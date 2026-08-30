@@ -11,7 +11,7 @@ illegible; keeping them distinct, and never collapsing the hierarchy, is the who
 
 | Boundary | Kind | Enforced by | Failure response |
 |---|---|---|---|
-| **host-admin ↔ user** | Authorization (host privilege) | the operator-admin channel (ADR-0004, chat-id lock) + `ADMIN_CAPABILITIES` for any API-side power | channel: ignored; API: 404 |
+| **host-admin ↔ user** | Authorization (host privilege) | the operator-admin channel only (ADR-0004, chat-id lock) — no API-side capability | channel: ignored |
 | **owner ↔ delegate** | Authorization (capability) | one dispatcher gate (`_require_capability_for` over `CAP_FOR_KIND`) | 404 (existence-hiding) |
 | **user ↔ user** | Tenancy (data isolation) | structural directory rooting + one `load_owned` ownership rule | 404 |
 | **loop ↔ everything** | OS privilege | systemd-hardened unit (kernel-enforced) | process denied (EACCES / cgroup) |
@@ -34,21 +34,24 @@ it, and the two must never collapse — on the team-online deployment (our defau
 signup is a user, and an ENTITLED user holds nearly all of an owner's rights. What separates a
 host admin is a small, explicitly-named set, never an implicit "and also…".
 
-**What host-admin can do** is one definition: `ADMIN_CAPABILITIES` (`shared/identity.py`).
-*Most* host-admin power still ships through the **operator-admin channel**
+**What host-admin can do arrives entirely through the operator-admin channel**
 (`presentation/admin_bot.py` — the sign-in blocklist, `/grant`, `/revoke`, provider config),
 which [ADR-0004](../adr/0004-operator-admin-channels.md) fixes as outbound-only and
-explicitly **not** an inbound API route. The set holds what that channel cannot express: a
-host privilege that is a **command against a running campaign**.
+explicitly **not** an inbound API route. **No `/commands/{kind}` verb is admin-only**, so the
+person running the box presses exactly the buttons its users press.
 
-Its one member today is **`scoring.sample_lookahead`** — arming the scoring walk to hold
-several of a candidate's samples in flight (`/commands/set-sample-lookahead`). It sits here
-rather than on a campaign tier because of *whose* resource it spends: not the campaign's
-budget but the **box's** shared provider key and rate bucket, so a tenant holding it would
-throttle every other tenant to finish sooner. The ceiling and what one press buys are the
-CONNECTOR's declarations, not this tier's; the tier answers only who may press. It is deliberately **not** `campaign.babysit` either — babysit marks
-a cycle whose measurement an operator steered, and this verb cannot steer one (the overshoot
-sample is discarded precisely so the recorded rows stay identical at either depth).
+That is a decision, not an absence. The one verb that used to sit here —
+`set-sample-lookahead`, arming the scoring walk to hold several of a candidate's samples in
+flight — spends the **box's** shared provider key and rate bucket rather than the campaign's
+budget, so a user holding it can throttle every other user to finish sooner. It was
+host-admin for exactly that reason, and moved to `campaign.lookahead` (Tier 1b) when the
+operator chose to let a downloaded install and a signed-up account both press it. What bounds
+the abuse now is the per-account spend ceiling plus the delegate carve: it is its OWN rung in
+`CAMPAIGN_CAP_BY_TIER`, so a host can withhold it from a delegate without withholding the
+run. It is still deliberately **not** `campaign.babysit` — babysit marks a cycle whose
+measurement an operator steered, and this verb cannot steer one (the overshoot sample is
+discarded precisely so the recorded rows stay identical at either depth). The ceiling and what
+one press buys are the CONNECTOR's declarations; the tier answers only who may press.
 
 **It is reachable from the browser only** — no CLI verb, no config key, no dataset knob. It is
 also the one command whose address may DESCEND (`payload.descend`), because the arming is not
@@ -58,13 +61,10 @@ of its gate, since the CLI is where automation and AI assistants operate. Adding
 parity" removes the boundary. Noted in root `CLAUDE.md` § Conventions so it is not re-litigated
 as an oversight.
 
-**Who is host-admin** is *two deliberate predicates* — **never merge them** (merging
-regrants admin to every OIDC signup):
-- **Stage 0 (CLI / auth-off):** `shared/identity.py::_admin_caps_from_env` — the
-  `PROMPTPOTTER_ADMIN=1` env flag, sound only on the single-operator box.
-- **Stage 1 (web / OIDC):** `middleware/oidc.py::_session_capabilities` — the one pinned
-  identity in the default-claim marker (the web analogue of ADR-0004's chat-id lock). A
-  fresh box with no marker has no admin at all (secure-by-default).
+**Who is host-admin** is the chat-id lock on the ADR-0004 channel, and nothing else asks. The
+default-claim marker (`HOST_ADMIN_EMAIL` → `maybe_claim_default`) survives it, but it now
+answers only *which tenant the terminal resolves* — never a capability, so a box with no
+marker is a workspace question rather than a privilege one.
 
 **Dataset reads are NOT part of this tier**, and adding them back is the regression to
 watch for. `infrastructure/store/dataset_access.py` is a resolver, not a gate: tenant
@@ -77,8 +77,8 @@ user's data from another's; a capability was never what did that work.
 
 **What a principal may do** is one definition: `CAMPAIGN_CAP_BY_TIER` in
 `shared/identity.py`, from which `OWNER_COMMAND_CAPABILITIES` is *derived* so the two can
-never drift. Adding a power = one line there. Kept separate from `ADMIN_CAPABILITIES`:
-owning a tenant is not running the box.
+never drift. Adding a power = one line there — and it is the ONLY capability set, since host
+privilege rides the ADR-0004 channel rather than a capability.
 
 **Who holds what:** every **entitled** authenticated user owns their own tenant and holds the full
 owner set (`_identity_context_from_session`, `presentation/api/middleware/oidc.py`); a **pending**
@@ -207,7 +207,8 @@ not backend-supplied.
   capability set, so Tier 1b's dispatcher gate refuses its every command with the same 404 a stranger
   gets. Nothing else re-checks.
 - **Who may claim the box is DECLARED, never inferred.** The claim marker `maybe_claim_default`
-  writes is what grants `ADMIN_CAPABILITIES`, and entitlement can no longer stand in front of it now
+  writes is what names the box's own tenant — the workspace a terminal run and a browser session
+  share — and entitlement can no longer stand in front of it now
   that everyone is entitled — so `auth.py::_is_declared_host_admin` reads `Settings.HOST_ADMIN_EMAIL`,
   and `HOST_ADMIN_ISSUER` too where that is set (empty accepts any issuer, so no deployed box
   changes until an operator sets it). An email is a CLAIM a provider makes and two providers are
@@ -231,8 +232,8 @@ not backend-supplied.
 | Concern | Look at |
 |---|---|
 | Entitlement (one derivation, feeds caps + the served state) | `middleware/oidc.py::resolve_access_state`; the browser reads it as `MeResponse.access_state` |
-| Host-admin capability set (one definition) | `shared/identity.py::ADMIN_CAPABILITIES` (`scoring.sample_lookahead`; the rest ride the ADR-0004 channel) |
-| Who-is-host-admin (two predicates, never merged) | `shared/identity.py::_admin_caps_from_env`, `middleware/oidc.py::_session_capabilities` |
+| Host privilege (no capability set — the channel IS the tier) | [ADR-0004](../adr/0004-operator-admin-channels.md) + `presentation/admin_bot.py` |
+| What an authenticated session holds | `middleware/oidc.py::_session_capabilities` — the owner set, or nothing if blocked |
 | Who may CLAIM the box (declared, not inferred) | `auth.py::_is_declared_host_admin` over `Settings.HOST_ADMIN_EMAIL` + `HOST_ADMIN_ISSUER` |
 | Whether an email may act as an identity at all | `identity/verifier.py` (`email_verified` required; absent counts as unverified) and `identity/github.py` (the verified list only, never the profile field) |
 | Who is exempt from free-tier metering (one definition, two readings) | `quota.py::_is_host` — the terminal, or the identity that claimed the box. `spends_the_hosts_own_key` reads it off a LIVE identity (no issuer); `is_host_tenant_dir` off a DIRECTORY walk (the un-renamed `projects/default/`), which has no session to ask. Only the terminal DETECTOR differs, and merging the two is what would let an identity that merely omits an issuer resolve as the operator — the anonymous-tier trap |

@@ -313,9 +313,9 @@ async def callback(
     if access_state == ACCESS_BLOCKED:
         logger.info("Blocked account signed in: %s (%s)", identity.email, provider)
     elif _is_declared_host_admin(identity.email, identity.issuer):
-        # The marker is what `_session_capabilities` reads to grant ADMIN_CAPABILITIES, so WHO may
-        # write it must be DECLARED. Entitlement used to stand in for that and cannot any more: now
-        # that signing up entitles, an inferred claim would hand the box to whoever arrived first.
+        # The marker NAMES the box's own tenant — the workspace terminal runs and browser sessions
+        # share — so WHO writes it must be DECLARED. Now that signing up entitles, an inferred claim
+        # would hand that workspace to whoever arrived first.
         maybe_claim_default(
             projects_root=DEFAULT_PROJECTS_ROOT,
             user_id=str(user_id),

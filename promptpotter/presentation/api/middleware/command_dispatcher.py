@@ -59,9 +59,9 @@ from promptpotter.shared.identity import (
     CAMPAIGN_BUDGET_CAP,
     CAMPAIGN_CREATE_CAP,
     CAMPAIGN_LIFECYCLE_CAP,
+    CAMPAIGN_LOOKAHEAD_CAP,
     CAMPAIGN_RUN_CAP,
     CAMPAIGN_STEP_CAP,
-    SCORING_SAMPLE_LOOKAHEAD_CAP,
     acting_principal_id,
     has_capability,
     require_capability,
@@ -186,10 +186,10 @@ CAP_FOR_KIND: dict[str, str] = {
     # every campaign that already measured against it — stronger authority than creating a
     # dataset, which is why it sits at the lifecycle tier rather than beside `mint-campaign`.
     "replace-dataset": CAMPAIGN_LIFECYCLE_CAP,
-    # The one HOST-ADMIN entry in this map. Look-ahead spends the box's shared provider rate
-    # bucket rather than the campaign's own budget, so no tenant tier carries it — see
-    # `shared/identity.py::SCORING_SAMPLE_LOOKAHEAD_CAP`.
-    "set-sample-lookahead": SCORING_SAMPLE_LOOKAHEAD_CAP,
+    # Its own tier rather than a share of babysit: look-ahead spends the box's shared provider
+    # rate bucket, which is the one thing a multi-tenant host may want to withhold from a
+    # delegate, and it steers no measurement (the overshoot sample is discarded).
+    "set-sample-lookahead": CAMPAIGN_LOOKAHEAD_CAP,
 }
 
 # Import-time exhaustiveness — a dispatched kind with no cap is a silent unguarded verb.

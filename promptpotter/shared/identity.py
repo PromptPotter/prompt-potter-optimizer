@@ -4,7 +4,6 @@ Stage-0 framing in ADR-0003. Stage 1 replaces only the resolver, never this type
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
@@ -13,24 +12,15 @@ from promptpotter.shared.errors import NotFoundError
 
 logger = logging.getLogger(__name__)
 
-# ── Tier 1a: host-admin ────────────────────────────────────────────────────
-# The sole definition of "what the HOST admin (the person who runs the box) can
-# do that a tenant owner cannot". Adding an admin power = adding it to this
-# frozenset; nowhere else.
-#
-# Most host-admin power ships through the operator-admin CHANNEL
-# (`presentation/admin_bot.py`), which ADR-0004 fixes as outbound-only and NOT an
-# inbound API route. This tier holds what that channel cannot express: an admin-only
-# power that is a COMMAND against a running campaign.
+# ── Host privilege is a CHANNEL, not an API capability ─────────────────────
+# What the HOST admin (the person who runs the box) can do that a tenant owner cannot
+# ships through the operator-admin channel (`presentation/admin_bot.py`) — the blocklist,
+# `/grant`, `/revoke`, provider config — which ADR-0004 fixes as outbound-only and NOT an
+# inbound API route. No `/commands/{kind}` verb is admin-only: an account on the box
+# presses the same buttons the person running it does.
 #
 # `datasets.benchmarks.read` MUST NOT come back — it gated repo `datasets/`, already
 # on the disk of anyone holding the install (`infrastructure/store/dataset_access.py`).
-
-# Host-admin rather than a campaign tier because it spends the BOX's shared provider
-# rate bucket, not a campaign budget. Not `campaign.babysit` either: it taints nothing.
-SCORING_SAMPLE_LOOKAHEAD_CAP = "scoring.sample_lookahead"
-
-ADMIN_CAPABILITIES: frozenset[str] = frozenset({SCORING_SAMPLE_LOOKAHEAD_CAP})
 
 # Control-plane command capabilities — one per privilege tier of the closed
 # `/commands/{kind}` set (the dispatcher's `CAP_FOR_KIND` maps each kind to one).
@@ -43,6 +33,7 @@ CAMPAIGN_CREATE_CAP = "campaign.create"
 CAMPAIGN_BUDGET_CAP = "campaign.budget"
 CAMPAIGN_LIFECYCLE_CAP = "campaign.lifecycle"
 CAMPAIGN_BABYSIT_CAP = "campaign.babysit"
+CAMPAIGN_LOOKAHEAD_CAP = "campaign.lookahead"
 
 # Short tier name → capability. The ONE place the ladder is enumerated: the owner
 # set derives from it and the admin channel parses `/grant sub step,create`
@@ -54,12 +45,14 @@ CAMPAIGN_CAP_BY_TIER: dict[str, str] = {
     "budget": CAMPAIGN_BUDGET_CAP,
     "lifecycle": CAMPAIGN_LIFECYCLE_CAP,
     "babysit": CAMPAIGN_BABYSIT_CAP,
+    # Spends the BOX's shared provider rate bucket rather than a campaign budget, so a host
+    # with several tenants may want to withhold it — its own rung, never folded into babysit.
+    "lookahead": CAMPAIGN_LOOKAHEAD_CAP,
 }
 
 # The full command-verb set a tenant owner holds — derived from the tier map so it
 # can never drift from it. Sub-principals are carved as a subset; the dispatcher
-# gate enforces the carve. Kept separate from `ADMIN_CAPABILITIES` — owning a
-# tenant is not running the box.
+# gate enforces the carve.
 OWNER_COMMAND_CAPABILITIES = frozenset(CAMPAIGN_CAP_BY_TIER.values())
 
 
@@ -78,8 +71,6 @@ def capabilities_from_tiers(tiers: Iterable[str]) -> frozenset[str]:
         caps.add(CAMPAIGN_CAP_BY_TIER[name])
     return frozenset(caps)
 
-
-PROMPTPOTTER_ADMIN_ENV = "PROMPTPOTTER_ADMIN"
 
 # The id the terminal identity carries in BOTH slots, and so the name of the tenant dir it writes
 # (`projects/default/`) until a browser claim renames it — the only terminal marker a walk can read.
@@ -104,14 +95,6 @@ class IdentityContext:
     capabilities: frozenset[str] = field(default_factory=frozenset)
 
 
-def _admin_caps_from_env() -> frozenset[str]:
-    """WHO is host-admin at Stage 0 — an env flag, sound ONLY on a single-operator box. The OIDC path
-    pins admin to a registered identity: **never merge the two predicates**, the threat models differ."""
-    if os.environ.get(PROMPTPOTTER_ADMIN_ENV, "").strip() == "1":
-        return ADMIN_CAPABILITIES
-    return frozenset()
-
-
 def default_identity(
     tenant_id: str = TERMINAL_IDENTITY_ID, user_id: str = TERMINAL_IDENTITY_ID
 ) -> IdentityContext:
@@ -122,7 +105,7 @@ def default_identity(
         tenant_id=TenantId(safe_name(tenant_id)),
         issuer=None,
         claims={},
-        capabilities=OWNER_COMMAND_CAPABILITIES | _admin_caps_from_env(),
+        capabilities=OWNER_COMMAND_CAPABILITIES,
     )
 
 
@@ -173,16 +156,15 @@ def claim_access_state(identity: IdentityContext) -> str:
 __all__ = [
     "ACCESS_ACTIVE",
     "ACCESS_BLOCKED",
-    "ADMIN_CAPABILITIES",
     "CAMPAIGN_BABYSIT_CAP",
     "CAMPAIGN_BUDGET_CAP",
     "CAMPAIGN_CAP_BY_TIER",
     "CAMPAIGN_CREATE_CAP",
     "CAMPAIGN_LIFECYCLE_CAP",
+    "CAMPAIGN_LOOKAHEAD_CAP",
     "CAMPAIGN_RUN_CAP",
     "CAMPAIGN_STEP_CAP",
     "OWNER_COMMAND_CAPABILITIES",
-    "SCORING_SAMPLE_LOOKAHEAD_CAP",
     "TERMINAL_IDENTITY_ID",
     "IdentityContext",
     "acting_principal_id",

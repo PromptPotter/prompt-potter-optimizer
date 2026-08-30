@@ -16,12 +16,10 @@ from promptpotter.infrastructure.identity.grants import (
     read_grant,
     resolve_effective_capabilities,
 )
-from promptpotter.infrastructure.identity.migration import registered_user_id
 from promptpotter.infrastructure.identity.session import SessionData
 from promptpotter.shared.identity import (
     ACCESS_ACTIVE,
     ACCESS_BLOCKED,
-    ADMIN_CAPABILITIES,
     OWNER_COMMAND_CAPABILITIES,
     IdentityContext,
 )
@@ -40,18 +38,13 @@ def resolve_access_state(email: str | None, bundle: IdentityBundle) -> str:
     )
 
 
-def _session_capabilities(
-    user_id: str, bundle: IdentityBundle, access_state: str
-) -> frozenset[str]:
+def _session_capabilities(access_state: str) -> frozenset[str]:
     """Capabilities for an authenticated web identity — every ENTITLED user owns their tenant, so each
-    holds the owner set. A BLOCKED account holds none: the dispatcher's `_require_capability_for` refuses
-    every command with the same 404 a stranger already gets, so no surface needs its own check. Admin is
-    the PINNED marker identity: an env flag here would make every signup an admin."""
+    holds the owner set, the box's operator included. A BLOCKED account holds none: the dispatcher's
+    `_require_capability_for` refuses every command with the same 404 a stranger already gets, so no
+    surface needs its own check."""
     if access_state == ACCESS_BLOCKED:
         return frozenset()
-    admin_uid = registered_user_id(bundle.paths.default_claim_marker)
-    if admin_uid is not None and user_id == admin_uid:
-        return OWNER_COMMAND_CAPABILITIES | ADMIN_CAPABILITIES
     return OWNER_COMMAND_CAPABILITIES
 
 
@@ -113,7 +106,7 @@ def _identity_context_from_session(
             "subject": data.subject,
             "access_state": access_state,
         },
-        capabilities=_session_capabilities(data.user_id, bundle, access_state),
+        capabilities=_session_capabilities(access_state),
     )
 
 

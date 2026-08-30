@@ -37,7 +37,7 @@ from promptpotter.application.runner.inner.spawn import publish_inner_spawn_cont
 from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.runner.round import flush_pending_decisions
 from promptpotter.application.runner.termination import BudgetGate
-from promptpotter.application.scoring.evaluators import resolve_round_formula
+from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import PromptExport, build_prompt_export
@@ -527,7 +527,7 @@ async def _run_single_cycle(
             campaign_config,
             cb=cb,
             scoring_formula=prep.scoring_spec.per_sample,
-            scoring_round_formula=prep.scoring_spec.per_round,
+            scoring_cell_formula=prep.scoring_spec.per_cell,
             scorer_id=prep.scoring_spec.scorer_id,
             no_divergence_check=mode.no_divergence_check,
             fork_on_divergence=mode.fork_on_divergence,
@@ -882,8 +882,8 @@ def _finalize_run(
 
         rounds = cycle_result.rounds
         rounds_to_95 = first_round_at_threshold(rounds, HEADLINE_ACC)
-        round_formula = resolve_round_formula(
-            session.scoring.scorer_round_formula, session.pipeline_schema
+        round_formula = resolve_cell_formula(
+            session.scoring.scorer_cell_formula, session.pipeline_schema
         )[0]
         final_block: dict[str, Any] = {
             "stop_reason": stop_reason,
@@ -895,7 +895,7 @@ def _finalize_run(
             # The formula EVERY number above was computed under, resolved by the same call the
             # dashboard makes: one resolution, now four readers — the export names it too, since
             # a fitness handed to another program without its formula is a number, not a result.
-            "scorer_round_formula": round_formula,
+            "scorer_cell_formula": round_formula,
             "mode": "sweep" if sweep else "full",
             # Basis: the COMPOSITE-fitness high-water SP — the engine's adoption objective —
             # which may name a different round than the index's top-level

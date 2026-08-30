@@ -57,9 +57,9 @@ Configured per dataset via `campaign.yaml::scoring`:
 ```jsonc
 {
   "scoring": {
-    "per_sample": "acc",            // required: scorer expression
-    "per_round": "median(scores)",  // optional: round-level aggregator
-    "scorer_id": "acc_v1"           // optional: explicit id
+    "per_sample": "acc",                    // required: was this cell RIGHT
+    "per_cell": "acc * 500 / max(1, latency)", // optional: what it was WORTH — θ is fit on this
+    "scorer_id": "acc_v1"                   // optional: explicit id
   }
 }
 ```
@@ -175,8 +175,8 @@ and where the HuggingFace `datasets` library lives.
 | `new` | `--dataset-name <name>` | Alternative to the positional `<name>`. |
 | `new` | `--sweep-batch` | Sweep mode: round 1 scored, round 2 generation-only. Mints sibling cycles flat under `cycles/`; `sweeps/{batch_id}` holds the batch index + summary. |
 | `new` | `--diag` | Diag mode: round 1 scored, force L2 on round-1 evidence, round 2 generation-only. |
-| `new` / `resume` | `--halt-at <float>` | Halt with `TARGET_HIT` once `best_accuracy ≥ X`. |
-| `new` / `resume` | `--spend-budget <float>` | Halt with `SPEND_BUDGET` once cycle spend ≥ X. |
+| `new` / `resume` | `--halt-at <float>` | Halt with `TARGET_HIT` once the cycle's running-max panel accuracy (`cycle.tracking.best_accuracy`) reaches X. NOT `index.json::best_accuracy`, which is the winner's score on the line's shared cells and is not a running max. |
+| `new` / `resume` | `--spend-budget <float>` | Halt with `SPEND_BUDGET` once cycle spend ≥ X — but only where X is BELOW the configured ceiling, which a launch flag may never raise. `set-budget` is the verb that raises one. |
 | `new` / `resume` | `--token-budget <int>` | The model-portable twin of `--spend-budget`; whichever trips first halts. |
 | `resume` | `--from <N>` | Resume rewind: archive rounds > N and resume from round N+1. |
 | `resume` | `--no-check` | Skip the rescore-and-replay divergence check at boot. |
