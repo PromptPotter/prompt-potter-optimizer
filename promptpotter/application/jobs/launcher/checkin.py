@@ -23,10 +23,10 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     _record_launch_stop,
     _release_slot,
     _run_in_background,
-    _run_preflight,
     build_cycle_config,
     materialize_and_write_origin,
     persist_origin_candidate_library,
+    run_preflight,
 )
 from promptpotter.application.jobs.mint import resolve_cycle_plan
 from promptpotter.application.jobs.quota import admit_launch, check_launch_quotas
@@ -225,7 +225,7 @@ async def start_checkin_campaign(
     # ADMISSION — nothing here touches the check-in cycle, so a refusal answers for the machine
     # slot alone and leaves the campaign re-startable once the account has room again.
     try:
-        await _run_preflight(draft.connector, backend_url)
+        await run_preflight(draft.connector, backend_url)
         spend_budget_usd, token_budget = await asyncio.to_thread(
             admit_launch,
             requested_cap_usd=spend_budget_usd,

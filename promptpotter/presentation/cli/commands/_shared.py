@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter import connectors
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
@@ -127,9 +128,17 @@ def bind_session_identity(session: Session, ctx: SessionCtx) -> None:
     session.state.cycle_id = ctx.cycle_id
 
 
+def backend_reach_line(backend_type: str, backend_url: str) -> str:
+    """What the check-in readout says once the preflight passed. An ``in_process`` connector was
+    never contacted, so claiming a URL is reachable states a fact nothing established."""
+    if connectors.get(backend_type).execution == "in_process":
+        return f"in-process ({backend_type}) — no wire"
+    return f"reachable at {backend_url}"
+
+
 def backend_unreachable_result(backend_url: str) -> CommandResult:
-    """The shared preflight failure every loop verb (``new`` / ``resume`` / sweep)
-    returns when ``check_status`` reports the backend down."""
+    """The shared preflight failure every loop verb (``new`` / ``resume`` / sweep) returns when the
+    connector's own probe reports the backend down (``launcher.mint_and_start::run_preflight``)."""
     return CommandResult(
         data={"error": "backend_unreachable", "backend_url": backend_url},
         human=(

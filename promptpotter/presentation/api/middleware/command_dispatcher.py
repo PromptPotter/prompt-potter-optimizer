@@ -24,6 +24,7 @@ from promptpotter.application.datasets.draft_patch import (
 )
 from promptpotter.application.jobs.quota import clamp_budget_change, hold_ceiling
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.runner.origin_gate import GateDecision, submit_gate_decision
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
@@ -38,7 +39,6 @@ from promptpotter.infrastructure.llm.telemetry import (
     set_cycle_ledger,
 )
 from promptpotter.infrastructure.runtime_flags import write_armed_cells
-from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     inner_sandboxes_dir,
@@ -291,7 +291,8 @@ class SetSampleLookaheadPayload(DescendableCyclePayload):
 
 
 class OriginGateDecisionPayload(CyclePayload):
-    decision: Literal["rescore", "proceed", "abort"]
+    # `GateDecision`, not a copy of its members: the wire vocabulary and the gate's own are one set.
+    decision: GateDecision
 
 
 class ChangeSpendBudgetPayload(CyclePayload):
@@ -956,12 +957,11 @@ class CommandDispatcher:
         was measured, this cannot, and a babysat stamp would assert a steer that did not happen."""
         write_armed_cells(self._stores.campaigns.cycle_dir(hop), cells)
 
-    def _apply_origin_gate_decision(self, hop: CycleHop, decision: str) -> None:
-        """The one decision channel all three surfaces write; ``run_origin_gate`` polls it, acts
-        (rescore / proceed / abort) and clears the file. Last write wins."""
-        gate_path = CycleLayout(self._stores.campaigns.cycle_dir(hop)).gate_decision
-        gate_path.parent.mkdir(parents=True, exist_ok=True)
-        write_json(gate_path, {"decision": decision})
+    def _apply_origin_gate_decision(self, hop: CycleHop, decision: GateDecision) -> None:
+        """The browser's half of the gate. The write itself is
+        ``runner/origin_gate.py::submit_gate_decision`` — one writer, so an embedded host answers
+        the gate through the same file this does rather than needing an HTTP client."""
+        submit_gate_decision(self._stores.campaigns.cycle_dir(hop), decision)
 
     def _clamp_to_account_ceilings(
         self,

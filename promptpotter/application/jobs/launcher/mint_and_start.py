@@ -154,9 +154,21 @@ def _assert_origin_ready(draft: DraftCampaign) -> None:
         raise OriginIncompleteError(readiness.gaps)
 
 
-async def _run_preflight(backend_type: str, backend_url: str) -> None:
+async def run_preflight(backend_type: str, backend_url: str) -> None:
     """Resolve the connector and run its reachability probe. A connector opts out by leaving
-    ``Connector.preflight = None``; a raised ``BackendUnreachableError`` becomes a 503."""
+    ``Connector.preflight = None``; a raised ``BackendUnreachableError`` becomes a 503.
+
+    **Every launch ingress asks the CONNECTOR, never a bare wire probe.** An `in_process`
+    connector has no wire, so probing one refuses a campaign over a backend it never touches —
+    which is what `python -m promptpotter new promptpotter-self` did from the terminal for as
+    long as the CLI called ``BackendClient.check_status`` directly.
+
+    An empty ``backend_type`` is the tolerant answer ``wiring.backend_type_of_dataset`` gives when
+    a campaign has outlived its dataset dir. There is no declared connector to ask, so there is no
+    probe — and ``connectors.get`` is strict, so resolving it would raise past every caller's
+    ``BackendUnreachableError`` handler."""
+    if not backend_type:
+        return
     connector = connectors.get(backend_type)
     if connector.preflight is None:
         return
@@ -242,7 +254,7 @@ async def mint_campaign_command(
         # Pre-202 phase timing — the synchronous init is what the operator waits on
         # (round-0 scoring is already backgrounded), so the dominant cost lands on disk.
         _t0 = time.perf_counter()
-        await _run_preflight(backend_type, backend_url)
+        await run_preflight(backend_type, backend_url)
         _t_preflight = time.perf_counter()
         # Admission globs + reads every cycle ledger — offload so the scan never blocks the
         # single event loop on the launch path.
@@ -421,7 +433,7 @@ async def start_run_command(
     # its instrumentation, including the rule that a refusal here leaves the cycle untouched.
     try:
         _t0 = time.perf_counter()
-        await _run_preflight(backend_type, backend_url)
+        await run_preflight(backend_type, backend_url)
         _t_preflight = time.perf_counter()
         spend_budget_usd, token_budget = await asyncio.to_thread(
             admit_launch,

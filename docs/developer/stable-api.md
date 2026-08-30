@@ -195,7 +195,8 @@ The programmatic peer of §5's verbs — `application/embedded_run.py`, for a ho
 one campaign inside its own event loop:
 
 ```python
-session = await open_session(dataset_name, *, backend_url=…, backend_id=…, on_status=None)
+session = await open_session(dataset_name, *, backend_url=…, backend_id=…, on_status=None,
+                             identity=None, stores=None)
 observers, dataset, origin = await mint_and_score_origin(
     session, train_data, campaign_config, *, pipeline_params=None, display=None, on_status=None)
 result = await run_campaign(observers, dataset, origin, campaign_config, *, session,
@@ -206,7 +207,11 @@ result = await run_campaign(observers, dataset, origin, campaign_config, *, sess
 Three steps rather than one because every caller does its own work between them. It mints through
 the same `prepare_fresh_cycle` prologue `new` and the web mint run, so the cycle it produces is
 resumable, forkable and diagnosable by the §5 verbs — that is what this seam buys over a private
-loop. It is `application/`, so it renders nothing: pass `LiveDisplay.for_campaign(session,
+loop. `identity` / `stores` pass through to `init_services`; without them a host writes into the
+anonymous `projects/default/` tenant. **`origin_gate` defaults to `strict` and a host has no TTY**,
+so `run_campaign` blocks at round 0 until something answers — call
+`submit_gate_decision(cycle_dir, "rescore"|"proceed"|"abort")` from another task, or set the knob
+off. It is `application/`, so it renders nothing: pass `LiveDisplay.for_campaign(session,
 campaign_config)` for the run readout, and `presentation/views/completion.py::report_completion`
 for the closing box.
 

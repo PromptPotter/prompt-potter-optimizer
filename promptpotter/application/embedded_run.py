@@ -20,6 +20,7 @@ from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_
 from promptpotter.application.origin import CampaignOrigin, prepare_scoring_context
 from promptpotter.application.run_observers import RunObservers, build_run_observers
 from promptpotter.application.runner.entry import RunMode, run_optimization
+from promptpotter.application.runner.origin_gate import submit_gate_decision
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.settings import DEFAULT_BACKEND_ID, DEFAULT_BACKEND_URL
 from promptpotter.domain.results import CycleResult
@@ -27,9 +28,21 @@ from promptpotter.domain.results import CycleResult
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.domain.sample import Sample
+    from promptpotter.infrastructure.store.stores import Stores
     from promptpotter.presentation.views.live.display import LiveDisplay
+    from promptpotter.shared.identity import IdentityContext
 
-__all__ = ["mint_and_score_origin", "open_session", "run_campaign"]
+# `submit_gate_decision` is re-exported under its OWN name because this module IS the embedded
+# surface — a capability it does not name is one a host program cannot find, and a second spelling
+# for it would be a synonym rather than a channel. A host with no TTY and no HTTP client had no
+# third way to answer: `origin_gate` defaults to `strict`, `_spawn_stdin_reader` returns None off a
+# Jupyter/harness stdin, and `_await_gate_decision` then polls forever.
+__all__ = [
+    "mint_and_score_origin",
+    "open_session",
+    "run_campaign",
+    "submit_gate_decision",
+]
 
 # Where a host program's progress lines go. ``None`` is silent, which is the right default for a
 # library: a caller that wants the run readout passes a ``LiveDisplay`` to the next step instead.
@@ -42,13 +55,20 @@ async def open_session(
     backend_url: str = DEFAULT_BACKEND_URL,
     backend_id: str = DEFAULT_BACKEND_ID,
     on_status: StatusFn | None = None,
+    identity: IdentityContext | None = None,
+    stores: Stores | None = None,
 ) -> Session:
+    """``identity`` and ``stores`` pass straight through to :func:`init_services`. Dropping them
+    here pinned every embedded host to ``projects/default/`` — this is an adapter over that call,
+    so a parameter it declines to forward is a capability the host cannot reach at all."""
     setup_logging()
     session = await init_services(
         dataset_name=dataset_name,
         backend_url=backend_url,
         backend_id=backend_id,
         on_status=on_status,
+        identity=identity,
+        stores=stores,
     )
     if on_status is not None:
         on_status(f"Dataset    : {dataset_name} ({len(session.samples)} queries)")

@@ -17,10 +17,12 @@ from promptpotter.application.run_phase_control import declare_run_phase, pause_
 from promptpotter.application.runner.round import emit_origin_round
 from promptpotter.application.runner.termination import OriginGateMode, origin_gate_tripped
 from promptpotter.domain.phases import RunPhase, StopReason
-from promptpotter.infrastructure.store.io import read_json_tolerant
+from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
 from promptpotter.infrastructure.store.layout import CycleLayout
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimization.cycle import Cycle
@@ -170,6 +172,18 @@ async def _rescore_and_reemit(
     # (no prior track record) exactly as the first origin emit was.
     cycle.restamp_origin_round(origin)
     await emit_origin_round(cycle, session, cb)
+
+
+def submit_gate_decision(cycle_dir: Path, decision: GateDecision) -> None:
+    """Answer a waiting origin gate. **The one write for every surface that is not an attached
+    TTY** — the API command applier and any embedded host both land here, and ``run_origin_gate``
+    polls the file, acts, and clears it. Last write wins.
+
+    Named rather than inlined because a host with no TTY and no HTTP client had no way to answer
+    at all: ``origin_gate`` defaults to ``strict``, so an embedded run blocked until killed."""
+    path = CycleLayout(cycle_dir).gate_decision
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(path, {"decision": decision})
 
 
 def _decision_path(session: Session):  # type: ignore[no-untyped-def]

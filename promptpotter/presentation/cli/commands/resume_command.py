@@ -7,7 +7,10 @@ import argparse
 import logging
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.initialization.wiring import backend_type_of_dataset
+from promptpotter.application.jobs.launcher.mint_and_start import run_preflight
 from promptpotter.application.jobs.mint import resolve_cycle_plan
+from promptpotter.connectors.protocol import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.presentation.cli.commands._shared import (
     _DIVERGENCE_HINT,
@@ -441,8 +444,12 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
     campaign_config = ctx.campaign_config
     session = await init_services_cli(**ctx.init_params, identity=identity_from_args(args))
 
-    status = await session.backend_client.check_status()
-    if status.get("status") == "unreachable":
+    try:
+        await run_preflight(
+            backend_type_of_dataset(session.store, ctx.init_params.get("dataset_name") or ""),
+            ctx.backend_url,
+        )
+    except BackendUnreachableError:
         return backend_unreachable_result(ctx.backend_url)
 
     train_data = session.samples

@@ -13,13 +13,17 @@ from pydantic import ValidationError
 
 from promptpotter.application.datasets.draft_campaign import OptimizationOverrides
 from promptpotter.application.datasets.draft_patch import SETTABLE_SCALARS, EditDraftPatch
+from promptpotter.application.initialization.wiring import backend_type_of_dataset
+from promptpotter.application.jobs.launcher.mint_and_start import run_preflight
 from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
+from promptpotter.connectors.protocol import BackendUnreachableError
 from promptpotter.presentation.api.middleware.command_dispatcher import (
     dispatch_draft_patch,
     dispatch_origin_resolution,
 )
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
+    backend_reach_line,
     backend_unreachable_result,
     bind_session_identity,
     build_observers,
@@ -475,10 +479,12 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
     else:
         session, campaign_config, dataset_name, _sid = await _mint_fresh_session(args)
 
-    status = await session.backend_client.check_status()
-    if status.get("status") == "unreachable":
+    backend_type = backend_type_of_dataset(session.store, dataset_name)
+    try:
+        await run_preflight(backend_type, args.backend_url)
+    except BackendUnreachableError:
         return backend_unreachable_result(args.backend_url)
-    checkin_line("backend", f"reachable at {args.backend_url}")
+    checkin_line("backend", backend_reach_line(backend_type, args.backend_url))
 
     train_data = session.samples
     checkin_line("dataset", f"{dataset_name} ({len(train_data)} queries)")
