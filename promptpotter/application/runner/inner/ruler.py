@@ -12,8 +12,10 @@ import logging
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from promptpotter.application.datasets.authored import dataset_cell_scorer
 from promptpotter.application.runner.inner.spawn import inner_spawn_context, set_inner_rulers
 from promptpotter.application.runner.inner.tasks import inner_tasks_path, load_inner_tasks
+from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -62,7 +64,15 @@ def _fit_or_extend(
 
     # No `origin_sp_hash`: the outer origin is not an arm on THIS dataset, and the fit wants every
     # arm equally.
-    obs = build_archive_observations(session.store, dataset_name=dataset_name)
+    # The INNER dataset's own scorer, never the outer session's: this scale grades justlogic cells,
+    # while the outer formula is over whole inner CAMPAIGNS and names measurands these rows lack.
+    scorer, scorer_id = dataset_cell_scorer(readable_dataset_dir(session.store, dataset_name))
+    obs = build_archive_observations(
+        session.store,
+        dataset_name=dataset_name,
+        scorer=scorer,
+        scorer_id=scorer_id,
+    )
     if not obs:
         return None
     held = session.store.campaigns.read_ruler(session.hop, dataset_name=dataset_name)

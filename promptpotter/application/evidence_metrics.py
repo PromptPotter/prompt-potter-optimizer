@@ -1,21 +1,17 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from pydantic import computed_field
 
 from promptpotter.application.scoring.formula.compiler import (
+    CELL_CHANNELS,
     CompiledExpression,
+    cell_channels_of,
     compile_expression,
 )
-from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
-from promptpotter.domain.scoring import QueryMeasurement, recorded_cost_s
 from promptpotter.domain.strict_model import StrictModel
-
-# The L4 recursion's measurand, in logits: one inner campaign's mean-over-rounds lift over its OWN
-# origin. Absent on an ordinary campaign, where a cell is a sample and has no origin of its own.
-_LIFT_KEY = OUTER_PROXY_KEYS[0]
 
 # What a number IS, which decides how it reads. `delta` is a signed difference and `level` an
 # absolute value, so only the first earns a leading `+`; `composed` is a hand-typed expression whose
@@ -63,81 +59,10 @@ _UNNAMED_UNITS: frozenset[str] = frozenset({"level", "delta", "composed"})
 # --- Channels: what one row can be asked for -------------------------------------------------
 
 
-def _number(value: object) -> float | None:
-    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
-
-
-def _step_tokens_sum(pipeline_data: Mapping[str, Any], *keys: str) -> float | None:
-    steps = pipeline_data.get("step_tokens")
-    if not isinstance(steps, dict) or not steps:
-        return None
-    total = 0.0
-    for entry in steps.values():
-        if not isinstance(entry, dict):
-            return None
-        for key in keys:
-            number = _number(entry.get(key))
-            if number is None:
-                return None
-            total += number
-    return total
-
-
-def _row_channels(row: Mapping[str, Any]) -> dict[str, float]:
-    """Every channel this ONE row can answer. A key absent from the result is a channel the row
-    cannot answer, and every caller downstream treats it that way."""
-    pipeline_data = row.get("pipeline_data")
-    pd: Mapping[str, Any] = pipeline_data if isinstance(pipeline_data, dict) else {}
-    out: dict[str, float] = {}
-
-    def put(name: str, value: float | None) -> None:
-        if value is not None:
-            out[name] = value
-
-    put("fitness", _number(row.get("fitness")))
-    put("rank", _number(row.get("ground_truth_rank")))
-
-    put("latency", recorded_cost_s(cast("QueryMeasurement", row)))
-
-    # The seed's own trajectory. `lift` is what the outer loop SCORES — the mean over the round
-    # budget — while `final_lift` is where it actually ended and `peak_lift` the best it reached;
-    # a run can score well and end badly, and only carrying all three can show it.
-    put("lift", _number(pd.get(_LIFT_KEY)))
-    put("origin", _number(pd.get("inner_origin_level")))
-    put("final_lift", _number(pd.get("inner_final_lift")))
-    put("peak_lift", _number(pd.get("inner_peak_lift")))
-    put("rounds", _number(pd.get("inner_rounds_ran")))
-    put("round_budget", _number(pd.get("inner_round_budget")))
-    put("unworked", _number(pd.get("inner_unworked_s")))
-
-    # Two homes, never a fallback chain: a row is EITHER an inner campaign, whose cost the spawn
-    # site forwards, OR a pipeline sample, whose cost rides `step_tokens`. No outer node is
-    # `is_llm`, so an L4 row never carries `step_tokens` and the two cannot both answer.
-    # `is None`, never `or`: a cell that genuinely cost 0.0 is a MEASUREMENT, and falling through
-    # on it would report a free cell as an unmeasured one — this module's own rule, inverted.
-    for name, own, steps in (
-        ("cost", _number(pd.get("inner_spend_usd")), _step_tokens_sum(pd, "cost_usd")),
-        ("tokens", _number(pd.get("inner_tokens")), _step_tokens_sum(pd, "input", "output")),
-    ):
-        put(name, own if own is not None else steps)
-
-    return out
-
-
-CHANNELS: tuple[str, ...] = (
-    "fitness",
-    "lift",
-    "origin",
-    "final_lift",
-    "peak_lift",
-    "rounds",
-    "round_budget",
-    "unworked",
-    "latency",
-    "cost",
-    "tokens",
-    "rank",
-)
+# What a row can be asked for is `formula/compiler.py::cell_channels_of` — the SAME builder the
+# per-sample formula namespace is cut from, so a channel here and a term in a `scoring:` formula
+# cannot come to mean different things. `CHANNELS` derives from that table rather than restating it.
+CHANNELS: tuple[str, ...] = CELL_CHANNELS
 
 
 def cell_channels(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
@@ -152,7 +77,7 @@ def cell_channels(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
         cell = row.get("query")
         if not isinstance(cell, str):
             continue
-        answered = _row_channels(row)
+        answered = cell_channels_of(row)
         if not answered:
             continue
         per_cell = sums.setdefault(cell, {})
@@ -278,7 +203,7 @@ _ENTRIES: tuple[MetricSpec, ...] = (
     MetricSpec(
         key="rank",
         label="Ground-truth rank",
-        expression="rank",
+        expression="ground_truth_rank",
         unit="rank",
         higher_is_better=False,
         description="Where the true answer landed in the pipeline's ranking. Lower is better.",

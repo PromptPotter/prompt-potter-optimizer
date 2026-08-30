@@ -4,6 +4,7 @@ from promptpotter.application.scoring.formula.compiler import (
     ScoringFormulaError,
     ScoringTermMissingError,
     auto_scorer_id,
+    cell_channels_of,
     compile_scorer,
     split_scoring_block,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "ScoringFormulaError",
     "ScoringTermMissingError",
     "auto_scorer_id",
+    "cell_channels_of",
     "compile_round_scorer",
     "compile_scorer",
     "rescore_results",

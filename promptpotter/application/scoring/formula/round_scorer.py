@@ -1,5 +1,11 @@
-"""Per-round formula compiler. A name the map lacks is an UNMEASURED term, not a zero — the registry omits an evaluator's
-key when it had nothing to measure, so a formula naming it halts rather than scoring on a default nobody measured."""
+"""The MASK's formula compiler, over a round's stored per-round evaluator map. A name the map lacks is an UNMEASURED
+term, not a zero — the registry omits an evaluator's key when it had nothing to measure, so a formula naming it halts
+rather than scoring on a default nobody measured.
+
+Not the campaign's composite: that is per-CELL (``domain/scoring.py::CellScorer``) and is what θ is fit on. This one
+answers a read-side counterfactual — *what would this round have scored under formula X* — off a record whose rows may
+be gone, which is what keeps it at round scope. Where a formula is nonlinear in the per-cell terms the two are the
+projection and the thing projected, and only the linear case makes them agree."""
 
 from __future__ import annotations
 
@@ -10,9 +16,7 @@ from promptpotter.application.scoring.formula.compiler import (
 )
 from promptpotter.domain.scoring import RoundScorer
 
-# The term a caller that supplies no formula is scored on. Not a second owner of the default
-# formula (``evaluators.default_per_round_formula`` is that, and every loop caller resolves it
-# before compiling) — this is the floor for the callers that pass ``None`` outright.
+# What a mask with no formula is read on — the round's plain accuracy.
 _DEFAULT_TERM = "accuracy"
 
 

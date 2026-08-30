@@ -53,9 +53,8 @@ def _cycle_edge(index: dict[str, Any]) -> tuple[str | None, int | None]:
 
 
 def load_lineage_spine(stores: Stores, campaign_id: str) -> list[SpineCycle]:
-    """The campaign's rounds and edges, folded from each cycle's LEDGER — no round file opened.
-    It used to take a whole `MaskRecord`: every manifest and every round document of every cycle,
-    rebuilt to recover four scalars per round, while a layer waited to fork."""
+    """The campaign's rounds and edges, folded from each cycle's LEDGER — no round file opened,
+    because a layer waits on this to fork and the four scalars per round are all it needs."""
     cycles: list[SpineCycle] = []
     for entry in stores.campaigns.enumerate_cycles():
         if entry["campaign_id"] != campaign_id:
@@ -98,7 +97,7 @@ def _candidates(
     round_file: dict[str, Any], samples: frozenset[int] | None, winner_label: str
 ) -> list[MaskCandidate]:
     # The per-sample rows already on disk. The row-derivable evaluator subset
-    # (accuracy, output_compactness, mean_latency_s, …) is recomputed from these and
+    # (accuracy, error_rate, degraded_rate, …) is recomputed from these and
     # merged over the stored snapshot — present on every record regardless of when it
     # was written. A sample-set mask filters the rows to the selected subset first, so
     # those same evaluators (accuracy especially) re-score on the subset and a mask

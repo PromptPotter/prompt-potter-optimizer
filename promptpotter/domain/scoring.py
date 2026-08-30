@@ -1,5 +1,5 @@
 """Datasets declare the formula in ``campaign.json::scoring`` — string shorthand is
-``per_sample``, or the twin ``{"per_sample", "per_round"}``. Missing raises; no default."""
+``per_sample``, or the twin ``{"per_sample", "per_cell"}``. Missing raises; no default."""
 
 from __future__ import annotations
 
@@ -77,14 +77,18 @@ class PipelineData(LedgerPipelineData, total=False):
 
 
 class QueryMeasurement(TypedDict):
-    """``fitness`` is the active-scorer projection written only by ``rescore_results`` — a fresh
-    trace has none. ``sample_id`` is a foreign key to ``Sample.id``, stable across campaigns."""
+    """``fitness`` and ``objective`` are the active-scorer projections written only by
+    ``rescore_results`` — a fresh trace has neither. ``sample_id`` is a foreign key to
+    ``Sample.id``, stable across campaigns."""
 
     sample_id: int
     query: str
     ground_truth: str
     predicted: str
     fitness: NotRequired[float]
+    # What this cell was WORTH under the campaign's composite formula — the value θ is fit on.
+    # Equals ``fitness`` wherever no ``per_cell`` formula was declared. See :class:`CellScorer`.
+    objective: NotRequired[float]
     # True when this measurement was reused from a prior identical searchpoint
     # instead of a fresh backend call. Stamped ``False`` at measurement time,
     # ``True`` by ``_materialize_cached``. Always present so readers (the live
@@ -145,7 +149,24 @@ def ledger_sample_view(result: QueryMeasurement) -> QueryMeasurement:
     return cast("QueryMeasurement", out)
 
 
-Scorer = Callable[[dict[str, Any]], float]
+class CellScorer(NamedTuple):
+    """The two numbers one cell carries, minted together because they are read apart.
+
+    ``fitness`` is CORRECTNESS — what :func:`is_hit` thresholds for the tape, the difficulty
+    stratification and the failing-samples panel L1 repairs from. ``objective`` is WORTH, what the
+    campaign's composite makes of that cell, and the only one θ is fit on
+    (``intelligence/exploration.py::graded_response``).
+
+    Two numbers rather than one: a cost penalty folded into the first renders a correct-but-slow
+    answer MISS and sends L1 to repair reasoning that was right, while a second left at bare
+    accuracy keeps every cost and reliability term out of the election a round is won on."""
+
+    fitness: Callable[[dict[str, Any]], float]
+    objective: Callable[[dict[str, Any]], float]
+
+
+# The MASK's evaluator, over a round's stored per-round evaluator map. A read-side counterfactual,
+# so it stays per-round: the record it reads may no longer have the rows.
 RoundScorer = Callable[[dict[str, float]], float]
 
 DEFAULT_SCORER_ID = "default_hit"
@@ -198,10 +219,14 @@ def recorded_cost_s(result: QueryMeasurement) -> float | None:
 
 
 class ScoringSpec(NamedTuple):
-    """Parsed ``campaign.json::scoring`` block — ``(per_sample, per_round, scorer_id)``."""
+    """Parsed ``campaign.json::scoring`` block — ``(per_sample, per_cell, scorer_id)``.
+
+    ``per_cell`` is the composite, evaluated on ONE cell rather than the round: latency, cost and
+    unreliability are provoked prompt by prompt, and a round-level mean hides a 2000-second cell
+    behind a fast one."""
 
     per_sample: str | None
-    per_round: str | None
+    per_cell: str | None
     scorer_id: str
 
 
@@ -302,10 +327,10 @@ def is_answer_collapsed(rows: Sequence[Mapping[str, Any]]) -> bool:
 __all__ = [
     "DEFAULT_SCORER_ID",
     "HIT_THRESHOLD",
+    "CellScorer",
     "PipelineData",
     "QueryMeasurement",
     "RoundScorer",
-    "Scorer",
     "ScoringSpec",
     "enumerable_truth_labels",
     "is_answer_collapsed",

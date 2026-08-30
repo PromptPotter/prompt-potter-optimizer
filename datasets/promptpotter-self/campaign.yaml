@@ -44,7 +44,7 @@ campaign_config:
   # Re-fit it here if the inner round budget moves; a stale anchor silently stops charging.
   scoring:
     per_sample: max(0.0, min(1.0, (mean_round_delta + 1.0) / 3.0))
-    per_round: max(0.0, min(1.0, accuracy * 500.0 / max(1.0, mean_latency_s)))
+    per_cell: max(0.0, min(1.0, fitness * 500.0 / max(1.0, latency)))
   headline_metric: ability
   # = the panel size in inner_tasks.yaml. Above it the engine warns and the adaptive queue is
   # inert (there is nothing to select from); below it a variant is judged on a subset of cells.

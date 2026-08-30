@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
 import httpx
 
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
-from promptpotter.application.scoring.diagnostics import find_rank
+from promptpotter.application.scoring.diagnostics import rank_ground_truth
 from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.l4.proxies import INNER_FACT_KEYS, PARENT_LEVEL_SE_KEY
 from promptpotter.domain.phases import RunPhase
@@ -417,7 +417,7 @@ async def measure_sample(
                 "Backend returned ERROR as candidate — pipeline internal failure for this query.",
                 category=ErrorCategory.PIPELINE,
             )
-        gt_rank = find_rank(ranked, ground_truth)
+        gt_rank, n_candidates = rank_ground_truth(ranked, predicted, ground_truth)
 
         # `result_ranking` is the canonical derived terminal ranking the scorer + find_gt_rank
         # read; the raw per-node observation keys are copied below for their own diagnostics.
@@ -450,7 +450,7 @@ async def measure_sample(
             "cached": False,
             "error": None,
             "error_category": None,
-            "n_candidates": len(ranked),
+            "n_candidates": n_candidates,
             "ground_truth_rank": gt_rank,
             "pipeline_data": pd,
         }
@@ -485,7 +485,8 @@ def find_gt_rank(result: Mapping[str, Any]) -> int | None:
     if not gt:
         return None
     pd = result.get("pipeline_data") or {}
-    return find_rank(pd.get("result_ranking", []), gt)
+    rank, _ = rank_ground_truth(pd.get("result_ranking", []), result.get("predicted") or "", gt)
+    return rank
 
 
 def compare_rerun(

@@ -273,8 +273,10 @@ class OptimizationConfig(StrictModel):
         0.025,
         description=(
             "Halt this cycle when cumulative spend (optimizer + backend) ≥ this "
-            "value in USD. CLI ``--spend-budget`` overrides the config value when "
-            "both are supplied. Default ≈ a 5-round run on the free-backend setup "
+            "value in USD. A launch flag (CLI ``--spend-budget``) only LOWERS it — it "
+            "arrives in the wallet slot, which may never be trusted upward; raising a "
+            "ceiling is ``set-budget``, whose value is clamped against the account and "
+            "then SETS. Default ≈ a 5-round run on the free-backend setup "
             "(measured ~$0.019) with headroom; raise ``max_rounds`` and let this be "
             "the binding limit. ``None`` disarms the USD ceiling. Tenant-wide "
             "enforcement is M12 / JobRegistry work; this gate halts the current "
@@ -332,7 +334,7 @@ class OptimizationConfig(StrictModel):
         Field(
             "guidance",
             description=(
-                "How the prompt building-block library (``promptpotter/config/"
+                "How the prompt block library (``promptpotter/config/"
                 "prompt_variants.json`` — reusable ``persona`` / ``task_intent`` / "
                 "``thinking_style`` / ``answer_format`` values adopted from PromptWizard "
                 "and PromptPotter's own runs) is offered to ``l1_generate``. ``guidance`` "

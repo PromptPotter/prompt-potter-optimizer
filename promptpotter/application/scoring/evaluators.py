@@ -1,6 +1,13 @@
-"""Evaluator registry + materializers. A compute fn returns a float — in [0, 1] wherever a yardstick
-exists to normalize against, RAW in its own unit where none does (``mean_latency_s``) — or ``None``
-when the round/sample carried nothing to measure: a zero is a verdict, an absence is not."""
+"""Evaluator registry + materializers — the round-level REPORTING surface, and what the read-side
+mask re-scores over. A compute fn returns a float in [0, 1], or ``None`` when the round/sample
+carried nothing to measure: a zero is a verdict, an absence is not.
+
+**Nothing here decides a round.** The election reads the per-cell ``objective``
+(``domain/scoring.py::CellScorer``), so an evaluator says what a round LOOKED like, never what it
+was worth. Two shapes are therefore inadmissible: a per-cell quantity the channel map already names
+(``latency`` / ``cost`` / ``tokens``, meaned in by ``metrics.py``), and a CANDIDATE CONSTANT, which
+cannot be a term at cell scope at all — under a logistic link a constant on y moves θ by an amount
+that depends on δ."""
 
 from __future__ import annotations
 
@@ -10,12 +17,11 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.domain.pipeline_schema import NodeType
-from promptpotter.domain.scoring import extract_item_label, recorded_cost_s
+from promptpotter.domain.scoring import extract_item_label
 from promptpotter.shared.composite import to_short_formula
 from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 
 if TYPE_CHECKING:
-    from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
     from promptpotter.domain.scoring import QueryMeasurement
 
@@ -23,35 +29,21 @@ if TYPE_CHECKING:
 Scope = Literal["per_sample", "per_round"]
 
 
-# Size yardsticks for the cost-shaped evaluators. Intentionally fixed module
-# constants, NOT per-campaign knobs: these normalize cross-dataset cost terms
-# onto one comparable [0,1] scale, so a dataset with long prompts SHOULD read a
-# lower compactness — that's the signal, not a miscalibration. TIME had one too
-# and could not have one: a yardstick spanning a seconds-long pipeline call and
-# a minutes-long L4 cell does not exist, so `mean_latency_s` reports raw seconds
-# and the formula naming it carries its own budget.
-PROMPT_BUDGET_CHARS = 4_000  # ≈ 1000 tokens; soft linear ceiling
-OUTPUT_TOKEN_BUDGET = 12_000  # generation-cost soft ceiling; ≥ budget → 0.0
-
-
 __all__ = [
-    "OUTPUT_TOKEN_BUDGET",
-    "PROMPT_BUDGET_CHARS",
+    "DEFAULT_CELL_FORMULA",
     "Evaluator",
     "all_evaluators",
-    "default_per_round_formula",
-    "default_per_round_formula_short",
     "evaluators_meta",
     "materialize_round_values",
     "materialize_row_derivable",
     "materialize_sample_values",
-    "resolve_round_formula",
+    "resolve_cell_formula",
 ]
 
 
 def compute_accuracy(*, results: list[QueryMeasurement], **_: Any) -> float | None:
-    """Mean fitness over SCOREABLE rows. A DEPRECATED row is already penalized via
-    ``runtime_failure_rate``; an ERRORED one never happened and surfaces via ``compute_error_rate``."""
+    """Mean fitness over SCOREABLE rows. A DEPRECATED row carries no verdict and an ERRORED one
+    never happened; the latter surfaces via ``compute_error_rate``."""
     # Lazy: scoring → optimization circular.
     from promptpotter.application.optimization.pobb.classification import scoreable_rows
 
@@ -73,68 +65,6 @@ def compute_degraded_rate(*, results: list[QueryMeasurement], **_: Any) -> float
     if not results:
         return None
     return sum(1 for r in results if has_pipeline_warnings(r)) / len(results)
-
-
-@dataclass(frozen=True)
-class SelfHealerSpec:
-    name: str
-    attr: str
-    description: str
-
-
-SELF_HEALERS: tuple[SelfHealerSpec, ...] = (
-    SelfHealerSpec(
-        "validation_failure_rate",
-        "validation_failures",
-        "Fraction of samples where L1 output was malformed; L1 re-proposes (owner=L1).",
-    ),
-    SelfHealerSpec(
-        "runtime_failure_rate",
-        "runtime_failures",
-        "Fraction of samples that triggered DegradationCheck; L1 retunes, or operator-flagged if locked.",
-    ),
-    SelfHealerSpec(
-        "l2_guard_breach_rate",
-        "l2_guard_breaches",
-        "Fraction of samples where L2 refinement breached guards; L3 healed.",
-    ),
-    SelfHealerSpec(
-        "l3_guard_breach_rate",
-        "l3_guard_breaches",
-        "Fraction of samples where L3 plan breached its own guards.",
-    ),
-)
-
-
-def _make_self_healer_evaluator(spec: SelfHealerSpec) -> Evaluator:
-    def compute(
-        *, results: list[QueryMeasurement], opt_sp: OptSearchPoint | None = None, **_: Any
-    ) -> float | None:
-        # No samples, or no OptSearchPoint to read the wound channels off: the heal rate was
-        # not measured. 0.0 would read as "nothing needed healing".
-        if not results or opt_sp is None:
-            return None
-        # The four wound channels live on ``opt_sp.memory.wounds`` (not the OSP
-        # top level, which is ``extra="forbid"``); reading the top level always
-        # missed, so every self-heal rate silently computed 0.0.
-        events = getattr(opt_sp.memory.wounds, spec.attr)
-        return min(len(events) / len(results), 1.0)
-
-    return Evaluator(
-        name=spec.name,
-        description=spec.description,
-        scope="per_round",
-        compute=compute,
-        direction="low",
-    )
-
-
-def compute_mean_latency_s(*, results: list[QueryMeasurement], **_: Any) -> float | None:
-    """Seconds one cell cost, meaned. RAW, because no yardstick fits every dataset: a TermNorm
-    call is seconds and one L4 cell is minutes, so a formula naming this states its own budget
-    (``accuracy * min(1.0, 600 / mean_latency_s)``) where the operator can read it."""
-    costs = [c for r in results if (c := recorded_cost_s(r)) is not None]
-    return sum(costs) / len(costs) if costs else None
 
 
 def _compute_recall(
@@ -237,41 +167,6 @@ def compute_mean_retrieval_shortfall(
     return sum(values) / len(values)
 
 
-def compute_pipeline_compactness(*, schema: PipelineSchema, **_: Any) -> float:
-    if schema.is_single_node:
-        return 1.0
-    n = len(schema.active_steps)
-    worst = 12  # node-count yardstick, same intentionally-fixed rationale as the budgets above
-    return max(0.0, 1.0 - (n - 1) / (worst - 1))
-
-
-def compute_prompt_compactness(*, opt_sp: OptSearchPoint | None = None, **_: Any) -> float | None:
-    if opt_sp is None:
-        return None
-    rendered = opt_sp.render()
-    if not rendered:
-        return None
-    return max(0.0, 1.0 - len(rendered) / PROMPT_BUDGET_CHARS)
-
-
-def compute_output_compactness(*, results: list[QueryMeasurement], **_: Any) -> float | None:
-    """``1 - mean(output_tokens)/budget`` — the generation-cost twin of ``prompt_compactness``, and the
-    accuracy-vs-cost axis the optimizer trades against: a terse candidate scores above a verbose one."""
-    totals: list[float] = []
-    for r in results:
-        st = (r.get("pipeline_data") or {}).get("step_tokens") or {}
-        out = 0.0
-        for v in st.values():
-            o = v.get("output") if isinstance(v, dict) else None
-            if isinstance(o, (int, float)):
-                out += float(o)
-        totals.append(out)
-    if not totals or not any(totals):
-        return None
-    mean_out = sum(totals) / len(totals)
-    return max(0.0, 1.0 - mean_out / OUTPUT_TOKEN_BUDGET)
-
-
 @dataclass(frozen=True)
 class Evaluator:
     name: str
@@ -300,13 +195,12 @@ class Evaluator:
         return self.requires(schema)
 
     # True ⇒ a pure function of the persisted per-sample rows alone (``compute`` needs
-    # only ``results`` — no ``schema`` / ``node`` / ``opt_sp``). The read-side mask
-    # recomputes exactly this subset from ``all_candidate_results`` at read time
-    # (``materialize_row_derivable``), so it is present on every record regardless of
-    # when the record was written — no backfill, no namespace-gap. The complement
-    # (recall / cache / *_shortfall / pipeline_compactness / self-heal /
-    # prompt_compactness) needs the unpersisted schema/opt_sp and is read from the
-    # stored snapshot only.
+    # only ``results`` — no ``schema`` / ``node``). The read-side mask recomputes exactly
+    # this subset from ``all_candidate_results`` at read time (``materialize_row_derivable``),
+    # so it is present on every record regardless of when the record was written — no
+    # backfill, no namespace-gap. The complement (recall / cache / *_shortfall) needs the
+    # unpersisted schema and is read from the stored snapshot only. The per-cell channel
+    # means ``metrics.py`` folds in beside these are row-derivable by construction.
     from_rows: bool = False
 
 
@@ -331,19 +225,6 @@ _REGISTRY: list[Evaluator] = [
         description="Fraction of queries that completed with pipeline degradation warnings.",
         scope="per_round",
         compute=compute_degraded_rate,
-        direction="low",
-        from_rows=True,
-    ),
-    # Self-healers — one Evaluator per SELF_HEALERS spec; combined weight ~0.30 in default formula.
-    *(_make_self_healer_evaluator(spec) for spec in SELF_HEALERS),
-    Evaluator(
-        name="mean_latency_s",
-        description=(
-            "Mean seconds one scored cell cost, off step_timings — so a cached replay still "
-            "prices the work it replays. Larger is worse; a formula supplies the budget."
-        ),
-        scope="per_round",
-        compute=compute_mean_latency_s,
         direction="low",
         from_rows=True,
     ),
@@ -384,36 +265,6 @@ _REGISTRY: list[Evaluator] = [
         scope="per_round",
         compute=compute_mean_retrieval_shortfall,
         requires=has_limit_node,
-    ),
-    Evaluator(
-        name="pipeline_compactness",
-        description=(
-            "1 - (active_steps - 1) / 11 — shorter pipelines score higher (single-node = 1.0)."
-        ),
-        scope="per_round",
-        compute=compute_pipeline_compactness,
-        direction="high",
-    ),
-    Evaluator(
-        name="output_compactness",
-        description=(
-            "1 - mean(output_tokens) / OUTPUT_TOKEN_BUDGET — terser (cheaper) generations "
-            "score higher. The accuracy-vs-cost axis; available to formulas, not in the "
-            "default composite."
-        ),
-        scope="per_round",
-        compute=compute_output_compactness,
-        from_rows=True,
-    ),
-    Evaluator(
-        name="prompt_compactness",
-        description=(
-            "1 - len(rendered_prompt) / PROMPT_BUDGET_CHARS — shorter prompts score "
-            "higher (≤ budget → 1.0, ≥ budget → 0.0). Penalizes overly verbose "
-            "prompt templates in the composite_fitness score."
-        ),
-        scope="per_round",
-        compute=compute_prompt_compactness,
     ),
 ]
 
@@ -463,12 +314,12 @@ def _concrete_round_entries(
 def materialize_round_values(
     schema: PipelineSchema,
     results: list[QueryMeasurement],
-    *,
-    opt_sp: OptSearchPoint | None = None,
 ) -> dict[str, float]:
+    """No ``opt_sp``: every evaluator that read one was a candidate constant, and those are gone.
+    What a round REPORTS is now a pure function of its rows and the schema they ran on."""
     values: dict[str, float] = {}
     for display_name, ev, node in _concrete_round_entries(schema):
-        kwargs: dict[str, Any] = {"results": results, "schema": schema, "opt_sp": opt_sp}
+        kwargs: dict[str, Any] = {"results": results, "schema": schema}
         if node is not None:
             kwargs["node"] = node
         value = ev.compute(**kwargs)
@@ -506,25 +357,21 @@ def materialize_sample_values(
     return values
 
 
-def default_per_round_formula(schema: PipelineSchema) -> str:
-    """``accuracy`` — the default composite is plain accuracy so the decision metric and the headline
-    agree. Degradation is gated by the round ``health`` block, never folded into fitness."""
-    return "accuracy"
+# The composite a campaign declaring none is scored on: the cell's own score, so the decision
+# metric and the headline agree and adopting the machinery costs nothing. Degradation is gated by
+# the round ``health`` block, never folded into fitness.
+DEFAULT_CELL_FORMULA = "fitness"
 
 
-def default_per_round_formula_short(schema: PipelineSchema) -> str:
-    """Short form of the default, derived through the shared short-code table; fits the 70-char frame."""
-    return to_short_formula(default_per_round_formula(schema))
-
-
-def resolve_round_formula(
+def resolve_cell_formula(
     explicit: str | None,
     schema: PipelineSchema | None,
 ) -> tuple[str | None, str | None]:
-    """``(full, short)`` for a cycle — campaign override, else the schema default, else nothing. THE one
+    """``(full, short)`` for a cycle — campaign override, else the default, else nothing. THE one
     resolution for all three surfaces; a short form exists only for the default, never for an override."""
     if explicit:
         return explicit, None
     if schema is None:
         return None, None
-    return default_per_round_formula(schema), default_per_round_formula_short(schema)
+    # Short form derived through the shared code table, never a synced literal.
+    return DEFAULT_CELL_FORMULA, to_short_formula(DEFAULT_CELL_FORMULA)

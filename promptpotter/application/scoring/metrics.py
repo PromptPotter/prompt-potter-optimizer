@@ -13,11 +13,11 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.scoring.diagnostics import count_degraded_samples
 from promptpotter.application.scoring.evaluators import (
     compute_accuracy,
-    default_per_round_formula,
     materialize_round_values,
 )
 from promptpotter.application.scoring.formula import (
     ScoringTermMissingError,
+    cell_channels_of,
     compile_round_scorer,
 )
 
@@ -38,6 +38,7 @@ __all__ = [
 def _compute_accuracy(results: list[QueryMeasurement]) -> dict[str, Any]:
     """``total`` is the EVIDENCE denominator: scoreable rows only. An errored or deprecated row
     carries no verdict, so neither belongs in the denominator a rate is read against."""
+    # Lazy: scoring → optimization circular.
     from promptpotter.application.optimization.pobb.classification import (
         is_deprecated,
         scoreable_rows,
@@ -60,6 +61,24 @@ def _compute_accuracy(results: list[QueryMeasurement]) -> dict[str, Any]:
     }
 
 
+# The per-cell channels a round REPORTS a mean of — the registry's COMPLEMENT, not all of them:
+# `fitness`/`errored`/`degraded` are already `accuracy`/`error_rate`/`degraded_rate`, and meaning
+# each twice would put one number in the map under two names.
+_MEANED_CHANNELS: tuple[str, ...] = ("latency", "cost", "tokens")
+
+
+def _channel_means(scoreable: list[QueryMeasurement]) -> dict[str, float]:
+    """Mean over the rows that ANSWERED each channel, never over all of them — a cell nothing
+    priced is unmeasured, and the full count reports the round as cheaper than it was."""
+    sums: dict[str, list[float]] = {}
+    for row in scoreable:
+        answered = cell_channels_of(row)
+        for name in _MEANED_CHANNELS:
+            if (value := answered.get(name)) is not None:
+                sums.setdefault(name, []).append(value)
+    return {name: sum(vs) / len(vs) for name, vs in sums.items()}
+
+
 # ---------------------------------------------------------------------------
 # Round-level composite_fitness — driven by the evaluator registry + scoring formula.
 # ---------------------------------------------------------------------------
@@ -70,34 +89,46 @@ def compute_composite_fitness(
     pipeline_schema: PipelineSchema,
     *,
     opt_sp: OptSearchPoint | None,
-    round_scorer: RoundScorer | str | None = None,
     l1_diversity: float = 1.0,
 ) -> dict[str, Any]:
     """``opt_sp=None`` puts every searchpoint-aware evaluator on its vacuous fallback, and ``l1_diversity`` defaults to 1.0
-    for the same reason: 0.0 would score the two halves of one delta on different bases."""
+    for the same reason: 0.0 would score the two halves of one delta on different bases.
+
+    The composite is the MEAN of what each cell was worth — ``rescore_results`` already evaluated
+    the campaign's formula once per row, so this folds rather than re-scores. That is what puts a
+    cost or reliability term on θ: this number and the one every θ is fit on are the same
+    per-cell value, read at two scopes instead of two formulas at one scope."""
+    # Lazy: scoring → optimization circular.
+    from promptpotter.application.optimization.pobb.classification import scoreable_rows
+
     base = _compute_accuracy(results)
-    evaluator_values = materialize_round_values(pipeline_schema, results, opt_sp=opt_sp)
-    # L1-generation quality is a batch property, not a per-result derivation —
-    # injected after registry materialization so operator formulas can
-    # reference ``l1_diversity`` via campaign.json::scoring.
+    scoreable = scoreable_rows(results)
+    evaluator_values = materialize_round_values(pipeline_schema, results)
+    # Meaned in under the SAME names the composite formula uses, so a mask is written `latency`
+    # rather than a second spelling of it. That makes the mask the PROJECTION of the elected
+    # formula, exact only where it is linear (`operations/mask-projection.md`).
+    evaluator_values.update(_channel_means(scoreable))
+    # A batch property, not a per-result derivation, so it names nothing the composite can read:
+    # REPORTING and the read-side mask only.
     evaluator_values["l1_diversity"] = float(l1_diversity)
 
-    if not results:
-        # No measurement — an operator skip at query 0/N, or a round whose every sample was
-        # excluded — has no fitness. Record the 0.0 floor (``total`` is already 0, the
-        # no-evidence marker election reads) rather than run the default ``accuracy`` scorer,
-        # which halts on the absent term and would crash the cycle. A round that DID measure
-        # rows but names an absent term is a formula bug and still raises below.
-        base = {**base, "accuracy": 0.0}
+    if not scoreable:
+        # No measurement — an operator skip at query 0/N, a round whose every sample was excluded,
+        # or one that errored throughout — has no fitness. Record the 0.0 floor (``total`` is
+        # already 0, the no-evidence marker election reads).
+        base = {**base, "accuracy": 0.0} if not results else base
         composite_fitness = 0.0
     else:
-        if callable(round_scorer):
-            scorer = round_scorer
-        elif isinstance(round_scorer, str):
-            scorer = compile_round_scorer(round_scorer)
-        else:
-            scorer = compile_round_scorer(default_per_round_formula(pipeline_schema))
-        composite_fitness = scorer(evaluator_values)
+        # The SAME denominator ``accuracy`` is read against, so the two cannot describe different
+        # populations. An unstamped row is an absence, never a zero: it halts.
+        unstamped = sum(1 for r in scoreable if r.get("objective") is None)
+        if unstamped:
+            raise ScoringTermMissingError(
+                f"{unstamped} of {len(scoreable)} scoreable rows carry no 'objective' — they never "
+                "passed through `rescore_results`, so what they were worth was never computed. "
+                "That is missing data, not a fitness of zero."
+            )
+        composite_fitness = sum(float(r["objective"]) for r in scoreable) / len(scoreable)
 
     # OptSP-layer counts for display and the validation-failure short-circuit.
     runtime_failure_count = 0
@@ -126,8 +157,6 @@ def matched_parent_stats(
     parent_results: list[QueryMeasurement],
     candidate_results: list[QueryMeasurement],
     pipeline_schema: PipelineSchema,
-    *,
-    round_scorer: RoundScorer | str | None = None,
 ) -> dict[str, Any] | None:
     """``None`` unless the candidate measured EVERY cell the PARENT did — the origin at round 0 and the prior winner after,
     never the origin throughout. Pairing does not rescue a truncated prefix — the shared cells ARE the parent's
@@ -142,7 +171,6 @@ def matched_parent_stats(
         parent_results,
         pipeline_schema,
         opt_sp=None,
-        round_scorer=round_scorer,
         l1_diversity=1.0,
     )
     return {key: composite[key] for key in ("accuracy", "total", "composite_fitness")}

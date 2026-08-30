@@ -22,7 +22,7 @@ from promptpotter.application.scoring.sample_measurement import (
 )
 from promptpotter.domain.escalation_signals import EscalationSignal
 from promptpotter.domain.phases import RunPhase, StopLoop
-from promptpotter.domain.scoring import QueryMeasurement, Scorer, is_hit
+from promptpotter.domain.scoring import CellScorer, QueryMeasurement, is_hit
 from promptpotter.domain.validators import StopRule
 from promptpotter.shared.errors import (
     ErrorCategory,
@@ -74,7 +74,7 @@ def _with_running(result: QueryMeasurement, running: dict[str, Any]) -> QueryMea
     return cast(QueryMeasurement, out)
 
 
-def _materialize_cached(item: QueryMeasurement, scorer: Scorer) -> QueryMeasurement:
+def _materialize_cached(item: QueryMeasurement, scorer: CellScorer) -> QueryMeasurement:
     """Mark prior as cached + rescored; warn on hit/no-hit drift unless explained by bold-strip."""
     # Deliberately BINARY, on the archived vs rescored verdict rather than the graded fitness:
     # a float comparison fires per sample on every formula tweak, and this warning is calibrated
@@ -131,7 +131,7 @@ class QueryLoopState:
     cached_sample_results: dict[int, QueryMeasurement]
     on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None
     axes: AxisIndex | None
-    scorer: Scorer  # narrowed from session.scoring.scorer (asserted non-None on construction)
+    scorer: CellScorer  # narrowed from session.scoring.scorer (asserted non-None on construction)
     # The cached entry itself, so display can show the original DEPR row before the retry row.
     deprecated_samples: dict[int, QueryMeasurement]
     # Persists results-so-far after each fresh measurement and returns the running fitness over

@@ -1,8 +1,25 @@
 campaign_config:
   dataset_name: justlogic-d234
   headline_metric: ability
-  scoring: exact_match(predicted, ground_truth)
-  sp_budget_ttest: 28
+  scoring:
+    per_sample: exact_match(predicted, ground_truth)
+    # Cost is charged in TOKENS, not seconds. Latency is `tokens x provider_rate`, and only the
+    # first factor is the prompt's: measured on one fixed cell set, the rate halved between two
+    # runs (median 2.94s -> 1.50s, -49%) while tokens moved +7%. Charging seconds therefore
+    # charged the weather, and because round 0 replays cached rows carrying an OLDER run's
+    # `step_timings`, the origin alone paid it — 31 of its 40 cells sat above the 2s knee, so it
+    # scored 0.371 against 0.500 accuracy while every same-day candidate scored ~1.00x. That
+    # inverted the ranking: the origin came LAST for being measured on a slow day.
+    #
+    # 1546 is C0's median `tokens` (input+output) on this dataset+model, so the origin sits at
+    # ~1.0x and only GROWTH past it is charged — which is what we want priced, since the winning
+    # prompts grew +7%, +7%, +23% across three rounds while accuracy stayed flat. Re-pin it on any
+    # model change; it is a typed constant standing in for an origin-relative term.
+    # Smooth by construction: no knee, so a cell one token over the line is not punished.
+    # `per_cell` rather than folding it into `per_sample`: a correct-but-expensive answer must stay
+    # a HIT, or L1 is sent to repair reasoning that was right.
+    per_cell: max(0.0, min(1.0, fitness * 1546.0 / (1546.0 + 0.5 * max(0.0, tokens - 1546.0))))
+  sp_budget_ttest: 34
   exclude_nodes: []
   pipeline_overrides: {}
   dataset_split:

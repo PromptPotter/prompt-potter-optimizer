@@ -6,12 +6,24 @@ from __future__ import annotations
 import ast
 import hashlib
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from types import SimpleNamespace
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 
 from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
-from promptpotter.domain.scoring import DEFAULT_SCORER_ID, ScoringSpec
+from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
+from promptpotter.domain.scoring import (
+    DEFAULT_SCORER_ID,
+    CellScorer,
+    QueryMeasurement,
+    ScoringSpec,
+    recorded_cost_s,
+)
+from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
+
+# The L4 recursion's measurand, in logits: one inner campaign's mean-over-rounds lift over its OWN
+# origin. Absent on an ordinary campaign, where a cell is a sample and has no origin of its own.
+_LIFT_KEY = OUTER_PROXY_KEYS[0]
 
 
 class ScoringFormulaError(Exception):
@@ -160,10 +172,102 @@ def clamp_unit_score(raw: Any, *, formula: str, subject: str) -> float:
     return max(0.0, min(1.0, value))
 
 
-def _build_namespace(result: dict[str, Any]) -> dict[str, Any]:
+def _number(value: object) -> float | None:
+    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
+
+
+def _step_tokens_sum(pipeline_data: Mapping[str, Any], *keys: str) -> float | None:
+    steps = pipeline_data.get("step_tokens")
+    if not isinstance(steps, dict) or not steps:
+        return None
+    total = 0.0
+    for entry in steps.values():
+        if not isinstance(entry, dict):
+            return None
+        for key in keys:
+            number = _number(entry.get(key))
+            if number is None:
+                return None
+            total += number
+    return total
+
+
+def _own_else_steps(own: float | None, steps: float | None) -> float | None:
+    """Two homes, never a fallback chain: a row is EITHER an inner campaign, whose cost the spawn
+    site forwards, OR a pipeline sample, whose cost rides ``step_tokens`` — no outer node is
+    ``is_llm``, so the two cannot both answer. ``is None`` rather than ``or``, because a cell that
+    genuinely cost 0.0 is a MEASUREMENT."""
+    return own if own is not None else steps
+
+
+# THE per-cell numeric vocabulary, one reader per name. `CELL_CHANNELS` derives from this table
+# rather than being authored beside it — the set IS the type, so a channel added here reaches the
+# evidence picker and the per-cell composite with nothing else to remember.
+#
+# `latency` is `recorded_cost_s`, which sums `step_timings` — the cache-surviving half. A replayed
+# row's `total_time` is zeroed by `query_loop.py::_materialize_cached`, so reading THAT would price
+# every cached cell as instantaneous.
+_CHANNEL_READERS: dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], float | None]] = {
+    "fitness": lambda row, _pd: _number(row.get("fitness")),
+    # Named for the field, never shortened to `rank`: the per-sample formula already binds it under
+    # this name (`rr(ground_truth_rank)`), and one field answering to two names in two namespaces
+    # is the synonym the root CLAUDE.md forbids.
+    "ground_truth_rank": lambda row, _pd: _number(row.get("ground_truth_rank")),
+    "latency": lambda row, _pd: recorded_cost_s(cast("QueryMeasurement", row)),
+    # The seed's own trajectory. `lift` is what the outer loop SCORES — the mean over the round
+    # budget — while `final_lift` is where it actually ended and `peak_lift` the best it reached;
+    # a run can score well and end badly, and only carrying all three can show it.
+    "lift": lambda _row, pd: _number(pd.get(_LIFT_KEY)),
+    "origin": lambda _row, pd: _number(pd.get("inner_origin_level")),
+    "final_lift": lambda _row, pd: _number(pd.get("inner_final_lift")),
+    "peak_lift": lambda _row, pd: _number(pd.get("inner_peak_lift")),
+    "rounds": lambda _row, pd: _number(pd.get("inner_rounds_ran")),
+    "round_budget": lambda _row, pd: _number(pd.get("inner_round_budget")),
+    "unworked": lambda _row, pd: _number(pd.get("inner_unworked_s")),
+    "cost": lambda _row, pd: _own_else_steps(
+        _number(pd.get("inner_spend_usd")), _step_tokens_sum(pd, "cost_usd")
+    ),
+    "tokens": lambda _row, pd: _own_else_steps(
+        _number(pd.get("inner_tokens")), _step_tokens_sum(pd, "input", "output")
+    ),
+}
+
+# The three health facts a cell answers about ITSELF, as 0/1 so a composite can price them — at
+# round scope they are one rate over the panel and which prompt provoked it cannot be recovered.
+#
+# Deliberately NOT channels: a predicate answers for ANY mapping (`is_error_result({})` is False),
+# so in the table above `cell_channels_of` would claim a health reading for a row carrying no
+# measurement, and the evidence side would score a cell it cannot read at a fabricated 0.
+_ROW_HEALTH: dict[str, Callable[[Mapping[str, Any]], float]] = {
+    "errored": lambda row: float(is_error_result(row)),
+    "degraded": lambda row: float(has_pipeline_warnings(row)),
+    "cached": lambda row: float(bool(row.get("cached", False))),
+}
+
+CELL_CHANNELS: tuple[str, ...] = tuple(_CHANNEL_READERS)
+
+
+def cell_channels_of(result: Mapping[str, Any]) -> dict[str, float]:
+    """Every channel this ONE row can answer. A key absent from the result is a channel the row
+    cannot answer, and every caller downstream treats it that way."""
+    pipeline_data = result.get("pipeline_data")
+    pd: Mapping[str, Any] = pipeline_data if isinstance(pipeline_data, dict) else {}
+    out: dict[str, float] = {}
+    for name, read in _CHANNEL_READERS.items():
+        value = read(result, pd)
+        if value is not None:
+            out[name] = value
+    return out
+
+
+def cell_namespace(result: dict[str, Any]) -> dict[str, Any]:
     """A term is bound only where the row CARRIES it. Binding a 0 for an absent count scores the row
     against a measurement nobody took; leaving it out is what raises ``ScoringTermMissingError``, the
     verdict this module's own contract promises and the read side renders as *unscorable*.
+
+    Deliberately WIDER than ``cell_channels_of``: a dataset's per-sample formula reaches whatever its
+    own trace carries (``mean_round_delta``), while the declared channels are the tight vocabulary a
+    comparison across campaigns can rely on.
 
     ``ground_truth_rank`` is the exception and stays bound at ``None`` — that is a value, meaning the
     truth was not in the ranking, which is what ``rr`` scores as a miss."""
@@ -196,9 +300,22 @@ def _build_namespace(result: dict[str, Any]) -> dict[str, Any]:
     return ns
 
 
-def compile_scorer(formula: str | None) -> Callable[[dict[str, Any]], float]:
-    """Pre-compile a scoring formula into a callable returning a [0, 1]-clamped float."""
-    if not formula:
+def objective_namespace(result: dict[str, Any]) -> dict[str, Any]:
+    """What the per-cell COMPOSITE reads: the declared channels and row health, plus everything
+    the per-sample formula already reaches.
+
+    The per-sample side wins every collision, so one term cannot mean two things across the two
+    formulas. Prefer ``latency`` to the ``total_time`` the ``pipeline_data`` splat also binds: a
+    replayed row has ``total_time`` zeroed by ``query_loop.py::_materialize_cached``."""
+    health = {name: read(result) for name, read in _ROW_HEALTH.items()}
+    return {**cell_channels_of(result), **health, **cell_namespace(result)}
+
+
+def compile_scorer(per_sample: str | None, per_cell: str | None = None) -> CellScorer:
+    """The two per-cell numbers, compiled together. ``per_cell`` absent ⇒ the objective IS the
+    fitness, which is what makes adopting this cost nothing on a campaign that declares no
+    composite: the same float, computed once and stamped twice."""
+    if not per_sample:
         raise ValueError(
             "compile_scorer: scoring formula is required. "
             "Set ``campaign_config.scoring`` (e.g. "
@@ -206,14 +323,24 @@ def compile_scorer(formula: str | None) -> Callable[[dict[str, Any]], float]:
             "and a ground truth, never a verdict; the formula IS the verdict."
         )
 
-    compiled = compile_expression(formula, source="per_sample scoring formula")
+    compiled = compile_expression(per_sample, source="per_sample scoring formula")
 
-    def _scorer(result: dict[str, Any]) -> float:
+    def _fitness(result: dict[str, Any]) -> float:
         query = str(result.get("query", "?"))[:80]
-        value = compiled.evaluate(_build_namespace(result), f"query {query!r}")
-        return clamp_unit_score(value, formula=formula, subject=f"query {query!r}")
+        value = compiled.evaluate(cell_namespace(result), f"query {query!r}")
+        return clamp_unit_score(value, formula=per_sample, subject=f"query {query!r}")
 
-    return _scorer
+    if not per_cell:
+        return CellScorer(fitness=_fitness, objective=_fitness)
+
+    composite = compile_expression(per_cell, source="per_cell scoring formula")
+
+    def _objective(result: dict[str, Any]) -> float:
+        query = str(result.get("query", "?"))[:80]
+        value = composite.evaluate(objective_namespace(result), f"query {query!r}")
+        return clamp_unit_score(value, formula=per_cell, subject=f"query {query!r}")
+
+    return CellScorer(fitness=_fitness, objective=_objective)
 
 
 def auto_scorer_id(per_sample: str | None) -> str:
@@ -228,24 +355,36 @@ def split_scoring_block(
     block: str | dict[str, str] | None,
 ) -> ScoringSpec:
     if isinstance(block, dict):
+        unknown = set(block) - {"per_sample", "per_cell", "id"}
+        if unknown:
+            raise ValueError(
+                f"campaign scoring block names {sorted(unknown)}. It carries 'per_sample' (the "
+                "cell's correctness), 'per_cell' (the composite θ is fit on) and 'id'. "
+                "'per_round' was the composite at ROUND scope and is gone — a latency or "
+                "reliability term meaned over a panel cannot say which prompt provoked it."
+            )
         per_sample = block.get("per_sample")
-        per_round = block.get("per_round")
+        per_cell = block.get("per_cell")
         scorer_id = block.get("id") or auto_scorer_id(per_sample)
-        return ScoringSpec(per_sample, per_round, scorer_id)
+        return ScoringSpec(per_sample, per_cell, scorer_id)
     if isinstance(block, str) and block:
         return ScoringSpec(block, None, auto_scorer_id(block))
     return ScoringSpec(None, None, DEFAULT_SCORER_ID)
 
 
 __all__ = [
+    "CELL_CHANNELS",
     "SAFE_BUILTINS",
     "CompiledExpression",
     "ScoringFormulaError",
     "ScoringTermMissingError",
     "auto_scorer_id",
+    "cell_channels_of",
+    "cell_namespace",
     "clamp_unit_score",
     "compile_expression",
     "compile_scorer",
+    "objective_namespace",
     "split_scoring_block",
     "validate_ast",
 ]

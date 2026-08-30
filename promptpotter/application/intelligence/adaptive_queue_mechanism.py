@@ -16,8 +16,8 @@ if TYPE_CHECKING:
 __all__ = [
     "build_round_order",
     "decision_information_gain",
+    "decision_order",
     "delta_learning_gain",
-    "expected_order",
     "marginal_hit_probability",
     "pick_value",
     "update_theta_posterior",
@@ -111,19 +111,25 @@ def pick_value(
 
 
 def build_round_order(
-    seed_grades: Mapping[int, float],
+    parent_grades: Mapping[int, float],
     ruler: DeltaRuler | None,
     sample_ids: Sequence[int],
 ) -> list[int]:
-    # An unmeasured sample stands at the ruler's OWN centre, not at 0.0. Zero is a position on
-    # this scale, not a neutral one — δ is centred wherever the bank's difficulty puts it — and
-    # the miss stratum sorts ascending, so grading an unknown cell 0.0 puts it ahead of every
-    # known-discriminating one and spends the round on cells no arm solves. A cold ruler is flat,
-    # so everything ties at 0.0 and the order falls back to sample id.
+    # The parent's grade is THREE-state and `is_hit` answers two, so `None` — never answered — has
+    # its own stratum: read as a miss, a panel sharing no cell with the parent is all
+    # win-opportunities sorted ascending and leads with its easiest cell.
+    # An unmeasured δ stands at the ruler's own CENTRE, never 0.0: zero is a position on this
+    # scale, and the miss stratum sorts ascending. A cold ruler is flat, so everything ties there
+    # and the order falls back to sample id.
     miss_stratum: list[int] = []
     hit_stratum: list[int] = []
+    unknown_stratum: list[int] = []
     for sid in sample_ids:
-        (hit_stratum if is_hit(seed_grades.get(sid)) else miss_stratum).append(sid)
+        grade = parent_grades.get(sid)
+        if grade is None:
+            unknown_stratum.append(sid)
+        else:
+            (hit_stratum if is_hit(grade) else miss_stratum).append(sid)
 
     centre = ruler.mu_delta if ruler is not None else 0.0
     known = ruler.delta if ruler is not None else {}
@@ -133,24 +139,34 @@ def build_round_order(
 
     miss_stratum.sort(key=lambda sid: (_delta(sid), sid))
     hit_stratum.sort(key=lambda sid: (-_delta(sid), sid))
+    # No evidence either way, so neither end is the useful one: a cell discriminates most where
+    # its δ sits nearest the scale's centre.
+    unknown_stratum.sort(key=lambda sid: (abs(_delta(sid) - centre), sid))
 
     order: list[int] = []
-    mi, hi = 0, 0
+    mi, hi, ui = 0, 0, 0
     for pos in range(1, len(sample_ids) + 1):
         take_hit = pos % 4 == 0
-        if take_hit and hi < len(hit_stratum) and mi < len(miss_stratum):
+        if (
+            take_hit
+            and hi < len(hit_stratum)
+            and (mi < len(miss_stratum) or ui < len(unknown_stratum))
+        ):
             order.append(hit_stratum[hi])
             hi += 1
         elif mi < len(miss_stratum):
             order.append(miss_stratum[mi])
             mi += 1
+        elif ui < len(unknown_stratum):
+            order.append(unknown_stratum[ui])
+            ui += 1
         else:
             order.append(hit_stratum[hi])
             hi += 1
     return order
 
 
-def expected_order(
+def decision_order(
     mu_c: float,
     var_c: float,
     mu_s: float,
@@ -159,18 +175,18 @@ def expected_order(
     delta_se_map: dict[int, float],
     sample_ids: Iterable[int],
 ) -> list[int]:
-    """Full ranking of ``sample_ids`` by descending pick-value; ties → asc sid."""
+    """Rank ``sample_ids`` on ``decision_information_gain`` ALONE — what separates the arms in
+    front of us, with nothing spent on refining δ. On the SUM, ``delta_learning_gain`` dominates
+    and the panel buys whatever the ruler knows least; the ruler gets its cells as the reserved
+    tail :func:`_with_ruler_learning` cuts instead.
+
+    Both maps are TOTAL over ``sample_ids`` — the caller substitutes the ruler's own centre and
+    population SE for an unabsorbed cell, and a default here would be a second, wronger answer to
+    that. Ties break on sid: arbitrary, but reproducible for the resume replayer."""
     return sorted(
         sample_ids,
         key=lambda sid: (
-            -pick_value(
-                mu_c,
-                var_c,
-                mu_s,
-                var_s,
-                delta_map.get(sid, 0.0),
-                delta_se_map.get(sid, 1.0),
-            ),
+            -decision_information_gain(mu_c, var_c, mu_s, var_s, delta_map[sid], delta_se_map[sid]),
             sid,
         ),
     )

@@ -118,10 +118,10 @@ summary fields instead and still serves such a cycle.
   computable from the record. *Adding* one the run lacked is not — lock-in keys off the
   leader's per-step `p_best` trajectory, which the per-candidate snapshot does not carry.
   That question is answered by running a real sibling cycle on the policy-scope fork path.
-- **No backfill, structurally.** Row-derivable evaluators (`accuracy`, `mean_latency_s`, …)
-  are recomputed from persisted per-sample rows at read time, so they are never "missing"
-  from an old record; snapshot-only evaluators resolve to honest absence. No tool rewrites
-  a stored round file.
+- **No backfill, structurally.** Row-derivable evaluators (`accuracy`, `error_rate`, …) and the
+  per-cell channel means (`latency`, `cost`, `tokens`) are recomputed from persisted per-sample
+  rows at read time, so they are never "missing" from an old record; snapshot-only evaluators
+  resolve to honest absence. No tool rewrites a stored round file.
 - **A node lacking the masked input is *unknown*, never divergent.** Absence of data is not
   evidence of departure.
 
@@ -157,9 +157,14 @@ summary fields instead and still serves such a cycle.
   on its *own* stored evaluator namespace, and the recorded eligibility filter is reused
   verbatim — so a higher-scoring but ineligible candidate is still not named leader. This is
   the self-consistency gate, and it holds by construction rather than by test.
-- **Non-stationary realized criterion.** A `per_round` formula changes by FORK, never mid-cycle
+- **Non-stationary realized criterion.** A `per_cell` formula changes by FORK, never mid-cycle
   (`persistence-and-state.md` § Changing the composite formula), so a mask spanning forks diffs
   against the formula in effect at each round.
+- **A mask is the PROJECTION of the composite, not the composite.** The campaign scores per CELL;
+  a mask re-scores a stored per-ROUND evaluator map, because the record it reads may no longer
+  have the rows. The two agree exactly where the formula is linear in its terms and diverge by
+  Jensen where it is not — a clamp or a ratio is enough. Read a masked value as *what this round
+  would have scored on these round-level terms*, never as the number the election used.
 - **Record unchanged.** A mask is a projection on top. The realized lineage and its winners
   never move.
 - **One scoring home.** No mask math in TypeScript; `score_search_point()` stays the single

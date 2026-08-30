@@ -24,12 +24,12 @@ __all__ = [
 # an evaluator's short code is a single edit here — everything else derives.
 SHORT_NAMES: dict[str, str] = {
     "accuracy": "acc",
+    "fitness": "fit",
     "error_rate": "err",
     "degraded_rate": "degr",
-    "runtime_failure_rate": "rf",
-    "mean_latency_s": "lat",
-    "prompt_compactness": "pc",
-    "pipeline_compactness": "ppl",
+    "latency": "lat",
+    "cost": "usd",
+    "tokens": "tok",
     "source_recall": "src",
     "candidate_recall": "cand",
     "cache_hit_rate": "cache",
@@ -48,7 +48,7 @@ class _ShortAggregate:
 
 
 AGGREGATES: tuple[_ShortAggregate, ...] = (
-    _ShortAggregate("H", ("error_rate", "degraded_rate", "runtime_failure_rate"), complement=True),
+    _ShortAggregate("H", ("error_rate", "degraded_rate"), complement=True),
     _ShortAggregate("R", ("source_recall", "candidate_recall", "cache_hit_rate"), complement=False),
 )
 
@@ -67,7 +67,7 @@ _NAME_RE = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
 
 def to_short_formula(formula: str) -> str:
     """Translate a full-name formula into its short form via ``SHORT_NAMES``; a name with no short code
-    renders unchanged. This is how ``default_per_round_formula_short`` derives, with no synced literal."""
+    renders unchanged. This is how ``resolve_cell_formula``'s short form derives, with no literal."""
     return _NAME_RE.sub(lambda m: SHORT_NAMES.get(m.group(0), m.group(0)), formula)
 
 

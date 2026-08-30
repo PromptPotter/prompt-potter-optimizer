@@ -8,8 +8,9 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import StopReason
+from promptpotter.domain.results import HeadlineMetric
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import RoundScorer, Scorer
+from promptpotter.domain.scoring import CellScorer
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.store.io import validate_path_component
 from promptpotter.infrastructure.store.layout import CycleLayout
@@ -34,13 +35,27 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ScorerSetup:
-    scorer: Scorer | None = None
+    scorer: CellScorer | None = None
     scorer_id: str = "none"
     scorer_formula: str | None = None
-    round_scorer: RoundScorer | None = None
-    scorer_round_formula: str | None = None
+    scorer_cell_formula: str | None = None
+    # WHICH number the operator's surfaces headline. Here rather than only on
+    # `dashboard.json` because the terminal is an entry point too: served to the browser
+    # alone, a campaign that declares `ability` still led every CLI line with the
+    # subset-relative accuracy, which is the one reading `per_round_resubset` makes
+    # unsafe (`knobs.py::headline_subset_relative_under_resubset`).
+    headline_metric: HeadlineMetric = "accuracy"
     scoring_set: list[Sample] = field(default_factory=list)
     degradation_checks: list[StopRule] = field(default_factory=list)
+
+    def require_scorer(self) -> CellScorer:
+        """The compiled scorer, or a loud stop. ``None`` means ``populate_session_scoring`` has not
+        run, so anything grading a cell here would be grading it under no declared formula."""
+        if self.scorer is None:
+            raise RuntimeError(
+                "session.scoring.scorer is unset — populate_session_scoring must run first."
+            )
+        return self.scorer
 
 
 @dataclass

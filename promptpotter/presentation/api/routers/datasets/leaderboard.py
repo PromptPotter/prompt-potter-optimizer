@@ -117,10 +117,17 @@ def _resolve_scope_artifact(
             return {}
         campaign_artifact: dict[str, Any] = read_json(path)
         return campaign_artifact
-    # `dataset` — always per-dataset (cross-dataset pooling is meaningless).
+    # `dataset` — always per-dataset (cross-dataset pooling is meaningless), so the grade is the
+    # one that dataset declares; there is no campaign in scope to ask.
+    from promptpotter.application.datasets.authored import dataset_cell_scorer
+    from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
+
+    scorer, scorer_id = dataset_cell_scorer(readable_dataset_dir(stores, name))
     return build_archive_hard_samples_artifact(
         stores,
         dataset_name=name,
+        scorer=scorer,
+        scorer_id=scorer_id,
         top_k_samples=None,
     )
 

@@ -10,7 +10,7 @@ from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.scoring.formula import ScoringTermMissingError, rescore_results
 from promptpotter.domain.measurement_provenance import entry_grade
 from promptpotter.domain.rendering import display_fitness
-from promptpotter.domain.scoring import Scorer
+from promptpotter.domain.scoring import CellScorer
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.infrastructure.store import archive_views
 
@@ -344,7 +344,7 @@ class AxisIndex:
     def refresh(
         self,
         stores: Stores,
-        scorer: Scorer | None = None,
+        scorer: CellScorer | None = None,
         scorer_id: str = "none",
         scorer_formula: str | None = None,
         *,
@@ -491,7 +491,7 @@ class AxisIndex:
     def ensure_for(
         cls,
         stores: Stores | None,
-        scorer: Scorer | None = None,
+        scorer: CellScorer | None = None,
         scorer_id: str = "none",
         scorer_formula: str | None = None,
         *,

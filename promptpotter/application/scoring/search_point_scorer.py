@@ -12,7 +12,7 @@ from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.query_loop import run_query_loop
 from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
-from promptpotter.domain.scoring import QueryMeasurement, Scorer
+from promptpotter.domain.scoring import CellScorer, QueryMeasurement
 from promptpotter.domain.validators import StopRule
 from promptpotter.infrastructure.store import archive_views
 from promptpotter.shared.errors import DatasetIdentityError, error_category, is_error_result
@@ -37,7 +37,7 @@ def rescored_prior_tail(
     cached_sample_results: dict[int, QueryMeasurement],
     dataset_sample_ids: set[int],
     deprecated_samples: dict[int, QueryMeasurement],
-    scorer: Scorer | None,
+    scorer: CellScorer | None,
 ) -> dict[int, QueryMeasurement]:
     """The cache priors this run may archive without re-measuring, rescored ONCE. The active scorer
     is fixed for one call, so rescoring per prior per sample was O(samples²) for the same answers."""
@@ -333,7 +333,6 @@ async def score_search_point(
             rows,
             pipeline_schema,
             opt_sp=opt_sp,
-            round_scorer=session.scoring.round_scorer,
             l1_diversity=l1_diversity,
         )
 

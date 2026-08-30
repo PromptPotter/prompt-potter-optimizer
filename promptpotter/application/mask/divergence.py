@@ -42,7 +42,7 @@ class Divergence(StrictModel):
 class DivergenceResult(StrictModel):
     """The fold's output. ``divergences`` are the markers; ``divergent`` are the dimmed
     counterfactual ``(cycle_id, round)`` coordinates STRICTLY after each one — a coordinate rather
-    than a ``::r`` key, which its only consumer used to parse straight back into this pair."""
+    than a ``::r`` key its only consumer would parse straight back into this pair."""
 
     model_config = ConfigDict(frozen=True)
 

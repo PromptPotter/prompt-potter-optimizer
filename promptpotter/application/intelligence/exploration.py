@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
+from numpy.typing import NDArray
 
-from promptpotter.application.intelligence.adaptive_queue_mechanism import expected_order
+from promptpotter.application.intelligence.adaptive_queue_mechanism import decision_order
 from promptpotter.domain.ruler import (
     AbilityReading,
     CalibrationModel,
@@ -16,7 +17,6 @@ from promptpotter.domain.ruler import (
     Ruler,
     anchor_id_of,
     ruler_entry,
-    ruler_id,
 )
 from promptpotter.shared.errors import RulerCoverageError, is_error_result
 
@@ -64,8 +64,22 @@ class Observation(NamedTuple):
 
 
 def graded_response(result: Mapping[str, Any]) -> float:
-    """One reader, so every θ/δ fit sees the same graded signal the composite does."""
-    return min(max(float(result.get("fitness", 0.0) or 0.0), 0.0), 1.0)
+    """One reader for STAMPED rows, so every θ/δ fit sees the same graded signal the composite does.
+
+    ``objective``, never ``fitness``: a round is won on θ, so this is the ONE place a cost, latency
+    or reliability term reaches the election at all (``domain/scoring.py::CellScorer``).
+
+    A row with no ``objective`` RAISES rather than defaulting — absence means the row never went
+    through ``rescore_results``, and a default reads that as a cell the arm got WRONG, which is
+    what fits a ruler on an all-zeros matrix. Archive rows are graded by the READING campaign's
+    scorer instead (``hard_sample_archive.py::build_archive_observations``)."""
+    if "objective" not in result:
+        raise KeyError(
+            "graded_response: row carries no 'objective'. Only rows stamped by "
+            "``rescore_results`` may be read here; grade an archive row with the reading "
+            "campaign's CellScorer."
+        )
+    return min(max(float(result["objective"] or 0.0), 0.0), 1.0)
 
 
 def ruler_expected_accuracy(theta: float | None, ruler: DeltaRuler | None) -> float | None:
@@ -93,13 +107,13 @@ def parent_level_trajectory(
     round carries the previous level forward, exactly as a round that crowned nobody does."""
     if origin is None or origin.se is None or ruler is None or not ruler.delta:
         return None, []
-    if origin.ruler_id != ruler_id(ruler):
+    if origin.ruler_id != ruler.anchor_id:
         # No reference on this scale ⇒ nothing to difference against; the L4 law reads it as
         # no evidence.
         logger.warning(
             "origin ability sits on %s, not the cycle's ruler %s — no level series on this scale",
             origin.scale(),
-            ruler_id(ruler),
+            ruler.anchor_id,
         )
         return None, []
     origin_pair = (origin.theta, origin.se)
@@ -120,6 +134,27 @@ _INIT_SIGMA_DELTA = 2.0
 # sparse data; washes out against real n.
 _EB_NU0 = 1.0
 _EB_S0_SQ = 1.0
+
+# The largest logit ONE Newton step may move a parameter. Every fit below is a MAP estimate on a
+# strictly log-concave posterior, so the root is unique and a bounded step always reaches it while
+# an unbounded one need not: where p saturates, the observed information collapses to the prior
+# term alone and `grad / info` jumps tens of logits into the opposite saturation. It bites the arms
+# furthest from the centre hardest — the ones that BEAT it — so an undamped fit reads improvement
+# as collapse.
+_MAX_NEWTON_STEP = 1.0
+
+# Panel slots held for the cells δ is least sure of, out of `sp_budget_ttest`; `_with_ruler_learning`
+# states what each end costs. A first estimate off one ruler, worth re-fitting on a second dataset.
+_RULER_LEARNING_SLOTS = 4
+
+
+def _newton_step(
+    grad: NDArray[np.floating[Any]] | float, info: NDArray[np.floating[Any]] | float
+) -> NDArray[np.floating[Any]]:
+    """One DAMPED Newton step — information floored so it cannot divide by zero, step bounded so it
+    cannot leave the region that information was measured in. Every fit here steps through this;
+    spelled per site, the bound is one a new fit forgets."""
+    return np.clip(grad / np.maximum(info, 1e-9), -_MAX_NEWTON_STEP, _MAX_NEWTON_STEP)
 
 
 @dataclass
@@ -191,7 +226,7 @@ def _map_fit(
         # Theta Newton step (prior N(0, σ_θ²)).
         grad_theta = np.bincount(rows, weights=responses - p, minlength=n_c) - inv_var_theta * theta
         info_theta = np.bincount(rows, weights=w, minlength=n_c) + inv_var_theta
-        theta = theta + grad_theta / np.maximum(info_theta, 1e-9)
+        theta = theta + _newton_step(grad_theta, info_theta)
 
         eta = theta[rows] - delta[cols]
         p = 1.0 / (1.0 + np.exp(-np.clip(eta, -50, 50)))
@@ -202,7 +237,7 @@ def _map_fit(
             delta - mu_delta
         )
         info_delta = np.bincount(cols, weights=w, minlength=n_s) + inv_var_delta
-        delta = delta + grad_delta / np.maximum(info_delta, 1e-9)
+        delta = delta + _newton_step(grad_delta, info_delta)
 
         # Anchor mean(theta) == 0 for identifiability.
         shift = float(theta.mean())
@@ -353,7 +388,7 @@ def fit_theta_given_delta(
             p = 1.0 / (1.0 + np.exp(-np.clip(a_arr * (theta - d_arr), -50, 50)))
             grad = float(np.sum(a_arr * (h_arr - p))) - inv_var * theta
             info = float(np.sum(a_arr * a_arr * p * (1.0 - p))) + inv_var
-            step = grad / max(info, 1e-9)
+            step = float(_newton_step(grad, info))
             theta += step
             if abs(step) < tol:
                 break
@@ -427,7 +462,7 @@ def extend_ruler(
             p = 1.0 / (1.0 + np.exp(-np.clip(t_arr - d, -50, 50)))
             grad = -float(np.sum(y_arr - p)) - inv_var * (d - ruler.mu_delta)
             info = float(np.sum(p * (1.0 - p))) + inv_var
-            step = grad / max(info, 1e-9)
+            step = float(_newton_step(grad, info))
             d += step
             if abs(step) < tol:
                 break
@@ -494,7 +529,7 @@ def fit_rasch_2pl(
         info_t = (
             np.bincount(rows, weights=a[cols] ** 2 * p * (1 - p), minlength=n_c) + inv_var_theta
         )
-        theta = theta + grad_t / np.maximum(info_t, 1e-9)
+        theta = theta + _newton_step(grad_t, info_t)
 
         # δ step — ∂η/∂δ = −aₛ.
         p = 1.0 / (1.0 + np.exp(-np.clip(a[cols] * (theta[rows] - delta[cols]), -50, 50)))
@@ -504,7 +539,7 @@ def fit_rasch_2pl(
         info_d = (
             np.bincount(cols, weights=a[cols] ** 2 * p * (1 - p), minlength=n_s) + inv_var_delta
         )
-        delta = delta + grad_d / np.maximum(info_d, 1e-9)
+        delta = delta + _newton_step(grad_d, info_d)
 
         # log-a step — η = aₛ(θ−δ), ∂η/∂log a = η; Gauss-Newton info ≈ Σ w·η².
         eta = a[cols] * (theta[rows] - delta[cols])
@@ -513,7 +548,7 @@ def fit_rasch_2pl(
             np.bincount(cols, weights=(responses - p) * eta, minlength=n_s) - inv_var_a * log_a
         )
         info_la = np.bincount(cols, weights=p * (1 - p) * eta * eta, minlength=n_s) + inv_var_a
-        log_a = np.clip(log_a + grad_la / np.maximum(info_la, 1e-9), -_LOG_A_CLIP, _LOG_A_CLIP)
+        log_a = np.clip(log_a + _newton_step(grad_la, info_la), -_LOG_A_CLIP, _LOG_A_CLIP)
 
         shift = float(theta.mean())
         theta -= shift
@@ -718,6 +753,7 @@ def select_round_subset(
     *,
     ruler: DeltaRuler | None = None,
     anchor_floor: int = 0,
+    leader_ids: Collection[str] | None = None,
 ) -> list[Sample]:
     """Which cells this round buys, ordered on the cycle's LOCKED ruler.
 
@@ -727,6 +763,11 @@ def select_round_subset(
 
     Cold ruler ⇒ the deterministic bank prefix, unchanged: a δ fit needs at least TWO arms or
     selecting on it is a difficulty ratchet, and freezing the subset is what lets the ruler warm.
+
+    ``leader_ids`` names the arms this round is DECIDING BETWEEN, and the target θ is the best of
+    those. *observations* deliberately carries the whole archive — a θ fit wants every arm — but the
+    max over it is the best searchpoint ever run on the dataset, which is not in this race, and
+    targeting it calibrates the panel to an arm nobody ran.
     """
     if budget <= 0 or not bank:
         return []
@@ -741,12 +782,17 @@ def select_round_subset(
     delta_se_map = {sid: ruler.delta_se.get(sid, ruler.sigma_delta) for sid in by_id}
     anchored = [o for o in observations if o.sample_id in ruler.delta]
     theta = fit_theta_given_delta(anchored, ruler.entries(), anchor_id=ruler.anchor_id)
-    if theta:
-        leader_theta, leader_se = max(theta.values(), key=lambda ts: ts[0])
+    in_race = (
+        [ts for cid, ts in theta.items() if cid in leader_ids]
+        if leader_ids is not None
+        else list(theta.values())
+    )
+    if in_race:
+        leader_theta, leader_se = max(in_race, key=lambda ts: ts[0])
         leader_var = leader_se**2
     else:
         leader_theta, leader_var = 0.0, _INIT_SIGMA_THETA**2
-    ranked = expected_order(
+    decided = decision_order(
         leader_theta,
         _INIT_SIGMA_THETA**2,
         leader_theta,
@@ -755,7 +801,28 @@ def select_round_subset(
         delta_se_map,
         list(by_id),
     )
+    ranked = _with_ruler_learning(decided, budget, delta_se_map)
     return [by_id[sid] for sid in _with_anchor_block(ranked, budget, ruler, anchor_floor)]
+
+
+def _with_ruler_learning(
+    decided: list[int], budget: int, delta_se_map: dict[int, float]
+) -> list[int]:
+    """Reserve the last ``_RULER_LEARNING_SLOTS`` of the panel for the cells δ is least sure of.
+
+    The panel's job is to separate the arms, so the bulk is bought on decision information alone —
+    but a pure-decision panel converges on one difficulty and STOPS BEING A READING (a band under
+    ``BAND_COLLAPSE_LOGITS``, where θ is logit-accuracy plus a constant). A handful of max-SE cells
+    holds the band open; more buys no further span and only makes the panel easier."""
+    slots = min(_RULER_LEARNING_SLOTS, max(budget - 1, 0))
+    if slots <= 0 or budget >= len(decided):
+        return decided
+    keep = decided[: budget - slots]
+    held = set(keep)
+    explore = sorted(
+        (sid for sid in decided if sid not in held), key=lambda sid: (-delta_se_map[sid], sid)
+    )
+    return [*keep, *explore[:slots], *(sid for sid in decided[budget - slots :] if sid not in held)]
 
 
 def _with_anchor_block(
