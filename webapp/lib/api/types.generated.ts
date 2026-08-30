@@ -532,6 +532,7 @@ export interface CurrentRound {
   candidates: DashboardCandidate[];
   nodes: Record<string, Record<string, unknown>>;
   pobb: PobbBlock;
+  overlap: OverlapReading | null;
 }
 
 /** ``dashboard.json`` — operator-facing snapshot, polled by the webapp. */
@@ -1188,13 +1189,6 @@ export interface LineageNode {
   /** Of `scored_samples`, how many were replayed from the MeasurementArchive rather
    * than measured. `None` on a course and on any candidate never measured. */
   cached_samples: number | null;
-  /** Ability of the parent lineage on the cycle's fixed δ ruler — the subset-
-   * invariant, cross-round-comparable series the trend plots. Carried by the
-   * round's WINNER only: it is a property of the advancing spine, and a
-   * losing sibling never joined it. Its accuracy-space predecessor was a mean
-   * over rows measured by different configurations and is gone; `accuracy` is
-   * what this node MEASURED. */
-  cumulative_theta: number | null;
   /** This candidate's fitness under the request's `score:` lens, re-scored server-
    * side from its stored evaluator namespace. Null without a lens, or when
    * the namespace can't satisfy the formula. */

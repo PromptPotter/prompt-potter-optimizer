@@ -12,8 +12,9 @@ from promptpotter.connectors.protocol import MeasuredUnit
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.rendering import DisplayRankKey, display_rank_key
-from promptpotter.domain.results import candidate_label
+from promptpotter.domain.results import candidate_label, overlap_series
 from promptpotter.domain.run_records import (
+    ElectionRecord,
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
@@ -260,6 +261,20 @@ class LiveDisplay(DerivedView):
         if cached:
             bits.append("cached")
         self._write(f"  {DIM}✓ {' · '.join(bits)}{RESET}")
+
+    def _handle_election(self, record: ElectionRecord) -> None:
+        """The verdict, where the election makes it — not at the round close two LLM calls later.
+
+        The browser reads it off this same record; the terminal was the entry point still waiting
+        for the summary block. ``verdict_reason`` rides the live handle rather than the wire, so a
+        replay off disk prints nothing and the summary stays the only readout there."""
+        rr = record.live_round_result
+        if rr is None or not (reason := rr.verdict_reason):
+            return
+        crown = record.winner_label or "nobody"
+        self._write(f"  {GREEN}✓ elected {crown}{RESET} {DIM}— {reason}{RESET}")
+        if series := overlap_series(rr.overlap):
+            self._write(f"  {DIM}overlap ({series}){RESET}")
 
     def _handle_snapshot(self, record: SnapshotRecord) -> None:
         payload = record.payload

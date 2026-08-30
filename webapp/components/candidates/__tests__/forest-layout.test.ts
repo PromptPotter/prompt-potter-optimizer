@@ -33,7 +33,6 @@ function node(
     is_winner: false,
     theta: null,
     theta_se: null,
-    cumulative_theta: null,
     evaluators: {},
     mean_fitness_ci_lo: null,
     mean_fitness_ci_hi: null,

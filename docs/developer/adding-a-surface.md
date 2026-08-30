@@ -145,9 +145,13 @@ mirror onto decides the cost, so ask first *whose* fact it is:
   and stop. Not `RoundSummaryCandidate`, which only narrows that base for a CLOSED round: a
   field declared there reaches `dash.rounds[].candidates[]` and never the live row. The
   projection's include-set is derived from `model_fields`, so the copy flows with **zero** edits
-  to `round_summary.py`, and `build_candidate_rows` fills the live half off the same
-  `candidate_scored` payload. The webapp seam is `CandidateRow` (`lib/types/candidate.ts` +
-  `lib/derivations/round-candidates.ts`, which maps both halves through ONE function).
+  to `round_summary.py`. `build_candidate_rows` fills the live half from the slot the buffer
+  holds — banked at `candidate_scored`, then folded onto by `RoundBuffer.stamp_fit` at the
+  election — so **ask WHEN your fact exists**: one the scorer knows per sample rides
+  `_composite`, one the election stamps rides `ElectionRecord.fit`, and a field that reaches
+  neither is null on every live row until the round closes. The webapp seam is `CandidateRow`
+  (`lib/types/candidate.ts` + `lib/derivations/round-candidates.ts`, which maps both halves
+  through ONE function).
 - **Per-ROUND** → mirror onto `RoundSummary` *and* hand-write the line in
   `projections/live_dashboard/round_summary.py`.
 

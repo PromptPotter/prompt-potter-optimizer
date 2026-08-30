@@ -241,3 +241,39 @@ export function whiskerAnchor(ctx: SeriesCtx): SeriesKey | null {
   }
   return ctx.metrics.has("accuracy") ? "accuracy" : null;
 }
+
+export interface WhiskerBand {
+  anchor: SeriesKey;
+  lo: (number | null)[];
+  hi: (number | null)[];
+}
+
+// 95%, normal. The server's mean band is already one (`scoring/selection.py::mean_fitness_ci`);
+// θ arrives as a standard error, so it is widened HERE rather than drawn raw — two whiskers drawn
+// alike have to mean alike, and one SE beside a 95% interval is the same picture for a third of
+// the coverage.
+const Z95 = 1.96;
+
+// EVERY band the chart draws — one per channel that has an interval and is currently showing.
+// Each hangs off its own bar and is drawn against that bar's OWN declared `axis`: the mean band on
+// the percent axis, θ's on the logit one. So no band carries a scale of its own and none is
+// rescaled onto another channel's bar — which is the thing that must not come back. Before this,
+// the ability bar — the one a campaign electing on θ is decided by — carried no interval at all,
+// and its band hung on the accuracy bar beside it instead.
+export function whiskerBands(ctx: SeriesCtx): WhiskerBand[] {
+  const bands: WhiskerBand[] = [];
+  const percent = whiskerAnchor(ctx);
+  if (percent !== null) {
+    bands.push({
+      anchor: percent,
+      lo: ctx.views.map((v) => v.meanFitnessCiLo),
+      hi: ctx.views.map((v) => v.meanFitnessCiHi),
+    });
+  }
+  if (ctx.metrics.has("ability")) {
+    const edge = (sign: number) => (v: CandidateView) =>
+      v.theta == null || v.theta_se == null ? null : v.theta + sign * Z95 * v.theta_se;
+    bands.push({ anchor: "ability", lo: ctx.views.map(edge(-1)), hi: ctx.views.map(edge(1)) });
+  }
+  return bands;
+}

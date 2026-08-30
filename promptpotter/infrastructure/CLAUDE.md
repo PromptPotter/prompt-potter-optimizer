@@ -36,8 +36,9 @@ archive holds keyed `(dataset_name, node_configs, sample_id)`, or that `rounds/r
 carries per candidate, is already addressable without it. Two shapes are declared, not optional:
 the projection at the writer (`RunCallbacks` → `domain/scoring.py::ledger_sample_view`,
 `ViewContext.ledger_anchors`) keeps a record to the union of what its subscribers RENDER, and a
-field that is live-only rides `Field(exclude=True)` (`PhaseRecord.data`, `.live_round_result`) so
-nothing decides per-key at the seam what serializes. Measured before the rule existed: one L2
+field that is live-only rides `Field(exclude=True)` (`PhaseRecord.data`, `.live_round_result`, and
+`ElectionRecord.live_round_result`, which is how the round's own readings reach `current_round` at
+the election) so nothing decides per-key at the seam what serializes. Measured before the rule existed: one L2
 prompt stored three times, twice in the same file, and 37 of 39 MB of `pipeline_data` was the
 archive's own bytes — 102.6 MB of ledger, 56.6% of it duplication.
 
@@ -91,9 +92,12 @@ a convention:
   the client to merge them field by field, which put a bar and its error whisker on two
   different polls, and made it regex a rendered tape to recover the row the other branch of the
   same key already held. **Each field lands at the moment its FACT exists, and none of them is the
-  round close:** the value and its band at `candidate_scored`, the crown on its own
-  `ElectionRecord`, written where the election runs. (θ stays null on a live row — it needs the round's joint fit,
-  which is a different fact, not a late one.) A field held back to `round:display` surfaces
+  round close:** the value and its band ride the scoring gateway's own fold
+  (`search_point_scorer::_composite`) out on every sample, so the whisker widens with the bar; the
+  crown, θ and the matched-parent lift all ride `ElectionRecord`, written where the election runs.
+  θ cannot come sooner and its nullness before the election is a fact, not a delay — `calibrate_ruler`
+  extends the δ scale onto the round's cells first, and `fit_theta_given_delta` raises on a cell it
+  does not carry. A field held back to `round:display` surfaces
   whenever the next node happens to finish, which is not a time the operator can read anything into.
 
 The **outbound SSE highway is NOT a projection/subscriber** — it *tails* the on-disk
@@ -185,18 +189,19 @@ erroring:
 - **Whichever cut moved the POINTER answers for run-state** — `supersede` and `equivalent`
   both do, `offshoot` alone leaves the parent running. Separate from what a cut retires.
 
-**A round fact lands on the record that OWNS it, and the split is not cosmetic.** The crown is
-stamped once, by `elect_round_winner`, and rides its own `ElectionRecord` — so the tree crowns a
-whole `l1_critique` call before the round closes, and `election_held` is what separates a round
-that HELD from one still scoring (`is_winner: false` reads identically for both). θ and the
-frontier are RESTAMPED when the ruler warms, so they stay on `round:complete`, which round 0
-reaches twice for exactly that reason. Move either half to the other record and nothing raises:
-round 0 silently reverts to its cold θ, or the served crown goes late again. The election's
-**lift** is the third case and the one with a trap: `l1_score` stamps it AFTER the ledger's
-`candidate_scored` snapshot is written, so `LedgerCandidate` cannot carry it — declaring it
-there, which that model's docstring invites, yields an all-null column on every live run and a
-value only on repaired rounds. It is folded from the course's own `dashboard.json` rounds,
-joined on the MINTING label (`_lifts`).
+**A round fact lands on the record that OWNS it, and the split is not cosmetic.** Everything
+`elect_round_winner` stamps rides `ElectionRecord` — the crown, each arm's θ and its matched-parent
+lift (`ElectionRecord.fit`, keyed by MINTING label because a resume re-mints ids) — so the tree
+carries the whole verdict a `l1_critique` call before the round closes, and `election_held` is what
+separates a round that HELD from one still scoring (`is_winner: false` reads identically for both).
+The FRONTIER θ is the exception and stays on `round:complete`: it is RESTAMPED when the ruler warms,
+which round 0 reaches twice for exactly that reason, so `LedgerRoundClose.abilities` wins over the
+election's copy wherever it answers. Move either half to the other record and nothing raises: round
+0 silently reverts to its cold θ, or the served verdict goes late again. The lift is the one that
+was got wrong before: `l1_score` stamps it AFTER the ledger's `candidate_scored` snapshot, so
+`LedgerCandidate` cannot carry it — declaring it there, which that model's docstring invites, yields
+an all-null column on every live run. It rode a fold of the course's own `dashboard.json` rounds
+until the election grew a chronology to put it on.
 
 **It is a READ MODEL and decides nothing.** The decision genealogy (`application/mask/`, the
 resume replayers) rides positional `(cycle_id, round)` and must not move onto it. What a cut

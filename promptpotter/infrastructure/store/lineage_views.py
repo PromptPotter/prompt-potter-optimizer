@@ -18,6 +18,7 @@ from promptpotter.domain.run_records import (
     ForkTrigger,
     LedgerAbility,
     LedgerCandidate,
+    LedgerFit,
 )
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
@@ -159,14 +160,6 @@ class LineageNode(StrictModel):
         default=None,
         description="Of `scored_samples`, how many were replayed from the MeasurementArchive "
         "rather than measured. `None` on a course and on any candidate never measured.",
-    )
-    cumulative_theta: float | None = Field(
-        default=None,
-        description="Ability of the parent lineage on the cycle's fixed δ ruler — the "
-        "subset-invariant, cross-round-comparable series the trend plots. Carried by the "
-        "round's WINNER only: it is a property of the advancing spine, and a losing sibling "
-        "never joined it. Its accuracy-space predecessor was a mean over rows measured by "
-        "different configurations and is gone; `accuracy` is what this node MEASURED.",
     )
     lens_value: float | None = Field(
         default=None,
@@ -356,52 +349,33 @@ def _fork_direction(fork: Mapping[str, Any]) -> ForkDirection | None:
 
 
 class _RoundFacts(NamedTuple):
-    """What a candidate learns from its ROUND, folded from the two records that hold it: the
-    ELECTION (the crown, stamped once at the end of scoring) and the CLOSE (θ + the frontier,
-    re-read every close so a warm ruler restamps them). Neither implies the other — a round elects
-    an ``l1_critique`` call before it closes. The whisker is in neither: it is the candidate's own,
-    and a round-scoped copy drew two quantities as one band."""
+    """What a candidate learns from its ROUND, folded from the two records that hold it.
+
+    The ELECTION carries everything it stamps at the end of scoring — the crown, θ, and the
+    matched-parent floor the arm was judged against. The CLOSE carries the frontier, and RE-READS
+    θ, which is how a warm ruler's restamp reaches round 0; where it answers, it wins. Neither
+    implies the other — a round elects an ``l1_critique`` call before it closes.
+
+    The whisker is in neither: it is the candidate's own, and a round-scoped copy drew two
+    quantities as one band."""
 
     election_held: bool = False
     is_winner: bool = False
     theta: float | None = None
     theta_se: float | None = None
-    cumulative_theta: float | None = None
-
-
-class _Lift(NamedTuple):
-    value: float | None = None
-    ci_lo: float | None = None
-    ci_hi: float | None = None
-
-
-_NO_LIFT = _Lift()
-
-
-def _lifts(dash: dict[str, object]) -> dict[str, _Lift]:
-    """``label -> _Lift``, folded from the course's OWN ``dashboard.json`` rounds. Not the ledger:
-    ``l1_score`` stamps the lift during the ELECTION, after the ``candidate_scored`` snapshot, so
-    :class:`LedgerCandidate` would serve an all-null column on every live run."""
-    out: dict[str, _Lift] = {}
-    rounds = dash.get("rounds")
-    if not isinstance(rounds, list):
-        return out
-    for entry in rounds:
-        rows = entry.get("candidates") if isinstance(entry, dict) else None
-        for row in rows if isinstance(rows, list) else []:
-            if not isinstance(row, dict) or not isinstance(label := row.get("label"), str):
-                continue
-            out[label] = _Lift(
-                _float_or_none(row.get("matched_parent_lift")),
-                _float_or_none(row.get("matched_parent_lift_ci_lo")),
-                _float_or_none(row.get("matched_parent_lift_ci_hi")),
-            )
-    return out
+    matched_parent_lift: float | None = None
+    matched_parent_lift_ci_lo: float | None = None
+    matched_parent_lift_ci_hi: float | None = None
 
 
 def _round_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[str, _RoundFacts]:
-    """``candidate_id -> _RoundFacts``, folded from the cycle's OWN ledger. **The join stays on
-    ``label``**: ``candidate_id`` is a fresh uuid per construction, and a resume re-mints it."""
+    """``candidate_id -> _RoundFacts``, folded from the cycle's OWN ledger — the whole fold, so the
+    tree is no longer a projection of another projection. **The join stays on ``label``**:
+    ``candidate_id`` is a fresh uuid per construction, and a resume re-mints it.
+
+    The lift used to be read out of ``dashboard.json::rounds[]`` because the election stamped it
+    after the ``candidate_scored`` snapshot and the ledger's candidate tier served an all-null
+    column. It rides ``ElectionRecord`` now, at the moment it is stamped."""
     elections = scan_ledger_elections(ledger_path)
     closes = scan_ledger_round_closes(ledger_path)
     out: dict[str, _RoundFacts] = {}
@@ -416,20 +390,21 @@ def _round_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[s
             and bool(election.winner_label)
             and cand.label == election.winner_label
         )
-        ability = (
-            close.abilities.get(cand.label) if close is not None else None
-        ) or LedgerAbility()
+        fit = (election.fit.get(cand.label) if election is not None else None) or LedgerFit()
+        # The close WINS where it answers: it re-reads θ on every close, which is the channel
+        # round 0's warm-ruler restamp arrives on. Everywhere else the two agree — same
+        # `candidate_scores`, read twice — so the election's copy is simply the earlier one.
+        ability = (close.abilities.get(cand.label) if close is not None else None) or LedgerAbility(
+            theta=fit.theta, theta_se=fit.theta_se
+        )
         out[cand.candidate_id] = _RoundFacts(
             election_held=election is not None,
             is_winner=won,
             theta=ability.theta,
             theta_se=ability.theta_se,
-            # The frontier belongs to the spine: only the adopted candidate advanced it. A LEVEL
-            # is projected out of the reading on purpose — the tree plots one and never differences
-            # across cycles, which is the only reading `AbilityReading` does not have to guard.
-            cumulative_theta=(
-                close.ability.theta if won and close is not None and close.ability else None
-            ),
+            matched_parent_lift=fit.matched_parent_lift,
+            matched_parent_lift_ci_lo=fit.matched_parent_lift_ci_lo,
+            matched_parent_lift_ci_hi=fit.matched_parent_lift_ci_hi,
         )
     return out
 
@@ -716,7 +691,6 @@ def _candidate_node(
     cand: LedgerCandidate,
     *,
     close: _RoundFacts,
-    lift: _Lift,
     children: list[LineageNode],
     retired_by: str | None,
     hops: list[CycleHop],
@@ -740,9 +714,9 @@ def _candidate_node(
         # second one to prefer over it.
         mean_fitness_ci_lo=cand.mean_fitness_ci_lo,
         mean_fitness_ci_hi=cand.mean_fitness_ci_hi,
-        matched_parent_lift=lift.value,
-        matched_parent_lift_ci_lo=lift.ci_lo,
-        matched_parent_lift_ci_hi=lift.ci_hi,
+        matched_parent_lift=close.matched_parent_lift,
+        matched_parent_lift_ci_lo=close.matched_parent_lift_ci_lo,
+        matched_parent_lift_ci_hi=close.matched_parent_lift_ci_hi,
         scored_samples=cand.scored_samples,
         expected_samples=cand.expected_samples,
         cached_samples=cand.cached_samples,
@@ -751,7 +725,6 @@ def _candidate_node(
         is_winner=close.is_winner and retired_by is None,
         theta=close.theta,
         theta_se=close.theta_se,
-        cumulative_theta=close.cumulative_theta,
         superseded_by=retired_by,
         children=children,
     )
@@ -797,7 +770,6 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Lin
     hops = list(path)
 
     decided = _round_facts(ledger_path, candidates)
-    lifts = _lifts(dash)
 
     # Forks resolve FIRST: a replayed origin grafts its runs onto the candidate it replays.
     by_id = {c.candidate_id: c for c in candidates}
@@ -820,7 +792,6 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Lin
                 _candidate_node(
                     cand,
                     close=decided.get(cand.candidate_id, _NO_ROUND_FACTS),
-                    lift=lifts.get(cand.label, _NO_LIFT),
                     children=[
                         _build(c.store, c.path, depth=depth - 1, reads=reads)
                         for c in buckets.get(cand.candidate_id, [])

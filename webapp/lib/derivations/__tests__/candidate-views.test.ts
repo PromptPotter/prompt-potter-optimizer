@@ -28,7 +28,6 @@ function node(
     scored_samples: null,
     expected_samples: null,
     cached_samples: null,
-    cumulative_theta: null,
     lens_value: null,
     composite_rank: null,
     lens_rank: null,

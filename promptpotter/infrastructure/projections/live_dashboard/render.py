@@ -10,7 +10,6 @@ from promptpotter.domain.results import candidate_label
 from promptpotter.domain.scoring import is_hit
 from promptpotter.infrastructure.projections.live_dashboard.state import PobbBlock
 from promptpotter.shared.composite import inline_short_formula_values
-from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.projections.live_dashboard.round_buffer import RoundBuffer
@@ -32,16 +31,6 @@ _NODE_BADGES: dict[str, str] = {
 def _trim(text: str, n: int) -> str:
     t = str(text or "").replace("\n", " ").strip()
     return t if len(t) <= n else t[: n - 1] + "…"
-
-
-def _partial_mean_fitness(samples: list[dict[str, Any]]) -> float | None:
-    """Running mean fitness over the samples GRADED so far, bridging the gap before a candidate's final ``accuracy``
-    lands. An errored row's ``fitness`` is a display convention no estimator may read (``formula/rescore.py``), so it
-    leaves BOTH halves — counted, it put a candidate whose cells all failed on the bar at 0%."""
-    graded = [s for s in samples if not is_error_result(s)]
-    if not graded:
-        return None
-    return sum(float(s.get("fitness") or 0.0) for s in graded) / len(graded)
 
 
 def sample_row(s: dict[str, Any]) -> DashboardSample:
@@ -103,23 +92,22 @@ def build_candidate_rows(buffer: RoundBuffer) -> list[DashboardCandidate]:
     """This round's candidates in the SAME shape a closed round serves (``rounds[].candidates``), so a reader takes a
     whole row from one half instead of filling one in from the other per field.
 
-    ``scores`` is the verbatim ``ScoredCandidate.model_dump()`` from ``candidate_scored``, and the composite CI is
-    stamped there rather than at round close (``l1/population.py``), so a finished candidate carries its whisker
-    mid-round. ``label`` is canonical — display sites read it verbatim, and no ``idx + 1`` arithmetic exists."""
+    ``scores`` is the ``candidate_scored`` report, folded onto by the election; before it lands, ``running`` is the
+    gateway's own per-sample fold. Both carry the composite CI, so the whisker widens with the bar. The ``or`` between
+    them is a PRECEDENCE, not two spellings of one thing — only ``scores`` carries ``label``, ``candidate_id``,
+    ``invalid`` and ``partial_reason``. ``label`` is canonical — display sites read it verbatim, and no ``idx + 1``
+    arithmetic exists."""
     rows: list[DashboardCandidate] = []
     for idx in sorted(buffer.candidates.keys()):
         cand = buffer.candidates[idx]
         served = _served(cand)
         samples = cand.get("samples") or []
         cached = served.get("cached_samples")
-        # Never null mid-scoring: the running fitness carries accuracy; the partial mean over
-        # samples-so-far is the safety net before it lands.
-        accuracy = served.get("accuracy")
         rows.append(
             DashboardCandidate(
                 label=candidate_label(buffer.round_num, idx),
                 candidate_id=served.get("candidate_id"),
-                accuracy=accuracy if accuracy is not None else _partial_mean_fitness(samples),
+                accuracy=served.get("accuracy"),
                 composite_fitness=served.get("composite_fitness"),
                 invalid=bool(served.get("invalid", False)),
                 scored_samples=int(served.get("scored_samples") or len(samples)),
@@ -132,15 +120,19 @@ def build_candidate_rows(buffer: RoundBuffer) -> list[DashboardCandidate]:
                     cand.get("changes_description") or served.get("changes_description") or ""
                 ),
                 partial_reason=served.get("partial_reason") or "",
-                # Absent until the round's election fit runs — it needs two arms.
-                theta=served.get("theta"),
-                theta_se=served.get("theta_se"),
                 mean_fitness_ci_lo=served.get("mean_fitness_ci_lo"),
                 mean_fitness_ci_hi=served.get("mean_fitness_ci_hi"),
+                # Everything below lands at `l1_score:exit`, folded in by `RoundBuffer.stamp_fit`
+                # and `mark_winner` off the one `ElectionRecord` — so the whole verdict is live
+                # from the election rather than from the round close, two LLM calls later. Absent
+                # before it: the fit needs two arms, and a cold ruler stamps no θ at all.
+                theta=served.get("theta"),
+                theta_se=served.get("theta_se"),
                 matched_parent_accuracy=served.get("matched_parent_accuracy"),
                 matched_parent_composite=served.get("matched_parent_composite"),
-                # Set at `l1_score:exit` by `RoundBuffer.mark_winner`, so the crown is live from
-                # the election rather than from the round close.
+                matched_parent_lift=served.get("matched_parent_lift"),
+                matched_parent_lift_ci_lo=served.get("matched_parent_lift_ci_lo"),
+                matched_parent_lift_ci_hi=served.get("matched_parent_lift_ci_hi"),
                 is_winner=bool(cand.get("is_winner")),
             )
         )

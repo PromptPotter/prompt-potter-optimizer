@@ -1208,9 +1208,9 @@ def test_lineage_serves_the_election_lift_joined_on_the_minting_label(built_stor
     """The gate's verdict reaches the tree, and each course answers with its OWN numbers.
 
     `matched_parent_lift` is stamped during the ELECTION — a phase after the ledger already
-    wrote its `candidate_scored` snapshot — so `LedgerCandidate` cannot carry it and declaring
-    it there would yield an all-null column on every live run. It is folded from the course's
-    own `dashboard.json` rounds instead, joined on the MINTING label.
+    wrote its `candidate_scored` snapshot — so `LedgerCandidate` cannot carry it. It rides
+    `ElectionRecord.fit` instead, joined on the MINTING label, and the decoy in each course's
+    `dashboard.json` is there to prove the tree no longer reads one projection through another.
 
     Silent both ways if the join slips: a wrong key serves `None` everywhere, and a join
     against the parent's projection would caption one course's crown with another course's
@@ -1253,6 +1253,21 @@ def test_lineage_serves_the_election_lift_joined_on_the_minting_label(built_stor
                 + "\n"
                 for rnd in (0, 1)
             )
+            + json.dumps(
+                {
+                    "record_type": "election",
+                    "round": 1,
+                    "winner_label": "C1.1",
+                    "fit": {
+                        "C1.1": {
+                            "matched_parent_lift": lift,
+                            "matched_parent_lift_ci_lo": None if lift is None else 0.04,
+                            "matched_parent_lift_ci_hi": None if lift is None else 0.2,
+                        }
+                    },
+                }
+            )
+            + "\n"
         )
         (cdir / "dashboard.json").write_text(
             json.dumps(
@@ -1261,11 +1276,14 @@ def test_lineage_serves_the_election_lift_joined_on_the_minting_label(built_stor
                         {
                             "round": 1,
                             "candidates": [
+                                # The DECOY: the tree read its lift out of here until the
+                                # election grew a chronology. Reading it again would serve
+                                # this number instead of the ledger's.
                                 {
                                     "label": "C1.1",
-                                    "matched_parent_lift": lift,
-                                    "matched_parent_lift_ci_lo": None if lift is None else 0.04,
-                                    "matched_parent_lift_ci_hi": None if lift is None else 0.2,
+                                    "matched_parent_lift": -9.9,
+                                    "matched_parent_lift_ci_lo": -9.9,
+                                    "matched_parent_lift_ci_hi": -9.9,
                                 }
                             ],
                         }

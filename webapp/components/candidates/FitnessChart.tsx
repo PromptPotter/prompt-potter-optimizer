@@ -12,10 +12,11 @@ import {
   activeSeries,
   seriesByKey,
   seriesColumn,
-  whiskerAnchor,
+  whiskerBands,
   type SeriesCtx,
   type SeriesKey,
   type SeriesSpec,
+  type WhiskerBand,
 } from "./series";
 import type { ChartData, ChartOptions, ChartType, Plugin } from "chart.js";
 
@@ -129,49 +130,51 @@ const barCapsPlugin: Plugin<
 // show), not the category center — a whisker must sit on the bar it brackets. Bars with a null
 // CI are skipped.
 //
-// ONE band per candidate, on ONE percent-axis bar. Do not reintroduce a per-bar scale; make the
-// one band mean one thing instead. WHICH bar is `whiskerAnchor(ctx)`, a `SeriesKey` rather than
-// a literal so the join cannot drift from the dataset it names without the compiler noticing.
-const meanFitnessCiWhiskerPlugin: Plugin<
-  "bar",
-  { anchor: SeriesKey | null; ciLo: (number | null)[]; ciHi: (number | null)[] }
-> = {
-  id: "meanFitnessCiWhisker",
+// ONE band per CHANNEL, each on its own bar and its own declared axis — never a per-bar scale.
+// The distinction is the whole rule: a band is drawn against the axis its anchor channel already
+// declares in `CANDIDATE_SERIES`, so nothing rescales an interval onto a bar that did not produce
+// it. WHICH bars is `whiskerBands(ctx)`; each `anchor` is a `SeriesKey` rather than a literal so
+// the join cannot drift from the dataset it names without the compiler noticing.
+const ciWhiskerPlugin: Plugin<"bar", { bands: WhiskerBand[] }> = {
+  id: "ciWhisker",
   afterDatasetsDraw(chart, _args, opts) {
-    const ciLo = opts?.ciLo;
-    const ciHi = opts?.ciHi;
-    const yScale = chart.scales.y;
-    if (!ciLo || !ciHi || !yScale || !opts?.anchor) return;
-    const meta = chart.data.datasets.findIndex((ds) => ds.label === opts.anchor);
-    if (meta < 0) return;
-    const bars = chart.getDatasetMeta(meta);
+    const bands = opts?.bands;
+    if (!bands?.length) return;
     const { ctx } = chart;
     ctx.save();
     ctx.strokeStyle = getCss("--color-ci");
     ctx.lineWidth = 1.5;
     const capHalf = 4;
-    for (let i = 0; i < ciLo.length; i++) {
-      const lo = ciLo[i];
-      const hi = ciHi[i];
-      if (lo == null || hi == null) continue;
-      const el = bars.data[i] as
-        | { getProps?: (p: string[], final: boolean) => Record<string, number> }
-        | undefined;
-      const x = el?.getProps?.(["x"], true)?.x;
-      if (typeof x !== "number") continue;
-      // Bounded to [0,1] by the server (`scoring/selection.py::mean_fitness_ci` clips to its
-      // support), so the pixel always lands inside the fixed axis. This used to clamp to the
-      // plot area, compensating here for an interval that claimed negative accuracy.
-      const yLo = yScale.getPixelForValue(lo);
-      const yHi = yScale.getPixelForValue(hi);
-      ctx.beginPath();
-      ctx.moveTo(x, yLo);
-      ctx.lineTo(x, yHi);
-      ctx.moveTo(x - capHalf, yLo);
-      ctx.lineTo(x + capHalf, yLo);
-      ctx.moveTo(x - capHalf, yHi);
-      ctx.lineTo(x + capHalf, yHi);
-      ctx.stroke();
+    for (const band of bands) {
+      // The anchor's OWN axis, off the one channel declaration — not a scale the band carries.
+      const yScale = chart.scales[seriesByKey(band.anchor)?.axis ?? "y"];
+      const meta = chart.data.datasets.findIndex((ds) => ds.label === band.anchor);
+      if (!yScale || meta < 0) continue;
+      const bars = chart.getDatasetMeta(meta);
+      for (let i = 0; i < band.lo.length; i++) {
+        const lo = band.lo[i];
+        const hi = band.hi[i];
+        if (lo == null || hi == null) continue;
+        const el = bars.data[i] as
+          | { getProps?: (p: string[], final: boolean) => Record<string, number> }
+          | undefined;
+        const x = el?.getProps?.(["x"], true)?.x;
+        if (typeof x !== "number") continue;
+        // The percent band is bounded to [0,1] by the server (`mean_fitness_ci` clips to its
+        // support) and θ's axis is fitted to the θ it plots, so both pixels land inside their own
+        // scale. This used to clamp to the plot area, compensating here for an interval that
+        // claimed negative accuracy.
+        const yLo = yScale.getPixelForValue(lo);
+        const yHi = yScale.getPixelForValue(hi);
+        ctx.beginPath();
+        ctx.moveTo(x, yLo);
+        ctx.lineTo(x, yHi);
+        ctx.moveTo(x - capHalf, yLo);
+        ctx.lineTo(x + capHalf, yLo);
+        ctx.moveTo(x - capHalf, yHi);
+        ctx.lineTo(x + capHalf, yHi);
+        ctx.stroke();
+      }
     }
     ctx.restore();
   },
@@ -321,7 +324,7 @@ const CHART_PLUGINS = [
   barCapsPlugin,
   divergenceLinePlugin,
   inFlightPulsePlugin,
-  meanFitnessCiWhiskerPlugin,
+  ciWhiskerPlugin,
   xBridgePlugin,
 ];
 
@@ -573,7 +576,9 @@ export const FitnessChart = memo(function FitnessChart({
             const theta = views[idx]?.theta;
             if (typeof theta === "number") {
               const se = views[idx]?.theta_se;
-              const tail = typeof se === "number" ? ` ± ${se.toFixed(2)}` : "";
+              // The SE, named as one — the whisker on this bar is the 95% band around it, and
+              // printing a bare ± beside a wider drawn interval reads as a mismatch.
+              const tail = typeof se === "number" ? `, se ${se.toFixed(2)}` : "";
               lines.push(`ability θ ${theta.toFixed(2)}${tail} (elected on θ, not accuracy)`);
             }
             const ciLo = views[idx]?.meanFitnessCiLo;
@@ -606,11 +611,7 @@ export const FitnessChart = memo(function FitnessChart({
       barCaps: { counts: partialPanels(views), parent: parentIdx, crown },
       divergenceLine: { index: divergenceBoundary },
       inFlightPulse: { index: inFlightIndex },
-      meanFitnessCiWhisker: {
-        anchor: whiskerAnchor(ctx),
-        ciLo: views.map((v) => v.meanFitnessCiLo),
-        ciHi: views.map((v) => v.meanFitnessCiHi),
-      },
+      ciWhisker: { bands: whiskerBands(ctx) },
       xBridge: { onGeometry },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps

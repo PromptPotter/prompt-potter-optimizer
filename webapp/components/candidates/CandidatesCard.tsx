@@ -190,9 +190,15 @@ export function CandidatesCard() {
   // The adopted line's shared reading, off the LATEST round that has one: the set drifts as the
   // line grows, so the newest round names the basis. Served, only re-keyed here by candidate id,
   // and its `sample_ids` is the picker's quick-pick — same set by construction.
+  //
+  // The round in flight is newer than every closed one, so it wins outright when it has a reading.
+  // It gets one at its ELECTION — the pass is measured there and quarantined behind every decision
+  // the round makes — which is a whole `l1_critique` call before `rounds[]` would carry it.
   const overlap = useMemo(
-    () => history.reduce<RoundSummary["overlap"]>((best, r) => r.overlap ?? best, null),
-    [history],
+    () =>
+      dash?.current_round.overlap ??
+      history.reduce<RoundSummary["overlap"]>((best, r) => r.overlap ?? best, null),
+    [dash?.current_round.overlap, history],
   );
   const overlapByCandidate = useMemo(
     () => new Map((overlap?.members ?? []).map((m) => [m.candidate_id, m])),

@@ -99,13 +99,17 @@ class DashboardCandidate(StrictModel):
     partial_reason: str = ""  # "" | "skip" — see ScoredCandidate.partial_reason
     # Difficulty-adjusted Rasch ability + SE (`ScoredCandidate.theta`) — the metric the winner
     # was elected on, so the chart can explain a lower-accuracy winner. `None` outside the fit,
-    # which includes every live row: the fit is round-scoped and needs two arms.
+    # which is round-scoped and needs two arms: every row is null until the ELECTION stamps it,
+    # and none is after (`ElectionRecord.fit`). Not fittable sooner — `calibrate_ruler` extends
+    # the δ scale onto the round's cells first, and `fit_theta_given_delta` raises on one it does
+    # not carry rather than defaulting it to a position on the scale.
     theta: float | None = None
     theta_se: float | None = None
-    # The whisker the chart draws (`ScoredCandidate.mean_fitness_ci_lo/hi`), stamped off the
-    # candidate's own rows when it finishes (`l1/population.py`) so it is present live and not
-    # only at round close. ONE band per candidate from that one writer: a second estimator
-    # overriding it makes the whisker come and go by gating rather than by evidence.
+    # The whisker the chart draws (`ScoredCandidate.mean_fitness_ci_lo/hi`), folded off the
+    # candidate's own rows by the scoring gateway (`search_point_scorer::_composite`) on every
+    # sample, so it widens with the bar instead of arriving whole when the walk ends. ONE band per
+    # candidate from that one writer: a second estimator overriding it makes the whisker come and
+    # go by gating rather than by evidence.
     mean_fitness_ci_lo: float | None = None
     mean_fitness_ci_hi: float | None = None
     # The floor this candidate was JUDGED against (`ScoredCandidate.matched_parent_*`): the

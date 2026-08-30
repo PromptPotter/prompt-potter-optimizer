@@ -154,11 +154,11 @@ def build_score_report(
     new_runtime_failure: RuntimeFailure | None = None,
     l1_diversity: float = 1.0,
 ) -> ScoredCandidate:
-    """Typed candidate score report. The CI is stamped HERE, off this candidate's own rows, so a finished candidate carries
-    its whisker before its round ends — one writer, one band, no later override."""
+    """Typed candidate score report. The CI is CARRIED from the gateway's own fold
+    (`search_point_scorer::_composite`), never re-derived here — one writer, one band, and the
+    same band the live row already showed."""
     # Lazy: scoring → optimization circular.
     from promptpotter.application.scoring.evaluators import materialize_row_derivable
-    from promptpotter.application.scoring.selection import mean_fitness_ci
 
     evaluators = {**(score_summary.get("evaluators") or {}), "l1_diversity": l1_diversity}
     # Refresh the row-derivable subset from the rows, as the read-side mask does (`mask/load.py`):
@@ -169,10 +169,9 @@ def build_score_report(
     # an invalid / force-zeroed candidate and stays empty rather than acquiring a real accuracy.
     if evaluators.get("accuracy") is not None and query_results:
         evaluators.update(materialize_row_derivable(query_results))
-    ci_lo, ci_hi = mean_fitness_ci(query_results)
     return ScoredCandidate(
-        mean_fitness_ci_lo=ci_lo,
-        mean_fitness_ci_hi=ci_hi,
+        mean_fitness_ci_lo=score_summary.get("mean_fitness_ci_lo"),
+        mean_fitness_ci_hi=score_summary.get("mean_fitness_ci_hi"),
         candidate_id=opt_sp.lineage.id,
         label=label,
         changes_description=opt_sp.lineage.changes_description or "",

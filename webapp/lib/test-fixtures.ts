@@ -44,6 +44,8 @@ export function currentRound(over: Partial<CurrentRound> = {}): CurrentRound {
     candidates: [],
     nodes: {},
     pobb: { current_id: "", n_samples: 0, leader_prob: 0, posterior_width: 1, top: [] },
+    // Null = the round has not elected yet, which is what an inert fixture is.
+    overlap: null,
     ...over,
   };
 }

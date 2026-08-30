@@ -25,11 +25,12 @@ export interface CandidateRow {
   accuracy: number | null;
   composite: number | null;
   // Difficulty-adjusted Rasch ability (logit) + its SE — the subset-invariant metric the winner
-  // is elected on. `null` for the in-flight round and for candidates outside the election fit.
+  // is elected on. Stamped at the ELECTION, so an in-flight round carries it from there rather
+  // than from its close; `null` before it, and for candidates outside the fit.
   theta: number | null;
   theta_se: number | null;
-  // The CI whisker (served): the normal-CLT mean interval over the candidate's own rows, stamped
-  // when it finishes scoring — so an IN-FLIGHT row carries it and it does not wait for close.
+  // The CI whisker (served): the normal-CLT mean interval over the candidate's own rows, folded by
+  // the scoring gateway on every sample — so it widens with the bar from the first graded cell.
   meanFitnessCiLo: number | null;
   meanFitnessCiHi: number | null;
   // The blocked lift over the floor this candidate was JUDGED against, WITH its interval —

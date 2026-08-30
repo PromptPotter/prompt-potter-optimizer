@@ -15,6 +15,7 @@ from promptpotter.domain.run_records import (
     CycleRecord,
     ElectionRecord,
     LedgerAbility,
+    LedgerFit,
     PhaseRecord,
     SnapshotRecord,
 )
@@ -119,6 +120,30 @@ def _round_abilities(round_result: RoundResult) -> dict[str, LedgerAbility]:
     }
 
 
+def _round_fit(round_result: RoundResult) -> dict[str, LedgerFit]:
+    """Each arm's ELECTION stamps — θ and the matched-parent floor it was judged against — under
+    the same LABEL key and for the same reason as :func:`_round_abilities`.
+
+    An untouched arm is dropped rather than served as a row of nulls: on a cold ruler no candidate
+    carries θ at all, and an arm below the coverage floor never reaches the fit."""
+    return {
+        cs.label: fit
+        for cs in round_result.candidate_scores
+        if (
+            fit := LedgerFit(
+                theta=cs.theta,
+                theta_se=cs.theta_se,
+                matched_parent_accuracy=cs.matched_parent_accuracy,
+                matched_parent_composite=cs.matched_parent_composite,
+                matched_parent_lift=cs.matched_parent_lift,
+                matched_parent_lift_ci_lo=cs.matched_parent_lift_ci_lo,
+                matched_parent_lift_ci_hi=cs.matched_parent_lift_ci_hi,
+            )
+        )
+        != LedgerFit()
+    }
+
+
 @dataclass
 class RunCallbacks:
     """Single ingress: callbacks → typed ``CycleRecord`` → ``CycleEventLog.append``, ledger bound at
@@ -155,12 +180,17 @@ class RunCallbacks:
         )
 
     def on_election(self, round_result: RoundResult) -> None:
-        """The crown, at the moment the election produced it — from ``execute_round`` once the
-        panel gate has let the round stand, and from ``emit_origin_round`` for round 0, which
-        adopts ``C0``. Round 0 differs in the VALUE it carries, never in the record it writes."""
+        """What the election produced, at the moment it produced it — from ``execute_round`` once
+        the panel gate has let the round stand, and from ``emit_origin_round`` for round 0, which
+        adopts ``C0``. Round 0 differs in the VALUE it carries, never in the record it writes.
+
+        The crown and the per-arm fit travel together because they are stamped together, two LLM
+        calls before the close that used to be their only carrier."""
         self._emit(
             ElectionRecord(
                 round=round_result.round,
+                fit=_round_fit(round_result),
+                live_round_result=round_result,
                 # `winner_id` is non-empty on a HELD round too — it names the retained
                 # parent, which is no candidate of THIS round, so the match fails and the
                 # crown is empty. The emptiness is in the match, never in the id.

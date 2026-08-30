@@ -487,8 +487,16 @@ class LiveDashboardView(DerivedView):
         election record fires for round 0 too, saying exactly that it adopted ``C0``.
 
         Two channels for one fact, and this is the one with its own record. ``DerivedView`` had no
-        branch for it at all, so the crown reached no fold."""
+        branch for it at all, so the crown reached no fold.
+
+        Everything the election stamps rides this record — the per-arm fit and the round's own
+        readings — because the alternative carrier is ``rounds[]`` at the close, two LLM calls
+        later. The round-level stamp is guarded on the live handle: a REPLAY carries none, and the
+        round file it would fall back on does not exist yet at this offset."""
         self._buffer.mark_winner(record.winner_label)
+        self._buffer.stamp_fit(record.fit)
+        if (rr := record.live_round_result) is not None:
+            self._buffer.stamp_overlap(rr.overlap)
         self._flush_pending_persist()
 
     def _handle_candidate_minted(self, record: CandidateMintedRecord) -> None:
@@ -939,6 +947,7 @@ class LiveDashboardView(DerivedView):
             candidates=build_candidate_rows(self._buffer),
             nodes=self._current_round_nodes(),
             pobb=build_pobb_block(self._core, self._buffer.p_best_top),
+            overlap=self._buffer.overlap,
         )
         # The ARMED ceiling, never the one INIT declared. `_build_budget_gate` prefers
         # `spend_cap.json` over the launch-composed cap, so serving the stamped value left every

@@ -11,7 +11,7 @@ from promptpotter.connectors.protocol import ConcurrencyArming, MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import DashboardCandidate, RoundSummary
 from promptpotter.domain.phases import DashboardState, RunPhase
-from promptpotter.domain.results import HeadlineMetric
+from promptpotter.domain.results import HeadlineMetric, OverlapReading
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
@@ -149,6 +149,11 @@ class CurrentRound(StrictModel):
     # Free-form per-node LLM I/O (``build_node_block``), mirroring ``round_NNNN.json::nodes``.
     nodes: dict[str, dict[str, Any]] = Field(default_factory=dict)
     pobb: PobbBlock = Field(default_factory=PobbBlock)
+    # The parent line on its shared cells, stamped at the ELECTION and null before it. Null here
+    # is "not measured yet", never "withheld". ONLY this one of the round's readings: the others
+    # (`verdict_reason`, `electable_count`, `separable`, `ability`, `health`) reach no live
+    # surface, and a served field nothing renders is a note nobody reads.
+    overlap: OverlapReading | None = None
 
 
 class LiveDashboardState(StrictModel):

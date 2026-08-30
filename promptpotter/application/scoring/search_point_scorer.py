@@ -11,6 +11,7 @@ from promptpotter.application.datasets.loaders import build_dataset_run_data
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.query_loop import run_query_loop
+from promptpotter.application.scoring.selection import mean_fitness_ci
 from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
 from promptpotter.domain.scoring import CellScorer, QueryMeasurement
 from promptpotter.domain.validators import StopRule
@@ -327,14 +328,18 @@ async def score_search_point(
     priors_appended = not prior_tail
 
     def _composite(rows: list[QueryMeasurement]) -> dict[str, Any]:
-        """This candidate's fitness over *rows*. Also the loop's `running_scores`, so the number a
-        live surface shows converging is the one the round banks — never a second fold."""
-        return compute_composite_fitness(
+        """This candidate's fitness over *rows*, and the band over the same rows. Also the loop's
+        `running_scores`, so the number a live surface shows converging is the one the round banks
+        — never a second fold. `build_score_report` READS the band from here rather than
+        re-deriving it: one estimator, so the whisker converges with the bar it brackets."""
+        scores = compute_composite_fitness(
             rows,
             pipeline_schema,
             opt_sp=opt_sp,
             l1_diversity=l1_diversity,
         )
+        ci_lo, ci_hi = mean_fitness_ci(rows)
+        return {**scores, "mean_fitness_ci_lo": ci_lo, "mean_fitness_ci_hi": ci_hi}
 
     def _save_run(results: list[QueryMeasurement], scores: dict[str, Any]) -> None:
         nonlocal appended, priors_appended

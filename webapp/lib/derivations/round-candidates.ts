@@ -76,8 +76,8 @@ export function closedRoundNumbers(dash: DashboardSnapshot | null): Set<number> 
 // ONE mapping, both halves. A live row and a closed row are the same served shape
 // (`DashboardCandidate`), so there is nothing left to merge — the live arm used to hardcode
 // `theta`/`meanFitnessCi*`/`matchedParent*` to null on the claim that all of them are "stamped at
-// round close", which is false for the CI: `l1/population.py` stamps it the moment a candidate
-// finishes scoring, so every in-flight bar was served a whisker and then told it had none.
+// round close". None of them is: the band is folded per sample by the scoring gateway, and θ and
+// the lift land at the ELECTION, a whole `l1_critique` call before the round closes.
 //
 // `candidateId` is the caller's, because the two halves live in DIFFERENT identity spaces and
 // that is the one thing they may not share — see the two call sites below.

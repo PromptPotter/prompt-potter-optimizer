@@ -544,6 +544,20 @@ class LedgerAbility(StrictModel):
     theta_se: float | None = None
 
 
+class LedgerFit(LedgerAbility):
+    """Everything the ELECTION stamps on one arm, keyed by LABEL in :class:`ElectionRecord`.
+
+    A superset of :class:`LedgerAbility` rather than a sibling: the close RE-READS θ and nothing
+    else, because the matched-parent floor is decided once, at the election, and never moves after
+    it. Two models would put the same two fields under two names and let them drift."""
+
+    matched_parent_accuracy: float | None = None
+    matched_parent_composite: float | None = None
+    matched_parent_lift: float | None = None
+    matched_parent_lift_ci_lo: float | None = None
+    matched_parent_lift_ci_hi: float | None = None
+
+
 class LedgerRoundClose(StrictModel):
     """The fit facts, RE-READ on every close — which is what lets round 0's second close carry the
     warm ruler's θ (``runner/loop.py``). The crown is on :class:`ElectionRecord` instead, because it
@@ -557,17 +571,29 @@ class LedgerRoundClose(StrictModel):
 
 
 class ElectionRecord(StrictModel):
-    """Who the round CROWNED, at its own coordinate: ``elect_round_winner`` is the last thing
-    ``l1_score`` does, so the crown exists a whole ``l1_critique`` call before the close it used
-    to ride. Nothing else joins it — the rest of what the election stamps is per-candidate and
-    already addressable in ``rounds/round_NNNN.json``, so it earns no chronology. A LABEL (a
-    resume re-mints ids); empty = the round HELD, and round 0 crowns the ``C0`` it adopted."""
+    """What the round's ELECTION produced, at its own coordinate: ``elect_round_winner`` is the
+    last thing ``l1_score`` does, so all of this exists a whole ``l1_critique`` call before the
+    close it used to ride.
+
+    ``fit`` is here for the same reason the crown is, and the argument that once kept it out —
+    "already addressable in ``rounds/round_NNNN.json``" — is what this record now answers: that
+    document is not addressable until the round CLOSES, two LLM calls after the election stamped
+    it, and every live surface reads in that gap. Keyed by LABEL, like ``winner_label`` and like
+    ``LedgerRoundClose.abilities``, because a resume re-mints candidate ids.
+
+    ``winner_label`` empty = the round HELD; round 0 crowns the ``C0`` it adopted."""
 
     model_config = ConfigDict(frozen=True)
 
     record_type: Literal["election"] = "election"
     round: int
     winner_label: str = ""
+    fit: dict[str, LedgerFit] = Field(default_factory=dict)
+    # In-memory-only carrier for the live ``RoundResult``, the ``PhaseRecord.live_round_result``
+    # shape and rationale: the round's OWN readings (``overlap``, the verdict, the electable count,
+    # separability) have no other live carrier, and the fat arrays already live in
+    # ``round_NNNN.json``. ``None`` on every replay off disk, which is why the fold guards on it.
+    live_round_result: Any = Field(default=None, exclude=True, repr=False)
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
