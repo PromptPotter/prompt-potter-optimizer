@@ -146,12 +146,16 @@ def _replay_round_winner(
     all_results = ctx.round_data.all_candidate_results
     candidate_ids = [str(c) for c in (inputs_ref.get("candidate_ids") or [])]
     coverage_floor = int(inputs_ref["coverage_floor"])
+    # Read, never re-derived: it is a function of the round HISTORY, which this replay does not
+    # hold, so recomputing it is the same defect as reconstructing the parent panel above. A
+    # record missing it RAISES — `restamp` writes the bias every election ran under.
     winner_id, _ = elect_round_winner(
         candidate_ids,
         cast("dict[str, list[QueryMeasurement]]", all_results),
         cast("list[QueryMeasurement]", parent),
         coverage_floor,
         ctx.ruler,
+        parent_bias=float(inputs_ref["parent_bias"]),
     )
     return winner_id
 

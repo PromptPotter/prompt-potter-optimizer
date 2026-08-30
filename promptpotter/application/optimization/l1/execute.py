@@ -53,7 +53,8 @@ async def execute_round(
     is_final_round: bool = False,
 ) -> RoundResult:
     """One L1 round: generate → score+select → critique. The runner folds the result in via ``absorb_round`` — this never mutates
-    ``Cycle``. Sweep mode and the final round both drop the critique, which nobody would read."""
+    ``Cycle``. Sweep mode and the final round drop the critique; `ensure_prior_critique` re-sends it
+    at the head of a round that turns out to follow one."""
     session = cycle.session
     config = cycle.config
     opt = config.optimization
@@ -75,7 +76,8 @@ async def execute_round(
         scoring_set = select_round_subset(scoring_pool, [], config.sp_budget_ttest)
     else:
         # Archive obs are dataset-scoped + abort-residue-free → cross-cycle evidence.
-        observations = [*cycle.archive_observations, *build_observations(cycle.rounds)]
+        own = build_observations(cycle.rounds)
+        observations = [*cycle.archive_observations, *own]
         # Thawing to adaptive is what can walk the subset off the locked ruler: the acquisition
         # score prefers unmeasured cells, because `delta_learning_gain` rises with δ's SE.
         # `anchor_floor` reserves enough already-anchored cells for the next extension to equate
@@ -86,6 +88,9 @@ async def execute_round(
             config.sp_budget_ttest,
             ruler=cycle.ruler,
             anchor_floor=opt.elimination_n_min,
+            # The archive fits the θ scale; only THIS cycle's arms are in the race the panel has
+            # to separate. Targeting the archive's best calibrates the round to an arm nobody ran.
+            leader_ids={o.candidate_id for o in own},
         )
 
     candidates, yield_stats = await generate_or_load_candidates(
@@ -263,7 +268,7 @@ async def execute_round(
     )
     if candidates and round_result.results and not skip_critique and not will_stop:
         # Critique is round-over-round feedback — survive a malformed response.
-        with graceful("L1 critique failed; continuing without round-over-round feedback"):
+        with graceful("L1 critique failed; the next round re-sends it before generating"):
             async with observed_node(
                 f"l1_critique_r{round_num}",
                 "llm/optimizer",

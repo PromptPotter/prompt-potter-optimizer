@@ -546,6 +546,7 @@ async def escalate_l2(
     event = esc.observe_l2_escalation(
         current_composite_fitness=cycle.tracking.best_composite_fitness,
         current_theta=cycle.tracking.best_theta,
+        current_theta_se=cycle.tracking.best_theta_se,
         l2_patience=opt.l2_patience,
         l3_patience=opt.l3_patience,
     )

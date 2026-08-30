@@ -9,8 +9,10 @@ from promptpotter.application.restamp import (
     backfill_inner_facts,
     check_round_documents,
     compact_cycle_ledgers,
+    reproject_cycle_indexes,
     restamp_campaign_configs,
     shrink_measurement_runs,
+    stamp_election_bias,
 )
 from promptpotter.presentation.cli.commands._shared import CommandResult
 
@@ -22,6 +24,8 @@ async def cmd_restamp(args: argparse.Namespace) -> CommandResult:
     counts = restamp_campaign_configs(apply=apply)
     ledgers = compact_cycle_ledgers(apply=apply)
     runs = shrink_measurement_runs(apply=apply)
+    indexes = reproject_cycle_indexes(apply=apply)
+    elections = stamp_election_bias(apply=apply)
     inner = backfill_inner_facts(apply=apply)
     # Read-only, so --apply does not change what it does.
     rounds = check_round_documents()
@@ -42,9 +46,15 @@ async def cmd_restamp(args: argparse.Namespace) -> CommandResult:
         f"Rounds: {rounds['rounds_checked'] - rounds['rounds_unreadable']}"
         f"/{rounds['rounds_checked']} load. "
         f"{runs_line}"
+        f"Cycle indexes: {indexes['cycle_indexes_reprojected']}"
+        f"/{indexes['cycle_indexes']} re-derived from their round documents. "
+        f"Elections: parent_bias {verb} onto {elections['elections_stamped']} decision(s) so a "
+        f"replay reads the bar each one ran under. "
         f"Inner seed facts {verb} onto {inner['inner_rows_filled']} row(s) from the inner "
         f"campaigns themselves; {inner['inner_rows_orphaned']} cell(s) no longer have one on "
         f"disk and stay absent. Peak lift and round budget are never backfilled — no surviving "
         f"record reproduces them exactly."
     )
-    return CommandResult(data={**counts, **ledgers, **runs, **rounds, **inner}, human=human)
+    return CommandResult(
+        data={**counts, **ledgers, **runs, **rounds, **indexes, **elections, **inner}, human=human
+    )

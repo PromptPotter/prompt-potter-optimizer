@@ -10,7 +10,10 @@ from promptpotter.application.optimization.pobb.classification import (
     get_ranked_items,
     ranked_item_keys_from_schema,
 )
-from promptpotter.application.scoring.diagnostics import extract_sample_diagnostics, find_rank
+from promptpotter.application.scoring.diagnostics import (
+    extract_sample_diagnostics,
+    rank_ground_truth,
+)
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.round_diagnostics import (
@@ -77,7 +80,9 @@ def _rank_analysis(
 ) -> tuple[dict[str, int], dict[int, float], list[NearMiss], int]:
     keys = ranked_item_keys or None
     rank_map: dict[int, int | None] = {
-        i: find_rank(get_ranked_items(r, keys), r.get("ground_truth", ""))
+        i: rank_ground_truth(
+            get_ranked_items(r, keys), r.get("predicted") or "", r.get("ground_truth", "")
+        )[0]
         for i, r in enumerate(results)
         if not is_error_result(r)
     }
@@ -269,7 +274,11 @@ def _sample_diagnostics(
             continue
         pd = r.get("pipeline_data") or {}
         diag = pd.get("diagnostics") or {}
-        rank = find_rank(get_ranked_items(r, ranked_item_keys), r.get("ground_truth", ""))
+        rank, _ = rank_ground_truth(
+            get_ranked_items(r, ranked_item_keys),
+            r.get("predicted") or "",
+            r.get("ground_truth", ""),
+        )
         sd: dict[str, Any] | None = None
         if pipeline_schema is not None:
             sd = extract_sample_diagnostics(r, pipeline_schema)

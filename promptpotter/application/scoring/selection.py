@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.exploration import RaschPosterior
+    from promptpotter.domain.results import RoundResult
     from promptpotter.domain.ruler import DeltaRuler
     from promptpotter.domain.scoring import QueryMeasurement
 
@@ -30,6 +31,7 @@ __all__ = [
     "mean_fitness_ci",
     "paired_fitness",
     "parent_cells",
+    "parent_selection_bias",
 ]
 
 
@@ -138,12 +140,40 @@ def parent_cells(parent_results: list[QueryMeasurement]) -> list[dict[str, Any]]
     ]
 
 
+# E[max of k standard normals], k = 1..6. Beyond that the table saturates slowly and the last
+# entry is used — a round with seven electable arms is not a shape this loop produces.
+_EXPECTED_MAX_Z: tuple[float, ...] = (0.0, 0.0, 0.5642, 0.8463, 1.0294, 1.1630, 1.2672)
+
+
+def parent_selection_bias(rounds: Sequence[RoundResult]) -> float:
+    """How much of the standing parent's θ is the selection that crowned it, in logits.
+
+    A winner is the MAXIMUM over the round's electable arms, so its θ carries that round's largest
+    noise draw — and ``rescore_parent`` replays its cached rows, so the inflation never washes out.
+    Corrects the BAR only: the challengers are unselected draws and carry no such term."""
+    for rr in reversed(rounds):
+        if not rr.winner_id:
+            continue
+        winner = next((c for c in rr.candidate_scores if c.candidate_id == rr.winner_id), None)
+        se = winner.theta_se if winner else None
+        if not se:
+            return 0.0
+        k = min(max(rr.electable_count, 1), len(_EXPECTED_MAX_Z) - 1)
+        # ONE arm's SE, not the paired √2 one: θ̂_parent is common to all k comparisons, so it
+        # shifts every lift equally and is never what the max selects on. A correction that
+        # over-corrects buys back exactly the noise-crowning it exists to stop.
+        return _EXPECTED_MAX_Z[k] * se
+    return 0.0
+
+
 def elect_round_winner(
     candidate_ids: list[str],
     results_by_id: Mapping[str, list[QueryMeasurement]],
     parent_results: list[QueryMeasurement],
     coverage_floor: int,
     ruler: DeltaRuler | None,
+    *,
+    parent_bias: float,
 ) -> tuple[str, RaschPosterior]:
     """ADMISSION is the point-estimate lift — strictly above the parent. The RANK is ``P(θ_cand >
     θ_parent)``, the same quantity ``elimination_p_best`` cuts on, so the two cannot disagree about
@@ -164,6 +194,9 @@ def elect_round_winner(
 
     theta_parent = abilities.theta.get(PARENT_ABILITY_ID)
     se_parent = abilities.theta_se.get(PARENT_ABILITY_ID) or 0.0
+    # The bar is what the parent can DO, not the draw that crowned it (`parent_selection_bias`).
+    if theta_parent is not None:
+        theta_parent -= parent_bias
 
     best_rank: tuple[float, int] = (0.0, 0)
     winner_id = ""
@@ -180,7 +213,14 @@ def elect_round_winner(
         # ADMISSION is the bare point lift, no SE margin — subtracting one shrinks the estimate
         # itself, turning a wide-posterior gain negative. Uncertainty belongs in the RANK below.
         lift = theta_lift_over_parent(abilities, cid)
-        if lift is None or lift <= 0.0:
+        if lift is None:
+            continue
+        # The credit is EARNED, not granted: it corrects a bar read at `se_parent`, so an arm read
+        # less precisely carries a wider draw of its own and a flat credit would be worth most to
+        # the noisiest arm in the round — the one that needs it least.
+        se_cand = abilities.theta_se.get(cid) or 0.0
+        lift += parent_bias * (min(1.0, se_parent / se_cand) if se_parent and se_cand else 1.0)
+        if lift <= 0.0:
             continue
         # RANK: the lift over the noise it cleared, because a bare gap cannot say whether the
         # round could TELL the arms apart — a thin arm out-points a full panel on a margin

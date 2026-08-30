@@ -61,8 +61,8 @@ def is_deprecated(result: Mapping[str, Any]) -> bool:
 
 
 def scoreable_rows(results: list[QueryMeasurement]) -> list[QueryMeasurement]:
-    """The EVIDENCE population — rows that carry a verdict. Deprecated is already penalized through
-    ``runtime_failure_rate`` and an errored row never happened, so neither belongs in a denominator.
+    """The EVIDENCE population — rows that carry a verdict. A deprecated row was measured and thrown
+    out, an errored one never happened, so neither belongs in a denominator.
 
     **One definition, because every published rate needs its ``n`` and its mean drawn from the same
     filter** — spelled per call site, a third exclusion added to one leaves the count describing a

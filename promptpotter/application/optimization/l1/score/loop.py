@@ -90,27 +90,29 @@ async def score_population(
         backfill_fn=_pobb_backfill,
     )
 
-    # Seed PoBB priors so candidate #1 has a comparator — without it, PoBB short-circuits on empty
+    # Prime PoBB priors so candidate #1 has a comparator — without it, PoBB short-circuits on empty
     # priors and round-1 cand-1 was un-eliminable. `current_results` = best-so-far per-sample
-    # history; `current_sp` is the leader, backfill-able on the candidate's hard samples.
-    seed_results = cycle.tracking.current_results
-    seed_sp = cycle.tracking.current_sp
-    seed_grades: dict[int, float] = {}
-    if seed_results and seed_sp is not None:
-        seed_id = f"R{cycle.rounds[-1].round}_winner"
+    # history; `current_sp` is the leader, backfill-able on the candidate's hard samples. This is
+    # the round's PARENT (`RoundParent` — the origin at round 0, the prior winner after it); the
+    # repo spends `seed` on `CycleSeed`, the `seed-screen` verb and an L4 inner cell.
+    parent_results = cycle.tracking.current_results
+    parent_sp = cycle.tracking.current_sp
+    parent_grades: dict[int, float] = {}
+    if parent_results and parent_sp is not None:
+        parent_id = f"R{cycle.rounds[-1].round}_winner"
         elim_check.register_completed(
-            cast("list[QueryMeasurement]", seed_results), candidate_id=seed_id, sp=seed_sp
+            cast("list[QueryMeasurement]", parent_results), candidate_id=parent_id, sp=parent_sp
         )
-        seed_grades = {
-            int(sid): grade for sid, grade in elim_check.priors_by_sample[seed_id].items()
+        parent_grades = {
+            int(sid): grade for sid, grade in elim_check.priors_by_sample[parent_id].items()
         }
 
-    # ONE deterministic shared order per round — seed-MISS samples front-loaded, a
-    # seed-HIT regression probe every 4th slot — so the ε-gate sees discriminating
-    # evidence immediately instead of a zero-information tie prefix. Every candidate
-    # walks the same order: shared prefixes keep paired stats comparable and the
-    # running display honest.
-    order = build_round_order(seed_grades, cycle.ruler, [int(s.id) for s in dataset])
+    # ONE deterministic shared order per round — parent-MISS samples front-loaded, a parent-HIT
+    # regression probe every 4th slot, cells the parent never answered ordered by discrimination —
+    # so the ε-gate sees discriminating evidence immediately instead of a zero-information tie
+    # prefix. Every candidate walks the same order: shared prefixes keep paired stats comparable
+    # and the running display honest.
+    order = build_round_order(parent_grades, cycle.ruler, [int(s.id) for s in dataset])
     samples_by_id = {int(s.id): s for s in dataset}
     dataset = [samples_by_id[sid] for sid in order]
 
@@ -136,10 +138,10 @@ async def score_population(
             opt_sp_c.lineage.id,
             on_snapshot=partial(callbacks.on_p_best_update, round_num, idx, n),
         )
-        # The shared order at candidate start, and the ONLY channel carrying it: the
-        # dashboard projection does not persist it, so `dashboard.json` reports the
-        # sample in flight and (at round close) the order after the fact. Read off the
-        # ledger by the console and, over SSE, by the chat's run card for "next in line".
+        # The shared order at candidate start. Read off the ledger by the console, over SSE
+        # by the chat's run card for "next in line", and absorbed into the dashboard
+        # projection as `declared_sample_order` — which is what lets a reader that missed
+        # this event still see forward.
         callbacks.on_sample_order_preview(
             round_num,
             idx,

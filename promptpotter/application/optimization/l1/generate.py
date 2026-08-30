@@ -131,7 +131,12 @@ async def l1_generate(
     )
     # The wire schema advertises renamed keys; the response model aliases them back. Both read
     # the SAME `effective_l1_field_names` — a disagreement would fail every parse, every round.
-    response_model = build_l1_response_model(effective_l1_field_names())
+    # The parent's text rides along so the empty-mutation guard can compare VALUES: the two
+    # task_context keys are disjoint from the six prompt fields, so one flat map serves both slots.
+    response_model = build_l1_response_model(
+        effective_l1_field_names(),
+        parent_text={**opt_sp.prompt_field_dict(), **opt_sp.memory.task_context.to_dict()},
+    )
     try:
         generated, _prompt, _repairs = await run_optimizer_node(
             template_name="l1_generate",
@@ -239,8 +244,8 @@ async def l1_generate(
         # Three slots, three readers — schema split (B1) prevents conflation. A node name
         # absent from the active schema (hallucinated) is NOT pre-filtered here: it flows to
         # the one validation producer (``validate_overrides`` via ``parse_population``), which
-        # records it as a non-fatal ``hallucinated_node`` wound (routed to l1_wounds +
-        # validation_failure_rate), and ``merge_pipeline_params`` strips it from the wire.
+        # records it as a non-fatal ``hallucinated_node`` wound (routed to l1_wounds), and
+        # ``merge_pipeline_params`` strips it from the wire.
         prompt_changes = dict(v.prompt_fields_override)
         tc_changes = dict(v.task_context_override)
         pipeline_params_override = v.pipeline_params_override

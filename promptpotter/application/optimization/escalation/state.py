@@ -178,9 +178,15 @@ class EscalationFSM:
         entry_comp: float,
         current_theta: float | None,
         entry_theta: float | None,
+        current_theta_se: float | None = None,
     ) -> tuple[bool, str]:
         """Did the cycle's best advance since a layer fired, and ON WHICH SCALE — θ when both readings
         carry one, composite otherwise.
+
+        A θ advance must CLEAR ITS OWN ERROR, or a rise of a few hundredths of one standard error
+        resets the stall counter and pins the ladder where it stands. ``current_theta_se`` is the
+        bar because it is the reading the caller has — the entry SE is not persisted, which makes
+        this the lenient side of the honest comparison rather than the strict one.
 
         The scale is NOT fixed per cycle, which the previous wording claimed: ``entry_theta`` is
         captured when the layer FIRES, so a layer entering before the ruler warms compares composites
@@ -189,7 +195,7 @@ class EscalationFSM:
         comparable to its own past while the formula holds (`persistence-and-state.md` § Changing the
         composite formula), which is why the caller records the answer rather than inferring it."""
         if current_theta is not None and entry_theta is not None:
-            return current_theta > entry_theta, "theta"
+            return current_theta - entry_theta > (current_theta_se or 0.0), "theta"
         scale = "theta_appeared" if current_theta is not None else "composite"
         return current_comp > entry_comp, scale
 
@@ -239,6 +245,7 @@ class EscalationFSM:
         *,
         current_composite_fitness: float,
         current_theta: float | None = None,
+        current_theta_se: float | None = None,
         l2_patience: int | None,
         l3_patience: int | None,
     ) -> EscalationEvent:
@@ -250,6 +257,7 @@ class EscalationFSM:
                 self._l2_best_composite_fitness_at_entry,
                 current_theta,
                 self._l2_best_theta_at_entry,
+                current_theta_se,
             )
             self._l2_stall_count = 0 if l2_improved else self._l2_stall_count + 1
 
@@ -262,6 +270,7 @@ class EscalationFSM:
                 self._l3_best_composite_fitness_at_entry,
                 current_theta,
                 self._l3_best_theta_at_entry,
+                current_theta_se,
             )
             self._l3_stall_count = 0 if l3_improved else self._l3_stall_count + 1
 

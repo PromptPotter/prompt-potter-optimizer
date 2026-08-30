@@ -35,6 +35,7 @@ from promptpotter.domain.phases import CampaignPhase, RunPhase
 from promptpotter.domain.results import DiagnosticRunRecord, RoundResult
 from promptpotter.domain.scoring import ledger_sample_view
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
+from promptpotter.infrastructure.store.campaign_store.store import reproject_round_index
 from promptpotter.infrastructure.store.io import (
     read_json_optional,
     read_json_tolerant,
@@ -53,8 +54,10 @@ __all__ = [
     "backfill_inner_facts",
     "check_round_documents",
     "compact_cycle_ledgers",
+    "reproject_cycle_indexes",
     "restamp_campaign_configs",
     "shrink_measurement_runs",
+    "stamp_election_bias",
 ]
 
 
@@ -479,7 +482,76 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
     }
 
 
-# --- (4) the L4 seed facts that reached the row as prose and nothing else --------------------
+# --- (4) the cycle index, stale against the round documents it is derived from ---------------
+
+
+def reproject_cycle_indexes(*, apply: bool) -> dict[str, int]:
+    """Re-derive every cycle index's ``rounds[]`` from its own round documents — the maintenance
+    half of ``campaign_store/store.py::reproject_round_index``, which states why."""
+    by_cycle: dict[pathlib.Path, list[pathlib.Path]] = {}
+    for doc in _iter_round_documents():
+        by_cycle.setdefault(doc.parent.parent, []).append(doc)
+
+    touched = failed = 0
+    for cycle_dir, docs in sorted(by_cycle.items()):
+        index_path = CycleLayout(cycle_dir).manifest
+        if not index_path.is_file():
+            continue
+        try:
+            touched += reproject_round_index(index_path, docs, apply=apply)
+        except (OSError, ValidationError, json.JSONDecodeError):
+            failed += 1
+
+    verb = "re-projected" if apply else "would re-project"
+    print(
+        f"\nCycle indexes — {verb} {touched} of {len(by_cycle)} cycle(s) from their round documents"
+    )
+    if failed:
+        print(f"  {failed:>6} unreadable — see the round-document check below")
+    if not apply and touched:
+        print("\nDry run. Re-run with --apply to rewrite.")
+    return {"cycle_indexes": len(by_cycle), "cycle_indexes_reprojected": touched}
+
+
+# --- (5) the election bias a replayed round reads off its own decision record ----------------
+
+
+def stamp_election_bias(*, apply: bool) -> dict[str, int]:
+    """Write ``parent_bias`` onto every ``round_winner`` decision that predates the field.
+
+    ``_replay_round_winner`` reads it rather than re-deriving it — the bias is a function of the
+    round HISTORY a replay does not hold — so the key must be present on every record, and a
+    read-time default for the ones lacking it is the back-compat this repo does not do. 0.0 is not
+    a guess: an election that ran before the correction subtracted nothing, so it IS the bias that
+    round was decided under, and writing it down is what makes the replay reproduce the decision
+    instead of re-deciding it."""
+    stamped = touched = 0
+    for ledger_path in _iter_cycle_ledgers():
+        lines = ledger_path.read_text(encoding="utf-8").splitlines()
+        out: list[str] = []
+        dirty = False
+        for line in lines:
+            rec = json.loads(line) if line.strip() else None
+            ref = rec.get("inputs_ref") if isinstance(rec, dict) else None
+            if isinstance(ref, dict) and "coverage_floor" in ref and "parent_bias" not in ref:
+                ref["parent_bias"] = 0.0
+                line = json.dumps(rec, ensure_ascii=False)
+                stamped += 1
+                dirty = True
+            out.append(line)
+        if dirty:
+            touched += 1
+            if apply:
+                ledger_path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+    verb = "stamped" if apply else "would stamp"
+    print(f"\nElection bias — {verb} parent_bias onto {stamped} decision(s) in {touched} ledger(s)")
+    if not apply and stamped:
+        print("\nDry run. Re-run with --apply to rewrite.")
+    return {"elections_stamped": stamped, "election_ledgers": touched}
+
+
+# --- (6) the L4 seed facts that reached the row as prose and nothing else --------------------
 
 
 def _inner_cycle_index() -> dict[tuple[str, str, int, str], pathlib.Path]:
@@ -599,7 +671,7 @@ def backfill_inner_facts(*, apply: bool) -> dict[str, int]:
     return {"inner_rows_filled": filled, "inner_rows_orphaned": orphaned}
 
 
-# --- (5) the run-level pipeline config re-stored on every measurement row --------------------
+# --- (7) the run-level pipeline config re-stored on every measurement row --------------------
 
 # One live producer ANYWHERE blocks this pass: the measurement archive is shared across every
 # cycle (`build_stores`'s `shared_root`) and appended to per sample, so a rewrite of any run

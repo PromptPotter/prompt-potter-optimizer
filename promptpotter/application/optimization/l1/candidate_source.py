@@ -9,6 +9,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     optimizer_model,
     optimizer_node_config,
 )
+from promptpotter.application.optimization.l1.critique import ensure_prior_critique
 from promptpotter.application.optimization.l1.generate import (
     candidate_summaries,
     l1_generate,
@@ -54,6 +55,18 @@ async def generate_or_load_candidates(
     # The parent's RESOLVED, folded config — the baseline every candidate's param override is
     # a delta against (`detect_invariants`). Bound once: the narrowing does not survive the await.
     parent_pipeline_params = cycle.tracking.current_sp.pipeline_params
+
+    # Read BEFORE the phase emit: a round that will replay its candidates makes no LLM call, so it
+    # is the one round not worth re-sending a missing critique for — and `has_l1_critique` is the
+    # operator's readout of whether the generator got one, so it has to be true after the re-send.
+    cached = (
+        session.store.campaigns.load_round_candidates(session.hop, round_num)
+        if session.state.cycle_id
+        else None
+    )
+    if cached is None:
+        await ensure_prior_critique(cycle)
+
     emit_phase(
         on_phase,
         CampaignPhase.L1_GENERATE,
@@ -72,51 +85,46 @@ async def generate_or_load_candidates(
         },
     )
 
-    if session.state.cycle_id:
-        cached = session.store.campaigns.load_round_candidates(
-            session.hop,
-            round_num,
+    if cached is not None:
+        persisted_raw, _consumed = cached
+        persisted = [CandidateProposal.model_validate(d) for d in persisted_raw]
+        logger.debug("Loaded %d persisted candidates for round %d", len(persisted), round_num)
+        yield_stats = detect_invariants(
+            persisted, cycle.opt_sp, parent_pipeline_params, cycle.rounds
         )
-        if cached is not None:
-            persisted_raw, _consumed = cached
-            persisted = [CandidateProposal.model_validate(d) for d in persisted_raw]
-            logger.debug("Loaded %d persisted candidates for round %d", len(persisted), round_num)
-            yield_stats = detect_invariants(
-                persisted, cycle.opt_sp, parent_pipeline_params, cycle.rounds
-            )
-            summaries = candidate_summaries(persisted, round_num)
-            # llm_call never fires on this branch — synthesize an
-            # ``LLMCallRecord(payload_kind="synthesized")`` so the audit
-            # trail + dashboard see the node, without lying about a real
-            # LLM call having happened.
-            if (_ledger := session.state.ledger) is not None:
-                _ledger.append(
-                    LLMCallRecord(
-                        node="l1_generate",
-                        round=round_num,
-                        payload_kind="synthesized",
-                        payload={
-                            "type": "l1_generate",
-                            "input": {"source": "loaded_from_disk", "round": round_num},
-                            "response": {"candidates": summaries},
-                        },
-                    )
+        summaries = candidate_summaries(persisted, round_num)
+        # llm_call never fires on this branch — synthesize an
+        # ``LLMCallRecord(payload_kind="synthesized")`` so the audit
+        # trail + dashboard see the node, without lying about a real
+        # LLM call having happened.
+        if (_ledger := session.state.ledger) is not None:
+            _ledger.append(
+                LLMCallRecord(
+                    node="l1_generate",
+                    round=round_num,
+                    payload_kind="synthesized",
+                    payload={
+                        "type": "l1_generate",
+                        "input": {"source": "loaded_from_disk", "round": round_num},
+                        "response": {"candidates": summaries},
+                    },
                 )
-            emit_phase(
-                on_phase,
-                CampaignPhase.L1_GENERATE,
-                "exit",
-                round=round_num,
-                n_candidates=len(persisted),
-                n_scoring_samples=n_scoring_samples,
-                loaded_from_disk=True,
-                candidates=summaries,
-                l1_yield=yield_stats.l1_yield,
-                l1_n_no_op=yield_stats.l1_n_no_op,
-                l1_n_duplicate=yield_stats.l1_n_duplicate,
-                l1_n_repeat=yield_stats.l1_n_repeat,
             )
-            return persisted, yield_stats
+        emit_phase(
+            on_phase,
+            CampaignPhase.L1_GENERATE,
+            "exit",
+            round=round_num,
+            n_candidates=len(persisted),
+            n_scoring_samples=n_scoring_samples,
+            loaded_from_disk=True,
+            candidates=summaries,
+            l1_yield=yield_stats.l1_yield,
+            l1_n_no_op=yield_stats.l1_n_no_op,
+            l1_n_duplicate=yield_stats.l1_n_duplicate,
+            l1_n_repeat=yield_stats.l1_n_repeat,
+        )
+        return persisted, yield_stats
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
 

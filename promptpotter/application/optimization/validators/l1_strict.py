@@ -82,9 +82,9 @@ def validate_overrides(
             # deterministic backstop. ``merge_pipeline_params`` drops nodes outside
             # ``active_steps``, so recording it ROUTES the signal without changing what runs,
             # and it is NON-FATAL (the reason-aware synthetic-0 gate in
-            # ``l1/score/candidate.py`` lets the candidate's real edits score): ``l1_wounds``
-            # + the ``validation_failure_rate`` evaluator. The node-name twin of
-            # ``validate_l1_layout``'s unknown-placeholder wound.
+            # ``l1/score/candidate.py`` lets the candidate's real edits score) and rides
+            # ``l1_wounds``. The node-name twin of ``validate_l1_layout``'s
+            # unknown-placeholder wound.
             failures.append(
                 ValidationFailure(
                     axis=node_name,

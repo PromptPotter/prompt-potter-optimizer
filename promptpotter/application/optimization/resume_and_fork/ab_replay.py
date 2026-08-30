@@ -181,6 +181,8 @@ def ab_replay_cycle(
         archive_obs=build_archive_observations(
             session.store,
             dataset_name=session.dataset_name,
+            scorer=scorer,
+            scorer_id=sc.scorer_id,
             origin_sp_hash=origin_sp_hash,
         ),
     )

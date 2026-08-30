@@ -32,6 +32,7 @@ from promptpotter.application.scoring.selection import (
     matched_parent_lift,
     paired_fitness,
     parent_cells,
+    parent_selection_bias,
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import (
@@ -140,9 +141,9 @@ def _separability(round_num: int, electable: list[ScoredCandidate]) -> bool | No
     carries one: below two shared cells there is nothing to be inconclusive ABOUT.
 
     The winner still stands either way; what this decides is whether the margin may be READ as a
-    result. It used to only warn, so the one degradation silent on every other channel — a winner
-    was crowned and every number reads — was also silent on the loop's own control path, and a
-    round that resolved nothing reset L1's patience exactly as a round that advanced did."""
+    result. It reaches the loop's control path rather than only warning, because a round that
+    resolved nothing is silent on every other channel — a winner is crowned and every number
+    reads — and would otherwise reset L1's patience exactly as a round that advanced does."""
     bracketed = [c for c in electable if c.matched_parent_lift_ci_lo is not None]
     if not bracketed:
         return None
@@ -284,7 +285,6 @@ async def l1_score(
             cast("list[QueryMeasurement]", parent.results),
             cand_results,
             schema,
-            round_scorer=session.scoring.round_scorer,
         )
         matched_by_id[ind.lineage.id] = matched
         # Unconditional on ``matched``: the lift is defined on the cells both reached, so a
@@ -318,13 +318,18 @@ async def l1_score(
     # what lets the θ fit raise on a hole instead of grading it δ=0.
     cycle.calibrate_ruler({**all_candidate_results, PARENT_ABILITY_ID: parent_election_results})
     # ``coverage_floor`` is persisted so the replayer applies the same electability floor;
-    # without it a resumed run elects a thin candidate the live path rejected.
+    # without it a resumed run elects a thin candidate the live path rejected. ``parent_bias`` is
+    # persisted for the same reason and read the same way: it is derived from the ROUND HISTORY,
+    # which a replay does not necessarily hold, so re-deriving it there is the reconstruction this
+    # file forbids for the parent panel.
+    parent_bias = parent_selection_bias(cycle.rounds)
     winner_id, abilities = elect_round_winner(
         electable,
         all_candidate_results,
         parent_election_results,
         coverage_floor,
         cycle.ruler,
+        parent_bias=parent_bias,
     )
     # From the SAME fixed-ruler fit the election just ran, never a second one, so the dashboard
     # can show *why* a lower-accuracy candidate won. ``None`` outside the election fit — and
@@ -353,6 +358,7 @@ async def l1_score(
             "candidate_ids": electable,
             "round_num": round_num,
             "coverage_floor": coverage_floor,
+            "parent_bias": parent_bias,
         },
         winner_id,
         # The PARENT this election ranked against; the round document cannot carry it, since on a
@@ -395,9 +401,9 @@ async def l1_score(
 
     # A round improved iff it crowned somebody. ``elect_round_winner`` admits a candidate only on
     # a STRICTLY positive ability lift over the parent on the cycle's fixed δ ruler, so the
-    # election already IS the gate. The second, stricter accuracy-recalibrated bar that used to sit
-    # here gated nothing — ``absorb_round`` adopts the winner either way — so it could only ever
-    # disagree with the adoption it annotated.
+    # election already IS the gate. A second, stricter bar here would gate nothing —
+    # ``absorb_round`` adopts the winner either way — so it could only disagree with the adoption
+    # it annotates.
     improved = bool(winner_id)
     verdict_reason = _verdict_reason(
         winner_id=winner_id,
