@@ -1271,8 +1271,6 @@ def test_config_keys_are_read_through_settings() -> None:
         # PROMPTPOTTER_AUTH — a local-harness OIDC bypass, kept off the Settings surface so
         # it can never be switched on by a file that ships or syncs.
         "presentation/api/deps.py",
-        # PROMPTPOTTER_ADMIN — same reasoning, for the terminal's admin tier.
-        "shared/identity.py",
     }
 
     offenders: list[str] = []

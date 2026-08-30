@@ -39,7 +39,7 @@ from promptpotter.application.mask.record import (
 )
 from promptpotter.application.mask.verdicts import make_abort_verdict, make_scoring_verdict
 from promptpotter.application.optimization.pobb.classification import terminal_ranking
-from promptpotter.application.scoring.evaluators import all_evaluators, materialize_round_values
+from promptpotter.application.scoring.evaluators import materialize_round_values
 from promptpotter.application.scoring.formula import (
     ScoringFormulaError,
     compile_scorer,
@@ -57,18 +57,22 @@ from promptpotter.application.scoring.metrics import (
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import (
+    NodePromptInfo,
     NodeType,
     ObservationMapping,
     PipelineNode,
     PipelineSchema,
 )
 from promptpotter.domain.rendering import display_fitness, extract_display_answer
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import (
-    FLAT_RULER_ID,
     AbilityReading,
     DeltaRuler,
+    ThetaCaveat,
     anchor_id_of,
-    ruler_id,
+    flat_ruler_id,
+    is_flat_ruler_id,
+    theta_caveat,
 )
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import extract_item_label
@@ -82,7 +86,14 @@ from promptpotter.shared.statistics import (
     paired_reading,
     two_way_effect_sds,
 )
-from tests.factories import cycle_result, lost_round, round_result
+from tests.factories import (
+    cycle_result,
+    lost_round,
+    measurement,
+    measurements,
+    round_result,
+    scored_candidate,
+)
 
 # 1. Scorer matcher formulas — one parametrized family
 # The cases that matter are the format edges: last-marker-wins, bad-marker fallback,
@@ -119,6 +130,20 @@ from tests.factories import cycle_result, lost_round, round_result
             "17",
         ),
         (extract_display_answer, ("  padded  ", None), "padded"),
+        # A list matcher's answer is the whole slate, parsed the way `_list_rr` parses it.
+        (
+            extract_display_answer,
+            ("1. Alien\n2. **Blade Runner**\n- Solaris\n", "list_rr(predicted, ground_truth)"),
+            "alien | blade runner | solaris",
+        ),
+        # One line is the contract, so it holds on the no-extractor fallback too — these render
+        # into a one-line-per-sample readout and a newline would split the row.
+        (extract_display_answer, ("first\nsecond", None), "first second"),
+        (
+            extract_display_answer,
+            ("reasoning\nspills", "rr(predicted, ground_truth)"),
+            "reasoning spills",
+        ),
     ],
 )
 def test_matcher_formula(fn, args, expected):
@@ -141,10 +166,18 @@ def _result_min(predicted: str, ground_truth: str) -> dict:
 
 
 def test_compile_scorer_routes_to_named_function():
+    # ``compile_scorer`` mints the PAIR now; the per-sample verdict is the ``fitness`` half.
     aime = compile_scorer("aime_match(predicted, ground_truth)")
-    assert aime(_result_min(r"\boxed{42}", "42")) == 1.0
+    assert aime.fitness(_result_min(r"\boxed{42}", "42")) == 1.0
     gsm = compile_scorer("gsm8k_match(predicted, ground_truth)")
-    assert gsm(_result_min("6 * 7 = 42. The answer is 42.", "#### 42")) == 1.0
+    assert gsm.fitness(_result_min("6 * 7 = 42. The answer is 42.", "#### 42")) == 1.0
+    # The other production shapes still clear the AST allowlist the tests above probe.
+    for f in (
+        "exact_match(predicted, ground_truth)",
+        "hockeystick(rr(ground_truth_rank), 0.2)",
+        "0.7 * hit + 0.3 * (1.0 - input_tokens / 1000)",
+    ):
+        assert compile_scorer(f) is not None
 
 
 @pytest.mark.parametrize(
@@ -171,11 +204,11 @@ def test_scorer_raises_loud_on_formula_trace_mismatch() -> None:
     # ``missing_field`` is not in the per-sample namespace → NameError under eval.
     missing = compile_scorer("missing_field + hit")
     with pytest.raises(ScoringFormulaError):
-        missing(_result_min("a", "a"))
+        missing.fitness(_result_min("a", "a"))
     # A formula that evaluates to a non-numeric must also fail loud, not score 0.
     non_numeric = compile_scorer("ground_truth")
     with pytest.raises(ScoringFormulaError):
-        non_numeric(_result_min("a", "not-a-number"))
+        non_numeric.fitness(_result_min("a", "not-a-number"))
 
 
 def test_scorer_rejects_non_finite_instead_of_scoring_it_perfect() -> None:
@@ -186,13 +219,13 @@ def test_scorer_rejects_non_finite_instead_of_scoring_it_perfect() -> None:
     assert max(0.0, min(1.0, float("nan"))) == 1.0  # the trap, pinned
     for expr in ("1e400", "-1e400", "1e400 - 1e400"):
         with pytest.raises(ScoringFormulaError, match="non-finite"):
-            compile_scorer(expr)(_result_min("a", "a"))
+            compile_scorer(expr).fitness(_result_min("a", "a"))
 
     # The reachable shape: a non-finite value arriving through `pipeline_data` — how an L4
     # proxy would deliver one — not a literal a human would notice in the formula string.
     result = _result_min("a", "a") | {"pipeline_data": {"after_N_rounds_delta": float("nan")}}
     with pytest.raises(ScoringFormulaError, match="non-finite"):
-        compile_scorer("after_N_rounds_delta")(result)
+        compile_scorer("after_N_rounds_delta").fitness(result)
 
     # The per-ROUND scorer clamps identically and was the twin hole: the fix to the per-sample
     # clamp above left the composite one wide open, so a NaN evaluator scored a perfect ROUND.
@@ -212,31 +245,33 @@ def test_an_unmeasured_term_is_never_scored_as_zero() -> None:
     # nothing is not.
     from promptpotter.application.scoring.evaluators import (
         compute_accuracy,
+        compute_degraded_rate,
         compute_error_rate,
-        compute_mean_latency_s,
-        compute_output_compactness,
     )
     from promptpotter.application.scoring.formula import (
         ScoringTermMissingError,
         compile_round_scorer,
     )
+    from promptpotter.domain.scoring import recorded_cost_s
 
     assert compute_accuracy(results=[]) is None
     assert compute_error_rate(results=[]) is None
-    assert compute_mean_latency_s(results=[]) is None
-    assert compute_output_compactness(results=[]) is None
+    assert compute_degraded_rate(results=[]) is None
 
-    # `mean_latency_s` has its own wrong-score: a CACHED replay stamps `total_time` 0.0 while the
-    # work it replays took minutes, so reading that field priced a whole round at "instant" and
-    # elected the arm that had doubled the clock. It reads `step_timings`, which survives the
+    # Latency stopped being an evaluator and became the `latency` CHANNEL
+    # (`domain/scoring.py::recorded_cost_s`) — one reading, per row, so a mask and a `per_cell`
+    # formula name the same number. It kept both properties, which is why they are pinned here
+    # and not left to the deleted evaluator's grave: a CACHED replay stamps `total_time` 0.0 while
+    # the work it replays took minutes, so reading that field priced a whole round at "instant"
+    # and elected the arm that had doubled the clock. It reads `step_timings`, which survives the
     # stamp. An EMPTY timing map is a row that recorded no time at all — absent, never a 0.0
     # that would read as a free cell and divide into any budget the formula sets.
     def _timed(total: float, steps: dict[str, float]) -> dict[str, object]:
         pipeline_data = {"total_time": total, "step_timings": steps}
         return _result_min("q", "a") | {"pipeline_data": pipeline_data}
 
-    assert compute_mean_latency_s(results=[_timed(0.0, {"inner": 600.0})]) == 600.0
-    assert compute_mean_latency_s(results=[_timed(0.0, {})]) is None
+    assert recorded_cost_s(_timed(0.0, {"inner": 600.0})) == 600.0
+    assert recorded_cost_s(_timed(0.0, {})) is None
 
     # All samples measured, all fatally deprecated → a verdict of 0.0, not an absence.
     deprecated = _result_min("q", "a") | {"error": "SCHEMA_VALIDATION_FAILED", "fitness": 0.0}
@@ -254,9 +289,9 @@ def test_an_unmeasured_term_is_never_scored_as_zero() -> None:
 
     # The default composite (`accuracy`) refuses a round it cannot score, rather than 0.0.
     with pytest.raises(ScoringTermMissingError, match="accuracy"):
-        compile_round_scorer(None)({"mean_latency_s": 600.0})
-    with pytest.raises(ScoringTermMissingError, match="mean_latency_s"):
-        compile_round_scorer("accuracy * 500.0 / mean_latency_s")({"accuracy": 0.9})
+        compile_round_scorer(None)({"latency": 600.0})
+    with pytest.raises(ScoringTermMissingError, match="latency"):
+        compile_round_scorer("accuracy * 500.0 / latency")({"accuracy": 0.9})
 
     # But the GATEWAY over an EMPTY round is defined, not a crash: an operator skip at query
     # 0/N (or an all-excluded round) hands ``compute_composite_fitness`` no rows. It records the
@@ -266,18 +301,6 @@ def test_an_unmeasured_term_is_never_scored_as_zero() -> None:
     assert empty["composite_fitness"] == 0.0
     assert empty["accuracy"] == 0.0
     assert empty["total"] == 0
-
-
-def test_compile_scorer_accepts_known_formulas() -> None:
-    """Production formulas across datasets must still compile after AST validation."""
-    for f in (
-        "exact_match(predicted, ground_truth)",
-        "gsm8k_match(predicted, ground_truth)",
-        "aime_match(predicted, ground_truth)",
-        "hockeystick(rr(ground_truth_rank), 0.2)",
-        "0.7 * hit + 0.3 * (1.0 - input_tokens / 1000)",
-    ):
-        assert compile_scorer(f) is not None
 
 
 # 3. Evaluator registry + composite fitness + matched-parent subset
@@ -311,6 +334,9 @@ def _eval_result(
         "ground_truth": ground_truth,
         "hit": hit,
         "fitness": score,
+        # Both halves, as ``rescore_results`` stamps them: the composite means ``objective``, and
+        # these fixtures declare no ``per_cell``, where it is the same float as ``fitness``.
+        "objective": score,
         "error": error,
         "pipeline_data": pd,
     }
@@ -320,6 +346,23 @@ def _single_node_schema() -> PipelineSchema:
     """Minimal schema with one generic node and no node_type assignments."""
     return PipelineSchema(
         name="test", nodes=[PipelineNode(name="llm_only", node_type=NodeType.NONE)]
+    )
+
+
+def _prompt_schema(
+    node: str = "llm_only", *, template_variables: list[str] | None = None
+) -> PipelineSchema:
+    """One node carrying a PROMPT surface — what ``parse_population`` validates a candidate's
+    overrides against, and what the render strip rebuilds a searchpoint from."""
+    return PipelineSchema(
+        name="test",
+        available_models=["openai/gpt-oss-120b"],
+        nodes=[
+            PipelineNode(
+                name=node,
+                prompt_info=NodePromptInfo(template_variables=template_variables or []),
+            )
+        ],
     )
 
 
@@ -347,14 +390,6 @@ def _recall_schema() -> PipelineSchema:
             ),
         ],
     )
-
-
-def test_registry_scopes_are_valid():
-    """Every registered evaluator declares a known scope."""
-    names = {ev.name for ev in all_evaluators()}
-    assert {"accuracy", "error_rate", "mean_latency_s", "source_recall"}.issubset(names)
-    for ev in all_evaluators():
-        assert ev.scope in ("per_sample", "per_round")
 
 
 def test_materialize_recall_only_emits_for_typed_nodes():
@@ -589,21 +624,15 @@ def test_mcts_backprop_does_not_double_count_a_fork_inherited_prefix():
     # from a descendant it never ran itself.
     assert stats[("root", 1)].q == pytest.approx((0.5 + 0.4 + 0.3 + 2.0 + 2.4) / 5)
 
-
-def test_mcts_ucb_rewinds_to_the_ancestor_whose_subtree_paid_off():
-    """UCB picks the ancestor to re-expand; a root's round 0 has nowhere to go.
-
-    root r0 → r1(θ high) → r2 → r3, and the θ collapses after r1. Stalled at r3, the
-    rewind target must be r1 — the ancestor whose subtree carries the ability — not the
-    adjacent r2 that merely happens to be nearest.
-    """
-    root = _spine_cycle("root", [(0, 0.0), (1, 2.0), (2, 0.1), (3, 0.0)])
-    spine = [root]
-    assert select_rewind_round(spine, cycle_id="root", current_round=3) == 1
-
-    # Nothing above round 0 — the caller must NOT fork (a rewind to nowhere would mint a
-    # duplicate cycle and burn a whole run).
-    assert select_rewind_round(spine, cycle_id="root", current_round=0) is None
+    # ---- and the PICK the fold feeds, on the same tree ---------------------------------
+    # UCB re-expands the ancestor whose subtree carries the ability, not the adjacent round
+    # that merely happens to be nearest. Read off root's own spine, where θ collapses after
+    # r1: stalled at r3, the target is r1.
+    collapsed = [_spine_cycle("root", [(0, 0.0), (1, 2.0), (2, 0.1), (3, 0.0)])]
+    assert select_rewind_round(collapsed, cycle_id="root", current_round=3) == 1
+    # Nothing above round 0 — the caller must NOT fork, or a rewind to nowhere mints a
+    # duplicate cycle and burns a whole run.
+    assert select_rewind_round(collapsed, cycle_id="root", current_round=0) is None
 
 
 def test_mask_abort_verdict_rides_the_same_fold():
@@ -746,25 +775,6 @@ def test_display_fitness_keeps_honest_zero_degrades_only_on_absence():
     assert display_fitness(0.85, 0.7) == 0.85  # active-formula value used as-is
 
 
-def test_prompt_compactness_penalizes_verbose_prompt():
-    """Long rendered prompts drive compactness toward zero; short prompts stay near 1."""
-    from promptpotter.application.scoring.evaluators import (
-        PROMPT_BUDGET_CHARS,
-        compute_prompt_compactness,
-    )
-    from promptpotter.domain.opt_search_point import OptSearchPoint
-
-    short = OptSearchPoint(instruction="Answer correctly.")
-    long_text = "x " * (PROMPT_BUDGET_CHARS // 2)  # ≈ 2× budget
-    verbose = OptSearchPoint(instruction=long_text)
-
-    assert compute_prompt_compactness(opt_sp=short) > 0.99
-    assert compute_prompt_compactness(opt_sp=verbose) == 0.0
-    # No prompt to measure → unmeasured (None), NOT a maximally compact 1.0. The old vacuous
-    # 1.0 was a free full-marks award on the term for a candidate carrying no prompt at all.
-    assert compute_prompt_compactness(opt_sp=None) is None
-
-
 # 4. Rasch fit + decision-information round subset
 
 
@@ -831,11 +841,21 @@ def test_rasch_handles_sparse_matrix() -> None:
     assert all(se > 0 for se in posterior.delta_se.values())
 
 
-def _ruler(delta: dict[int, float], *, mu: float = 0.0, sigma: float = 2.0) -> DeltaRuler:
-    """A locked ruler over a bare δ map — the shape most numeric tests care about."""
+def _ruler(
+    delta: dict[int, float],
+    *,
+    mu: float = 0.0,
+    sigma: float = 2.0,
+    se: float | dict[int, float] = 0.5,
+) -> DeltaRuler:
+    """A locked ruler over a bare δ map — the shape most numeric tests care about.
+
+    ``se`` per cell rather than flat is what the acquisition tests bend: the whole question
+    there is which of two cells at the SAME difficulty a round buys, and a flat map cannot ask
+    it."""
     return DeltaRuler(
         delta=dict(delta),
-        delta_se=dict.fromkeys(delta, 0.5),
+        delta_se=dict(se) if isinstance(se, dict) else dict.fromkeys(delta, se),
         mu_delta=mu,
         sigma_delta=sigma,
         sigma_theta=1.5,
@@ -948,12 +968,21 @@ def test_parent_level_trajectory_is_honest_single_scale() -> None:
     def on(theta: float, se: float, *, scale: DeltaRuler | None = ruler) -> AbilityReading:
         """A reading, not a bare pair — a level carries the SCALE it was read on, because that is
         what says whether it may be differenced against the next one."""
+        cal = scale.calibration_model if scale is not None else None
+        # Read on the whole ruler, so the round's own band IS the ruler's.
+        span = scale.delta_span if scale is not None else None
         return AbilityReading(
+            # ``scale=None`` is a COLD reading, named for the OBJECTIVE θ was logit-accuracy on
+            # rather than sharing one id with every other cold one. Either way it is incomparable
+            # with a fitted anchor, which is the whole point of the branches below.
             theta=theta,
             se=se,
-            ruler_id=ruler_id(scale),
+            ruler_id=scale.anchor_id if scale is not None else flat_ruler_id("acc"),
             ruler_n=len(scale.delta) if scale is not None else 0,
-            calibration_model=scale.calibration_model if scale is not None else None,
+            ruler_span=span,
+            round_span=span,
+            calibration_model=cal,
+            caveat=theta_caveat(calibration_model=cal, round_span=span, ruler_span=span),
         )
 
     origin_theta = on(0.0, 0.30)
@@ -1269,7 +1298,7 @@ def test_pp_self_scoring_is_monotone_and_never_clips_on_real_data() -> None:
     score = compile_scorer(cfg["campaign_config"]["scoring"]["per_sample"])
 
     def s(mean_round_delta: float) -> float:
-        return score({"pipeline_data": {"mean_round_delta": mean_round_delta}})
+        return score.fitness({"pipeline_data": {"mean_round_delta": mean_round_delta}})
 
     assert s(0.9) > s(0.5) > s(0.0) > s(-0.5)  # monotone across the measured range
     # LINEAR, which is what makes the paired estimator's effect readable as a logit lift rather
@@ -1398,17 +1427,14 @@ def test_round_winner_elects_by_ability_not_subset_accuracy() -> None:
     """
     from promptpotter.application.scoring.selection import elect_round_winner
 
-    def res(hit: bool, sid: int) -> dict:
-        return {"sample_id": sid, "hit": hit, "fitness": 1.0 if hit else 0.0}
-
     # Fixed δ ruler: easy {0..19} low difficulty, hard {20..39} high — the bank the election reads.
     ruler = _ruler({i: (-1.5 if i < 20 else 1.5) for i in range(40)})
     # Origin spans all 40: easy {0..19} hit, hard {20..39} missed.
-    origin = [res(i < 20, i) for i in range(40)]
+    origin = [measurement(i, float(i < 20)) for i in range(40)]
     # Easy candidate: 16/20 on easy samples the origin also hits → accuracy 0.80, modest lift.
-    weak_on_easy = [res(i < 16, i) for i in range(20)]
+    weak_on_easy = [measurement(i, float(i < 16)) for i in range(20)]
     # Able candidate: 14/20 on HARD samples the origin always misses → accuracy 0.70, bigger lift.
-    able_on_hard = [res(i < 34, i) for i in range(20, 40)]
+    able_on_hard = [measurement(i, float(i < 34)) for i in range(20, 40)]
     results_by_id = {"weak_on_easy": weak_on_easy, "able_on_hard": able_on_hard}
 
     # Raw subset accuracy crowns the easy candidate (0.80 > 0.70)...
@@ -1416,7 +1442,7 @@ def test_round_winner_elects_by_ability_not_subset_accuracy() -> None:
     # ...but the θ-gated election crowns the abler one — it cleared HARD items (high δ), stronger
     # evidence of ability than more wins on easy items (low δ) everyone already passes.
     winner_id, abilities = elect_round_winner(
-        ["weak_on_easy", "able_on_hard"], results_by_id, origin, 4, ruler
+        ["weak_on_easy", "able_on_hard"], results_by_id, origin, 4, ruler, parent_bias=0.0
     )
     assert winner_id == "able_on_hard"
     # The fit rides out so the caller stamps θ from the same election fit (no second fit):
@@ -1447,14 +1473,8 @@ def test_an_origin_that_never_scored_is_no_floor_to_beat() -> None:
     )
     from promptpotter.application.scoring.selection import elect_round_winner, paired_fitness
 
-    def res(sid: int, fitness: float, errored: bool = False) -> dict:
-        row = {"sample_id": sid, "hit": fitness > 0.5, "fitness": fitness}
-        if errored:
-            row["error_category"] = "transport"
-        return row
-
-    origin = [res(i, 0.0, errored=True) for i in range(6)]
-    candidate = [res(i, 0.55) for i in range(6)]
+    origin = [measurement(i, 0.0, error_category="transport") for i in range(6)]
+    candidate = measurements([0.55] * 6)
     abilities = candidate_abilities({"c1": candidate}, origin, None)
 
     # The origin was never fit — nothing to floor against.
@@ -1463,15 +1483,18 @@ def test_an_origin_that_never_scored_is_no_floor_to_beat() -> None:
     assert len(paired_fitness(candidate, origin)[0]) == 6
 
     assert theta_lift_over_parent(abilities, "c1") is None
-    winner_id, _ = elect_round_winner(["c1"], {"c1": candidate}, origin, 1, None)
+    winner_id, _ = elect_round_winner(["c1"], {"c1": candidate}, origin, 1, None, parent_bias=0.0)
     assert winner_id == ""
 
     # A measured origin still elects normally — the guard costs nothing when there IS a floor.
-    scored_origin = [res(i, 0.1) for i in range(6)]
+    scored_origin = measurements([0.1] * 6)
     scored_abilities = candidate_abilities({"c1": candidate}, scored_origin, None)
     lift = theta_lift_over_parent(scored_abilities, "c1")
     assert lift is not None and lift > 0.0
-    assert elect_round_winner(["c1"], {"c1": candidate}, scored_origin, 1, None)[0] == "c1"
+    assert (
+        elect_round_winner(["c1"], {"c1": candidate}, scored_origin, 1, None, parent_bias=0.0)[0]
+        == "c1"
+    )
 
 
 def test_errored_cells_never_satisfy_coverage_floor() -> None:
@@ -1493,26 +1516,25 @@ def test_errored_cells_never_satisfy_coverage_floor() -> None:
         elect_round_winner,
     )
 
-    def clean(sid: int, fitness: float) -> dict:
-        return {"sample_id": sid, "hit": fitness > 0.5, "fitness": fitness}
-
+    # ``fitness=None`` IS the error shape: a real error row (`_error_result`) carries no
+    # hit/fitness, only the category, and that absence is the whole subject here.
     def errored(sid: int) -> dict:
-        # Real error rows (`_error_result`) carry no hit/fitness — only the category.
-        return {"sample_id": sid, "error_category": "unknown"}
+        return measurement(sid, None, error_category="unknown")
 
-    origin = [clean(i, 0.0) for i in range(7)]
+    origin = measurements([0.0] * 7)
     # 7 cells attempted, 5 died as tooling errors — only 2 carry evidence.
-    thin = [clean(0, 1.0), clean(1, 1.0)] + [errored(i) for i in range(2, 7)]
+    thin = measurements([1.0, 1.0]) + [errored(i) for i in range(2, 7)]
 
     # The lift is real (floor 2 elects it) — only coverage may stop it...
-    assert elect_round_winner(["thin"], {"thin": thin}, origin, 2, None)[0] == "thin"
+    assert (
+        elect_round_winner(["thin"], {"thin": thin}, origin, 2, None, parent_bias=0.0)[0] == "thin"
+    )
     # ...and at floor 6 it must: 2 evidence cells, not 7 attempted ones.
-    assert elect_round_winner(["thin"], {"thin": thin}, origin, 6, None)[0] == ""
+    assert elect_round_winner(["thin"], {"thin": thin}, origin, 6, None, parent_bias=0.0)[0] == ""
 
     # Repeated rows for one cell (what `verify` leaves behind): an errored row adds no
     # coverage, a clean one carries the cell, and the pair counts once.
-    repeated = [clean(0, 1.0), clean(1, 1.0), errored(0), errored(1)]
-    assert distinct_valid_cells(repeated) == 2
+    assert distinct_valid_cells([*measurements([1.0, 1.0]), errored(0), errored(1)]) == 2
 
 
 def test_a_thin_arm_cannot_win_on_a_margin_inside_its_own_noise() -> None:
@@ -1529,13 +1551,10 @@ def test_a_thin_arm_cannot_win_on_a_margin_inside_its_own_noise() -> None:
     from promptpotter.application.scoring.selection import elect_round_winner
     from promptpotter.shared.statistics import p_exceeds
 
-    def res(hit: bool, sid: int) -> dict:
-        return {"sample_id": sid, "hit": hit, "fitness": 1.0 if hit else 0.0}
-
     ruler = _ruler(dict.fromkeys(range(28), 0.0))
-    origin = [res(i < 14, i) for i in range(28)]
-    deep = [res(i < 21, i) for i in range(28)]  # full panel, a well-measured gain
-    shallow = [res(i < 5, i) for i in range(6)]  # cut at n_min, higher RATE on 1/6 the evidence
+    origin = measurements([1.0] * 14 + [0.0] * 14)
+    deep = measurements([1.0] * 21 + [0.0] * 7)  # full panel, a well-measured gain
+    shallow = measurements([1.0] * 5 + [0.0])  # cut at n_min, higher RATE on 1/6 the evidence
 
     ab = candidate_abilities({"deep": deep, "shallow": shallow}, origin, ruler)
     theta_p, se_p = ab.theta[PARENT_ABILITY_ID], ab.theta_se[PARENT_ABILITY_ID]
@@ -1546,11 +1565,114 @@ def test_a_thin_arm_cannot_win_on_a_margin_inside_its_own_noise() -> None:
     assert ab.theta_se["shallow"] > 1.8 * ab.theta_se["deep"]
     assert p["deep"] > p["shallow"]
     args = (["deep", "shallow"], {"deep": deep, "shallow": shallow}, origin, 6, ruler)
-    assert elect_round_winner(*args)[0] == "deep"
+    assert elect_round_winner(*args, parent_bias=0.0)[0] == "deep"
 
     # Ranking on P must never DISQUALIFY — that is what separates it from the `- theta_se` shrink
     # it replaced, which turned a wide-posterior gain negative and crowned nobody.
-    assert elect_round_winner(["shallow"], {"shallow": shallow}, origin, 6, ruler)[0] == "shallow"
+    assert (
+        elect_round_winner(["shallow"], {"shallow": shallow}, origin, 6, ruler, parent_bias=0.0)[0]
+        == "shallow"
+    )
+
+
+def test_the_bar_is_what_the_parent_can_do_not_the_draw_that_crowned_it() -> None:
+    """A winner is the MAXIMUM over its round's electable arms, so its θ carries that round's
+    largest noise draw and not just its ability. Nothing washes it out — ``rescore_parent``
+    replays the winner's own cached rows, so the same inflated estimate is re-fit bit-for-bit
+    every round after. ``parent_selection_bias`` subtracts E[max of k standard normals] × the
+    winner's OWN SE so the bar stops ratcheting past what any arm can clear.
+
+    Both ways of getting it wrong are silent, and they fail in opposite directions.
+    UNDER-correct (drop the term) and a genuinely better arm is refused for the rest of the
+    cycle: ``improved: false`` on every round with no reason recorded anywhere.
+    OVER-correct — the paired ``√2`` SE, which charges the parent's noise to a maximum that
+    never selected on it — and the bar sinks below the parent's real ability: on round 2 of
+    `screen-taste-v0__0cb4d4` that turned a raw lift of −0.337 into +0.060 and crowned an arm
+    below the parent on θ AND composite. A correction that over-corrects buys back exactly the
+    noise-crowning it exists to stop, so the ~41% gap between the two is the whole subject.
+    """
+    import math
+
+    from promptpotter.application.intelligence.exploration import (
+        candidate_abilities,
+        theta_lift_over_parent,
+    )
+    from promptpotter.application.scoring.selection import (
+        elect_round_winner,
+        parent_selection_bias,
+    )
+
+    def won(*, se: float | None, electable: int) -> RoundResult:
+        """A round that crowned ``w`` over ``electable`` arms. ``winner_id`` is read off
+        ``prompt_fields['lineage']``, which is where the live election stamps it."""
+        return round_result(
+            1,
+            electable_count=electable,
+            prompt_fields={"lineage": {"id": "w"}},
+            candidate_scores=[scored_candidate("w", theta=0.5, theta_se=se)],
+        )
+
+    def held() -> RoundResult:
+        return round_result(1, prompt_fields={})
+
+    # ---- the term itself -------------------------------------------------------------
+    # k=2 has a closed form — E[max of two standard normals] is 1/√π — so the table's entries
+    # are checkable against arithmetic rather than against themselves.
+    assert parent_selection_bias([won(se=1.0, electable=2)]) == pytest.approx(
+        1 / math.sqrt(math.pi), abs=5e-5
+    )
+    # Linear in the winner's own SE: a sharply-measured winner carries almost no curse.
+    assert parent_selection_bias([won(se=0.25, electable=2)]) == pytest.approx(
+        0.25 / math.sqrt(math.pi), abs=2e-5
+    )
+    # A LONE electable arm was selected against nothing, so there is no maximum and no curse —
+    # and the default ``electable_count`` of 0 clamps into that same safe end, never inventing
+    # a correction for a round that never recorded how many arms it had.
+    assert parent_selection_bias([won(se=0.9, electable=1)]) == 0.0
+    assert parent_selection_bias([round_result(1, prompt_fields={"lineage": {"id": "w"}})]) == 0.0
+    # Monotone in k, and CLAMPED past the table's end rather than extrapolated or IndexError-ing
+    # on a round this loop does not produce.
+    by_k = [parent_selection_bias([won(se=1.0, electable=k)]) for k in range(1, 7)]
+    assert by_k == sorted(by_k) and by_k[0] == 0.0
+    assert parent_selection_bias([won(se=1.0, electable=99)]) == pytest.approx(by_k[-1])
+
+    # The STANDING parent is what the next round must beat, so the term is the one that crowned
+    # it — the most recent round with a winner. A HELD round crowned nobody and must be walked
+    # PAST, not read as "no curse": reading the newest round unconditionally zeroes the term for
+    # every round after the first hold, which is most of a long cycle.
+    assert parent_selection_bias(
+        [won(se=0.40, electable=6), held(), won(se=0.10, electable=2), held()]
+    ) == pytest.approx(0.10 / math.sqrt(math.pi), abs=2e-5)
+    # No crowned round at all, and a winner with no θ fit (a cold ruler stamps none): 0.0, the
+    # safe end again — an absent SE may not be defaulted into a correction nobody measured.
+    assert parent_selection_bias([held(), held()]) == 0.0
+    assert parent_selection_bias([]) == 0.0
+    assert parent_selection_bias([won(se=None, electable=4)]) == 0.0
+
+    # ---- and what it does to an election ---------------------------------------------
+    ruler = _ruler(dict.fromkeys(range(28), 0.0))
+    parent = measurements([1.0] * 15 + [0.0] * 13)
+    challenger = measurements([1.0] * 13 + [0.0] * 15)  # two cells behind on the same panel
+    deficit = -(theta_lift_over_parent(candidate_abilities({"c": challenger}, parent, ruler), "c"))
+    assert deficit > 0.0, "the challenger must LOOK worse, or there is no bar to lower"
+
+    def elect(bias: float) -> str:
+        return elect_round_winner(["c"], {"c": challenger}, parent, 6, ruler, parent_bias=bias)[0]
+
+    # Sized against the term itself, not a hardcoded z: a round whose winner SE puts the curse
+    # just OVER the apparent deficit, and one that puts it just under.
+    z = parent_selection_bias([won(se=1.0, electable=3)])
+    covers = [won(se=deficit * 1.10 / z, electable=3)]
+    tight = [won(se=deficit * 0.90 / z, electable=3)]
+
+    # Uncorrected, the arm is refused — which is right only if the parent's θ were its ability.
+    assert elect(0.0) == ""
+    # The curse covers the deficit ⇒ the arm is crowned. This is the whole point of the term.
+    assert elect(parent_selection_bias(covers)) == "c"
+    # It does not ⇒ still refused. A term that admitted here would admit anything.
+    assert elect(parent_selection_bias(tight)) == ""
+    # …and the ~41% the paired √2 SE adds is exactly enough to crown it anyway. THE regression.
+    assert elect(parent_selection_bias(tight) * math.sqrt(2.0)) == "c"
 
 
 def test_rerun_short_circuits_when_max_tokens_le_cached_completion() -> None:
@@ -1743,8 +1865,6 @@ from promptpotter.application.optimization.validators.l1_invariants import (  # 
     detect_invariants,
 )
 from promptpotter.application.optimization.validators.l3_output import (  # noqa: E402
-    L3_PLAN_LENGTH_FLOOR,
-    L3_PLAN_VERBATIM_REPEAT,
     run_l3_output_validators,
 )
 from promptpotter.domain.escalation_signals import (  # noqa: E402
@@ -1764,8 +1884,10 @@ from promptpotter.domain.opt_search_point import (  # noqa: E402
 )
 from promptpotter.domain.results import (  # noqa: E402
     CandidateProposal,
+    OverlapMember,
+    OverlapReading,
     ScoredCandidate,
-    best_round_by_measured_accuracy,
+    best_round_on_shared_cells,
     is_leader_eligible,
 )
 from promptpotter.domain.search_point import (  # noqa: E402
@@ -1785,17 +1907,30 @@ def _child(parent: OptSearchPoint, **changes) -> CandidateProposal:
     return CandidateProposal(opt_sp=parent.mutate(**changes))
 
 
-def test_no_op_clone_attaches_validation_failure():
+def test_the_two_collapse_kinds_are_counted_apart_in_one_population():
+    """A clone of the parent and a clone of a SIBLING are different failures with the same cost —
+    a scoring pass on a searchpoint already measured — and the round reports them separately
+    because they ask for different next moves (widen the mutation vs. de-duplicate the batch).
+
+    One population carrying both is the case that was untested: with a test per kind, a detector
+    that stamped whichever reason it checked LAST onto every collapse passed both.
+    """
     parent = _parent()
-    proposals = [_child(parent), _child(parent, persona="Expert ranker")]
+    clone = _child(parent)  # echoes the parent
+    first = _child(parent, persona="Specialist")
+    twin = _child(parent, persona="Specialist")  # echoes its sibling
+    novel = _child(parent, instruction="Rank with care.")
 
-    stats = detect_invariants(proposals, parent, {})
+    stats = detect_invariants([clone, first, twin, novel], parent, {})
 
-    no_op_reasons = [vf.reason for vf in proposals[0].opt_sp.memory.wounds.validation_failures]
-    assert "no_op_variant" in no_op_reasons
-    assert proposals[1].opt_sp.memory.wounds.validation_failures == []
-    assert stats.l1_n_no_op == 1
-    assert stats.l1_n_duplicate == 0
+    def reasons(p) -> list[str]:
+        return [vf.reason for vf in p.opt_sp.memory.wounds.validation_failures]
+
+    assert reasons(clone) == ["no_op_variant"]
+    assert reasons(twin) == ["duplicate_variant"]
+    # The first of a duplicate PAIR is the survivor — convicting both empties the round.
+    assert reasons(first) == [] and reasons(novel) == []
+    assert (stats.l1_n_no_op, stats.l1_n_duplicate) == (1, 1)
     assert stats.l1_yield == 0.5
 
 
@@ -1836,70 +1971,46 @@ def test_a_reproposed_idea_is_rejected_even_when_rewritten_into_another_field():
     assert proposals[1].opt_sp.memory.wounds.validation_failures == [], "unrelated idea survives"
     assert stats.l1_n_repeat == 1
 
+    # THE THREE QUIET ARMS, beside the fire case because that is what stops one of them going
+    # vacuous alone: each is a way the gate could do more harm than the disease, and each is
+    # the SAME rewrite against a different history.
+    def repeats_caught(history, *proposals) -> int:
+        stats = detect_invariants(list(proposals), parent, {}, history)
+        assert not any(p.opt_sp.memory.wounds.validation_failures for p in proposals)
+        return stats.l1_n_repeat
 
-def test_a_repeat_never_empties_the_round_and_unmeasured_history_never_convicts():
-    """Two ways the gate could do more harm than the disease, both silent.
-
-    (1) If EVERY proposal repeats, rejecting them all hands PoBB an empty population and the
-    loop forfeits the round — strictly worse than re-testing a dead idea, which the ALREADY
-    TRIED panel still marks. (2) A prior candidate that scored zero samples carries
-    ``accuracy == 0.0`` only because the field is a non-optional float; convicting a live
-    proposal on that is the loop punishing an idea nobody ever ran.
-    """
-    parent = _parent()
-    prior = [lost_round(1, "instruction", _DEAD_IDEA)]
-
-    # (1) every proposal is a repeat → none rejected.
-    all_repeats = [
-        _child(parent, thinking_style=_DEAD_IDEA_REPHRASED),
-        _child(parent, answer_format=_DEAD_IDEA),
-    ]
-    stats = detect_invariants(all_repeats, parent, {}, prior)
-    assert stats.l1_n_repeat == 0, "a repeat may cost a candidate, never the whole round"
-    assert all(not p.opt_sp.memory.wounds.validation_failures for p in all_repeats)
-
-    # (2) the same history, but never measured → no conviction even with a live alternative.
-    unmeasured = [lost_round(1, "instruction", _DEAD_IDEA, total=0, acc=0.0)]
-    proposals = [
-        _child(parent, thinking_style=_DEAD_IDEA_REPHRASED),
-        _child(parent, persona="A terse logician who commits to a label."),
-    ]
-    stats = detect_invariants(proposals, parent, {}, unmeasured)
-    assert stats.l1_n_repeat == 0, "0/0 is absence of evidence, not a measured defeat"
-
-
-def test_an_idea_that_beat_its_origin_is_not_grounds_for_rejection():
-    """Refining a winner is the search working. Only measured LOSSES close a direction off."""
-    parent = _parent()
-    won = lost_round(1, "instruction", _DEAD_IDEA, acc=0.9)  # 0.9 > matched parent 0.5
-    proposals = [
-        _child(parent, thinking_style=_DEAD_IDEA_REPHRASED),
-        _child(parent, persona="A terse logician who commits to a label."),
-    ]
-
-    stats = detect_invariants(proposals, parent, {}, [won])
-
-    assert stats.l1_n_repeat == 0
-    assert proposals[0].opt_sp.memory.wounds.validation_failures == []
-
-
-def test_duplicate_signature_attaches_validation_failure():
-    parent = _parent()
-    proposals = [
-        _child(parent, persona="Specialist"),
-        _child(parent, persona="Specialist"),  # same signature → duplicate
-        _child(parent, instruction="Rank with care."),
-    ]
-
-    stats = detect_invariants(proposals, parent, {})
-
-    assert proposals[0].opt_sp.memory.wounds.validation_failures == []
-    dup_reasons = [vf.reason for vf in proposals[1].opt_sp.memory.wounds.validation_failures]
-    assert "duplicate_variant" in dup_reasons
-    assert proposals[2].opt_sp.memory.wounds.validation_failures == []
-    assert stats.l1_n_duplicate == 1
-    assert stats.l1_n_no_op == 0
-    assert stats.l1_yield == 2 / 3
+    # (1) EVERY proposal repeats. Rejecting them all hands PoBB an empty population and the
+    # round is forfeit — strictly worse than re-testing a dead idea, which the ALREADY TRIED
+    # panel still marks. A repeat may cost a candidate, never the whole round.
+    assert (
+        repeats_caught(
+            prior,
+            _child(parent, thinking_style=_DEAD_IDEA_REPHRASED),
+            _child(parent, answer_format=_DEAD_IDEA),
+        )
+        == 0
+    )
+    # (2) The same idea, never measured: a prior that scored zero samples reads
+    # ``accuracy == 0.0`` only because the field is a non-optional float, and 0/0 is absence
+    # of evidence rather than a measured defeat.
+    assert (
+        repeats_caught(
+            [lost_round(1, "instruction", _DEAD_IDEA, total=0, acc=0.0)],
+            _child(parent, thinking_style=_DEAD_IDEA_REPHRASED),
+            _child(parent, persona="A terse logician who commits to a label."),
+        )
+        == 0
+    )
+    # (3) The same idea, but it BEAT its matched parent (0.9 against 0.5). Refining a winner is
+    # the search working; only measured LOSSES close a direction off.
+    assert (
+        repeats_caught(
+            [lost_round(1, "instruction", _DEAD_IDEA, acc=0.9)],
+            _child(parent, thinking_style=_DEAD_IDEA_REPHRASED),
+            _child(parent, persona="A terse logician who commits to a label."),
+        )
+        == 0
+    )
 
 
 def test_param_override_echoing_parent_value_is_a_no_op():
@@ -1952,20 +2063,14 @@ def test_param_override_echoing_parent_value_is_a_no_op():
 
 def test_parse_population_attaches_forbidden_axis_failure_to_opt_sp():
     from promptpotter.application.optimization.l1.population import parse_population
-    from promptpotter.domain.pipeline_schema import NodePromptInfo
 
-    schema = PipelineSchema(
-        name="test",
-        available_models=["openai/gpt-oss-120b"],
-        nodes=[PipelineNode(name="llm_only", prompt_info=NodePromptInfo())],
-    )
     parent = _parent()
     proposal = CandidateProposal(
         opt_sp=parent.mutate(persona="Strict"),
         pipeline_params_override={"llm_only": {"model": "anything-at-all"}},
     )
 
-    opt_sp_list, _ = parse_population([proposal], pipeline_params=None, schema=schema)
+    opt_sp_list, _ = parse_population([proposal], pipeline_params=None, schema=_prompt_schema())
 
     failures = opt_sp_list[0].memory.wounds.validation_failures
     assert len(failures) == 1
@@ -1978,18 +2083,8 @@ def test_parse_population_flags_dropped_mandatory_placeholder():
     real winner — the gap that let an evidence-free program out-score the evidence-fed origin.
     The intact sibling stays clean. Guards a wrong score: the drop is silent without this."""
     from promptpotter.application.optimization.l1.population import parse_population
-    from promptpotter.domain.pipeline_schema import NodePromptInfo
 
-    schema = PipelineSchema(
-        name="test",
-        available_models=["openai/gpt-oss-120b"],
-        nodes=[
-            PipelineNode(
-                name="entity_profiling",
-                prompt_info=NodePromptInfo(template_variables=["combined_text"]),
-            )
-        ],
-    )
+    schema = _prompt_schema("entity_profiling", template_variables=["combined_text"])
     parent = _parent()
     dropped = CandidateProposal(opt_sp=parent.mutate(problem_description="Profile the entity."))
     intact = CandidateProposal(
@@ -2078,8 +2173,14 @@ def _opt_sp(**kwargs) -> OptSearchPoint:
     return OptSearchPoint(persona="Expert", instruction="Rank items.", **kwargs)
 
 
-def test_l1_config_not_in_runtime_failures_fires_on_reproposal():
-    """L1 proposing a (param, value) matching a known runtime failure ⇒ ValidationFailure."""
+def test_a_config_a_runtime_failure_convicted_is_refused_and_a_novel_one_is_not():
+    """Re-proposing a (param, value) a RUNTIME failure already convicted is rejected; a novel
+    value for the same param is the retune the loop is asking for and must pass.
+
+    One fixture, both arms — as two tests the quiet one drifted onto its own narrower wound and
+    stopped saying anything about the fixture the fire case used. Convicted per PARAM: the wound
+    records the WHOLE observed config, so a node-level verdict would blacklist every knob that
+    happened to be set when the node broke."""
     from promptpotter.application.optimization.validators.l1_strict import (
         L1_CONFIG_NOT_IN_RUNTIME_FAILURES,
     )
@@ -2098,52 +2199,111 @@ def test_l1_config_not_in_runtime_failures_fires_on_reproposal():
             first_seen_round=1,
         )
     ]
-    out = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run({"llm_only": {"max_tokens": 1800}}, opt_sp=opt_sp)
-    assert out is not None
-    failures = out.evidence["failures"]
-    assert len(failures) == 1
-    assert failures[0].axis == "llm_only.max_tokens"
-    assert failures[0].reason == "reproposes_known_failing_config"
 
+    def axes(**params: object) -> list[str]:
+        out = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run({"llm_only": params}, opt_sp=opt_sp)
+        if out is None:
+            return []
+        failures = out.evidence["failures"]
+        assert {f.reason for f in failures} == {"reproposes_known_failing_config"}
+        return [f.axis for f in failures]
 
-def test_l1_config_not_in_runtime_failures_quiet_on_novel_config():
-    """Novel (param, value) ⇒ no fire."""
-    from promptpotter.application.optimization.validators.l1_strict import (
-        L1_CONFIG_NOT_IN_RUNTIME_FAILURES,
-    )
-    from promptpotter.domain.escalation_signals import RuntimeFailure
-
-    opt_sp = _opt_sp()
-    opt_sp.memory.wounds.runtime_failures = [
-        RuntimeFailure(
-            source="degradation_check",
-            dominant_warning="llm_only:empty_response",
-            warning_types={"llm_only:empty_response": 3},
-            degraded_rate=1.0,
-            degraded_count=3,
-            total_scored=3,
-            observed_config={"max_tokens": 1800},
-            first_seen_round=1,
-        )
+    assert axes(max_tokens=1800) == ["llm_only.max_tokens"]
+    # Both halves of the observed config, re-proposed together → both convicted, named apart.
+    assert axes(max_tokens=1800, temperature=0.7) == [
+        "llm_only.max_tokens",
+        "llm_only.temperature",
     ]
-    out = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run({"llm_only": {"max_tokens": 2400}}, opt_sp=opt_sp)
-    assert out is None
+    # A novel value on a convicted param, and a novel pair: quiet.
+    assert axes(max_tokens=2400) == []
+    assert axes(max_tokens=2400, temperature=0.3) == []
+    # No wound at all ⇒ nothing to convict against, whatever is proposed.
+    assert (
+        L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run({"llm_only": {"max_tokens": 1800}}, opt_sp=_opt_sp())
+        is None
+    )
 
 
 # 8. L3 output validators
 
 
-def test_plan_length_floor_fires_on_short_plan():
-    out = L3_PLAN_LENGTH_FLOOR.run({"plan": "do better"}, opt_sp=_opt_sp())
-    assert out is not None
+def test_l3_output_validators_fire_on_a_stalled_plan_and_stay_quiet_on_a_real_one() -> None:
+    """Both L3 soft signals, through the aggregate the loop actually calls.
+
+    They append to ``opt_sp.l3_guard_breaches`` and come back as self-healing evidence at L3's
+    next fire, so one stuck ON spends the replan on a breach that never happened, and one stuck
+    OFF leaves a planner repeating itself unremarked. The QUIET arm is what was missing: with
+    fire cases only, a check returning an outcome unconditionally passed every one of them.
+    """
+    prior = "Maintain the current strategy and explore the persona axis, one edit at a time."
+
+    def fired(plan: object, *, standing: str = prior) -> set[str]:
+        opt_sp = _opt_sp(plan=standing) if standing else _opt_sp()
+        return {o.validator_id for o in run_l3_output_validators({"plan": plan}, opt_sp)}
+
+    # Below the floor, and not a repeat of the standing plan → the length check alone.
+    assert fired("do better") == {"l3_plan_length_floor"}
+    # Long enough, but the planner restated its own standing plan — the stall this exists for.
+    assert fired(prior) == {"l3_plan_verbatim_repeat"}
+    # A substantive new plan trips neither.
+    assert fired("Target answer_format: the last three rounds all hedged to Uncertain.") == set()
+    # Round 1 has no standing plan to repeat, and a non-string payload is not a short plan —
+    # both stay quiet rather than convicting on an absence.
+    assert fired(prior, standing="") == set()
+    assert fired(None) == set()
 
 
-def test_plan_verbatim_repeat_fires():
-    opt_sp = _opt_sp(plan="Maintain current strategy and explore persona axis carefully.")
-    out = L3_PLAN_VERBATIM_REPEAT.run(
-        {"plan": "Maintain current strategy and explore persona axis carefully."}, opt_sp=opt_sp
-    )
-    assert out is not None
+def test_a_theta_stall_verdict_must_clear_its_own_error() -> None:
+    """The escalation ladder advances on "did the cycle improve", and a θ rise inside its own
+    standard error is not an improvement. A bare ``>`` counts one, resets the stall counter, and
+    holds the ladder at L2 forever — with no error anywhere: every round completes, L2 fires, and
+    L3 simply never arrives.
+
+    Measured on `justlogic-d234__082126`, whose numbers this replays. Round 3's θ rose +0.012 on
+    se 0.198 — six hundredths of one standard error — which reset ``_l2_stall_count`` to zero and
+    cost exactly one round. L3 would then have fired at round 5, but a round's escalation runs
+    AFTER it closes and round 5 closed on `max_rounds`, so L3 never fired at all; rounds 3-5 spent
+    49% of the run's budget re-testing candidates against a panel that had stopped moving.
+
+    Silent harm: nothing distinguishes "L2 keeps firing because it is working" from "L2 keeps
+    firing because noise keeps clearing its stall counter"."""
+    from promptpotter.application.optimization.escalation.state import EscalationFSM, NextAction
+
+    # (composite, θ, θ_se) per round, from the live run: composite frozen from round 2 on, θ
+    # advancing once for real (+0.467) and then only by noise (+0.012, then flat).
+    live = [
+        (0.4853, -0.1296, 0.216),
+        (0.6248, 0.3376, 0.202),
+        (0.6248, 0.3498, 0.198),
+        (0.6248, 0.3498, 0.198),
+    ]
+
+    def ladder(*, with_se: bool) -> list[str]:
+        fsm, actions = EscalationFSM(), []
+        for comp, theta, se in live:
+            event = fsm.observe_l2_escalation(
+                current_composite_fitness=comp,
+                current_theta=theta,
+                current_theta_se=se if with_se else None,
+                l2_patience=2,
+                l3_patience=1,
+            )
+            actions.append(str(event.next_action))
+            if event.next_action != NextAction.FIRE_L2:
+                break
+            fsm.record_l2_fired(best_composite_fitness=comp, best_theta=theta)
+        return actions
+
+    # The real +0.467 move at round 2 still counts — the bar rejects noise, not signal.
+    assert ladder(with_se=True) == ["fire_l2", "fire_l2", "fire_l2", "fire_l3"]
+    # Without it the noise move buys another L2 round and L3 is pushed out of the run.
+    assert NextAction.FIRE_L3 not in ladder(with_se=False)
+
+    # The bar is the reading's own SE, applied on the θ scale only: a composite-scale verdict has
+    # no error term to clear and must be untouched by it.
+    assert EscalationFSM._improved(0.0, 0.0, 0.35, 0.34, 0.20)[0] is False
+    assert EscalationFSM._improved(0.0, 0.0, 0.60, 0.34, 0.20)[0] is True
+    assert EscalationFSM._improved(0.7, 0.6, None, None, 0.20) == (True, "composite")
 
 
 def test_fatal_degradation_runtime_failure_escalates_to_operator():
@@ -2189,14 +2349,6 @@ def test_fatal_degradation_runtime_failure_escalates_to_operator():
     )
     assert rate_based is not None
     assert rate_based.owner is NurseOwner.L1
-
-
-def test_run_l3_output_validators_aggregates():
-    opt_sp = _opt_sp(plan="short")
-    outcomes = run_l3_output_validators({"plan": "short"}, opt_sp)
-    ids = {o.validator_id for o in outcomes}
-    assert "l3_plan_length_floor" in ids
-    assert "l3_plan_verbatim_repeat" in ids
 
 
 # 9. L1 layout validators — one parametrized hard-failure family
@@ -2284,14 +2436,9 @@ def test_persisted_params_drop_the_render_and_lose_nothing():
     re-derives at the write, so persisting it is how a round comes to name a prompt its winner
     never ran. Stripping is safe only because the render rebuilds identically from the fields —
     that equality is what this asserts, not the strip itself."""
-    from promptpotter.domain.pipeline_schema import NodePromptInfo
     from promptpotter.domain.search_point import strip_rendered_prompt
 
-    schema = PipelineSchema(
-        name="test",
-        available_models=["openai/gpt-oss-120b"],
-        nodes=[PipelineNode(name="llm_only", prompt_info=NodePromptInfo())],
-    )
+    schema = _prompt_schema()
     osp = _opt_sp()
     # A stale render beside a real config axis — the shape `current_sp` hands the round writer.
     base = {"llm_only": {"temperature": 0.3, "prompt": "AN OLDER ROUND'S PROMPT"}}
@@ -2348,25 +2495,15 @@ def test_resolve_node_layout_l4_edit_and_guard_rail():
 # 10. PoBB posterior gate + leader eligibility
 
 
-def _measurements(scores: list[float], sample_ids: list[int] | None = None) -> list[dict]:
-    """Minimal QueryMeasurement-shaped dicts for PoBB tests. ``hit`` (what the θ
-    elimination fit reads) is derived from the per-sample fitness (>0.5 == hit)."""
-    ids = sample_ids if sample_ids is not None else list(range(len(scores)))
-    return [
-        {"sample_id": sid, "fitness": float(s), "hit": s > 0.5}
-        for sid, s in zip(ids, scores, strict=True)
-    ]
-
-
 _DUMMY_SP = JobSearchPoint()
 
 
 def test_pobb_check_gates_elimination_on_posterior():
     """PoBB.check() fires when the paired-difference posterior clears the ε gate."""
     check_sep = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20, ruler=None)
-    check_sep.register_completed(_measurements([1.0] * 20), candidate_id="winner", sp=_DUMMY_SP)
+    check_sep.register_completed(measurements([1.0] * 20), candidate_id="winner", sp=_DUMMY_SP)
     check_sep.set_current("loser")
-    sig = check_sep.check(_measurements([0.0] * 5), candidate_idx=1, n_total_candidates=2)
+    sig = check_sep.check(measurements([0.0] * 5), candidate_idx=1, n_total_candidates=2)
     assert sig is not None
     assert sig.check_name == "elimination"
     cr = sig.check_result
@@ -2384,9 +2521,14 @@ def test_pobb_check_gates_elimination_on_posterior():
 
 def test_pobb_epsilon_is_graded_by_depth_not_scalar():
     """A raised ε must not spend its aggression at ``n_min``, where ONE discordant sample already
-    drives ``p_best`` to ~0.2. The bar is ``epsilon_floor`` at the floor and the full ``epsilon``
-    by twice that depth, so an arm one sample behind buys a short reprieve while an arm further
-    behind still dies at the floor. Equal floor and ε — the default — leaves the bar flat.
+    drives ``p_best`` to ~0.2, NOR carry it into the tail, where cutting saves almost nothing. The
+    bar is ``epsilon_floor`` at both ends and the full ``epsilon`` in the middle, ramping over
+    ``n_min`` cells each side. Equal floor and ε — the default — leaves the bar flat.
+
+    The ramp-OUT is the half that was missing: the bar sat at its maximum from ``2 * n_min`` until
+    the tail guard switched cutting off, so an arm deep in its budget faced the same bar as one
+    with the whole panel still to save. It lands on the floor exactly where the guard begins, so
+    the two meet instead of cliffing.
 
     The ramp itself is what this pins. The DEPTHS below are a consequence of the dispersion rule
     and moved by one sample when φ stopped being floored at a constant (`fit_theta_given_delta`):
@@ -2397,9 +2539,13 @@ def test_pobb_epsilon_is_graded_by_depth_not_scalar():
     assert graded.epsilon_at(6) == pytest.approx(0.15)
     assert graded.epsilon_at(9) == pytest.approx(0.225)
     assert graded.epsilon_at(12) == pytest.approx(0.30)
-    # Clamped past 2*n_min, never extrapolated: the ramp must not carry the bar ABOVE ε.
+    # Clamped, never extrapolated: the ramp must not carry the bar ABOVE ε at any depth.
     assert graded.epsilon_at(15) == pytest.approx(0.30)
-    assert graded.epsilon_at(28) == pytest.approx(0.30)
+    assert max(graded.epsilon_at(n) for n in range(cfg.n_min, 29)) == pytest.approx(0.30)
+    # …and back down to the floor as the remaining budget — all cutting can still save — runs out.
+    assert graded.epsilon_at(20) == pytest.approx(0.20)
+    # The last cuttable depth (`n_samples - n_min`) is where the guard takes over, at the floor.
+    assert graded.epsilon_at(22) == pytest.approx(0.15)
 
     flat = PoBBCheck(
         PoBBConfig(n_min=6, epsilon=0.30, epsilon_floor=0.30), n_samples=28, ruler=None
@@ -2411,10 +2557,10 @@ def test_pobb_epsilon_is_graded_by_depth_not_scalar():
 
     def arm_behind_perfect_prior(n: int, misses: int):
         check = PoBBCheck(cfg, n_samples=28, ruler=None)
-        check.register_completed(_measurements([1.0] * 28), candidate_id="winner", sp=_DUMMY_SP)
+        check.register_completed(measurements([1.0] * 28), candidate_id="winner", sp=_DUMMY_SP)
         check.set_current("arm")
         return check.check(
-            _measurements([0.0] * misses + [1.0] * (n - misses)),
+            measurements([0.0] * misses + [1.0] * (n - misses)),
             candidate_idx=1,
             n_total_candidates=2,
         )
@@ -2438,9 +2584,9 @@ def test_pobb_locks_in_dominant_leader():
         n_samples=20,
         ruler=None,
     )
-    check.register_completed(_measurements([0.0] * 20), candidate_id="weak_prior", sp=_DUMMY_SP)
+    check.register_completed(measurements([0.0] * 20), candidate_id="weak_prior", sp=_DUMMY_SP)
     check.set_current("strong_current")
-    sig = check.check(_measurements([1.0] * 8), candidate_idx=1, n_total_candidates=3)
+    sig = check.check(measurements([1.0] * 8), candidate_idx=1, n_total_candidates=3)
     assert sig is not None
     assert sig.target == EscalationTarget.LEADER_LOCKED
     cr = sig.check_result
@@ -2467,13 +2613,13 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
     # --- Branch (a): no backfill_fn ⇒ incomplete prior is excluded, no elimination.
     check_no_backfill = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20, ruler=None)
     check_no_backfill.register_completed(
-        _measurements([1.0] * 8, sample_ids=leader_samples),
+        measurements([1.0] * 8, sample_ids=leader_samples),
         candidate_id="R1_lucky_winner",
         sp=_DUMMY_SP,
     )
     check_no_backfill.set_current("R2_challenger")
     sig = check_no_backfill.check(
-        _measurements([0.0] * 5, sample_ids=candidate_samples),
+        measurements([0.0] * 5, sample_ids=candidate_samples),
         candidate_idx=0,
         n_total_candidates=6,
     )
@@ -2496,13 +2642,16 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
         # Leader misses 4/5 hard samples; only #13 is hit. Mirrors origin's
         # behavior on the same samples in the real cycle.
         truth = {9: False, 12: False, 13: True, 14: False, 8: False}
-        return [{"sample_id": s.id, "fitness": 1.0 if truth[s.id] else 0.0} for s in samples]
+        return [
+            {"sample_id": s.id, "fitness": (f := 1.0 if truth[s.id] else 0.0), "objective": f}
+            for s in samples
+        ]
 
     check_paired = PoBBCheck(
         PoBBConfig(n_min=4, epsilon=0.05), n_samples=20, ruler=None, backfill_fn=_stub_backfill
     )
     check_paired.register_completed(
-        _measurements([1.0] * 8, sample_ids=leader_samples),
+        measurements([1.0] * 8, sample_ids=leader_samples),
         candidate_id="R1_lucky_winner",
         sp=_DUMMY_SP,
     )
@@ -2515,7 +2664,7 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
 
     check_paired.set_current("R2_challenger")
     sig = check_paired.check(
-        _measurements([0.0] * 5, sample_ids=candidate_samples),
+        measurements([0.0] * 5, sample_ids=candidate_samples),
         candidate_idx=0,
         n_total_candidates=6,
     )
@@ -2678,6 +2827,40 @@ def test_classify_sample_failure_attributes_the_warning_bearing_node(
     assert classify_sample_failure(statuses, warnings) == (kind, node)
 
 
+def _health_row(
+    statuses: dict[str, str], *warnings: dict[str, str], hit: bool = False, **extra: object
+) -> dict:
+    """One sample as the round verdict reads it — per-node step statuses plus whatever the
+    BACKEND stamped about them. Every case below is a shape of this one row, so building it in
+    one place is what stops them disagreeing about where a warning lives."""
+    return {
+        "hit": hit,
+        "pipeline_data": {"diagnostics": {"step_statuses": statuses, "warnings": list(warnings)}},
+        **extra,
+    }
+
+
+_STRUCTURAL_BREAK = {
+    "step": "entity_profiling",
+    "code": "schema_invalid",
+    "message": "max completion tokens reached",
+    "kind": "structural",
+}
+_BRAVE_QUOTA = {
+    "step": "web_search",
+    "code": "no_results",
+    "message": "No web evidence — Brave rate limit exceeded",
+    "kind": "transient",
+}
+
+
+def _transient_round() -> list[dict]:
+    """A round degrading on transient web_search noise — five of twenty, above the rate floor."""
+    return [_health_row({"web_search": "degraded"}) for _ in range(5)] + [
+        _health_row({}) for _ in range(15)
+    ]
+
+
 def test_compute_round_health_names_the_structural_cause_not_collateral():
     """End-to-end on the lca-bom-termnorm shape: web_search is silently ``failed``
     (collateral, no warning) while entity_profiling carries the structural warning.
@@ -2685,31 +2868,10 @@ def test_compute_round_health_names_the_structural_cause_not_collateral():
     tally-by-failed-status picked web_search by 12-12 tie + insertion order."""
     from promptpotter.domain.results_health import compute_round_health
 
-    def _struct_fail() -> dict:
-        return {
-            "hit": False,
-            "pipeline_data": {
-                "diagnostics": {
-                    "step_statuses": {"web_search": "failed", "entity_profiling": "failed"},
-                    "warnings": [
-                        {
-                            "step": "entity_profiling",
-                            "code": "schema_invalid",
-                            "message": "max completion tokens reached",
-                            "kind": "structural",
-                        }
-                    ],
-                }
-            },
-        }
-
-    def _clean_hit() -> dict:
-        return {
-            "hit": True,
-            "pipeline_data": {"diagnostics": {"step_statuses": {"entity_profiling": "success"}}},
-        }
-
-    results = [_struct_fail() for _ in range(12)] + [_clean_hit() for _ in range(8)]
+    results = [
+        _health_row({"web_search": "failed", "entity_profiling": "failed"}, _STRUCTURAL_BREAK)
+        for _ in range(12)
+    ] + [_health_row({"entity_profiling": "success"}, hit=True) for _ in range(8)]
     h = compute_round_health(results=results, prior_healths=[])
     assert h is not None
     assert h.grade == "critical"
@@ -2732,31 +2894,10 @@ def test_evidence_starved_round_grades_critical_without_auto_halting():
     from promptpotter.application.runner.termination import backend_unreachable_tripped
     from promptpotter.domain.results_health import compute_round_health
 
-    def _web_starved() -> dict:
-        return {
-            "hit": False,
-            "pipeline_data": {
-                "diagnostics": {
-                    "step_statuses": {"web_search": "degraded", "entity_profiling": "degraded"},
-                    "warnings": [
-                        {
-                            "step": "web_search",
-                            "code": "no_results",
-                            "message": "No web evidence — Brave rate limit exceeded",
-                            "kind": "transient",
-                        }
-                    ],
-                }
-            },
-        }
-
-    def _clean_hit() -> dict:
-        return {
-            "hit": True,
-            "pipeline_data": {"diagnostics": {"step_statuses": {"web_search": "success"}}},
-        }
-
-    results = [_web_starved() for _ in range(10)] + [_clean_hit() for _ in range(10)]
+    results = [
+        _health_row({"web_search": "degraded", "entity_profiling": "degraded"}, _BRAVE_QUOTA)
+        for _ in range(10)
+    ] + [_health_row({"web_search": "success"}, hit=True) for _ in range(10)]
     h = compute_round_health(results=results, prior_healths=[])
     assert h is not None
     assert h.grade == "critical"
@@ -2807,66 +2948,61 @@ def test_a_near_constant_answerer_is_reported_and_still_grades_healthy():
     )
 
 
-def test_unscoreable_origin_grades_critical_and_trips_the_origin_gate():
-    """The JustLogic failure mode: the pipeline RUNS (``step_statuses`` success, no
-    warning) but emits no extractable label → ``predicted == NO_RESULT`` on every
-    sample. The backend calls this a success, so the structural/transient channel is
-    blind to it — the OLD verdict graded the origin ``healthy`` and the loop wasted
-    rounds optimizing a prompt whose every output was unscoreable. The PP-owned
-    no-result rate must lift it to ``critical``/``unscoreable`` and trip the origin
-    gate, while a wrong-but-extractable round (real labels, just wrong) must NOT."""
+def test_a_round_that_measured_nothing_usable_names_which_way_it_broke():
+    """Three ways a round produces no usable measurement. Each must NAME itself, because the
+    next move differs completely between them — and every one of the three used to grade
+    ``healthy`` or abstain.
+
+    ``unscoreable`` (JustLogic): the pipeline RUNS — every ``step_status`` success, no warning —
+    and emits no extractable label. The backend calls that a success, so the structural/transient
+    channel is blind, and the loop spent rounds optimizing a prompt whose every output was
+    unreadable. ``origin_unmeasured`` (L4): round-0 scoring produced ZERO rows, and graded
+    healthy or abstained, candidates are then elected against NO baseline — the irreversible
+    one. ``backend_unreachable``: every row errored, and since ``total`` counts only evidence
+    rows, a round that ATTEMPTED work must not slip out as "nothing measured".
+
+    Only the ORIGIN halts, and only on a real break: a non-origin round that measured nothing
+    abstains rather than fabricating a verdict, and a wrong-but-extractable round IS a
+    measurement — real labels, just wrong — which must stay gradable on accuracy."""
     from promptpotter.application.runner.termination import origin_gate_tripped
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.results_health import compute_round_health
 
-    def _row(predicted: str, *, hit: bool) -> dict:
-        return {
-            "predicted": predicted,
-            "hit": hit,
-            "pipeline_data": {"diagnostics": {"step_statuses": {"llm_only": "success"}}},
-        }
+    def answered(predicted: str) -> list[dict]:
+        return [_health_row({"llm_only": "success"}, predicted=predicted) for _ in range(20)]
 
-    # All 20 succeeded but produced no parseable label → unscoreable floor.
-    no_result_rows = [_row("NO_RESULT", hit=False) for _ in range(20)]
-    h = compute_round_health(results=no_result_rows, prior_healths=[])
-    assert h is not None
-    assert h.grade == "critical"
-    assert h.cause == "unscoreable"
-    assert h.no_result_count == 20
-    assert h.suggested_action and "answer_format" in h.suggested_action
-    # Critical → halts even in the least-strict armed mode; this is the guarantee
-    # that the broken origin never silently enters L1.
-    assert origin_gate_tripped(h, "critical_only") == StopReason.ORIGIN_GATE
+    unscoreable = compute_round_health(results=answered("NO_RESULT"), prior_healths=[])
+    assert unscoreable is not None
+    assert (unscoreable.grade, unscoreable.cause) == ("critical", "unscoreable")
+    assert unscoreable.no_result_count == 20
+    assert unscoreable.suggested_action and "answer_format" in unscoreable.suggested_action
 
-    # A hard task that emits REAL labels (just wrong) is a measurement, not a broken
-    # floor — it must stay gradable on accuracy, never flagged ``unscoreable``.
-    wrong_rows = [_row("FALSE", hit=False) for _ in range(20)]
-    hw = compute_round_health(results=wrong_rows, prior_healths=[])
-    assert hw is not None
-    assert hw.no_result_count == 0
-    assert hw.cause != "unscoreable"
+    unmeasured = compute_round_health(results=[], prior_healths=[], is_origin=True)
+    assert unmeasured is not None
+    assert (unmeasured.grade, unmeasured.cause) == ("critical", "origin_unmeasured")
 
+    dead = compute_round_health(
+        results=[
+            {"error": "connect timeout", "error_category": "CONNECTION", "pipeline_data": None}
+            for _ in range(10)
+        ],
+        prior_healths=[],
+    )
+    assert dead is not None
+    assert (dead.grade, dead.cause) == ("critical", "backend_unreachable")
+    assert dead.samples == 10 and dead.suggested_action is not None
 
-def test_unmeasured_origin_grades_critical_but_a_non_origin_round_abstains():
-    """The L4 failure mode: round-0 scoring produced ZERO rows (``total==0``) — a crash
-    or empty connector return, not a wrong answer. The OLD ``has_program`` sniff silently
-    skipped scoring the L4 outer origin (empty prose, empty node configs), landing
-    ``total=0``; if that graded ``healthy``/abstained, candidates would be elected against
-    NO baseline — the silent, irreversible harm. Only the ORIGIN's ``total=0`` is critical
-    (halt-and-decide); a non-origin round that measured nothing genuinely abstains (``None``),
-    never a fabricated clean verdict."""
-    from promptpotter.application.runner.termination import origin_gate_tripped
-    from promptpotter.domain.phases import StopReason
-    from promptpotter.domain.results_health import compute_round_health
+    # Every one halts even in the LEAST-strict armed mode — that is the guarantee that a broken
+    # origin never silently enters L1.
+    for broken in (unscoreable, unmeasured, dead):
+        assert origin_gate_tripped(broken, "critical_only") == StopReason.ORIGIN_GATE
 
-    ho = compute_round_health(results=[], prior_healths=[], is_origin=True)
-    assert ho is not None
-    assert ho.grade == "critical"
-    assert ho.cause == "origin_unmeasured"
-    # Halts even in the least-strict armed mode — the baseline-less election never begins.
-    assert origin_gate_tripped(ho, "critical_only") == StopReason.ORIGIN_GATE
-
-    # A non-origin round that measured nothing abstains — not a fabricated ``healthy``.
+    # A hard task emitting REAL labels is a measurement, not a broken floor.
+    wrong = compute_round_health(results=answered("FALSE"), prior_healths=[])
+    assert wrong is not None
+    assert wrong.no_result_count == 0 and wrong.cause != "unscoreable"
+    assert origin_gate_tripped(wrong, "critical_only") is None
+    # …and a NON-origin round that measured nothing abstains, never a fabricated ``healthy``.
     assert compute_round_health(results=[], prior_healths=[]) is None
 
 
@@ -2887,6 +3023,9 @@ def test_unmeasured_origin_grades_critical_but_a_non_origin_round_abstains():
         # purely because a 20-sample Wilson interval is wide — precision is not health,
         # and that verdict was what kept ``prior_clean_rounds`` pinned at 0 forever.
         (20, 0, 0, 0, 0, "healthy", None),
+        # Zero samples is NO VERDICT, never a fabricated healthy one — the row that keeps
+        # "nothing was measured" from reading as "nothing was wrong".
+        (0, 0, 0, 0, 0, None, None),
     ],
 )
 def test_degradation_health_is_context_aware(
@@ -2906,6 +3045,9 @@ def test_degradation_health_is_context_aware(
         consecutive_degraded_rounds=consec,
         dominant_node="entity_profiling",
     )
+    if grade is None:
+        assert h is None
+        return
     assert h is not None
     assert h.grade == grade
     assert h.cause == cause
@@ -2919,7 +3061,6 @@ def test_origin_verdict_is_first_in_the_l1_track_record():
     assembly must take the origin from ``origin_health`` and drop that round-0 entry
     (no double-count) plus the round being closed. End-to-end: an origin that graded
     ``critical`` makes a degrading L1 round see ≥3 consecutive → ``persistent``."""
-    from promptpotter.domain.results import RoundResult
     from promptpotter.domain.results_health import (
         assemble_prior_healths,
         compute_degradation_health,
@@ -2957,11 +3098,7 @@ def test_origin_verdict_is_first_in_the_l1_track_record():
     assert assemble_prior_healths(rounds, 1) == [rounds[0].health, rounds[2].health]
 
     # Degrading R3 on top of (critical origin, degraded R1, degraded R2) → 3 consecutive.
-    transient_rows = [
-        {"pipeline_data": {"diagnostics": {"step_statuses": {"web_search": "degraded"}}}}
-        for _ in range(5)
-    ] + [{"pipeline_data": {"diagnostics": {}}} for _ in range(15)]
-    h = compute_round_health(results=transient_rows, prior_healths=fresh)
+    h = compute_round_health(results=_transient_round(), prior_healths=fresh)
     assert h is not None and h.grade == "critical" and h.cause == "persistent"
 
 
@@ -2987,45 +3124,8 @@ def test_ungraded_prior_round_is_transparent_to_the_track_record():
 
     # Priors oldest→newest: degraded, probe(None), degraded. The current round is also
     # degrading → 3 consecutive once the probe is skipped (not counted, not a break).
-    transient_rows = [
-        {"pipeline_data": {"diagnostics": {"step_statuses": {"web_search": "degraded"}}}}
-        for _ in range(5)
-    ] + [{"pipeline_data": {"diagnostics": {}}} for _ in range(15)]
-    h = compute_round_health(results=transient_rows, prior_healths=[degraded, None, degraded])
+    h = compute_round_health(results=_transient_round(), prior_healths=[degraded, None, degraded])
     assert h is not None and h.grade == "critical" and h.cause == "persistent"
-
-
-def test_all_errored_round_is_critical_not_unmeasured() -> None:
-    """An all-errored round ATTEMPTED work — it must grade critical/backend_unreachable,
-    not slip through as "nothing measured" (None) now that ``total`` counts only
-    evidence rows. Silent harm: a dead backend would produce rounds with no health
-    banner and no suggested_action — the loop burns rounds against an outage nobody
-    is told about."""
-    from promptpotter.domain.results_health import compute_round_health
-
-    rows = [
-        {"error": "connect timeout", "error_category": "CONNECTION", "pipeline_data": None}
-        for _ in range(10)
-    ]
-    h = compute_round_health(results=rows, prior_healths=[])
-    assert h is not None and h.grade == "critical" and h.cause == "backend_unreachable"
-    assert h.samples == 10 and h.suggested_action is not None
-
-
-def test_degradation_health_none_when_unmeasured():
-    """Zero samples ⇒ no verdict (None), not a fabricated healthy grade."""
-    from promptpotter.domain.results_health import compute_degradation_health
-
-    assert (
-        compute_degradation_health(
-            attempted=0,
-            structural_count=0,
-            transient_count=0,
-            prior_clean_rounds=0,
-            consecutive_degraded_rounds=0,
-        )
-        is None
-    )
 
 
 # 11. L2 behaviour conformance
@@ -3074,7 +3174,6 @@ def test_l2_behavior_checks_score_conformant_vs_stub_fires():
 from promptpotter.application.optimization.round_analysis import (  # noqa: E402
     compute_round_diagnostics,
 )
-from promptpotter.domain.results import RoundResult  # noqa: E402
 
 
 def _round_result(round_num: int, accuracy: float, results: list[dict]) -> RoundResult:
@@ -3091,35 +3190,43 @@ def _round_result(round_num: int, accuracy: float, results: list[dict]) -> Round
     )
 
 
-def _hit(query: str, gt: str) -> dict:
-    return {"query": query, "ground_truth": gt, "fitness": 1.0, "predicted": gt}
+def test_round_diagnostics_read_rank_and_trajectory_off_the_rounds_it_is_given():
+    """With no schema there is no ranker to read a rank OFF, so every cell must land in
+    ``not_found`` — a fabricated rank-1 bucket would report perfect retrieval on a pipeline that
+    has none, and top-k accuracy is drawn straight off those buckets."""
 
+    def rows(*graded: bool) -> list[dict]:
+        return [
+            {
+                "query": f"q{i}",
+                "ground_truth": chr(ord("a") + i),
+                "fitness": float(g),
+                "objective": float(g),
+                "predicted": chr(ord("a") + i) if g else "?",
+            }
+            for i, g in enumerate(graded)
+        ]
 
-def _miss(query: str, gt: str) -> dict:
-    return {"query": query, "ground_truth": gt, "fitness": 0.0, "predicted": "?"}
-
-
-def test_diag_rank_lookup_no_schema_lands_everything_not_found():
-    results = [_hit("q1", "a"), _miss("q2", "b"), _miss("q3", "c")]
-    rr = _round_result(0, 0.33, results)
+    rr = _round_result(0, 0.33, rows(True, False, False))
     diag = compute_round_diagnostics(rr, [rr], pipeline_schema=None)
-
     assert diag.n_valid == 3
     assert diag.rank_buckets["1"] == 0
     assert diag.rank_buckets["not_found"] == 3
-    assert diag.top_k_accuracy[1] == 0.0
-    assert diag.top_k_accuracy[10] == 0.0
+    assert diag.top_k_accuracy[1] == 0.0 and diag.top_k_accuracy[10] == 0.0
 
+    def trajectory(*series: tuple[int, float]) -> tuple[str, str]:
+        rounds = [_round_result(n, acc, rows(True)) for n, acc in series]
+        diag = compute_round_diagnostics(rounds[-1], rounds, pipeline_schema=None)
+        # The DESCRIPTION as well as the class: "healthy" is also the mixed-progress fallback,
+        # so on the class alone a classifier that recognised nothing would pass the climbing arm.
+        return diag.trajectory, diag.trajectory_description.split(" —")[0]
 
-def test_diag_trajectory_classification_picks_up_plateau():
-    rounds = [
-        _round_result(0, 0.50, [_hit("q1", "a")]),
-        _round_result(1, 0.51, [_hit("q1", "a")]),
-        _round_result(2, 0.51, [_hit("q1", "a")]),
-        _round_result(3, 0.51, [_hit("q1", "a")]),
-    ]
-    diag = compute_round_diagnostics(rounds[-1], rounds, pipeline_schema=None)
-    assert diag.trajectory in {"plateau", "ceiling"}
+    # A run that moved 0.01 once and then stopped. The escalation ladder reads this class, so a
+    # "healthy" verdict here spends L1's whole patience on a search that has already finished.
+    assert trajectory((0, 0.50), (1, 0.51), (2, 0.51), (3, 0.51)) == ("plateau", "Plateau")
+    # …and one still climbing must be recognised AS climbing, or the class is a constant
+    # dressed as a verdict. This arm is what the plateau case alone could never say.
+    assert trajectory((0, 0.20), (1, 0.45), (2, 0.70)) == ("healthy", "Improving")
 
 
 # 13. Adaptive-queue Bayesian math (θ posterior, decision-info, pick-score)
@@ -3217,47 +3324,67 @@ def test_pick_score_artifact_ranks_contested_above_settled() -> None:
 
 
 def test_build_round_order_fronts_win_opportunities_with_hit_probes() -> None:
-    """The shared round order is the elimination gate's evidence pipeline: seed-miss
-    (win-opportunity) samples front-loaded ascending-δ, a seed-hit regression probe at
-    every 4th slot descending-δ, unknowns riding the MISS stratum at the ruler's own
-    CENTRE, deterministic tie-breaks. Silent harm: a wrong order re-creates the
-    tie-prefix blindness — the round completes, no error, and dead candidates ride their
-    full budget again. Centre and not 0.0, which is a position on this scale rather than a
-    neutral one: it ranked every unknown ahead of every measured cell, so a near-floor
-    origin spent its round on cells no arm solves and learned nothing about which arm wins."""
+    """The shared round order is the elimination gate's evidence pipeline: parent-miss
+    (win-opportunity) samples front-loaded ascending-δ, a parent-hit regression probe at
+    every 4th slot descending-δ, cells the parent NEVER ANSWERED in their own stratum
+    ordered by discrimination, deterministic tie-breaks. Silent harm: a wrong order
+    re-creates the tie-prefix blindness — the round completes, no error, and dead
+    candidates ride their full budget again.
+
+    A known miss is a measured opportunity and an unknown is a gamble, so the knowns drain
+    first. Filing unknowns as misses conflated the two: `is_hit` returns False for `None`
+    and for a miss alike, and under `per_round_resubset` round 1's panel shares no cell
+    with the parent, so EVERY cell became a win-opportunity sorted ascending and the panel
+    led with its easiest. Live on `justlogic-d234__8f6499` r1 that put three cells nothing
+    has missed in 8-10 archived measurements in the first six, and the ε-gate cut an arm on
+    one discordant cell. The all-unknown arm below is that case; the mixed arm above it is
+    why unknowns still may not simply be dropped to the tail of a round that has real misses."""
     from promptpotter.application.intelligence.adaptive_queue_mechanism import build_round_order
 
     ids = list(range(24))
-    # Seed hits 0-8; misses 9-22; sample 23 unmeasured by the seed (unclassified).
-    seed_grades = dict.fromkeys(range(9), 1.0) | dict.fromkeys(range(9, 23), 0.0)
+    # Parent hits 0-8; misses 9-22; sample 23 never answered by the parent (unclassified).
+    parent_grades = dict.fromkeys(range(9), 1.0) | dict.fromkeys(range(9, 23), 0.0)
     ruler = _ruler({sid: float(sid % 7) for sid in range(20)}, mu=2.85)
 
-    order = build_round_order(seed_grades, ruler, ids)
+    order = build_round_order(parent_grades, ruler, ids)
     assert sorted(order) == ids
     # Deterministic: same inputs, same order.
-    assert build_round_order(seed_grades, ruler, ids) == order
+    assert build_round_order(parent_grades, ruler, ids) == order
 
     hit_set = set(range(9))
-    # Positions 4, 8, 12, 16 (1-indexed) carry seed-HIT probes while both strata remain.
+    # Positions 4, 8, 12, 16 (1-indexed) carry parent-HIT probes while both strata remain.
     for pos in (4, 8, 12, 16):
-        assert order[pos - 1] in hit_set, f"position {pos} should be a seed-hit probe"
-    # All other early positions are win opportunities (seed-miss or unclassified —
-    # the unmeasured sample 23 must ride the miss stratum, not the tail).
+        assert order[pos - 1] in hit_set, f"position {pos} should be a parent-hit probe"
+    # All other early positions are win opportunities, never regression probes.
     non_probe_head = [order[i] for i in range(16) if (i + 1) % 4 != 0]
     assert all(sid not in hit_set for sid in non_probe_head)
     # Computed, not spelled: a hardcoded default here would pass while disagreeing with the ruler.
     unmeasured = ruler.mu_delta
-    # An unknown sits mid-queue, so a measured EASIER cell is reached before it and a measured
-    # harder one after — the whole point of the centre.
     assert min(ruler.delta.values()) < unmeasured < max(ruler.delta.values())
-    # MISS stratum walks ascending δ (unknown entries at the ruler's centre, ties by sid).
-    miss_positions = [sid for sid in order if sid not in hit_set]
+    # MISS stratum walks ascending δ (a miss the ruler has no δ for still sits at the centre),
+    # and every one is reached before the unknown GRADE: an opportunity the parent actually
+    # failed outranks one nobody has tried.
+    miss_positions = [sid for sid in order if sid not in hit_set and sid != 23]
     miss_keys = [(ruler.delta.get(sid, unmeasured), sid) for sid in miss_positions]
     assert miss_keys == sorted(miss_keys)
+    assert order.index(23) > max(order.index(sid) for sid in miss_positions)
     # HIT stratum walks descending δ (likeliest regression points first).
     hit_positions = [sid for sid in order if sid in hit_set]
     hit_keys = [(-ruler.delta.get(sid, unmeasured), sid) for sid in hit_positions]
     assert hit_keys == sorted(hit_keys)
+
+    # The round-1 case, and the one the two-state predicate got wrong: the parent has answered
+    # NOTHING on this panel, so there is no miss stratum to front-load and no hit stratum to
+    # probe from. The order must then lead with the cells that discriminate most — δ nearest the
+    # scale's centre — not with the panel's easiest, which separate no arm from any other.
+    all_unknown = build_round_order({}, ruler, ids)
+    assert sorted(all_unknown) == ids
+    spread = [abs(ruler.delta.get(sid, unmeasured) - unmeasured) for sid in all_unknown]
+    assert spread == sorted(spread), (
+        "an all-unknown panel must open on its most discriminating cells"
+    )
+    easiest = min(ruler.delta, key=lambda sid: (ruler.delta[sid], sid))
+    assert all_unknown.index(easiest) >= 6, "the panel's easiest cell must not lead the round"
 
 
 def test_elimination_p_best_discriminates_on_graded_backend() -> None:
@@ -3299,39 +3426,35 @@ def test_elimination_p_best_discriminates_on_graded_backend() -> None:
     assert p_best_bin > 0.5
 
 
-def test_mean_ci_bounds_and_degenerate_n() -> None:
-    """``mean_ci`` is the always-on per-candidate composite CI (L4 variance fix) — a
-    wrong bound would silently mislabel a real difference as noise or vice versa, with
-    no visible symptom. Pin the degenerate n=0/n=1 cases and that the interval always
-    brackets the mean."""
+def test_the_two_mean_intervals_differ_where_it_matters_and_neither_invents_width() -> None:
+    """Two readings of one mean, and they are NOT interchangeable at the sizes this loop runs.
+
+    ``mean_ci`` is the always-on per-candidate composite band — a normal-CLT interval carrying
+    PoBB's own SE floor, drawn as the loop believed it. ``mean_ci_t`` is the Compare read over a
+    handful of cells, where t is 2.571 against z's 1.96 at n=6. A wrong bound in either mislabels
+    a real difference as noise or the reverse, with nothing to see.
+
+    They part on the degenerate n as well as on the width, which is the half worth pinning:
+    ``mean_ci`` answers for one reading because the posterior it draws IS defined there, and
+    ``mean_ci_t`` refuses, because a distribution-free bracket from a single value is a fiction.
+    """
     assert mean_ci([]) == (0.0, 0.0, 0.0)
-
-    mean, lo, hi = mean_ci([0.7])
-    assert mean == 0.7
-    assert lo < mean < hi  # n=1 still yields a real (non-degenerate) interval
-
-    values = [0.6, 0.7, 0.65, 0.72, 0.68]
-    mean, lo, hi = mean_ci(values)
-    assert abs(mean - sum(values) / len(values)) < 1e-9
-    assert lo < mean < hi
-    assert lo < hi
-
-
-def test_mean_ci_t_brackets_wider_than_z_and_refuses_a_single_reading() -> None:
-    """The Compare read brackets a handful of cells, where t and z are not interchangeable — at 6
-    cells t is 2.571 against z's 1.96. Pin that ``mean_ci_t`` is the wider of the two on identical
-    data (a swap back to ``norm.ppf`` fails here) and that it refuses to bracket one reading."""
     assert mean_ci_t([]) is None
-    assert mean_ci_t([0.5]) is None  # one reading has no spread; a bracket from it is a fiction
+    mean, lo, hi = mean_ci([0.7])
+    assert mean == 0.7 and lo < mean < hi
+    assert mean_ci_t([0.5]) is None
 
     values = [0.40, 0.50, 0.45, 0.52, 0.38, 0.49]
+    exact = sum(values) / len(values)
+    _, lo_z, hi_z = mean_ci(values)
     reading = mean_ci_t(values)
     assert reading is not None
     mean_t, lo_t, hi_t, n = reading
-    _, lo_z, hi_z = mean_ci(values)
     assert n == len(values)
-    assert abs(mean_t - sum(values) / len(values)) < 1e-9
+    assert abs(mean_t - exact) < 1e-9
+    assert lo_z < exact < hi_z
     assert lo_t < mean_t < hi_t
+    # t is the WIDER of the two on identical data — a swap back to ``norm.ppf`` fails here.
     assert (hi_t - lo_t) > (hi_z - lo_z)
 
 
@@ -3501,23 +3624,139 @@ def test_headline_best_is_always_a_number_something_measured():
     previous config scored ~100% on, so the bias has a direction: each configuration
     inherited its predecessor's perfect easy-tail score and a regression there was invisible.
     """
-    # Shaped like `index.json::rounds[]`: each round's own measurement, plus the pooled
-    # number the old basis would have published (never `max`-ed by anything now).
+    # Shaped like `index.json::rounds[]`: each round's own panel measurement, its winner scored
+    # on the line's SHARED cells, and the pooled number the old basis would have published.
     rounds = [
-        {"round": 0, "accuracy": 0.575, "pooled": 0.575},
-        {"round": 6, "accuracy": 0.750, "pooled": 0.750},
-        {"round": 7, "accuracy": 0.679, "pooled": 0.775},  # pooled > anything measured
+        {"round": 0, "accuracy": 0.575, "overlap_accuracy": None, "pooled": 0.575},
+        {"round": 6, "accuracy": 0.750, "overlap_accuracy": 0.600, "pooled": 0.750},
+        {"round": 7, "accuracy": 0.679, "overlap_accuracy": 0.640, "pooled": 0.775},
     ]
-    best, best_round = best_round_by_measured_accuracy(rounds)
+    best, best_round = best_round_on_shared_cells(rounds)
 
-    measured = {r["accuracy"] for r in rounds}
-    assert best in measured, "headline must be a value some round actually scored"
-    assert best == 0.750 and best_round == 6
+    shared = {r["overlap_accuracy"] for r in rounds if r["overlap_accuracy"] is not None}
+    assert best in shared, "headline must be a value some round actually scored"
     assert best < max(r["pooled"] for r in rounds), "the pooled basis outran every measurement"
 
-    # A round with no accuracy doesn't back the headline (vs `or 0.0`, which could crown it).
-    assert best_round_by_measured_accuracy([{"round": 1, "accuracy": None}]) == (0.0, None)
-    assert best_round_by_measured_accuracy([]) == (0.0, None)
+    # The panel-difficulty trap, and the reason the basis moved off `accuracy`: round 6 has the
+    # higher own-panel number and round 7 the higher score on the cells BOTH answered. Electing on
+    # `accuracy` crowns whichever round bought the easiest subset — live on
+    # `justlogic-d234__960ea6`, round 1 held the cycle's best accuracy and its worst shared-cell
+    # score, because the acquisition does not hold the panel still between rounds.
+    assert best == 0.640 and best_round == 7
+
+    # A cycle whose line shares no measurable cell has run only its origin, and answers with it.
+    assert best_round_on_shared_cells([{"round": 0, "accuracy": 0.5}]) == (0.5, 0)
+    # A round with no number at all doesn't back the headline (vs `or 0.0`, which could crown it).
+    assert best_round_on_shared_cells([{"round": 1, "accuracy": None}]) == (0.0, None)
+    assert best_round_on_shared_cells([]) == (0.0, None)
+
+
+def test_a_stale_cycle_index_is_re_derived_from_its_rounds_rather_than_believed(
+    tmp_path: Path,
+) -> None:
+    """The index is a DERIVED read model, so a projection that GAINS a field leaves every index
+    written before it stale against its own round documents — silently, because each derivation
+    reads the row it was handed rather than the document behind it. Measured 2026-08-30: 22 of 24
+    cycle indexes on disk carried no ``overlap_accuracy`` on any row while 70 round documents held
+    the reading, so the headline either kept a pre-change argmax or fell through to the origin.
+    Neither is a number the cycle measured, and no gate could see the difference.
+    """
+    import json
+
+    from promptpotter.infrastructure.store.campaign_store.store import reproject_round_index
+
+    def overlap(rnd: int, origin_rate: float, own_rate: float) -> OverlapReading:
+        member = lambda r, rate: OverlapMember(  # noqa: E731
+            round=r, candidate_id=f"c{r}", label=f"C{r}", accuracy=rate, total=28
+        )
+        return OverlapReading(
+            sample_ids=list(range(28)), members=[member(0, origin_rate), member(rnd, own_rate)]
+        )
+
+    # Round 3 bought the EASIEST panel: the cycle's best own-panel accuracy and its worst score on
+    # the cells the whole line answered. Shaped on `justlogic-d234__3d3e63`, where round 3 read
+    # 0.821 against an archive that passes that panel 89% of the time.
+    cycle = tmp_path / "cycles" / "cyc1"
+    (cycle / "rounds").mkdir(parents=True)
+    docs = []
+    for rnd, acc, own in ((0, 0.50, None), (3, 0.82, 0.11), (4, 0.61, 0.14)):
+        rr = round_result(
+            rnd, accuracy=acc, overlap=overlap(rnd, 0.07, own) if own is not None else None
+        )
+        doc = cycle / "rounds" / f"round_{rnd:04d}.json"
+        doc.write_text(json.dumps(rr.model_dump(mode="json")), encoding="utf-8")
+        docs.append(doc)
+
+    # The stale shape: rows projected before the field existed, and a headline from an older basis.
+    stale = {"round": 3, "accuracy": 0.82}
+    index = cycle / "index.json"
+    index.write_text(
+        json.dumps(
+            {
+                "rounds": [{"round": 0, "accuracy": 0.50}, stale, {"round": 4, "accuracy": 0.61}],
+                "best_accuracy": 0.82,
+                "best_round": 3,
+            }
+        ),
+        encoding="utf-8",
+    )
+    # Two wrong answers, and the row cannot tell them apart: the number ON DISK crowns the easiest
+    # panel, while re-deriving from the same stale rows collapses a five-round cycle onto round 0.
+    on_disk = json.loads(index.read_text(encoding="utf-8"))
+    assert (on_disk["best_accuracy"], on_disk["best_round"]) == (0.82, 3)
+    assert best_round_on_shared_cells(on_disk["rounds"]) == (0.50, 0)
+
+    assert reproject_round_index(index, docs) is True
+    fresh = json.loads(index.read_text(encoding="utf-8"))
+    # The shared-cell reading the documents carried all along: 0.07 → 0.11 → 0.14, so round 4 is
+    # the best the line ever managed on one exam — and 0.14, not 0.82, is what it managed.
+    assert (fresh["best_accuracy"], fresh["best_round"]) == (0.14, 4)
+    # Round 0 has no reading of its own; the derivation lifts C0's rate out of the NEWEST round's
+    # members, or the origin never reaches the election it is the baseline for.
+    assert [r["overlap_accuracy"] for r in fresh["rounds"]] == [0.07, 0.11, 0.14]
+
+    # Idempotent, so the maintenance walk's count is a real backlog rather than its own footprint.
+    assert reproject_round_index(index, docs) is False
+
+
+def test_every_carrier_of_a_round_row_projects_the_overlap_pair() -> None:
+    """The headline is elected on a flattened pair that no ``RoundResult`` FIELD holds, and two
+    carriers build the rows — the cycle index and the resume rebuild. Handed a bare ``model_dump()``
+    the election finds no shared cell on any round and collapses the whole trajectory onto round 0:
+    silent, plausible, and on every resume and every rewind. So the trap is pinned here, not just
+    the agreement — a third carrier that forgets the projection reads a different fact."""
+    from promptpotter.domain.results import overlap_row
+    from promptpotter.infrastructure.store.campaign_store.store import _index_round
+
+    def overlap(rnd: int, origin_rate: float, own_rate: float) -> OverlapReading:
+        member = lambda r, rate: OverlapMember(  # noqa: E731
+            round=r, candidate_id=f"c{r}", label=f"C{r}", accuracy=rate, total=28
+        )
+        return OverlapReading(
+            sample_ids=list(range(28)), members=[member(0, origin_rate), member(rnd, own_rate)]
+        )
+
+    # Round 2 wins its OWN panel by a mile; round 1 wins the cells the whole line answered. The
+    # two carriers must therefore crown round 1, and any row shape that loses the pair crowns C0.
+    rounds = [
+        round_result(0, accuracy=0.50),
+        round_result(1, accuracy=0.60, overlap=overlap(1, 0.50, 0.72)),
+        round_result(2, accuracy=0.90, overlap=overlap(2, 0.50, 0.55)),
+    ]
+
+    indexed = best_round_on_shared_cells([_index_round(rr) for rr in rounds])
+    resumed = best_round_on_shared_cells(
+        [{**rr.model_dump(), **overlap_row(rr.overlap)} for rr in rounds]
+    )
+    assert indexed == resumed == (0.72, 1)
+
+    # The trap itself. A row holding the reading WHOLE but not the flattened pair is the one shape
+    # the derivation cannot survive quietly, so it REFUSES rather than crowning C0 at 0.50.
+    with pytest.raises(ValueError, match="overlap_row"):
+        best_round_on_shared_cells([rr.model_dump() for rr in rounds])
+
+    # Rows older than the projection carry neither key and stay readable — unmeasured, not broken.
+    assert best_round_on_shared_cells([{"round": 0, "accuracy": 0.50}]) == (0.50, 0)
 
 
 def test_delta_ruler_stays_flat_until_a_second_arm_exists() -> None:
@@ -3615,7 +3854,6 @@ def test_a_round_that_resolves_nothing_says_so(monkeypatch) -> None:
     # so no rail fires; the operator reads a margin that the panel cannot support. SILENT by
     # construction, which is why the warning is the whole mechanism.
     from promptpotter.application.optimization.l1.score import winner as winner_mod
-    from tests.factories import scored_candidate
 
     fired: list[dict] = []
     monkeypatch.setattr(winner_mod, "emit_round_warning", lambda **kw: fired.append(kw))
@@ -3818,7 +4056,6 @@ def test_panel_precision_subject_is_an_arm_the_round_could_read() -> None:
     from promptpotter.infrastructure.projections.live_dashboard.round_summary import (
         build_round_summary,
     )
-    from tests.factories import scored_candidate
 
     truths = (("a", "T"), ("b", "F"), ("c", "T"), ("d", "F"))
 
@@ -3887,14 +4124,17 @@ def test_ruler_id_names_the_scale_a_theta_was_read_on() -> None:
     """Comparability is a machine-checkable fact or it is nothing. The cold ruler shares ONE id
     everywhere — flat δ makes θ plain logit-accuracy, which depends on no fit — while any refit
     gets its own, because δ estimates move with the archive the fit saw."""
-    assert ruler_id(None) == FLAT_RULER_ID
+    # A cold cycle has no fit to name, so its id is minted from the OBJECTIVE instead — there is
+    # no one flat id any more, because two objectives on a flat ruler are two scales.
+    assert is_flat_ruler_id(flat_ruler_id("acc"))
+    assert flat_ruler_id("acc") != flat_ruler_id("acc_minus_latency")
 
     fitted = _ruler({1: 0.5, 2: -0.25, 3: 0.0})
     # Key order is not part of the scale.
     assert fitted.anchor_id == anchor_id_of({3: 0.0, 2: -0.25, 1: 0.5}, 0.0, 2.0, "1PL")
     # …and a genuinely different δ is a different scale, however small the move.
     assert fitted.anchor_id != anchor_id_of({1: 0.5, 2: -0.2500001, 3: 0.0}, 0.0, 2.0, "1PL")
-    assert ruler_id(fitted) != FLAT_RULER_ID
+    assert not is_flat_ruler_id(fitted.anchor_id)
 
     # THE ANCHOR, NOT THE MEMBERSHIP. Anchored extension adds cells without moving the ones
     # already there, so a θ read before and after are on ONE scale and must share an id. Hashing
@@ -3903,7 +4143,7 @@ def test_ruler_id_names_the_scale_a_theta_was_read_on() -> None:
     # comparison too.
     grown = extend_ruler(fitted, [Observation("arm", 1, 1.0), Observation("arm", 9, 0.0)])
     assert set(grown.delta) == {1, 2, 3, 9}
-    assert ruler_id(grown) == ruler_id(fitted)
+    assert grown.anchor_id == fitted.anchor_id
     assert all(grown.delta[sid] == fitted.delta[sid] for sid in fitted.delta)
 
 
@@ -4010,7 +4250,14 @@ def test_unstamped_ruler_reads_as_unknown_never_as_comparable() -> None:
             arm_id="a",
             instrument_id=None,
             ability=AbilityReading(
-                theta=0.0, se=None, ruler_id=ruler, ruler_n=1, calibration_model=None
+                theta=0.0,
+                se=None,
+                ruler_id=ruler,
+                ruler_n=1,
+                ruler_span=None,
+                round_span=None,
+                calibration_model=None,
+                caveat=ThetaCaveat.COLD_RULER,
             ),
             round=0,
             cycle_spend_usd=None,
@@ -4130,7 +4377,6 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
     at the same rate by construction, under a label naming no candidate.
     """
     from promptpotter.domain.results import (
-        RoundResult,
         ScoredCandidate,
         choose_overlap_set,
         measured_cells,
@@ -4203,8 +4449,6 @@ def test_a_collapse_cut_is_never_reported_as_an_epsilon_cut() -> None:
     from promptpotter.application.optimization.pobb.checks import PoBBCheck, PoBBConfig
     from promptpotter.domain.results import EliminationGate
 
-    from .factories import scored_candidate
-
     rows = [
         {
             "sample_id": i,
@@ -4263,3 +4507,217 @@ def test_only_an_epsilon_cut_banks_an_idea_as_measured_and_lost() -> None:
     assert not banked({"gate": EliminationGate.COLLAPSED})
     assert not banked({"gate": EliminationGate.LOCK_IN})
     assert not banked({}), "a degradation cut carries no gate — the node broke, not the idea"
+
+
+def test_an_arm_that_beats_a_far_off_ruler_is_fit_not_oscillated_past() -> None:
+    # `screen-taste-v0` cycle_df3de1e40b64: a graded objective puts every cell's δ near +5.55, and
+    # the fit seeds at θ=0 — five logits away, where p saturates and the observed information is
+    # the prior term alone. Undamped, `grad / info` is then a jump of ~14 logits into the OPPOSITE
+    # saturation, and the iteration limit-cycles (14.06 → -19.46 → 16.09 → -19.68 → …) until
+    # max_iter stops it wherever it stands. The three best arms of that run were each recorded
+    # near θ = -25 with an SE in the hundreds, so every round refused to crown one.
+    #
+    # It is the arms sitting FURTHEST from the seed that overshoot, which on a hard ruler are the
+    # arms that scored HIGHEST — so the failure is not noise, it reads improvement as collapse.
+    delta = dict.fromkeys(range(20), 5.55)
+    parent = [Observation("parent", sid, 0.20) for sid in delta]
+    better = [Observation("better", sid, 0.45) for sid in delta]
+
+    fit = fit_theta_given_delta(parent + better, delta, sigma_theta=1.34)
+    parent_theta, parent_se = fit["parent"]
+    better_theta, better_se = fit["better"]
+
+    # Both land near the ruler they were measured on, not tens of logits away from it.
+    assert 2.0 < parent_theta < 5.55, parent_theta
+    assert parent_theta < better_theta < 7.0, better_theta
+    # An SE in the hundreds is the tell that the iteration never converged at all.
+    assert parent_se < 1.0 and better_se < 1.0, (parent_se, better_se)
+
+
+def test_an_arm_in_the_last_n_min_cells_is_finished_not_discarded() -> None:
+    """`n_min` at BOTH ends: an arm may not be judged on fewer than that many cells, and may not
+    be discarded with fewer than that many left. Cutting in the tail saves almost nothing and
+    costs the comparison outright — `matched_parent_stats` needs EVERY cell the parent measured,
+    so an arm stopped one cell short is unrankable against the parent for the rest of the round.
+
+    Live on `justlogic-d234__8ada8e` r1: an arm was cut at q27 of 28 having paid 96% of its cost,
+    and the round then reported one readable arm and resolved nothing.
+
+    Silent harm: the arm's rows are still banked, so the round LOOKS measured — it simply has
+    nothing it can rank, and says so only in the `resolved nothing` line."""
+    cfg = PoBBConfig(n_min=6, epsilon=0.30)
+
+    def cut_at(n: int) -> object | None:
+        check = PoBBCheck(cfg, n_samples=28, ruler=None)
+        check.register_completed(measurements([1.0] * 28), candidate_id="winner", sp=_DUMMY_SP)
+        check.set_current("arm")
+        return check.check(measurements([0.0] * n), candidate_idx=1, n_total_candidates=2)
+
+    # Hopeless arms in the BODY of the panel still die — the guard is a tail rule, not a reprieve.
+    assert cut_at(9) is not None
+    assert cut_at(22) is not None, "the last cut-eligible depth is n_samples - n_min"
+    # …and in the tail they are finished instead, however far behind they are.
+    assert cut_at(23) is None
+    assert cut_at(27) is None, "one cell short of the panel is the case this exists for"
+
+
+def test_an_archive_row_is_graded_by_the_reading_scorer_not_its_stamp(monkeypatch) -> None:
+    """The δ ruler grades archive rows with the CAMPAIGN's scorer, never a stamp on the row.
+
+    ``objective`` is written by ``rescore_results`` under whatever formula was active when the row
+    was banked, so reading it back pools one scale out of several — and a row banked before the
+    field existed carries none at all. Read with ``.get("objective", 0.0)`` that absence is not a
+    hole, it is a WRONG ANSWER: measured on `justlogic-d234`, 49,221 of 49,501 observations graded
+    0.0, the fit collapsed δ to sd 0.243 across 600 cells, θ became logit-accuracy plus a constant,
+    and the acquisition — which ranks on δ ≈ θ — bought progressively EASIER panels while the
+    headline climbed 50.0% → 85.7% and `overlap` stayed flat.
+
+    Silent harm: every number renders, the ruler reports 600 cells and a warm id, and the campaign
+    reads as a clean climb.
+    """
+    import types
+
+    from promptpotter.application.intelligence.hard_sample_archive import (
+        build_archive_observations,
+    )
+    from promptpotter.domain.scoring import CellScorer
+    from promptpotter.infrastructure.store import archive_views
+
+    # Two cells the arm got RIGHT, banked before ``objective`` existed — and one stamped by a
+    # formula that is not the reading campaign's, which must lose to the scorer just the same.
+    rows = [
+        {"sample_id": 1, "fitness": 1.0},
+        {"sample_id": 2, "fitness": 1.0, "objective": 0.0},
+    ]
+    monkeypatch.setattr(
+        archive_views,
+        "list_runs",
+        lambda *_a, **_k: [
+            {"run_id": "r1", "prompt_fields_id": "cand-a", "provenance": {"grade": "A"}}
+        ],
+    )
+    monkeypatch.setattr(archive_views, "run_signatures", lambda *_a, **_k: {"r1": (1, 1)})
+    monkeypatch.setattr(archive_views, "load_run", lambda *_a, **_k: {"measurements": rows})
+
+    stores = types.SimpleNamespace(
+        archive=types.SimpleNamespace(base_dir="/nowhere-unique-to-this-test")
+    )
+    obs = build_archive_observations(
+        stores,
+        dataset_name="d",
+        scorer=CellScorer(fitness=lambda r: r["fitness"], objective=lambda r: r["fitness"]),
+        scorer_id="under-test",
+    )
+
+    assert [o.response for o in obs] == [1.0, 1.0], (
+        "an archive row was graded from its stamp, not from the reading campaign's scorer"
+    )
+
+
+def test_ruler_learning_cannot_take_the_whole_round_panel() -> None:
+    """The panel is bought to SEPARATE THE ARMS; refining δ gets a bounded reservation, not a vote.
+
+    `pick_value` summed `decision_information_gain + delta_learning_gain`, and the second rises with
+    δ's SE while the first is capped by an entropy — so wherever a difficulty exists in both a
+    well-measured and a barely-measured cell, the sum takes the barely-measured one every time and
+    the panel becomes a ruler-refinement queue. Live on `justlogic-d234` that bought 28 cells the
+    archive passes 1.6% of the time; once those were measured and their SE fell, the next round
+    bought cells it passes ~100% of. Both scored every arm identically and separated nothing.
+
+    Dropping the term is not the fix either: a pure-decision panel converges on one difficulty
+    (0.93 logits on the live ruler, under `BAND_COLLAPSE_LOGITS`), which is the state where θ is
+    logit-accuracy plus a constant and ranking on it ranks on accuracy.
+
+    Silent harm: every arm scores ~0 or ~1, `improved` reads false or trivially true, and the
+    headline moves with panel composition while nothing reports that the panel moved.
+    """
+    from promptpotter.application.intelligence.exploration import (
+        Observation,
+        select_round_subset,
+    )
+    from promptpotter.domain.sample import Sample
+
+    # A bank shaped like a real one: a DENSE mid-difficulty cluster the arms have hammered, in
+    # two measurement states, plus a SPARSE tail nobody has answered often. That shape is what
+    # separates the three rankings — an SE tied smoothly to |δ| never exercises it, because there
+    # the coarse cells sit where the decision term is already near zero and it wins on its own.
+    delta: dict[int, float] = {}
+    delta_se: dict[int, float] = {}
+    n = 0
+    for i in range(100):
+        d = -0.6 + 1.2 * i / 99
+        delta[n], delta_se[n] = d, 0.20
+        n += 1
+        delta[n], delta_se[n] = d, 0.90
+        n += 1
+    for i in range(50):
+        delta[n], delta_se[n] = -4.33 + 8.66 * i / 49, 1.50
+        n += 1
+    ruler = _ruler(delta, se=delta_se)
+    bank = [Sample(id=str(sid), query="q", ground_truth="g") for sid in sorted(delta)]
+    # One arm in the race, sitting mid-scale: it passes the easy half and misses the hard half.
+    own = [Observation("leader", sid, 1.0 if delta[sid] < 0 else 0.0) for sid in delta]
+    budget = 28
+
+    panel = [
+        int(s.id)
+        for s in select_round_subset(bank, own, budget, ruler=ruler, leader_ids={"leader"})
+    ]
+
+    assert len(set(panel)) == budget, "the panel duplicated or dropped cells"
+
+    # A MINORITY, not the reservation's exact size: a coarse cell sitting near the leader can
+    # legitimately win a decision slot on its own merits. What may never happen is the panel
+    # being made of them, which is what the summed acquisition did — 28 of 28.
+    coarse = {sid for sid, se in delta_se.items() if se > 1.0}
+    from_coarse = len(coarse & set(panel))
+    assert from_coarse <= budget // 3, (
+        f"{from_coarse} of {budget} panel cells are the ones δ is least sure of — "
+        "ruler learning outvoted the decision the panel exists to make"
+    )
+
+    span = max(delta[s] for s in panel) - min(delta[s] for s in panel)
+    assert span > 1.0, f"panel spans {span:.2f} logits — a collapsed band is not a reading"
+
+
+def test_the_panel_is_calibrated_to_the_arm_in_the_race_not_the_archive_best() -> None:
+    """The round buys cells that separate THIS cycle's arms; the archive only lends the δ scale.
+
+    ``select_round_subset`` is handed ``[*archive_observations, *cycle.rounds]`` because a θ fit
+    wants every arm it can get, and it took ``max`` over all of them — the best searchpoint ever
+    run on the dataset, which is not in this race. Live on `justlogic-d234` that was θ 1.79 against
+    a parent at −0.01, so the panel came out two logits too hard: 28 cells the archive passes 1.6%
+    of the time, every arm scored ~0, and the round resolved nothing.
+
+    It was harmless while a flat ruler made every θ equal, which is why it surfaced only once δ
+    was real — repairing an instrument is what lets the next defect downstream of it bite.
+
+    Silent harm: the panel is legitimately hard, every number renders, and `improved: false` reads
+    as "no candidate was better" rather than "nobody could have been measured".
+    """
+    from promptpotter.application.intelligence.exploration import (
+        Observation,
+        select_round_subset,
+    )
+    from promptpotter.domain.sample import Sample
+
+    delta = {i: -4.33 + 8.66 * i / 99 for i in range(100)}
+    # Uniform SE, so ruler-learning cannot confound the read.
+    ruler = _ruler(delta, se=0.50)
+    bank = [Sample(id=str(sid), query="q", ground_truth="g") for sid in sorted(delta)]
+    # The arm under test sits mid-scale; a far stronger arm rides in from the archive.
+    leader = [Observation("leader", sid, 1.0 if delta[sid] < 0 else 0.0) for sid in delta]
+    archive_star = [Observation("star", sid, 1.0 if delta[sid] < 2.5 else 0.0) for sid in delta]
+
+    panel = [
+        int(s.id)
+        for s in select_round_subset(
+            bank, [*archive_star, *leader], 28, ruler=ruler, leader_ids={"leader"}
+        )
+    ]
+    mean_delta = sum(delta[s] for s in panel) / len(panel)
+
+    # Near the arm in the race (θ ≈ 0), not near the archive's best (θ ≈ +2.6).
+    assert abs(mean_delta) < 1.0, (
+        f"panel centred at δ {mean_delta:+.2f} — calibrated to an arm that is not in this round"
+    )

@@ -745,7 +745,14 @@ def test_export_carries_one_round_whole_and_survives_the_file() -> None:
         total=28,
         matched_parent_lift=0.1,
         ability=AbilityReading(
-            theta=0.42, se=0.1, ruler_id="anchor-x", ruler_n=28, calibration_model="1PL"
+            theta=0.42,
+            se=0.1,
+            ruler_id="anchor-x",
+            ruler_n=28,
+            ruler_span=3.4,
+            round_span=2.1,
+            calibration_model="1PL",
+            caveat=None,
         ),
         prompt_fields={
             "persona": "P",
@@ -1020,7 +1027,7 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
         assert "mutation_rationale" in variant["required"]
 
         # Schema and model agree: the wire key parses, and binds back onto the real field.
-        model = build_l1_response_model(effective_l1_field_names())
+        model = build_l1_response_model(effective_l1_field_names(), parent_text={})
         parsed = model.model_validate(
             {
                 "variants": [
@@ -1059,7 +1066,9 @@ def test_schema_field_rename_is_locked_by_default_and_never_silently_half_applie
 
         # Nothing bound → the plain model, allocated once.
         set_optimizer_prompt_overrides(None)
-        assert build_l1_response_model(effective_l1_field_names()) is L1GenerateOutput
+        assert (
+            build_l1_response_model(effective_l1_field_names(), parent_text={}) is L1GenerateOutput
+        )
     finally:
         set_optimizer_prompt_overrides(None)
 
@@ -1768,6 +1777,7 @@ _CONFIG_TIER_BOOLEANS = frozenset(
         "lca-termnorm/pipeline::nodes.web_search.config.extra_snippets",
         "lca-termnorm/pipeline::nodes.web_search.config.extract_pdf",
         "lca-termnorm/pipeline::nodes.web_search.config.spellcheck",
+        "screen-taste-v0/pipeline::nodes.llm_only.optimizer.observation_mappings[0].is_llm",
     }
 )
 
@@ -3063,7 +3073,7 @@ def test_an_arm_read_on_two_instruments_is_not_a_replicate(built_stores: Any) ->
 # What `datasets/promptpotter-self/` currently fingerprints to. A pin, never a target: moving it
 # is allowed and sometimes right, but it is a CORPUS RESET and must be paid for on purpose — the
 # reason for a move belongs in the commit body, which is what this test's own message asks for.
-L4_INNER_ORIGIN = "59372f827e55"
+L4_INNER_ORIGIN = "630b3eeae841"
 
 
 def test_the_two_optimizer_manifests_describe_one_graph() -> None:
@@ -3161,6 +3171,7 @@ class _OrderedFakeBackend:
             "ground_truth": sample.ground_truth,
             "predicted": sample.ground_truth,
             "fitness": 1.0,
+            "objective": 1.0,
             "cached": False,
             "error": None,
             "pipeline_data": {"total_time": 0.5},
@@ -4343,7 +4354,7 @@ def test_digest_reads_the_ruler_off_the_cycle_not_the_unabsorbed_round() -> None
     from promptpotter.domain.ruler import DeltaRuler
 
     session = Mock()
-    session.scoring.scorer_round_formula = "accuracy"
+    session.scoring.scorer_cell_formula = "fitness"
     session.spend_used = None
     warm = DeltaRuler(
         delta={1: -0.5, 2: 0.5, 3: 1.0},
@@ -4365,7 +4376,11 @@ def test_digest_reads_the_ruler_off_the_cycle_not_the_unabsorbed_round() -> None
     # Exactly what `run_l1_critique` is handed: the round the loop has not folded in yet — so it
     # carries no reading of its own, and the digest's can only have come off the cycle.
     latest = round_result(
-        1, results=[{"sample_id": s, "fitness": f} for s, f in ((1, 1.0), (2, 0.0), (3, 1.0))]
+        1,
+        results=[
+            {"sample_id": s, "fitness": f, "objective": f}
+            for s, f in ((1, 1.0), (2, 0.0), (3, 1.0))
+        ],
     )
     assert latest.ability is None
     bundle = build_bundle(cycle, latest_round=latest)
@@ -4618,3 +4633,193 @@ def test_a_gutted_prompt_field_is_rejected_and_a_tightening_is_not() -> None:
     # The manifest fallback is live: with no parent override, the parent is the template's own
     # text and it is long enough to be reachable. Pins the wiring, not a byte count.
     assert len(_parent_field_text("l1_critique", "instruction", None)) > _GUTTABLE_MIN_CHARS
+
+
+def test_a_round_missing_its_critique_is_re_sent_before_the_generator_reads() -> None:
+    """`critique` is L1_MANDATORY, and two paths leave it empty: the producer skips the last round
+    of an invocation — which a `resume` then walks past — and a terminal provider failure there is
+    absorbed so the round can still close. Five of eleven rounds on `screen-taste-v0__26f943` had
+    none, including every one of the four it stalled on, and nothing on any channel said so."""
+    import asyncio
+    from unittest.mock import Mock, patch
+
+    from factories import round_result
+
+    from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
+    from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.application.optimization.l1 import critique as critique_mod
+    from promptpotter.domain.phases import StopLoop, StopReason
+
+    def _cycle(prior: object) -> Cycle:
+        session = Mock()
+        session.state.cycle_id = "cyc"
+        return Cycle(
+            session=session,
+            config=CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05)),
+            rounds=[round_result(0), prior],
+        )
+
+    rows = [{"sample_id": 1, "fitness": 1.0}]
+
+    # A round that HAS one is never re-sent — the skip must stay free.
+    kept = round_result(1, results=rows)
+    kept.critique = {"priority_fix": "already here"}
+    cycle = _cycle(kept)
+    calls: list[int] = []
+    with patch.object(critique_mod, "run_l1_critique", side_effect=AssertionError("re-sent")):
+        asyncio.run(critique_mod.ensure_prior_critique(cycle))
+    assert kept.critique == {"priority_fix": "already here"}
+
+    # A round MISSING one is re-sent, and the result lands on disk — or the next resume pays for
+    # a call this one already made, and the round file keeps saying the generator had no steer.
+    bare = round_result(1, results=rows)
+    bare.critique = None
+    cycle = _cycle(bare)
+
+    async def _distil(*_a: object, **_k: object) -> dict[str, str]:
+        calls.append(1)
+        return {"priority_fix": "distilled late"}
+
+    with patch.object(critique_mod, "run_l1_critique", side_effect=_distil):
+        asyncio.run(critique_mod.ensure_prior_critique(cycle))
+    assert calls == [1]
+    assert bare.critique == {"priority_fix": "distilled late"}
+    cycle.session.store.campaigns.save_round_file.assert_called_once()
+
+    # A transient failure is re-sent, not surrendered to: the second attempt carries the round.
+    flaky = round_result(1, results=rows)
+    flaky.critique = None
+    cycle = _cycle(flaky)
+    tries: list[int] = []
+
+    async def _second_time(*_a: object, **_k: object) -> dict[str, str]:
+        tries.append(1)
+        if len(tries) < 2:
+            raise RuntimeError("provider down")
+        return {"priority_fix": "arrived on the re-send"}
+
+    with patch.object(critique_mod, "run_l1_critique", side_effect=_second_time):
+        asyncio.run(critique_mod.ensure_prior_critique(cycle))
+    assert len(tries) == 2
+    assert flaky.critique == {"priority_fix": "arrived on the re-send"}
+
+    # Exhausting the re-sends HALTS. A round whose generator would run with an empty MANDATORY
+    # panel is a compromised decision point, and spending a full panel on it is the waste.
+    blind = round_result(1, results=rows)
+    blind.critique = None
+    cycle = _cycle(blind)
+    seen: list[dict[str, object]] = []
+    attempts: list[int] = []
+
+    async def _always_down(*_a: object, **_k: object) -> dict[str, str]:
+        attempts.append(1)
+        raise RuntimeError("provider down")
+
+    with (
+        patch.object(critique_mod, "run_l1_critique", side_effect=_always_down),
+        patch.object(critique_mod, "emit_round_warning", lambda **kw: seen.append(kw)),
+        patch.object(critique_mod, "declare_run_phase", lambda *a, **k: None),
+        pytest.raises(StopLoop) as halted,
+    ):
+        asyncio.run(critique_mod.ensure_prior_critique(cycle))
+    assert len(attempts) == critique_mod.CRITIQUE_RESEND_ATTEMPTS
+    assert halted.value.reason is StopReason.PAUSED
+    assert [w["kind"] for w in seen] == ["l1_critique_unavailable"]
+    assert seen[0]["severity"] == "error"
+    cycle.session.store.campaigns.save_round_file.assert_not_called()
+
+
+def test_the_schema_carries_the_datasets_nodes_not_the_backends_whole_inventory(
+    tmp_path: Path,
+) -> None:
+    """A discovered backend answers ``GET /pipeline`` with everything it can serve; the DATASET
+    says which of those are this campaign's.
+
+    `screen-taste-v0` declares one `llm_only` ranker and inherited six of TermNorm's other nodes —
+    3,789 chars of every optimizer prompt, every round, offering `web_search` and
+    `entity_profiling` levers to a film-ranking pipeline. Nothing failed: the model correctly
+    ignored them and paid the attention anyway.
+
+    The narrowing is the dataset's declaration UNIONED with the running chain, never
+    `active_steps` alone — `promptpotter-self` declares `l2_context` and `l3_plan` off-chain
+    deliberately, and dropping them would silently delete the L4 arc's main mutation targets."""
+    from promptpotter.application.datasets.prompts import dataset_declared_nodes
+    from promptpotter.application.pipeline_resolve import _resolve_active_schema
+    from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+
+    def _dataset(nodes: dict[str, Any], pipelines: dict[str, list[str]]) -> Path:
+        d = tmp_path / f"ds{len(list(tmp_path.iterdir()))}"
+        d.mkdir()
+        (d / "pipeline.yaml").write_text(
+            yaml.safe_dump({"name": "x", "nodes": nodes, "pipelines": pipelines}),
+            encoding="utf-8",
+        )
+        return d
+
+    # The backend's whole inventory, as discovery returns it.
+    backend = parse_pipeline_response(
+        {
+            "name": "termnorm",
+            "version": "v0",
+            "description": "",
+            "nodes": {
+                "llm_only": {"type": "generation", "optimizer": {"param_keys": ["temperature"]}},
+                "web_search": {"type": "enrichment", "optimizer": {"param_keys": ["num_results"]}},
+                "entity_profiling": {
+                    "type": "generation",
+                    "optimizer": {"param_keys": ["persona"]},
+                },
+            },
+            "pipelines": {"default": ["llm_only"]},
+        }
+    )
+    assert sorted(backend.node_param_keys()) == ["entity_profiling", "llm_only", "web_search"]
+
+    # A dataset declaring ONE node keeps one — `config: {}` still declares it.
+    one_node = _dataset({"llm_only": {"config": {}}}, {"default": ["llm_only"]})
+    assert dataset_declared_nodes(one_node) == frozenset({"llm_only"})
+    _active, narrowed = _resolve_active_schema(
+        backend, exclude=[], narrowing={}, dataset_dir=one_node
+    )
+    assert sorted(narrowed.node_param_keys()) == ["llm_only"]
+
+    # A node the dataset does not declare but the chain RUNS survives: narrowing may only ever
+    # drop what nothing executes.
+    two_step = parse_pipeline_response(
+        {
+            "name": "termnorm",
+            "version": "v0",
+            "description": "",
+            "nodes": {
+                "llm_only": {"type": "generation", "optimizer": {"param_keys": ["temperature"]}},
+                "web_search": {"type": "enrichment", "optimizer": {"param_keys": ["num_results"]}},
+                "entity_profiling": {
+                    "type": "generation",
+                    "optimizer": {"param_keys": ["persona"]},
+                },
+            },
+            "pipelines": {"default": ["web_search", "llm_only"]},
+        }
+    )
+    _active, kept = _resolve_active_schema(two_step, exclude=[], narrowing={}, dataset_dir=one_node)
+    assert sorted(kept.node_param_keys()) == ["llm_only", "web_search"]
+    assert "entity_profiling" not in kept.node_param_keys()
+
+    # A dataset with no pipeline.yaml has no opinion — never "no nodes".
+    empty = tmp_path / "bare"
+    empty.mkdir()
+    _active, untouched = _resolve_active_schema(
+        backend, exclude=[], narrowing={}, dataset_dir=empty
+    )
+    assert sorted(untouched.node_param_keys()) == ["entity_profiling", "llm_only", "web_search"]
+
+    # The L4 case my first attempt broke: off-chain optimizer nodes the dataset DECLARES survive.
+    pp_self = _pipeline_schema("promptpotter-self")
+    assert "l2_context" not in pp_self.active_steps
+    _active, l4 = _resolve_active_schema(
+        pp_self,
+        exclude=[],
+        narrowing={},
+        dataset_dir=Path(__file__).resolve().parents[1] / "datasets" / "promptpotter-self",
+    )
+    assert {"l2_context", "l3_plan"} <= set(l4.node_param_keys())

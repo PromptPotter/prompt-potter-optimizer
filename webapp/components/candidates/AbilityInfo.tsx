@@ -15,7 +15,57 @@ import type { AbilityReading } from "@/lib/api/types.generated";
 //
 // `model` is null while the ruler is cold — a flat ruler is neither 1PL nor 2PL, so the
 // third string is a real state, not a placeholder. Never collapse it into "1PL".
-export function AbilityHelp({ model }: { model: AbilityReading["calibration_model"] }) {
+type Caveat = NonNullable<AbilityReading["caveat"]>;
+
+// The three states in which θ is NOT ability. SERVED, never derived here — the backend decides
+// (`domain/ruler.py::theta_caveat`) and this only puts it into words, so the screen and the
+// optimizer's own `confounds` panel cannot disagree about whether a number means anything.
+// One copy, read by the inline notice and the explainer both.
+const CAVEAT_COPY: Record<Caveat, { head: string; body: string }> = {
+  cold_ruler: {
+    head: "θ is not ability yet",
+    body: "No difficulty ruler has been fitted, so θ is plain accuracy on the logit scale, read on each candidate's own cells. These θ compare to each other and to nothing else.",
+  },
+  flat_ruler: {
+    head: "θ is not ability here",
+    body: "The ruler itself spans almost nothing, so every cell counts the same and θ is accuracy plus a constant. That is the instrument, not this round's draw — no round could have read wider.",
+  },
+  collapsed_band: {
+    head: "θ is not ability this round",
+    body: "This round bought a thin slice of a wide ruler. Inside a band that narrow every cell is equally hard, so ranking on θ ranks on accuracy. That is the draw, not the instrument.",
+  },
+};
+
+const fmtSpan = (v: number | null) => (v == null ? null : `${v.toFixed(2)} logits`);
+
+// Silent unless a caveat is live — a warning that renders every round is read as boilerplate by
+// the third one, which is the same rule the `confounds` panel keeps on the optimizer's side.
+export function ThetaCaveatNotice({ ability }: { ability: AbilityReading | null | undefined }) {
+  const caveat = ability?.caveat;
+  if (!caveat) return null;
+  const { head, body } = CAVEAT_COPY[caveat];
+  const round = fmtSpan(ability?.round_span ?? null);
+  const ruler = fmtSpan(ability?.ruler_span ?? null);
+  return (
+    <div className="theta-caveat" role="note">
+      <strong>{head}</strong> {body}
+      {round && ruler ? (
+        <span className="theta-caveat-spans">
+          {" "}
+          This round&rsquo;s cells span {round}; the ruler spans {ruler}.
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+export function AbilityHelp({
+  model,
+  caveat,
+}: {
+  model: AbilityReading["calibration_model"];
+  caveat?: AbilityReading["caveat"];
+}) {
   return (
     <div className="ability-help">
       <p>
@@ -50,6 +100,11 @@ export function AbilityHelp({ model }: { model: AbilityReading["calibration_mode
           </>
         )}
       </p>
+      {caveat ? (
+        <p className="ability-help-calib">
+          <strong>{CAVEAT_COPY[caveat].head}</strong> {CAVEAT_COPY[caveat].body}
+        </p>
+      ) : null}
     </div>
   );
 }

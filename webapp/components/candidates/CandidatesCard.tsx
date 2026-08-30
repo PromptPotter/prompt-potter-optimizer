@@ -3,7 +3,7 @@ import { useCallback, useMemo, useState, type CSSProperties } from "react";
 import { activeSeries, metricInkToken, type SeriesCtx } from "./series";
 import { FitnessChart, type PlotGeometry, geomEqual } from "./FitnessChart";
 import { DendrogramStrip } from "./DendrogramStrip";
-import { AbilityHelp } from "./AbilityInfo";
+import { AbilityHelp, ThetaCaveatNotice } from "./AbilityInfo";
 import { setCandidatesState, toggleMetric, useCandidatesState } from "./candidates-store";
 import {
   Badge,
@@ -608,7 +608,10 @@ export function CandidatesCard() {
                   How candidates are ranked
                 </MenuCheck>
                 {showTheta && (
-                  <AbilityHelp model={history.at(-1)?.ability?.calibration_model ?? null} />
+                  <AbilityHelp
+                    model={history.at(-1)?.ability?.calibration_model ?? null}
+                    caveat={history.at(-1)?.ability?.caveat ?? null}
+                  />
                 )}
               </>
             )}
@@ -618,6 +621,9 @@ export function CandidatesCard() {
       }
     >
       <div className="fitness-body">
+        {/* On the θ it invalidates, not behind the `⋯` disclosure: a reading that is not ability
+            renders every number and raises nothing, so the screen has to say so unprompted. */}
+        {!areCourses && <ThetaCaveatNotice ability={history.at(-1)?.ability ?? null} />}
         {sampleSet && !areCourses && (
           <SampleSetControl rounds={history} overlap={overlap} unit={unit} />
         )}

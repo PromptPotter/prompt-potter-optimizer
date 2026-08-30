@@ -20,6 +20,27 @@
             ],
             "title": "Calibration Model"
           },
+          "caveat": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ThetaCaveat"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "round_span": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Round Span"
+          },
           "ruler_id": {
             "anyOf": [
               {
@@ -34,6 +55,17 @@
           "ruler_n": {
             "title": "Ruler N",
             "type": "integer"
+          },
+          "ruler_span": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ruler Span"
           },
           "se": {
             "anyOf": [
@@ -56,7 +88,10 @@
           "se",
           "ruler_id",
           "ruler_n",
-          "calibration_model"
+          "ruler_span",
+          "round_span",
+          "calibration_model",
+          "caveat"
         ],
         "title": "AbilityReading",
         "type": "object"
@@ -4209,6 +4244,16 @@
         ],
         "title": "TermsConsent",
         "type": "object"
+      },
+      "ThetaCaveat": {
+        "description": "A state in which θ is NOT ability — decided beside the ruler, never in a view.\n\nAll three render every number and raise nothing, so the round looks identical to a sound one.\nWHICH one fired is the whole value, because the fix differs: one is an instrument, one is an\nacquisition, one is the absence of a scale. The ABSENCE of a caveat is the fourth state, and\nthe only one where θ is ability.\n\n`docs/methods/verdict-resolution.md` § Reading a round.",
+        "enum": [
+          "cold_ruler",
+          "flat_ruler",
+          "collapsed_band"
+        ],
+        "title": "ThetaCaveat",
+        "type": "string"
       },
       "TrajectoryPoint": {
         "additionalProperties": false,

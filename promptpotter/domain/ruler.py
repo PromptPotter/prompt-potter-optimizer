@@ -8,6 +8,7 @@ the one it was read on. `intelligence/exploration.py` keeps the estimators that 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import ConfigDict, Field
@@ -22,25 +23,94 @@ from promptpotter.domain.strict_model import StrictModel
 RulerEntry = float | tuple[float, float]
 Ruler = Mapping[int, RulerEntry]
 
-# The identity a COLD ruler shares everywhere: flat δ means θ is plain logit-accuracy, which
-# depends on no fit and is therefore comparable across cycles. A fitted ruler is not.
-FLAT_RULER_ID = "flat"
+# A COLD ruler's id, qualified by the OBJECTIVE θ was fit on: flat δ depends on no fit, so the
+# objective is the only thing separating two cold readings. A FITTED ruler needs no qualifier —
+# `anchor_id_of` hashes δ that were fit from the objective's own responses.
+_FLAT_PREFIX = "flat"
 
 # Which IRT model a cycle's δ ruler was fitted under. The ABSENCE of a member is the third,
 # real state — a cold ruler is flat, so θ degenerates to logit-accuracy. Never collapse it
 # into "1PL".
 CalibrationModel = Literal["1PL", "2PL"]
 
+# A round whose cells span less than this FRACTION of the ruler's own δ range is a collapsed band.
+# Deliberately loose: it must catch the case `verdict-resolution.md` records without firing on an
+# ordinary acquisition draw. A first estimate, to refine against banked rounds.
+BAND_COLLAPSE_RATIO = 0.20
+# ...and this many LOGITS absolutely. The ratio measures the round against the ruler, so on a ruler
+# that is itself collapsed the yardstick is the thing under test and a wide-looking fraction of a
+# narrow scale stays silent. Below this span θ is logit-accuracy plus a constant either way.
+BAND_COLLAPSE_LOGITS = 1.0
+
+
+class ThetaCaveat(StrEnum):
+    """A state in which θ is NOT ability — decided beside the ruler, never in a view.
+
+    All three render every number and raise nothing, so the round looks identical to a sound one.
+    WHICH one fired is the whole value, because the fix differs: one is an instrument, one is an
+    acquisition, one is the absence of a scale. The ABSENCE of a caveat is the fourth state, and
+    the only one where θ is ability.
+
+    `docs/methods/verdict-resolution.md` § Reading a round."""
+
+    # No δ scale at all — θ is plain logit-accuracy on whatever subset this arm answered, so two
+    # readings are comparable to each other and to nothing else.
+    COLD_RULER = "cold_ruler"
+    # The INSTRUMENT: the ruler itself spans almost nothing, so no draw could have been wider.
+    FLAT_RULER = "flat_ruler"
+    # The ACQUISITION: a warm, wide ruler, and this round bought a thin slice of it. The silent
+    # one — the ruler id matches, the cell count is healthy, and every number renders.
+    COLLAPSED_BAND = "collapsed_band"
+
+
+def theta_caveat(
+    *,
+    calibration_model: CalibrationModel | None,
+    round_span: float | None,
+    ruler_span: float | None,
+) -> ThetaCaveat | None:
+    """Which of the three states this reading is in, or ``None`` where θ is genuinely ability.
+
+    The SOLE decision: the served reading and the optimizer's ``confounds`` panel both call here,
+    or the screen and the generator disagree about whether a number means anything. Spans below
+    two cells arrive as ``None`` and are not a verdict — an unmeasurable band is not a narrow one.
+    """
+    if calibration_model is None:
+        return ThetaCaveat.COLD_RULER
+    if round_span is None or ruler_span is None:
+        return None
+    if ruler_span <= BAND_COLLAPSE_LOGITS:
+        return ThetaCaveat.FLAT_RULER
+    if round_span <= max(BAND_COLLAPSE_LOGITS, BAND_COLLAPSE_RATIO * ruler_span):
+        return ThetaCaveat.COLLAPSED_BAND
+    return None
+
+
 __all__ = [
-    "FLAT_RULER_ID",
+    "BAND_COLLAPSE_LOGITS",
+    "BAND_COLLAPSE_RATIO",
     "CalibrationModel",
     "DeltaRuler",
     "Ruler",
     "RulerEntry",
+    "ThetaCaveat",
     "anchor_id_of",
+    "flat_ruler_id",
+    "is_flat_ruler_id",
     "ruler_entry",
-    "ruler_id",
+    "theta_caveat",
 ]
+
+
+def flat_ruler_id(objective_id: str) -> str:
+    """The scale of a COLD ruler, per the prefix above."""
+    return f"{_FLAT_PREFIX}:{objective_id}"
+
+
+def is_flat_ruler_id(value: str) -> bool:
+    """Whether a STAMPED id names a cold ruler. A fitted anchor is a hex digest, so the prefix
+    cannot collide with one."""
+    return value.startswith(_FLAT_PREFIX)
 
 
 def ruler_entry(value: RulerEntry) -> tuple[float, float]:
@@ -103,6 +173,12 @@ class DeltaRuler(StrictModel):
             for sid, d in self.delta.items()
         }
 
+    @property
+    def delta_span(self) -> float:
+        """Total δ range in logits — how much difficulty this scale can actually tell apart. Near
+        zero means θ is logit-accuracy plus a constant however many cells the ruler carries."""
+        return max(self.delta.values()) - min(self.delta.values()) if self.delta else 0.0
+
     def band_span(self, sample_ids: Iterable[int]) -> tuple[float, float] | None:
         """``(round_span, ruler_span)`` in logits — ``None`` below two cells on either side, where
         a span is not a reading.
@@ -117,8 +193,7 @@ class DeltaRuler(StrictModel):
         on = [self.delta[sid] for sid in sample_ids if sid in self.delta]
         if len(on) < 2 or len(self.delta) < 2:
             return None
-        full = list(self.delta.values())
-        return (max(on) - min(on), max(full) - min(full))
+        return (max(on) - min(on), self.delta_span)
 
     def entries_covering(self, sample_ids: Iterable[int]) -> dict[int, RulerEntry]:
         """This ruler completed with a PROVISIONAL entry at its own centre (``mu_delta``, a=1) for
@@ -138,11 +213,6 @@ class DeltaRuler(StrictModel):
         return out
 
 
-def ruler_id(ruler: DeltaRuler | None) -> str:
-    """The scale a θ was read ON. Two θ readings are comparable iff these match."""
-    return FLAT_RULER_ID if ruler is None else ruler.anchor_id
-
-
 class AbilityReading(StrictModel):
     """A Rasch θ and the δ scale it was read on — meaningless apart, so they are one value.
     ``ruler_id`` ``None`` names NO scale: that reading is comparable to nothing.
@@ -158,8 +228,20 @@ class AbilityReading(StrictModel):
     ruler_id: str | None
     # The ruler grows by anchored extension, so the id alone cannot say how much scale was real.
     ruler_n: int
+    # ...and the count cannot either: 600 cells inside a quarter-logit is a WARM ruler reading
+    # flat, the one degenerate state that renders every number and says nothing. On disk beside
+    # the θ it qualifies, so an operator surface can read it and not only the optimizer node.
+    ruler_span: float | None
+    # The δ span of the cells THIS reading was taken on. Beside `ruler_span` because the pair is
+    # the reading: a thin round on a wide ruler and a wide round on a thin one are different
+    # faults with identical θ. ``None`` below two cells, where a span is not a reading.
+    round_span: float | None
     # ``None`` = the ruler is cold (flat δ) and θ is plain logit-accuracy — neither model.
     calibration_model: CalibrationModel | None
+    # SERVED, never re-derived: which of the three states this θ is in, or ``None`` where it is
+    # genuinely ability. Stamped from `theta_caveat` at the one minting site, so the browser and
+    # the optimizer's `confounds` panel cannot disagree about whether a number means anything.
+    caveat: ThetaCaveat | None
 
     def comparable_to(self, other: AbilityReading) -> bool:
         return self.ruler_id is not None and self.ruler_id == other.ruler_id
@@ -167,4 +249,4 @@ class AbilityReading(StrictModel):
     def scale(self) -> str:
         """The scale in words — the one rendering, so no surface reassembles it."""
         model = f", {self.calibration_model}" if self.calibration_model else ""
-        return f"ruler {self.ruler_id or FLAT_RULER_ID}, {self.ruler_n} cells{model}"
+        return f"ruler {self.ruler_id or 'unscaled'}, {self.ruler_n} cells{model}"

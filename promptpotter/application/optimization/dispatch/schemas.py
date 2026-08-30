@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Callable, Mapping
-from typing import Annotated, Any
+from typing import Annotated, Any, ClassVar
 
 from pydantic import (
     BaseModel,
@@ -167,18 +167,33 @@ class L1Variant(OptimizerResponseModel):
         Field(max_length=VARIANT_PROSE_MAX)
     )
 
+    # The parent's CURRENT text per override key, bound per round onto the SUBCLASS
+    # `build_l1_response_model` mints. Empty on this base class, which is reached only where the
+    # round has no parent text and no rename to apply — there a blank slot is still convicted,
+    # and only a deliberate CLEAR becomes indistinguishable from a restatement.
+    parent_text: ClassVar[Mapping[str, str]] = {}
+
     @model_validator(mode="after")
     def _reject_empty_mutation(self) -> L1Variant:
-        if not (
-            self.pipeline_params_override
-            or self.prompt_fields_override
-            or self.task_context_override
-        ):
+        # A slot FILLED is not a mutation MADE, and only the parent's text tells the two apart:
+        # `{"upstream_context": ""}` beside two empty slots passes any container test — the dict
+        # is non-empty — while carrying no edit at all. `l1_invariants.py` convicts the same
+        # delta after the call returns, where it can only drop the candidate; here the message
+        # rides the schema-repair retry back to the model (`llm/openai_compat.py`), so the round
+        # gets the arm instead of losing it.
+        parent = type(self).parent_text
+        blank = not self.pipeline_params_override and not any(
+            value != parent.get(key, "")
+            for slot in (self.prompt_fields_override, self.task_context_override)
+            for key, value in slot.items()
+        )
+        if blank:
             raise ValueError(
                 "this variant mutates nothing: at least one of pipeline_params_override, "
-                "prompt_fields_override or task_context_override must be non-empty. "
-                "Describing a change in changes_description is not making one — emit the "
-                "override that carries it."
+                "prompt_fields_override or task_context_override must carry a value that "
+                "DIFFERS from the current prompt. Describing a change in changes_description "
+                "is not making one, and a key mapped to an empty string — or to what the field "
+                "already says — fills a slot without making a mutation. Emit the new text."
             )
         return self
 
@@ -187,16 +202,27 @@ class L1GenerateOutput(OptimizerResponseModel):
     variants: list[L1Variant]
 
 
-def build_l1_response_model(field_names: Mapping[str, str]) -> type[L1GenerateOutput]:
+def build_l1_response_model(
+    field_names: Mapping[str, str], *, parent_text: Mapping[str, str]
+) -> type[L1GenerateOutput]:
     """``L1GenerateOutput`` validating through renamed wire keys. ``populate_by_name`` is left OFF deliberately: a model
-    emitting the original key fails validation and self-penalises, rather than the rename silently half-applying."""
-    if not field_names:
+    emitting the original key fails validation and self-penalises, rather than the rename silently half-applying.
+
+    ``parent_text`` is what each override key says on the parent RIGHT NOW, so
+    ``_reject_empty_mutation`` measures a value rather than a container. REQUIRED, because it
+    changes which variants that guard convicts — passing it is the caller declaring which parent
+    this round is mutating away from, and a default would decide that from an absent argument."""
+    if not field_names and not parent_text:
         return L1GenerateOutput
-    return _build_l1_response_model(tuple(sorted(field_names.items())))
+    return _build_l1_response_model(
+        tuple(sorted(field_names.items())), tuple(sorted(parent_text.items()))
+    )
 
 
 @functools.lru_cache(maxsize=16)
-def _build_l1_response_model(items: tuple[tuple[str, str], ...]) -> type[L1GenerateOutput]:
+def _build_l1_response_model(
+    items: tuple[tuple[str, str], ...], parent: tuple[tuple[str, str], ...]
+) -> type[L1GenerateOutput]:
     overrides: dict[str, Any] = {}
     for field, wire in items:
         info = L1Variant.model_fields[field]
@@ -212,6 +238,9 @@ def _build_l1_response_model(items: tuple[tuple[str, str], ...]) -> type[L1Gener
         # No default and no default_factory ⇒ Field() stays required, matching the source field.
         overrides[field] = (info.annotation, Field(**kwargs))
     variant = create_model("L1Variant", __base__=L1Variant, **overrides)
+    # A ClassVar, so it rides the subclass without becoming a field the wire schema advertises —
+    # the parent's own text must never be emitted back to the model as something to fill in.
+    variant.parent_text = dict(parent)
     suffix = "_".join(f"{f}2{w}" for f, w in items)
     # `variant` is a class only at runtime (`create_model` above), so `list[variant]` written as a
     # subscript is a type expression over a variable and mypy objects — correctly. Whether it

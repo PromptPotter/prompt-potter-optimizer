@@ -50,11 +50,16 @@ def injection_source_digest() -> str:
     allowance and derives the mandatory/exempt sets those two are handed. A module that shapes the
     prompt and is not hashed here pools corpora the fingerprint exists to keep apart.
 
+    ``domain.ruler`` because ``theta_caveat`` and the two collapse thresholds decide whether the
+    ``confounds`` panel says a round's θ is ability at all — a verdict the served reading and the
+    panel share, so it shapes the prompt from outside this package.
+
     ``facade`` imports this module, so it is resolved at call time rather than above.
     """
     from promptpotter.application.optimization.dispatch import facade
+    from promptpotter.domain import ruler
 
-    return module_source_digest(bundle, compose, facade, *_RENDERER_MODULES)
+    return module_source_digest(bundle, compose, facade, ruler, *_RENDERER_MODULES)
 
 
 def citable_fields(

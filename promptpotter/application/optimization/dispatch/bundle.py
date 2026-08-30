@@ -80,10 +80,6 @@ AXES_ENUM_PREVIEW = 4
 # "is this separable"; the tail is already in `mutation_memory` and repeating it here would spend
 # the frame's whole budget on the arms least likely to win.
 PRECISION_ARM_ROWS = 3
-# A round whose cells span less than this FRACTION of the ruler's own δ range is reported as a
-# collapsed band. Deliberately loose: it must catch the case `verdict-resolution.md` records
-# without firing on an ordinary acquisition draw. A first estimate, to refine against banked rounds.
-BAND_COLLAPSE_RATIO = 0.20
 NEAR_MISS_RENDER_CAP = 2
 SAMPLE_RENDER_CAP = 2
 TRANSCRIPT_RENDER_CAP = 3

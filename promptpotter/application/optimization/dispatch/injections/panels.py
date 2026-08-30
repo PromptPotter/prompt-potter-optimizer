@@ -7,7 +7,6 @@ from typing import Any, cast
 from promptpotter.application.optimization.dispatch.bundle import (
     ANSWER_LABEL_STEM,
     ANSWER_TALLY_ROWS,
-    BAND_COLLAPSE_RATIO,
     INNER_NARRATIVE_CAP,
     INNER_NARRATIVE_FULL_CELLS,
     INNER_NARRATIVE_RENDER_CAP,
@@ -44,6 +43,7 @@ from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS, PARENT_LEVEL_SE_KEY
 from promptpotter.domain.results import CritiqueReadout, EliminationGate, ScoredCandidate
 from promptpotter.domain.results_health import evidence_starved_node
+from promptpotter.domain.ruler import ThetaCaveat, theta_caveat
 from promptpotter.domain.scoring import QueryMeasurement, enumerable_truth_labels, is_hit
 from promptpotter.shared.composite import render_composite_fitness_block
 from promptpotter.shared.errors import is_error_result
@@ -1005,11 +1005,25 @@ def _r_confounds(b: InjectionBundle) -> list[Item]:
         span := b.ruler.band_span(s for s in d.latest_sample_ids if isinstance(s, int))
     ) is not None:
         round_span, ruler_span = span
-        if ruler_span > 0 and round_span <= BAND_COLLAPSE_RATIO * ruler_span:
+        # The verdict is the SERVED one (`domain/ruler.py::theta_caveat`), never a second reading
+        # of the same spans: the operator's screen and this panel must not be able to disagree
+        # about whether a number means anything. Naming WHICH arm fired is the value — the
+        # instrument and the acquisition need different fixes and the round looks identical.
+        caveat = theta_caveat(
+            calibration_model=b.ruler.calibration_model,
+            round_span=round_span,
+            ruler_span=ruler_span,
+        )
+        if caveat in (ThetaCaveat.FLAT_RULER, ThetaCaveat.COLLAPSED_BAND):
+            cause = (
+                "the ruler itself spans almost nothing, so no draw could have been wider"
+                if caveat is ThetaCaveat.FLAT_RULER
+                else "the draw took a thin slice of a wider ruler"
+            )
             rows.append(
                 f"COLLAPSED BAND — this round's {unit_plural(b.measured_unit)} span "
-                f"{round_span:.2f} logits on a ruler spanning {ruler_span:.2f}. Inside a band "
-                f"that narrow every {b.measured_unit} is equally hard, "
+                f"{round_span:.2f} logits on a ruler spanning {ruler_span:.2f}; {cause}. Inside a "
+                f"band that narrow every {b.measured_unit} is equally hard, "
                 "so θ is logit-accuracy plus a constant and ranking on it ranks on accuracy."
             )
     if d.prev_sample_ids and not (d.latest_sample_ids & d.prev_sample_ids):

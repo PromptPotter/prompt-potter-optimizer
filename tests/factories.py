@@ -18,6 +18,7 @@ Only what a test actually bends is a parameter; everything else is a plausible d
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from promptpotter.domain.escalation_signals import ValidationFailure
@@ -34,6 +35,45 @@ from promptpotter.domain.spend import SpendBucket, SpendRollup
 # only two labels: with as many distinct truths as rows the answer space reads as
 # identity-keyed and no constant answerer is detectable.
 _TRUTH = ["TRUE", "FALSE", "TRUE", "FALSE"]
+
+
+def measurement(
+    sample_id: int,
+    fitness: float | None = 1.0,
+    *,
+    objective: float | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    """One measured cell, stamped the way ``rescore_results`` leaves one.
+
+    ``objective`` defaults to ``fitness`` — that IS the identity wherever a campaign declares no
+    ``per_cell`` formula — and stamping both is what keeps these rows readable by
+    ``graded_response``, which RAISES on a row carrying neither rather than reading the absence
+    as a 0.0. Pass it separately only to make the two differ.
+
+    ``fitness=None`` builds the other row shape: a real error row (``_error_result``) carries no
+    grade at all, and the coverage floor and the θ fit are both about that ABSENCE rather than
+    about a low score. Eight local copies of these two shapes drifted apart here once already —
+    adding ``objective`` to the loop had to find every one of them.
+    """
+    if fitness is None:
+        return {"sample_id": sample_id, **extra}
+    return {
+        "sample_id": sample_id,
+        "hit": fitness > 0.5,
+        "fitness": fitness,
+        "objective": fitness if objective is None else objective,
+        **extra,
+    }
+
+
+def measurements(
+    grades: Sequence[float], sample_ids: Sequence[int] | None = None
+) -> list[dict[str, Any]]:
+    """One arm's panel. Ids run ``0..n-1`` unless the test needs a specific set — a subset
+    disjoint from the prior's is how the paired-PoBB and subset-drift cases are built."""
+    ids = range(len(grades)) if sample_ids is None else sample_ids
+    return [measurement(sid, g) for sid, g in zip(ids, grades, strict=True)]
 
 
 def scored_candidate(

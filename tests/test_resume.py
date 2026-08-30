@@ -34,7 +34,14 @@ _CAMPAIGN = "testds__20260101-000000"
 
 
 def _r(score: float) -> dict:
-    return {"query": "q", "predicted": "p", "ground_truth": "g", "fitness": score}
+    # ``objective`` is what θ is fit on; equal to ``fitness`` under no ``per_cell`` composite.
+    return {
+        "query": "q",
+        "predicted": "p",
+        "ground_truth": "g",
+        "fitness": score,
+        "objective": score,
+    }
 
 
 def _decisions(*recs: dict[str, Any]) -> list[dict[str, Any]]:

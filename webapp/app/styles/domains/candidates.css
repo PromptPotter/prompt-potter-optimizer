@@ -94,6 +94,12 @@
 .ability-help p:last-child{margin-bottom:0}
 .ability-help strong{color:var(--color-text-primary)}
 .ability-help-calib{padding-top:6px;border-top:0.5px solid var(--color-border);color:var(--color-text-tertiary)}
+/* Rendered only while a caveat is live, so it may sit in the body's flow and read as part of the
+   card rather than as a dismissible banner. Warn ink on the rule alone — the state is a fact about
+   the reading, not an error, and a filled panel here would outshout the bars it qualifies. */
+.theta-caveat{margin:0 0 var(--space-8);padding:var(--space-6) var(--space-8);border-left:2px solid var(--color-warn);font-size:var(--text-xs);line-height:1.5;color:var(--color-text-secondary)}
+.theta-caveat strong{color:var(--color-text-primary)}
+.theta-caveat-spans{color:var(--color-text-tertiary)}
 /* The scoring mask opens to the RIGHT of the chart (side-by-side) inside the
    fitness card. .fitness-chart-wrap groups the legend + chart so the
    legend stays positioned above the bars (matching the Composite-only

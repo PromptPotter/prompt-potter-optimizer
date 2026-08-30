@@ -8,7 +8,10 @@ export interface AbilityReading {
   se: number | null;
   ruler_id: string | null;
   ruler_n: number;
+  ruler_span: number | null;
+  round_span: number | null;
   calibration_model: '1PL' | '2PL' | null;
+  caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | null;
 }
 
 /** One candidate as `dashboard.json` serves it, in ANY round state — the live rows under */
@@ -565,6 +568,7 @@ export interface LiveDashboardState {
   current_query_payload: string | null;
   current_sample_id: number | null;
   open_sample_ids: number[];
+  declared_sample_order: number[];
   sample_lookahead: number;
   sample_lookahead_discards: number;
   sample_lookahead_armed: number;
@@ -1741,17 +1745,9 @@ export const EVALUATOR_META: EvaluatorMeta[] = [
   { name: 'accuracy', scope: 'per_round', direction: 'high', node_type: null, from_rows: true, description: 'Mean per-sample score across non-deprecated samples.' },
   { name: 'error_rate', scope: 'per_round', direction: 'low', node_type: null, from_rows: true, description: 'Fraction of queries that errored (ERROR predicted or exception).' },
   { name: 'degraded_rate', scope: 'per_round', direction: 'low', node_type: null, from_rows: true, description: 'Fraction of queries that completed with pipeline degradation warnings.' },
-  { name: 'validation_failure_rate', scope: 'per_round', direction: 'low', node_type: null, from_rows: false, description: 'Fraction of samples where L1 output was malformed; L1 re-proposes (owner=L1).' },
-  { name: 'runtime_failure_rate', scope: 'per_round', direction: 'low', node_type: null, from_rows: false, description: 'Fraction of samples that triggered DegradationCheck; L1 retunes, or operator-flagged if locked.' },
-  { name: 'l2_guard_breach_rate', scope: 'per_round', direction: 'low', node_type: null, from_rows: false, description: 'Fraction of samples where L2 refinement breached guards; L3 healed.' },
-  { name: 'l3_guard_breach_rate', scope: 'per_round', direction: 'low', node_type: null, from_rows: false, description: 'Fraction of samples where L3 plan breached its own guards.' },
-  { name: 'mean_latency_s', scope: 'per_round', direction: 'low', node_type: null, from_rows: true, description: 'Mean seconds one scored cell cost, off step_timings — so a cached replay still prices the work it replays. Larger is worse; a formula supplies the budget.' },
   { name: 'source_recall', scope: 'per_round', direction: 'high', node_type: 'candidate_source', from_rows: false, description: "Fraction of queries where GT appears in a candidate_source node's output." },
   { name: 'candidate_recall', scope: 'per_round', direction: 'high', node_type: 'ranker', from_rows: false, description: "Fraction of queries where GT appears in a ranker node's final_ranking." },
   { name: 'cache_hit_rate', scope: 'per_round', direction: 'high', node_type: 'cache', from_rows: false, description: 'Fraction of queries resolved by a cache node (non-null timing).' },
   { name: 'retrieval_shortfall', scope: 'per_sample', direction: 'high', node_type: null, from_rows: false, description: 'Per-sample min(observed/target, 1.0) across nodes with max_*/num_* limits on list-valued outputs. 1.0 = target met or exceeded.' },
   { name: 'mean_retrieval_shortfall', scope: 'per_round', direction: 'high', node_type: null, from_rows: false, description: "Mean of retrieval_shortfall across the round's results." },
-  { name: 'pipeline_compactness', scope: 'per_round', direction: 'high', node_type: null, from_rows: false, description: '1 - (active_steps - 1) / 11 — shorter pipelines score higher (single-node = 1.0).' },
-  { name: 'output_compactness', scope: 'per_round', direction: 'high', node_type: null, from_rows: true, description: '1 - mean(output_tokens) / OUTPUT_TOKEN_BUDGET — terser (cheaper) generations score higher. The accuracy-vs-cost axis; available to formulas, not in the default composite.' },
-  { name: 'prompt_compactness', scope: 'per_round', direction: 'high', node_type: null, from_rows: false, description: '1 - len(rendered_prompt) / PROMPT_BUDGET_CHARS — shorter prompts score higher (≤ budget → 1.0, ≥ budget → 0.0). Penalizes overly verbose prompt templates in the composite_fitness score.' },
 ];
