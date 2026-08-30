@@ -153,7 +153,7 @@ async def cmd_pause(args: argparse.Namespace) -> CommandResult:
     logger.info("run control: %s/%s -> pause requested", campaign_id, cycle_id)
     # `status`, matching this function's other two exits — NOT `run_phase`. The cycle's
     # phase is still whatever `derive_run_phase` says (it runs until its next checkpoint),
-    # and the word this used to serve there, `pausing`, is in no `RunPhase`. Run-state has
+    # and `pausing` — the obvious word for it — is in no `RunPhase`. Run-state has
     # one server-owned answer and one vocabulary; a fourth entry point minting a seventh
     # word for it is how the CLI and the browser come to describe one cycle differently.
     return CommandResult(
@@ -208,7 +208,7 @@ async def cmd_set_budget(args: argparse.Namespace) -> CommandResult:
     logger.info("budget: %s/%s -> %s", campaign_id, cycle_id, payload)
     # The REQUESTED figures are deliberately absent from the human line: the account clamp can
     # write less than was asked (`quota.py::clamp_budget_change`), so quoting the request here
-    # would be the terminal telling the same lie the webapp's optimistic note used to.
+    # would have the terminal report a ceiling that was never armed.
     return CommandResult(
         data={
             "campaign_id": campaign_id,

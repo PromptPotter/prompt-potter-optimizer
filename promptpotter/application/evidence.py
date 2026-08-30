@@ -688,10 +688,9 @@ def subject_evidence(
         heads[key] = head
         channels_by_subject[key] = channels
 
-    # An unmeasured selection is not a metric problem, and answering it as one is what two
-    # ordinary actions — ticking a campaign whose origin has not run, mistyping an id — used to
-    # get back: "Metric 'measurand' is not one this selection can answer", about a vocabulary,
-    # when the fact is that there is nothing here to have a vocabulary over.
+    # An unmeasured selection is not a metric problem, so it may not be answered as one: two
+    # ordinary actions reach here — ticking a campaign whose origin has not run, mistyping an id
+    # — and neither has a vocabulary to be wrong about.
     if not heads:
         raise ValueError(
             f"None of {', '.join(sorted(wanted)) or 'the subjects named'} has scored rows to read. "

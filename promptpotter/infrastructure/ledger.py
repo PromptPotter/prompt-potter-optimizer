@@ -48,9 +48,8 @@ def branch_offset(cycle_dir: CycleDir) -> int | None:
     """Where this cycle's history begins on its PARENT's ledger — ``index.json::forked_at_offset``,
     stamped at the cut by ``campaign_store``. ``None`` for a root, which inherits nothing.
 
-    The one copy of a number that used to be derived twice and stored never, and the reason a
-    fork's history could not be walked from disk: ``forked_from_round`` is a round and
-    ``forked_at`` a wall clock, so neither addresses the ray. A FORK whose manifest predates the
+    The one copy of this number, and the only field that addresses the ray: ``forked_from_round``
+    is a round and ``forked_at`` a wall clock, so neither substitutes for it. A FORK whose manifest predates the
     stamp raises rather than defaulting — inheriting ``0`` would silently serve a fork as though
     it began from nothing, which reads as a real (and much shorter) history."""
     link = _fork_link(cycle_dir)

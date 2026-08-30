@@ -719,17 +719,22 @@ the PR description.
   config — and mode-relative (`measured`, the samples that round actually ran,
   vs `all`, the full dataset). Two values appear in the data:
   `composite_fitness` (the score under the active formula, **served already
-  resolved** — with no active formula the default per-round formula is plain
-  accuracy, so it **equals** `accuracy` and readers take it verbatim) and
+  resolved** — with no active formula the default is the cell's own score, so
+  it **equals** `accuracy` and readers take it verbatim) and
   `accuracy` (the plain correctness rate, formula-independent). Per-sample
   difficulty is a *separate* view, not a fitness formula (the hard-sample
-  sorter bullet above). The chain is produced + resolved at three
-  single-writer choke points. `compute_composite_fitness`
+  sorter bullet above). **The composite is scored per CELL and folded, not
+  computed on the round** — `rescore_results` stamps each row's `objective`
+  beside its `fitness` (`domain/scoring.py::CellScorer`), and that per-cell
+  value is BOTH what `composite_fitness` means and what θ is fit on
+  (`exploration.py::graded_response`). That identity is the whole point: a
+  round is won on θ, so a latency, cost or reliability term reaches the
+  election only by being charged to the cell. The chain is produced + resolved
+  at three single-writer choke points. `compute_composite_fitness`
   (`application/scoring/metrics.py`) is the sole writer of
-  `composite_fitness`; with no active per-round formula it degrades to
-  accuracy **at compute time** via `_default_round_scorer`
-  (`application/scoring/formula/round_scorer.py`), so the served field is
-  never a sentinel — the only manufactured value is a real `0.0` for a
+  `composite_fitness`, meaning `objective` over the same scoreable rows
+  `accuracy` is read against, so the served field is never a sentinel — the
+  only manufactured value is a real `0.0` for a
   validation-failed candidate. `display_fitness` (`domain/rendering.py`)
   is the **one** canonical resolved value every display + ranking site
   reads — `composite_fitness` when present (the honest `0.0` is kept),
@@ -737,10 +742,12 @@ the PR description.
   argmax-over-candidates form, and **is not the election** — that is
   `elect_round_winner`'s Rasch θ-lift, which no aggregate reproduces.
   Alternative formulas (a `score:<formula>` mask, replay) never recompute in the consumer — they
-  re-project from the stored evaluator namespace via
+  re-project from the stored per-ROUND evaluator namespace via
   `value_with_mask_applied` (`metrics.py`) and are **served** — every
   score, active or alternative, is backend-computed and the webapp never
-  recomputes. Don't
+  recomputes. A mask is therefore the *projection* of the active composite and
+  agrees with it only where the formula is linear in its terms
+  (`operations/mask-projection.md`). Don't
   add a second composite-or-accuracy resolution; route through
   `display_fitness`. **A cycle's "best" deliberately has two bases:** the
   *winner export* (and the L2/L3 stall comparator) argmaxes cumulative

@@ -97,9 +97,12 @@ validated document (a `Stores`-shaped stub, a session object).
 
 `factories.py` is not a seventh test file (no `test_` prefix, collects nothing). It holds
 builders that return REAL domain models — `round_result`, `cycle_result`,
-`scored_candidate`, `degradation_health`, `lost_round` — each taking only the fields a
+`scored_candidate`, `degradation_health`, `lost_round` — plus `measurement` /
+`measurements`, the one MEASURED-CELL row (`QueryMeasurement` is a `TypedDict`, so the
+dict *is* the model and no strict model is being faked). Each takes only the fields a
 test bends. Add a parameter when a test needs to bend one, never a whole new builder for
-a shape an existing one can express.
+a shape an existing one can express — eight local copies of the cell row had drifted apart
+here before, and adding `objective` to the loop had to find every one of them.
 
 ## Frozen cycle fixtures (`tests/fixtures/cycles/`)
 

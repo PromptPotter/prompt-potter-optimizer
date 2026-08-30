@@ -205,7 +205,6 @@ async def verify_candidate(
         # `score_search_point` call above) — a lift read across two different bases is not
         # a lift.
         opt_sp=None,
-        round_scorer=session.scoring.round_scorer,
     )
 
     workspace_n = len(workspace_qms)

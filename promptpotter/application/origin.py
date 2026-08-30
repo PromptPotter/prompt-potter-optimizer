@@ -369,8 +369,9 @@ async def prepare_scoring_context(
         session,
         obs=obs,
         scoring_formula=spec.per_sample,
-        scoring_round_formula=spec.per_round,
+        scoring_cell_formula=spec.per_cell,
         scorer_id=spec.scorer_id,
+        headline_metric=campaign_config.headline_metric,
         source="origin",
     )
 

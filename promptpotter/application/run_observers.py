@@ -52,9 +52,8 @@ __all__ = [
 ]
 
 
-# What ``current_query_payload`` shows the operator (``LiveStateCard``). The reader used to
-# slice this off a full query it was handed; the cap belongs at the writer, where the record
-# is decided.
+# What ``current_query_payload`` shows the operator (``LiveStateCard``). The cap belongs at the
+# writer, where the record is decided — never sliced off a full query by the reader.
 QUERY_PREVIEW_CHARS = 120
 
 
@@ -70,7 +69,7 @@ def build_campaign_emitter(
 ) -> LiveDashboardView | None:
     """Live dashboard projection from session + config. ``seed_from_cycle_id`` names the parent
     cycle to seed prior trajectory from; ``None`` seeds from the cycle's own dir. ``None`` back
-    when the session carries no cycle to write into — the type says so now; it used to say ``Any``."""
+    when the session carries no cycle to write into, which the return type states."""
     opt = campaign_config.optimization
     return LiveDashboardView.for_session(
         session.hop,

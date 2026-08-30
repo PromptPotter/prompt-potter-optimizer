@@ -228,7 +228,7 @@ recorded, so the run's rows are identical at any depth — unlike Skip, which do
 cycle. And it **costs at most one discarded backend call per eliminated candidate**, shown as
 `sample_lookahead_discards` on the dashboard.
 
-It is browser-only and host-admin-gated (`scoring.sample_lookahead`) — there is deliberately no CLI verb and no config key, so an assistant can *recommend* the control but cannot press it. Contract: [`../specs/m12-api-openapi.yaml`](../specs/m12-api-openapi.yaml)`::setSampleLookahead`.
+It is browser-only and gated on `campaign.lookahead` — there is deliberately no CLI verb and no config key, so an assistant can *recommend* the control but cannot press it. Contract: [`../specs/m12-api-openapi.yaml`](../specs/m12-api-openapi.yaml)`::setSampleLookahead`.
 
 ### Sweep batch — `new --sweep-batch`
 
@@ -339,18 +339,23 @@ score?"* Three facts answer it; together they're why editing a file can feel ine
 
 ## Changing the composite formula — fork, never swap
 
-**There is no live swap, and the reason is a gate rather than plumbing.** `round_scorer` compiles once during run init (`initialization/loop_start.py::populate_session_scoring`) from `campaign.json::scoring` and is never re-read. To change it: author a `per_round` formula over the names below, edit `campaign.json::scoring`, and `resume --fork-on-divergence` — the sibling starts at the divergence point and every round it banks is scored under one formula.
+**There is no live swap, and the reason is a gate rather than plumbing.** The scorer compiles once during run init (`initialization/loop_start.py::populate_session_scoring`) from `campaign.json::scoring` and is never re-read. To change it: author a `per_cell` formula over the names below, edit `campaign.json::scoring`, and `resume --fork-on-divergence` — the sibling starts at the divergence point and every round it banks is scored under one formula.
+
+**A `per_cell` formula is what θ is fit on** (`domain/scoring.py::CellScorer`), so it is the only route by which a latency, cost or reliability term reaches the election at all — a round is won on θ, and a term outside it moves the display alone. It is charged where it happened rather than meaned over the panel, which is the point: at round scope one 2000-second cell hides behind a fast one, and which prompt provoked the slowdown cannot be recovered. The cell's own correctness stays `per_sample` and stays what `is_hit` thresholds, or a correct-but-slow answer would render MISS and send L1 to repair an answer that was already right.
 
 Swapping it between rounds instead would make the composite **incomparable to its own past** inside one cycle, silently. `EscalationFSM._improved` — the L2/L3 stall gate — asks whether the cycle's best advanced since a layer fired, and answers on `best_composite_fitness` whenever the θ ruler is unavailable (a cold-started cycle). Redefine the composite mid-cycle and that comparison reads a change of scale as progress or as stall, with nothing to error on. The same argument retires the per-sample/per-round distinction this section used to draw: the per-sample scorer additionally rewrites recorded `hit`/`score` on every prior trace and trips the divergence replayer on the next resume, but neither is safe mid-cycle, and both have the same cure. `POST /commands/change-scoring-composite` is declared in `docs/specs/m12-api-openapi.yaml` and carries `x-status: declared-not-wired`; wiring it as specified would reintroduce exactly this.
 
 ### Available names
 
-**The roster is `application/scoring/evaluators.py::_REGISTRY`** — the twelve literal
-`Evaluator`s plus one per `::SELF_HEALERS` spec, each carrying its own range and one-line
-meaning. Read it there: a table here goes stale in the one direction that costs the
-operator a name they never learn exists, and this page listed eleven of sixteen for
-long enough to hide five. Each is gated by `applies(schema)`, so it is present only when
-the matching node is active.
+**A `per_cell` formula reads `scoring/formula/compiler.py::objective_namespace`** — the declared
+channels (`fitness`, `latency`, `cost`, `tokens`, `ground_truth_rank`, the L4 lift family), the three
+row-health facts (`errored`, `degraded`, `cached`), and whatever else that dataset's own trace
+carries. **A MASK reads `evaluators.py::_REGISTRY`** plus the per-cell channel means
+`metrics.py::_MEANED_CHANNELS` folds in, which is what lets one formula be written once and read in
+both places. Read both there: a table here goes stale in the one direction that costs the operator a
+name they never learn exists, and this page listed eleven of sixteen for long enough to hide five.
+Registry entries are gated by `applies(schema)`, so each is present only when the matching node is
+active; a channel is present only where a row answered it.
 
 Helpers are `scoring/formula/compiler.py::SAFE_BUILTINS`. Output clamped to `[0, 1]`;
 undefined names raise `NameError` — fail loud is the contract, which is exactly why the

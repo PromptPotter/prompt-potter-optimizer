@@ -156,10 +156,11 @@ Finished cycle: `campaigns/<id>/log.md` (campaign digest, heatmap, final winner)
 ### A held round is not proof the candidate failed — check the other estimator
 
 **The hit sequence is difficulty-ordered, so a tail of 1s is the ORDER, never a surge.**
-`build_round_order` (`intelligence/adaptive_queue_mechanism.py`) puts seed-MISS win-opportunities
-first (ascending δ) and slots seed-HIT regression probes every 4th position, so every arm ends
-`…1111111` and opens near zero. The late run is the bank, not momentum, and paired against an
-parent that also wins those rows it carries no information.
+`build_round_order` (`intelligence/adaptive_queue_mechanism.py`) puts parent-MISS win-opportunities
+first (ascending δ), parent-HIT regression probes every 4th position, and cells the parent never
+answered last, by discrimination — never as misses, which front-loaded the easiest cells. So every
+arm ends `…1111111` and opens near zero: the late run is the bank, not momentum, and paired
+against a parent that also wins those rows it carries no information.
 
 **The promotion gate and the PoBB posterior can disagree — they are asking different questions.**
 `p_better` is a **stopping** posterior (is more measurement worth buying?); `improved` is a

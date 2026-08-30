@@ -103,9 +103,8 @@ def persist_round(
     # ONE destination. Every pending record goes to the ledger, which is its chronological
     # place and the only home it needs: each carries its own ``round`` stamp, so the round that
     # MADE a decision is a fact about the record rather than about when it happened to be
-    # flushed. The document used to carry a second copy assembled here, and a record stamped for
-    # a round whose file was already written reached no document at all — it was dropped from
-    # this drain and cleared from the buffer in the same breath.
+    # flushed. Assemble no second copy onto the round document: a record stamped for a round
+    # whose file is already written reaches no document at all.
     flushed: list[ResumeCheckpointRecord] = []
     if cycle.pending_decisions:
         flushed = list(cycle.pending_decisions)

@@ -84,9 +84,8 @@ def _inner_optimizer_revision(dataset_dir: Path) -> dict[str, Any]:
 def _measurement_source_digest() -> str:
     """The ESTIMATOR's own code, which decides what a banked cell's number means.
 
-    It replaced ``APP_VERSION`` in the fingerprint. That constant voided every banked cell on
-    every release while saying nothing about whether the measurement had actually changed — the
-    two costs run opposite ways, and a corpus that cannot survive a version bump cannot
+    Never ``APP_VERSION`` here: it voids every banked cell on each release while saying nothing
+    about whether the measurement changed, and a corpus that cannot survive a version bump cannot
     accumulate at all. These five modules are what genuinely decides the number: the composite,
     the election and its intervals, the ability fit the levels are expressed in, the SCALE that
     fit is read on, and the law that reads a finished inner cycle. Same AST normalization as its

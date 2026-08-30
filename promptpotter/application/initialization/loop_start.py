@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.origin import CampaignOrigin
     from promptpotter.application.run_observers import RunCallbacks
+    from promptpotter.domain.results import HeadlineMetric
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
@@ -79,27 +80,22 @@ def populate_session_scoring(
     *,
     obs: ObservabilityBridge | None,
     scoring_formula: str | None,
-    scoring_round_formula: str | None = None,
+    scoring_cell_formula: str | None = None,
     scorer_id: str | None = None,
+    headline_metric: HeadlineMetric = "accuracy",
     source: str = "optimization_loop",
 ) -> None:
     """Attach scoring + obs to *session* in place (step 2 of run init).
     Requires ``init_services`` already ran; ``scoring_formula`` resolved from ``campaign.json::scoring`` by the caller."""
-    from promptpotter.application.scoring.formula import (
-        auto_scorer_id,
-        compile_round_scorer,
-        compile_scorer,
-    )
+    from promptpotter.application.scoring.formula import auto_scorer_id, compile_scorer
 
     session.state.obs = obs
     session.source = source
-    session.scoring.scorer = compile_scorer(scoring_formula)
+    session.scoring.scorer = compile_scorer(scoring_formula, scoring_cell_formula)
     session.scoring.scorer_id = scorer_id or auto_scorer_id(scoring_formula)
     session.scoring.scorer_formula = scoring_formula
-    session.scoring.round_scorer = (
-        compile_round_scorer(scoring_round_formula) if scoring_round_formula else None
-    )
-    session.scoring.scorer_round_formula = scoring_round_formula
+    session.scoring.scorer_cell_formula = scoring_cell_formula
+    session.scoring.headline_metric = headline_metric
 
 
 def arm_diagnostic_scoring(
@@ -129,8 +125,9 @@ def arm_diagnostic_scoring(
         session,
         obs=None,
         scoring_formula=spec.per_sample,
-        scoring_round_formula=spec.per_round,
+        scoring_cell_formula=spec.per_cell,
         scorer_id=spec.scorer_id,
+        headline_metric=campaign_config.headline_metric,
         source=source,
     )
     return pipeline_params
@@ -186,7 +183,7 @@ async def _emit_preflight_and_init_session(
 
 def _build_and_start_cycle(
     origin: CampaignOrigin,
-    scoring_round_formula: str | None,
+    scoring_cell_formula: str | None,
     session: Session,
     config: CampaignConfig,
     dataset: list[Sample],
@@ -234,7 +231,7 @@ def _start_observability_and_scoring(
     started_at: str,
     langfuse_session_id: str | None,
     scoring_formula: str | None,
-    scoring_round_formula: str | None,
+    scoring_cell_formula: str | None,
     scorer_id: str,
 ) -> tuple[str, ObservabilityBridge | None]:
     from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
@@ -255,8 +252,9 @@ def _start_observability_and_scoring(
         session,
         obs=obs,
         scoring_formula=scoring_formula,
-        scoring_round_formula=scoring_round_formula,
+        scoring_cell_formula=scoring_cell_formula,
         scorer_id=scorer_id,
+        headline_metric=config.headline_metric,
     )
     return tracing_campaign_id, obs
 
@@ -344,15 +342,15 @@ def _finalize_loop_state(
     # Stamped at init rather than only into `index.json::final`: that block exists only once the
     # cycle STOPS, and a RUNNING cycle's `log.md` must still name the formula its numbers carry.
     if session.state.cycle_id:
-        from promptpotter.application.scoring.evaluators import resolve_round_formula
+        from promptpotter.application.scoring.evaluators import resolve_cell_formula
         from promptpotter.shared.errors import graceful
 
         with graceful("round-formula stamp failed"):
             session.store.campaigns.update(
                 session.hop,
                 {
-                    "scorer_round_formula": resolve_round_formula(
-                        session.scoring.scorer_round_formula, session.pipeline_schema
+                    "scorer_cell_formula": resolve_cell_formula(
+                        session.scoring.scorer_cell_formula, session.pipeline_schema
                     )[0]
                 },
             )
@@ -375,7 +373,7 @@ async def init_optimization_loop(
     *,
     cb: RunCallbacks,
     scoring_formula: str | None,
-    scoring_round_formula: str | None,
+    scoring_cell_formula: str | None,
     scorer_id: str,
     no_divergence_check: bool,
     fork_on_divergence: bool,
@@ -393,7 +391,7 @@ async def init_optimization_loop(
 
     cycle, resolved_cycle_id, resumed_from_round = _build_and_start_cycle(
         origin,
-        scoring_round_formula,
+        scoring_cell_formula,
         session,
         config,
         dataset,
@@ -410,7 +408,7 @@ async def init_optimization_loop(
         started_at=started_at,
         langfuse_session_id=langfuse_session_id,
         scoring_formula=scoring_formula,
-        scoring_round_formula=scoring_round_formula,
+        scoring_cell_formula=scoring_cell_formula,
         scorer_id=scorer_id,
     )
 

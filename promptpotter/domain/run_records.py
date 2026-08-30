@@ -314,6 +314,11 @@ RoundWarningKind = Literal[
     # volunteered field, not a decision — but never silently: it means the layer's schema let it
     # fill the kill switch with "" while its actual output was a healthy steer.
     "layer_terminate_blank",
+    # `l1_generate` ran with its MANDATORY critique panel empty. The prior round either skipped
+    # the distillation (it was the last of its invocation) or lost it to a terminal provider
+    # failure, and the re-send at the next round's head failed too. The generator then rewrites a
+    # prompt nothing told it how to fix, which is invisible on every other channel.
+    "l1_critique_unavailable",
     # The odd one out, deliberately: nothing failed. The round measured cleanly and still
     # resolved nothing — no arm's blocked lift over the parent excluded 0 — which looks
     # identical to a decisive round on every other channel. Emitted by `l1/score/winner.py`.

@@ -33,7 +33,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     load_optimizer_prompt,
     resolve_node_layout,
 )
-from promptpotter.application.scoring.evaluators import resolve_round_formula
+from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.domain.escalation_signals import exploration_budget
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS, L1Layout
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
@@ -325,8 +325,8 @@ def build_bundle(
     current_sp = cycle.tracking.current_sp
     current_pp = current_sp.pipeline_params if current_sp is not None else None
     opt = cycle.config.optimization
-    formula, formula_short = resolve_round_formula(
-        cycle.session.scoring.scorer_round_formula, cycle.session.pipeline_schema
+    formula, formula_short = resolve_cell_formula(
+        cycle.session.scoring.scorer_cell_formula, cycle.session.pipeline_schema
     )
     spend_used = cycle.session.spend_used
     cs = CycleSlice(

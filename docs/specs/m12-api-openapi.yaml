@@ -201,9 +201,10 @@ paths:
         every nested level at once. So arming the outer releases N inner campaigns together,
         and arming one of those inner runs holds N of its own rows in flight.
 
-        Requires the host-admin `scoring.sample_lookahead` capability — it spends the box's shared
-        provider rate bucket, so no tenant tier carries it. Deliberately has **no CLI verb**:
-        the browser remote is the only surface, which is the boundary itself.
+        Requires `campaign.lookahead` — its own rung rather than a share of babysit, because it
+        spends the box's shared provider rate bucket and is therefore the one power a host may
+        want to withhold from a delegate. Deliberately has **no CLI verb**: the browser remote
+        is the only surface, which is the boundary itself.
       tags: [cycle-control]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'

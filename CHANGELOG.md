@@ -15,6 +15,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **A campaign starts when you say so.** A check-in that resolved cleanly used to mint and spawn the runner with no Start press, so the first sign of a launch was a round already scoring against real money. Every resolved draft now lands in review behind the button.
 - **Picking a set of cells moves only the `overlap` bars.** Accuracy, θ and the composite stay on each candidate's own cells instead of vanishing, and a candidate that answered part of the set is blank rather than drawn short beside a full one.
 - **The shared reading is `overlap` everywhere** — chart, terminal line, `log.md`, `review.md`, round document. It read "trajectory" on screen only, a word two other things already mean.
 

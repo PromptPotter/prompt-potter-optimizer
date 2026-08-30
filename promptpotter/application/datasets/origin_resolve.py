@@ -220,7 +220,7 @@ async def resolve_origin_turn(
 
 def _degraded_cause(*, output: CheckinOutput, applied: bool, repair_attempts: int) -> str | None:
     """Why this turn came back thin, or ``None`` where it did not — the check-in panel's warning
-    text and the block on auto-mint.
+    text.
 
     A turn that produced nothing usable RAISES rather than returning one; the route's catch turns
     that into the 502 the webapp shows. So no unusable turn ever reaches a client, which is why the
