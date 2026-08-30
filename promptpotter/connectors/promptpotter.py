@@ -11,6 +11,7 @@ from promptpotter.domain.pipeline_overlay import node_config_items
 
 if TYPE_CHECKING:
     from pathlib import Path
+    from types import ModuleType
 
     import httpx
 
@@ -21,6 +22,18 @@ logger = logging.getLogger(__name__)
 # measurement identity (rides node_configs / the origin cycle id), NEVER a wire
 # tunable — the adapter strips it before building ``optimizer_prompt_overrides``.
 INNER_ORIGIN_KEY = "inner_origin"
+
+
+def instrument_of(pipeline_params: object) -> str | None:
+    """Which INSTRUMENT a searchpoint was measured on — its inner-origin fingerprint, or ``None``
+    where the backend has none. The one reader of ``INNER_ORIGIN_KEY`` out of a params map, so the
+    mint-time cohort warning and the evidence roster cannot disagree about where it is written."""
+    if not isinstance(pipeline_params, dict):
+        return None
+    node = pipeline_params.get("l1_generate")
+    value = node.get(INNER_ORIGIN_KEY) if isinstance(node, dict) else None
+    return value if isinstance(value, str) and value else None
+
 
 # Most inner campaigns the operator may set running at once — a RESOURCE ceiling (peak RSS and
 # one shared provider key), never a scientific one: rows absorb in walk order at any depth.
@@ -81,23 +94,30 @@ def _inner_optimizer_revision(dataset_dir: Path) -> dict[str, Any]:
     return revision
 
 
-def _measurement_source_digest() -> str:
-    """The ESTIMATOR's own code, which decides what a banked cell's number means.
+def measurement_modules() -> tuple[ModuleType, ...]:
+    """The ESTIMATOR's own code, which decides what a banked cell's number means, in digest order.
 
     Never ``APP_VERSION`` here: it voids every banked cell on each release while saying nothing
     about whether the measurement changed, and a corpus that cannot survive a version bump cannot
     accumulate at all. These five modules are what genuinely decides the number: the composite,
     the election and its intervals, the ability fit the levels are expressed in, the SCALE that
-    fit is read on, and the law that reads a finished inner cycle. Same AST normalization as its
-    prompt-side twin ``injection_source_digest`` — a docstring is free, an expression is not.
+    fit is read on, and the law that reads a finished inner cycle. Unlike its prompt-side twin
+    ``registry.fingerprinted_modules``, this roster is a CHOICE within the layer rather than a
+    package, so it is listed and pinned by ``tests/test_integrity.py`` instead of walked.
     """
     from promptpotter.application.intelligence import exploration
     from promptpotter.application.runner.inner import ruler
     from promptpotter.application.scoring import metrics, selection
     from promptpotter.domain.l4 import proxies
+
+    return (exploration, metrics, selection, proxies, ruler)
+
+
+def _measurement_source_digest() -> str:
+    """Same AST normalization as the prompt side — a docstring is free, an expression is not."""
     from promptpotter.shared.hashing import module_source_digest
 
-    return module_source_digest(exploration, metrics, selection, proxies, ruler)
+    return module_source_digest(*measurement_modules())
 
 
 def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:

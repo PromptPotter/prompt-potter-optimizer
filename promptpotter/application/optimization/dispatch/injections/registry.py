@@ -5,26 +5,32 @@ A divisible panel needs none — `compose.select` thins it to whatever the node 
 from __future__ import annotations
 
 import functools
+import importlib
 import inspect
+import pkgutil
 from collections.abc import Mapping
+from types import ModuleType
 
 from promptpotter.application.optimization.dispatch import bundle, compose
+from promptpotter.application.optimization.dispatch import injections as _injections_pkg
 from promptpotter.application.optimization.dispatch.bundle import (
     _Injection,
     injection_registry,
 )
-
-# Imported for the @signal side effect — each module decorates its `_r_*` renderers, which
-# registers them into the bundle-level registry that `injection_registry()` snapshots below.
-from promptpotter.application.optimization.dispatch.injections import (
-    catalogues,
-    layer_state,
-    panels,
-    wounds,
-)
 from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.l1_layout import NODE_LAYOUTS, L1Layout
 from promptpotter.shared.hashing import module_source_digest
+
+# The modules whose source DECIDES what an optimizer prompt contains. WALKED, never listed: the
+# import is also the @signal side effect that registers each module's `_r_*` renderers, so a
+# hand-authored tuple can omit a module three ways at once — its panels never register, the
+# orphan check below never scans it, and the identity digest never hashes it, all in silence.
+# Sorted by module name, which is the order the digest is taken in.
+_RENDERER_MODULES: tuple[ModuleType, ...] = tuple(
+    importlib.import_module(f"{_injections_pkg.__name__}.{_m.name}")
+    for _m in sorted(pkgutil.iter_modules(_injections_pkg.__path__), key=lambda m: m.name)
+    if _m.name != "registry"
+)
 
 INJECTIONS: dict[str, _Injection] = injection_registry()
 
@@ -33,22 +39,18 @@ INJECTIONS: dict[str, _Injection] = injection_registry()
 # escalation panel's budget has widened past `tight`.
 STALL_EXPLORATION = "stall_exploration"
 
-# The modules whose source DECIDES what an optimizer prompt contains. One tuple, because the
-# orphan check below and the identity digest above must never disagree about the set: a renderer
-# module missing from the digest changes every prompt and voids nothing.
-_RENDERER_MODULES = (catalogues, layer_state, panels, wounds)
 
-
-@functools.cache
-def injection_source_digest() -> str:
-    """The panels' text is code, so it sits outside ``_identity_config``'s prompt templates and
-    layouts. Its estimator-side twin is ``connectors/promptpotter.py::_measurement_source_digest``.
+def fingerprinted_modules() -> tuple[ModuleType, ...]:
+    """Every module whose source shapes an optimizer prompt, in digest order. The panels' text is
+    code, so it sits outside ``_identity_config``'s prompt templates and layouts; its estimator-side
+    twin is ``connectors/promptpotter.py::measurement_modules``.
 
     ``bundle`` is hashed beside the renderers because the constants deciding how much of a panel a
     prompt receives live there rather than in the renderer that spends them, ``compose`` because
     it decides which of those panels a prompt receives AT ALL, and ``facade`` because it picks the
     allowance and derives the mandatory/exempt sets those two are handed. A module that shapes the
-    prompt and is not hashed here pools corpora the fingerprint exists to keep apart.
+    prompt and is not hashed here pools corpora the fingerprint exists to keep apart, which is what
+    ``tests/test_integrity.py`` pins this roster against.
 
     ``domain.ruler`` because ``theta_caveat`` and the two collapse thresholds decide whether the
     ``confounds`` panel says a round's θ is ability at all — a verdict the served reading and the
@@ -59,7 +61,12 @@ def injection_source_digest() -> str:
     from promptpotter.application.optimization.dispatch import facade
     from promptpotter.domain import ruler
 
-    return module_source_digest(bundle, compose, facade, ruler, *_RENDERER_MODULES)
+    return (bundle, compose, facade, ruler, *_RENDERER_MODULES)
+
+
+@functools.cache
+def injection_source_digest() -> str:
+    return module_source_digest(*fingerprinted_modules())
 
 
 def citable_fields(
@@ -82,8 +89,8 @@ def citable_fields(
 
 # Fail import if a slot's name drifts from its key, or a ``_r_*`` renderer is
 # defined in a source module but never wired (forgot the ``@signal`` decorator):
-# an orphan renders nothing yet looks live. The renderer modules are already
-# imported above, so this needs no package walk.
+# an orphan renders nothing yet looks live. Scans the walked set, so a module
+# added to the package is scanned without being named anywhere.
 _wired = {inj.render for inj in INJECTIONS.values()}
 for _key, _inj in INJECTIONS.items():
     if _inj.name != _key:

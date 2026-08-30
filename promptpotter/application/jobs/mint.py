@@ -15,8 +15,11 @@ from promptpotter.application.pipeline_resolve import (
     resolved_dataset_name,
 )
 from promptpotter.application.runner.campaign_ids import build_origin_cycle_id, mint_campaign_id
+from promptpotter.connectors.promptpotter import instrument_of
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.run_records import CycleSeed
+from promptpotter.infrastructure.store.io import read_json_tolerant
+from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -114,6 +117,49 @@ def _warn_on_duplicate_origin(
     log(f"NOTE: identical origin already run in {', '.join(prior)} — consider `resume`")
 
 
+def _warn_on_novel_instrument(
+    session: Session,
+    plan: CyclePlan,
+    campaign_config: CampaignConfig,
+    *,
+    log: Callable[..., None],
+) -> None:
+    """Say so, BEFORE the spend, when nothing this dataset has already banked will replay — the
+    inner INSTRUMENT (``connectors/promptpotter.py::_identity_config``) is computed from the engine,
+    so an ordinary edit to a panel, a layout or the estimator moves it and silently strands every
+    prior cell. The cost otherwise lands weeks later as "why does nothing accumulate", a question
+    about numbers that no longer exist to be asked about.
+
+    Silent on the healthy path and on every backend declaring no instrument."""
+    instrument = instrument_of(plan.pipeline_params)
+    if instrument is None:
+        return
+    dataset_name = resolved_dataset_name(session, campaign_config)
+    prior: list[str] = []
+    for campaign_dir in session.store.campaigns.iter_campaign_dirs():
+        campaign = session.store.campaigns.load_campaign(campaign_dir.name)
+        if campaign is None or campaign.dataset_name != dataset_name:
+            continue
+        root = campaign_cycles_dir(campaign_dir) / campaign.root_cycle_id
+        doc = read_json_tolerant(CycleLayout(root).round_file(0), {})
+        banked = instrument_of(doc.get("pipeline_params") if isinstance(doc, dict) else None)
+        if banked is not None:
+            prior.append(banked)
+    if not prior or instrument in prior:
+        return
+    logger.warning(
+        "Inner instrument %s matches none of the %d prior %s campaign(s), which carry %d other "
+        "fingerprint(s) — no banked cell replays, so this run re-measures its origin and can be "
+        "compared to none of them. Expected while the engine is being rewritten; it is also the "
+        "reason a panel does not accumulate across runs.",
+        instrument,
+        len(prior),
+        dataset_name,
+        len(set(prior)),
+    )
+    log(f"NOTE: instrument {instrument} is new — none of {len(prior)} prior campaigns replay")
+
+
 def fresh_campaign_id(session: Session, campaign_config: CampaignConfig) -> str:
     """A brand-new random campaign id — what every mint that does NOT own its campaign's identity
     passes on. The L4 inner spawn is the one caller that does, deriving it from its cell."""
@@ -139,6 +185,7 @@ def prepare_fresh_cycle(
     # key carries it (``store/layout.py::inner_sandbox_key``), so an rmtree at this line can
     # only destroy a DIFFERENT campaign's inner history. One did: 39 banked inner campaigns.
     _warn_on_duplicate_origin(session, plan.cycle_id, log=log or _noop_log)
+    _warn_on_novel_instrument(session, plan, campaign_config, log=log or _noop_log)
     session_id, campaign_id, cycle_id = auto_mint_session(
         session,
         campaign_config,

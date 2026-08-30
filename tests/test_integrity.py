@@ -3086,12 +3086,30 @@ def test_an_arm_read_on_two_instruments_is_not_a_replicate(built_stores: Any) ->
     assert moved.replicates[0].level_spread > held.replicates[0].level_spread
 
 
-# --- L4 measurement identity: the freeze ratchet ------------------------------
+# --- L4 measurement identity -------------------------------------------------
 
-# What `datasets/promptpotter-self/` currently fingerprints to. A pin, never a target: moving it
-# is allowed and sometimes right, but it is a CORPUS RESET and must be paid for on purpose — the
-# reason for a move belongs in the commit body, which is what this test's own message asks for.
-L4_INNER_ORIGIN = "630b3eeae841"
+# Every module whose source decides what one banked inner cell MEANS, named without the package
+# prefix. Not a value pin: what the fingerprint hashes TO moves on any ordinary engine edit, and
+# what it costs is counted at the mint instead (`jobs/mint.py::_warn_on_novel_instrument`).
+L4_FINGERPRINT_ROSTER = frozenset(
+    {
+        # Prompt side — walked from the injections package by `fingerprinted_modules`.
+        "application.optimization.dispatch.bundle",
+        "application.optimization.dispatch.compose",
+        "application.optimization.dispatch.facade",
+        "application.optimization.dispatch.injections.catalogues",
+        "application.optimization.dispatch.injections.layer_state",
+        "application.optimization.dispatch.injections.panels",
+        "application.optimization.dispatch.injections.wounds",
+        "domain.ruler",
+        # Estimator side — a choice within the layer, so listed by `measurement_modules`.
+        "application.intelligence.exploration",
+        "application.runner.inner.ruler",
+        "application.scoring.metrics",
+        "application.scoring.selection",
+        "domain.l4.proxies",
+    }
+)
 
 
 def test_the_two_optimizer_manifests_describe_one_graph() -> None:
@@ -3123,31 +3141,33 @@ def test_the_two_optimizer_manifests_describe_one_graph() -> None:
     )
 
 
-def test_the_l4_measurement_identity_moves_only_when_someone_meant_it() -> None:
-    """The silent harm: this fingerprint keys every banked inner campaign, and it is computed from
-    the ENGINE — dispatch panel prose, ``NODE_LAYOUTS``, the estimator's own source, the inner
-    prompts, the seed roster, the inner benchmark's config. So an ordinary edit to any of those
-    voids the whole L4 archive with nothing raised anywhere: the next campaign simply re-measures
-    its origin, cannot be compared to the ones before it, and a replicate arm reads its own code
-    drift back as noise.
+def test_the_l4_fingerprint_hashes_every_module_that_shapes_a_cell() -> None:
+    """The silent harm: a module that decides what a banked inner cell MEANS but is missing from
+    the fingerprint pools two incomparable corpora under ONE id. That is worse than a reset — the
+    numbers are wrong rather than absent, a replicate arm reads its own code drift back as noise,
+    and nothing else in the system says so.
 
-    Nothing else can catch it. The cost lands weeks later as "why does nothing accumulate", which
-    is a question about a number that no longer exists to be asked about.
+    The VALUE is deliberately not pinned here. It is computed from the engine, so it moves on any
+    ordinary panel or estimator edit; pinning it made a third of all commits re-pin a constant and
+    trained exactly the reflex re-pin it was written to prevent, while guarding a corpus that had
+    never once replayed. What a move COSTS is stated where it can be COUNTED instead —
+    ``jobs/mint.py::_warn_on_novel_instrument``, at the mint, before the spend.
 
-    Re-pin DELIBERATELY, in the commit that moves it, with the reason in the commit body — the
-    ``<surface-ledger>`` discipline, applied to measurement identity instead of surface count."""
-    from promptpotter.connectors import CONNECTORS
+    The prompt half is walked from the injections package, so only the estimator half can silently
+    lose a member. Re-pin when a module joins or leaves, and say why in the commit body."""
+    from promptpotter.application.optimization.dispatch.injections.registry import (
+        fingerprinted_modules,
+    )
+    from promptpotter.connectors.promptpotter import measurement_modules
 
-    identity = CONNECTORS["promptpotter"].identity_config(Path("datasets/promptpotter-self"))
-    assert identity == {"l1_generate": {"inner_origin": L4_INNER_ORIGIN}}, (
-        f"L4 measurement identity moved to {identity}. Every banked inner campaign under "
-        f"{L4_INNER_ORIGIN} just stopped replaying, so the next `new promptpotter-self` "
-        "re-measures its origin and compares to nothing. If that is what you meant — a batched "
-        "inner-side change — re-pin L4_INNER_ORIGIN here and say why in the commit body. If it "
-        "is not, the edit reached inside the fingerprint: dispatch/panel prose, NODE_LAYOUTS, "
-        "the estimator source (exploration/metrics/selection/proxies), the inner optimizer "
-        "prompts, inner_tasks.yaml, or the inner benchmark's pipeline/campaign config. The OUTER "
-        "optimizer prompts (assets/optimizer/sets/) are outside it and free to edit."
+    modules = (*fingerprinted_modules(), *measurement_modules())
+    roster = {m.__name__.removeprefix("promptpotter.") for m in modules}
+    assert roster == L4_FINGERPRINT_ROSTER, (
+        "the L4 measurement fingerprint's inputs moved. Gone: "
+        f"{sorted(L4_FINGERPRINT_ROSTER - roster)}; added: {sorted(roster - L4_FINGERPRINT_ROSTER)}. "
+        "A module that shapes an inner cell and is NOT hashed lets two corpora measured under "
+        "different rules pool under one instrument id, which carries wrong numbers rather than "
+        "missing ones. If the move is deliberate, re-pin L4_FINGERPRINT_ROSTER and say why."
     )
 
 

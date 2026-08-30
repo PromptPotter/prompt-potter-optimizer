@@ -50,6 +50,7 @@ from promptpotter.application.scoring.formula.compiler import (
     CompiledExpression,
     ScoringFormulaError,
 )
+from promptpotter.connectors.promptpotter import instrument_of
 from promptpotter.domain.candidate_diff import build_candidate_flat, flatten_sp_summary
 from promptpotter.domain.cycle_paths import (
     CycleHop,
@@ -1180,9 +1181,7 @@ def _reading_row(
     hashes = doc.get("optimizer_prompt_hashes")
     # `None` on any backend declaring no measurement identity — every campaign shares that absence,
     # so the arm alone is the whole grouping there.
-    params = doc.get("pipeline_params")
-    generate = params.get("l1_generate") if isinstance(params, dict) else None
-    instrument = generate.get("inner_origin") if isinstance(generate, dict) else None
+    instrument = instrument_of(doc.get("pipeline_params"))
     raw = doc.get("ability")
     value, ci_lo, ci_hi, n_cells = _merged(values)
     return SubjectReading(
