@@ -47,7 +47,7 @@ nodes:
     runtime: backend
     node_role: enricher
     description: "Searches the web for contextual information about the input query. Retrieved content\
-      \ provides the primary raw context that entity_profiling uses to generate structured profiles Ã¢â‚¬â€\uDC9D\
+      \ provides the primary raw context that entity_profiling uses to generate structured profiles —\
       \ the quality of web results directly determines profiling quality."
     config:
       strategy: snippets
@@ -163,9 +163,9 @@ nodes:
           How the single Brave query becomes evidence: 'snippets' (Brave's returned text - instant, never
           hangs, fewer LLM tokens), 'scrape' (full-page fetch under scrape_budget - deepest evidence,
           slower), 'hybrid' (scrape with per-source snippet fallback). Swept on ground truth to pick most-efficiently-true.
-        query_prefix: "Text prepended to the input query before web search Ã¢â‚¬â€\uDC9D controls search\
+        query_prefix: "Text prepended to the input query before web search — controls search\
           \ focus, domain targeting, and terminology framing (e.g. 'LCA database' narrows to domain)"
-        query_suffix: "Text appended to the input query before web search Ã¢â‚¬â€\uDC9D adds qualifiers,\
+        query_suffix: "Text appended to the input query before web search — adds qualifiers,\
           \ constraints, or context keywords (e.g. 'material composition' adds specificity)"
         num_results: Number of search engine results to request
         max_sites: Maximum number of evidence sources kept (scraped pages or snippets)
@@ -216,7 +216,7 @@ nodes:
         - answer_format
       param_descriptions:
         raw_content_limit: "Maximum characters of web-sourced raw content passed as context to the profiling\
-          \ LLM Ã¢â‚¬â€\uDC9D bounds how much of web_search output is visible to the model"
+          \ LLM — bounds how much of web_search output is visible to the model"
         temperature: LLM sampling temperature for profile generation
         max_tokens: Maximum tokens in the LLM profile generation response
       input_keys:
@@ -304,7 +304,7 @@ nodes:
     type: generation
     runtime: backend
     node_role: ''
-    description: "Direct LLM prompt for simple queries Ã¢â‚¬â€\uDC9D bypasses the full pipeline."
+    description: "Direct LLM prompt for simple queries — bypasses the full pipeline."
     config:
       model: openai/gpt-oss-120b
       temperature: 0.0
@@ -415,7 +415,7 @@ resolved_schemas:
   llm_ranking_output/1:
     family: llm_ranking_output
     version: 1
-    description: LLM ranking step output schema â€” structured candidate evaluation
+    description: LLM ranking step output schema — structured candidate evaluation
     fields:
       - profile_summary
       - core_concept_description

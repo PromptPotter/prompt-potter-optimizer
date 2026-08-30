@@ -1,4 +1,4 @@
-"""The prompt building-block library; data rides beside this module in ``prompt_variants.json``, each entry tagged with
+"""The prompt block library; data rides beside this module in ``prompt_variants.json``, each entry tagged with
 its source. An empty placeholder is dropped here, so a field whose only entry is blank never reaches the catalogue."""
 
 from __future__ import annotations

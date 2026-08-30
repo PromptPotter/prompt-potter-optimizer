@@ -10,11 +10,9 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-# The `promptpotter/` package dir — this module's OWN parent. Derived by name rather
-# than by counting `parents[N]` hops: the hop count silently re-aims the whole ledger at
-# whatever directory happens to sit N levels up, which is exactly what happened when this
-# module moved up out of `diagnostics/` (it began counting the repo root, node_modules
-# and all, reporting 4741 modules against a baseline of 296).
+# The `promptpotter/` package dir — this module's OWN parent, derived by NAME so that moving
+# this file trips the assert below instead of silently re-aiming the ledger N levels up, where
+# it counts the repo root, node_modules and all, and still reports a number.
 _PACKAGE_ROOT = Path(__file__).resolve().parent
 assert _PACKAGE_ROOT.name == "promptpotter", f"ledger root is not the package: {_PACKAGE_ROOT}"
 

@@ -29,7 +29,7 @@ PromptPotter is **LLM-driven program evolution** for prompts and pipeline params
 
 Ask fits no row, or you need one fact rather than a task's whole surface? The question→file table is [`docs/CLAUDE.md`](docs/CLAUDE.md) § Anchor docs for hot questions.
 
-**Two pointer kinds below, deliberately not merged.** A `§` names a PLACE to go read. A `` `<tag>` `` names a delimited block you recall whole — cross-linked from inside other blocks, and cited by name from source (`diagnostics.py`, `seed_screen.py`, `test_complexity_ledger.py`), so it is an identifier, not a location. Don't convert one into the other.
+**Two pointer kinds below, deliberately not merged.** A `§` names a PLACE to go read. A `` `<tag>` `` names a delimited block you recall whole — cross-linked from inside other blocks, and cited by name from source (`complexity_ledger.py`, `seed_screen.py`, `test_complexity_ledger.py`), so it is an identifier, not a location. Don't convert one into the other.
 
 ## Load-bearing
 

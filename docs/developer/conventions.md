@@ -9,8 +9,14 @@ collects everything else.
 
 - **PEP 604** type hints (`X | None`, `list[str]`); never `Optional[X]` /
   `List[str]`.
-- **`logging` module only** — no `print()` in `promptpotter/`. Setup via
-  `promptpotter/config/logging.py`.
+- **`logging` in library code; `print()` only where a human is the reader.** Setup
+  via `promptpotter/config/logging.py`. A print is an operator-facing OUTPUT, never a
+  debug aid, so it belongs to the CLI (`presentation/cli/`), the terminal views, the
+  server banner, first-run setup, the interactive origin gate and the maintenance
+  verbs (`restamp`, `diagnostics`) — anywhere else it writes to a stream nothing
+  captures. Inside the live run readout it is narrower still: every line goes through
+  `LiveDisplay._write`, the single stdout funnel that mirrors ANSI-stripped to
+  `logs/latest.log`, so a bare `print()` there is a line no headless reader can recover.
 - **Ruff line-length: 100.** Enforced by `scripts/gate.py`, which is what CI runs.
 - **Direct field access** — `dict[key]` for guaranteed fields, not
   `.get(key, fallback)`. Fallbacks announce uncertainty; if you have a
@@ -158,7 +164,7 @@ When an LLM call is slow, costly, or timeout-prone because it emits a large numb
 <surface-ledger>
 **The AI blind spot this guards against:** told to "simplify", an AI reaches for *additive-but-safe* moves — extract a helper, fold two copies into a `shared/` util, split a big file — each of which adds a module + an import line per call site, so the **total grows** while every commit says "refactor". The genuinely shrinking moves (delete a mechanism, re-inline a single-use module, drop a dead knob) are riskier, so they get skipped. Four rules counter the drift:
 
-1. **Lower the ledger.** Run `python -m promptpotter.diagnostics`. A pass *labelled* simplification/unification MUST move the total **down**. A pass that raises it isn't blocked — it just isn't a "refactor": justify it as a feature or as a shape that makes the codebase quicker to develop, edit the baseline up, and write the reason in the COMMIT BODY — `git log -p tests/test_complexity_ledger.py` is the precedent, and the baseline file itself carries numbers only. **The TOTAL is comparable only across commits counting the same dimensions** — adding one jumps it by that dimension's whole magnitude with no surface moved, so read the rows, not the sum.
+1. **Lower the ledger.** Run `python -m promptpotter.complexity_ledger`. A pass *labelled* simplification/unification MUST move the total **down**. A pass that raises it isn't blocked — it just isn't a "refactor": justify it as a feature or as a shape that makes the codebase quicker to develop, edit the baseline up, and write the reason in the COMMIT BODY — `git log -p tests/test_complexity_ledger.py` is the precedent, and the baseline file itself carries numbers only. **The TOTAL is comparable only across commits counting the same dimensions** — adding one jumps it by that dimension's whole magnitude with no surface moved, so read the rows, not the sum.
 2. **Subtract a concept, don't relocate one.** Every simplification commit removes ≥1 *named* thing (module, class, public symbol, config field, code path). Moving code between files counts as zero.
 3. **Extraction threshold.** Default: a shared helper earns its place at **≥3 call sites**, or when it removes a concept; at ≤2 callers inline is usually right. A default, not a bar — extract below it when the shared thing is an invariant callers must not diverge from, and say that's why. (The subtractive counterpart to the pre-flight "Reuse before adding" gate.)
 4. **Lock the wins** — enforced, not advised. The ratchet asserts EQUALITY, so a deletion that lowers a dimension goes red until you lower the baseline in the same commit. Asserting only `<=` re-pins on raises alone: an unrecorded drop becomes silent headroom for the next raise, the baselines drift loose from the package they claim to measure, and the pass that earned the win has no number to show for it. The baseline records where the surface stands — it isn't a target to reach and halt at. When no dimension can fall further without losing a load-bearing concept, the unification *phase* is done; that says nothing about whether the next change may add.

@@ -47,7 +47,7 @@ class OptimizationOverrides(StrictModel):
     prompt_block_catalogue: PromptBlockCatalogue = Field(
         # The config field's own default — the draft never re-spells it.
         OptimizationConfig.model_fields["prompt_block_catalogue"].default,
-        description="How the reusable prompt building-block library reaches the "
+        description="How the reusable prompt block library reaches the "
         "optimizer: ``guidance`` (suggest blocks, it may still invent), "
         "``restrict`` (blocks only), ``off`` (no library).",
     )

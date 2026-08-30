@@ -96,7 +96,7 @@ _BLOCK_LIBRARY_HEADERS: dict[str, str] = {
     citable=False,
 )
 def _r_prompt_block_catalogue(b: InjectionBundle) -> list[Item]:
-    """The building-block library L1 picks from. ``restrict`` is a hard value space, ``guidance`` leaves it open. It
+    """The block library L1 picks from. ``restrict`` is a hard value space, ``guidance`` leaves it open. It
     falls back to general reasoning modules — NEVER silence, which shifts temp-0 generation to weaker mutations."""
     mode = b.prompt_block_catalogue
     header = _BLOCK_LIBRARY_HEADERS.get(mode)

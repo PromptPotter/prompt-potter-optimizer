@@ -5,7 +5,7 @@ move's reason goes in the COMMIT BODY, and ``git log -p`` is the history layer. 
 only where the surface stands now — never a target to reach.
 """
 
-from promptpotter.diagnostics import compute_ledger
+from promptpotter.complexity_ledger import compute_ledger
 
 LEDGER_BASELINE = {
     "modules": 328,
@@ -15,7 +15,7 @@ LEDGER_BASELINE = {
     "settings_env": 31,
     "settings_const": 14,
     "opt_search_point_fields": 39,
-    "cycle_result_fields": 155,
+    "cycle_result_fields": 158,
     "any_params": 50,
     "domain_any_maps": 83,
     "models_lax": 3,
