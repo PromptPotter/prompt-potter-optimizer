@@ -134,6 +134,50 @@ _LEDGER_PIPELINE_KEYS: frozenset[str] = frozenset(
     LedgerPipelineData.__required_keys__ | LedgerPipelineData.__optional_keys__
 )
 
+_ROW_KEYS: frozenset[str] = frozenset(
+    QueryMeasurement.__required_keys__ | QueryMeasurement.__optional_keys__
+)
+_PIPELINE_KEYS: frozenset[str] = frozenset(
+    PipelineData.__required_keys__ | PipelineData.__optional_keys__
+)
+
+
+# -- what an archive row may lose ---------------------------------------------
+#
+# `application/archive_maintenance.py` moves these into the cold store; they live HERE because the
+# question they answer — which of a row's keys does anything read — is about the two types above,
+# and a set of key names sitting anywhere else is a second contract nobody declared.
+#
+# Two sets rather than one, because the asserts below run in OPPOSITE directions and a flat set
+# could not carry either.
+
+UNREAD_ROW_KEYS: frozenset[str] = frozenset({"objective"})
+"""Declared, written, and read by nothing.
+
+Archive rows are RE-GRADED by the reading campaign's scorer (`intelligence/hard_sample_archive.py`
+builds its observations through `CellScorer.objective`), so a STORED verdict is never consulted."""
+
+ABANDONED_ROW_KEYS: frozenset[str] = frozenset({"hit", "scored"})
+"""On disk in quantity, declared by nothing, and written by no code path in this tree.
+
+They are not deprecated fields — they were never fields. Nothing derives them either: every reader
+meaning "did this cell land" calls :func:`is_hit` on ``fitness`` at the point of use. Naming them
+is what lets a compaction move them; the assert is what stops one silently becoming a real key
+again."""
+
+UNREAD_PIPELINE_KEYS: frozenset[str] = frozenset(
+    {"reasoning_trace", "result_ranking", "final_ranking", "total_time"}
+)
+"""``pipeline_data`` keys no estimator, cache, ruler or index reads.
+
+``reasoning_trace`` reaches only the three L1 transcript panels, and only for rows live in the
+current cycle; ``result_ranking``/``final_ranking`` re-derive the ``ground_truth_rank`` already
+stamped beside them; ``total_time`` is zeroed on replay anyway."""
+
+assert UNREAD_ROW_KEYS <= _ROW_KEYS, "an unread key must be one QueryMeasurement declares"
+assert not (ABANDONED_ROW_KEYS & _ROW_KEYS), "an abandoned key that got declared is no longer one"
+assert UNREAD_PIPELINE_KEYS <= _PIPELINE_KEYS, "an unread key must be one PipelineData declares"
+
 
 def ledger_sample_view(result: QueryMeasurement) -> QueryMeasurement:
     """NEW dicts, never a pop: the argument is the same object that becomes the archive row,
@@ -325,8 +369,11 @@ def is_answer_collapsed(rows: Sequence[Mapping[str, Any]]) -> bool:
 
 
 __all__ = [
+    "ABANDONED_ROW_KEYS",
     "DEFAULT_SCORER_ID",
     "HIT_THRESHOLD",
+    "UNREAD_PIPELINE_KEYS",
+    "UNREAD_ROW_KEYS",
     "CellScorer",
     "PipelineData",
     "QueryMeasurement",

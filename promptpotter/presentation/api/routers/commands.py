@@ -10,6 +10,7 @@ from fastapi import APIRouter, Header, Path, Request
 from fastapi.routing import APIRoute
 from pydantic import Field, ValidationError
 
+from promptpotter.application.archive_maintenance import ArchiveReport
 from promptpotter.application.jobs.launcher.checkin import (
     load_checkin_draft,
     save_checkin_draft,
@@ -31,6 +32,7 @@ from promptpotter.presentation.api.middleware.command_dispatcher import (
     CommandAcceptedBody,
     CommandDispatcher,
     CommandPayload,
+    CompactArchivePayload,
     CyclePayload,
     CycleScopedKind,
     DescendableCyclePayload,
@@ -62,8 +64,13 @@ _CYCLE_SCOPED_KINDS: frozenset[str] = frozenset(get_args(CycleScopedKind))
 _WORKSPACE_SCOPED_KINDS: frozenset[str] = frozenset(get_args(WorkspaceScopedKind))
 _CAMPAIGN_CONFIG_KINDS: frozenset[str] = frozenset(get_args(CampaignConfigKind))
 # A kind answering a domain object rather than a 202 keeps its own typed route and stays off
-# the generic one; `replace-dataset` is the one such kind outside `CheckinScopedKind`.
-_TYPED_ROUTE_KINDS: frozenset[str] = frozenset(get_args(CheckinScopedKind)) | {"replace-dataset"}
+# the generic one. Two such kinds sit outside `CheckinScopedKind`.
+_TYPED_ROUTE_KINDS: frozenset[str] = frozenset(get_args(CheckinScopedKind)) | {
+    "replace-dataset",
+    # Its whole point is the report: a preview the operator consents on cannot be delivered
+    # through a 202 envelope, and the apply must answer in the same shape the preview did.
+    "compact-archive",
+}
 # SUBTRACTED from the dispatched set rather than re-authored as a union of the four Literals,
 # because a union silently omits whatever it forgets to name — so a new kind is wired by
 # default and going unwired is the thing you have to write down.
@@ -215,6 +222,37 @@ async def start_checkin(
         dedupe=False,
     )
     return cast("dict[str, Any]", outcome.result)
+
+
+@commands_router.post("/compact-archive")
+async def compact_archive(
+    request: Request,
+    stores: StoresDep,
+    envelope: CommandEnvelope,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> ArchiveReport:
+    """Compact, restore, or purge the measurement archive's cold store.
+
+    Per ``docs/specs/m12-api-openapi.yaml::compactArchive``. Typed rather than 202 because the
+    preview IS the product: an operator consents to a step that costs money to undo on the byte
+    counts this returns, and the apply answers in the same shape so the two are comparable.
+    """
+    _require_kind(envelope, "compact-archive")
+    idemp = ensure_idempotency_key(idempotency_key)
+    payload = cast(CompactArchivePayload, _validated_payload("compact-archive", envelope.payload))
+    dispatcher = CommandDispatcher(stores)
+    outcome = await dispatcher.dispatch_workspace_command(
+        kind="compact-archive",
+        payload=payload,
+        idempotency_key=idemp,
+    )
+    result = cast("dict[str, Any]", outcome.result)
+    # The applier hands back a dump so the dispatcher can carry it like every other payload, and a
+    # dump carries COMPUTED fields. `ArchiveReport` is a `StrictModel`, so feeding one straight back
+    # in trips `extra_forbidden` on `bytes_freed` and the route 500s on every call — invisible to
+    # mypy and to any test that does not cross the serializer.
+    computed = set(ArchiveReport.model_computed_fields)
+    return ArchiveReport.model_validate({k: v for k, v in result.items() if k not in computed})
 
 
 @commands_router.post("/replace-dataset")

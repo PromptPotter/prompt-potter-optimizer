@@ -14,6 +14,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.archive_maintenance import (
+    compact_measurement_archive,
+    purge_cold_store,
+    reindex_measurement_archive,
+    restore_measurement_archive,
+)
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
@@ -37,9 +43,16 @@ if TYPE_CHECKING:
 # for it would be a synonym rather than a channel. A host with no TTY and no HTTP client had no
 # third way to answer: `origin_gate` defaults to `strict`, `_spawn_stdin_reader` returns None off a
 # Jupyter/harness stdin, and `_await_gate_decision` then polls forever.
+# The archive-maintenance passes are re-exported for the same reason: a host driving campaigns in
+# its own loop owns the measurement archive they fill, and reclaiming it through the CLI would mean
+# leaving the process that has the `Stores` already built.
 __all__ = [
+    "compact_measurement_archive",
     "mint_and_score_origin",
     "open_session",
+    "purge_cold_store",
+    "reindex_measurement_archive",
+    "restore_measurement_archive",
     "run_campaign",
     "submit_gate_decision",
 ]

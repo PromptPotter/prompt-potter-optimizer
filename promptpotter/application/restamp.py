@@ -20,6 +20,11 @@ from typing import Any, NamedTuple, Union, get_args, get_origin
 import yaml
 from pydantic import BaseModel, ValidationError
 
+from promptpotter.application.archive_maintenance import (
+    archive_writers,
+    iter_cycle_ledgers,
+    workspace_trees,
+)
 from promptpotter.application.campaign_config import CampaignConfig, freeze_campaign_config
 from promptpotter.application.run_observers import QUERY_PREVIEW_CHARS
 from promptpotter.application.views.view_models import (
@@ -42,11 +47,7 @@ from promptpotter.infrastructure.store.io import (
     write_json,
     write_yaml,
 )
-from promptpotter.infrastructure.store.layout import (
-    ROUND_GLOB,
-    CycleLayout,
-    inner_sandboxes_dir,
-)
+from promptpotter.infrastructure.store.layout import ROUND_GLOB, CycleLayout
 from promptpotter.infrastructure.store.user_store import User
 from promptpotter.shared.errors import graceful
 
@@ -61,30 +62,12 @@ __all__ = [
 ]
 
 
-def _workspace_trees() -> list[pathlib.Path]:
-    """Inner sandboxes are a SIBLING tree, not a subtree, so a ``*``-per-level glob silently
-    misses every one — it reports a plausible smaller number rather than raising."""
-    root = DEFAULT_PROJECTS_ROOT
-    if not root.is_dir():
-        return []
-    trees = [root]
-    inner = inner_sandboxes_dir(root)
-    if inner.is_dir():
-        trees.extend(p for p in inner.iterdir() if p.is_dir())
-    return trees
-
-
-def _iter_cycle_ledgers() -> list[pathlib.Path]:
-    """Every cycle ledger under the workspace, inner sandboxes included."""
-    return [p for tree in _workspace_trees() for p in sorted(tree.glob("**/.runtime/ledger.jsonl"))]
-
-
 def _iter_round_documents() -> list[pathlib.Path]:
     """``**`` descends dot-directories, so the ``.runtime`` filter is what excludes the audit
     twins under ``.runtime/cache/rounds/`` — same basename, and never a ``RoundResult``."""
     return [
         p
-        for tree in _workspace_trees()
+        for tree in workspace_trees(DEFAULT_PROJECTS_ROOT)
         for p in sorted(tree.glob(f"**/rounds/{ROUND_GLOB}"))
         if ".runtime" not in p.parts
     ]
@@ -442,7 +425,7 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
     total_before = total_after = touched = 0
     skipped: Counter[RunPhase] = Counter()
     rows: list[tuple[int, str]] = []
-    for ledger_path in _iter_cycle_ledgers():
+    for ledger_path in iter_cycle_ledgers(DEFAULT_PROJECTS_ROOT):
         cycle_dir = ledger_path.parent.parent
         manifest = read_json_optional(CycleLayout(cycle_dir).manifest)
         finished = bool(manifest.get("finished_at")) if isinstance(manifest, dict) else False
@@ -526,7 +509,7 @@ def stamp_election_bias(*, apply: bool) -> dict[str, int]:
     round was decided under, and writing it down is what makes the replay reproduce the decision
     instead of re-deciding it."""
     stamped = touched = 0
-    for ledger_path in _iter_cycle_ledgers():
+    for ledger_path in iter_cycle_ledgers(DEFAULT_PROJECTS_ROOT):
         lines = ledger_path.read_text(encoding="utf-8").splitlines()
         out: list[str] = []
         dirty = False
@@ -560,9 +543,9 @@ def _inner_cycle_index() -> dict[tuple[str, str, int, str], pathlib.Path]:
     The pointer between an outer cell and the inner campaign that produced it lives on the INNER
     side — ``index.json::spawned_by``, written by ``runner/inner/spawn.py`` — so building this
     index is the only join back. Sandboxes are a SIBLING tree of the workspace, which
-    :func:`_workspace_trees` already knows and a ``*``-per-level glob silently misses."""
+    :func:`workspace_trees` already knows and a ``*``-per-level glob silently misses."""
     index: dict[tuple[str, str, int, str], pathlib.Path] = {}
-    for tree in _workspace_trees():
+    for tree in workspace_trees(DEFAULT_PROJECTS_ROOT):
         for cycle_dir in sorted(tree.glob("*/campaigns/*/cycles/*")):
             spawned = (read_json_tolerant(cycle_dir / "index.json", {}) or {}).get("spawned_by")
             if not isinstance(spawned, dict) or not spawned.get("task"):
@@ -673,30 +656,15 @@ def backfill_inner_facts(*, apply: bool) -> dict[str, int]:
 
 # --- (7) the run-level pipeline config re-stored on every measurement row --------------------
 
-# One live producer ANYWHERE blocks this pass: the measurement archive is shared across every
-# cycle (`build_stores`'s `shared_root`) and appended to per sample, so a rewrite of any run
-# file can lose a row another cycle is landing. CHECKIN is pre-loop and writes no measurement.
-_ARCHIVE_WRITER_PHASES: frozenset[RunPhase] = frozenset({RunPhase.RUNNING, RunPhase.GATE})
-
-
-def _archive_writers() -> int:
-    """Cycles that could append to the archive while this pass runs."""
-    n = 0
-    for ledger_path in _iter_cycle_ledgers():
-        cycle_dir = ledger_path.parent.parent
-        manifest = read_json_optional(CycleLayout(cycle_dir).manifest)
-        finished = bool(manifest.get("finished_at")) if isinstance(manifest, dict) else False
-        if derive_run_phase(cycle_dir, is_terminal=finished) in _ARCHIVE_WRITER_PHASES:
-            n += 1
-    return n
-
 
 def _iter_measurement_runs() -> list[pathlib.Path]:
     """Every archived run's detail log. An inner sandbox isolates campaign state but NOT the
     content-addressed caches, so in practice these all live under the real projects root — the
     sandbox trees are walked anyway rather than asserting that from here."""
     return [
-        p for tree in _workspace_trees() for p in sorted(tree.glob("*/measurements/runs/*.jsonl"))
+        p
+        for tree in workspace_trees(DEFAULT_PROJECTS_ROOT)
+        for p in sorted(tree.glob("*/measurements/runs/*.jsonl"))
     ]
 
 
@@ -743,7 +711,7 @@ def shrink_measurement_runs(*, apply: bool) -> dict[str, int]:
     Safe against the cache key by construction: ``content_hash`` is sha256 over the rendered
     prompt, the dataset pairs and the search point's ``pipeline_params`` (``shared/hashing.py``) —
     never the stored row bytes — so no archived cell moves."""
-    writers = _archive_writers()
+    writers = archive_writers(DEFAULT_PROJECTS_ROOT)
     if writers:
         print(f"\nMeasurement rows — SKIPPED, {writers} cycle(s) can still append to the archive")
         return {"runs_shrunk": 0, "run_bytes_saved": 0, "archive_writers": writers}

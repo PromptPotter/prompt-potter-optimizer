@@ -3,6 +3,7 @@ is new (the scoring walk re-saves per sample), and a read tails only the bytes s
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import logging
@@ -13,7 +14,12 @@ from typing import Any
 
 from promptpotter.domain.measurement_provenance import entry_grade, meets_grade
 from promptpotter.domain.sample import Measurement
-from promptpotter.infrastructure.store.io import write_jsonl
+from promptpotter.infrastructure.store.io import (
+    read_bytes_optional,
+    write_bytes,
+    write_jsonl,
+    write_text,
+)
 from promptpotter.infrastructure.store.read_model import (
     append_row,
     compact,
@@ -27,6 +33,7 @@ logger = logging.getLogger(__name__)
 _FOLD_KEY = "k"
 _HEADER_KEY = "run"
 _DETAIL_SUFFIX = ".jsonl"
+_COLD_SUFFIX = ".jsonl.gz"
 
 
 def _measurement_key(item: dict[str, Any]) -> str:
@@ -187,6 +194,82 @@ class MeasurementArchive:
         """``factor=1`` is required, not a tuning choice: a walk of S samples leaves S header rows
         against ONE live one, so the default 2× guard would never fire."""
         return compact(self._detail_path(run_id), _FOLD_KEY, factor=1)
+
+    # -- field compaction: the cold store -------------------------------------
+    #
+    # Dropping a field from a measurement row destroys paid LLM spend, so the archive does not
+    # offer a way to drop one. It offers a way to MOVE one: the payload lands gzipped beside the
+    # runs and `restore_cold` puts it back. Deleting the cold store is a separate act, and the
+    # only one that is irreversible.
+
+    def _cold_dir(self) -> Path:
+        return self._store_dir() / "cold"
+
+    def cold_path(self, run_id: str) -> Path:
+        return self._cold_dir() / f"{run_id}{_COLD_SUFFIX}"
+
+    def has_cold(self, run_id: str) -> bool:
+        return self.cold_path(run_id).exists()
+
+    def detail_lines(self, run_id: str) -> list[str]:
+        """The detail log's raw lines, IN ORDER. Order is load-bearing — the file folds last-wins on
+        ``k``, so a caller rewriting it must preserve both the sequence and the unparseable lines."""
+        path = self._detail_path(run_id)
+        try:
+            with path.open(encoding="utf-8") as fh:
+                return fh.readlines()
+        except FileNotFoundError:
+            return []
+
+    def replace_detail(self, run_id: str, lines: Iterable[str]) -> int:
+        """Swap the whole detail log atomically; returns the byte count written. ``append`` is not
+        crash-atomic and neither is a truncate-then-write, so a rewrite never happens in place."""
+        content = "".join(lines)
+        write_text(self._detail_path(run_id), content)
+        return len(content.encode("utf-8"))
+
+    @staticmethod
+    def _encode_cold(rows: Iterable[dict[str, Any]]) -> bytes:
+        blob = "\n".join(json.dumps(r, separators=(",", ":"), default=str) for r in rows)
+        return gzip.compress(blob.encode("utf-8"), 6)
+
+    def cold_size(self, rows: Iterable[dict[str, Any]]) -> int:
+        """What :meth:`write_cold` WOULD cost, without writing it — so a dry run reports the same
+        number the apply produces rather than a ratio someone guessed."""
+        return len(self._encode_cold(rows))
+
+    def cold_bytes_on_disk(self, run_id: str) -> int:
+        """Bytes the run's cold payload occupies; 0 when absent."""
+        try:
+            return self.cold_path(run_id).stat().st_size
+        except OSError:
+            return 0
+
+    def write_cold(self, run_id: str, rows: Iterable[dict[str, Any]]) -> int:
+        """Persist the moved payload; returns bytes on disk. Written WHOLE rather than appended: a
+        second compaction of the same run must not leave two generations under one name."""
+        data = self._encode_cold(rows)
+        write_bytes(self.cold_path(run_id), data)
+        return len(data)
+
+    def read_cold(self, run_id: str) -> list[dict[str, Any]] | None:
+        """``None`` when the run was never compacted — distinct from a compaction that moved
+        nothing, which reads as an empty list."""
+        raw = read_bytes_optional(self.cold_path(run_id))
+        if raw is None:
+            return None
+        text = gzip.decompress(raw).decode("utf-8")
+        return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+    def drop_cold(self, run_id: str) -> int:
+        """Delete one run's cold payload for good; returns the bytes reclaimed, 0 if absent."""
+        path = self.cold_path(run_id)
+        try:
+            size = path.stat().st_size
+        except OSError:
+            return 0
+        path.unlink(missing_ok=True)
+        return size
 
     def reset_run(self, run_id: str) -> None:
         """Append-only does not overwrite, so a re-measure meaning to REPLACE has to say so — an

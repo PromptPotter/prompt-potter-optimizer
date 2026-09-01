@@ -30,6 +30,7 @@ COMMANDS = {
     "reset": "promptpotter.presentation.cli.commands.reset:cmd_reset",
     "reindex": "promptpotter.presentation.cli.commands.reindex:cmd_reindex",
     "restamp": "promptpotter.presentation.cli.commands.restamp:cmd_restamp",
+    "compact-archive": "promptpotter.presentation.cli.commands.maintenance:cmd_compact_archive",
     "verify": "promptpotter.presentation.cli.commands.verify:cmd_verify",
     "noise-floor": "promptpotter.presentation.cli.commands.noise_floor:cmd_noise_floor",
     "seed-screen": "promptpotter.presentation.cli.commands.seed_screen:cmd_seed_screen",

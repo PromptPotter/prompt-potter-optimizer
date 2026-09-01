@@ -110,6 +110,22 @@ def _atomic_write(path: Path, write_fn: Callable[[IO[str]], object]) -> None:
         raise
 
 
+def write_bytes(path: Path, data: bytes) -> None:
+    """The binary twin of :func:`_atomic_write`, not a second mechanism: the text path streams into
+    an encoding wrapper, so a caller holding compressed bytes cannot use it. Only the measurement
+    archive's gzip cold store needs this."""
+    ensure_parent_dir(path)
+    fd, tmp = tempfile.mkstemp(dir=_long_path(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        _atomic_replace(tmp, path)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
 def write_json(
     path: Path,
     data: Any,
@@ -121,6 +137,15 @@ def write_json(
 
 def write_text(path: Path, content: str) -> None:
     _atomic_write(path, lambda f: f.write(content))
+
+
+def read_bytes_optional(path: Path) -> bytes | None:
+    """``None`` for an absent file — the caller distinguishes "never compacted" from "empty"."""
+    try:
+        with open(_long_path(path), "rb") as f:
+            return f.read()
+    except FileNotFoundError:
+        return None
 
 
 def read_json(path: Path) -> Any:
@@ -246,6 +271,7 @@ __all__ = [
     "append_jsonl",
     "ensure_parent_dir",
     "newest_mtime_ns",
+    "read_bytes_optional",
     "read_json",
     "read_json_optional",
     "read_json_tolerant",
@@ -254,6 +280,7 @@ __all__ = [
     "rmtree_robust",
     "unlink_robust",
     "validate_path_component",
+    "write_bytes",
     "write_json",
     "write_jsonl",
     "write_text",

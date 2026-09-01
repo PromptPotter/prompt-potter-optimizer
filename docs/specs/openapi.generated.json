@@ -292,6 +292,80 @@
         "title": "ActivityResponse",
         "type": "object"
       },
+      "ArchiveReport": {
+        "additionalProperties": false,
+        "description": "What a pass did, or would do.\n\nA model rather than a dataclass because it IS the wire shape: the API answers it directly and\nthe browser's type is generated from it, so a preview and an apply cannot be described in two\ndifferent vocabularies. ``applied`` is the only field that separates the two.",
+        "properties": {
+          "applied": {
+            "default": false,
+            "title": "Applied",
+            "type": "boolean"
+          },
+          "archive_writers": {
+            "default": 0,
+            "title": "Archive Writers",
+            "type": "integer"
+          },
+          "bytes_after": {
+            "default": 0,
+            "title": "Bytes After",
+            "type": "integer"
+          },
+          "bytes_before": {
+            "default": 0,
+            "title": "Bytes Before",
+            "type": "integer"
+          },
+          "bytes_freed": {
+            "description": "Net, and net is the honest number: the payload does not vanish, it moves to the cold\nstore, so the hot-side saving is reported against what the cold side cost.",
+            "readOnly": true,
+            "title": "Bytes Freed",
+            "type": "integer"
+          },
+          "cold_bytes": {
+            "default": 0,
+            "title": "Cold Bytes",
+            "type": "integer"
+          },
+          "conflicts": {
+            "default": 0,
+            "title": "Conflicts",
+            "type": "integer"
+          },
+          "purged": {
+            "default": 0,
+            "title": "Purged",
+            "type": "integer"
+          },
+          "rows_moved": {
+            "default": 0,
+            "title": "Rows Moved",
+            "type": "integer"
+          },
+          "runs_skipped": {
+            "default": 0,
+            "title": "Runs Skipped",
+            "type": "integer"
+          },
+          "runs_touched": {
+            "default": 0,
+            "title": "Runs Touched",
+            "type": "integer"
+          },
+          "skipped_by_label": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Skipped By Label",
+            "type": "object"
+          }
+        },
+        "required": [
+          "bytes_freed"
+        ],
+        "title": "ArchiveReport",
+        "type": "object"
+      },
       "ArmReplicate": {
         "additionalProperties": false,
         "description": "One arm — a CONFIGURATION identity, which is what the word keeps meaning here — that ran\nmore than once. Computed over ``campaign`` subjects only: a course and a candidate share their\ncampaign's round-0 hashes, so grouping them by it would report a branch as a replicate of the\ntrunk it grew out of. ``level_spread`` is the cheapest noise reading on the board — taken from\ncampaigns already paid for, and invisible to a roster that lists campaigns rather than arms.\n\nIt is a noise reading ONLY at ``n_instruments == 1``. Above that the arm was held constant while\nthe INSTRUMENT moved underneath it, so the spread measures the engine's own drift and is served\nas that — a replicate that was never one is the more useful finding, but it is not noise.",
@@ -2529,6 +2603,12 @@
               }
             ],
             "title": "Scored Samples"
+          },
+          "sp_hash": {
+            "default": "",
+            "description": "THE address of this candidate's measurements — the searchpoint id the archive stores on every row it wrote, under its own spelling `prompt_fields_id`. Neither `id` (a per-individual `uuid4`) nor `label` joins to a row; this does. Served rather than derived: it hashes the node configs INCLUDING the rendered prompt, which no served field carries, so a client recomputing it would match nothing and see no error. Empty on a course, on a candidate minted before the stamp existed, and on one that measured nothing. NOT unique — one searchpoint scored on two subsets is one `sp_hash` over two runs, and a re-proposed configuration shares it across rounds.",
+            "title": "Sp Hash",
+            "type": "string"
           },
           "status": {
             "default": "",
@@ -5657,6 +5737,66 @@
         "summary": "Get Campaign Storage",
         "tags": [
           "Campaigns"
+        ]
+      }
+    },
+    "/api/v1/commands/compact-archive": {
+      "post": {
+        "description": "Compact, restore, or purge the measurement archive's cold store.\n\nPer ``docs/specs/m12-api-openapi.yaml::compactArchive``. Typed rather than 202 because the\npreview IS the product: an operator consents to a step that costs money to undo on the byte\ncounts this returns, and the apply answers in the same shape so the two are comparable.",
+        "operationId": "compact_archive_api_v1_commands_compact_archive_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommandEnvelope"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compact Archive",
+        "tags": [
+          "Commands"
         ]
       }
     },

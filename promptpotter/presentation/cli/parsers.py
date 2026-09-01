@@ -395,6 +395,29 @@ def build_parser() -> argparse.ArgumentParser:
         "after a crash mid-append or to reclaim orphaned bytes. Pure disk work, zero spend.",
     )
 
+    p_compact = sub.add_parser(
+        "compact-archive",
+        help="Move the fields nothing reads out of candidate measurement rows into a gzip cold "
+        "store beside them (`compact`), put them back (`restore`), or delete the store "
+        "(`purge-cold`). A measurement row is paid LLM spend, so `compact` never drops a field — "
+        "it moves `hit`/`scored`/`objective` plus pipeline_data's `reasoning_trace`, "
+        "`result_ranking`, `final_ranking` and `total_time`, and stamps the run header with what "
+        "left. `origin` and `round_parent` runs are never touched: they serve the overwhelming "
+        "majority of cache replays. Refuses while any cycle can still append. Dry-run by default; "
+        "`purge-cold --apply` is the ONE irreversible step. Pure disk work, zero spend.",
+    )
+    p_compact.add_argument(
+        "mode",
+        choices=["compact", "restore", "purge-cold"],
+        help="Which step to run.",
+    )
+    p_compact.add_argument(
+        "--dataset",
+        default=None,
+        help="Scope to one dataset (default: every dataset).",
+    )
+    p_compact.add_argument("--apply", action="store_true", help="Write (default: report only).")
+
     p_restamp = sub.add_parser(
         "restamp",
         help="Bring on-disk data onto today's shape. (1) Prune knobs the engine no longer "

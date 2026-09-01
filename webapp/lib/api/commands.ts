@@ -18,7 +18,7 @@ import type {
   CycleSeed,
   OriginGateDecisionPayload,
 } from "./types.generated";
-import type { CommandAcceptedBody } from "./types";
+import type { ArchiveReport, CommandAcceptedBody } from "./types";
 
 // The ONE `POST /commands/{kind}` write path. Generic over the response because the
 // typed routes (`edit-draft-campaign`, `start-checkin`, `resolve-origin`,
@@ -272,4 +272,20 @@ export async function postStartRun(
     payload.spend_budget_usd = opts.spendBudgetUsd;
   }
   return postCommand("start-run", payload);
+}
+
+// Archive maintenance — the one command whose PREVIEW is the product. Every mode defaults to a
+// dry run server-side; `apply` is what writes, and `purge-cold` with it is the only step that
+// destroys (the rows it drops are paid LLM spend). The report shape is identical either way, so
+// a caller renders a preview and an apply with one component.
+export async function postCompactArchive(opts: {
+  mode: "compact" | "restore" | "purge-cold";
+  dataset?: string;
+  apply?: boolean;
+}): Promise<ArchiveReport> {
+  return postCommand<ArchiveReport>("compact-archive", {
+    mode: opts.mode,
+    ...(opts.dataset ? { dataset: opts.dataset } : {}),
+    apply: opts.apply ?? false,
+  });
 }

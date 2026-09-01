@@ -13,6 +13,12 @@ from typing import Annotated, Any, Literal, cast, get_args
 
 from pydantic import BeforeValidator, ConfigDict, Field, ValidationError, model_validator
 
+from promptpotter.application.archive_maintenance import (
+    ArchiveReport,
+    compact_measurement_archive,
+    purge_cold_store,
+    restore_measurement_archive,
+)
 from promptpotter.application.datasets.dataset_replace import (
     NothingToReplaceError,
     version_and_repoint,
@@ -144,7 +150,9 @@ CycleScopedKind = Literal[
     "start-run",
     "step-cycle",
 ]
-WorkspaceScopedKind = Literal["register-backend", "mint-campaign", "replace-dataset"]
+WorkspaceScopedKind = Literal[
+    "register-backend", "mint-campaign", "replace-dataset", "compact-archive"
+]
 CheckinScopedKind = Literal["edit-draft-campaign", "resolve-origin", "start-checkin"]
 # Campaign-scoped IN-PLACE manifest edits (the campaign persists — distinct from
 # `delete`, the one lifecycle verb that removes a tree). Rewrites `campaign.json`.
@@ -186,6 +194,9 @@ CAP_FOR_KIND: dict[str, str] = {
     # every campaign that already measured against it — stronger authority than creating a
     # dataset, which is why it sits at the lifecycle tier rather than beside `mint-campaign`.
     "replace-dataset": CAMPAIGN_LIFECYCLE_CAP,
+    # Rewrites rows every campaign measured against, and its purge step destroys paid spend
+    # outright — the same authority `replace-dataset` sits at, for the same reason.
+    "compact-archive": CAMPAIGN_LIFECYCLE_CAP,
     # Its own tier rather than a share of babysit: look-ahead spends the box's shared provider
     # rate bucket, which is the one thing a multi-tenant host may want to withhold from a
     # delegate, and it steers no measurement (the overshoot sample is discarded).
@@ -369,6 +380,23 @@ class ReplaceDatasetPayload(CommandPayload):
         return self
 
 
+class CompactArchivePayload(CommandPayload):
+    """``apply`` defaults to False on every mode, including the destructive one: a preview is what
+    the operator consents on, so the write has to be asked for rather than defaulted into."""
+
+    mode: Literal["compact", "restore", "purge-cold"]
+    dataset: str | None = Field(default=None, min_length=1, max_length=64)
+    apply: bool = False
+
+    @model_validator(mode="after")
+    def _dataset_is_a_dataset_name(self) -> CompactArchivePayload:
+        from promptpotter.infrastructure.store.layout import validate_dataset_name
+
+        if self.dataset is not None:
+            validate_dataset_name(self.dataset)
+        return self
+
+
 class _CheckinPayload(CommandPayload):
     """``draft_id`` and ``campaign_id`` are the same id, re-keyed at ``create_checkin_campaign``;
     each check-in verb names it whichever way its wire schema does."""
@@ -429,6 +457,7 @@ PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {
     "register-backend": RegisterBackendPayload,
     "mint-campaign": MintCampaignPayload,
     "replace-dataset": ReplaceDatasetPayload,
+    "compact-archive": CompactArchivePayload,
     "edit-draft-campaign": EditDraftCampaignPayload,
     "resolve-origin": ResolveOriginPayload,
     "start-checkin": StartCheckinPayload,
@@ -651,6 +680,15 @@ class CommandDispatcher:
             slug = payload.slug
             applier = lambda: self._apply_replace_dataset(slug)  # noqa: E731
             on_replay = lambda: {"slug": slug}  # noqa: E731
+        elif isinstance(payload, CompactArchivePayload):
+            job = payload
+            applier = lambda: self._apply_compact_archive(job)  # noqa: E731
+            # A deduped retry must not re-run the pass: `purge-cold` would report a second deletion
+            # of bytes already gone. It replays an EMPTY report — the same model the applier
+            # answers with, because the route validates this body too, and a bespoke
+            # `{"replayed": true}` shape 500s the retry that an Idempotency-Key exists to make safe.
+            # All-zero is also the true answer: this attempt moved nothing.
+            on_replay = lambda: ArchiveReport().model_dump(mode="json")  # noqa: E731
         elif isinstance(payload, MintCampaignPayload):
             mint = payload
 
@@ -921,6 +959,20 @@ class CommandDispatcher:
                 str(exc), code="nothing_to_replace", details={"slug": exc.slug}
             ) from exc
         return {"slug": result.slug}
+
+    def _apply_compact_archive(self, payload: CompactArchivePayload) -> dict[str, Any]:
+        """Three modes, one application-layer function each — this arm only picks and reports.
+
+        A refusal is an OUTCOME, not an exception: ``archive_writers`` is on the response either
+        way, so a client learns "a cycle is still appending" from the same shape as a success
+        rather than from an error it has to special-case."""
+        run = {
+            "compact": compact_measurement_archive,
+            "restore": restore_measurement_archive,
+            "purge-cold": purge_cold_store,
+        }[payload.mode]
+        report = run(self._stores, dataset=payload.dataset, apply=payload.apply)
+        return report.model_dump(mode="json")
 
     def _apply_register_backend(self, payload: RegisterBackendPayload) -> None:
         backend_id = payload.id or _slugify_backend_id(payload.name)

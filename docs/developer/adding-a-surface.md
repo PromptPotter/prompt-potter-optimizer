@@ -25,7 +25,7 @@ tests. Add new ones the same way — never as a `test_structure` scan.
 | A connector (backend) | [§5](#5-a-connector-backend) | Import-time: the `CONNECTORS` registry guard |
 | An optimizer node | [§6](#6-an-optimizer-node) | Import-time: `validate_template()` at prompt load |
 | A CLI verb | [§7](#7-a-cli-verb) | Breaks loud — an unknown verb exits non-zero |
-| A measurement field | [developer README §4](README.md#4-cross-run-memory) | `MEASUREMENTS_SCHEMA_VERSION` bump |
+| A measurement field | [developer README §4](README.md#4-cross-run-memory) | **Nothing, on the way in** — an undeclared key is dropped at `sample_measurement.py::measure_sample`, silently. Declare it on `domain/scoring.py::QueryMeasurement` / `PipelineData`; a `pipeline_data` key also needs `_INFRA_KEYS` or a dataset `observation_mapping`. Import-time only afterwards: the compaction asserts beside those types |
 
 ---
 
@@ -240,8 +240,12 @@ directory per verb bought a reader a hop to learn there was nothing to choose.
 **Two decisions the wiring does not make for you.** Honor the verb's class — **write**
 (`new` / `resume`, which mint or extend a cycle), **lifecycle** (`archive` / `delete` /
 `unarchive` / `reset`), **manifest-edit** (`rename`, which rewrites `campaign.json` in place
-and leaves the tree and every measurement where they are), or **diagnostic** (`ab` / `verify` /
-`noise-floor` / `reindex`, which must not perturb an existing cycle's measurements). And do
+and leaves the tree and every measurement where they are), **diagnostic** (`ab` / `verify` /
+`noise-floor` / `seed-screen`, which must not perturb an existing cycle's measurements), or
+**maintenance** (`reindex` / `restamp` / `compact-archive`, which rewrite stored artifacts on
+purpose). A maintenance verb owes two things a diagnostic does not: it is dry-run by default,
+and it refuses while a producer could still be writing what it rewrites
+(`application/archive_maintenance.py::archive_writers`). And do
 **not** add a read verb: reads happen by opening the artifact tree, and raw-file ingest is
 `new <file.csv>`, not an `ingest` verb.
 

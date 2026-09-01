@@ -17,6 +17,7 @@ from pydantic.fields import ComputedFieldInfo, FieldInfo
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO))
 
+from promptpotter.application.archive_maintenance import ArchiveReport
 from promptpotter.application.evidence import (
     ArmReplicate,
     Comparability,
@@ -156,6 +157,7 @@ from promptpotter.presentation.api.routers.verify import DiagnosticRunListRespon
 
 EXPORTED_MODELS: list[type[BaseModel]] = [
     # Nested types first so the TS file reads top-down.
+    ArchiveReport,
     AbilityReading,
     DashboardCandidate,
     DashboardSample,

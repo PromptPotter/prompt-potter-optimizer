@@ -8,6 +8,7 @@
 
 export type {
   AbilityReading,
+  ArchiveReport,
   ActiveSessionResponse,
   CampaignListResponse,
   CampaignSummary,
