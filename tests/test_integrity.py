@@ -75,6 +75,48 @@ def test_content_hash_distinguishes_pipeline_params() -> None:
     assert sp_a.content_hash(dataset) == content_hash(sp_a.render(), dataset, sp_a.pipeline_params)
 
 
+def test_sp_hash_is_not_recoverable_from_the_stripped_config() -> None:
+    """``sp_hash`` is the ONE key joining a candidate to the rows it paid for, and the only
+    config a candidate carries forward (``ScoredCandidate.resolved_pipeline_params``) is that
+    config with the rendered ``prompt`` STRIPPED. So the hash cannot be re-derived downstream —
+    a reader doing it gets a well-formed id that addresses no run, and neither the archive nor
+    the ruler raises: they simply find nothing and report an arm with no measurements.
+
+    That is not hypothetical. `repair.py` rebuilt its re-measurement point from the stripped
+    field, so every hole it plugged went to the backend with no prompt and banked under a run
+    keyed on ``sha256("")``. Both halves are pinned here: the recompute diverges, and the
+    reconstruction through the OSP restores the point that ran."""
+    from promptpotter.domain.pipeline_schema import (
+        NodePromptInfo,
+        PipelineNode,
+        PipelineSchema,
+    )
+
+    schema = PipelineSchema(
+        name="t",
+        version="1",
+        nodes=[
+            PipelineNode(
+                name="llm_only",
+                wire_type="llm",
+                node_type="",
+                param_keys=[],
+                prompt_info=NodePromptInfo(),
+            )
+        ],
+    )
+    opt_sp = OptSearchPoint(persona="Expert", instruction="Solve it.")
+    sp = opt_sp.to_job_search_point(base_pipeline_params={}, schema=schema)
+    assert sp.render(), "the point that runs carries the rendered prompt in its node config"
+
+    stripped = JobSearchPoint(pipeline_params=sp.config_params, prompt_fields=sp.prompt_fields)
+    assert stripped.sp_hash(schema) != sp.sp_hash(schema)
+    assert not stripped.render(), "and the stripped twin reaches the backend with no prompt"
+
+    restored = opt_sp.to_job_search_point(base_pipeline_params=sp.config_params, schema=schema)
+    assert restored.sp_hash(schema) == sp.sp_hash(schema)
+
+
 def test_pipeline_params_rejects_flat_param_map() -> None:
     """``pipeline_params`` is nested-by-node ⇒ a flat ``{param: value}`` map is
     rejected, never silently misread as a node-keyed config."""

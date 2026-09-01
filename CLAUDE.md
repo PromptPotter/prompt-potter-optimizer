@@ -39,7 +39,18 @@ What this file owns, and where each rule is stated. Names only — the section i
 - Delete shims, fallbacks and redundant paths → § STOP — no backward compatibility, ever
 - Never commit or push unprompted → § Conventions
 - Reach for a doctrine by its trigger → § Working principles
+- A campaign does not own its measurements → § The archive is not scoped by campaign
 - Per-layer contracts — load only yours → § Pointers
+
+## The archive is not scoped by campaign
+
+**`measurements/` is ONE content-addressed tree per workspace, and it outlives the campaigns that filled it.** Three consequences, each of which has already been read backwards:
+
+- **A row is filed under the dataset it MEASURED, never under the campaign that paid for it.** On the recursion that is the *inner* benchmark (`datasets/{name}/inner_tasks.yaml::inner_benchmark`) — an inner sandbox isolates campaign state but deliberately shares `shared_root`, so **`promptpotter-self`'s bytes are almost all filed under the inner dataset's name.** Scoping anything by `--dataset promptpotter-self` reaches the outer cells and essentially nothing L4 actually cost. Count before concluding: `compact-archive compact --dataset <name>` dry-runs and prints the split by label.
+- **Nothing on a run names a campaign.** The index entry is content, provenance and a label — no `campaign_id`, no `cycle_id`, because a cache hit is supposed to cross campaigns. So "what did this campaign cost on disk" is not a question the archive answers, and the join a surface needs is `LineageNode.sp_hash` → the row's `prompt_fields_id` (`docs/developer/README.md` § Cross-run memory).
+- **Cycle state is disposable and the rows are not**, so the rows routinely outlive every campaign that could select them: an emptied `.inner/` leaves its measurements addressable only by dataset. Selecting a family and acting on "what it produced" is therefore a claim about *surviving* state — say so, rather than reporting a smaller number as if it were the whole.
+
+Reversibility is what makes the first two survivable: `compact` keeps every field the δ ruler re-grades from and the replay cache needs, so compacting rows another campaign replays from costs it nothing. Only `purge-cold` needs the attribution, and only it is irreversible.
 
 ## STOP — no backward compatibility, ever
 

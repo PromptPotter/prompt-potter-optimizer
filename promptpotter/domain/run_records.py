@@ -524,6 +524,9 @@ class LedgerCandidate(StrictModel):
     accuracy: float | None = None
     composite_fitness: float | None = None
     state: CandidateState = "minted"
+    # The searchpoint id — the archive's `prompt_fields_id`, and the only key joining a node of
+    # the served tree to the rows it paid for.
+    sp_hash: str = ""
     # The candidate's stored evaluator namespace — what a `score:` lens re-scores against.
     evaluators: dict[str, float] = Field(default_factory=dict)
     scored_samples: int | None = None

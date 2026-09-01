@@ -2,6 +2,25 @@
 // Run `python scripts/build_ts_types.py` to regenerate from the Pydantic
 // models in `promptpotter/` and commit the diff alongside any schema change.
 
+/** What a pass did, or would do. */
+export interface ArchiveReport {
+  runs_touched: number;
+  runs_skipped: number;
+  rows_moved: number;
+  bytes_before: number;
+  bytes_after: number;
+  cold_bytes: number;
+  archive_writers: number;
+  conflicts: number;
+  purged: number;
+  skipped_by_label: unknown;
+  applied: boolean;
+  /** Net, and net is the honest number: the payload does not vanish, it moves to
+   * the cold store, so the hot-side saving is reported against what the cold
+   * side cost. */
+  bytes_freed: number;
+}
+
 /** A Rasch θ and the δ scale it was read on — meaningless apart, so they are one value. */
 export interface AbilityReading {
   theta: number;
@@ -253,6 +272,7 @@ export interface ScoredCandidate {
   evaluators: Record<string, number>;
   pipeline_params_override: Record<string, unknown> | null;
   resolved_pipeline_params: Record<string, unknown> | null;
+  sp_hash: string;
   prompt_fields: Record<string, unknown>;
   escalation_aborted: boolean;
   elimination_stopped: boolean;
@@ -1144,6 +1164,17 @@ export interface LineageNode {
   children: LineageNode[];
   /** Column hint. Candidates only. */
   round: number | null;
+  /** THE address of this candidate's measurements — the searchpoint id the archive
+   * stores on every row it wrote, under its own spelling `prompt_fields_id`.
+   * Neither `id` (a per-individual `uuid4`) nor `label` joins to a row; this
+   * does. Served rather than derived: it hashes the node configs INCLUDING
+   * the rendered prompt, which no served field carries, so a client
+   * recomputing it would match nothing and see no error. Empty on a course,
+   * on a candidate minted before the stamp existed, and on one that measured
+   * nothing. NOT unique — one searchpoint scored on two subsets is one
+   * `sp_hash` over two runs, and a re-proposed configuration shares it across
+   * rounds. */
+  sp_hash: string;
   accuracy: number | null;
   composite_fitness: number | null;
   /** Candidate: minted | measured | invalid — never 'winner' (that rides
@@ -1704,7 +1735,7 @@ export type RunPhase = 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 
 export type DashboardState = 'init' | 'origin' | 'scoring' | 'between_samples' | 'between_candidates' | 'l1_generate' | 'l2_refining' | 'l3_replanning' | 'escalation' | 'stopped';
 
 // Every kind `POST /commands/{kind}` dispatches (command_dispatcher.py).
-export type CommandKind = 'archive-campaign' | 'change-spend-budget' | 'cleanup-empty-cycles' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-allowed-models' | 'set-campaign-label' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign';
+export type CommandKind = 'archive-campaign' | 'change-spend-budget' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-allowed-models' | 'set-campaign-label' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign';
 
 // Kinds no activity item is ever made of — the ray drops them and the translator
 // returns null. Complement of domain/projection_envelope.py::RENDERS_AS_ACTIVITY.

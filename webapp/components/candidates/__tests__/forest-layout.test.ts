@@ -26,6 +26,7 @@ function node(
     path: [],
     children: [],
     round: null,
+    sp_hash: "",
     accuracy: null,
     composite_fitness: null,
     status: "",

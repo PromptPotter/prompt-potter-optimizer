@@ -221,6 +221,11 @@ class ScoredCandidate(StrictModel):
     # config verbatim and never re-merges client-side. Distinct from the sparse
     # ``pipeline_params_override`` above (the fork transport) — two data classes, not a stitch.
     resolved_pipeline_params: dict[str, Any] | None = None
+    # THE join to the archive, stored there on every row as ``prompt_fields_id``. Stamped, never
+    # recomputed downstream: it covers each node's rendered ``prompt`` and the field above has
+    # that stripped, so a re-derivation addresses no row and nothing raises. ``""`` where no
+    # schema was in scope (the unmeasured origin) or the searchpoint configures no node.
+    sp_hash: str = ""
     # Paired with ``pipeline_params_override``, the full searchpoint an operator selects to seed
     # an operator-steered fork.
     prompt_fields: dict[str, Any] = Field(default_factory=dict)

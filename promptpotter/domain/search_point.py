@@ -73,13 +73,17 @@ class JobSearchPoint(SearchPoint):
         return strip_rendered_prompt(self.pipeline_params)
 
     def sp_hash(self, pipeline_schema: PipelineSchema) -> str:
-        """Optimizer-side dedup over the SCHEMA-RESOLVED node configs, never the archive key.
+        """The SEARCHPOINT id — over the SCHEMA-RESOLVED node configs alone, so it is the same
+        across subsets while :meth:`content_hash` is not. It is stored on every archive row as
+        ``prompt_fields_id``, and is what the δ ruler keys its arms on
+        (``intelligence/hard_sample_archive.py``); it is not the archive's RUN key.
         A ``None`` schema would hash the raw params under this same name — so it is required."""
         return pipeline_schema.sp_hash(self.pipeline_params)
 
     def content_hash(self, dataset: list[Any]) -> str:
-        """The measurement-archive key — rendered prompt + dataset + the overlay-MERGED
-        ``pipeline_params``, so two points differing only by model share no measurements."""
+        """The measurement-archive RUN key — rendered prompt + dataset + the overlay-MERGED
+        ``pipeline_params``, so two points differing only by model share no measurements, and one
+        prompt scored on N subsets is N runs."""
         return content_hash(
             self.render(),
             dataset,

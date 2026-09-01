@@ -89,6 +89,7 @@ async def rescore_parent(
             # The parent INDIVIDUAL's label (``C0``, ``C3.1``, …), off the round it won — it
             # reaches disk, so a synthesized round name here would name no candidate.
             label=cycle.rounds[-1].label,
+            sp_hash=tr.current_sp.sp_hash(session.pipeline_schema),
         ),
     )
 
@@ -333,7 +334,14 @@ async def prepare_scoring_context(
                 # Unmeasured reports as unmeasured in the shape a measured one uses: `total=0`
                 # is the no-evidence marker, where a bare 0.0 reads as a real floor of zero.
                 report=build_score_report(
-                    resolved_origin, None, INVALID_SCORES, [], [], label=candidate_label(0, 0)
+                    resolved_origin,
+                    None,
+                    INVALID_SCORES,
+                    [],
+                    [],
+                    label=candidate_label(0, 0),
+                    # No session ⇒ no schema to hash under, and no rows for an id to address.
+                    sp_hash="",
                 ),
                 origin_results=None,
             ),
@@ -434,6 +442,7 @@ async def prepare_scoring_context(
             origin_results,
             scoring_set,
             label=candidate_label(0, 0),
+            sp_hash=sp.sp_hash(pipeline_schema),
             resolved_pipeline_params=sp.config_params,
         )
         if listener is not None:

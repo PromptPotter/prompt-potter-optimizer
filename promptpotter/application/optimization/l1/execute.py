@@ -292,7 +292,7 @@ async def execute_round(
                     accuracy=round_result.accuracy,
                     total=round_result.total,
                     improved=round_result.improved,
-                    winner_prompt_fields_id=winner_opt_sp.lineage.id,
+                    winner_lineage_id=winner_opt_sp.lineage.id,
                     candidate_scores=[c.model_dump() for c in round_result.candidate_scores],
                     model=optimizer_model(),
                     n_variants=config.optimization.n_variants,
@@ -305,7 +305,7 @@ async def execute_round(
                 PromptVersion(
                     campaign_id=session.state.tracing_campaign_id,
                     round_num=round_num,
-                    prompt_fields_id=winner_opt_sp.lineage.id,
+                    lineage_id=winner_opt_sp.lineage.id,
                     rendered_prompt=winner_opt_sp.render(),
                     layer1_fields={f: getattr(winner_opt_sp, f) for f in PROMPT_STRING_FIELDS},
                     parent_id=winner_opt_sp.lineage.parent_id,

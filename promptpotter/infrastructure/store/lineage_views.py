@@ -103,6 +103,17 @@ class LineageNode(StrictModel):
 
     # -- candidate scalars ----------------------------------------------------
     round: int | None = Field(default=None, description="Column hint. Candidates only.")
+    sp_hash: str = Field(
+        default="",
+        description="THE address of this candidate's measurements — the searchpoint id the "
+        "archive stores on every row it wrote, under its own spelling `prompt_fields_id`. "
+        "Neither `id` (a per-individual `uuid4`) nor `label` joins to a row; this does. Served "
+        "rather than derived: it hashes the node configs INCLUDING the rendered prompt, which "
+        "no served field carries, so a client recomputing it would match nothing and see no "
+        "error. Empty on a course, on a candidate minted before the stamp existed, and on one "
+        "that measured nothing. NOT unique — one searchpoint scored on two subsets is one "
+        "`sp_hash` over two runs, and a re-proposed configuration shares it across rounds.",
+    )
     accuracy: float | None = None
     composite_fitness: float | None = None
     status: str = Field(
@@ -716,6 +727,7 @@ def _candidate_node(
         course_label=cand.label,
         path=hops,
         round=cand.round,
+        sp_hash=cand.sp_hash,
         accuracy=cand.accuracy,
         composite_fitness=cand.composite_fitness,
         status=cand.state,

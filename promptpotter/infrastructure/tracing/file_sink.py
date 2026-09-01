@@ -327,7 +327,7 @@ class FileSink:
                         "total": event.total,
                         "improved": event.improved,
                         "next_action": event.next_action,
-                        "winner_prompt_fields_id": event.winner_prompt_fields_id,
+                        "winner_lineage_id": event.winner_lineage_id,
                     },
                     meta_extra,
                 )
@@ -342,7 +342,7 @@ class FileSink:
             "total": event.total,
             "improved": event.improved,
             "next_action": event.next_action,
-            "winner_prompt_fields_id": event.winner_prompt_fields_id,
+            "winner_lineage_id": event.winner_lineage_id,
         }
         if event.optimizer_templates:
             log_entry["optimizer_templates"] = event.optimizer_templates
@@ -355,13 +355,13 @@ class FileSink:
         # sides of the loop. Write-only (no reader in the package), so the rename orphans some
         # directories and breaks nothing.
         family = "target_prompt"
-        version = event.prompt_fields_id[:8] if event.prompt_fields_id else "unknown"
+        version = event.lineage_id[:8] if event.lineage_id else "unknown"
         prompt_dir = self._scope_dir() / "prompts" / family / version
         write_text(prompt_dir / "prompt.txt", event.rendered_prompt)
         metadata = {
             "family": family,
             "version": version,
-            "prompt_fields_id": event.prompt_fields_id,
+            "lineage_id": event.lineage_id,
             "parent_id": event.parent_id,
             "layer1_fields": event.layer1_fields,
             "created_at": utcnow_iso(),
@@ -370,7 +370,7 @@ class FileSink:
         self._log_event(
             {
                 "event": "prompt_version",
-                "prompt_fields_id": event.prompt_fields_id,
+                "lineage_id": event.lineage_id,
                 "family": family,
                 "version": version,
                 "parent_id": event.parent_id,

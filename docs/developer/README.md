@@ -124,6 +124,8 @@ The archive is tenant-global and **never backend-scoped** — no read or write t
 
 **The one rule:** `node_configs` is canonical identity — must be deterministic from pipeline params. Don't break determinism.
 
+**Two hashes, and they are not interchangeable.** `SearchPoint.content_hash(dataset)` is the RUN key — rendered prompt + dataset + merged params — so one prompt scored on N subsets is N runs. `PipelineSchema.sp_hash(params)` is over the schema-resolved node configs alone, so it is the same across subsets; that is why `intelligence/hard_sample_archive.py` keys the ruler's arms on it rather than on the run. It is stored on every index entry, and a caller wanting "the searchpoint" rather than "the run" reads that. **`OptSearchPoint.lineage.id` is neither** — a `uuid4` minted per individual, stable across nothing, and what `LineageNode.id` carries. Joining a tree node to an archive row on it matches nothing; the node serves `sp_hash` beside it for that, stamped on `ScoredCandidate` at the moment it is scored. **Never re-derive it downstream:** the only config a scored candidate carries forward (`resolved_pipeline_params`) is `config_params`, the node configs with each rendered `prompt` stripped, and the hash covers that prompt — so a recompute yields a well-formed id addressing no run, and nothing raises.
+
 ---
 
 ## Reading the three-layer loop

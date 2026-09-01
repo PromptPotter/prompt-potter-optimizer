@@ -283,12 +283,12 @@ class LangfuseSink:
             trace_id=trace_id,
             name="prompt_version",
             input={
-                "prompt_fields_id": event.prompt_fields_id,
+                "lineage_id": event.lineage_id,
                 "parent_id": event.parent_id,
             },
             output={
                 "family": "target_prompt",
-                "version": event.prompt_fields_id[:8] if event.prompt_fields_id else "unknown",
+                "version": event.lineage_id[:8] if event.lineage_id else "unknown",
             },
             metadata={"layer1_fields": event.layer1_fields},
             parent_observation_id=round_observation_id,

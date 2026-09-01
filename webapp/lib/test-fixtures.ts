@@ -92,6 +92,7 @@ export function scored(over: Partial<ScoredCandidate> = {}): ScoredCandidate {
     composite_fitness: 0,
     total: 0,
     evaluators: {},
+    sp_hash: "",
     pipeline_params_override: null,
     resolved_pipeline_params: null,
     prompt_fields: {},

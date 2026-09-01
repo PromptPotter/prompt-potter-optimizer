@@ -80,9 +80,14 @@ class NodeEnd:
 
 @dataclass(frozen=True, slots=True)
 class PromptVersion:
+    """``lineage_id`` is ``OptSearchPoint.lineage.id`` — a per-individual ``uuid4``, and NOT the
+    ``prompt_fields_id`` the archive stores under that name (which is ``sp_hash``). Two events on
+    this page carry each; joining a trace to an archive row on the wrong one matches nothing and
+    raises nothing. The ladder is `docs/developer/README.md` § Cross-run memory."""
+
     campaign_id: str
     round_num: int
-    prompt_fields_id: str
+    lineage_id: str
     rendered_prompt: str
     layer1_fields: dict[str, Any]
     parent_id: str | None = None
@@ -98,6 +103,7 @@ class DatasetRun:
     run_id: str
     content_hash: str
     prompt_fields_id: str
+    """``sp_hash`` — the archive's own spelling, and the one id that joins a trace to a row."""
     accuracy: float
     total: int
 
@@ -109,7 +115,7 @@ class RoundEnd:
     accuracy: float
     total: int
     improved: bool
-    winner_prompt_fields_id: str
+    winner_lineage_id: str
     candidate_scores: list[dict[str, Any]]
     next_action: str = ""
     model: str = ""
