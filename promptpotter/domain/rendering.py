@@ -296,9 +296,9 @@ def _one_line(text: str) -> str:
 
 
 def _extract_gsm8k_display(text: str) -> str:
-    n = extract_gsm8k_number(text or "")
+    n = extract_gsm8k_number(text)
     if n is None:
-        return (text or "").strip()
+        return text.strip()
     return str(int(n)) if n.is_integer() else str(n)
 
 
@@ -307,9 +307,9 @@ def _extract_boxed_display(text: str) -> str:
     # scorer (`_aime_match`) matched — a non-numeric `\boxed{…}` falls back to the
     # last number (as the scorer does), never the raw boxed junk. Mirrors
     # `_extract_gsm8k_display`'s int-if-integral formatting; stripped text when none.
-    n = extract_boxed_number(text or "")
+    n = extract_boxed_number(text)
     if n is None:
-        return (text or "").strip()
+        return text.strip()
     return str(int(n)) if n.is_integer() else str(n)
 
 
@@ -317,8 +317,8 @@ def _extract_list_display(text: str) -> str:
     # A list matcher's answer is the whole ORDERED SET, so route through the same
     # `text_list_items` walk `_list_rr` scores on: bullets and `1.` numbering stripped
     # the same way, joined so the slate the scorer read stays one readable line.
-    items = text_list_items(text or "")
-    return " | ".join(items) if items else (text or "")
+    items = text_list_items(text)
+    return " | ".join(items) if items else text
 
 
 DISPLAY_EXTRACTORS: dict[str, Any] = {
@@ -336,7 +336,7 @@ def extract_display_answer(predicted: str, formula: str | None) -> str:
     Single-line is the CONTRACT, not the caller's to re-impose: every consumer renders into a
     one-line-per-sample readout, so a multi-line answer — a ranked slate, reasoning no extractor
     isolates — splits the row and the ANSI-stripped `logs/latest.log` mirror with it."""
-    text = predicted or ""
+    text = predicted
     if formula:
         for name, extractor in DISPLAY_EXTRACTORS.items():
             if name in formula:
