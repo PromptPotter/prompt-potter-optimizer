@@ -1,10 +1,10 @@
 "use client";
 import type { DraftPatch, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
 import type { CandidateSearchPoint, ConfigMode } from "@/lib/derivations";
+import { outputContract } from "@/lib/derivations";
 import type { PipelineViewNode } from "@/components/workflow";
 import { PromptFieldsEditor } from "./PromptFieldsEditor";
 import { NodeConfigEditor } from "./NodeConfigEditor";
-import { NodeOutputSchemaView } from "./NodeOutputSchemaView";
 
 // The one node surface: config → prompt → output, rendered as an inseparable unit so
 // config can never be gated away from its prompt. It renders exactly ONE runnable
@@ -104,11 +104,60 @@ export function NodeSurface({
       {compact ? (
         <details className="node-output-fold">
           <summary>Output contract</summary>
-          <NodeOutputSchemaView schema={nodeOutput} />
+          <OutputContract schema={nodeOutput} />
         </details>
       ) : (
-        <NodeOutputSchemaView schema={nodeOutput} />
+        <OutputContract schema={nodeOutput} />
       )}
     </>
+  );
+}
+
+// The structured output this node is contracted to return — every parameter, not just the
+// top-level keys. It lives in this file because the surface above renders config → prompt →
+// output as one unit, and a separate component is what lets one of the three drift into its own,
+// thinner reading of the same schema. `outputContract` flattens it; this only lays the rows out.
+//
+// Read-only by definition: the contract is a backend fact, not an operator knob.
+function OutputContract({
+  schema,
+}: {
+  schema: Record<string, NodeOutputSchema | null> | null;
+}) {
+  const nodes = Object.entries(schema ?? {})
+    .map(([node, out]) => [node, outputContract(out)] as const)
+    .filter(([, fields]) => fields.length > 0);
+  if (nodes.length === 0) return null;
+
+  return (
+    <div className="node-output-schema">
+      <span className="node-output-title">Structured output</span>
+      {nodes.map(([node, fields]) => (
+        <dl key={node} className="node-output-list" aria-label={`${node} output schema`}>
+          {fields.map((f) => (
+            <div key={f.key} className="node-output-row" data-depth={f.depth}>
+              <dt className="node-output-field">
+                <code>{f.name}</code>
+                {/* Required is marked, never optional — most parameters are required, so
+                    marking the majority is noise that says nothing about the minority. */}
+                {f.required && (
+                  <span className="node-output-req" title="Required">
+                    *
+                  </span>
+                )}
+              </dt>
+              <dd className="node-output-desc">
+                {f.type && <span className="node-output-type">{f.type}</span>}
+                {f.limit && <span className="node-output-limit">{f.limit}</span>}
+                {f.enums.length > 0 && (
+                  <span className="node-output-enum">{f.enums.join(" · ")}</span>
+                )}
+                {f.description}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ))}
+    </div>
   );
 }

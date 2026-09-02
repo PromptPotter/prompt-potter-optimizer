@@ -330,6 +330,10 @@ _SCOREBOARD_INCLUDE: set[str] = {
     "mean_fitness_ci_lo",
     "mean_fitness_ci_hi",
     "escalation_aborted",
+    # Without this the table cannot tell a candidate REJECTED before it cost a sample from one
+    # that got everything wrong — the two are byte-identical otherwise, and the display half was
+    # the one surface still rendering the first as a rate.
+    "invalid",
     "matched_parent_accuracy",
     "matched_parent_composite",
     # The election's own number and the margin it was decided on. Without these the table can
@@ -356,6 +360,10 @@ class ScoreboardRow(StrictModel):
     composite_fitness: float
     total: int
     escalation_aborted: bool
+    # Rejected by validation before it ran, so the ``accuracy`` / ``composite_fitness`` beside it
+    # are ``INVALID_SCORES``' synthetic 0.0 — see ``DashboardCandidate.invalid`` for why that
+    # number is served at all. Nothing may render those two as a rate while this is true.
+    invalid: bool
     # ``None`` for a row that did not cover the parent's panel — see ``ScoredCandidate``: the
     # file carries the absence rather than a 0.0 that reads as a verdict the parent never gave.
     matched_parent_accuracy: float | None

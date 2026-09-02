@@ -106,10 +106,10 @@ class DatasetPipelineResponse(StrictModel):
     pipeline: dict[str, Any]
     view: PipelineView | None
     # Every param each node carries, keyed by node — COMPLETE (prompt + nested params
-    # included, carrying no value), because `optimizer_tunable` is summed per node to
-    # answer "is this node optimizer-locked". The config editor filters to the widget
-    # kinds; `optimizer_locked` marks what the optimizer may never permute
-    # (model/provider), which the operator may still set on a fork seed.
+    # included, carrying no value), because `movable_by` is summed per node to answer
+    # "where does the search reach here". The config editor filters to the widget kinds;
+    # `optimizer_locked` marks what nobody may ever permute (model/provider) and `held`
+    # what THIS campaign closed — either of which the operator may still set on a fork.
     node_config_schema: dict[str, list[NodeConfigParam]]
     # Per-node structured-output contract (read-only) — the steer panel shows it
     # beside the config so the operator sees the WHOLE node (model + params +

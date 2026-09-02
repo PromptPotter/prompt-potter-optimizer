@@ -4,6 +4,7 @@ import type { DraftPatch, NodeConfigParam } from "@/lib/api";
 import { CommitInput } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import {
+  agentLabel,
   configRows,
   nodeOverlayPatch,
   seedOverlayFromRows,
@@ -283,10 +284,6 @@ function ValuesEditor({
   );
 }
 
-// One row, shared by both modes. The lock button + enum allow/deny chips +
-// `origin` tag are search-space only; the `·evolved` / `optimizer-locked` key
-// badges are values only. Everything else (model select, number/text/bool
-// inputs, the "keep current value selectable" guard) is shared.
 function ConfigRowView({
   row,
   mode,
@@ -308,9 +305,6 @@ function ConfigRowView({
 }) {
   const isSearch = mode === "search-space";
   const isModel = row.kind === "model";
-  // locksOnly: render the lock affordances (🔒/🔓 + enum allow/deny chips) but not
-  // the origin-value widgets — values are edited in the separate values editor.
-  const showValueWidget = !locksOnly;
   return (
     <div className="config-row">
       <span className="config-label">
@@ -320,26 +314,29 @@ function ConfigRowView({
             ·evolved
           </span>
         ) : null}
-        {!isSearch && row.optimizerLocked ? (
+        {/* Two states on screen — the optimizer may move this axis, or it may not — because
+            that is the only question a row is read for. The three reasons it may not are three
+            different operator remedies, so they ride the title, read one row at a time. */}
+        {isSearch ? null : row.movableBy.length > 0 ? (
           <span
-            className="config-optlocked"
-            title={
-              readOnly
-                ? "The optimizer can't change this, and it's locked on this fork."
-                : "The optimizer can't change this — but you can, on this fork (a babysit edit)."
-            }
+            className="config-optmovable"
+            title={`Searched by ${row.movableBy.map(agentLabel).join(", ")}.`}
           >
-            optimizer-locked
+            {row.movableBy.join("+")}
           </span>
-        ) : null}
+        ) : (
+          <span className="config-optlocked" title={lockReason(row, readOnly)}>
+            🔒
+          </span>
+        )}
       </span>
-      <span className={cx("config-value", isModel && "config-model")}>
+      <span className="config-value">
         {isSearch && lockable ? (
           <LockButton locked={row.locked} readOnly={readOnly} onClick={onToggleLock!} />
         ) : null}
-        {/* locksOnly hides the value widgets; the enum chips below stay — they ARE a
-            lock affordance (allow / deny each value). */}
-        {showValueWidget || row.kind === "enum" ? (
+        {/* `locksOnly` drops the value widgets but keeps the enum chips: allow / deny per
+            value IS a lock affordance. */}
+        {!locksOnly || row.kind === "enum" ? (
           isModel || (row.kind === "enum" && !isSearch) ? (
           <select
             className="config-input"
@@ -418,6 +415,20 @@ function ConfigRowView({
       </span>
     </div>
   );
+}
+
+// `optimizerLocked` (PARAM_FORBIDDEN_KEYS) outranks `held` (the campaign's own narrowing at
+// mint) — a forbidden key stays forbidden however the campaign narrowed.
+function lockReason(row: ConfigRow, readOnly: boolean): string {
+  if (row.optimizerLocked) {
+    return readOnly
+      ? "Never a search axis — the model and provider are held so a comparison isn't confounded. Locked on this fork."
+      : "Never a search axis — the model and provider are held so a comparison isn't confounded. You can still set it on this fork (a babysit edit).";
+  }
+  if (row.held) {
+    return "The dataset offers this as a search axis and this campaign closed it at mint. Reopen it on a fork.";
+  }
+  return "Nothing searches this. It COULD be opened: an axis is a key in the node's `param_keys`. Open it on a fork.";
 }
 
 function LockButton({

@@ -17,8 +17,8 @@ import {
 import { fmtSecs, fmtValue } from "@/lib/format";
 import { nodeKind } from "@/components/workflow";
 import { CopyButton, SegmentedControl } from "@/components/ui";
-import { RoundSamplesView } from "@/components/dashboard/samples/RoundSamplesView";
 import { NodeSurface } from "./NodeSurface";
+import { MeasurementRun } from "./MeasurementRun";
 import { L1Variants, variantsOf } from "./L1Variants";
 
 // THE node detail — one panel, both canvases, every tab.
@@ -64,15 +64,18 @@ export function NodeDetail({ node: selected, draft, onClose, onPromptApply }: Pr
   const { dash, isLive, dashRound: liveRound } = useDashboard();
   // Both gated by argument rather than by an early return — a hook may not be
   // conditional, and the parked side must not spend its round-trip either.
-  const { doc: optimizer } = useOptimizerPipeline(isOptimizer);
+  const { doc: optimizer, loading: pipelineLoading } = useOptimizerPipeline(isOptimizer);
   const observe = useObserveSearchPoint(id, !isOptimizer && !draft);
 
   const view = isOptimizer ? optimizer?.view : cv.view;
   const node = interiorNodes(view).find((n) => n.id === id) ?? null;
-  // `tool` where the view has no such node, matching the producer's own fallback
-  // (`nodeKind`), so no two surfaces name one absent kind differently.
-  const kind = node?.kind ?? "tool";
-  const kindInfo = nodeKind(kind);
+  // `null` where the served view has not resolved this node — still fetching, or absent from the
+  // manifest. Deliberately NOT defaulted: the run half below DISPATCHES on this, and a default
+  // would render an LLM call's trace for a system step during every fetch. The header is a
+  // caption rather than a decision, so it takes `nodeKind`'s own `tool` fallback — the producer's
+  // (`pipeline_parsing.py::_derive_node_kind`), spelled in one place.
+  const servedKind = node?.kind ?? null;
+  const kindInfo = nodeKind(servedKind ?? undefined);
   const schema = isOptimizer ? (optimizer?.node_config_schema ?? null) : cv.nodeConfigSchema;
   const outputSchema = isOptimizer
     ? (optimizer?.node_output_schema ?? null)
@@ -116,7 +119,7 @@ export function NodeDetail({ node: selected, draft, onClose, onPromptApply }: Pr
               </span>
             )}
             <CopyButton
-              data={block ?? { id, scope, label: node?.label ?? id, kind }}
+              data={block ?? { id, scope, label: node?.label ?? id, kind: servedKind }}
               title="Copy this node's full I/O as JSON"
             />
             <button
@@ -159,10 +162,11 @@ export function NodeDetail({ node: selected, draft, onClose, onPromptApply }: Pr
             never having fired when there was no run to fire in. */}
         {isOptimizer && viewedRound != null && (
           <RunSection
-            id={id}
-            kind={kind}
+            kind={servedKind}
             block={block}
+            round={viewedRound}
             loading={nodesLoading}
+            kindLoading={pipelineLoading}
             inFlight={isLiveNow}
           />
         )}
@@ -307,15 +311,70 @@ function TargetProgram({
 }
 
 // RUN: what this node did in the viewed round, out of the audit twin.
+//
+// WHICH account that is depends on what the node IS. A measurement node runs a whole pipeline
+// rather than a prompt: it has no rendered input, no response and no token bill, so offering
+// those three for one describes a call it never makes — which is what this panel used to do,
+// printing "No template fields on this block" and "No response on this block" for keys the
+// block never carried, and then bolting the real content on behind a hard-coded node id.
+//
+// Dispatch is on the served `kind` and nothing else. Block SHAPE answers the same question a
+// second way and gets it wrong: an LLM node that has not fired yet is equally missing all three
+// keys, and would take the measurement arm.
 function RunSection({
-  id,
   kind,
+  block,
+  round,
+  loading,
+  kindLoading,
+  inFlight,
+}: {
+  kind: string | null;
+  block: NodeBlock | null;
+  round: number;
+  loading: boolean;
+  kindLoading: boolean;
+  inFlight: boolean;
+}) {
+  return (
+    <>
+      <hr className="setup-preview-divider" />
+      {kind == null ? (
+        // Unresolved is its own answer. Without this arm the panel picks a run shape from a
+        // node it has not read yet, and every measurement node flashes an LLM trace first.
+        <div className="opt-detail-empty">
+          {kindLoading
+            ? "Reading the optimizer manifest…"
+            : "This node is not in the served pipeline."}
+        </div>
+      ) : kind === "measurement" ? (
+        <MeasurementRun block={block} round={round} />
+      ) : (
+        <CallRun block={block} loading={loading} inFlight={inFlight} />
+      )}
+
+      {block && (
+        <footer className="opt-detail-footer">
+          {/* ONE fold, over the block WHOLE. It replaces a separate `raw input` and `raw output`
+              that were proper subsets of it — so this shows strictly more (the model, the usage,
+              the timestamp neither of them carried) in half the chrome. Same object the header's
+              copy button hands over, so the two cannot disagree about what this node did. */}
+          <details className="opt-detail-disclosure">
+            <summary>raw block</summary>
+            <pre className="opt-detail-pre">{fmtValue(block, { pretty: true })}</pre>
+          </details>
+        </footer>
+      )}
+    </>
+  );
+}
+
+// What an LLM node did: what went in, what came back, and what it cost.
+function CallRun({
   block,
   loading,
   inFlight,
 }: {
-  id: string;
-  kind: string;
   block: NodeBlock | null;
   loading: boolean;
   inFlight: boolean;
@@ -329,31 +388,45 @@ function RunSection({
   const usage = block?.usage;
   const variants = variantsOf(response);
 
+  // What we ASKED FOR carries the routing suffix; `block.model` is the provider's echo, which
+  // OpenRouter returns bare — so it names a `:nitro` call identically to a normally-routed one.
+  // The ask is absent when the node declares no model and takes the provider default.
+  const asked = block?.config?.["model"];
+  const model = (typeof asked === "string" ? asked : block?.model) || "";
+
+  // Filtered BEFORE the wrapper, never inside each chip: a strip where every entry declines to
+  // render must ship no `<div>` at all, or a node that has not fired draws an empty box.
+  const chips = [
+    { label: "model", value: model },
+    { label: "dur", value: block ? fmtSecs(block.duration_s) : "" },
+    {
+      label: "tokens",
+      value: usage
+        ? `${usage.prompt_tokens ?? "—"}p / ${usage.completion_tokens ?? "—"}c / ${usage.total_tokens ?? "—"}t`
+        : "",
+    },
+    { label: "template", value: (block?.input?.template_name as string | undefined) ?? "" },
+    { label: "ts", value: block?.timestamp ?? "" },
+  ].filter((c) => c.value !== "" && c.value !== "—");
+
   return (
     <>
-      <hr className="setup-preview-divider" />
-      <div className="opt-detail-meta">
-        <Chip label="model" value={block?.model ?? ""} />
-        <Chip label="dur" value={block ? fmtSecs(block.duration_s) : ""} />
-        <Chip
-          label="tokens"
-          value={
-            usage
-              ? `${usage.prompt_tokens ?? "—"}p / ${usage.completion_tokens ?? "—"}c / ${usage.total_tokens ?? "—"}t`
-              : ""
-          }
-        />
-        <Chip label="template" value={(block?.input?.template_name as string | undefined) ?? ""} />
-        <Chip label="ts" value={block?.timestamp ?? ""} />
-      </div>
+      {chips.length > 0 && (
+        <div className="opt-detail-meta">
+          {chips.map((c) => (
+            <span key={c.label} className="opt-detail-chip">
+              <span className="opt-detail-chip-label">{c.label}</span>
+              <span className="opt-detail-chip-value">{c.value}</span>
+            </span>
+          ))}
+        </div>
+      )}
 
       {!block ? (
         <div className="opt-detail-empty">
-          {kind === "measurement"
-            ? "System step — no LLM call. See the configuration above for the wired params."
-            : loading
-              ? "Loading this round's audit trail…"
-              : "This node has not fired in any cached round yet."}
+          {loading
+            ? "Loading this round's audit trail…"
+            : "This node has not fired in any cached round yet."}
         </div>
       ) : (
         <>
@@ -430,37 +503,6 @@ function RunSection({
           </div>
         </>
       )}
-
-      {id === "l1_score" && (
-        <section className="opt-detail-samples" aria-label="Round samples">
-          <RoundSamplesView />
-        </section>
-      )}
-
-      {block && (
-        <footer className="opt-detail-footer">
-          <details className="opt-detail-disclosure">
-            <summary>raw input</summary>
-            <pre className="opt-detail-pre">{fmtValue(block.input ?? {}, { pretty: true })}</pre>
-          </details>
-          <details className="opt-detail-disclosure">
-            <summary>raw output</summary>
-            <pre className="opt-detail-pre">{fmtValue(block.output ?? {}, { pretty: true })}</pre>
-          </details>
-        </footer>
-      )}
     </>
-  );
-}
-
-// One-line chip inside the meta strip. Skipped entirely when the value is empty so
-// the strip stays dense.
-function Chip({ label, value }: { label: string; value: string }) {
-  if (!value || value === "—") return null;
-  return (
-    <span className="opt-detail-chip">
-      <span className="opt-detail-chip-label">{label}</span>
-      <span className="opt-detail-chip-value">{value}</span>
-    </span>
   );
 }

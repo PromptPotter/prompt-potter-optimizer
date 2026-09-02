@@ -33,6 +33,7 @@ import type {
   DashboardSample,
   LiveDashboardState,
   RayItem,
+  ValidationFailure,
 } from "./api/types";
 import { usePoll } from "./hooks/usePoll";
 import { bumpRevalidation, useRevalidation } from "./revalidate";
@@ -85,6 +86,14 @@ export interface LiveCandidate {
   // The same rows rendered for the operator reading the file. No component reads it; it is
   // declared so the folder-UI half of this block is visible to anyone typing `dash.`.
   sample_lines?: string[];
+  // WHY a candidate has no samples — the scoring node's own account of a validation rejection,
+  // and the only place it is served. It is NOT copied onto `current_round.candidates`: that row
+  // carries the `invalid` FLAG (which every surface reads), while the reasons stay here, where
+  // one panel reads them. Serving the list twice would put the same failures in `dashboard.json`
+  // in two places, which is the ledger duplication `infrastructure/CLAUDE.md` § Persistence
+  // measures. `invalid` is mirrored here only so this half is readable on its own.
+  invalid?: boolean;
+  validation_failures?: ValidationFailure[];
   // No numbers here: they moved to `current_round.candidates`, in the same shape a closed
   // round serves, so no surface merges two shapes field by field. The tape is what this half
   // still owns. (The block also carries the value-inlined formula and the self-healing state

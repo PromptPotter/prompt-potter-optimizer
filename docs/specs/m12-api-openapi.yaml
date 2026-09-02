@@ -3751,10 +3751,16 @@ components:
           additionalProperties: true
           description: |
             Every param each node carries, keyed by node id — COMPLETE, because
-            clients sum `optimizer_tunable` across it to answer "is this node
-            optimizer-locked". An EMPTY list is a different answer from "has
-            params, none tunable" — the node carries nothing to change at all —
-            and `[].every()` collapses the two, so test length before the sum.
+            clients sum `movable_by` across it to answer "where does the search
+            reach on this node". A lock is (axis, AGENT): `movable_by` names who
+            may move it now (`l1` the generator each round, `l2` escalation over
+            the optimizer's own knobs), and the EMPTY list is the only true lock —
+            nobody may, and changing it costs a fork. Two fields say why a shut
+            axis is shut: `optimizer_locked` (never an axis — model/provider, a
+            confound guard) and `held` (the dataset offered it, this campaign
+            closed it). Neither is plain configuration. An EMPTY param list is a
+            third answer again — nothing here to change at all — and
+            `[].every()` collapses it into the others, so test length first.
             Each param's `kind` names the surface that owns it:
             the five widget kinds (`model`/`enum`/`number`/`bool`/`string`) are
             config-editor rows; `prompt` (a PromptTemplate decomposition field) and

@@ -7,6 +7,15 @@ export function interiorNodes(view: PipelineView | null | undefined): PipelineVi
   return (view?.nodes ?? []).filter((n) => n.kind !== "io");
 }
 
+// The node that runs something ELSE — the optimizer's `l1_score`, which fires the whole
+// campaign pipeline under it. The server names this per campaign (`nests.node`); the optimizer
+// manifest has no parent to be named by, so its one is derived the way the server derives it:
+// the measurement node is what runs another pipeline. Shared by all three hosts of that
+// picture, since a host deriving `null` of its own drops the nesting glyph on one surface only.
+export function measurementNode(doc: PipelineDoc | null | undefined): string | null {
+  return interiorNodes(doc?.view).find((n) => n.kind === "measurement")?.id ?? null;
+}
+
 export interface OriginPrompt {
   fields: Record<string, unknown>;
   version: string;

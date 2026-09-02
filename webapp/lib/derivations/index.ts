@@ -15,6 +15,7 @@ export * from "./inner-panel";
 export * from "./lineage-candidates";
 export * from "./lineage-descendants";
 export * from "./nodeConfig";
+export * from "./output-contract";
 export * from "./pipeline-layout";
 export * from "./pipeline-nodes";
 export * from "./round-axis";

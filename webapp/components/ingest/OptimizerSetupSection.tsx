@@ -1,4 +1,5 @@
 "use client";
+import { measurementNode } from "@/lib/derivations";
 import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import { useSelection } from "@/lib/SelectionContext";
 import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
@@ -61,7 +62,7 @@ export function OptimizerSetupSection() {
         connector="PromptPotter"
         schema={schema}
         scope="optimizer"
-        nestsNode={null}
+        nestsNode={measurementNode(doc)}
         activeNode={null}
         isLive={false}
         tone="neutral"

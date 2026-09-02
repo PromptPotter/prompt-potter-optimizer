@@ -306,6 +306,7 @@ export interface ScoreboardRow {
   composite_fitness: number;
   total: number;
   escalation_aborted: boolean;
+  invalid: boolean;
   matched_parent_accuracy: number | null;
   matched_parent_composite: number | null;
   mean_fitness_ci_lo: number | null;
@@ -702,7 +703,7 @@ export interface MeasurementSeriesResponse {
   mean_fitness: number | null;
 }
 
-/** One param a node carries — the COMPLETE per-node list, which is what lets */
+/** One param a node carries — the COMPLETE per-node list, which is what lets a reader sum */
 export interface NodeConfigParam {
   key: string;
   value: unknown;
@@ -710,7 +711,8 @@ export interface NodeConfigParam {
   options: string[];
   description: string;
   optimizer_locked: boolean;
-  optimizer_tunable: boolean;
+  movable_by: string[];
+  held: boolean;
 }
 
 /** Resolved output schema for a TARGET pipeline node — the structured output the */

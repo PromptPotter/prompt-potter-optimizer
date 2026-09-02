@@ -1,19 +1,24 @@
-// Per-sample readers. Two strict functions, one per source —
-// `liveSamplesFor` reads the in-flight projection in `dashboard.json`,
-// `historicalSamplesFor` reads `round_NNNN.json::all_candidate_results`.
-// Both return the same `SampleRow[]` shape so the unified
-// RoundSamplesView mounts a single renderer.
+// What the `l1_score` block says about each candidate: the ROWS it measured, and WHY it has
+// them. One module because it is one array — `nodes.l1_score.{input,output}.candidates[]`,
+// built in one loop over one `RoundBuffer` (`live_dashboard/render.py`). Two readers of one
+// source in two files is how the same shape gets read two ways.
+//
+// Per-sample: two strict functions, one per source — `liveSamplesFor` reads the in-flight
+// projection in `dashboard.json`, `historicalSamplesFor` reads
+// `round_NNNN.json::all_candidate_results`. Both return the same `SampleRow[]` shape so the
+// unified MeasurementRun mounts a single renderer.
 //
 // CLAUDE.md rule: live vs historical never merge. These functions are
 // deliberately separate, with no fallback chain between them — `samplesForRow`
 // SELECTS one based on the row's `source` tag (never merges), so every consumer
-// (the candidates card's bars, RoundSamplesView's groups) routes the same way.
+// (the candidates card's bars, MeasurementRun's groups) routes the same way.
 
 import {
   liveCandidate,
   type DashboardSnapshot,
 } from "@/lib/poll";
-import type { CandidateRow, SampleRow } from "@/lib/types";
+import type { ValidationFailure } from "@/lib/api/types";
+import type { CandidateRow, NodeBlock, SampleRow } from "@/lib/types";
 import type { RoundResult } from "@/lib/types";
 import { isHit } from "@/lib/fitness";
 
@@ -153,4 +158,75 @@ export function samplesForRow(
   return row.source === "inflight"
     ? liveSamplesFor(dash, row.round, row.candidate_id)
     : historicalSamplesFor(doc, row.round, row.candidate_id);
+}
+
+// WHY a candidate produced the rows it produced. The block's two halves each own half the
+// account: the input half carries what the candidate TRIED (`changes_description`), the output
+// half what validation SAID about it (`validation_failures`). They join on `label`, exactly —
+// both halves and `DashboardCandidate.label` come from one `candidate_label(round, idx)` call.
+export interface CandidateVerdict {
+  // The optimizer's own words. `""` when the half is absent — never a placeholder sentence,
+  // which would read as something the optimizer wrote.
+  changes: string;
+  // Empty for a candidate that ran. Non-empty means it never did.
+  failures: ValidationFailure[];
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+// The `candidates` array off one half of the block, or empty. Rows that are not objects are
+// dropped rather than coerced — a malformed row has no label to file it under anyway.
+function candidatesOf(half: Record<string, unknown> | undefined): Record<string, unknown>[] {
+  if (!isRecord(half)) return [];
+  const raw = half.candidates;
+  return Array.isArray(raw) ? raw.filter(isRecord) : [];
+}
+
+function labelOf(c: Record<string, unknown>): string | null {
+  return typeof c.label === "string" && c.label !== "" ? c.label : null;
+}
+
+// Only the two fields anything renders are required. `axis` / `allowed` / `owner` ride along
+// untouched — checking them would reject a row over a field no surface reads.
+function isFailure(v: unknown): v is ValidationFailure {
+  return isRecord(v) && typeof v.value === "string" && typeof v.reason === "string";
+}
+
+// Takes the RESOLVED block rather than reaching for the live snapshot, and that is what makes it
+// work on a HISTORICAL round: `useRoundNodes` is the single resolver that picks the live block vs
+// the audit twin, and `AuditTrailView.set_l1_score` deposits the identical object into the twin.
+//
+// It deliberately does NOT answer whether a candidate is invalid — `ElectedRow.invalid` does, off
+// the candidate row every other surface already reads. This only EXPLAINS a rejection the row has
+// already declared, which is why a missing entry here is never a verdict: it means the block has
+// not arrived, not that nothing was wrong. Read defensively throughout; the block is a plain
+// `dict[str, Any]` server-side with no model behind it.
+export function candidateVerdicts(
+  block: NodeBlock | null | undefined,
+): Map<string, CandidateVerdict> {
+  const out = new Map<string, CandidateVerdict>();
+  if (!block) return out;
+
+  for (const c of candidatesOf(block.input)) {
+    const label = labelOf(c);
+    if (!label) continue;
+    out.set(label, {
+      changes: typeof c.changes_description === "string" ? c.changes_description : "",
+      failures: [],
+    });
+  }
+
+  // A candidate can appear in one half and not the other — the input half is seeded when scoring
+  // STARTS and the output half filled as it finishes, so mid-round the two disagree by design.
+  for (const c of candidatesOf(block.output)) {
+    const label = labelOf(c);
+    if (!label) continue;
+    const raw = c.validation_failures;
+    const failures = Array.isArray(raw) ? raw.filter(isFailure) : [];
+    out.set(label, { changes: out.get(label)?.changes ?? "", failures });
+  }
+
+  return out;
 }

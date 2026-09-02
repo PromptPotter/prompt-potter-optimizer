@@ -26,9 +26,11 @@ nodes:
     type: llm/optimizer
     # The MENUS behind this node's scalar params, so the operator picks a value instead of
     # typing one. `param_allowed_values` alone does NOT open a search axis — `node_config_schema`
-    # reads `optimizer_tunable` off `param_keys`, which stays empty here on purpose: the
-    # optimizer never searches its own configuration. Anchored and aliased onto every node
-    # below; a menu named for a key a node does not carry is simply never read.
+    # reads L1's reach off `param_keys`, which stays empty here on purpose: L1 never searches
+    # its own configuration. That says nothing about L2, whose reach is declared in
+    # `dispatch/schemas.py::L2_NODE_AXES` and served from there, not from this block. Anchored
+    # and aliased onto every node below; a menu named for a key a node does not carry is simply
+    # never read.
     optimizer: &node_menus
       param_allowed_values:
         reasoning_effort: [none, default, low, medium, high]

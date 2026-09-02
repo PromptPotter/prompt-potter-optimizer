@@ -43,15 +43,21 @@ export interface ConfigRow {
   // values: present in the candidate overlay (vs the config floor) — keep it in
   // the emitted overlay even when the operator leaves it untouched.
   fromCandidate: boolean;
-  // The optimizer can't permute this (model/provider — always locked). Shown as a
-  // hint; a cap-holding operator may still set it on a fork (a babysit edit).
+  // NEVER a search axis (model/provider — a confound guard). Shown as a hint; a
+  // cap-holding operator may still set it on a fork (a babysit edit).
   optimizerLocked: boolean;
+  // Who searches this axis right now — served, and the reason a shut axis and an axis
+  // nobody happens to be moving are two different rows rather than one badge.
+  movableBy: string[];
+  // The dataset offered this axis and THIS campaign closed it. The only shut state a
+  // person caused, and the only one worth offering a click.
+  held: boolean;
   description: string;
 }
 
 // The kinds this editor draws a widget for. The served param list is COMPLETE per
-// node (that is what makes `optimizer_tunable` summable into "is this node
-// optimizer-locked"), so it also carries `prompt` (a PromptTemplate decomposition
+// node (that is what makes `movable_by` summable into "where does the search reach
+// here"), so it also carries `prompt` (a PromptTemplate decomposition
 // field, owned by the prompt editor) and `nested` (object/array — a nested value in
 // a text box is a corrupt edit waiting to happen). Those are listed, not rendered:
 // the filter belongs here, at the surface that knows what it can draw, not at the
@@ -66,6 +72,71 @@ export const WIDGET_KINDS: ReadonlySet<string> = new Set([
 
 export function isWidgetParam(p: { kind: string }): boolean {
   return WIDGET_KINDS.has(p.kind);
+}
+
+// WHERE THE SEARCH REACHES on one node — the single reading the picture and the config rows
+// both take, so a glyph on the graph and the 🔒 beside a param cannot disagree.
+//
+// A lock is (axis, AGENT), never an axis alone. The server says who may move each param
+// (`movable_by`); this counts. The denominator is the DECLARED axes — params that are open, or
+// that were open and this campaign closed (`held`) — never the whole param list: `model`,
+// `provider` and plain configuration are not axes, and counting them draws every plumbing node
+// as locked.
+export interface NodeReach {
+  /** Axes some agent may move right now. */
+  open: number;
+  /** Every axis that COULD be opened — the open ones plus the shut ones. */
+  openable: number;
+  /** Which agents reach this node at all, in `MOVABLE_AGENTS` order. */
+  agents: string[];
+  /** Some shut axis was shut by a NARROWING, not merely left closed by the dataset. */
+  held: boolean;
+  // `nothing` is the only state with no lock: every param here is `model`/`provider`, or the
+  // node carries none — nothing that could ever be opened, so nothing to draw shut.
+  state: "open" | "partial" | "locked" | "nothing";
+}
+
+// `null` is UNKNOWN — the schema has not loaded, or this node is absent from it. Distinct from
+// `nothing`, and never drawn as a lock: an unread node depicted as shut is a claim nobody made.
+//
+// The denominator is what is OPENABLE, and that is nearly every param: adding a key to a node's
+// `param_keys` is what opens an axis, so a config param no agent moves is shut, not exempt.
+// Only `PARAM_FORBIDDEN_KEYS` (`optimizer_locked` — model and provider, held so a comparison
+// isn't confounded) is outside the question, and it wears its own badge rather than a padlock.
+export function nodeReach(
+  schema: Record<string, NodeConfigParam[]> | null,
+  node: string,
+): NodeReach | null {
+  const params = schema?.[node];
+  if (params == null) return null;
+  const openable = params.filter((p) => !p.optimizer_locked);
+  const open = openable.filter((p) => p.movable_by.length > 0);
+  const agents = [...new Set(open.flatMap((p) => p.movable_by))];
+  const state =
+    openable.length === 0
+      ? "nothing"
+      : open.length === 0
+        ? "locked"
+        : open.length === openable.length
+          ? "open"
+          : "partial";
+  return {
+    open: open.length,
+    openable: openable.length,
+    agents,
+    held: openable.some((p) => p.held),
+    state,
+  };
+}
+
+// What the agent list says out loud. `l1` fires every round and `l2` only on a stall, so they
+// are not interchangeable and a bare "the optimizer" would flatten them.
+export function agentLabel(agent: string): string {
+  return agent === "l1"
+    ? "the generator, every round"
+    : agent === "l2"
+      ? "escalation, when a round stalls"
+      : agent;
 }
 
 function asObj(v: unknown): Record<string, unknown> {
@@ -112,12 +183,12 @@ export function configRows(
       if (mode === "search-space") {
         const isModel = p.kind === "model";
         // model/provider are always optimizer-locked; every other param inherits
-        // the overlay's open-set (or the schema's tunability when unset).
+        // the overlay's open-set, or — unset — whether any agent reaches it today.
         const locked = isModel
           ? true
           : overlayKeys !== undefined
             ? !overlayKeys.includes(p.key)
-            : !p.optimizer_tunable;
+            : p.movable_by.length === 0;
         rows.push({
           node: n,
           key: p.key,
@@ -129,6 +200,8 @@ export function configRows(
           allowed: narrowed ?? p.options,
           fromCandidate: false,
           optimizerLocked: p.optimizer_locked,
+          movableBy: p.movable_by,
+          held: p.held,
           description: p.description,
         });
       } else {
@@ -147,6 +220,8 @@ export function configRows(
           allowed: p.options,
           fromCandidate,
           optimizerLocked: p.optimizer_locked,
+          movableBy: p.movable_by,
+          held: p.held,
           description: p.description,
         });
       }
@@ -265,7 +340,7 @@ export function seedOverlayFromRows(
 ): Record<string, Record<string, unknown>> {
   const overlay: Record<string, Record<string, unknown>> = {};
   for (const r of rows) {
-    const edit = edits[`${r.node}.${r.key}`];
+    const edit = edits[flatConfigKey(r.node, r.key)];
     if (!r.fromCandidate && (edit === undefined || edit === r.value)) continue; // inherited + untouched
     const raw = edit ?? r.value;
     if (raw === "") continue; // empty = drop (inherit)

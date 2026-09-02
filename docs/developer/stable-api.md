@@ -86,7 +86,7 @@ Connector-described pipeline (the shape `GET /pipeline` exposes, plus an operato
 - `name`, `version` — pipeline identity.
 - `backend_type` — connector name; must match a registered connector.
 - `backend_name` — display name for operator surfaces.
-- `nodes` — node graph. Per-node: `runtime` (`backend`/`frontend`/`in_process`) · `node_role` (`candidate_source`/`ranker`/`enricher`/`cache`/`""` — the WIRE key; it maps to `PipelineNode.node_type`, which is the model field, not the key you publish) · `optimizer.param_keys` (list — operator-tunable knobs) · `optimizer.observation_mappings` (wire-name → optimizer-name) · `optimizer.langfuse_type` · `config` (per-dataset overlay merged onto the wire payload).
+- `nodes` — node graph. Per-node: `runtime` (`backend`/`frontend`/`in_process`) · `node_role` (`candidate_source`/`ranker`/`enricher`/`cache`/`""` — the WIRE key; it maps to `PipelineNode.node_type`, which is the model field, not the key you publish) · `optimizer.param_keys` (list — the SEARCH AXES this node opens to the optimizer; `model`/`provider` are stripped whatever it says, and a campaign narrows the rest) · `optimizer.observation_mappings` (wire-name → optimizer-name) · `optimizer.langfuse_type` · `config` (per-dataset overlay merged onto the wire payload).
 - `pipelines` — named pipeline variants.
 - `available_models` — model menu shown to L1.
 - `resolved_prompts` — prompt-template map keyed by version. (`resolved_schemas` is a

@@ -72,6 +72,7 @@ export type {
   RoundSummaryCandidate,
   ScoreboardRow,
   ScoredCandidate,
+  ValidationFailure,
   SampleSeries,
   SpendBucket,
   SpendRollup,

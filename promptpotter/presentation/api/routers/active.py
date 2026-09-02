@@ -12,6 +12,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     optimizer_manifest,
     optimizer_resolved_schemas,
 )
+from promptpotter.application.optimization.dispatch.schemas import L2_NODE_AXES
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.run_records import MintKind
@@ -250,9 +251,10 @@ def get_optimizer_pipeline() -> dict[str, Any]:
     # block stays free to shape the graph.
     schema = parse_pipeline_response(pipeline)
     pipeline["view"] = schema.view.model_dump(by_alias=True) if schema.view else None
+    # This is the OPTIMIZER's own manifest, so it is the one route that names L2's axes.
     pipeline["node_config_schema"] = {
         node: [p.model_dump() for p in params]
-        for node, params in schema.node_config_schema().items()
+        for node, params in schema.node_config_schema(L2_NODE_AXES).items()
     }
     pipeline["node_output_schema"] = {
         node: (out.model_dump() if out is not None else None)

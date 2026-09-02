@@ -90,7 +90,6 @@
 /* Round samples embedded in the l1_score node panel — the scoring node owns
    the per-round HIT/MISS view now that it's no longer a standalone card. */
 .opt-detail-samples{padding:var(--space-8) var(--space-16);border-top:0.5px solid var(--color-border)}
-.opt-detail-samples .round-samples-view{margin-bottom:0}
 
 /* What l1_generate PRODUCED — the round's population, one candidate at a time.
    The node's response is the whole population in one blob, and printed as a single

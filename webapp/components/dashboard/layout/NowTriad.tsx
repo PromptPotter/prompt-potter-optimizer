@@ -18,7 +18,8 @@ import { useSelection } from "@/lib/SelectionContext";
 // candidate is selected, the node panel when a node is — EITHER canvas's, since
 // `NodeDetail` is one panel for both scopes and the tab a node was clicked on no
 // longer decides whether it opens. The per-round samples view is not a standalone
-// card either — it lives inside the l1_score node panel.
+// card either — it is the RUN half of a measurement node's panel (`MeasurementRun`),
+// which is why it draws no frame and no round heading of its own.
 //
 // Every region reads its own state from context (`useDashboard`,
 // `useWorkspace`, `useSelection`); the only thing threaded is `pipeline` (a

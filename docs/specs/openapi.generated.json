@@ -3212,12 +3212,17 @@
       },
       "NodeConfigParam": {
         "additionalProperties": false,
-        "description": "One param a node carries — the COMPLETE per-node list, which is what lets\n`optimizer_tunable` sum to the node's whole search space.\n\n`kind` names the surface that OWNS the param: `model`/`enum` → a select,\n`number`/`bool`/`string` → a typed input, `prompt` → the prompt editor's (a\n`PromptTemplate` decomposition field), `nested` → structured, no scalar widget\n(`NESTED_PARAM_TYPES`). Only the first five are config-editor rows; the last two\nare listed but not rendered. They are listed because dropping them made\n`every(!optimizer_tunable)` answer \"optimizer-locked\" for a node whose every\naxis is prose — do not re-filter this list at the source.\n\n`optimizer_locked` = never an optimizer axis (`PARAM_FORBIDDEN_KEYS`), though a\ncap-holding operator may still set it on a steered fork. `optimizer_tunable` =\nthe optimizer may currently MOVE it (sits in `param_keys`). A config-only key is\nneither; a node with no tunable param is optimizer-fixed (origin-locked).",
+        "description": "One param a node carries — the COMPLETE per-node list, which is what lets a reader sum\n`movable_by` into the node's whole search space.\n\n`kind` names the surface that OWNS the param: `model`/`enum` → a select,\n`number`/`bool`/`string` → a typed input, `prompt` → the prompt editor's (a\n`PromptTemplate` decomposition field), `nested` → structured, no scalar widget\n(`NESTED_PARAM_TYPES`). Only the first five are config-editor rows; the last two\nare listed but not rendered. They are listed because dropping them made an\nall-axes-shut sum answer \"locked\" for a node whose every axis is prose — do not\nre-filter this list at the source.\n\n**A lock is (axis, AGENT), never an axis alone.** `movable_by` names the agents that may\nmove this param right now — the vocabulary is `MOVABLE_AGENTS` — and the empty list is the\nonly true lock: nobody may, and changing it costs a fork.\n\nTwo fields say WHY a shut axis is shut, and the difference is the whole point:\n`optimizer_locked` = never an axis (`PARAM_FORBIDDEN_KEYS` — a confound guard, nobody's\ndecision); `held` = the dataset offered it and this campaign closed it (`param_keys_held`\n— somebody's decision, and reversible). Neither = plain configuration, never an axis at\nall.",
         "properties": {
           "description": {
             "default": "",
             "title": "Description",
             "type": "string"
+          },
+          "held": {
+            "default": false,
+            "title": "Held",
+            "type": "boolean"
           },
           "key": {
             "title": "Key",
@@ -3227,14 +3232,16 @@
             "title": "Kind",
             "type": "string"
           },
+          "movable_by": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Movable By",
+            "type": "array"
+          },
           "optimizer_locked": {
             "default": false,
             "title": "Optimizer Locked",
-            "type": "boolean"
-          },
-          "optimizer_tunable": {
-            "default": false,
-            "title": "Optimizer Tunable",
             "type": "boolean"
           },
           "options": {

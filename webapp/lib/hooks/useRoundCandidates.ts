@@ -1,6 +1,6 @@
 "use client";
 // The leaf cycle's per-round rows, computed once and grouped (`groupByRound`) so the
-// sample-scoped surfaces — `ScoringInspector` and `RoundSamplesView` — share one memoized
+// sample-scoped surfaces — `ScoringInspector` and `MeasurementRun` — share one memoized
 // list per `dash` snapshot. Components ask this hook rather than importing the derivation,
 // which is what guarantees the merge runs once.
 //
