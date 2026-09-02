@@ -21,7 +21,7 @@ Describe your 1️⃣ **task**, drop in a labeled 2️⃣ **dataset**, and 3️�
 
 ## 📺 Watch it work
 
-- **[Can open models operate PromptPotter?](https://www.youtube.com/watch?v=DLhb26ppX_s)** — Qwen, GLM and DeepSeek each drive the same Swiss-invoice campaign end to end, then one of them is handed a real bug in this repo to fix. Unedited, no benchmark scores — the operating work itself.
+- **[Can open models operate PromptPotter?](https://www.youtube.com/watch?v=DLhb26ppX_s)** — an attempt to swap Claude Code for Qwen 3.8, which fails at the harness rather than the model: opencode never reads the `CLAUDE.md` files the run skill depends on. Alongside it a Swiss-invoice campaign runs unattended, elects a lower-accuracy winner, and hits its own spend cap on camera. Unedited, no benchmark scores — the operating work itself.
 
 ## ⭐ Features
 

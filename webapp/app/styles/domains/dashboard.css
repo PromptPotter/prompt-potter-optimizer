@@ -12,6 +12,9 @@
 .dash-spine-narrow{width:100%;max-width:var(--dash-narrow-max);margin-left:auto;margin-right:auto;margin-bottom:var(--dash-zone-gap)}
 @media (max-width:880px){
   .content{padding:var(--space-12)}
+  /* Ceiling the BOX, never the list: four server-authored warnings fill half a
+     phone pane, and clamping the text would hide a state with nothing to report it. */
+  .run-error-banner{max-height:26vh;overflow-y:auto;overscroll-behavior:contain}
 }
 .dash-spine-narrow:last-child{margin-bottom:0}
 

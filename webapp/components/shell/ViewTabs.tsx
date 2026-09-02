@@ -15,8 +15,9 @@ import {
   type ViewGroup,
 } from "@/lib/view-tab";
 
-// The per-campaign view axis, on the page under the run title — the app's ONE nav
-// surface for it, at every width. Two rows: the top level (Chat · Dashboard ·
+// The per-campaign view axis — the app's ONE nav surface for it, in two forms one
+// stylesheet apart: a strip under the run title, and below --bp-md the phone's
+// bottom tab bar (domains/shell.css). Two rows: the top level (Chat · Dashboard ·
 // Records), and the Records members, which appear only while one of them is the
 // view. Which view sits in which tier is `lib/view-tab.ts`.
 

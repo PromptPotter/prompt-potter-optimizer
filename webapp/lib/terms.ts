@@ -44,13 +44,10 @@ export const TERMS: Record<string, string> = {
   badge_top:          "Page-anchor card — primary signal for round health.",
   brand_live_preview: "This page polls dashboard.json every 2s.",
 
-  // New Job status / spend bar — collapsed chips + expand-down panel
-  newjob_bar_best:   "Lift over origin — the running winner's gain (best − origin). '+12% · best 62%' reads as '+12 points over origin, now at 62%' — the gain is the spend's return.",
-  newjob_bar_round:  "Current round number. The campaign's progress through its round budget.",
-  newjob_bar_spend:  "Total LLM cost on this campaign: backend (per-sample wire calls) + loop (optimizer generate / critique / refine / replan). USD when the provider returns it (OpenRouter) or the model resolves in the bundled rate table; falls back to a token count otherwise. Tooltip splits Backend vs Loop. Source: dashboard.json::spend.",
-  newjob_bar_budget: "Spend ceiling for this campaign — it halts at the next round boundary once cumulative spend reaches it. A free account's runs are launched at a fixed step, so this is the ceiling the run was admitted at, not a knob you set. Your remaining allowance lives in Account → Security.",
-  newjob_bar_eta:    "Estimated time until spend hits the budget at the current burn rate. Renders '—' when the budget is uncapped or spend is unknown.",
-  newjob_bar_eff:    "Improvement-per-spend overall: (best − origin) / spend_used, in percentage points per dollar. The headline efficiency number.",
+  // Remote control — the Lift chip's readouts, served on the strip and its panel
+  remote_best:   "Lift over origin — the running winner's gain (best − origin). '+12% · best 62%' reads as '+12 points over origin, now at 62%' — the gain is the spend's return.",
+  remote_eta:    "Estimated time until spend hits the budget at the current burn rate. Renders '—' when the budget is uncapped or spend is unknown.",
+  remote_eff:    "Improvement-per-spend overall: (best − origin) / spend_used, in percentage points per dollar. The headline efficiency number.",
 };
 
 // The target/backend node ids of a connector view — every node that isn't a

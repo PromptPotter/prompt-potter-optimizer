@@ -54,21 +54,21 @@
 
   /* ── Responsive tokens (mobile-first foundation) ─────────────────
      Content-driven breakpoints — derived from the points where existing
-     desktop layouts already break (commit b1f35923 chose 640/380; the
-     dashboard's container queries break at 760/780/880/960). Three tiers
+     desktop layouts already break (commit b1f35923 chose 640; the
+     dashboard's container queries break at 760/780/880/960). Two tiers
      plus an orientation-rotation threshold for dense visualisations
      that cannot meaningfully fit portrait phone.
 
      There is no --bp-lg / --bp-xl. Both were declared, used by no @media
      rule, and --bp-xl was a second name for --dash-wide-max, which is
-     the one the dashboard spine actually reads.
+     the one the dashboard spine actually reads. --bp-xs (380) met the
+     same fate once the ≤380px chat-job-bar block went with that bar.
 
      Note: CSS @media queries cannot read CSS custom properties (per
      spec — media queries resolve before custom-property substitution).
      The numbers must literal in @media rules; these tokens are the
      canonical source the sweep references when authoring new rules
      and the lint test pins to a single list of allowed breakpoints. */
-  --bp-xs:380px;          /* iPhone SE-class portrait */
   --bp-sm:640px;          /* large phone */
   --bp-rotate:768px;      /* below this, portrait dense surfaces show rotate prompt */
   --bp-md:880px;          /* small tablet / landscape phone */

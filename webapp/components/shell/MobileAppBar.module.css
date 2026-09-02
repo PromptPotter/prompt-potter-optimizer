@@ -2,10 +2,12 @@
    gate and the two-screen flow swap live in app/styles/domains/shell.css: a @media
    in here is invisible to lib/__tests__/css-breakpoints.test.ts, and a CSS Module's
    order against the global barrel is not something `display` may rely on. */
+/* No bottom rule: the run header sits directly under this and the two are read as
+   one identity band — campaign on the first line, cycle on the second. That header
+   carries the hairline that closes both. */
 .bar {
   flex-shrink: 0;
   background: var(--color-background-primary);
-  border-bottom: 0.5px solid var(--color-border);
   padding-top: max(0px, var(--safe-top));
 }
 

@@ -268,11 +268,11 @@ export function IngestConversation({
         <div className="chat-field">
           <textarea
             className="chat-input"
-            placeholder={
-              flow.awaitingContext
-                ? "Describe the task in one message…"
-                : "Drop a CSV, TSV, JSON or Excel file…"
-            }
+            // Short enough to sit on ONE line beside the attach and send buttons at
+            // 390px — a composer that wraps to two rows is not a composer. The accepted
+            // formats are the attach button's `accept` list and the pick-list's own copy;
+            // spelling them here made this the widest thing in the row.
+            placeholder={flow.awaitingContext ? "Describe the task…" : "Drop a dataset file…"}
             rows={1}
             value={flow.inputText}
             onChange={(e) => flow.setInputText(e.target.value)}

@@ -29,8 +29,8 @@ interface Props {
 // dataset ingest, rendered by the shared `IngestConversation` (same surface as the
 // "New campaign" modal): drop/pick → ask context if missing → one check-in → Start.
 // Run status lives on the shell's RemoteControl, and what this chat can DO is the
-// composer's Tools popover — one column of settings beside the thread was a card a
-// phone had to scroll past its own input to reach.
+// composer's Tools popover. Everything above the thread is deliberately MINIATURE —
+// the Dashboard is where these same surfaces are read at size.
 export function ChatPane({ checkinCampaignId }: Props) {
   // Only the name is read here (the pipeline hero labels itself with it); the roster
   // and its controls go straight to the two panels that draw them.
@@ -131,22 +131,19 @@ export function ChatPane({ checkinCampaignId }: Props) {
           its header row is gone — cycle picker, KPI chips and the status/spend panel are all
           on the shell's RemoteControl now, which renders on every tab rather than this one. */}
       <div className="wf-hero">
-        {/* One frame over the nesting this campaign sits in — the corner buttons are the
-            zoom axis and belong to the stack, which is the only thing that knows how many
-            levels there are to zoom to. Ingest keeps its node list always-on: there you
-            configure nodes, not watch them. */}
-        <div className="pipeline-frame">
-          <PipelineStack
-            datasetName={datasetName}
-            samplesOpen={samplesOpen}
-            onToggleSamples={toggleSamples}
-          />
-          {/* The round the hero's node detail reads. Its twin scopes the Dashboard's
-              canvas from that card's own toolbar — one control per picture, both
-              writing the single `selection.round` axis, so crossing tabs holds the
-              round. Without one here the chat could only ever inspect live. */}
-          <RoundAxis />
-        </div>
+        {/* The corner buttons are the zoom axis and belong to the stack, which is the
+            only thing that knows how many levels there are to zoom to. Ingest keeps its
+            node list always-on: there you configure nodes, not watch them. */}
+        <PipelineStack
+          datasetName={datasetName}
+          samplesOpen={samplesOpen}
+          onToggleSamples={toggleSamples}
+        />
+        {/* The round the hero's node detail reads. Its twin scopes the Dashboard's
+            canvas from that card's own toolbar — one control per picture, both
+            writing the single `selection.round` axis, so crossing tabs holds the
+            round. Without one here the chat could only ever inspect live. */}
+        <RoundAxis />
         {/* Either scope. The optimizer rail used to light a node and open nothing,
             because `optimizer`-scoped detail was mounted on the Dashboard alone. */}
         {selectedNode && (
@@ -164,9 +161,6 @@ export function ChatPane({ checkinCampaignId }: Props) {
 
       <div className="chat-grid">
         <div className="chat-panel">
-          <div className="chat-panel-header">
-            <div className="chat-panel-title">New Chat</div>
-          </div>
           <IngestConversation
             flow={ingest}
             // The entry list, on the landing surface. Withholding it here is what

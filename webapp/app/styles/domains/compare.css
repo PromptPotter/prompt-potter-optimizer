@@ -183,34 +183,6 @@
   color: var(--color-text-tertiary);
   font-family: var(--font-mono);
 }
-.cmp-channel-cfg {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  margin: var(--space-6) 0 0;
-  font-size: var(--text-xs);
-  font-family: var(--font-mono);
-  /* A prompt field is a paragraph and a pipeline can carry dozens of keys, so the list scrolls
-     inside the card rather than pushing the comparison below it off the screen. */
-  max-height: 18rem;
-  overflow-y: auto;
-}
-.cmp-channel-cfg > div {
-  display: grid;
-  grid-template-columns: minmax(0, 11rem) minmax(0, 1fr);
-  gap: var(--space-6);
-  align-items: baseline;
-}
-.cmp-channel-cfg dt {
-  color: var(--color-text-tertiary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.cmp-channel-cfg dd {
-  margin: 0;
-  min-width: 0;
-  color: var(--color-text-secondary);
-}
 /* An editable cell. The input is the value — no box, no chrome — until it holds something the
    record does not, which is the one state worth ink. */
 .cmp-cfg-cell {
