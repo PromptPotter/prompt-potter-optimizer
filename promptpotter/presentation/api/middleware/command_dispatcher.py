@@ -9,7 +9,7 @@ import re
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal, cast, get_args
+from typing import Annotated, Any, Literal, cast
 
 from pydantic import BeforeValidator, ConfigDict, Field, ValidationError, model_validator
 
@@ -33,6 +33,14 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.runner.origin_gate import GateDecision, submit_gate_decision
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.command_kinds import (
+    ALL_DISPATCHED_KINDS,
+    CampaignConfigKind,
+    CheckinScopedKind,
+    CycleScopedKind,
+    LifecycleKind,
+    WorkspaceScopedKind,
+)
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.pipeline_overlay import overlay_sets_model_outside_allowed
 from promptpotter.domain.run_records import CommandAckRecord, CommandRecord, CycleSeed
@@ -136,28 +144,6 @@ logger = logging.getLogger(__name__)
 __all__ = ["CommandAcceptedBody", "CommandDispatcher", "CommandOutcome"]
 
 
-LifecycleKind = Literal["archive-campaign", "delete-campaign", "unarchive-campaign"]
-
-CycleScopedKind = Literal[
-    "fork-cycle",
-    "skip-searchpoint",
-    "delete-cycle",
-    "cleanup-empty-cycles",
-    "pause-cycle",
-    "set-sample-lookahead",
-    "origin-gate-decision",
-    "change-spend-budget",
-    "start-run",
-    "step-cycle",
-]
-WorkspaceScopedKind = Literal[
-    "register-backend", "mint-campaign", "replace-dataset", "compact-archive"
-]
-CheckinScopedKind = Literal["edit-draft-campaign", "resolve-origin", "start-checkin"]
-# Campaign-scoped IN-PLACE manifest edits (the campaign persists — distinct from
-# `delete`, the one lifecycle verb that removes a tree). Rewrites `campaign.json`.
-CampaignConfigKind = Literal["set-allowed-models", "set-campaign-label"]
-
 Applier = Callable[[], Awaitable[Any]] | Callable[[], Any]
 
 # The one cap→verb ladder (ADR-0005 §3): every command kind that funnels through
@@ -204,17 +190,6 @@ CAP_FOR_KIND: dict[str, str] = {
 }
 
 # Import-time exhaustiveness — a dispatched kind with no cap is a silent unguarded verb.
-# Derived from the Literal types themselves, so the map cannot drift from the wire. Public
-# because the router subtracts its typed routes from this to wire the generic one: a verb
-# reachable over HTTP but absent HERE is gated by nothing, which is how `replace-dataset`
-# ran unguarded — it was in no Literal, so this raise could not see it.
-ALL_DISPATCHED_KINDS: frozenset[str] = frozenset(
-    get_args(LifecycleKind)
-    + get_args(CycleScopedKind)
-    + get_args(WorkspaceScopedKind)
-    + get_args(CheckinScopedKind)
-    + get_args(CampaignConfigKind)
-)
 if set(CAP_FOR_KIND) != ALL_DISPATCHED_KINDS:
     raise RuntimeError(
         "CAP_FOR_KIND out of sync with the dispatched command set: "

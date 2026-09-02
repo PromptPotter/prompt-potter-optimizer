@@ -19,30 +19,32 @@ from promptpotter.application.jobs.launcher.checkin import (
 from promptpotter.application.jobs.launcher.mint_and_start import OriginIncompleteError
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.connectors import BackendUnreachableError
+from promptpotter.domain.command_kinds import (
+    ALL_DISPATCHED_KINDS,
+    CampaignConfigKind,
+    CheckinScopedKind,
+    CycleScopedKind,
+    LifecycleKind,
+    WorkspaceScopedKind,
+)
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import resolve_cycle_path
 from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.middleware.command_dispatcher import (
-    ALL_DISPATCHED_KINDS,
     PAYLOAD_MODEL_FOR_KIND,
-    CampaignConfigKind,
     CampaignPayload,
-    CheckinScopedKind,
     CommandAcceptedBody,
     CommandDispatcher,
     CommandPayload,
     CompactArchivePayload,
     CyclePayload,
-    CycleScopedKind,
     DescendableCyclePayload,
     EditDraftCampaignPayload,
-    LifecycleKind,
     LifecyclePayload,
     ReplaceDatasetPayload,
     ResolveOriginPayload,
     StartCheckinPayload,
-    WorkspaceScopedKind,
     dispatch_draft_patch,
     dispatch_origin_resolution,
 )
@@ -57,8 +59,8 @@ logger = logging.getLogger(__name__)
 
 commands_router = APIRouter(prefix="/commands", tags=["Commands"])
 
-# Derived from the dispatcher's kind Literals (the SoT), never re-authored here — so a new
-# kind reaches the router the moment it joins its Literal.
+# Derived from the `domain/command_kinds.py` Literals (the SoT), never re-authored here — so a
+# new kind reaches the router the moment it joins its Literal.
 _LIFECYCLE_KINDS: frozenset[str] = frozenset(get_args(LifecycleKind))
 _CYCLE_SCOPED_KINDS: frozenset[str] = frozenset(get_args(CycleScopedKind))
 _WORKSPACE_SCOPED_KINDS: frozenset[str] = frozenset(get_args(WorkspaceScopedKind))

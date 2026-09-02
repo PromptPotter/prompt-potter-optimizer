@@ -8,7 +8,12 @@ only where the surface stands now — never a target to reach.
 from promptpotter.complexity_ledger import compute_ledger
 
 LEDGER_BASELINE = {
-    "modules": 330,
+    # +1: `domain/command_kinds.py` — the `/commands/{kind}` vocabulary, moved out of the
+    # dispatcher that applies it. Not a new concept: the four parties that must agree on it
+    # (dispatcher, router, CLI, TS codegen) could not all import the dispatcher, and the one that
+    # could not is the CLI — which is why nothing bound the terminal to the command set and five
+    # kinds shipped browser-only. The module is what makes `CLI_VERB_FOR_KIND` expressible.
+    "modules": 331,
     "init_files": 48,
     "reexport_shims": 5,
     "config_leaf_fields": 39,

@@ -14,15 +14,16 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
+from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
 from promptpotter.presentation.cli.parsers import build_parser, parser_verbs
 
 __all__ = ["main"]
 
 
-# Verb -> "module:attr", resolved on dispatch rather than bound at module scope. Importing all
-# fourteen command bodies up front made every invocation pay for every other verb's dependency
-# tree before argparse had looked at argv — `ab` alone dragged in numpy, `new` dragged in httpx —
-# so `pause` cost the same second of imports as a full campaign launch.
+# Verb -> "module:attr", resolved on dispatch rather than bound at module scope. Importing every
+# command body up front made each invocation pay for every other verb's dependency tree before
+# argparse had looked at argv — `ab` alone dragged in numpy, `new` dragged in httpx — so `pause`
+# cost the same second of imports as a full campaign launch.
 COMMANDS = {
     "new": "promptpotter.presentation.cli.commands.new:cmd_new",
     "resume": "promptpotter.presentation.cli.commands.resume_command:cmd_resume",
@@ -41,6 +42,16 @@ COMMANDS = {
     "pause": "promptpotter.presentation.cli.commands.lifecycle:cmd_pause",
     "rename": "promptpotter.presentation.cli.commands.lifecycle:cmd_rename",
     "set-budget": "promptpotter.presentation.cli.commands.lifecycle:cmd_set_budget",
+    "skip-searchpoint": "promptpotter.presentation.cli.commands.lifecycle:cmd_skip_searchpoint",
+    "step-cycle": "promptpotter.presentation.cli.commands.lifecycle:cmd_step_cycle",
+    "delete-cycle": "promptpotter.presentation.cli.commands.lifecycle:cmd_delete_cycle",
+    "cleanup-empty-cycles": (
+        "promptpotter.presentation.cli.commands.lifecycle:cmd_cleanup_empty_cycles"
+    ),
+    "set-allowed-models": (
+        "promptpotter.presentation.cli.commands.lifecycle:cmd_set_allowed_models"
+    ),
+    "replace-dataset": "promptpotter.presentation.cli.commands.lifecycle:cmd_replace_dataset",
 }
 
 # A verb is one row here plus one `sub.add_parser` in `parsers.py`, and nothing made the two
@@ -55,6 +66,54 @@ assert _declared == COMMANDS.keys(), (
     "CLI verb drift between COMMANDS and parsers.py — "
     f"parser-only: {sorted(_declared - COMMANDS.keys())}, "
     f"handler-only: {sorted(COMMANDS.keys() - _declared)}"
+)
+
+# Which CLI verb reaches each server command kind. The assert below makes it TOTAL over the
+# dispatched set, so a new kind cannot land browser-only in silence — its author names a verb or
+# declares the gap with its reason. `CAP_FOR_KIND` and `PAYLOAD_MODEL_FOR_KIND` already bind the
+# same vocabulary to authorization and payload shape; the terminal was the one consumer nothing
+# checked, which is why five verbs had to be found one at a time before this existed.
+CLI_VERB_FOR_KIND: dict[str, str | None] = {
+    # Verbs that POST the kind itself — one command, one ledger record, either surface.
+    "archive-campaign": "archive",
+    "delete-campaign": "delete",
+    "unarchive-campaign": "unarchive",
+    "delete-cycle": "delete-cycle",
+    "cleanup-empty-cycles": "cleanup-empty-cycles",
+    "skip-searchpoint": "skip-searchpoint",
+    "step-cycle": "step-cycle",
+    "pause-cycle": "pause",
+    "change-spend-budget": "set-budget",
+    "set-campaign-label": "rename",
+    "set-allowed-models": "set-allowed-models",
+    "replace-dataset": "replace-dataset",
+    "edit-draft-campaign": "new",
+    "resolve-origin": "new",
+    # Reached by the verb named, but through an IN-PROCESS path rather than the command — the
+    # terminal changes the same state and writes no `CommandRecord` naming who asked. Each is its
+    # own standing finding; they are named here so the next reader inherits them instead of
+    # rediscovering them. `new`/`resume` mint and run inline (`--steer-model` is the fork),
+    # `register-backend` is written by init wiring, `origin-gate-decision` is answered by the
+    # in-run stdin prompt, and `compact-archive` calls the maintenance pass direct.
+    "mint-campaign": "new",
+    "start-checkin": "new",
+    "register-backend": "new",
+    "start-run": "resume",
+    "fork-cycle": "resume",
+    "origin-gate-decision": "resume",
+    "compact-archive": "compact-archive",
+    # Browser-only ON PURPOSE, and the absence IS the boundary: look-ahead spends the box's shared
+    # provider rate bucket, so an assistant may recommend the control but never press it. Root
+    # `CLAUDE.md` § Conventions; `docs/operations/access-model.md` § Tier 1a.
+    "set-sample-lookahead": None,
+}
+_named_verbs = {v for v in CLI_VERB_FOR_KIND.values() if v is not None}
+assert set(CLI_VERB_FOR_KIND) == ALL_DISPATCHED_KINDS, (
+    "command kind unclassified for the terminal — name the verb that reaches it, or declare the "
+    f"gap: {sorted(ALL_DISPATCHED_KINDS.symmetric_difference(CLI_VERB_FOR_KIND))}"
+)
+assert _named_verbs <= COMMANDS.keys(), (
+    f"CLI_VERB_FOR_KIND names verbs that do not exist: {sorted(_named_verbs - COMMANDS.keys())}"
 )
 
 
