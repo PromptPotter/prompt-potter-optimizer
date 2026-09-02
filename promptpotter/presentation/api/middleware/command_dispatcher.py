@@ -472,7 +472,7 @@ if set(PAYLOAD_MODEL_FOR_KIND) != ALL_DISPATCHED_KINDS:
 
 
 class CommandAcceptedBody(StrictModel):
-    """The 202 response shape declared in ``m12-api-openapi.yaml``."""
+    """The 202 response shape declared in ``api-openapi.yaml``."""
 
     command_id: str = Field(description="Stable id of the appended `CommandRecord`.")
     correlation_id: str = Field(description="Echo of the request's `Idempotency-Key`.")

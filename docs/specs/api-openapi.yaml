@@ -2568,7 +2568,7 @@ components:
           type: string
           description: |
             The ledger `record_type`, identical to `ProjectionEnvelope.kind`. The set is
-            the same closed set declared in `m12-events-asyncapi.yaml`.
+            the same closed set declared in `events-asyncapi.yaml`.
         payload:
           type: object
           additionalProperties: true

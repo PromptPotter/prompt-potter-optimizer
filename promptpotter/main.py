@@ -118,7 +118,7 @@ async def scalar_docs() -> Response:
 
 
 # Every API error serializes to the ONE flat envelope declared in
-# docs/specs/m12-api-openapi.yaml#/components/schemas/ErrorEnvelope —
+# docs/specs/api-openapi.yaml#/components/schemas/ErrorEnvelope —
 # `{"error", "message", "error_id", "details"?}` at the top level (no `detail`
 # wrapper). Three handlers feed it: typed PotterError (the application taxonomy),
 # FastAPI's request-validation 422, and the catch-all 500. No route raises

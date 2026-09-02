@@ -1,4 +1,4 @@
-"""The closed outbound SSE set declared in ``docs/specs/m12-events-asyncapi.yaml``. ``sequence`` is the ledger
+"""The closed outbound SSE set declared in ``docs/specs/events-asyncapi.yaml``. ``sequence`` is the ledger
 offset — a subscriber detects gaps by it and replays from the family ray, never via a ``since=`` on the tail."""
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ __all__ = [
 ]
 
 
-# Closed enum mirroring ``ProjectionEnvelope.kind`` in ``docs/specs/m12-events-asyncapi.yaml``.
+# Closed enum mirroring ``ProjectionEnvelope.kind`` in ``docs/specs/events-asyncapi.yaml``.
 #
 # **A missing kind is a HOLE, not a filter.** ``CycleLedgerTail.read_new`` advances
 # ``_line_index`` for every line it reads, including one whose kind it cannot map — so an

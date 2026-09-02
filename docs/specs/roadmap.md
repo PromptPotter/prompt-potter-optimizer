@@ -51,7 +51,7 @@ Sequenced into lanes by dependency, not milestone number. **Front priority = Lan
 
 - **Identity foundation** — OIDC wire + PostgreSQL RLS; three-stage staging. → [`ADR-0002`](../adr/0002-identity-foundation.md)
 - **Spend + tenancy** — `TokenUsageRecord` on the canonical ledger via `emit_token_usage`. → [`ADR-0003`](../adr/0003-spend-and-tenancy.md)
-- **Control plane** — Control-remote I/O kind; closed in/out sets ([`m12-api-openapi.yaml`](m12-api-openapi.yaml) + [`m12-events-asyncapi.yaml`](m12-events-asyncapi.yaml)). → [`ADR-0001`](../adr/0001-m12-control-plane.md)
+- **Control plane** — Control-remote I/O kind; closed in/out sets ([`api-openapi.yaml`](api-openapi.yaml) + [`events-asyncapi.yaml`](events-asyncapi.yaml)). → [`ADR-0001`](../adr/0001-m12-control-plane.md)
 - **Frontend surface** — per-control behavior per auth/data state. → [`frontend-surface-contract`](frontend-surface-contract.md)
 - **Verdict resolution** — the statistical model behind the live adaptive queue + `hard_samples.json`. → [`verdict-resolution`](../methods/verdict-resolution.md)
 

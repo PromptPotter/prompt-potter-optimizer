@@ -2447,7 +2447,7 @@ def test_declared_command_payloads_match_their_models() -> None:
     )
 
     doc = yaml.safe_load(
-        (Path(__file__).resolve().parents[1] / "docs/specs/m12-api-openapi.yaml").read_text(
+        (Path(__file__).resolve().parents[1] / "docs/specs/api-openapi.yaml").read_text(
             encoding="utf-8"
         )
     )
@@ -2509,7 +2509,7 @@ def test_declared_command_payloads_match_their_models() -> None:
 def test_declared_command_kinds_match_the_wired_set() -> None:
     """A command kind that LOOKS live in the spec but is not wired, or the reverse.
 
-    ``m12-api-openapi.yaml`` is schema-first by design: a kind is declared before its
+    ``api-openapi.yaml`` is schema-first by design: a kind is declared before its
     handler exists, and those carry ``x-status: declared-not-wired``. That makes the
     ABSENCE of the marker a positive claim — "this one is live" — and nothing checked
     it. The claim is read by humans and by us: `chat-foundation.md` once advertised
@@ -2539,7 +2539,7 @@ def test_declared_command_kinds_match_the_wired_set() -> None:
     }
     wired = set(_WIRED_KINDS) | typed_routes
 
-    spec_path = Path(__file__).resolve().parents[1] / "docs" / "specs" / "m12-api-openapi.yaml"
+    spec_path = Path(__file__).resolve().parents[1] / "docs" / "specs" / "api-openapi.yaml"
     spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
 
     declared_live: set[str] = set()
@@ -2559,13 +2559,13 @@ def test_declared_command_kinds_match_the_wired_set() -> None:
             target.add(kind)
 
     assert not (declared_live - wired), (
-        f"declared live in m12-api-openapi.yaml but NOT wired: {sorted(declared_live - wired)}. "
+        f"declared live in api-openapi.yaml but NOT wired: {sorted(declared_live - wired)}. "
         "A POST to one 404s `command_kind_unknown`. Either wire it, or mark the operation "
         "`x-status: declared-not-wired`."
     )
     assert not (wired - declared_live), (
         f"wired but not declared live: {sorted(wired - declared_live)}. Every inbound command "
-        "is declared in m12-api-openapi.yaml BEFORE its handler lands (ADR-0001). Add the "
+        "is declared in api-openapi.yaml BEFORE its handler lands (ADR-0001). Add the "
         "operation, or drop the `x-status: declared-not-wired` marker it still carries."
     )
     assert not (declared_not_wired & wired), (
@@ -2593,7 +2593,7 @@ def test_declared_reads_are_served_paths() -> None:
     disagreement there is information rather than drift. A promised path that does not
     exist is not a disagreement; it is a dead link.
     """
-    spec_path = Path(__file__).resolve().parents[1] / "docs" / "specs" / "m12-api-openapi.yaml"
+    spec_path = Path(__file__).resolve().parents[1] / "docs" / "specs" / "api-openapi.yaml"
     generated = Path(__file__).resolve().parents[1] / "docs" / "specs" / "openapi.generated.json"
     spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
     served = set(json.loads(generated.read_text(encoding="utf-8"))["paths"])
@@ -2606,7 +2606,7 @@ def test_declared_reads_are_served_paths() -> None:
         and f"/api/v1{path}" not in served
     )
     assert not dead, (
-        f"declared in m12-api-openapi.yaml but served at no such path: {dead}. Either the "
+        f"declared in api-openapi.yaml but served at no such path: {dead}. Either the "
         "path parameter is spelled differently from the handler's argument (the camelCase "
         "case), the route moved, or the operation needs `x-status: declared-not-wired`."
     )

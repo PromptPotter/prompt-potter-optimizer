@@ -43,7 +43,7 @@ export function SteerForkAction({
   // `descend`, so the only `(round, candidate_id)` it can name is one of the addressed cycle's
   // own. Asked to fork an L4 inner searchpoint it would either resolve nothing or match a
   // coincidental id in the outer cycle and cut the wrong point, which is worse than refusing.
-  // Making it reachable means widening the command contract, declared in `m12-api-openapi.yaml`
+  // Making it reachable means widening the command contract, declared in `api-openapi.yaml`
   // first.
   if (path && path.length > 1) {
     return (

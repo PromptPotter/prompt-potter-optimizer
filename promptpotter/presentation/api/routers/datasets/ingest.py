@@ -77,7 +77,7 @@ async def ingest_dataset(
     """Parse an uploaded tabular file (CSV/TSV/JSON/XLSX); mint a durable check-in
     campaign and return its :class:`DraftCampaign` (``draft_id`` == ``campaign_id``).
 
-    Wire contract pinned in ``docs/specs/m12-api-openapi.yaml::POST /datasets/ingest``.
+    Wire contract pinned in ``docs/specs/api-openapi.yaml::POST /datasets/ingest``.
     The check-in campaign appears in the sidebar immediately and survives a restart;
     nothing runs until the operator starts it via ``/commands/start-checkin``.
     """
@@ -130,7 +130,7 @@ async def upload_candidate_library(
     A multipart ingress for an `edit-draft-campaign`: the upload is parsed into the
     patch value, then dispatched, so the edit lands on the check-in ledger like every
     other origin mutation. Nothing runs until Start. Wire contract pinned in
-    ``docs/specs/m12-api-openapi.yaml::POST /datasets/draft/candidate-library``.
+    ``docs/specs/api-openapi.yaml::POST /datasets/draft/candidate-library``.
     ``draft_id`` is the check-in campaign id.
     """
     idemp = ensure_idempotency_key(idempotency_key)
@@ -173,7 +173,7 @@ async def build_candidate_library_from_column(
     uploaded. The derived terms become an `edit-draft-campaign` patch, so this lands
     on the check-in ledger exactly like the upload does. Returns the updated draft
     wire (its `candidate_library` dependency now `fulfilled`). Wire contract pinned in
-    `docs/specs/m12-api-openapi.yaml::POST /datasets/draft/candidate-library/from-column`.
+    `docs/specs/api-openapi.yaml::POST /datasets/draft/candidate-library/from-column`.
     `draft_id` is the check-in campaign id.
     """
     idemp = ensure_idempotency_key(idempotency_key)

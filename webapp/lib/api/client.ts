@@ -9,7 +9,7 @@ export const API = "/api/v1";
 // raw (frontend-surface-contract.md § I2).
 //
 // `code` and `errorId` come from the `ErrorEnvelope` the API serializes at ONE
-// seam (`main.py::_error_response`, schema in m12-api-openapi.yaml). The server
+// seam (`main.py::_error_response`, schema in api-openapi.yaml). The server
 // already classifies every failure precisely; this type is what stops that
 // classification being thrown away on arrival. `errorId` is the handle that
 // reaches the server log line — quote it in a bug report.

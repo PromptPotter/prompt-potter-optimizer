@@ -855,7 +855,7 @@ export interface CyclesResponse {
   cycles: CycleListEntry[];
 }
 
-/** The 202 response shape declared in ``m12-api-openapi.yaml``. */
+/** The 202 response shape declared in ``api-openapi.yaml``. */
 export interface CommandAcceptedBody {
   /** Stable id of the appended `CommandRecord`. */
   command_id: string;

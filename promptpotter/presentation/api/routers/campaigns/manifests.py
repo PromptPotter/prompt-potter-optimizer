@@ -233,7 +233,7 @@ def get_campaign_checkin(stores: StoresDep, campaign_id: str) -> dict[str, Any]:
     Tenant-scoped (the check-in store is rooted at the tenant dir) — a cross-tenant
     id 404s. 404 when this campaign has no check-in working state (already Started
     or never a check-in). Wire contract pinned in
-    ``docs/specs/m12-api-openapi.yaml::GET /campaigns/{id}/checkin``.
+    ``docs/specs/api-openapi.yaml::GET /campaigns/{id}/checkin``.
     """
     draft = load_checkin_draft(stores, campaign_id)
     if draft is None:

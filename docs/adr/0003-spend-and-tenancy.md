@@ -186,7 +186,7 @@ host-key spend sums **separately** from user-key spend — the one field that ma
 host-only metering and real provenance on `/auth/activity` possible. It is the *one* allowed
 exception to "identity from path, not per-record" (option E): `key_source` is not identity,
 it is which wallet paid, and the coupon math needs it on the record. Declared on
-`TokenUsagePayload` in [`../specs/m12-events-asyncapi.yaml`](../specs/m12-events-asyncapi.yaml).
+`TokenUsagePayload` in [`../specs/events-asyncapi.yaml`](../specs/events-asyncapi.yaml).
 
 **The coupon (`grant.json`).** Per user at `projects/{tenant}/grant.json`:
 `{amount_usd, issued_at, expires_at}`. A **coupon/voucher** — a fixed size + an expiration
@@ -350,7 +350,7 @@ liveness gap. New `StopReason.HOST_ALLOWANCE`.
 
 The `/auth/api-keys` + `/auth/coupon` verbs ride the **auth router** (account-scoped siblings
 of the shipped `/auth/{quota-status,user-settings}`), **not** the control-plane
-`m12-api-openapi.yaml` — whose scope is the closed `/commands/*` set. Only the event-surface
+`api-openapi.yaml` — whose scope is the closed `/commands/*` set. Only the event-surface
 change (`key_source` on `TokenUsagePayload`) is asyncapi-declared. Build direction + status:
 [`../specs/roadmap.md`](../specs/roadmap.md) § Host coupon + BYO per-user API keys.
 

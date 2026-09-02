@@ -222,7 +222,7 @@ Every ledger record is already typed; combined with `inherit_from`, "human in th
 button spent by the round that scored under it, or a number field spent by the group it
 releases — and **either layer is armed by naming the one you mean**, so an outer press
 releases several inner campaigns and an inner one holds several of its own rows. Both forms,
-the ceilings, and why an arming is never inherited downward: [`../specs/m12-api-openapi.yaml`](../specs/m12-api-openapi.yaml)`::setSampleLookahead`.
+the ceilings, and why an arming is never inherited downward: [`../specs/api-openapi.yaml`](../specs/api-openapi.yaml)`::setSampleLookahead`.
 
 Two things hold under either form, and neither is on the wire. It **does not make the cycle
 babysat**: samples are absorbed in walk order and an in-flight one is discarded rather than
@@ -230,7 +230,7 @@ recorded, so the run's rows are identical at any depth — unlike Skip, which do
 cycle. And it **costs at most one discarded backend call per eliminated candidate**, shown as
 `sample_lookahead_discards` on the dashboard.
 
-It is browser-only and gated on `campaign.lookahead` — there is deliberately no CLI verb and no config key, so an assistant can *recommend* the control but cannot press it. Contract: [`../specs/m12-api-openapi.yaml`](../specs/m12-api-openapi.yaml)`::setSampleLookahead`.
+It is browser-only and gated on `campaign.lookahead` — there is deliberately no CLI verb and no config key, so an assistant can *recommend* the control but cannot press it. Contract: [`../specs/api-openapi.yaml`](../specs/api-openapi.yaml)`::setSampleLookahead`.
 
 ### Sweep batch — `new --sweep-batch`
 
@@ -345,7 +345,7 @@ score?"* Three facts answer it; together they're why editing a file can feel ine
 
 **A `per_cell` formula is what θ is fit on** (`domain/scoring.py::CellScorer`), so it is the only route by which a latency, cost or reliability term reaches the election at all — a round is won on θ, and a term outside it moves the display alone. It is charged where it happened rather than meaned over the panel, which is the point: at round scope one 2000-second cell hides behind a fast one, and which prompt provoked the slowdown cannot be recovered. The cell's own correctness stays `per_sample` and stays what `is_hit` thresholds, or a correct-but-slow answer would render MISS and send L1 to repair an answer that was already right.
 
-Swapping it between rounds instead would make the composite **incomparable to its own past** inside one cycle, silently. `EscalationFSM._improved` — the L2/L3 stall gate — asks whether the cycle's best advanced since a layer fired, and answers on `best_composite_fitness` whenever the θ ruler is unavailable (a cold-started cycle). Redefine the composite mid-cycle and that comparison reads a change of scale as progress or as stall, with nothing to error on. The same argument retires the per-sample/per-round distinction this section used to draw: the per-sample scorer additionally rewrites recorded `hit`/`score` on every prior trace and trips the divergence replayer on the next resume, but neither is safe mid-cycle, and both have the same cure. `POST /commands/change-scoring-composite` is declared in `docs/specs/m12-api-openapi.yaml` and carries `x-status: declared-not-wired`; wiring it as specified would reintroduce exactly this.
+Swapping it between rounds instead would make the composite **incomparable to its own past** inside one cycle, silently. `EscalationFSM._improved` — the L2/L3 stall gate — asks whether the cycle's best advanced since a layer fired, and answers on `best_composite_fitness` whenever the θ ruler is unavailable (a cold-started cycle). Redefine the composite mid-cycle and that comparison reads a change of scale as progress or as stall, with nothing to error on. The same argument retires the per-sample/per-round distinction this section used to draw: the per-sample scorer additionally rewrites recorded `hit`/`score` on every prior trace and trips the divergence replayer on the next resume, but neither is safe mid-cycle, and both have the same cure. `POST /commands/change-scoring-composite` is declared in `docs/specs/api-openapi.yaml` and carries `x-status: declared-not-wired`; wiring it as specified would reintroduce exactly this.
 
 ### Available names
 

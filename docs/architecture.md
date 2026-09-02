@@ -317,8 +317,8 @@ split the ack onto a second subscriber.
 
 Outbound, no projection writes SSE frames at all: `CycleLedgerTail` tails the on-disk ledger
 directly, cross-process. The closed inbound set is declared in
-[`specs/m12-api-openapi.yaml`](specs/m12-api-openapi.yaml), the closed outbound set in
-[`specs/m12-events-asyncapi.yaml`](specs/m12-events-asyncapi.yaml); **adding a kind updates the
+[`specs/api-openapi.yaml`](specs/api-openapi.yaml), the closed outbound set in
+[`specs/events-asyncapi.yaml`](specs/events-asyncapi.yaml); **adding a kind updates the
 YAML first, in its own PR**. Permanent contract: [`adr/0001-m12-control-plane.md`](adr/0001-m12-control-plane.md).
 
 #### 5 — Identity
@@ -570,8 +570,8 @@ the PR description.
   / `ProjectionEnvelope` triple riding the canonical `.runtime/ledger.jsonl` via
   sole `CommandDispatcher` (inbound AND ack), `CycleLedgerTail` reading
   the ledger directly (outbound SSE, no writer). The closed inbound +
-  outbound sets live in `docs/specs/m12-api-openapi.yaml` and
-  `docs/specs/m12-events-asyncapi.yaml`; the permanent contract is
+  outbound sets live in `docs/specs/api-openapi.yaml` and
+  `docs/specs/events-asyncapi.yaml`; the permanent contract is
   `docs/adr/0001-m12-control-plane.md`. Cleanup PRs cannot collapse
   commands into a parallel queue, drop the YAML-first rule, or remove
   the sole-writer invariants — every M12-onward interactive surface

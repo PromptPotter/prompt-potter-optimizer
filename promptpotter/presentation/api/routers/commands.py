@@ -78,7 +78,7 @@ _WIRED_KINDS: frozenset[str] = ALL_DISPATCHED_KINDS - _TYPED_ROUTE_KINDS
 
 
 class CommandEnvelope(StrictModel):
-    """Inbound envelope per ``m12-api-openapi.yaml#/components/schemas/CommandEnvelope``."""
+    """Inbound envelope per ``api-openapi.yaml#/components/schemas/CommandEnvelope``."""
 
     kind: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9-]*$")
     payload: dict[str, Any] = Field(default_factory=dict)
@@ -119,7 +119,7 @@ async def edit_draft_campaign(
 ) -> dict[str, Any]:
     """Sparse-patch a `DraftCampaign`. Returns the post-mutation full shape.
 
-    Per ``docs/specs/m12-api-openapi.yaml::editDraftCampaign``. The mutation rides
+    Per ``docs/specs/api-openapi.yaml::editDraftCampaign``. The mutation rides
     `CommandDispatcher` (architecture.md §0: sole writer of `CommandRecord`); only
     the response shape differs from the generic 202 verbs, never the ingress.
     """
@@ -144,7 +144,7 @@ async def resolve_origin(
 ) -> dict[str, Any]:
     """Run one origin-resolver turn against a draft. Returns ``{resolution, draft}``.
 
-    Per ``docs/specs/m12-api-openapi.yaml::resolveOrigin``. Synchronous, like
+    Per ``docs/specs/api-openapi.yaml::resolveOrigin``. Synchronous, like
     ``edit-draft-campaign`` — the resolver's findings apply in-line and the
     deterministic checklist re-gates before the response.
     """
@@ -168,7 +168,7 @@ async def start_checkin(
     """Flip a CHECKIN campaign to ``active`` + spawn the runner. Synchronous;
     returns ``{campaign_id, cycle_id, job_id}``.
 
-    Per ``docs/specs/m12-api-openapi.yaml::startCheckin``. The campaign already
+    Per ``docs/specs/api-openapi.yaml::startCheckin``. The campaign already
     exists durably (minted on the first ingest action); this gate-checks the
     origin (incomplete → 422, stays ``checkin``), materializes the dataset, mints
     the run cycle, and detaches the loop.
@@ -233,7 +233,7 @@ async def compact_archive(
 ) -> ArchiveReport:
     """Compact, restore, or purge the measurement archive's cold store.
 
-    Per ``docs/specs/m12-api-openapi.yaml::compactArchive``. Typed rather than 202 because the
+    Per ``docs/specs/api-openapi.yaml::compactArchive``. Typed rather than 202 because the
     preview IS the product: an operator consents to a step that costs money to undo on the byte
     counts this returns, and the apply answers in the same shape so the two are comparable.
     """
@@ -264,7 +264,7 @@ async def replace_dataset(
 ) -> dict[str, Any]:
     """Version-and-repoint a colliding dataset so its name frees for new data.
 
-    Per ``docs/specs/m12-api-openapi.yaml::replaceDataset``. Data-safe: never overwrites — the
+    Per ``docs/specs/api-openapi.yaml::replaceDataset``. Data-safe: never overwrites — the
     old data + every prior campaign's results are preserved under ``{slug}-vN``.
     Synchronous (the migration is a bounded set of renames + JSON rewrites); the
     freed name is re-ingested in a separate ``/datasets/ingest`` call.
@@ -293,7 +293,7 @@ async def post_command(
     expected_version: Annotated[int | None, Header(alias="Expected-Version")] = None,
 ) -> CommandAcceptedBody:
     """Closed-set command surface — every wired kind validates against the
-    declared schema in ``m12-api-openapi.yaml`` and dispatches through
+    declared schema in ``api-openapi.yaml`` and dispatches through
     ``CommandDispatcher``."""
     idemp = ensure_idempotency_key(idempotency_key)
     if kind != envelope.kind:
@@ -303,7 +303,7 @@ async def post_command(
     if kind not in _WIRED_KINDS:
         raise NotFoundError(
             f"Command kind {kind!r} not wired. See "
-            f"docs/specs/m12-api-openapi.yaml for the declared set.",
+            f"docs/specs/api-openapi.yaml for the declared set.",
             code="command_kind_unknown",
         )
 

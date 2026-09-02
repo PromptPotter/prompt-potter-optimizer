@@ -42,7 +42,7 @@ Chosen option: **A — OpenAPI 3.1 + AsyncAPI 3.0**.
 
 The contract bounds the entire interactivity envelope (what a client can send, what it can observe) with two industry-standard schemas. Drift is CI-detectable by off-the-shelf linters. The schemas constrain only the wire — internals remain free. Permanent — the contract stays alive after M12 ships; items move out into `docs/developer/` / `docs/operations/` as they get certified, with checkboxes flipping in this ADR.
 
-The §0 amendment defining the Control-remote I/O kind is the precondition. Schemas are declared in `docs/specs/m12-api-openapi.yaml` (inbound) and `docs/specs/m12-events-asyncapi.yaml` (outbound). Adding a command or event kind requires updating the YAML first.
+The §0 amendment defining the Control-remote I/O kind is the precondition. Schemas are declared in `docs/specs/api-openapi.yaml` (inbound) and `docs/specs/events-asyncapi.yaml` (outbound). Adding a command or event kind requires updating the YAML first.
 
 ### Consequences
 
@@ -119,8 +119,8 @@ Identity scope rides the ledger path (tenant prefix on the per-cycle directory) 
 
 ### Closed sets
 
-- **Inbound commands.** `docs/specs/m12-api-openapi.yaml` (OpenAPI 3.1).
-- **Outbound events.** `docs/specs/m12-events-asyncapi.yaml` (AsyncAPI 3.0).
+- **Inbound commands.** `docs/specs/api-openapi.yaml` (OpenAPI 3.1).
+- **Outbound events.** `docs/specs/events-asyncapi.yaml` (AsyncAPI 3.0).
 
 ### Profile gradient
 
@@ -150,7 +150,7 @@ Each profile is a named, stable conformance level. Newer profiles compose with o
 | `POST /backends` | `register-backend` |
 | `POST /backends/{id}/sync` | `sync-backend-experiments` |
 
-**Closed inbound set draft (23 commands).** The full enumeration lives in `docs/specs/m12-api-openapi.yaml` and is the single source of truth for the inbound surface; the ADR keeps only the migration table above + the category map below. Categories (= OpenAPI `tags`): cycle-control (pause / step / rewind — `pause-cycle` is the single operator-interrupt, no separate stop/resume-cycle), cycle-lifecycle (fork / delete / cleanup-empty / archive / mint-campaign / start-run), budget (spend / halt / sample), pipeline-params (change-pipeline-param / reset-pipeline-overlay), scoring (change-scoring-composite), operator-feedback (mark / unmark hard-sample / annotate-round / endorse-candidate), backends (register / sync-experiments). All v0 — operator-redline cycle precedes any handler.
+**Closed inbound set draft (23 commands).** The full enumeration lives in `docs/specs/api-openapi.yaml` and is the single source of truth for the inbound surface; the ADR keeps only the migration table above + the category map below. Categories (= OpenAPI `tags`): cycle-control (pause / step / rewind — `pause-cycle` is the single operator-interrupt, no separate stop/resume-cycle), cycle-lifecycle (fork / delete / cleanup-empty / archive / mint-campaign / start-run), budget (spend / halt / sample), pipeline-params (change-pipeline-param / reset-pipeline-overlay), scoring (change-scoring-composite), operator-feedback (mark / unmark hard-sample / annotate-round / endorse-candidate), backends (register / sync-experiments). All v0 — operator-redline cycle precedes any handler.
 
 First end-to-end command: **`pause-cycle`**. On certification, boxes 1–10 and 17 flip.
 
@@ -181,8 +181,8 @@ enforcement detail that must move freely, so they are named in prose (see
 |---|---|
 | §0 Control-remote definition | `docs/architecture.md` (§0 "State + persistence" — I/O kinds taxonomy) |
 | §0.5 Control-remote load-bearing-surface entry | `docs/architecture.md` (§0.5 load-bearing surface) |
-| Closed inbound command set | `docs/specs/m12-api-openapi.yaml` |
-| Closed outbound event set | `docs/specs/m12-events-asyncapi.yaml` |
+| Closed inbound command set | `docs/specs/api-openapi.yaml` |
+| Closed outbound event set | `docs/specs/events-asyncapi.yaml` |
 | Identity seam consumed | `promptpotter/presentation/api/deps.py::resolve_identity` |
 | `emit_token_usage` template (mirrored by `emit_command`) | `promptpotter/infrastructure/llm/telemetry.py::emit_token_usage` |
 | Sole-writer template | `promptpotter/infrastructure/projections/live_dashboard/view.py::LiveDashboardView._handle_token_usage` |

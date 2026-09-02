@@ -1,5 +1,5 @@
 // The closed-set command highway — every campaign-state write posts to `/commands/{kind}`,
-// declared in `docs/specs/m12-api-openapi.yaml` and dispatched server-side by `CommandDispatcher`
+// declared in `docs/specs/api-openapi.yaml` and dispatched server-side by `CommandDispatcher`
 // (`promptpotter/presentation/api/middleware/`). The dispatcher writes a `CommandRecord` to the
 // target cycle's ledger, inline-applies the mutation, then writes a `CommandAckRecord`.
 //
@@ -173,7 +173,7 @@ export async function postDeleteCampaign(
 // the worker exits cleanly, and the cycle stays resumable (non-terminal). There
 // is no separate "stop" / "resume-cycle": resuming is `postStartRun(…, "resume")`
 // relaunching from the last completed round. Idempotent. Cycle-scoped per
-// `m12-api-openapi.yaml::pauseCycle`. Pause-state reads back from
+// `api-openapi.yaml::pauseCycle`. Pause-state reads back from
 // `GET /api/v1/sessions/active/live-state::is_paused`.
 export async function postPauseCycle(
   campaignId: string,
@@ -186,7 +186,7 @@ export async function postPauseCycle(
 // searchpoint, accepts the partial score, and the cycle CONTINUES to the next
 // candidate (NOT a stop). The operator analog of automatic PoBB elimination.
 // A manual skip marks the cycle `human_intervened` (babysat). Cycle-scoped per
-// `m12-api-openapi.yaml::skipSearchpoint`.
+// `api-openapi.yaml::skipSearchpoint`.
 export async function postSkipSearchpoint(
   campaignId: string,
   cycleId: string,
@@ -203,7 +203,7 @@ export async function postSkipSearchpoint(
 // The one command addressed by PATH rather than by the root hop: throughput is what an inner
 // run answers for itself, so an L4 inner cycle is armed by descending to it — the same
 // `descend` grammar the dashboard poll uses, empty at depth 1.
-// Per `m12-api-openapi.yaml::setSampleLookahead`.
+// Per `api-openapi.yaml::setSampleLookahead`.
 export async function postSetSampleLookahead(
   path: CyclePath,
   cells: number,
@@ -222,13 +222,13 @@ export async function postSetSampleLookahead(
 // re-reads it every clean round — `0` on a ceiling halts at the next round
 // boundary, raising above current usage releases. Pass `null` for a ceiling to
 // leave it unchanged (the applier merges). At least one must be a number.
-// Cycle-scoped command per `m12-api-openapi.yaml::changeSpendBudget`.
+// Cycle-scoped command per `api-openapi.yaml::changeSpendBudget`.
 // Resolve a cycle blocked at the round-0 origin gate (`run_phase: gate`): the
 // origin verdict was not `healthy`, so the runner is holding before L1. Writes
 // `.runtime/gate_decision.json`, which the runner polls. `rescore` re-measures
 // the origin force-fresh (reflecting a backend-code fix) and re-evaluates the
 // gate in place; `proceed` overrides into L1; `abort` ends the cycle with
-// `StopReason.ORIGIN_GATE`. Cycle-scoped per `m12-api-openapi.yaml::originGateDecision`.
+// `StopReason.ORIGIN_GATE`. Cycle-scoped per `api-openapi.yaml::originGateDecision`.
 export type OriginGateDecision = OriginGateDecisionPayload["decision"];
 export async function postOriginGateDecision(
   campaignId: string,

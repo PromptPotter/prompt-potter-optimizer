@@ -286,7 +286,7 @@ alone, which the `spend_cap` file merge then made stick for the rest of the run.
 
 `start-run` is all-or-nothing and `fork-cycle` mints a *sibling*, so there was no
 discrete "advance N rounds in place" action. Rather than a new verb, this wired the
-**already-declared-not-wired `step-cycle`** (`m12-api-openapi.yaml`): resume the cycle
+**already-declared-not-wired `step-cycle`** (`api-openapi.yaml`): resume the cycle
 in place, run `rounds` clean rounds (payload, default 1), then auto-pause (the existing
 `StopReason.PAUSED` — resumable, so the operator steps again). It reuses the resume
 launcher wholesale plus one run-scoped field, `RunMode.stop_after_rounds`; no new runner

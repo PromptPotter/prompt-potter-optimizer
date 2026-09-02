@@ -784,7 +784,7 @@
       },
       "CommandAcceptedBody": {
         "additionalProperties": false,
-        "description": "The 202 response shape declared in ``m12-api-openapi.yaml``.",
+        "description": "The 202 response shape declared in ``api-openapi.yaml``.",
         "properties": {
           "command_id": {
             "description": "Stable id of the appended `CommandRecord`.",
@@ -813,7 +813,7 @@
       },
       "CommandEnvelope": {
         "additionalProperties": false,
-        "description": "Inbound envelope per ``m12-api-openapi.yaml#/components/schemas/CommandEnvelope``.",
+        "description": "Inbound envelope per ``api-openapi.yaml#/components/schemas/CommandEnvelope``.",
         "properties": {
           "kind": {
             "maxLength": 64,
@@ -1281,7 +1281,7 @@
       },
       "DatasetIndexEntry": {
         "additionalProperties": false,
-        "description": "One row in the dataset registry — backs the Dashboard ``New campaign`` view.\n\nWire shape pinned in ``docs/specs/m12-api-openapi.yaml::DatasetIndexEntry``.",
+        "description": "One row in the dataset registry — backs the Dashboard ``New campaign`` view.\n\nWire shape pinned in ``docs/specs/api-openapi.yaml::DatasetIndexEntry``.",
         "properties": {
           "n_samples": {
             "anyOf": [
@@ -4586,7 +4586,7 @@
     }
   },
   "info": {
-    "description": "GENERATED — do not edit. Regenerate with `python scripts/build_openapi.py`.\n\nEvery operation the running app serves, derived from the FastAPI routers. The\nhand-written command contract is `m12-api-openapi.yaml`; it is schema-first and\nmay declare operations that are not wired yet, so the two documents are expected\nto differ. This one describes reality.\n",
+    "description": "GENERATED — do not edit. Regenerate with `python scripts/build_openapi.py`.\n\nEvery operation the running app serves, derived from the FastAPI routers. The\nhand-written command contract is `api-openapi.yaml`; it is schema-first and\nmay declare operations that are not wired yet, so the two documents are expected\nto differ. This one describes reality.\n",
     "title": "PromptPotter Optimizer",
     "version": "generated"
   },
@@ -5115,7 +5115,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/checkin": {
       "get": {
-        "description": "Re-open a durable check-in campaign — its draft wire + last resolver turn.\n\nThe sidebar opens a ``checkin``-lifecycle campaign through here instead of the\ndashboard (no ``dashboard.json`` exists pre-loop): the webapp rebuilds the\ningest \"ready\" panel from ``draft`` and shows the prior ``resolution`` recap.\nTenant-scoped (the check-in store is rooted at the tenant dir) — a cross-tenant\nid 404s. 404 when this campaign has no check-in working state (already Started\nor never a check-in). Wire contract pinned in\n``docs/specs/m12-api-openapi.yaml::GET /campaigns/{id}/checkin``.",
+        "description": "Re-open a durable check-in campaign — its draft wire + last resolver turn.\n\nThe sidebar opens a ``checkin``-lifecycle campaign through here instead of the\ndashboard (no ``dashboard.json`` exists pre-loop): the webapp rebuilds the\ningest \"ready\" panel from ``draft`` and shows the prior ``resolution`` recap.\nTenant-scoped (the check-in store is rooted at the tenant dir) — a cross-tenant\nid 404s. 404 when this campaign has no check-in working state (already Started\nor never a check-in). Wire contract pinned in\n``docs/specs/api-openapi.yaml::GET /campaigns/{id}/checkin``.",
         "operationId": "get_campaign_checkin_api_v1_campaigns__campaign_id__checkin_get",
         "parameters": [
           {
@@ -5749,7 +5749,7 @@
     },
     "/api/v1/commands/compact-archive": {
       "post": {
-        "description": "Compact, restore, or purge the measurement archive's cold store.\n\nPer ``docs/specs/m12-api-openapi.yaml::compactArchive``. Typed rather than 202 because the\npreview IS the product: an operator consents to a step that costs money to undo on the byte\ncounts this returns, and the apply answers in the same shape so the two are comparable.",
+        "description": "Compact, restore, or purge the measurement archive's cold store.\n\nPer ``docs/specs/api-openapi.yaml::compactArchive``. Typed rather than 202 because the\npreview IS the product: an operator consents to a step that costs money to undo on the byte\ncounts this returns, and the apply answers in the same shape so the two are comparable.",
         "operationId": "compact_archive_api_v1_commands_compact_archive_post",
         "parameters": [
           {
@@ -5809,7 +5809,7 @@
     },
     "/api/v1/commands/edit-draft-campaign": {
       "post": {
-        "description": "Sparse-patch a `DraftCampaign`. Returns the post-mutation full shape.\n\nPer ``docs/specs/m12-api-openapi.yaml::editDraftCampaign``. The mutation rides\n`CommandDispatcher` (architecture.md §0: sole writer of `CommandRecord`); only\nthe response shape differs from the generic 202 verbs, never the ingress.",
+        "description": "Sparse-patch a `DraftCampaign`. Returns the post-mutation full shape.\n\nPer ``docs/specs/api-openapi.yaml::editDraftCampaign``. The mutation rides\n`CommandDispatcher` (architecture.md §0: sole writer of `CommandRecord`); only\nthe response shape differs from the generic 202 verbs, never the ingress.",
         "operationId": "edit_draft_campaign_api_v1_commands_edit_draft_campaign_post",
         "parameters": [
           {
@@ -5871,7 +5871,7 @@
     },
     "/api/v1/commands/replace-dataset": {
       "post": {
-        "description": "Version-and-repoint a colliding dataset so its name frees for new data.\n\nPer ``docs/specs/m12-api-openapi.yaml::replaceDataset``. Data-safe: never overwrites — the\nold data + every prior campaign's results are preserved under ``{slug}-vN``.\nSynchronous (the migration is a bounded set of renames + JSON rewrites); the\nfreed name is re-ingested in a separate ``/datasets/ingest`` call.",
+        "description": "Version-and-repoint a colliding dataset so its name frees for new data.\n\nPer ``docs/specs/api-openapi.yaml::replaceDataset``. Data-safe: never overwrites — the\nold data + every prior campaign's results are preserved under ``{slug}-vN``.\nSynchronous (the migration is a bounded set of renames + JSON rewrites); the\nfreed name is re-ingested in a separate ``/datasets/ingest`` call.",
         "operationId": "replace_dataset_api_v1_commands_replace_dataset_post",
         "parameters": [
           {
@@ -5933,7 +5933,7 @@
     },
     "/api/v1/commands/resolve-origin": {
       "post": {
-        "description": "Run one origin-resolver turn against a draft. Returns ``{resolution, draft}``.\n\nPer ``docs/specs/m12-api-openapi.yaml::resolveOrigin``. Synchronous, like\n``edit-draft-campaign`` — the resolver's findings apply in-line and the\ndeterministic checklist re-gates before the response.",
+        "description": "Run one origin-resolver turn against a draft. Returns ``{resolution, draft}``.\n\nPer ``docs/specs/api-openapi.yaml::resolveOrigin``. Synchronous, like\n``edit-draft-campaign`` — the resolver's findings apply in-line and the\ndeterministic checklist re-gates before the response.",
         "operationId": "resolve_origin_api_v1_commands_resolve_origin_post",
         "parameters": [
           {
@@ -5995,7 +5995,7 @@
     },
     "/api/v1/commands/start-checkin": {
       "post": {
-        "description": "Flip a CHECKIN campaign to ``active`` + spawn the runner. Synchronous;\nreturns ``{campaign_id, cycle_id, job_id}``.\n\nPer ``docs/specs/m12-api-openapi.yaml::startCheckin``. The campaign already\nexists durably (minted on the first ingest action); this gate-checks the\norigin (incomplete → 422, stays ``checkin``), materializes the dataset, mints\nthe run cycle, and detaches the loop.",
+        "description": "Flip a CHECKIN campaign to ``active`` + spawn the runner. Synchronous;\nreturns ``{campaign_id, cycle_id, job_id}``.\n\nPer ``docs/specs/api-openapi.yaml::startCheckin``. The campaign already\nexists durably (minted on the first ingest action); this gate-checks the\norigin (incomplete → 422, stays ``checkin``), materializes the dataset, mints\nthe run cycle, and detaches the loop.",
         "operationId": "start_checkin_api_v1_commands_start_checkin_post",
         "parameters": [
           {
@@ -6057,7 +6057,7 @@
     },
     "/api/v1/commands/{kind}": {
       "post": {
-        "description": "Closed-set command surface — every wired kind validates against the\ndeclared schema in ``m12-api-openapi.yaml`` and dispatches through\n``CommandDispatcher``.",
+        "description": "Closed-set command surface — every wired kind validates against the\ndeclared schema in ``api-openapi.yaml`` and dispatches through\n``CommandDispatcher``.",
         "operationId": "post_command_api_v1_commands__kind__post",
         "parameters": [
           {
@@ -6216,7 +6216,7 @@
     },
     "/api/v1/datasets/draft/candidate-library": {
       "post": {
-        "description": "Attach a candidate library to a draft — the operator's \"drop in place\" for an\nunfulfilled ``candidate_source`` dependency. Returns the updated draft wire (its\n``dependencies`` block now reports the dependency ``fulfilled``).\n\nA multipart ingress for an `edit-draft-campaign`: the upload is parsed into the\npatch value, then dispatched, so the edit lands on the check-in ledger like every\nother origin mutation. Nothing runs until Start. Wire contract pinned in\n``docs/specs/m12-api-openapi.yaml::POST /datasets/draft/candidate-library``.\n``draft_id`` is the check-in campaign id.",
+        "description": "Attach a candidate library to a draft — the operator's \"drop in place\" for an\nunfulfilled ``candidate_source`` dependency. Returns the updated draft wire (its\n``dependencies`` block now reports the dependency ``fulfilled``).\n\nA multipart ingress for an `edit-draft-campaign`: the upload is parsed into the\npatch value, then dispatched, so the edit lands on the check-in ledger like every\nother origin mutation. Nothing runs until Start. Wire contract pinned in\n``docs/specs/api-openapi.yaml::POST /datasets/draft/candidate-library``.\n``draft_id`` is the check-in campaign id.",
         "operationId": "upload_candidate_library_api_v1_datasets_draft_candidate_library_post",
         "parameters": [
           {
@@ -6278,7 +6278,7 @@
     },
     "/api/v1/datasets/draft/candidate-library/from-column": {
       "post": {
-        "description": "Build a draft's candidate library from the distinct values of one of its own\ncolumns — the unified \"build from dataset\" path (no external file).\n\nWhen the targets already live in the data (the ground-truth/target column, the\nunion of the dataset's category sheets), the library is derived rather than\nuploaded. The derived terms become an `edit-draft-campaign` patch, so this lands\non the check-in ledger exactly like the upload does. Returns the updated draft\nwire (its `candidate_library` dependency now `fulfilled`). Wire contract pinned in\n`docs/specs/m12-api-openapi.yaml::POST /datasets/draft/candidate-library/from-column`.\n`draft_id` is the check-in campaign id.",
+        "description": "Build a draft's candidate library from the distinct values of one of its own\ncolumns — the unified \"build from dataset\" path (no external file).\n\nWhen the targets already live in the data (the ground-truth/target column, the\nunion of the dataset's category sheets), the library is derived rather than\nuploaded. The derived terms become an `edit-draft-campaign` patch, so this lands\non the check-in ledger exactly like the upload does. Returns the updated draft\nwire (its `candidate_library` dependency now `fulfilled`). Wire contract pinned in\n`docs/specs/api-openapi.yaml::POST /datasets/draft/candidate-library/from-column`.\n`draft_id` is the check-in campaign id.",
         "operationId": "build_candidate_library_from_column_api_v1_datasets_draft_candidate_library_from_column_post",
         "parameters": [
           {
@@ -6340,7 +6340,7 @@
     },
     "/api/v1/datasets/ingest": {
       "post": {
-        "description": "Parse an uploaded tabular file (CSV/TSV/JSON/XLSX); mint a durable check-in\ncampaign and return its :class:`DraftCampaign` (``draft_id`` == ``campaign_id``).\n\nWire contract pinned in ``docs/specs/m12-api-openapi.yaml::POST /datasets/ingest``.\nThe check-in campaign appears in the sidebar immediately and survives a restart;\nnothing runs until the operator starts it via ``/commands/start-checkin``.",
+        "description": "Parse an uploaded tabular file (CSV/TSV/JSON/XLSX); mint a durable check-in\ncampaign and return its :class:`DraftCampaign` (``draft_id`` == ``campaign_id``).\n\nWire contract pinned in ``docs/specs/api-openapi.yaml::POST /datasets/ingest``.\nThe check-in campaign appears in the sidebar immediately and survives a restart;\nnothing runs until the operator starts it via ``/commands/start-checkin``.",
         "operationId": "ingest_dataset_api_v1_datasets_ingest_post",
         "requestBody": {
           "content": {

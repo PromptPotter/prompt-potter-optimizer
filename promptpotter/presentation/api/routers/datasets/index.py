@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 class DatasetIndexEntry(StrictModel):
     """One row in the dataset registry — backs the Dashboard ``New campaign`` view.
 
-    Wire shape pinned in ``docs/specs/m12-api-openapi.yaml::DatasetIndexEntry``.
+    Wire shape pinned in ``docs/specs/api-openapi.yaml::DatasetIndexEntry``.
     """
 
     name: str = Field(description="Slug used as the path segment under `datasets/`.")
