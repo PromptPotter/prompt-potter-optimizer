@@ -172,7 +172,18 @@ until 3c, so it stays gated on 3c.
 sandboxed process. It fights the current single-process design (a few hundred LOC + delicate
 JobRegistry coordination) and guards a low-probability threat (our own optimizer code) in the
 current single-operator / small-team model. **Until 3c lands, web-launched loops are bounded by 3a
-only, not the full 3b wall.** Do it when untrusted third-party pipeline code executes in-process.
+only, not the full 3b wall.**
+
+**The TRIGGER is the first time a tenant can supply anything EXECUTABLE** — a custom node, a plugin
+connector, arbitrary Python. Until then the requirement is undefined, and that was audited rather
+than assumed: across every tenant-controlled path into the API worker, the scoring formula is
+AST-allowlisted, YAML is `safe_load`ed, slugs are regex-validated, and the provider registry is
+closed and never tenant-set. Nobody can supply code, so a boundary built now is built against a
+guess — and the guess decides the shape (subprocess vs trust model vs container). It also fights
+L4, whose recursion spawns each inner campaign as an in-process `asyncio` task. Waiting costs
+nothing **while the launch seam stays single** (`application/embedded_run.py`,
+`jobs/launcher/mint_and_start.py`); let run-launch logic spread across call sites and it stops
+being cheap.
 
 The one place the loop `eval()`s an external string — the scoring formula — is fenced by an AST
 allowlist (`application/scoring/formula/compiler.py`); the formula source is operator/tenant config,

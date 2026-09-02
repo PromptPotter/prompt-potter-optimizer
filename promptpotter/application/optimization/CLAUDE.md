@@ -73,6 +73,8 @@ Channel: written to `OptSearchPoint.memory.l1_layout` / `.l1_overrides`. L2 does
 
 ### Probe rounds — what they mean, and why the lever is not wired
 
+**This section stays at full length — it is a written SPEC, not stale description of an unwired lever.** It reads as prose about nothing because `L2ContextOutput` carries no `action` field, so a doc-shrink pass scores it as dead. Operator-decided: don't compress it, don't fold it into a code pointer, and don't file the missing field as drift.
+
 **A probe round spends its whole budget interrogating ONE thing** — one axis, one variable, one recurring mistake — instead of spreading a broad mutation set across the failure surface. The distinguishing move is **more candidates on a narrower question**, so the round returns a real answer about that one thing rather than one noisy sample of it.
 
 **L2 cannot request one today: there is no `action` field on `L2ContextOutput`, deliberately.** The shipped version selected samples by *warning* while the prompt asked L2 which *axis* to probe, and the warning inventory behind it was later deleted — leaving a set that only fills on backend degradation. On a healthy run it is empty, so the round scored every candidate 0/0 and persisted `accuracy: 0.0`, indistinguishable downstream from a genuinely terrible candidate, while still paying its optimizer calls and consuming a round. `l2_targets_l1_surface` even counted the choice as conformant — L2 scored 100% precisely by picking the action that measured nothing.

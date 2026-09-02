@@ -168,7 +168,18 @@ class _SampleOutcome:
 
 def _armed_cells(session: Session) -> int:
     """What the operator ASKED for, clamped to what the backend declares it can hold — the request
-    alone would let the browser outrun the box, the ceiling alone would widen every walk unbidden."""
+    alone would let the browser outrun the box, the ceiling alone would widen every walk unbidden.
+
+    **Sample look-ahead is LIVE, and every part of it looks removable.** It defaults off and no
+    committed campaign enables it, so a reader concludes the branch never fires; it fires on every
+    dataset the moment the operator presses the control — ``promptpotter-self`` included, where one
+    press releases a GROUP of inner campaigns. Four pieces move together or not at all: the
+    ``.runtime/sample_lookahead.json`` write/poll/consume triple, the acquire/absorb split below,
+    ``dashboard.json::sample_lookahead`` + ``sample_lookahead_discards`` with the two connector
+    declarations beside them, and the ``campaign.lookahead`` cap. **Never "recover" the discarded
+    acquisition** — recording it makes the run's rows depend on in-flight depth, forcing a
+    ``human_intervened`` stamp and devaluing the campaign; that discard is the design. Why it is
+    browser-only with no CLI verb: ``docs/operations/access-model.md`` § Tier 1a."""
     check = session.sample_lookahead_check
     requested = check() if check is not None else 1
     return max(1, min(requested, session.backend_client.max_cells_in_flight))

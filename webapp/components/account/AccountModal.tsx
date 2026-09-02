@@ -1,6 +1,10 @@
 "use client";
 // Clerk-style account modal — two-pane shell over `/auth/*`. Each section is its
 // own pane component: Profile / Security / Activity / Preferences / About.
+//
+// Update profile, remove account and connect account are INTENTIONAL placeholders, previewing the
+// config-edit surface — not scaffolding, and out of scope for any "hide non-functional controls"
+// sweep. Peers: `chat/ChatPane.tsx`, `shell/Sidebar.tsx`.
 
 import { AboutUnit } from "./AboutUnit";
 import { AccountProfileTab } from "./AccountProfileTab";

@@ -41,7 +41,18 @@ class OriginReadiness:
 
 
 def origin_readiness(draft: DraftCampaign) -> OriginReadiness:
-    """Gate ``draft`` for mint. Pure; the checklist — not the operator — decides."""
+    """Gate ``draft`` for mint. Pure; the checklist — not the operator — decides.
+
+    **"Ready" is deliberately not "mintable", and the gap is not a bug to close here.** This gates
+    columns / framing / node-models but NOT whether the committed prompt carries each node's
+    required ``{{template vars}}`` — that check lives only at mint
+    (``pipeline_resolve.py::configure_and_apply_pipeline``, ``pipeline_config_invalid`` 422).
+    Surfacing it at the resolve turn would need the live ``GET /pipeline`` schema threaded into a
+    path that is I/O-free on purpose (this function is pure over the draft; ``resolve_origin_turn``
+    carries no backend client and the draft no base_url). **Operator decided: keep the 422 backstop,
+    add no pre-mint backend I/O.** It is non-destructive — draft preserved, retry, and it names the
+    exact missing vars — so a bad origin never runs. Revisit only if check-in timing becomes a felt
+    pain."""
     gaps: list[FieldGap] = []
 
     _check_column(

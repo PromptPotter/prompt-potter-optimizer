@@ -101,6 +101,10 @@ CORRECT depends on what the payload carries:
   stay required. A missing field means the record cannot be vouched for, and a tolerant read
   hands back a winner prompt with a silently defaulted field — a wrong answer beats an
   unreadable one only until someone believes it.
+- **Ledger** — the `CycleRecord` arms. Tolerant by SKIP, not by default: `ledger.py::iter` logs
+  a key no arm declares and drops the WHOLE line, so a field DELETE erases every record carrying
+  it and nothing raises. Here pruning IS the repair — `restamp.py::_prune_record`, derived from
+  the union, so no field delete needs a migration of its own.
 
 `application/restamp.py::check_round_documents` reports which side has drifted; PRUNING never
 repairs a round document, because it cannot restore a renamed field's value. Recovering one from a

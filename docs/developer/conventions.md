@@ -52,6 +52,13 @@ collects everything else.
   and an import-time guard keeps it stripped. What ships there is
   `Field(description=)` — editing one IS a prompt change, so regenerate via
   `scripts/build_optimizer_schemas.py`.
+- **A filler name whose PACKAGE PATH resolves it is not a collision.** `session.py` ×3,
+  `state.py` ×2, `base.py` ×2 and `shared/identity.py` keep their names, and the refusal was
+  bought by the verification it asked for: a genuine clash produces a disambiguating
+  `import … as`, and there is **not one in the tree** — no module imports a colliding pair
+  together. Re-open only for a name whose own package cannot resolve it. The two failures that ARE
+  renames — a second word for something the repo already names, and a name that stopped describing
+  its contents — are owned by root [`CLAUDE.md`](../../CLAUDE.md) § STOP.
 - **Four banned words**, in identifiers and prose alike. **node** — never
   "building block", never "service". **eval** — use loop / round / scoring /
   fitness (the `Evaluator` class is the sole exception). **legacy** — either the
@@ -96,6 +103,29 @@ collects everything else.
   definition site (the `@signal` `INJECTIONS` pattern); enum-keyed dict +
   import-time completeness assert is the third acceptable form. String-keyed
   *data* tables are fine.
+
+## Auditing for debt
+
+Bar for reporting one: **high confidence after verification** — call sites traced, bodies read —
+never "I spotted a smell". Where it survives that bar, **fix it in the pass that found it**; only
+blocked or multi-arc work is filed ([`../specs/code-debt-cleanup.md`](../specs/code-debt-cleanup.md)).
+
+Productive patterns:
+
+- **Premature optimization with an apologetic docstring** — guards a scenario that cannot happen. Verify by reading call sites and measuring fire-rate.
+- **Redundant double-protection** — two guards on one condition where one subsumes the other. Verify by writing the decision boundaries.
+- **Single-caller indirection with no architectural reason** — no own test, no layer boundary. Skip splits across a load-bearing layer.
+- **Dead exception paths / enum variants** — handler arms outliving the raising path. Grep every variant for a construction site.
+- **Speculative API surface** — params never read, an `X | None` always non-None, fields declared and written but never read.
+- **Absent collapsed into zero** — a `float = 0.0` default or an `or 0.0` coercion on a field carrying a MEASUREMENT. The tell is a `| None` sibling in the same model: the rule and its violation have twice appeared in one constructor call. Counts, rates and money are honest zeros; reporting-only models default by written rule ([`../../promptpotter/domain/CLAUDE.md`](../../promptpotter/domain/CLAUDE.md) § Tolerance is scoped by what a payload is FOR). Enforcement is per-site — [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md) forbids a repo-wide scan — which is why this is a hunt pattern and not a task.
+- **Vibe-coded scaffolding** — `NotImplementedError` branches, comments about work the project does not plan. Check the roadmap before believing the "future".
+
+**NOT debt — skip on sight:** intentional UI placeholders (each names itself in its own component
+header); per-injection `char_cap`; domain vocabulary policed elsewhere (`origin` not `baseline`);
+the `application/intelligence/ ↮ application/optimization/` layer split; ABC `@abstractmethod` /
+`Protocol` `...` bodies; `from __future__ import annotations`; boundary guards at external-input
+sites (file I/O, JSON ingest); validators on `extra='forbid'` user-config models; `_*` private
+helpers used by one caller **in the same file**.
 
 ## Tests
 

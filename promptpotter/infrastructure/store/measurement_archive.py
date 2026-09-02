@@ -51,7 +51,11 @@ def _measurement_key(item: dict[str, Any]) -> str:
 
 def _summary(data: dict[str, Any]) -> dict[str, Any]:
     """Shared by :meth:`MeasurementArchive.save` and :meth:`MeasurementArchive.reindex`, so the
-    summary the two write can never drift."""
+    summary the two write can never drift.
+
+    The defaulted ``.get(…)`` reads LOOK like tolerance for a drifted writer and are not: test
+    fixtures call ``save`` with partial dicts, so tightening them to subscripts breaks the callers
+    rather than catching one. The subscripted keys above are the ones every writer supplies."""
     return {
         "run_id": data["run_id"],
         "name": data.get("name", data["run_id"]),

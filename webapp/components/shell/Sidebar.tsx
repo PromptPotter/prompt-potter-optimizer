@@ -1,4 +1,7 @@
 "use client";
+// The footer search icon is an INTENTIONAL placeholder previewing the analytics-search surface —
+// not scaffolding, and out of scope for any "hide non-functional controls" sweep. Peers:
+// `chat/ChatPane.tsx`, `account/AccountModal.tsx`.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWorkspace } from "@/lib/workspace";
 import { useAuth } from "@/lib/auth-context";
@@ -215,8 +218,8 @@ export function Sidebar({
       />
       <div className="sidebar-footer">
         <div className="sidebar-footer-chrome">
-          {/* Search — a disabled placeholder (analytics, M13+). It stays in the
-              DOM and stays honestly inert; see code-debt-cleanup.md § placeholders. */}
+          {/* Search — the disabled placeholder this file's header refuses to sweep.
+              It stays in the DOM and stays honestly inert. */}
           <button
             type="button"
             className="sidebar-search"

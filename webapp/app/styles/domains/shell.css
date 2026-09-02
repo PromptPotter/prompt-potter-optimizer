@@ -56,8 +56,8 @@
 .sidebar-footer-chrome{display:flex;align-items:center;gap:var(--space-6);margin-bottom:var(--space-8)}
 .sidebar-footer-chrome .account-trigger{margin-left:auto}
 .sidebar-footer-auth{display:flex;flex-wrap:wrap;gap:var(--space-6);margin-bottom:var(--space-8)}
-/* Search — a disabled placeholder (analytics, M13+). Holds its spot and stays
-   legibly inert; see code-debt-cleanup.md § intentional placeholders. */
+/* Search — a disabled placeholder (analytics). Holds its spot and stays legibly
+   inert; the refusal that keeps it lives in `components/shell/Sidebar.tsx`'s header. */
 .sidebar-search{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;background:transparent;border:0;border-radius:var(--border-radius-md);color:var(--color-text-tertiary);cursor:pointer;font-family:inherit;flex-shrink:0;padding:0}
 .sidebar-search:hover:not(:disabled){background:var(--color-background-hover);color:var(--color-text-primary)}
 .sidebar-search:disabled{cursor:default}

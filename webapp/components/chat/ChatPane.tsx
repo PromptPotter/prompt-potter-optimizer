@@ -1,4 +1,9 @@
 "use client";
+// The disabled controls here are INTENTIONAL placeholders, not scaffolding: attach, the textarea,
+// send, and the thinking / web-search / code-exec toggles preview the chat-first front door
+// (`docs/specs/chat-foundation.md`). Out of scope for any "hide non-functional controls" sweep —
+// that sweep is why this note exists. Milestone text inside them is exempt from the
+// "no M-milestone references on operator surfaces" gate; other operator surfaces are not.
 import { useEffect, useRef, useState } from "react";
 import { useHardSamples } from "@/lib/hard-samples";
 import { useDashboard } from "@/lib/hooks/useDashboard";

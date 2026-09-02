@@ -45,6 +45,13 @@ class InstrumentMode:
     ruler: DeltaRuler | None
 
 
+# The UNRESET ContextVars in this package are NOT a leak class — do not file a reset sweep, and
+# never fuse them into one settings object. All eight were traced; the one genuine defect
+# (`_ABORT_CHECK` chaining a predicate per rebase, `infrastructure/llm/rate_limit.py`) is fixed, and
+# every remaining non-reset is load-bearing. This one is the clearest case: `_MODE` must cover
+# FINALIZE, or the archive reads and the optimizer clamp de-hermeticize mid-measurement. Its twin
+# is `_OPTIMIZER_PROMPT_OVERRIDES` (`optimization/dispatch/llm_call/prompts.py`), where clearing
+# would wipe the inner mutations `runner/inner/spawn.py` sets before `run_optimization`.
 _MODE: contextvars.ContextVar[InstrumentMode | None] = contextvars.ContextVar(
     "instrument_mode", default=None
 )
