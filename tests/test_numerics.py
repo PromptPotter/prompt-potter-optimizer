@@ -861,7 +861,6 @@ def _ruler(
         sigma_theta=1.5,
         calibration_model="1PL",
         anchor_id=anchor_id_of(delta, mu, sigma, "1PL"),
-        anchored_at_round=0,
     )
 
 

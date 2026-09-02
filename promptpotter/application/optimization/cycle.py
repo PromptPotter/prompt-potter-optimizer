@@ -165,7 +165,6 @@ def _calibrate_delta_ruler(
     *,
     enable_2pl: bool,
     archive_obs: list[Observation],
-    round_num: int = 0,
 ) -> tuple[DeltaRuler | None, tuple[float, float] | None]:
     """The per-cycle ANCHORING fit — the scale every later θ readout is measured against
     (``docs/methods/verdict-resolution.md``). It locks the anchor; ``extend_ruler`` grows the
@@ -205,7 +204,7 @@ def _calibrate_delta_ruler(
         fitted, post = graduate_ruler_model(obs, enable=enable_2pl)
         # Cold below the floor: too few banked samples to trust a fitted ruler → stay flat.
         if len(post.delta) >= n_min:
-            ruler = post.anchored(fitted, round_num)
+            ruler = post.anchored(fitted)
             if fitted == "2PL":
                 logger.info("δ ruler graduated to 2PL (%d samples fit)", len(post.delta))
     # θ_C0 THROUGH THE SAME ESTIMATOR EVERY OTHER LEVEL USES. Never hand back the JOINT fit's
@@ -614,7 +613,6 @@ class Cycle:
                     scorer_id=self.session.scoring.scorer_id,
                     origin_sp_hash=self.origin_sp_hash,
                 ),
-                round_num=max(len(self.rounds) - 1, 0),
             )
             if ruler is None:
                 return  # still cold — legitimate, and it re-attempts next round

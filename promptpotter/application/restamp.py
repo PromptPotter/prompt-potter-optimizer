@@ -5,7 +5,11 @@ PRUNING never touches a round document: a row repairs by pruning to ``model_fiel
 cannot restore a renamed field's value, so a repair there would be silently wrong. A migration that
 RECOVERS a value from a surviving record may write one — :func:`backfill_inner_facts` does. Which
 drift is fatal, and why that is correct, is owned by ``domain/CLAUDE.md`` § Tolerance is scoped by
-what a payload is FOR."""
+what a payload is FOR.
+
+It DOES prune a LEDGER record (:func:`_prune_record`, inside the compaction pass), for the opposite
+reason: that reader is tolerant by SKIP rather than by default, so a stale key costs the whole
+line rather than one value, and nothing raises when it does."""
 
 from __future__ import annotations
 
@@ -38,6 +42,7 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
 from promptpotter.domain.phases import CampaignPhase, RunPhase
 from promptpotter.domain.results import DiagnosticRunRecord, RoundResult
+from promptpotter.domain.run_records import CycleRecord
 from promptpotter.domain.scoring import ledger_sample_view
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.campaign_store.store import reproject_round_index
@@ -341,6 +346,32 @@ _COMPACTABLE_PHASES: frozenset[RunPhase] = frozenset(
 )
 
 
+# Every ledger arm by its `record_type` discriminator. DERIVED from the union, so a record kind
+# added, renamed or retired reaches this pass without a second edit here.
+_LEDGER_ARMS: dict[str, type[BaseModel]] = {
+    str(arm.model_fields["record_type"].default): arm for arm in get_args(get_args(CycleRecord)[0])
+}
+
+
+def _prune_record(rec: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Drop the keys no ``CycleRecord`` arm declares any more, and name them.
+
+    This is the one migration a field DELETE on a ledger record needs, and it is needed because
+    the reader is tolerant BY SKIP: ``ledger.py::iter`` logs the line and continues, so a deleted
+    field raises nowhere — the record is simply gone, and ``read_ruler``, every projection rebuild
+    and every fork lookup behave as though it was never written. ``DeltaRuler.anchored_at_round``
+    is the case that named it: dropping a reader-less field would have silently un-ruled every
+    banked cycle, which reads downstream as "θ that cannot be reproduced".
+
+    A RENAME is still not this — pruning cannot restore the value under its new name, and the
+    module docstring says which act may."""
+    arm = _LEDGER_ARMS.get(str(rec.get("record_type")))
+    if arm is None:
+        return rec, []
+    pruned, dropped = _prune_to_schema(rec, arm)
+    return (pruned, [dotted for dotted, _ in dropped]) if dropped else (rec, [])
+
+
 def _compact_record(rec: dict[str, Any]) -> dict[str, Any] | None:
     """One stored record → what the writer would emit for it today. ``None`` ⇒ already current."""
     payload = rec.get("payload")
@@ -390,7 +421,7 @@ def _compact_record(rec: dict[str, Any]) -> dict[str, Any] | None:
     return None if new == payload else rec | {"payload": new}
 
 
-def _compact_one(path: pathlib.Path, *, apply: bool) -> tuple[int, int, int]:
+def _compact_one(path: pathlib.Path, *, apply: bool, gone: Counter[str]) -> tuple[int, int, int]:
     """``(bytes_before, bytes_after, records_rewritten)``. A tmp + ``os.replace``, never in
     place — ``CycleEventLog.append`` is not crash-atomic, so a torn rewrite loses the cycle."""
     before = after = rewritten = 0
@@ -405,11 +436,16 @@ def _compact_one(path: pathlib.Path, *, apply: bool) -> tuple[int, int, int]:
                 lines.append(line)
                 after += len(line)
                 continue
+            # Prune BEFORE projecting: the projections read `payload`, and a stale key sits one
+            # level above it on the record itself.
+            rec, dropped = _prune_record(rec)
+            gone.update(dropped)
             out = _compact_record(rec)
-            if out is None:
+            if out is None and not dropped:
                 lines.append(line)
                 after += len(line)
                 continue
+            out = out if out is not None else rec
             rewritten += 1
             new_line = json.dumps(out, separators=(",", ":"), default=str) + "\n"
             lines.append(new_line)
@@ -425,6 +461,7 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
     """Re-project every finished cycle's ``.runtime/ledger.jsonl`` onto today's record shape."""
     total_before = total_after = touched = 0
     skipped: Counter[RunPhase] = Counter()
+    gone: Counter[str] = Counter()
     rows: list[tuple[int, str]] = []
     for ledger_path in iter_cycle_ledgers(DEFAULT_PROJECTS_ROOT):
         cycle_dir = ledger_path.parent.parent
@@ -434,7 +471,7 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
         if phase not in _COMPACTABLE_PHASES:
             skipped[phase] += 1
             continue
-        before, after, rewritten = _compact_one(ledger_path, apply=apply)
+        before, after, rewritten = _compact_one(ledger_path, apply=apply, gone=gone)
         total_before += before
         total_after += after
         if rewritten:
@@ -456,6 +493,11 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
         print(f"  {'saved':>12}: {(total_before - total_after) / mb:8.2f} MB  ({pct:.1f}%)")
     for saved, name in sorted(rows, reverse=True)[:10]:
         print(f"  {saved / mb:8.2f} MB  {name}")
+    if gone:
+        print("\nDropped — record keys the engine no longer declares, which the reader was")
+        print("silently SKIPPING the whole line over:")
+        for key, n in gone.most_common():
+            print(f"  {n:4d}x  {key}")
     if not apply and touched:
         print("\nDry run. Re-run with --apply to rewrite.")
     return {
@@ -463,6 +505,7 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
         "skipped_checkin": skipped.get(RunPhase.CHECKIN, 0),
         "skipped_producing": sum(n for p, n in skipped.items() if p is not RunPhase.CHECKIN),
         "bytes_saved": total_before - total_after,
+        "record_keys_dropped": sum(gone.values()),
     }
 
 

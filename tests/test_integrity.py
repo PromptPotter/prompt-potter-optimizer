@@ -4544,7 +4544,6 @@ def test_digest_reads_the_ruler_off_the_cycle_not_the_unabsorbed_round() -> None
         sigma_theta=1.0,
         calibration_model="1PL",
         anchor_id="anchor-x",
-        anchored_at_round=1,
     )
     cycle = Cycle(
         session=session,
