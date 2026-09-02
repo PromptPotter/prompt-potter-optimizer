@@ -19,6 +19,10 @@ Describe your 1️⃣ **task**, drop in a labeled 2️⃣ **dataset**, and 3️�
 > [!IMPORTANT]
 > **New here?** Start with [`docs/manual/`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/manual/README.md) — six chapters covering install → first run → reading output → troubleshooting.
 
+## 📺 Watch it work
+
+- **[Can open models operate PromptPotter?](https://www.youtube.com/watch?v=DLhb26ppX_s)** — Qwen, GLM and DeepSeek each drive the same Swiss-invoice campaign end to end, then one of them is handed a real bug in this repo to fix. Unedited, no benchmark scores — the operating work itself.
+
 ## ⭐ Features
 
 Every measurement costs money, so the whole design is **most fitness per dollar**. What that buys in practice: a real run on a Swiss invoice account-coding set moved exact-match accuracy from **5% to 55%** — and stopped because it hit its own spend cap, not because it ran out of ideas. (5 rounds, n=20; a measured lift, not a significance claim.)
