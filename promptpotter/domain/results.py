@@ -828,7 +828,11 @@ class CycleResult(StrictModel):
     # They travel together because a consumer reading one against a composite computed on some
     # other basis is comparing two different measurements.
     origin_accuracy: float
-    origin_composite_fitness: float = 0.0
+    # `None`, not 0.0, on a cycle that never started: the same rule `origin_level` below states,
+    # and the pair was violated and honoured in this one constructor call. A stand-in 0.0 becomes
+    # round 0's lift bar in `l1/stats.py::_top_lifts`, which reports the first round's whole
+    # composite as its improvement over an origin nothing ever scored.
+    origin_composite_fitness: float | None = None
     # The L4 outer proxy's inner-search signal: the origin's level and the ability each round
     # The PARENT each round ended on — the winner it crowned, or the one carried forward when it
     # crowned nobody — never the proposals, which turn the metric NEGATIVE for exactly the

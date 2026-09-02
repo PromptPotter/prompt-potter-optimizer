@@ -423,7 +423,7 @@ def _build_cycle_result(
         best_round=cycle.tracking.best_round if cycle is not None else 0,
         origin_accuracy=origin.report.accuracy,
         origin_composite_fitness=(
-            cycle.origin_round.composite_fitness if cycle is not None else 0.0
+            cycle.origin_round.composite_fitness if cycle is not None else None
         ),
         origin_level=origin_lv[0] if origin_lv is not None else None,
         origin_level_se=origin_lv[1] if origin_lv is not None else None,

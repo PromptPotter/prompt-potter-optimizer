@@ -40,7 +40,7 @@ class L1Stats:
 def compute_l1_stats(
     rounds: list[RoundResult],
     *,
-    origin_composite_fitness: float,
+    origin_composite_fitness: float | None,
     behavior_results: list[list[CheckResult]],
     l2_behavior_results: list[list[CheckResult]] | None = None,
 ) -> L1Stats:
@@ -114,13 +114,18 @@ def _mean_yield_rate(rounds: list[RoundResult]) -> float | None:
     return sum(r.l1_yield for r in rounds) / len(rounds)
 
 
-def _top_lifts(rounds: list[RoundResult], origin_composite_fitness: float) -> list[float]:
+def _top_lifts(rounds: list[RoundResult], origin_composite_fitness: float | None) -> list[float]:
     """Per-round (best variant composite_fitness − parent composite_fitness). Round 0's parent
-    is the origin composite_fitness; subsequent rounds inherit the prior round's."""
+    is the origin composite_fitness; subsequent rounds inherit the prior round's.
+
+    An origin that was never scored has NO bar, so the first round contributes no lift at all.
+    Measured against a stand-in 0.0 it reports its whole composite as improvement, and that
+    fabricated number then reaches both the mean and the stagnation streak."""
     lifts: list[float] = []
     parent = origin_composite_fitness
     for r in rounds:
-        lifts.append(r.composite_fitness - parent)
+        if parent is not None:
+            lifts.append(r.composite_fitness - parent)
         parent = r.composite_fitness
     return lifts
 

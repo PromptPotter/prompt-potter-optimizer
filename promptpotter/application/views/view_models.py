@@ -114,7 +114,6 @@ class InitExitView:
     l2_round: int = 0
     composite_fitness_formula: str | None = None
     composite_fitness_formula_short: str | None = None
-    origin_composite_fitness: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -310,7 +309,9 @@ class DigestStatusView:
     parent_session_id: str | None
     status: str
     stop_reason: str
-    origin_accuracy: float
+    # ``None`` where the cycle banked no round 0 — `origin_accuracy_of` reads it off the round
+    # documents and there is no stored copy, so absent means never scored, not scored zero.
+    origin_accuracy: float | None
     best_accuracy: float
     best_round: int | None
     rounds_completed: int
@@ -383,7 +384,7 @@ class ForkSummaryView:
     mode: str
     status: str
     best_accuracy: float
-    origin_accuracy: float
+    origin_accuracy: float | None
     n_rounds: int
     stop_reason: str
     finished_at: str | None
