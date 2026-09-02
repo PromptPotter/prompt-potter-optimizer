@@ -126,7 +126,7 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
     round: 0,
     // No ledger behind a fixture, so the round closed at no offset — the same `null` a
     // diagnostic replay writes, never 0, which is a real record.
-    closed_at_offset: null,
+    at_offset: null,
     label: "C0",
     accuracy: 0,
     composite_fitness: 0,

@@ -261,6 +261,18 @@ them there.
 
 Forks within a family share one event stream via `CycleEventLog.inherit_from(parent, offset)`. The forked cycle's ledger FILE holds only its own appends; `iter()` walks the parent's records up to `offset` in front of them, and the parent carries a `ResumeCheckpointRecord` of kind `FORK_CUT`. The cut address is `index.json::forked_at_offset`, so that walk is reproducible off disk — but it yields a VIRTUAL position (parent + own) that is not the `sequence` a tail reports, which is the file's own line. Address a record as `(path, offset)`, never by an integer alone.
 
+### The cut
+
+A family is a partial order over **cuts**, and there are exactly two operations over them: **iterate** by time (the ray — one chronology, forks interleaved with their parents) and **reduce** to one by causality (a **fold** — the inherited prefix, then the cycle's own records).
+
+A cut is `(cycle, offset)`, resolved as `domain/cycle_paths.py::Cut`. `offset` is the physical 0-based line index in that cycle's **own** ledger: the one space `ProjectionEnvelope.sequence`, `RayItem.offset`, `dashboard.json::at_offset` and `round_NNNN.json::at_offset` share, so a ray item addresses a fold directly. An inherited prefix is walked in front of that space and is not in it — which is why a cut rides `iter(own_limit=…)` and never a comparison inside the loop.
+
+Three consequences that a surface must not re-decide:
+
+- **A cut names a `CycleHop`, not a `CyclePath`.** Descent is spent before anything folds (`resolve_cycle_path` returns a sandbox-rooted store plus the leaf), so a path would be a lie at depth ≥ 1. `CyclePath` is the WIRE address and stays `RayItem`'s.
+- **`cycle` and `hop` ride together** because they must agree; every construction site derives one from the other through `cycle_dir_for`.
+- **Every artifact stamps the cut it is of**, so the ledger is the truth and each file is a cache: `?at=<offset>` on the dashboard route re-folds any past moment off disk, and `index.json::forked_at_offset` is a cut on the *parent*.
+
 Subscribers read via `DerivedView.on_record(record)` and MUST NOT write any campaign artifact beyond their declared allowlist (fails loud; see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
 
 ## 7. Per-cycle artifact paths

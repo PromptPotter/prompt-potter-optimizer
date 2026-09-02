@@ -5,7 +5,7 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RoundSummary
 from promptpotter.domain.phases import CampaignPhase, DashboardState, PhaseEvent, RunPhase
 from promptpotter.domain.results import (
@@ -250,8 +250,7 @@ class LiveDashboardView(DerivedView):
             else hop
         )
         resume_from = resolve_resume_state(
-            cycle_dir_for(root, seed_hop),
-            seed_hop,
+            Cut(cycle=CycleDir(cycle_dir_for(root, seed_hop)), hop=seed_hop),
             Path(cycle_dir),
             resumed_from_round,
         )
@@ -302,7 +301,7 @@ class LiveDashboardView(DerivedView):
         """Stamps a cycle whose run stopped BEFORE the projection bound, so the tree shows what
         happened. Pair with ``mark_finished`` only on a crash — a ``finished_at`` unresumes a pause."""
         cycle_path = Path(cycle_dir)
-        state = resolve_resume_state(cycle_path, hop, cycle_path, None)
+        state = resolve_resume_state(Cut(cycle=CycleDir(cycle_path), hop=hop), cycle_path, None)
         if session_id:
             state.session_id = session_id
         if interrupted:
@@ -973,8 +972,7 @@ class LiveDashboardView(DerivedView):
 
 
 def resolve_resume_state(
-    seed_dir: Path,
-    seed_hop: CycleHop,
+    seed: Cut,
     active_cycle_dir: Path,
     resumed_from_round: int | None,
 ) -> LiveDashboardState:
@@ -987,7 +985,7 @@ def resolve_resume_state(
 
     **The one place the trajectory is CUT**: rounds at or past ``resumed_from_round`` drop and
     ``best`` is RE-DERIVED, because a carried rolling max keeps a peak the rewind just discarded."""
-    prior = fold_at(seed_dir, seed_hop)
+    prior = fold_at(seed)
     surviving = [
         r for r in prior.rounds if resumed_from_round is None or r.round < resumed_from_round
     ]
@@ -1007,26 +1005,18 @@ def resolve_resume_state(
     )
 
 
-def fold_at(cycle_dir: Path, hop: CycleHop, *, at_offset: int | None = None) -> LiveDashboardState:
-    """The cycle's dashboard state as of ledger offset *at_offset* — ``None`` for the head. The
-    SAME fold the runner drives, given records off disk instead of off an append.
+def fold_at(cut: Cut) -> LiveDashboardState:
+    """The cycle's dashboard state as of *cut* (``domain/cycle_paths.py``) — the SAME fold the
+    runner drives, given records off disk instead of off an append.
 
-    ``at_offset`` is a physical offset in THIS cycle's own ledger: the space
-    ``DerivedView.at_offset``, ``ProjectionEnvelope.sequence`` and ``RayItem.offset`` share, so a
-    ray item taken from this course addresses a fold directly. A fork's parent prefix is walked in
-    front of it and is NOT in that space, which is why the cut rides ``iter(own_limit=…)`` rather
-    than a comparison inside the loop.
-
-    The ledger is the ONLY input. The wiring constants (``WIRING_FIELDS``) are stamped at run
-    start and ride no record, so they come back at their model defaults here and the serving route
-    stamps the live ones over them — the same overlay it already does for ``run_phase``. Reading
-    them from the head ``dashboard.json`` instead made a projection depend on its own output, and
-    it is what kept every OTHER consumer of a past round — the lineage tree, the mask spine — from
-    folding rather than re-deriving."""
+    The ledger is the ONLY input, so that no projection depends on its own output. The wiring
+    constants (``WIRING_FIELDS``) are stamped at run start and ride no record, so they come back at
+    their model defaults here and the serving route stamps the live ones over them — the same
+    overlay it already does for ``run_phase``."""
     view = LiveDashboardView(
-        CycleDir(cycle_dir),
+        cut.cycle,
         state_path=None,
-        hop=hop,
+        hop=cut.hop,
         # The wiring, at the model's own defaults — `WIRING_FIELDS` names what the caller stamps.
         session_id="",
         l1_patience=0,
@@ -1034,8 +1024,8 @@ def fold_at(cycle_dir: Path, hop: CycleHop, *, at_offset: int | None = None) -> 
         sp_budget_ttest=0,
         headline_metric="accuracy",
     )
-    limit = None if at_offset is None else at_offset + 1
-    for offset, record in open_with_history(CycleDir(cycle_dir)).iter(limit):
+    limit = None if cut.offset is None else cut.offset + 1
+    for offset, record in open_with_history(cut.cycle).iter(limit):
         view.on_record(record, offset)
     return view.compose()
 

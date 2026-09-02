@@ -4635,7 +4635,7 @@ def test_a_replayed_fold_rebuilds_the_trajectory_and_a_forks_history_is_bounded_
     parent's whole CHAIN, so a fork OF A FORK replayed the first N of its grandparent and dropped
     its parent entirely — a plausible, shorter history in place of the real one.
     """
-    from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+    from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
     from promptpotter.domain.run_records import PhaseRecord
     from promptpotter.infrastructure.ledger import CycleEventLog, open_with_history
     from promptpotter.infrastructure.projections.live_dashboard.view import (
@@ -4679,7 +4679,7 @@ def test_a_replayed_fold_rebuilds_the_trajectory_and_a_forks_history_is_bounded_
     live_rounds = [r.round for r in view.state.rounds]
     assert live_rounds == [0, 1]
 
-    replayed = fold_at(root_dir, hop)
+    replayed = fold_at(Cut(cycle=CycleDir(root_dir), hop=hop))
     assert [r.round for r in replayed.rounds] == live_rounds, (
         "the replay rebuilds the trajectory from the round documents, not from a prior dashboard"
     )

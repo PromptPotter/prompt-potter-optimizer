@@ -15,7 +15,7 @@ from promptpotter.application.mask.record import MaskRecord
 from promptpotter.application.mask.verdicts import make_abort_verdict, make_scoring_verdict
 from promptpotter.application.scoring.formula import compile_round_scorer
 from promptpotter.application.scoring.metrics import value_with_mask_applied
-from promptpotter.domain.cycle_paths import CycleHop, CyclePath, WorkspaceDir
+from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop, CyclePath, WorkspaceDir
 from promptpotter.domain.results import ABORT_LENS_LABELS, EliminationGate
 from promptpotter.domain.scoring import RoundScorer
 from promptpotter.infrastructure.projections.live_dashboard.state import (
@@ -131,7 +131,9 @@ def serve_dashboard_response(
         # wiring constants ride no record, so the fold returns them at their defaults and only
         # this file has the live ones. The armed ceilings deliberately get NEITHER — they are the
         # cap in force now, and restating one as a past moment's cap would be a fabrication.
-        replay = fold_at(cycle_path, hop, at_offset=at).model_dump(mode="json")
+        replay = fold_at(Cut(cycle=CycleDir(cycle_path), hop=hop, offset=at)).model_dump(
+            mode="json"
+        )
         replay["run_phase"] = run_phase
         if isinstance(body, dict):
             for field in LiveDashboardState.WIRING_FIELDS:

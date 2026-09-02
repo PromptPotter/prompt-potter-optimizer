@@ -3,6 +3,7 @@ root→leaf hop chain names one entity. ``CycleDir`` / ``WorkspaceDir`` are newt
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import NewType
 
@@ -11,6 +12,7 @@ from pydantic import ConfigDict
 from promptpotter.domain.strict_model import StrictModel
 
 __all__ = [
+    "Cut",
     "CycleDir",
     "CycleHop",
     "CyclePath",
@@ -44,6 +46,16 @@ class CycleHop(StrictModel):
 
 
 CyclePath = tuple[CycleHop, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Cut:
+    """WHERE a fold stops: a cycle, and a line index in its OWN records — an inherited prefix is
+    walked in front of that space, never inside it. ``None`` = the head. Model: `stable-api.md` §6."""
+
+    cycle: CycleDir
+    hop: CycleHop
+    offset: int | None = None
 
 
 def encode_cycle_path(path: CyclePath) -> str:

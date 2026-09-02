@@ -119,7 +119,7 @@ def persist_round(
         # The close IS the document's address: fold the ledger to this offset and you get
         # exactly this round. Stamped between the emit and the write, the only window where
         # both are true.
-        round_result.closed_at_offset = cb.on_round_close(round_result)
+        round_result.at_offset = cb.on_round_close(round_result)
 
     if session.state.cycle_id:
         with graceful("Round checkpoint failed"):

@@ -156,7 +156,7 @@ def _rebank_on_branch(
         cb.on_election(corrected)
         # The re-close MOVES the document's address: its numbers now come from the branch's own
         # record, so a stamp still naming the retired close would re-fold to the holed round.
-        corrected.closed_at_offset = cb.on_round_close(corrected)
+        corrected.at_offset = cb.on_round_close(corrected)
     return len(retirements)
 
 

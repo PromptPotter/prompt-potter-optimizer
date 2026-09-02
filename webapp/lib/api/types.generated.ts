@@ -402,7 +402,7 @@ export interface OptSearchPoint {
 /** Per-round outcome — and the round document itself. */
 export interface RoundResult {
   round: number;
-  closed_at_offset: number | null;
+  at_offset: number | null;
   label: string;
   accuracy: number;
   composite_fitness: number;
