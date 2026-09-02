@@ -23,7 +23,6 @@ from promptpotter.application.optimization.dispatch.llm_call.call import (
 )
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     load_optimizer_prompt,
-    resolve_node_layout,
 )
 from promptpotter.application.optimization.dispatch.schemas import (
     ForkProposal,
@@ -323,7 +322,6 @@ async def _run_transition(
     ):
         template, prompt_vars, rendered, coverage = DispatchHub.fill(
             load_optimizer_prompt(transition.template_name),
-            resolve_node_layout(transition.template_name),
             build_bundle(cycle),
             node=transition.template_name,
         )

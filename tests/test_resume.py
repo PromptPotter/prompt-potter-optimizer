@@ -101,6 +101,38 @@ def test_rescore_results_projects_the_scorer_it_was_handed() -> None:
     assert result["fitness"] == 0.0 and not is_hit(result["fitness"])
 
 
+def test_a_replayer_that_cannot_re_derive_is_not_reported_as_a_match() -> None:
+    """A record the replay cannot reproduce is a THIRD state, never agreement.
+
+    The replayers raise on purpose where a decision does not re-derive — a `ROUND_WINNER` with no
+    `parent_bias`/`parent_cells` anchor, `RulerCoverageError` on a cell the ruler never carried.
+    The walker caught every exception and counted it as a match, so the rounds nothing could verify
+    were exactly the rounds that reported clean: `--fork-on-divergence` never fired, and the resume
+    continued on a winner no rule had reproduced. Silent in the worst direction — a ledger that has
+    not been through `restamp --stamp-election-bias` replays green from end to end.
+    """
+    round_data = _round(
+        round=0,
+        all_candidate_results={"c1": [{**_r(1.0), "sample_id": 0}]},
+    )
+    div = replay_decisions(
+        round_data,
+        _decisions(
+            {
+                "kind": "round_winner",
+                "inputs_ref": {"candidate_ids": ["c1"], "round_num": 0, "coverage_floor": 1},
+                "outcome": "c1",
+                "data": {"parent_cells": [{**_r(0.0), "sample_id": 0}]},
+            }
+        ),
+    )
+    assert div is not None, "an unreproducible decision was reported as a clean replay"
+    assert div.kind == "replay_error:round_winner", (
+        "the mismatch must name WHICH check went blind, not just that one did"
+    )
+    assert "parent_bias" in str(div.current_outcome)
+
+
 def test_round_winner_replay_ranks_against_the_recorded_parent() -> None:
     """Rescoring preserves the recorded winner, and the panel it is re-ranked against is READ off
     the decision instead of reconstructed: c1 clears the cells the parent misses → a confident
@@ -114,7 +146,15 @@ def test_round_winner_replay_ranks_against_the_recorded_parent() -> None:
     def _m(sid: int, hit: bool) -> dict:
         return {**_r(1.0 if hit else 0.0), "sample_id": sid}
 
-    inputs_ref = {"candidate_ids": ["c1", "c2"], "round_num": 0, "coverage_floor": 4}
+    # `parent_bias` is read, never re-derived — a record lacking it RAISES, which the replay walker
+    # now reports as its own mismatch. Supplied so this test exercises the election rather than the
+    # unreproducible path (it asserted "no divergence" off a swallowed `KeyError` before).
+    inputs_ref = {
+        "candidate_ids": ["c1", "c2"],
+        "round_num": 0,
+        "coverage_floor": 4,
+        "parent_bias": 0.0,
+    }
     round_data = _round(
         round=0,
         all_candidate_results={
@@ -987,30 +1027,36 @@ def test_partial_walk_log_folds_to_the_full_record(built_stores: Stores) -> None
     assert archive.load_by_id("r_a") is None
 
 
-def test_reindex_rebuilds_index_and_gcs_orphans_without_shrinking(built_stores: Stores) -> None:
-    """The measurement index is an append-only JSONL fold (last-wins by ``content_hash``);
-    ``reindex`` rebuilds it from the detail files and GCs orphans. Two silent harms it must
-    not commit: (1) a re-measure of the same hash under a NEW run_id must last-win, never
-    serve the stale row; (2) reindex must delete ONLY the orphaned detail file, never a live
-    winner — an over-eager GC silently shrinks an irreplaceable archive."""
+def test_two_readings_of_one_searchpoint_are_two_runs_and_reindex_destroys_neither(
+    built_stores: Stores,
+) -> None:
+    """A run is identified by ``run_id``; ``content_hash`` is a property of what it MEASURED, and
+    two runs legitimately share one. The label is not in the hash, so `origin_<h>` and
+    `round_parent_<h>` are the same searchpoint on the same rows read twice — the parent fold
+    scored `opt_sp=None, l1_diversity=1.0`, the origin with the round's real diversity.
+
+    Two silent harms, both of which keying the index on ``content_hash`` committed: (1) one entry
+    survived for the pair, so `scores`/`item_count`/`source`/`provenance` were whichever landed
+    last — and `_save_run` fires per sample, so an in-flight 3-of-30 could overwrite a complete
+    30-of-30 — while `AxisIndex` and `archive_top_runs` read exactly those fields into the
+    optimizer prompt; (2) ``reindex`` unlinked the loser's detail file as an orphan, destroying
+    paid LLM spend and reporting it as GC."""
     archive = built_stores.archive
     _archive_run(archive, run_id="run_10", content_hash="h_a")
     _archive_run(archive, run_id="run_11", content_hash="h_b")
-    # Re-measure h_a under a DIFFERENT run_id → the old detail (run_10) is now an orphan.
+    # The SAME searchpoint on the same rows, read a second time under its own label.
     _archive_run(archive, run_id="run_12", content_hash="h_a")
 
-    rows = {e["content_hash"]: e["run_id"] for e in archive.list_all(dataset_name="reidx")}
-    assert rows == {"h_a": "run_12", "h_b": "run_11"}  # last-wins fold
+    rows = {e["run_id"]: e["content_hash"] for e in archive.list_all(dataset_name="reidx")}
+    assert rows == {"run_10": "h_a", "run_11": "h_b", "run_12": "h_a"}
 
     counts = archive.reindex()
-    assert counts["indexed"] == 2  # two live hashes
-    assert counts["orphans_removed"] == 1  # run_10's detail
+    assert counts["indexed"] == 3  # three runs, not two hashes
 
-    after = {e["content_hash"]: e["run_id"] for e in archive.list_all(dataset_name="reidx")}
+    after = {e["run_id"]: e["content_hash"] for e in archive.list_all(dataset_name="reidx")}
     assert after == rows  # reindex reproduces the fold, doesn't shrink it
-    assert archive.load_by_id("run_12") is not None  # winners survive
-    assert archive.load_by_id("run_11") is not None
-    assert archive.load_by_id("run_10") is None  # orphan GC'd
+    for run_id in ("run_10", "run_11", "run_12"):
+        assert archive.load_by_id(run_id) is not None  # nothing was deleted
 
 
 def test_compaction_round_trips_every_field_it_moved(built_stores: Stores) -> None:
@@ -1133,7 +1179,7 @@ def test_compaction_leaves_an_l4_row_still_narratable(built_stores: Stores) -> N
     assert l4_row["pipeline_data"]["reasoning_trace"] == "T" * 3000  # protected
     assert "reasoning_trace" not in plain_row["pipeline_data"]  # its neighbour still moved
     # The protection is per-ROW, so the rest of the L4 row compacts like any other.
-    assert "result_ranking" not in l4_row["pipeline_data"]
+    assert "total_time" not in l4_row["pipeline_data"]
 
 
 def test_a_purged_cold_store_is_the_only_irreversible_step(built_stores: Stores) -> None:

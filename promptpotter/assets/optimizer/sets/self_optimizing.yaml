@@ -73,9 +73,10 @@ l1_generate:
     evidence panels feed that inner node. Under pipeline_params_override[node] emit `layout: {problem_description:
     [signal, ...]}`; the schema's own enum for that node lists every legal panel name, so pick from it
     rather than inventing one. Excise a panel that is crowding out the evidence the failures need, or add
-    one that is missing. A few per node are load-bearing and an edit dropping them rolls back silently —
-    so name in `changes_description` what you removed, and expect a layout to survive only if it keeps
-    what the node cannot work without. One candidate edits prose OR layout for a node, not both.
+    one that is missing. A few per node are load-bearing: an edit dropping one, or naming a panel outside
+    the enum, is REJECTED and the candidate scores 0 — it does not fall back to the current layout. Keep
+    what the node cannot work without, and name in `changes_description` what you removed. One candidate
+    edits prose OR layout for a node, not both.
   answer_format: |-
     Return JSON: {"variants": [...]}. Each variant, IN THIS ORDER:
       - "evidence_grounding": {field, citation} — field is EXACTLY one of {{citable_fields}} (any other value, e.g. 'failure', is invalid); citation quotes the panel entry.

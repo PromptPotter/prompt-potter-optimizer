@@ -165,14 +165,17 @@ meaning "did this cell land" calls :func:`is_hit` on ``fitness`` at the point of
 is what lets a compaction move them; the assert is what stops one silently becoming a real key
 again."""
 
-UNREAD_PIPELINE_KEYS: frozenset[str] = frozenset(
-    {"reasoning_trace", "result_ranking", "final_ranking", "total_time"}
-)
+UNREAD_PIPELINE_KEYS: frozenset[str] = frozenset({"reasoning_trace", "total_time"})
 """``pipeline_data`` keys no estimator, cache, ruler or index reads.
 
 ``reasoning_trace`` reaches only the three L1 transcript panels, and only for rows live in the
-current cycle; ``result_ranking``/``final_ranking`` re-derive the ``ground_truth_rank`` already
-stamped beside them; ``total_time`` is zeroed on replay anyway."""
+current cycle; ``total_time`` is zeroed on replay anyway.
+
+**A ranking may not be moved.** The `candidate_recall` / `source_recall` evaluators walk
+`final_ranking` / `candidate_ranking` for GT membership, and a row cannot tell a MOVED key from a
+ranker that legitimately returned nothing — so a compacted row scores a real miss, the denominator
+(`terminal_node` / `step_timings`) survives compaction intact, and the fabricated rate is banked as
+`index.jsonl::scores` and re-read by any `score:` lens."""
 
 assert UNREAD_ROW_KEYS <= _ROW_KEYS, "an unread key must be one QueryMeasurement declares"
 assert not (ABANDONED_ROW_KEYS & _ROW_KEYS), "an abandoned key that got declared is no longer one"

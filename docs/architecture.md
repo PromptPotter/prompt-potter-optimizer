@@ -119,7 +119,7 @@ posture is "ignore and continue"; aborting requires evidence.
 ### Dispatch hub
 
 Every optimizer LLM call composes its prompt by the
-same path: `build_bundle(cycle) → DispatchHub.fill(template, layout, bundle)
+same path: `build_bundle(cycle) → DispatchHub.fill(template, bundle, node=…)
 → compile_prompt` — one fill path for every optimizer node. **Injections** are the named placeholder renderers
 (`{{slot}} → renderer(bundle) → str`) — they inject deterministic
 state into a prompt's body. One registry (`dispatch/injections/registry.py::INJECTIONS`).

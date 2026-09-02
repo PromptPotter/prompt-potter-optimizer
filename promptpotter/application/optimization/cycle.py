@@ -364,6 +364,14 @@ class CycleRoundState:
     # counted a +0.012 move on se 0.20 as progress and reset the stall counter.
     best_theta_se: float | None = None
 
+    def raise_best_theta(self, reading: AbilityReading | None) -> None:
+        """The running max, asked at each of the three points a θ enters: a live round, a resumed
+        reconstruction, and the restamp that re-reads every θ once the ruler warms. One method
+        because the three must agree — a peak banked on one δ scale and differenced on another is
+        exactly what `_restamp_on_warm` exists to prevent."""
+        if reading is not None and (self.best_theta is None or reading.theta > self.best_theta):
+            self.best_theta, self.best_theta_se = reading.theta, reading.se
+
 
 @dataclass
 class Cycle:
@@ -573,9 +581,7 @@ class Cycle:
                 )
             # Re-maxed here so a resumed cycle reconstructs exactly what a fresh
             # `absorb_round` held.
-            cum = self.cumulative_ability(acc_cum)
-            if cum is not None and (tr.best_theta is None or cum.theta > tr.best_theta):
-                tr.best_theta, tr.best_theta_se = cum.theta, cum.se
+            tr.raise_best_theta(self.cumulative_ability(acc_cum))
         tr.current_results = acc_cum
         # Mirrors `absorb_round`: "current" is the last round's OWN measurement.
         tr.current_accuracy = last_rr.accuracy
@@ -645,6 +651,14 @@ class Cycle:
         # fit at δ≡0, a DIFFERENT scale, and unrestamped they sit side by side in
         # ``round_parent_levels`` for the L4 law to average. The ROUND's frontier θ only —
         # ``l1_score`` stamps no candidate θ on a cold ruler, so none can contradict this.
+        # `tracking.best_theta` is one of those θ. The escalation ladder differences the CURRENT
+        # reading against it (`escalation/state.py::_improved`, and the entry comparator
+        # `record_l2_fired` stamps), so a cold value left here is a comparison across two scales —
+        # and where `mu_delta < 0` the cold θ is the larger, pinning it for the rest of the run and
+        # reporting "no advance" every round. Re-seeded from the restamped origin and re-maxed
+        # below through the same `raise_best_theta` a live round takes.
+        tr = self.tracking
+        tr.best_theta, tr.best_theta_se = o_theta, o_se
         frontier: list[dict[str, Any]] = []
         for rr in self.rounds:
             frontier = merge_known_outcomes(frontier, list(rr.results))
@@ -653,6 +667,7 @@ class Cycle:
                 # and the archive, and a round that already walked past that is not on this scale.
                 on_ruler = [r for r in frontier if int(r.get("sample_id", -1)) in self._ruler_cells]
                 rr.ability = self.cumulative_ability(on_ruler)
+                tr.raise_best_theta(rr.ability)
 
     @property
     def _ruler_cells(self) -> set[int]:
@@ -728,8 +743,7 @@ class Cycle:
             tr.best_round = round_num
             tr.best_sp = tr.current_sp
         cur = self.cumulative_ability(tr.current_results)
-        if cur is not None and (tr.best_theta is None or cur.theta > tr.best_theta):
-            tr.best_theta, tr.best_theta_se = cur.theta, cur.se
+        tr.raise_best_theta(cur)
 
         rr.ability = cur
         rr.opt_sp = self.opt_sp

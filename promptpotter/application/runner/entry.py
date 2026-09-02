@@ -123,6 +123,30 @@ def _build_budget_gate(
     )
 
 
+def _arm_run_controls(
+    session: Session,
+    observers: RunObservers,
+    campaign_config: CampaignConfig,
+) -> BudgetGate:
+    """The one place the ceiling and the pause/budget flags are ARMED, over the cycle dir the run is
+    actually in — re-called per rebase/fork, which mints a different one. Both gate cadences (round
+    boundary, and the per-sample checkpoint `query_loop` no-ops on a `None`) ride one gate, so a
+    ceiling moved mid-flight moves both. Must precede round 0, which spends before any round loop.
+    """
+    # `Path()` where no cycle exists yet keeps the pollers total rather than optional.
+    cycle_dir = session.store.campaigns.cycle_dir(session.hop) if session.state.cycle_id else Path()
+    _bind_run_controls(session, cycle_dir)
+    gate = _build_budget_gate(
+        observers,
+        cycle_dir,
+        usd_cap=campaign_config.optimization.spend_budget_usd,
+        token_cap=campaign_config.optimization.token_budget,
+    )
+    session.budget_tripped = gate.tripped
+    session.spend_used = gate.usd_spent
+    return gate
+
+
 def _apply_config_overrides(
     config: CampaignConfig,
     overrides: ConfigOverrides,
@@ -306,7 +330,6 @@ async def _prepare_run(
         # The sweep HANDS BACK the ceiling it drops — see the function for why it is the one
         # polled flag a launch may not simply discard.
         carried = clear_run_control_flags(launch_cycle_dir)
-        _bind_run_controls(session, launch_cycle_dir)
 
     # Read HERE — the single runner seam every launch path funnels through — never threaded
     # through each launcher. Precedence is seed > dataset > backend.
@@ -341,8 +364,9 @@ async def _prepare_run(
         campaign_config, operator=carried, wallet=(spend_budget_usd, token_budget)
     )
     # The composed ceilings are the ones that bind, and this is the first moment they exist —
-    # `_build_budget_gate` below reads the same object. Published before origin scoring, which is
-    # where the operator spends the longest stretch of the run.
+    # `_arm_run_controls` below reads the same object. Stamped before origin scoring, which is
+    # where the operator spends the longest stretch of the run. The stamp is the READOUT; the
+    # enforcement is the arming further down, and only both together mean "the ceiling holds".
     observers.dashboard.stamp_run_limits(run_limits_from(campaign_config))
     if launch_cycle_dir is not None and carried != (None, None):
         # Re-land what the sweep dropped, so the raise outlives THIS launch too — otherwise it is
@@ -355,6 +379,10 @@ async def _prepare_run(
             usd=opt.spend_budget_usd if carried[0] is not None else None,
             tokens=opt.token_budget if carried[1] is not None else None,
         )
+
+    # After the caps file, so the gate's probes read the same ceiling the composed config carries,
+    # and before the origin pass, which spends without one otherwise.
+    _arm_run_controls(session, observers, campaign_config)
 
     if origin is None:
         # Round 0 IS a round, so it is declared like any other: `_CURRENT_ROUND` must be bound
@@ -567,24 +595,7 @@ async def _run_single_cycle(
         # The gate probes go through the dashboard, which already owns the spend rollup, rather
         # than a parallel reader; `observers` is bound in the builder so the rebase loop's
         # rebuild cannot leave it on a stale ref.
-        cycle_dir_for_probe = (
-            session.store.campaigns.cycle_dir(session.hop) if session.state.cycle_id else Path()
-        )
-        # Re-bind per rebase/fork iteration so the hooks track a fork's OWN cycle dir
-        # (`_prepare_run` bound the launch cycle's; a fork mints a different one).
-        _bind_run_controls(session, cycle_dir_for_probe)
-        budget_gate = _build_budget_gate(
-            observers,
-            cycle_dir_for_probe,
-            usd_cap=campaign_config.optimization.spend_budget_usd,
-            token_cap=campaign_config.optimization.token_budget,
-        )
-        # Same gate, two cadences — the round boundary and the per-sample checkpoint — bound as
-        # ONE object, so a ceiling moved mid-flight moves both and both name one reason.
-        session.budget_tripped = budget_gate.tripped
-        # The same rollup the gate compares against, read as an AMOUNT rather than a verdict —
-        # `budget_tripped` can only answer "already over", which no panel can spend.
-        session.spend_used = budget_gate.usd_spent
+        budget_gate = _arm_run_controls(session, observers, campaign_config)
         stop_reason, cycle_error = await run_round_loop(
             cycle,
             dataset,

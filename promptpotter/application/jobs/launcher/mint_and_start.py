@@ -307,6 +307,12 @@ async def mint_campaign_command(
             origin_override=origin_override,
         )
         campaign_id, cycle_id = minted.campaign_id, minted.cycle_id
+        # Resolve the reservation onto the cycle it now names. Every hop-keyed join reads this —
+        # `running_job_for` (how `change-spend-budget` reaches the held cap), `reap_cycle_by_id`,
+        # the busy 409 — and each answers nothing at all against `UNRESOLVED_HOP`.
+        job_registry.update_target(
+            job.job_id, hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
+        )
 
     except BaseException as exc:
         _release_slot(job_registry, job.job_id, exc)

@@ -57,12 +57,15 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
           streams/round_NNNN_p_best.jsonl   # PoBB telemetry (sparkline in log.md)
           cache/rounds|candidates/     # per-round node I/O + pre-scoring checkpoint
     measurements/                       # PAID cache 1 — measurements. Cross-cycle/session/tenant, peer of campaigns/
-      index.jsonl                  # append-only, last-wins by content_hash; `reindex` rebuilds it from runs/
+      index.jsonl                  # append-only, last-wins by run_id; `reindex` rebuilds it from runs/
       runs/{run_id}.jsonl          # one append-only log per run: a `k:"run"` header row + a `k:"m:{sample_id}"` row each
       derived/                     # read models folded FROM the runs (regenerable)
     optimizer_reuse/{hash}.json         # PAID cache 2 — optimizer-LLM answers, replayed instead of re-sampled
     diagnostics/                        # seed-screen + noise-floor + verify — the three verbs that mint no cycle
-      runs/{ts}_{config_hash}.json
+      runs/{ts}_{config_hash}.json      #   verify + noise-floor, as a typed DiagnosticRunRecord
+      seed-screen-{dataset}-{date}.json #   seed-screen's own shape — it screens SEATS, before a campaign
+                                        #   exists, so the record's source-campaign fields would name
+                                        #   nothing (`seed_screen.py` argues it). Only `runs/` is served.
     traces/obs|mlruns/                  # observability sinks (regenerable; mlruns is settings-gated)
     backends/{backend_id}/backend.json  # backend registration + synced API responses
     datasets/  benchmark-rows/  task-context/   # dataset tier — definition, materialized rows, decomposed context

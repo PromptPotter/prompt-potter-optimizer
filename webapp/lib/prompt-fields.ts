@@ -1,21 +1,11 @@
-// The six PromptTemplate string fields — the decomposition scheme the optimizer
-// evolves. Canonical MEMBERSHIP only — Python orders each prompt kind for itself
-// (`PromptTemplate.RENDER_ORDER`), so the sequence below is this editor's grid, not a
-// render order. MUST stay in sync with
-// `PROMPT_STRING_FIELDS` in `promptpotter/config/settings.py` (the TS/Py seam).
+// The PromptTemplate decomposition fields, and what each is CALLED on screen.
 //
-// Single source for every webapp consumer: the `PromptFieldsEditor` grid and the
-// observe read model (`searchPoint.ts`, which projects an optimizer prompt node's evolved
-// fields out of its per-node resolved params). Do not re-list these keys elsewhere.
+// The field SET is no longer written here — it is GENERATED from
+// `config/settings.py::PROMPT_STRING_FIELDS` and re-exported below, so the "MUST stay in sync"
+// note this file used to carry is a mechanism now instead of a hope. The LABELS stay, because
+// they have no Python counterpart: nothing server-side names these for a human.
 
-export const PROMPT_STRING_FIELDS = [
-  "persona",
-  "task_intent",
-  "problem_description",
-  "instruction",
-  "thinking_style",
-  "answer_format",
-] as const;
+export { PROMPT_STRING_FIELDS } from "@/lib/api/types.generated";
 
 // What each field is CALLED on screen. Here rather than in the editor because more
 // than one surface names these now — the editor's grid and the run card's

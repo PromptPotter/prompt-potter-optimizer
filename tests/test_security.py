@@ -974,6 +974,80 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
     assert gate.tripped() is None, "the swept file must stop governing the next run"
 
 
+def test_the_ceiling_is_armed_before_the_origin_pass_spends() -> None:
+    """The gate is BOUND before round 0 is scored, not after it.
+
+    ``_prepare_run`` stamped the composed ceilings onto the dashboard and then scored the origin;
+    the binding that makes them bite — ``session.budget_tripped`` — happened two hundred lines
+    later, in ``_run_single_cycle``. So the per-sample checkpoint (``query_loop``: ``if
+    session.budget_tripped is not None``) silently no-opped for every origin sample, and the
+    round-boundary gate could not cover it because the round loop had not started. Round 0 IS a
+    round and the longest stretch of a fresh launch — for an L4 outer round it is ``n_samples``
+    whole inner CAMPAIGNS — so a free-tier account admitted at one launch step could spend
+    multiples of its entire grant before the ceiling bound once.
+
+    Pinned as an ORDER rather than by running a campaign: the defect was never a wrong value, it
+    was two owners of "the ceiling is in place" — the dashboard stamp and the arming — with only
+    the readout ahead of the spending. ``_arm_run_controls`` is now the single owner of both the
+    ceiling and the pause flags, and the two call sites are the two moments it has to hold.
+    """
+    import inspect
+
+    from promptpotter.application.runner import entry
+
+    src = inspect.getsource(entry._prepare_run)
+    armed = src.find("_arm_run_controls(")
+    spends = src.find("establish_campaign_origin(")
+    assert armed != -1, "_prepare_run no longer arms the budget gate — round 0 spends unmetered"
+    assert spends != -1, "the origin seam moved; re-pin this ordering against its new call"
+    assert armed < spends, (
+        "the origin pass is scored before `session.budget_tripped` is bound, so the per-sample "
+        "ceiling check no-ops for every origin sample"
+    )
+
+    # Both callers arm through the one owner, so a ceiling moved mid-flight cannot reach one
+    # cadence and not the other.
+    assert "_build_budget_gate(" not in inspect.getsource(entry._run_single_cycle), (
+        "_run_single_cycle builds its own gate again — arming has two owners once more"
+    )
+
+
+def test_a_reservation_is_addressable_by_the_cycle_it_holds(tmp_path: Path) -> None:
+    """A slot admitted before the mint must be bound to the cycle once the ids exist.
+
+    `mint_campaign_command` reserves at `UNRESOLVED_HOP` — the slot is held before the cycle it
+    will name exists — so until `update_target` lands, the job answers NO hop-keyed query. Three
+    read it: `running_job_for` (how `change-spend-budget` reaches the cap the reservation holds),
+    `reap_cycle_by_id`, and the busy 409's campaign name. With the reservation unreachable, a
+    raise moves `spend_cap.json` while `Job.cap_usd` keeps quoting the launch number — and since
+    `_outstanding_reservations` sums that field, the difference is committed money the next
+    `admit_launch` cannot see.
+
+    Both halves are pinned: the registry resolves, AND the launcher calls it. The mechanism alone
+    was already correct and reachable from nothing.
+    """
+    import inspect
+
+    from promptpotter.application.jobs.launcher import mint_and_start
+    from promptpotter.application.jobs.registry import UNRESOLVED_HOP, JobRegistry
+    from promptpotter.domain.cycle_paths import CycleHop
+
+    registry = JobRegistry(tmp_path / "jobs")
+    job = registry.reserve(user_id="u1", dataset_name="d1").job
+    assert job is not None and job.hop == UNRESOLVED_HOP
+
+    hop = CycleHop(campaign_id="ca_1", cycle_id="cy_1")
+    assert registry.running_job_for(hop) is None, "an unresolved reservation cannot name a cycle"
+
+    registry.update_target(job.job_id, hop=hop)
+    found = registry.running_job_for(hop)
+    assert found is not None and found.job_id == job.job_id
+
+    assert "update_target(" in inspect.getsource(mint_and_start.mint_campaign_command), (
+        "the mint resolves ids the reservation never receives — every hop-keyed join goes blind"
+    )
+
+
 def test_a_fork_seed_cannot_raise_the_ceiling_the_wallet_admitted() -> None:
     """A `CycleSeed` arrives over `fork-cycle` as REQUEST INPUT from anyone holding `campaign.run`
     — which every OIDC signup holds — and its `config_overrides` carry `spend_budget_usd` /

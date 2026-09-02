@@ -81,19 +81,19 @@ def populate_session_scoring(
     obs: ObservabilityBridge | None,
     scoring_formula: str | None,
     scoring_cell_formula: str | None = None,
-    scorer_id: str | None = None,
+    scorer_id: str,
     headline_metric: HeadlineMetric = "accuracy",
     source: str = "optimization_loop",
 ) -> None:
     """Attach scoring + obs to *session* in place (step 2 of run init).
-    Requires ``init_services`` already ran; ``scoring_formula`` resolved from ``campaign.json::scoring`` by the caller."""
-    from promptpotter.application.scoring.formula import auto_scorer_id, compile_scorer
+    Requires ``init_services`` already ran; ``scoring_formula`` and ``scorer_id`` both resolved from
+    ``campaign.json::scoring`` by the caller, through the one ``split_scoring_block`` that pairs them."""
+    from promptpotter.application.scoring.formula import compile_scorer
 
     session.state.obs = obs
     session.source = source
     session.scoring.scorer = compile_scorer(scoring_formula, scoring_cell_formula)
-    session.scoring.scorer_id = scorer_id or auto_scorer_id(scoring_formula)
-    session.scoring.scorer_formula = scoring_formula
+    session.scoring.scorer_id = scorer_id
     session.scoring.scorer_cell_formula = scoring_cell_formula
     session.scoring.headline_metric = headline_metric
 
@@ -321,7 +321,6 @@ def _finalize_loop_state(
         session.store,
         scorer=session.scoring.scorer,
         scorer_id=session.scoring.scorer_id,
-        scorer_formula=session.scoring.scorer_formula,
         dataset_name=session.dataset_name,
     )
 

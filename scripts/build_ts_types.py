@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import enum
+import json
 import sys
 import textwrap
 import types
@@ -421,10 +422,10 @@ def _emit_command_kinds() -> str:
 
     Same argument as ``_emit_stop_reason_labels``: against a `kind: string` parameter a renamed
     verb reaches the operator as a runtime ``command_kind_unknown`` 404, not a compile error."""
-    from promptpotter.presentation.api.middleware.command_dispatcher import ALL_DISPATCHED_KINDS
+    from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
 
     members = " | ".join(repr(k) for k in sorted(ALL_DISPATCHED_KINDS))
-    note = "Every kind `POST /commands/{kind}` dispatches (command_dispatcher.py)."
+    note = "Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py)."
     return f"// {note}\nexport type CommandKind = {members};"
 
 
@@ -516,6 +517,76 @@ def _emit_evaluator_meta() -> str:
     )
 
 
+def _emit_prompt_string_fields() -> str:
+    """Emit ``PROMPT_STRING_FIELDS`` (config/settings.py) — the decomposition field SET.
+
+    Hand-mirrored at ``webapp/lib/prompt-fields.ts`` under a header saying it "MUST stay in
+    sync", which is the note a copy carries instead of a mechanism. MEMBERSHIP only: each prompt
+    kind orders its own render (``PromptTemplate.RENDER_ORDER``), so this sequence is a grid
+    order for the editor and never a render order.
+    """
+    from promptpotter.config.settings import PROMPT_STRING_FIELDS
+
+    rows = "\n".join(f"  {name!r}," for name in PROMPT_STRING_FIELDS).replace("'", '"')
+    return (
+        "// The PromptTemplate decomposition field SET. Mirror of\n"
+        "// config/settings.py::PROMPT_STRING_FIELDS — canonical MEMBERSHIP only, since each\n"
+        "// prompt kind orders its own render (PromptTemplate.RENDER_ORDER). Don't hand-list these.\n"
+        "export const PROMPT_STRING_FIELDS = [\n"
+        f"{rows}\n"
+        "] as const;"
+    )
+
+
+def _emit_cycle_path_grammar() -> str:
+    """Emit the cycle-address grammar (``domain/cycle_paths.py``) — two separators and two
+    charset patterns.
+
+    Hand-authored twice: ``lib/ids.ts`` re-declared all four, and ``store/io.py`` kept its own
+    third spelling of the charset. Nothing could catch a drift — the browser's own test locks
+    the TS side against hardcoded strings, so a Python-side change would have passed every gate
+    while deep addresses silently resolved to a different cycle.
+
+    The patterns are emitted as literal regexes, which only works because the Python source is
+    spelled in the character-class form JS also accepts; the guard below refuses anything
+    needing translation rather than emitting something subtly different.
+    """
+    from promptpotter.domain.cycle_paths import (
+        ALL_DOTS_PATTERN,
+        HOP_SEP,
+        ID_COMPONENT_PATTERN,
+        UNIT_SEP,
+    )
+
+    for pattern in (ID_COMPONENT_PATTERN, ALL_DOTS_PATTERN):
+        if "/" in pattern:
+            raise ValueError(
+                f"cycle-path pattern {pattern!r} contains '/', which cannot ride a TS regex "
+                "literal unescaped. Escape it here deliberately rather than emitting a regex "
+                "that differs from the Python one."
+            )
+
+    return (
+        "// The cycle-address grammar. Mirror of domain/cycle_paths.py, which owns it and\n"
+        "// asserts at import that no separator matches the id charset — the precondition that\n"
+        "// makes encode/decode round-trip. Don't hand-declare these.\n"
+        "//\n"
+        "// Two deliberate asymmetries with the Python side, both correct, neither drift:\n"
+        "//  - decodeCyclePath('') is null here and () there. A CyclePath is non-empty by\n"
+        "//    construction in the browser; in Python () is a real value meaning depth 1.\n"
+        "//  - This decoder validates the charset inline; the Python one defers to\n"
+        "//    descend_store, which must validate anyway because it also receives hops the\n"
+        "//    codec never produced. The browser has no such downstream boundary.\n"
+        # `json.dumps`, not `!r`: a Python repr picks single quotes and would emit a JS string
+        # the file's own style forbids — and a blanket quote-swap afterwards would rewrite the
+        # apostrophes in the comment above it.
+        f"export const CYCLE_PATH_HOP_SEP = {json.dumps(HOP_SEP)};\n"
+        f"export const CYCLE_PATH_UNIT_SEP = {json.dumps(UNIT_SEP)};\n"
+        f"export const ID_COMPONENT_RE = /{ID_COMPONENT_PATTERN}/;\n"
+        f"export const ALL_DOTS_RE = /{ALL_DOTS_PATTERN}/;"
+    )
+
+
 def _emit_interface(model: type[BaseModel]) -> str:
     hints = _resolved_hints(model)
     body_lines = [
@@ -564,6 +635,8 @@ def main() -> int:
     blocks.append(_emit_stop_reason_labels())
     blocks.append(_emit_abort_lens_labels())
     blocks.append(_emit_evaluator_meta())
+    blocks.append(_emit_cycle_path_grammar())
+    blocks.append(_emit_prompt_string_fields())
     content = _HEADER + "\n\n".join(blocks) + "\n"
     _OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     prior = _OUT_PATH.read_text(encoding="utf-8") if _OUT_PATH.is_file() else ""

@@ -31,11 +31,11 @@ from promptpotter.application.optimization.dispatch.compose import (
 from promptpotter.application.optimization.dispatch.injections.registry import INJECTIONS
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     load_optimizer_prompt,
-    resolve_node_layout,
+    node_layout,
 )
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.domain.escalation_signals import exploration_budget
-from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS, L1Layout
+from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
 from promptpotter.domain.results import merge_known_outcomes
 from promptpotter.domain.results_health import compute_node_failure_rates
@@ -190,33 +190,32 @@ class DispatchHub:
     @staticmethod
     def fill(
         template: PromptTemplate,
-        layout: L1Layout,
         bundle: InjectionBundle,
         *,
-        node: str | None = None,
+        node: str,
     ) -> FilledPrompt:
-        """Fill a node's layout, then resolve any injection token left in non-layout prose — two
+        """Fill *node*'s layout, then resolve any injection token left in non-layout prose — two
         channels, one call. ``rendered`` is what the node was actually SHOWN, which is the smaller set.
 
-        *node* names the discretionary allowance this composition must fit; without one the preview
-        budget applies and every item is placed. Selection runs either way, so a panel's fencing, its
-        boundaries and its "showed N of M" line have one implementation however the prompt was
-        reached."""
+        The layout is RESOLVED here rather than passed in: it is a function of the node and the
+        cycle's searchpoint (`node_layout`), so every caller that supplied one re-derived the same
+        thing — and could hand a node another node's panel set. *node* also names the discretionary
+        allowance this composition must fit, and its mandatory rail."""
+        layout = node_layout(node, bundle.opt_sp)
         order = layout.all_placeholders()
         items = {name: DispatchHub.render_items(name, bundle) for name in order}
-        budget = OPTIMIZER_DISCRETIONARY_CHARS.get(node or "", _NO_CEILING)
+        budget = OPTIMIZER_DISCRETIONARY_CHARS.get(node, _NO_CEILING)
         # Which panels may be thinned is a property of what they CARRY, so it is asked of the kind
         # each signal already declares rather than kept as a second list here.
         whole = frozenset(n for n in order if (sig := INJECTIONS.get(n)) and not sig.kind.divisible)
-        spec = NODE_LAYOUTS.get(node or "")
-        mandatory = spec.mandatory if spec else frozenset()
+        mandatory = NODE_LAYOUTS[node].mandatory
         rendered, coverage = compose_select(items, order, budget, exempt=whole, mandatory=mandatory)
         # `l1_layout_missing_mandatory` (`domain/l1_layout.py`) guards these against L2 EXCISING
         # them; this is the same promise's other half, against the composition refusing them.
         if starved := sorted(
             n for n in mandatory if coverage[n].produced and not coverage[n].placed
         ):
-            raise MandatoryPanelStarvedError(node or "llm_call", starved)
+            raise MandatoryPanelStarvedError(node, starved)
 
         update: dict[str, str] = {}
         for slot in L1_LAYOUT_SLOTS:
@@ -274,12 +273,9 @@ def node_packages(bundle: InjectionBundle) -> dict[str, str]:
     these, never one against a stored value** — an absolute fingerprint cannot be reproduced later."""
     out: dict[str, str] = {}
     with _no_round_warnings():
-        for node, spec in NODE_LAYOUTS.items():
-            layout = (
-                bundle.opt_sp.memory.l1_layout if spec.editor != "l4" else resolve_node_layout(node)
-            )
+        for node in NODE_LAYOUTS:
             filled, injection_vars, _, _ = DispatchHub.fill(
-                load_optimizer_prompt(node), layout, bundle, node=node
+                load_optimizer_prompt(node), bundle, node=node
             )
             payload = json.dumps(
                 [filled.render(), sorted(injection_vars.items())], ensure_ascii=False

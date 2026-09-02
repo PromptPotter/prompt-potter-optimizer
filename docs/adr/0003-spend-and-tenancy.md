@@ -272,8 +272,11 @@ It excludes the cycle's own reservation, or the cycle would be denied headroom i
 *And every path that composes one is READ by something.* Two ways of writing a ceiling nothing
 would ever poll both ended in the same silence — the command acked `applied`, the number reached
 the dashboard, and the run spent past it to completion. So the per-cycle gate is armed
-**unconditionally** (`entry.py::_build_budget_gate`): a run that declared no ceiling may still be
-given one mid-flight, and an unset arm costs nothing because `tripped` skips a `None` cap.
+**unconditionally, and before the first sample is scored** (`entry.py::_arm_run_controls`, the one
+owner, called from `_prepare_run` ahead of the origin pass and again per fork iteration): a run
+that declared no ceiling may still be given one mid-flight, and an unset arm costs nothing because
+`tripped` skips a `None` cap. Arming only at the round loop left round 0 — the longest stretch of
+a fresh launch — spending against a `budget_tripped` that was still `None`.
 And the file is scoped to the run it was written in — `clear_run_control_flags` drops it with the
 other polled flags, since it was clamped against the account as it stood at write time and
 outliving its run would let a ceiling the account can no longer afford govern each later resume —

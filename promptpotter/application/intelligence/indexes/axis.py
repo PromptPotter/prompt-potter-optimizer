@@ -346,15 +346,16 @@ class AxisIndex:
         stores: Stores,
         scorer: CellScorer | None = None,
         scorer_id: str = "none",
-        scorer_formula: str | None = None,
         *,
         dataset_name: str | None,
     ) -> None:
         """Incremental archive refresh, dataset-scoped. A row this formula cannot score is SKIPPED, counted
-        and logged — never 0.0, which would poison the digest — and the skip binds BOTH halves below."""
-        formula_key = f"{scorer_id}\x1f{scorer_formula or ''}"
+        and logged — never 0.0, which would poison the digest — and the skip binds BOTH halves below.
+
+        The fold is stamped with ``scorer_id`` alone: it hashes both formulas
+        (`compiler.py::auto_scorer_id`), so a second spelling here could only disagree with it."""
         if self._fold_seeded is None:
-            self._fold_seeded = self._seed_from_fold(stores, dataset_name, formula_key)
+            self._fold_seeded = self._seed_from_fold(stores, dataset_name, scorer_id)
 
         # Captured BEFORE the details are read, never after: a run whose log grows between the
         # two must end up stamped with the OLDER signature, so the next process re-derives it.
@@ -367,7 +368,7 @@ class AxisIndex:
         for run_id, detail in archive_views.runs_since(
             stores, self.sample_index._seen_runs, dataset_name=dataset_name
         ):
-            stamp = {"fk": formula_key, "sig": list(signatures.get(run_id) or ())}
+            stamp = {"fk": scorer_id, "sig": list(signatures.get(run_id) or ())}
             if scorer is not None:
                 try:
                     rescore_results(detail.get("measurements") or [], scorer)
@@ -493,7 +494,6 @@ class AxisIndex:
         stores: Stores | None,
         scorer: CellScorer | None = None,
         scorer_id: str = "none",
-        scorer_formula: str | None = None,
         *,
         dataset_name: str | None,
     ) -> AxisIndex | None:
@@ -504,7 +504,6 @@ class AxisIndex:
             stores,
             scorer=scorer,
             scorer_id=scorer_id,
-            scorer_formula=scorer_formula,
             dataset_name=dataset_name,
         )
         return idx

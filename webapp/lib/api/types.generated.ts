@@ -1743,7 +1743,7 @@ export type RunPhase = 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 
 // The fine-grained activity axis, `dashboard.json::state` (domain/phases.py::DashboardState).
 export type DashboardState = 'init' | 'origin' | 'scoring' | 'between_samples' | 'between_candidates' | 'l1_generate' | 'l2_refining' | 'l3_replanning' | 'escalation' | 'stopped';
 
-// Every kind `POST /commands/{kind}` dispatches (command_dispatcher.py).
+// Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).
 export type CommandKind = 'archive-campaign' | 'change-spend-budget' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-allowed-models' | 'set-campaign-label' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign';
 
 // Kinds no activity item is ever made of — the ray drops them and the translator
@@ -1805,3 +1805,30 @@ export const EVALUATOR_META: EvaluatorMeta[] = [
   { name: 'retrieval_shortfall', scope: 'per_sample', direction: 'high', node_type: null, from_rows: false, description: 'Per-sample min(observed/target, 1.0) across nodes with max_*/num_* limits on list-valued outputs. 1.0 = target met or exceeded.' },
   { name: 'mean_retrieval_shortfall', scope: 'per_round', direction: 'high', node_type: null, from_rows: false, description: "Mean of retrieval_shortfall across the round's results." },
 ];
+
+// The cycle-address grammar. Mirror of domain/cycle_paths.py, which owns it and
+// asserts at import that no separator matches the id charset — the precondition that
+// makes encode/decode round-trip. Don't hand-declare these.
+//
+// Two deliberate asymmetries with the Python side, both correct, neither drift:
+//  - decodeCyclePath('') is null here and () there. A CyclePath is non-empty by
+//    construction in the browser; in Python () is a real value meaning depth 1.
+//  - This decoder validates the charset inline; the Python one defers to
+//    descend_store, which must validate anyway because it also receives hops the
+//    codec never produced. The browser has no such downstream boundary.
+export const CYCLE_PATH_HOP_SEP = "~";
+export const CYCLE_PATH_UNIT_SEP = "::";
+export const ID_COMPONENT_RE = /^[a-zA-Z0-9_.-]+$/;
+export const ALL_DOTS_RE = /^\.+$/;
+
+// The PromptTemplate decomposition field SET. Mirror of
+// config/settings.py::PROMPT_STRING_FIELDS — canonical MEMBERSHIP only, since each
+// prompt kind orders its own render (PromptTemplate.RENDER_ORDER). Don't hand-list these.
+export const PROMPT_STRING_FIELDS = [
+  "persona",
+  "task_intent",
+  "problem_description",
+  "instruction",
+  "thinking_style",
+  "answer_format",
+] as const;

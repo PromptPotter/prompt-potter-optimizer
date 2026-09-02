@@ -14,6 +14,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.optimization.dispatch.llm_call.prompts import resolved_overrides
 from promptpotter.application.runner.inner.tasks import (
     InnerTaskSpec,
     inner_instrument_config,
@@ -363,9 +364,14 @@ def inner_campaign_id(
     role: MeasurementRole = MeasurementRole.PANEL,
 ) -> str:
     """Content, never asker: the cell and the optimizer prompts it runs under ARE its identity, so a
-    re-measured cell continues the rounds a previous attempt banked. ``cycle_id`` collides across candidates."""
+    re-measured cell continues the rounds a previous attempt banked. ``cycle_id`` collides across candidates.
+
+    The RESOLVED overrides, never the declared ones — the prompts are built from the resolution, so
+    hashing the declaration made the id both over- and under-specific at once: two arms whose
+    declarations resolve to one prompt paid for two inner campaigns and continued neither, while a
+    resolution-inert re-declaration restarted a banked cell at round 0."""
     purpose = "backfill" if role is MeasurementRole.BACKFILL else "own"
-    digest = stable_hash([spec.model_dump(mode="json"), overrides, purpose])[:6]
+    digest = stable_hash([spec.model_dump(mode="json"), resolved_overrides(overrides), purpose])[:6]
     return f"{spec.inner_dataset}__{digest}"
 
 

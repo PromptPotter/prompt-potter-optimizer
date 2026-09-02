@@ -526,7 +526,7 @@ def purge_cold_store(
 
 
 def reindex_measurement_archive(stores: Stores) -> dict[str, int]:
-    """Rebuild the measurement index from the detail files and GC orphans.
+    """Rebuild the measurement index from the detail files. It deletes nothing.
 
     Lives here rather than in the CLI shell that used to call the store directly: an adapter that
     reaches past this layer is one no other adapter can follow."""

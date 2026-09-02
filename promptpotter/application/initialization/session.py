@@ -37,7 +37,6 @@ logger = logging.getLogger(__name__)
 class ScorerSetup:
     scorer: CellScorer | None = None
     scorer_id: str = "none"
-    scorer_formula: str | None = None
     scorer_cell_formula: str | None = None
     # WHICH number the operator's surfaces headline. Here rather than only on
     # `dashboard.json` because the terminal is an entry point too: served to the browser

@@ -8,6 +8,7 @@ from typing import Any
 
 from promptpotter.application.optimization.validators.l1_strict import (
     L1_CONFIG_NOT_IN_RUNTIME_FAILURES,
+    L1_INNER_LAYOUT_APPLIES,
     L1_INNER_STEER_IS_LEGAL,
     L1_PROMPT_BLOCKS_IN_LIBRARY,
     L1_PROMPT_FIELD_NOT_GUTTED,
@@ -105,6 +106,7 @@ def parse_population(
                 # length it judges is a COMPARISON — the delta alone cannot say what it replaced.
                 for outcome in (
                     L1_INNER_STEER_IS_LEGAL.run(pipeline_params_override),
+                    L1_INNER_LAYOUT_APPLIES.run(pipeline_params_override),
                     L1_PROMPT_FIELD_NOT_GUTTED.run(
                         pipeline_params_override,
                         pipeline_params=pipeline_params,

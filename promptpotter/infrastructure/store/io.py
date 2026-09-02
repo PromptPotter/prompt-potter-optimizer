@@ -2,7 +2,6 @@ import contextlib
 import itertools
 import json
 import os
-import re
 import shutil
 import stat
 import tempfile
@@ -13,14 +12,17 @@ from typing import IO, Any
 
 import yaml
 
-_SAFE_PATH_RE = re.compile(r"^[a-zA-Z0-9_\-\.]+$")
+from promptpotter.domain.cycle_paths import ALL_DOTS_RE, ID_COMPONENT_RE
 
 
 def validate_path_component(name: str) -> str:
+    # The charset is `domain/cycle_paths.py`'s, not a second copy: a path component and a
+    # cycle-address component are ONE grammar, and it was written out three times — here, in
+    # the codec's prose, and by hand in `webapp/lib/ids.ts`.
     # An all-dots component (``.``/``..``/``...``) matches the dot-allowing regex
     # but is a traversal segment — reject it so a user-supplied id/slug/filename
     # can never climb out of the dir the caller rooted it under.
-    if not name or set(name) == {"."} or not _SAFE_PATH_RE.match(name):
+    if not name or ALL_DOTS_RE.match(name) or not ID_COMPONENT_RE.match(name):
         raise ValueError(
             f"Invalid path component: {name!r}. "
             "Only alphanumerics, hyphens, underscores, and dots are allowed "

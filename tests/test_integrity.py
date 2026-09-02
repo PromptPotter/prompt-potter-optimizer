@@ -267,7 +267,13 @@ def test_earned_block_mining_is_blind_inside_an_instrument() -> None:
 
 
 def _archive(archive: MeasurementArchive, run_id: str, data: dict[str, Any]) -> None:
-    """Seed one complete run — the whole measurement set is what is new."""
+    """Seed one complete run — the whole measurement set is what is new.
+
+    Grade A unless the caller stamps its own: `entry_grade` reads an unstamped row as C, and the
+    reuse path excludes C, so an ungraded fixture is not replayable at all — every test here that
+    is ABOUT matching would then pass or fail on provenance instead. Production rows always carry
+    one (`loaders.py::build_dataset_run_data` grades every run it banks)."""
+    data.setdefault("provenance", {"grade": "A", "deliberate_source": True})
     archive.append_run(run_id, data, data["measurements"])
 
 
@@ -372,11 +378,19 @@ def _seed_graded(
     )
 
 
-def test_reusable_results_min_grade_drops_connector_runs(tmp_path: Path) -> None:
-    """``min_grade`` lets a clean-substrate read reuse only deliberately-explored
-    measurements: a grade-C connector run is excluded, so its stale sample is not
-    silently served as if it were a real evaluation. The default (no floor) keeps
-    every run, so ordinary scoring caching is unchanged."""
+def test_a_grade_C_run_is_never_replayed_from_either_entry(tmp_path: Path) -> None:
+    """A grade-C run is never served back as a cache hit, so its stale sample cannot pose as a real
+    evaluation: replayed rows are re-archived under the READING run, which `build_dataset_run_data`
+    grades from its own ``source``/``human_intervened``, so a served C cell re-enters as A and
+    reaches the δ ruler `hard_sample_archive` keeps it out of (ADR-0005: every consumer excludes C).
+
+    Both entries are pinned because the floor used to be a PARAMETER — the facade passed it and the
+    core defaulted to serving everything, so reuse was the one consumer of the grade that excluded
+    nothing, and reaching the core directly was enough to launder a C cell into the ruler."""
+    import types
+
+    from promptpotter.infrastructure.store import archive_views
+
     archive = MeasurementArchive(tmp_path)
     _seed_graded(archive, run_id="clean", grade="A", terminal_node="llm_only", sample_id=7)
     _seed_graded(
@@ -384,12 +398,14 @@ def test_reusable_results_min_grade_drops_connector_runs(tmp_path: Path) -> None
     )
     node_configs = [("llm_only", {"model": "X"})]
 
-    everything = archive.load_reusable_results(node_configs, dataset_name="aime")
-    assert set(everything) == {7, 8}
+    from_core = archive.load_reusable_results(node_configs, dataset_name="aime")
+    assert set(from_core) == {7}, "the DB core served a grade-C run without being asked to exclude"
+    assert from_core[7]["query"] == "q_clean"
 
-    clean_only = archive.load_reusable_results(node_configs, dataset_name="aime", min_grade="A")
-    assert set(clean_only) == {7}
-    assert clean_only[7]["query"] == "q_clean"
+    served = archive_views.reusable_results(
+        types.SimpleNamespace(archive=archive), node_configs, dataset_name="aime"
+    )
+    assert set(served) == {7}, "the reuse facade served a grade-C run as a cache hit"
 
 
 def test_reuse_serves_the_best_match_not_the_last_one_walked(tmp_path: Path) -> None:
@@ -4403,7 +4419,7 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         load_optimizer_prompt,
     )
-    from promptpotter.domain.l1_layout import NODE_LAYOUTS, default_l1_layout
+    from promptpotter.domain.l1_layout import NODE_LAYOUTS
     from promptpotter.domain.opt_search_point import PROMPT_STRING_FIELDS, OptSearchPoint
     from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
     from promptpotter.domain.round_diagnostics import RoundDiagnostics
@@ -4453,10 +4469,7 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
     )
 
     filled, _, rendered, coverage = DispatchHub.fill(
-        load_optimizer_prompt("l1_generate"),
-        default_l1_layout(),
-        bundle,
-        node="l1_generate",
+        load_optimizer_prompt("l1_generate"), bundle, node="l1_generate"
     )
     assert "CURRENT INNER OPTIMIZER PROMPTS" in filled.render(), (
         "the generator was handed no subject — it is rewriting text it cannot see"

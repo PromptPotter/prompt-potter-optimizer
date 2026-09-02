@@ -19,16 +19,16 @@ describe("CyclePath", () => {
   const depth1: CyclePath = [outer];
   const depth2: CyclePath = [outer, inner];
 
+  // The PROPERTY, not the literal. The separators are generated from
+  // `domain/cycle_paths.py` now, so asserting the encoded string here would re-declare the
+  // grammar in a third place: a deliberate change on the Python side would regenerate
+  // cleanly, pass tsc, and fail this file on a string nobody edited.
   it("round-trips a top-level (1-hop) path", () => {
-    const s = encodeCyclePath(depth1);
-    expect(s).toBe("justlogic__ab12cd::cycle_9f3a1b");
-    expect(decodeCyclePath(s)).toEqual(depth1);
+    expect(decodeCyclePath(encodeCyclePath(depth1))).toEqual(depth1);
   });
 
   it("round-trips a deep (2-hop) path", () => {
-    const s = encodeCyclePath(depth2);
-    expect(s).toBe("justlogic__ab12cd::cycle_9f3a1b~justlogic__ff00aa::cycle_1122ab_s3");
-    expect(decodeCyclePath(s)).toEqual(depth2);
+    expect(decodeCyclePath(encodeCyclePath(depth2))).toEqual(depth2);
   });
 
   it("returns null on malformed input", () => {

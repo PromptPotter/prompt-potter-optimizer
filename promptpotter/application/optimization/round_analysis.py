@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from promptpotter.application.intelligence.exploration import graded_response
 from promptpotter.application.optimization.pobb.classification import (
     get_ranked_items,
     ranked_item_keys_from_schema,
@@ -292,7 +291,11 @@ def _sample_diagnostics(
                 gt_in_source=(sd or {}).get("gt_in_source"),
                 gt_in_ranked=(sd or {}).get("gt_in_ranked"),
                 warnings=[_warning_str(w) for w in (diag.get("warnings") or ())],
-                fitness=graded_response(r),
+                # CORRECTNESS. Its one reader thresholds it with `is_hit`
+                # (`panels.py::_r_diagnostics`), which `CellScorer` declares a predicate on
+                # `fitness`; `graded_response` here fed it the composite instead, so under any
+                # `per_cell` penalty a correct-but-costly cell rendered to `l1_critique` as a MISS.
+                fitness=float(r["fitness"]),
             )
         )
     return out

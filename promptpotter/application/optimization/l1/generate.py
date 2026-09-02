@@ -100,10 +100,7 @@ async def l1_generate(
     bundle = build_bundle(cycle)
     # L2-authored layout rides the OSP; `fill` resolves each slot's injections into `injection_vars`.
     template, injection_vars, rendered, coverage = DispatchHub.fill(
-        load_optimizer_prompt("l1_generate"),
-        opt_sp.memory.l1_layout,
-        bundle,
-        node="l1_generate",
+        load_optimizer_prompt("l1_generate"), bundle, node="l1_generate"
     )
     # What L1 may cite IS what L1 was shown — one derivation, feeding the prompt's menu and
     # the wire schema's enum, so the two can't disagree about which panels exist this round.

@@ -196,7 +196,11 @@ def reusable_results(
     dataset_name: str,
 ) -> dict[int, dict[str, Any]]:
     """Per-sample cache reuse from prior runs sharing *node_configs*. *dataset_name* is required:
-    a ``sample_id`` only identifies a sample within one dataset."""
+    a ``sample_id`` only identifies a sample within one dataset.
+
+    The grade floor is the facade's, not the caller's: this is the seam ADR-0005's "every consumer
+    excludes ``C``" is enforced at, and a replayed row is re-archived under the reading run, so a
+    caller free to lower it could launder a ``C`` cell into the δ ruler."""
     return stores.archive.load_reusable_results(
         node_configs,
         is_fatal=is_fatal,

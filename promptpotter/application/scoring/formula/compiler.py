@@ -343,11 +343,17 @@ def compile_scorer(per_sample: str | None, per_cell: str | None = None) -> CellS
     return CellScorer(fitness=_fitness, objective=_objective)
 
 
-def auto_scorer_id(per_sample: str | None) -> str:
-    """Stable scorer id from formula hash; ``None``/empty → ``default_hit``."""
+def auto_scorer_id(per_sample: str | None, per_cell: str | None) -> str:
+    """Stable id over the WHOLE grading function; ``None``/empty ``per_sample`` → ``default_hit``.
+
+    ``per_cell`` is half of it — the composite IS ``objective`` — and grades cached under this id
+    are what a δ ruler is fit on (`hard_sample_archive`), so an id naming only ``per_sample``
+    hands one arm the other's grades. Absent, the payload is unchanged, so a campaign declaring
+    no composite keeps the id it already has."""
     if not per_sample:
         return DEFAULT_SCORER_ID
-    h = hashlib.sha256(per_sample.encode("utf-8")).hexdigest()[:10]
+    payload = f"{per_sample}\x1f{per_cell}" if per_cell else per_sample
+    h = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:10]
     return f"auto_{h}"
 
 
@@ -355,20 +361,20 @@ def split_scoring_block(
     block: str | dict[str, str] | None,
 ) -> ScoringSpec:
     if isinstance(block, dict):
-        unknown = set(block) - {"per_sample", "per_cell", "id"}
+        unknown = set(block) - {"per_sample", "per_cell"}
         if unknown:
             raise ValueError(
                 f"campaign scoring block names {sorted(unknown)}. It carries 'per_sample' (the "
-                "cell's correctness), 'per_cell' (the composite θ is fit on) and 'id'. "
-                "'per_round' was the composite at ROUND scope and is gone — a latency or "
-                "reliability term meaned over a panel cannot say which prompt provoked it."
+                "cell's correctness) and 'per_cell' (the composite θ is fit on). 'id' is DERIVED "
+                "from both — a hand-set one naming only 'per_sample' pooled two composites' grades "
+                "onto one δ ruler. 'per_round' was the composite at ROUND scope and is gone — a "
+                "latency or reliability term meaned over a panel cannot say which prompt provoked it."
             )
         per_sample = block.get("per_sample")
         per_cell = block.get("per_cell")
-        scorer_id = block.get("id") or auto_scorer_id(per_sample)
-        return ScoringSpec(per_sample, per_cell, scorer_id)
+        return ScoringSpec(per_sample, per_cell, auto_scorer_id(per_sample, per_cell))
     if isinstance(block, str) and block:
-        return ScoringSpec(block, None, auto_scorer_id(block))
+        return ScoringSpec(block, None, auto_scorer_id(block, None))
     return ScoringSpec(None, None, DEFAULT_SCORER_ID)
 
 
