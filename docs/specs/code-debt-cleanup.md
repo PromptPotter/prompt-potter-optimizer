@@ -37,11 +37,6 @@ decisions → [`../architecture.md`](../architecture.md).
   the bare table don't exist. Campaigns are async, so **submit → poll → fetch result** is the shape
   a caller needs documented; keep it protocol-agnostic rather than coupling it to one gateway.
 
-- **`datasets/bbeh/sweep/*.yaml` — 12 arms carrying a `reason:` and no lever.** The reader now refuses
-  them at load (`OperatorSweepFile` requires a contrast lever), so nothing burns. What is left is a
-  CONTENT call, not a task: delete the dir (`git log` holds the narratives) or author fresh `l1_layout`
-  arms — 8 of the 12 narratives are prompt-CONTENT hypotheses `l1_layout` structurally cannot express.
-
 - **The cycle-path codec agrees with Python only in prose.** `lib/ids.ts` re-implements
   `encode_cycle_path`'s separators and charset, and `cyclepath.test.ts` locks the TS side against itself.
   Action: generate the codec from `openapi.generated.json`, or accept the duplication and say so.
@@ -306,3 +301,9 @@ M-milestone references on operator surfaces" grep gate); other operator surfaces
 must not leak milestone numbers.
 
 Closed items are not tracked here — `git log` is the history layer.
+
+## verified 2026-09-02
+
+- `` `datasets/bbeh/sweep/*.yaml` `` — 12 arms — STALE — directory absent from working tree; `git log --all --full-history -- "datasets/bbeh/sweep/*.yaml"` returns empty. The "delete the dir" action is already done.
+- An origin-relative cost term — WRONG — `OUTPUT_TOKEN_BUDGET = 12_000` named in the entry is absent from the entire tree (grep across `promptpotter/` and `datasets/` returns nothing); `mean_out` likewise. `domain/scoring.py:152` (`CellScorer` with `.objective`) is real. The inert-absolute-form claim is contradicted; whether origin-relative work remains is a separate question for the operator.
+- The cycle-path codec agrees — VALID — `encodeCyclePath` at `webapp/lib/ids.ts:75` and `encode_cycle_path` at `promptpotter/domain/cycle_paths.py:49` independently encode with `~`/`::` as stated; `webapp/lib/__tests__/cyclepath.test.ts` locks the TS side against itself. Python docstring acknowledges the shared grammar in prose only.
