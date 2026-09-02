@@ -3190,7 +3190,7 @@ def _round_result(round_num: int, accuracy: float, results: list[dict]) -> Round
     )
 
 
-def test_round_diagnostics_read_rank_and_trajectory_off_the_rounds_it_is_given():
+def test_round_diagnostics_read_rank_and_trend_off_the_rounds_it_is_given():
     """With no schema there is no ranker to read a rank OFF, so every cell must land in
     ``not_found`` — a fabricated rank-1 bucket would report perfect retrieval on a pipeline that
     has none, and top-k accuracy is drawn straight off those buckets."""
@@ -3214,19 +3214,19 @@ def test_round_diagnostics_read_rank_and_trajectory_off_the_rounds_it_is_given()
     assert diag.rank_buckets["not_found"] == 3
     assert diag.top_k_accuracy[1] == 0.0 and diag.top_k_accuracy[10] == 0.0
 
-    def trajectory(*series: tuple[int, float]) -> tuple[str, str]:
+    def trend(*series: tuple[int, float]) -> tuple[str, str]:
         rounds = [_round_result(n, acc, rows(True)) for n, acc in series]
         diag = compute_round_diagnostics(rounds[-1], rounds, pipeline_schema=None)
         # The DESCRIPTION as well as the class: "healthy" is also the mixed-progress fallback,
         # so on the class alone a classifier that recognised nothing would pass the climbing arm.
-        return diag.trajectory, diag.trajectory_description.split(" —")[0]
+        return diag.trend, diag.trend_description.split(" —")[0]
 
     # A run that moved 0.01 once and then stopped. The escalation ladder reads this class, so a
     # "healthy" verdict here spends L1's whole patience on a search that has already finished.
-    assert trajectory((0, 0.50), (1, 0.51), (2, 0.51), (3, 0.51)) == ("plateau", "Plateau")
+    assert trend((0, 0.50), (1, 0.51), (2, 0.51), (3, 0.51)) == ("plateau", "Plateau")
     # …and one still climbing must be recognised AS climbing, or the class is a constant
     # dressed as a verdict. This arm is what the plateau case alone could never say.
-    assert trajectory((0, 0.20), (1, 0.45), (2, 0.70)) == ("healthy", "Improving")
+    assert trend((0, 0.20), (1, 0.45), (2, 0.70)) == ("healthy", "Improving")
 
 
 # 13. Adaptive-queue Bayesian math (θ posterior, decision-info, pick-score)
@@ -4285,7 +4285,7 @@ def test_unstamped_ruler_reads_as_unknown_never_as_comparable() -> None:
             comparable_note="",
             mask=None,
             scenario=None,
-            trajectory=None,
+            winner_chain=None,
             config=None,
             arm_id="a",
             instrument_id=None,

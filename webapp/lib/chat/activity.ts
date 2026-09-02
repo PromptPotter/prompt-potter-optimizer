@@ -17,8 +17,13 @@
 // the per-sample running update all upsert to one row.
 //
 // `projectionToActivity` has a SECOND caller: the time-ray (`lib/derivations/time-ray.ts`)
-// maps a `RayItem` through it unchanged, because a RayItem's `kind` + `payload` are
-// byte-identical to an envelope's. One vocabulary, two surfaces.
+// maps a `RayItem` through it unchanged, because a RayItem's `kind` is an envelope's and its
+// `payload` is a SUBSET of the same body. One vocabulary, two surfaces. The subset is the
+// server's declaration (`domain/projection_envelope.py::RAY_PAYLOAD_FIELDS`): a ray window is
+// up to a thousand records at once, so it carries identity, address and the one-line reading
+// and leaves each record's bulk to the surface fetched one round at a time. **A new field read
+// below must be declared there** — it arrives on the live envelope and is simply absent from
+// every ray item, which renders as a step quietly missing half its line.
 //
 // WHICH kinds can be items is the server's — `domain/projection_envelope.py`, one declaration
 // total over `ProjectionKind`, whose complement arrives here as `NonActivityKind` and is what

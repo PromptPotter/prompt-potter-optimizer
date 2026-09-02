@@ -11,7 +11,7 @@ Two halves, and the origin half is the one that keeps being needed: a campaign s
 first L1 round still has an origin panel, a ruler and a spend, so the roster, the comparability
 check, the variance decomposition and the confound flags all answer. The ranking needs a scored
 candidate, walks every round document, and is therefore opt-in (``include_ranking``) — as is the
-per-subject ``trajectory``, for the same reason.
+per-subject ``winner_chain``, for the same reason.
 
 **No L4 anywhere in here.** A cell is whatever the campaign scored one row against — an inner
 campaign on the recursion, a sample everywhere else — and `evidence_metrics.py::cell_channels` is
@@ -299,10 +299,17 @@ class ScenarioReading(StrictModel):
     note: str
 
 
-class TrajectoryPoint(StrictModel):
+class WinnerChainPoint(StrictModel):
     """One step of the branch standing behind a subject — the winner chain from the origin up to
     its head, each point read on ITS OWN cells under the selected metric. Opt-in
-    (``include_trajectory``), because every point past the origin opens a round document."""
+    (``include_winner_chain``), because every point past the origin opens a round document.
+
+    **Named for the chain, never "trajectory".** The subsets move between rounds, so this reads
+    each point on the evidence that point actually had; the round's own `overlap` line is the
+    OPPOSITE basis — that same chain on one shared set of cells. Two readings of one sequence
+    that disagree by construction, and under one word a reader could tell them apart from
+    neither name. The word survives where a series genuinely is one (`p_best_trajectory`,
+    `parent_level_trajectory`, the Sample-trajectory grid)."""
 
     candidate_id: str
     round: int
@@ -340,7 +347,7 @@ class SubjectReading(StrictModel):
     # RESOLVED, not echoed: the cycle these rows were read in, and the ONE searchpoint they came
     # off. A campaign resolves to its root cycle's origin arm and a course to the winner its last
     # election crowned, so "which point am I looking at" is answerable without asking for the
-    # whole trajectory.
+    # whole winner chain.
     cycle_id: str
     candidate_id: str
     # What to CALL this channel — the campaign, the branch, or the searchpoint. Deliberately not
@@ -364,7 +371,7 @@ class SubjectReading(StrictModel):
     mask: SubjectMask | None
     scenario: ScenarioReading | None
     # The winner chain behind this subject, origin-first. ``None`` unless asked for.
-    trajectory: list[TrajectoryPoint] | None
+    winner_chain: list[WinnerChainPoint] | None
     # WHAT this searchpoint IS, as against what it scored: one flat ``key -> rendered value`` map
     # over the RESOLVED config (`node.param`) plus the prompt fields. ``None`` unless asked for —
     # a prompt field is the largest thing this read can put on the wire, and a comparison of four
@@ -638,7 +645,7 @@ class _Head(NamedTuple):
 
     ``chain`` is the branch behind the head where a LENS produced one — the counterfactual winners,
     which are not the crowned ones and cannot be re-derived from the ledger. ``None`` means the
-    trajectory walk reads the crowns instead."""
+    winner-chain walk reads the crowns instead."""
 
     cycle_dir: Path
     label: str
@@ -654,7 +661,7 @@ def subject_evidence(
     specs: list[SubjectSpec],
     *,
     include_ranking: bool = False,
-    include_trajectory: bool = False,
+    include_winner_chain: bool = False,
     include_config: bool = False,
     metric: str = MEASURAND,
 ) -> Evidence:
@@ -710,7 +717,7 @@ def subject_evidence(
             head,
             compiled,
             channels_by_subject[key],
-            include_trajectory=include_trajectory,
+            include_winner_chain=include_winner_chain,
             include_config=include_config,
         )
         for key, head in heads.items()
@@ -979,9 +986,9 @@ def _candidate_point(cycle_dir: Path, candidate_id: str) -> _ChainPoint | None:
     return None
 
 
-def _trajectory(
+def _winner_chain(
     head: _Head, spec: SubjectSpec, compiled: CompiledExpression
-) -> list[TrajectoryPoint]:
+) -> list[WinnerChainPoint]:
     """The branch standing behind a head: the origin, every winner before it, then the head itself.
     Each point is read on ITS OWN cells — the subsets move between rounds, so restricting the chain
     to the head's cells would redraw earlier rounds on evidence they never had.
@@ -989,7 +996,7 @@ def _trajectory(
     Under a lens the chain is already resolved (the counterfactual winners, which no ledger holds)
     and ENDS at the round the two readings part; otherwise it is the crowns, off the elections."""
     if head.chain is not None:
-        return [_trajectory_point(p, compiled) for p in head.chain]
+        return [_winner_chain_point(p, compiled) for p in head.chain]
     crowns = _crowns(head.cycle_dir)
     at = head.point.round
     rounds = [r for r in sorted({0, *(r for r in crowns if r < at)}) if r != at]
@@ -998,7 +1005,7 @@ def _trajectory(
         for r in rounds
         if (p := _point_at(head.cycle_dir, r, label=crowns.get(r, ""))) is not None
     ]
-    return [_trajectory_point(_masked(p, spec.samples), compiled) for p in (*points, head.point)]
+    return [_winner_chain_point(_masked(p, spec.samples), compiled) for p in (*points, head.point)]
 
 
 def _config_of(point: _ChainPoint) -> dict[str, str]:
@@ -1021,10 +1028,10 @@ def _config_of(point: _ChainPoint) -> dict[str, str]:
     )
 
 
-def _trajectory_point(point: _ChainPoint, compiled: CompiledExpression) -> TrajectoryPoint:
+def _winner_chain_point(point: _ChainPoint, compiled: CompiledExpression) -> WinnerChainPoint:
     values, _ = _score_cells(compiled, cell_channels(point.rows))
     value, ci_lo, ci_hi, n_cells = _merged(values)
-    return TrajectoryPoint(
+    return WinnerChainPoint(
         candidate_id=point.candidate_id,
         round=point.round,
         label=point.label,
@@ -1165,7 +1172,7 @@ def _reading_row(
     compiled: CompiledExpression,
     channels: dict[str, dict[str, float]],
     *,
-    include_trajectory: bool,
+    include_winner_chain: bool,
     include_config: bool,
 ) -> SubjectReading:
     """One roster row. The arm, the instrument, the ruler and the spend are facts about the CYCLE
@@ -1208,9 +1215,9 @@ def _reading_row(
         ),
         scenario=head.scenario,
         # A campaign is its origin and nothing precedes it; the other two stand on a branch.
-        trajectory=(
-            _trajectory(head, spec, compiled)
-            if include_trajectory and spec.kind != "campaign"
+        winner_chain=(
+            _winner_chain(head, spec, compiled)
+            if include_winner_chain and spec.kind != "campaign"
             else None
         ),
         config=_config_of(head.point) if include_config else None,
@@ -1507,7 +1514,7 @@ __all__ = [
     "SubjectMask",
     "SubjectReading",
     "SubjectSpec",
-    "TrajectoryPoint",
+    "WinnerChainPoint",
     "campaigns_on_dataset",
     "parse_subject",
     "subject_evidence",

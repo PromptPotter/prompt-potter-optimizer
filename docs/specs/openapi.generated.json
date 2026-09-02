@@ -3716,7 +3716,7 @@
       },
       "RayItem": {
         "additionalProperties": false,
-        "description": "One event on the ray: a projection envelope plus its address.\n\n``kind``/``payload`` are byte-identical to ``ProjectionEnvelope``'s, so the webapp's\n``projectionToActivity`` maps a ``RayItem`` unchanged. ``path`` is the address — a bare\n``cycle_id`` is ambiguous inside an L4 family (inner ids repeat across sandboxes).",
+        "description": "One event on the ray: a projection envelope plus its address.\n\n``kind`` is ``ProjectionEnvelope``'s and ``payload`` is a SUBSET of the same body, so the\nwebapp's ``projectionToActivity`` maps a ``RayItem`` unchanged — one translator, two\nsurfaces. The subset is why the two are not interchangeable in the other direction: the\nlive tail carries one record at a time and hands over the whole thing, while a ray window\nis up to ``MAX_RAY_LIMIT`` of them and serves only what a chronology reads\n(``RAY_PAYLOAD_FIELDS``). ``path`` is the address — a bare ``cycle_id`` is ambiguous\ninside an L4 family (inner ids repeat across sandboxes).",
         "properties": {
           "kind": {
             "description": "The ledger record_type — ProjectionEnvelope.kind.",
@@ -3758,7 +3758,7 @@
           },
           "payload": {
             "additionalProperties": true,
-            "description": "The record's model_dump — ProjectionEnvelope.payload.",
+            "description": "The chronology projection of the record's model_dump — identity, address and the one-line reading, per domain/projection_envelope.py::RAY_PAYLOAD_FIELDS. A SUBSET of ProjectionEnvelope.payload: the record's bulk (LLM I/O, a sample's query and prediction, a phase's view) is addressable at the audit twin, the round document and dashboard.json, each fetched one round at a time rather than a window at a time.",
             "title": "Payload",
             "type": "object"
           },
@@ -4224,20 +4224,6 @@
             "title": "Spend To Round",
             "type": "object"
           },
-          "trajectory": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/TrajectoryPoint"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Trajectory"
-          },
           "unscorable_cells": {
             "items": {
               "type": "string"
@@ -4262,6 +4248,20 @@
             },
             "title": "Values",
             "type": "object"
+          },
+          "winner_chain": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/WinnerChainPoint"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Winner Chain"
           }
         },
         "required": [
@@ -4278,7 +4278,7 @@
           "comparable_note",
           "mask",
           "scenario",
-          "trajectory",
+          "winner_chain",
           "config",
           "arm_id",
           "instrument_id",
@@ -4335,9 +4335,64 @@
         "title": "ThetaCaveat",
         "type": "string"
       },
-      "TrajectoryPoint": {
+      "UserSettings": {
         "additionalProperties": false,
-        "description": "One step of the branch standing behind a subject — the winner chain from the origin up to\nits head, each point read on ITS OWN cells under the selected metric. Opt-in\n(``include_trajectory``), because every point past the origin opens a round document.",
+        "description": "Per-user preferences surfaced in Account → Preferences.",
+        "properties": {
+          "demo_mode_enabled": {
+            "title": "Demo Mode Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "demo_mode_enabled"
+        ],
+        "title": "UserSettings",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WinnerChainPoint": {
+        "additionalProperties": false,
+        "description": "One step of the branch standing behind a subject — the winner chain from the origin up to\nits head, each point read on ITS OWN cells under the selected metric. Opt-in\n(``include_winner_chain``), because every point past the origin opens a round document.\n\n**Named for the chain, never \"trajectory\".** The subsets move between rounds, so this reads\neach point on the evidence that point actually had; the round's own `overlap` line is the\nOPPOSITE basis — that same chain on one shared set of cells. Two readings of one sequence\nthat disagree by construction, and under one word a reader could tell them apart from\nneither name. The word survives where a series genuinely is one (`p_best_trajectory`,\n`parent_level_trajectory`, the Sample-trajectory grid).",
         "properties": {
           "candidate_id": {
             "title": "Candidate Id",
@@ -4398,62 +4453,7 @@
           "ci_hi",
           "n_cells"
         ],
-        "title": "TrajectoryPoint",
-        "type": "object"
-      },
-      "UserSettings": {
-        "additionalProperties": false,
-        "description": "Per-user preferences surfaced in Account → Preferences.",
-        "properties": {
-          "demo_mode_enabled": {
-            "title": "Demo Mode Enabled",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "demo_mode_enabled"
-        ],
-        "title": "UserSettings",
-        "type": "object"
-      },
-      "ValidationError": {
-        "properties": {
-          "ctx": {
-            "title": "Context",
-            "type": "object"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "title": "Location",
-            "type": "array"
-          },
-          "msg": {
-            "title": "Message",
-            "type": "string"
-          },
-          "type": {
-            "title": "Error Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
-        "title": "ValidationError",
+        "title": "WinnerChainPoint",
         "type": "object"
       },
       "WorkspaceStorageEntry": {
@@ -6898,12 +6898,12 @@
           {
             "description": "Also serve the branch standing behind each course / candidate subject — the winner chain from its origin to its head, each point read on its own cells. OFF by default for the same reason as `ranking`: every point past the origin opens a round document. A campaign subject serves none, having no branch.",
             "in": "query",
-            "name": "trajectory",
+            "name": "winner_chain",
             "required": false,
             "schema": {
               "default": false,
               "description": "Also serve the branch standing behind each course / candidate subject — the winner chain from its origin to its head, each point read on its own cells. OFF by default for the same reason as `ranking`: every point past the origin opens a round document. A campaign subject serves none, having no branch.",
-              "title": "Trajectory",
+              "title": "Winner Chain",
               "type": "boolean"
             }
           },

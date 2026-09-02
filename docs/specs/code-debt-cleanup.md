@@ -57,52 +57,13 @@ decisions → [`../architecture.md`](../architecture.md).
   nothing on screen says so. Action: name the surface each one writes to *before* adding a surface;
   `descend=` may already answer the L4 half. Blocker: none.
 
-- **"trajectory" still names two things it should not, and the candidates card has stopped being
-  one of them.** The winner chain read on ONE shared set is `overlap` from disk to screen now, but
-  two uses remain and each is its own PR. (1) `evidence.py::TrajectoryPoint` / `?trajectory=` /
-  `--trajectory` is the SAME winner chain read on each point's OWN cells — the opposite basis, with
-  no qualifier on either name, which is exactly the pair a reader cannot tell apart. Action: qualify
-  it; blocker: it is a wire type, a CLI flag and a generated OpenAPI schema at once. (2)
-  `round_diagnostics.py::TrajectoryClass` is a health enum (`healthy|oscillating|plateau|ceiling`)
-  and the ONLY on-disk `trajectory` key — 384 round documents, and `RoundResult` reads back with
-  `extra="ignore"`, so a rename degrades to the field's default rather than raising. `trend` or
-  `shape` fits it; the migration is the work. `p_best_trajectory`, `parent_level_trajectory` and
-  the Sample-trajectory grid keep the word — they are genuine trajectories, which is the point of
-  giving it up on the card.
-
 - **Absent-vs-zero is a rule, and only its named instances have been fixed.** Every number reaches
   the screen as measured / not-measured / not-applicable and may not lose which one on the way; the
   tell is a null branch in the browser that no Python writer can emit. The five sites filed as
   "Step 5" are closed (`git log`). Action: sweep for the *rule* — writers whose `0.0` default is
   indistinguishable from a measurement — rather than re-checking those five. Blocker: none.
 
-- **`/ray` serves whole records where its readers want fields.** The by-KIND half of this entry
-  shipped: `domain/projection_envelope.py::RENDERS_AS_ACTIVITY` is the one declaration of the feed's
-  vocabulary and the ray's drop set derives from it, so `election` / `ruler` / `spend_tombstone` no
-  longer ride at all. What remains is by FIELD — `family_ray_views.py::RayItem.payload` is still
-  declared to BE the record's `model_dump`, so there is no server-side shape to project onto.
-  **Measured over the banked corpus, so the
-  entry that stood here is corrected, not merely sharpened:** the "multi-MB window" claim is refuted as
-  stated (real windows are a few hundred KB), but the window is bounded by ITEM COUNT and one existing
-  family already exceeds a megabyte at `MAX_RAY_LIMIT`. Three named targets were wrong —
-  `llm_call.payload.messages` does not exist (it is `template_fields`), `.reasoning` is not capped where
-  claimed, and `cycle_seed.origin_prompt_fields` has zero records — while the two largest went unnamed:
-  `snapshot.payload.result`, near half the corpus and now the whole target, and `ruler.ruler`, which
-  left with its kind. Applying the readers' true field set would keep a small fraction of the bytes.
-  **Do NOT derive the projection from the TypeScript readers** — a server filter whose correctness is
-  defined by a client file is the seam defect itself; `call_id` and `detail` are the two whose loss is
-  silent, not visible.
 - **Five `export *` barrels re-export symbols that look file-local to a naive grep** — `lib/api`, `lib/types`, `lib/derivations`, `components/ui`, `components/workflow`. Stripping an `export` there silently narrows the barrel's public surface. Action: decide per barrel whether the symbol is meant to be public, then strip or keep — don't script it blind. **Recount before acting and never re-cite a headcount as current**; two traps in the recount itself are that relative-path importers (`from "./api"`, `"../api"`) miss an `@/…` grep, and that `lib/api/reads.ts` / `components/ingest/*` importing `"./types"` resolve to LEAF files, not the barrel.
-- **`RoundResult.results` drops the parent's panel on every round that promotes** — verified across the
-  banked corpus: every round with a winner is byte-identical to that candidate's rows and every held
-  round matches no candidate, so the parent's per-sample panel on the round's own subset is never
-  persisted once a winner is elected. **Action is ADDITIVE and a subject swap is refused:** key the
-  parent's rows under a reserved id in `all_candidate_results`, leaving `results` as the subject its
-  readers depend on. Swapping would lag the θ frontier permanently (`optimization/cycle.py` +
-  `mask/load.py` feed `cumulative_theta`), re-break two writers in `resume_and_fork/repair.py`, and
-  silently reinterpret every existing document (`extra="ignore"`, no version marker). Wants its own
-  PR — it changes a persisted shape.
-
 - **The mobile pass was verified at 375/1440 on chat/dashboard/files/verify only.** Unswept: 393, 412,
   768 and landscape; login, onboarding, l4, account modal, candidates, lineage. No Lighthouse number
   was recorded, so there is no before/after. Action: sweep + record one pass.

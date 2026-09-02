@@ -55,6 +55,7 @@ __all__ = [
     "backfill_inner_facts",
     "check_round_documents",
     "compact_cycle_ledgers",
+    "rename_round_trend",
     "reproject_cycle_indexes",
     "restamp_campaign_configs",
     "shrink_measurement_runs",
@@ -654,7 +655,55 @@ def backfill_inner_facts(*, apply: bool) -> dict[str, int]:
     return {"inner_rows_filled": filled, "inner_rows_orphaned": orphaned}
 
 
-# --- (7) the run-level pipeline config re-stored on every measurement row --------------------
+# --- (7) the diagnostics key a rename left behind on the round documents ---------------------
+
+
+def rename_round_trend(*, apply: bool) -> dict[str, int]:
+    """Move ``diagnostics.trajectory`` onto ``diagnostics.trend`` on every banked round document.
+
+    A rename that ships without one of these is the recurring shape, and this field's version of
+    it is the quiet kind. ``RoundDiagnostics`` is a stdlib dataclass reached through
+    ``RoundResult``, so the old key does not raise on load — it is dropped, and ``trend`` reads
+    its DEFAULT. The default is ``"healthy"``. A resumed cycle rebuilds ``cycle.rounds`` from
+    these documents and ``dispatch/facade.py`` hands the newest one's diagnostics to the TREND
+    panel, so a run that had plateaued or hit a ceiling resumes telling the optimizer it is
+    climbing — no error, no log line, and the panel reads exactly as it does when true.
+
+    Pruning cannot do this (it drops the stale key and its value together); this recovers the
+    value from the record that still holds it, which is what the module docstring sanctions.
+    """
+    moved = touched = 0
+    for path in _iter_round_documents():
+        with graceful(f"rename trend {path}"):
+            doc = read_json_tolerant(path, {})
+            diag = doc.get("diagnostics") if isinstance(doc, dict) else None
+            if not isinstance(diag, dict):
+                continue
+            dirty = False
+            for old, new in (
+                ("trajectory", "trend"),
+                ("trajectory_description", "trend_description"),
+            ):
+                if old in diag:
+                    # A document carrying BOTH was written by the new code and re-read by the
+                    # old; the live spelling is the one to keep.
+                    diag.setdefault(new, diag[old])
+                    del diag[old]
+                    dirty = True
+                    moved += 1
+            if dirty:
+                touched += 1
+                if apply:
+                    write_json(path, doc)
+
+    verb = "moved" if apply else "would move"
+    print(f"\nRound trend — {verb} {moved} key(s) across {touched} round document(s)")
+    if not apply and moved:
+        print("\nDry run. Re-run with --apply to rewrite.")
+    return {"trend_keys_moved": moved, "trend_documents": touched}
+
+
+# --- (8) the run-level pipeline config re-stored on every measurement row --------------------
 
 
 def _iter_measurement_runs() -> list[pathlib.Path]:

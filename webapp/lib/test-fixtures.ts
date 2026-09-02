@@ -152,6 +152,7 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
     parent_accuracy: 0,
     results: [],
     all_candidate_results: {},
+    parent_results: [],
     candidates_scored: 0,
     candidate_scores: [],
     evaluators: {},

@@ -18,7 +18,7 @@
 
 import { memo } from "react";
 import { Bar, Line } from "react-chartjs-2";
-import type { Evidence, SubjectReading, TrajectoryPoint } from "@/lib/api";
+import type { Evidence, SubjectReading, WinnerChainPoint } from "@/lib/api";
 import { maskedSubject } from "@/lib/api/reads";
 import { cx } from "@/lib/cx";
 import { fmtMetricInterval, fmtMetricValue, shortId } from "@/lib/format";
@@ -197,7 +197,7 @@ export function Coverage({ evidence }: { evidence: Evidence }) {
 const AXIS_W = 220;
 const ROW_H = 18;
 
-// The whole selection's bounds, so every row — and every trajectory point under it — is drawn on
+// The whole selection's bounds, so every row — and every winner-chain point under it — is drawn on
 // ONE scale. Read off the trajectories too: a chain point outside the heads' range would be
 // clipped to the edge and read as a value it never had.
 function scaleOver(rows: readonly { value: number | null; ci_lo: number | null; ci_hi: number | null }[]) {
@@ -214,7 +214,7 @@ function scaleOver(rows: readonly { value: number | null; ci_lo: number | null; 
 
 function Merged({ evidence }: { evidence: Evidence }) {
   const rows = evidence.subjects;
-  const x = scaleOver([...rows, ...rows.flatMap((r) => r.trajectory ?? [])]);
+  const x = scaleOver([...rows, ...rows.flatMap((r) => r.winner_chain ?? [])]);
   if (x === null) {
     return (
       <p className="l4-empty">No subject in this selection could be read under this metric.</p>
@@ -238,7 +238,7 @@ function Merged({ evidence }: { evidence: Evidence }) {
           />
           {/* The branch behind this channel, origin first — the same estimate-and-interval row,
               indented, so a head and the points it came from read on one scale. */}
-          {r.trajectory?.map((p: TrajectoryPoint) => (
+          {r.winner_chain?.map((p: WinnerChainPoint) => (
             <MergedRow
               key={`${r.key}|${p.round}|${p.candidate_id}`}
               label={`r${p.round} ${p.label}`}

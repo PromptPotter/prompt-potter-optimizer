@@ -664,6 +664,29 @@ class RoundResult(StrictModel):
     results: list[dict[str, Any]] = Field(default_factory=list)
     # Per-candidate scored results — lets resume rescore under a changed scorer + replay decisions.
     all_candidate_results: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+    # The PARENT's rows on THIS round's subset — the incumbent every arm was measured against,
+    # and until now the one panel the round threw away. `results` is the winner's (byte-identical
+    # to that candidate's rows on every round that promoted), and `all_candidate_results` holds
+    # the arms; the parent is neither, so nothing persisted it and every reader that needed the
+    # bar reconstructed it from round N-1's winner instead. **Subsets move between rounds**, so
+    # that reconstruction reads the parent on cells this round never bought — which is how a
+    # sample-set mask came to re-score every arm on the selected cells while leaving the bar they
+    # must clear at its full-set value (`mask/load.py`). Empty at round 0, which has no parent,
+    # and on any round that closed before this field. A repair re-measures the ARMS and not the
+    # bar, so on a repaired round this stays the reading the round was actually decided under —
+    # which is what a record is for.
+    #
+    # On a HELD round `results` already IS these rows (the retained parent is the headline), so
+    # the panel is banked twice there. Deliberately: a reader wanting the bar must not first have
+    # to work out whether this round promoted, which is exactly the question the field exists to
+    # stop being asked.
+    #
+    # Its own field rather than a reserved key in `all_candidate_results`, for the reason
+    # `OverlapReading` states about `overlap_results`: those two maps are where the election, the
+    # parent floor, the lift, the ruler and the acquisition all read, and ten call sites walk
+    # `.values()` treating each entry as an arm. A pseudo-candidate there is a silent extra arm
+    # in every one of them.
+    parent_results: list[dict[str, Any]] = Field(default_factory=list)
     candidates_scored: int
     # How many candidates actually entered the election — measured, leader-eligible, not
     # answer-collapsed. `candidates_scored` counts one step earlier, so the gap is exactly the

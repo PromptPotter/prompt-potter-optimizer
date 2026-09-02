@@ -473,8 +473,8 @@ def build_parser() -> argparse.ArgumentParser:
         "a prompt field is the largest thing this read carries.",
     )
     p_evidence.add_argument(
-        "--trajectory",
-        dest="trajectory",
+        "--winner-chain",
+        dest="winner_chain",
         action="store_true",
         help="Also print the branch behind each course / candidate subject — the winner chain "
         "from its origin to its head, each point read on its own cells. OFF by default: every "

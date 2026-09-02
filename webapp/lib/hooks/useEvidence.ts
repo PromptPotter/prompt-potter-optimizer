@@ -1,6 +1,6 @@
 "use client";
 // The Compare tab's one read. Not on the 2 s poll — a selection changes when the operator changes
-// it, so this is `useFetch`, one shot per (selection, metric, ranking, trajectory).
+// it, so this is `useFetch`, one shot per (selection, metric, ranking, winnerChain).
 //
 // `subjects` are opaque address strings (`lib/api/reads.ts::subjectKey` owns the grammar) and
 // `metric` an opaque selector — a catalogue key or a composed `expr:…`, both owned by the server.
@@ -28,7 +28,7 @@ export interface EvidenceRead {
 export function useEvidence(
   subjects: readonly string[],
   ranking: boolean,
-  trajectory: boolean,
+  winnerChain: boolean,
   config: boolean,
   metric: string,
 ): EvidenceRead {
@@ -37,9 +37,9 @@ export function useEvidence(
   const { data, loading, error, kind } = useFetch<Evidence>(
     key
       ? (signal) =>
-          fetchEvidence(key.split(SEP), { ranking, trajectory, config, metric }, signal)
+          fetchEvidence(key.split(SEP), { ranking, winnerChain, config, metric }, signal)
       : null,
-    [key, ranking, trajectory, config, metric],
+    [key, ranking, winnerChain, config, metric],
     "invalid",
   );
 

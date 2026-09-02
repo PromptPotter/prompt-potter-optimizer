@@ -212,12 +212,12 @@ def _r_diagnostics(b: InjectionBundle) -> list[Item]:
     if d.l1_diversity != 1.0:
         sections.append(Item(f"POPULATION: diversity={d.l1_diversity:.2f}"))
 
-    # TRAJECTORY + EVOLUTION last (least actionable: historical narrative, first to be tail-cut).
+    # TREND + EVOLUTION last (least actionable: historical narrative, first to be tail-cut).
     # Skipped at R1 — "too few rounds to classify" is dead weight.
     if len(d.evolution_rows) > 1:
-        line = f"TRAJECTORY: {d.trajectory}"
-        if d.trajectory_description:
-            line += f" — {d.trajectory_description}"
+        line = f"TREND: {d.trend}"
+        if d.trend_description:
+            line += f" — {d.trend_description}"
         sections.append(Item(line))
         tbl = ["EVOLUTION (last rounds):", "  round  acc      Δ       degraded"]
         for row in d.evolution_rows[-5:]:

@@ -16,7 +16,7 @@ export type {
   EffectProvenance,
   EditSpread,
   SubjectReading,
-  TrajectoryPoint,
+  WinnerChainPoint,
   Comparability,
   ArmReplicate,
   EvidenceVariance,

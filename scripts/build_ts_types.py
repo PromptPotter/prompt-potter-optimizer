@@ -33,7 +33,7 @@ from promptpotter.application.evidence import (
     ScenarioReading,
     SubjectMask,
     SubjectReading,
-    TrajectoryPoint,
+    WinnerChainPoint,
 )
 from promptpotter.application.evidence_metrics import MetricSpec
 from promptpotter.domain.cycle_paths import CycleHop
@@ -230,7 +230,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     MetricSpec,
     SubjectMask,
     ScenarioReading,
-    TrajectoryPoint,
+    WinnerChainPoint,
     SubjectReading,
     PairwiseComparison,
     MetricReading,

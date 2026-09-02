@@ -22,12 +22,22 @@ LEDGER_BASELINE = {
     # +1: `sp_hash` on `ScoredCandidate` — the searchpoint id, so a candidate names the archive
     # rows it paid for. Cannot be derived from what the model already carries: the sibling
     # `resolved_pipeline_params` has the rendered prompt stripped, and the hash covers it.
-    "cycle_result_fields": 160,
+    # +1: `parent_results` on `RoundResult` — the bar the round's arms were measured against, on
+    # the round's own subset. Not derivable from anything banked: round N-1's winner is the same
+    # SEARCHPOINT but was read on cells this round never bought, and reconstructing it that way
+    # is what left a sample-set mask re-scoring the arms and not the bar.
+    "cycle_result_fields": 161,
     "any_params": 50,
     # +1: `results.py::is_floor_pinned(rows: Sequence[Mapping[str, Any]])`, the same signature as
     # `measured_cells` and `is_answer_collapsed` beside it — a round row read off disk is a plain
     # mapping, so a narrower annotation here would be a claim the callers cannot honour.
-    "domain_any_maps": 84,
+    # +4: `projection_envelope.py::ray_payload` and its `_pick` helper — the ray's field
+    # projection. Both ends are genuinely untyped: the input is a `CycleRecord.model_dump()`
+    # whose bulk sits under `payload: dict[str, Any]` on the models themselves, and the output is
+    # `RayItem.payload`, the same shape narrowed. A model for the projection would have to
+    # declare every kind's picked subset as a class, which is the hand-authored roster the
+    # declaration exists to avoid.
+    "domain_any_maps": 88,
     "models_lax": 3,
     "prompt_string_fields": 6,
     "injections": 32,

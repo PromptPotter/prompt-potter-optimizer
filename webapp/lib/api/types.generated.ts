@@ -424,6 +424,7 @@ export interface RoundResult {
   parent_accuracy: number;
   results: Record<string, unknown>[];
   all_candidate_results: Record<string, Record<string, unknown>[]>;
+  parent_results: Record<string, unknown>[];
   candidates_scored: number;
   electable_count: number;
   candidate_scores: ScoredCandidate[];
@@ -1009,7 +1010,7 @@ export interface ScenarioReading {
 }
 
 /** One step of the branch standing behind a subject — the winner chain from the origin up to */
-export interface TrajectoryPoint {
+export interface WinnerChainPoint {
   candidate_id: string;
   round: number;
   label: string;
@@ -1034,7 +1035,7 @@ export interface SubjectReading {
   comparable_note: string;
   mask: SubjectMask | null;
   scenario: ScenarioReading | null;
-  trajectory: TrajectoryPoint[] | null;
+  winner_chain: WinnerChainPoint[] | null;
   config: Record<string, string> | null;
   arm_id: string | null;
   instrument_id: string | null;
@@ -1310,7 +1311,13 @@ export interface RayItem {
   ts: string;
   /** The ledger record_type — ProjectionEnvelope.kind. */
   kind: 'candidate_minted' | 'decision' | 'command' | 'command_ack' | 'cycle_seed' | 'election' | 'error' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'round_warning' | 'ruler' | 'snapshot' | 'spend_tombstone' | 'token_usage' | 'stream_snapshot';
-  /** The record's model_dump — ProjectionEnvelope.payload. */
+  /** The chronology projection of the record's model_dump — identity, address and
+   * the one-line reading, per
+   * domain/projection_envelope.py::RAY_PAYLOAD_FIELDS. A SUBSET of
+   * ProjectionEnvelope.payload: the record's bulk (LLM I/O, a sample's query
+   * and prediction, a phase's view) is addressable at the audit twin, the
+   * round document and dashboard.json, each fetched one round at a time
+   * rather than a window at a time. */
   payload: Record<string, unknown>;
 }
 

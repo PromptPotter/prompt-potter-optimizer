@@ -1595,6 +1595,91 @@ def test_the_time_ray_pages_without_a_hole_and_never_doubles_a_forks_parent(
     assert [item.ts for item in fresh.items] == [stamp(8), stamp(20), stamp(21)]
 
 
+def test_the_ray_projection_keeps_the_reading_it_drops_the_record_around() -> None:
+    """A ray item's payload is a projection, and every way it can be wrong is silent.
+
+    The by-kind half fails loud — an undeclared kind raises at import. The by-FIELD half
+    cannot: `RAY_PAYLOAD_FIELDS` names paths into `dict[str, Any]` payloads, so only the
+    first segment is checked against the model, and a nested key that moves picks nothing.
+    The step still renders. It renders without its number, which reads as a candidate that
+    has not been scored rather than as a bug — the same shape as the whisker that twice went
+    undrawn. Pinned here, in both directions:
+
+      * **The reading survives the projection.** `composite_fitness` under
+        `payload.result._running` and under `payload.scores`, the usage block, the round
+        headline — each two or three levels down an untyped dict.
+      * **The record's bulk does not.** An LLM's prompt and response, a sample's query and
+        pipeline data, a phase's whole view. These are what make a window unservable, and
+        each is already addressable one round at a time somewhere else.
+      * **Absent stays absent.** A declared path the record does not carry yields no key
+        rather than a null — a served null reads as a measurement under the browser's
+        absent-vs-zero rule — and a nested path that finds nothing leaves no empty ``{}``
+        behind either, which reads the same way one level down.
+    """
+    from promptpotter.domain.projection_envelope import ray_payload
+    from promptpotter.domain.run_records import LLMCallRecord, PhaseRecord, SnapshotRecord
+
+    scored = SnapshotRecord(
+        event="sample_scored",
+        round=2,
+        candidate_idx=1,
+        sample_idx=3,
+        sample_total=8,
+        payload={
+            "result": {
+                "sample_id": "s3",
+                "query": "x" * 400,
+                "predicted": "y" * 400,
+                "pipeline_data": {"steps": ["z" * 400]},
+                "_running": {"accuracy": 0.5, "composite_fitness": 0.61, "evaluators": {"a": 1.0}},
+            },
+            "scores": {"label": "C2.1", "composite_fitness": 0.61, "prompt_fields": "p" * 400},
+        },
+    )
+    body = ray_payload("snapshot", scored.model_dump())
+    assert body["payload"]["result"] == {"_running": {"accuracy": 0.5, "composite_fitness": 0.61}}
+    assert body["payload"]["scores"] == {"label": "C2.1", "composite_fitness": 0.61}
+    assert (body["sample_idx"], body["sample_total"], body["round"]) == (3, 8, 2)
+    # `accuracy` is declared on `scores` and this record has none: the key is gone, not null.
+    assert "accuracy" not in body["payload"]["scores"]
+    assert "record_type" not in body and "timestamp" not in body, "RayItem carries both itself"
+
+    call = LLMCallRecord(
+        node="l1_generate",
+        round=2,
+        call_id="c-1",
+        payload={
+            "template_fields": {"task": "t" * 2000},
+            "reasoning": "r" * 2000,
+            "response": "s" * 2000,
+            "usage": {"total_tokens": 900},
+            "duration_s": 12.5,
+            "cached": True,
+        },
+    )
+    body = ray_payload("llm_call", call.model_dump())
+    assert body["payload"] == {"usage": {"total_tokens": 900}, "duration_s": 12.5, "cached": True}
+    assert body["call_id"] == "c-1"
+
+    phase = PhaseRecord(
+        phase="round",
+        event="display",
+        round=2,
+        payload={"view": {"bulk": "v" * 4000}, "round_result": {"round": 2, "accuracy": 0.75}},
+    )
+    body = ray_payload("phase", phase.model_dump())
+    assert body["payload"] == {"round_result": {"round": 2, "accuracy": 0.75}}
+
+    # A phase carrying only the bulk: the projection finds nothing under `payload`, so `payload`
+    # is absent — not an empty dict, which a reader takes for "opened it, nothing there".
+    bare = PhaseRecord(phase="control", event="start", payload={"view": {"bulk": "v" * 400}})
+    assert ray_payload("phase", bare.model_dump()) == {
+        "phase": "control",
+        "event": "start",
+        "round": None,
+    }
+
+
 def test_a_conditional_validator_moves_when_its_inputs_do(built_stores) -> None:
     """A validator that misses an input 304s a changed body FOREVER — the operator reads a
     stale tree or ray as current, and nothing anywhere errors. The two ways that happens,
@@ -3999,27 +4084,27 @@ def test_a_course_reads_at_the_winner_its_LEDGER_crowned(built_stores: Any) -> N
     _write_election(built_stores, "gsm8k__aaaaaa", "cycle_0", round_num=1, winner_label="C1.1")
 
     course = SubjectSpec("course", "gsm8k__aaaaaa", "cycle_0")
-    ev = subject_evidence(built_stores, [course], include_trajectory=True)
+    ev = subject_evidence(built_stores, [course], include_winner_chain=True)
     head = ev.subjects[0]
     assert head.values == {"q1": 0.6, "q2": 0.9}, "the branch reads at its crowned winner"
     # The channel is named for the BRANCH; the searchpoint it currently reads at is resolved
-    # beside it, so "which point am I looking at" needs no trajectory to answer.
+    # beside it, so "which point am I looking at" needs no winner chain to answer.
     assert (head.label, head.candidate_id) == ("cycle_0", "c1")
 
     # The branch BEHIND it — origin first, each point on its own cells, so a round that scored a
     # different subset is not redrawn on evidence it never had.
-    assert head.trajectory is not None
-    assert [(p.round, p.label, p.n_cells) for p in head.trajectory] == [
+    assert head.winner_chain is not None
+    assert [(p.round, p.label, p.n_cells) for p in head.winner_chain] == [
         (0, "C0", 2),
         (1, "C1.1", 2),
     ]
-    assert head.trajectory[0].value == pytest.approx(0.3)
+    assert head.winner_chain[0].value == pytest.approx(0.3)
 
     # A campaign subject is the ORIGIN of the same cycle and stays there — the two are different
     # questions, and collapsing them would make "compare the branches" unaskable.
     root = subject_evidence(built_stores, [SubjectSpec("campaign", "gsm8k__aaaaaa")])
     assert root.subjects[0].values == {"q1": 0.2, "q2": 0.4}
-    assert root.subjects[0].trajectory is None
+    assert root.subjects[0].winner_chain is None
 
     # One searchpoint, addressed directly: the same rows, keyed and labelled as itself.
     point = subject_evidence(
