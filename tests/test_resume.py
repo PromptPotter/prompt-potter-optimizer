@@ -327,7 +327,7 @@ def test_merge_with_unprocessed_priors_preserves_full_archive_on_partial_run() -
         cached_sample_results={i: _prior(i) for i in dataset_sample_ids},
         dataset_sample_ids=dataset_sample_ids,
         deprecated_samples={},
-        scorer=compile_scorer(formula),
+        scorer=compile_scorer(formula, verifier_graded=False),
     )
     # Simulate a partial run: 6 cache hits + 1 fresh measurement.
     merged = merge_with_unprocessed_priors([_prior(i) for i in range(7)], prior_tail)

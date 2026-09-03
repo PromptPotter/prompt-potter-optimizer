@@ -19,7 +19,10 @@ class Sample(StrictModel):
     # Primary identity + inputs — owned directly.
     id: int
     query: str
-    ground_truth: str
+    # ``None`` DECLARES a verifier-graded cell: this backend answers with a reward, not a label,
+    # so there is nothing for ``predicted`` to match. A placeholder string instead of this reads
+    # as a MISS on every row, and three sites downstream then have to un-believe it.
+    ground_truth: str | None
 
     # Cross-campaign metadata — accumulates via SampleIndex.ingest_run.
     run_ids: list[str] = Field(default_factory=list)

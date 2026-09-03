@@ -28,7 +28,11 @@ LEDGER_BASELINE = {
     # mode (reentrancy, release-on-death, token reclaim), and the registry beside it is a slot
     # counter. It PAID for itself: `reconcile_stale` and `reaper.producer_gone` both went, and the
     # injected `producer_gone` oracle with them — one liveness rule now, in one place.
-    "modules": 334,
+    # +1: `connectors/harbor.py` — a fourth backend, and by construction a connector is exactly
+    # one module: the whole point of `connectors/` is that adding one touches no other file. The
+    # surface it buys is a containerized agent episode as a measured cell, which is the first
+    # backend shape whose row is graded by a verifier rather than matched against a label.
+    "modules": 335,
     "init_files": 48,
     "reexport_shims": 5,
     "config_leaf_fields": 39,
@@ -60,6 +64,11 @@ LEDGER_BASELINE = {
     # `RayItem.payload`, the same shape narrowed. A model for the projection would have to
     # declare every kind's picked subset as a class, which is the hand-authored roster the
     # declaration exists to avoid.
+    # Back to 88: `scoring.py::is_verifier_graded` was added taking a `Mapping[str, Any]` row and
+    # now takes the LABEL (`str | None`). Not a cosmetic narrowing — the question has two carriers
+    # (an unmeasured `Sample`, where the fact is `None`, and a measured row, where it is `""`), so
+    # a row signature could only ever serve one of them and the other would have re-derived it.
+    # Its set arity `all_verifier_graded` takes labels for the same reason and adds none back.
     "domain_any_maps": 88,
     "models_lax": 3,
     "prompt_string_fields": 6,

@@ -284,7 +284,7 @@ def _error_result(
     return QueryMeasurement(
         sample_id=sample.id,
         query=sample.query,
-        ground_truth=sample.ground_truth,
+        ground_truth=sample.ground_truth or "",
         predicted="ERROR",
         cached=False,
         error=error_msg or "unknown error",
@@ -340,7 +340,10 @@ async def measure_sample(
     pipeline_params: dict[str, Any] | None = None,
 ) -> QueryMeasurement:
     query = sample.query
-    ground_truth = sample.ground_truth
+    # The ONE place a labelless cell becomes a row. `QueryMeasurement.ground_truth` is `str`, and
+    # everything downstream of here — the matcher, the rank, the archive — reads it as one; a
+    # verifier-graded cell says so by carrying `""`, which no answer matches.
+    ground_truth = sample.ground_truth or ""
 
     pipeline_schema = session.pipeline_schema
 

@@ -19,7 +19,7 @@ from promptpotter.domain.scoring import (
     ScoringSpec,
     recorded_cost_s,
 )
-from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
+from promptpotter.shared.errors import PayloadInvalidError, has_pipeline_warnings, is_error_result
 
 # The L4 recursion's measurand, in logits: one inner campaign's mean-over-rounds lift over its OWN
 # origin. Absent on an ordinary campaign, where a cell is a sample and has no origin of its own.
@@ -311,10 +311,51 @@ def objective_namespace(result: dict[str, Any]) -> dict[str, Any]:
     return {**cell_channels_of(result), **health, **cell_namespace(result)}
 
 
-def compile_scorer(per_sample: str | None, per_cell: str | None = None) -> CellScorer:
+_LABEL_TERM = "ground_truth"
+
+
+def _refuse_label_formula(formula: str, names: frozenset[str], *, source: str) -> None:
+    """A formula reading the LABEL, armed against a bank that has none, does not merely score
+    badly — it scores WRONG, and in the flattering direction.
+
+    ``exact_match(predicted, ground_truth)`` strips and lowercases both sides, so with the label
+    empty every cell whose prediction is also empty compares equal and takes a PERFECT 1.0. That
+    is the launcher's own default formula shape (``jobs/launcher/draft_build.py``), so a
+    verifier-graded dataset drafted through the browser arrives armed this way with nothing
+    between it and a fabricated 100%.
+
+    Refuses rather than returning a number, on ``seed_screen.py::class_floor``'s precedent: the
+    verdict here is undefined, not unknown, and a ``None`` would say the second. Typed like its
+    arm-time sibling ``_verify_required_observation_keys`` so the webapp reads a 422 it must not
+    retry rather than a 500 it will.
+    """
+    if _LABEL_TERM not in names:
+        return
+    raise PayloadInvalidError(
+        f"the {source} {formula!r} compares against {_LABEL_TERM}, but this dataset's cells carry "
+        f"no label — its backend answers with a number that its own verifier decided. Every cell "
+        f"would be graded against an empty string, which `exact_match` scores as a PERFECT 1.0 "
+        f"wherever the prediction is also empty. Score the observation the backend emits instead "
+        f"(the key the connector declares in `required_observation_keys`, e.g. "
+        f"`max(0.0, min(1.0, env_reward))`).",
+        code="pipeline_config_invalid",
+        details={"formula": formula, "source": source},
+    )
+
+
+def compile_scorer(
+    per_sample: str | None,
+    per_cell: str | None = None,
+    *,
+    verifier_graded: bool,
+) -> CellScorer:
     """The two per-cell numbers, compiled together. ``per_cell`` absent ⇒ the objective IS the
     fitness, which is what makes adopting this cost nothing on a campaign that declares no
-    composite: the same float, computed once and stamped twice."""
+    composite: the same float, computed once and stamped twice.
+
+    ``verifier_graded`` is the BANK's fact, which only the caller holding the samples can answer;
+    what a formula READS is this module's. Joined here because refusing needs both — and REQUIRED,
+    because a default ``False`` is a guard that reads as armed at every call site that forgot it."""
     if not per_sample:
         raise ValueError(
             "compile_scorer: scoring formula is required. "
@@ -324,6 +365,8 @@ def compile_scorer(per_sample: str | None, per_cell: str | None = None) -> CellS
         )
 
     compiled = compile_expression(per_sample, source="per_sample scoring formula")
+    if verifier_graded:
+        _refuse_label_formula(per_sample, compiled.names, source="per_sample scoring formula")
 
     def _fitness(result: dict[str, Any]) -> float:
         query = str(result.get("query", "?"))[:80]
@@ -334,6 +377,8 @@ def compile_scorer(per_sample: str | None, per_cell: str | None = None) -> CellS
         return CellScorer(fitness=_fitness, objective=_fitness)
 
     composite = compile_expression(per_cell, source="per_cell scoring formula")
+    if verifier_graded:
+        _refuse_label_formula(per_cell, composite.names, source="per_cell scoring formula")
 
     def _objective(result: dict[str, Any]) -> float:
         query = str(result.get("query", "?"))[:80]

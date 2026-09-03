@@ -123,7 +123,9 @@ def dataset_cell_scorer(dataset_dir: Path) -> tuple[CellScorer, str]:
     spec = split_scoring_block(
         load_dataset_campaign_config(dataset_campaign_path(dataset_dir)).scoring
     )
-    return compile_scorer(spec.per_sample, spec.per_cell), spec.scorer_id
+    # No bank here to read the shape off, and none is needed: this compiles a formula a campaign's
+    # own init already refused-or-accepted against its samples.
+    return compile_scorer(spec.per_sample, spec.per_cell, verifier_graded=False), spec.scorer_id
 
 
 def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:

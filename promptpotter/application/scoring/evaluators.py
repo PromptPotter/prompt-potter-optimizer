@@ -17,7 +17,11 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.domain.pipeline_schema import NodeType
-from promptpotter.domain.scoring import extract_item_label
+from promptpotter.domain.scoring import (
+    all_verifier_graded,
+    extract_item_label,
+    is_verifier_graded,
+)
 from promptpotter.shared.composite import to_short_formula
 from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 
@@ -194,6 +198,14 @@ class Evaluator:
             return False
         return self.requires(schema)
 
+    # True ⇒ this evaluator's number is a comparison AGAINST A LABEL, so it is undefined on a
+    # verifier-graded backend rather than 0.0. Declared here for the same reason ``from_rows``
+    # is: ``applies`` sees the schema alone and structurally cannot ask, since the fact lives in
+    # the ROWS. Left to fall through, ``candidate_recall`` reports "the ranker never retrieved
+    # the ground truth on any sample" — for a backend that has none — and the materializers
+    # bank that 0.0 into ``rounds/round_NNNN.json`` and ``index.jsonl::scores``, where any
+    # ``score:`` lens re-reads it.
+    needs_labels: bool = False
     # True ⇒ a pure function of the persisted per-sample rows alone (``compute`` needs
     # only ``results`` — no ``schema`` / ``node``). The read-side mask recomputes exactly
     # this subset from ``all_candidate_results`` at read time (``materialize_row_derivable``),
@@ -234,6 +246,7 @@ _REGISTRY: list[Evaluator] = [
         scope="per_round",
         compute=partial(_compute_recall, candidate_key="candidate_ranking"),
         node_type=NodeType.CANDIDATE_SOURCE,
+        needs_labels=True,
     ),
     Evaluator(
         name="candidate_recall",
@@ -241,6 +254,7 @@ _REGISTRY: list[Evaluator] = [
         scope="per_round",
         compute=partial(_compute_recall, candidate_key="final_ranking"),
         node_type=NodeType.RANKER,
+        needs_labels=True,
     ),
     Evaluator(
         name="cache_hit_rate",
@@ -318,7 +332,10 @@ def materialize_round_values(
     """No ``opt_sp``: every evaluator that read one was a candidate constant, and those are gone.
     What a round REPORTS is now a pure function of its rows and the schema they ran on."""
     values: dict[str, float] = {}
+    labelless = all_verifier_graded(r.get("ground_truth") for r in results)
     for display_name, ev, node in _concrete_round_entries(schema):
+        if ev.needs_labels and labelless:
+            continue
         kwargs: dict[str, Any] = {"results": results, "schema": schema}
         if node is not None:
             kwargs["node"] = node
@@ -348,6 +365,8 @@ def materialize_sample_values(
     values: dict[str, float] = {}
     for ev in _REGISTRY:
         if ev.scope != "per_sample":
+            continue
+        if ev.needs_labels and is_verifier_graded(result.get("ground_truth")):
             continue
         if not ev.applies(schema):
             continue

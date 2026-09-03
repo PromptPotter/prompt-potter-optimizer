@@ -87,12 +87,21 @@ def populate_session_scoring(
 ) -> None:
     """Attach scoring + obs to *session* in place (step 2 of run init).
     Requires ``init_services`` already ran; ``scoring_formula`` and ``scorer_id`` both resolved from
-    ``campaign.json::scoring`` by the caller, through the one ``split_scoring_block`` that pairs them."""
+    ``campaign.json::scoring`` by the caller, through the one ``split_scoring_block`` that pairs them.
+
+    That precondition is what lets the compiler refuse a label-comparing formula here: ``session.samples``
+    is populated by the end of ``init_services``, so the bank's own declaration is available before a
+    single cell is spent."""
     from promptpotter.application.scoring.formula import compile_scorer
+    from promptpotter.domain.scoring import all_verifier_graded
 
     session.state.obs = obs
     session.source = source
-    session.scoring.scorer = compile_scorer(scoring_formula, scoring_cell_formula)
+    session.scoring.scorer = compile_scorer(
+        scoring_formula,
+        scoring_cell_formula,
+        verifier_graded=all_verifier_graded(s.ground_truth for s in session.samples),
+    )
     session.scoring.scorer_id = scorer_id
     session.scoring.scorer_cell_formula = scoring_cell_formula
     session.scoring.headline_metric = headline_metric

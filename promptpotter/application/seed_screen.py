@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.scoring import is_hit, modal_answer_share
+from promptpotter.domain.scoring import is_hit, is_verifier_graded, modal_answer_share
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
@@ -143,8 +143,22 @@ class SeedScreenOutcome:
 
 def class_floor(bank: list[Sample]) -> float:
     """What answering ONE label to every row would score. Free — the only screen axis needing no
-    measurement, which is why a candidate sweep filters on it before spending a call."""
-    counts = collections.Counter(str(s.ground_truth) for s in bank)
+    measurement, which is why a candidate sweep filters on it before spending a call.
+
+    Refuses a verifier-graded bank rather than returning a number for it: ``reasoning_margin``,
+    ``rewards_collapse`` and ``verdict_settled`` all derive from this, so with no labels the
+    screen's whole verdict is undefined — not merely unknown, which is what a ``None`` would say.
+    """
+    labels = [s.ground_truth for s in bank]
+    # ANY missing label, not all of them: one unlabelled row already makes the constant-answer
+    # score undefined, so this is the ``any`` arity of the same predicate the round-level readers
+    # ask at ``all``.
+    if any(is_verifier_graded(gt) for gt in labels):
+        raise SeedScreenError(
+            "this bank is verifier-graded (Sample.ground_truth is None), so no constant answer "
+            "has a score and the collapse verdict cannot be read."
+        )
+    counts = collections.Counter(str(gt) for gt in labels)
     return max(counts.values()) / len(bank) if bank else 0.0
 
 

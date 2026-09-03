@@ -224,7 +224,7 @@ def test_matcher_formula(fn, args, expected):
 def test_compile_scorer_rejects_attribute_and_unsafe_syntax(formula: str) -> None:
     """Restricted-eval is bypassable; the AST allowlist is the real boundary."""
     with pytest.raises((ValueError, SyntaxError)):
-        compile_scorer(formula)
+        compile_scorer(formula, verifier_graded=False)
 
 
 def test_scorer_rejects_non_finite_instead_of_scoring_it_perfect() -> None:
@@ -235,13 +235,13 @@ def test_scorer_rejects_non_finite_instead_of_scoring_it_perfect() -> None:
     assert max(0.0, min(1.0, float("nan"))) == 1.0  # the trap, pinned
     for expr in ("1e400", "-1e400", "1e400 - 1e400"):
         with pytest.raises(ScoringFormulaError, match="non-finite"):
-            compile_scorer(expr).fitness(_result_min("a", "a"))
+            compile_scorer(expr, verifier_graded=False).fitness(_result_min("a", "a"))
 
     # The reachable shape: a non-finite value arriving through `pipeline_data` — how an L4
     # proxy would deliver one — not a literal a human would notice in the formula string.
     result = _result_min("a", "a") | {"pipeline_data": {"after_N_rounds_delta": float("nan")}}
     with pytest.raises(ScoringFormulaError, match="non-finite"):
-        compile_scorer("after_N_rounds_delta").fitness(result)
+        compile_scorer("after_N_rounds_delta", verifier_graded=False).fitness(result)
 
     # The per-ROUND scorer clamps identically and was the twin hole: the fix to the per-sample
     # clamp above left the composite one wide open, so a NaN evaluator scored a perfect ROUND.
@@ -346,6 +346,117 @@ def test_an_unmeasured_term_is_never_scored_as_zero() -> None:
     assert empty["composite_fitness"] == 0.0
     assert empty["accuracy"] == 0.0
     assert empty["total"] == 0
+
+
+def test_a_labelless_round_reports_absence_not_zero() -> None:
+    """A comparison AGAINST A LABEL, run on a backend that has none, reports 0.0 — and that
+    zero is banked.
+
+    Every reading here walks a ranking for the ground truth. With none it is in nothing, so
+    ``candidate_recall`` records "the ranker never retrieved it on any sample", every rank lands
+    in ``not_found`` and every top-k is 0.0. All three persist: the evaluator map into
+    ``rounds/round_NNNN.json`` and ``index.jsonl::scores``, where any ``score:`` lens re-reads
+    it; the rank statistics into ``RoundResult.diagnostics``. Measured on a Harbor origin that
+    solved EIGHT of ten, the round file carried ``not_found: 10`` and ``top-1: 0.0``.
+
+    Silent by construction — the numbers are well-formed and in range, and the panel that
+    renders them self-suppresses on an undiscriminating distribution, so nothing on screen
+    disagrees. What decides it is the LABEL, never ``predicted == NO_RESULT``: that sentinel is
+    set by a dataset's ``node_role`` declarations and fires on Harbor but not on L4, which
+    declares ``l1_critique`` a ranker.
+    """
+    from promptpotter.application.optimization.round_analysis import compute_round_diagnostics
+    from promptpotter.application.scoring.evaluators import materialize_round_values
+
+    schema = _recall_schema()
+
+    def rows(ground_truth: str) -> list[dict]:
+        # The ranker RAN on every row (`step_timings` carries it), which is what puts these rows
+        # in the recall denominator — the arm that fabricates the rate rather than abstaining.
+        return [
+            _eval_result(
+                score=1.0,
+                ground_truth=ground_truth,
+                predicted="",
+                step_timings={"ranker": 0.1, "fuzzy": 0.1},
+                # Width 2: below that a ranking has no ordering to report and `gt_in_ranked`
+                # is already absent for that reason, which would mask the one under test.
+                final_ranking=[{"candidate": "wrong-a"}, {"candidate": "wrong-b"}],
+                candidate_ranking=[{"candidate": "wrong-a"}, {"candidate": "wrong-b"}],
+            )
+            for _ in range(10)
+        ]
+
+    labelled = materialize_round_values(schema, rows("A"))
+    labelless = materialize_round_values(schema, rows(""))
+
+    # The labelled round genuinely missed on every row: 0.0 is a VERDICT there and must stay.
+    assert labelled["candidate_recall"] == 0.0
+    assert labelled["source_recall"] == 0.0
+    # The labelless one has no such verdict to give. Omitted, not defaulted — the same contract
+    # `test_an_unmeasured_term_is_never_scored_as_zero` pins for an unmeasured term, so a formula
+    # naming it halts loud instead of scoring on a number nobody computed.
+    assert "candidate_recall" not in labelless
+    assert "source_recall" not in labelless
+    # Everything that is NOT a label comparison still answers, on the same rows.
+    assert labelless["accuracy"] == 1.0
+    assert labelless["cache_hit_rate"] == 0.0
+
+    def diagnostics(ground_truth: str):
+        rr = round_result(1, results=rows(ground_truth))
+        return compute_round_diagnostics(rr, [rr], schema)
+
+    labelled_diag = diagnostics("A")
+    assert labelled_diag.rank_buckets["not_found"] == 10
+    assert labelled_diag.top_k_accuracy[1] == 0.0
+    assert labelled_diag.samples[0].gt_in_ranked is False
+    assert labelled_diag.samples[0].gt_in_source is False
+
+    labelless_diag = diagnostics("")
+    assert labelless_diag.rank_buckets == {}
+    assert labelless_diag.top_k_accuracy == {}
+    # The count of rows that WERE measured is not a rank claim and survives.
+    assert labelless_diag.n_valid == 10
+    # Per-sample, the same distinction: absent, never the positive claim `False`.
+    assert labelless_diag.samples[0].gt_in_ranked is None
+    assert labelless_diag.samples[0].gt_in_source is None
+
+
+def test_the_constant_answer_floor_is_undefined_without_labels() -> None:
+    """A verifier-graded bank has no constant answer, so it has no floor — and the two readers of
+    that fact must not conflate "undefined" with "0.0".
+
+    `class_floor` REFUSES such a bank rather than returning a number: `reasoning_margin`,
+    `rewards_collapse` and `verdict_settled` all derive from it, so the screen's whole verdict is
+    undefined, which is what a `None` would fail to say.
+
+    Its second caller is the one that made this worth pinning. `runner/inner/spawn.py` computes the
+    floor for every seat it seats, then REPORTS collapse risk — it is not the screen and owns no
+    verdict. Unguarded it would take the refusal and die mid-spawn on the arrangement the recursion
+    exists for (`pp-self` over a verifier-graded inner benchmark), with a message about a collapse
+    reading from a path that was only ever logging one.
+    """
+    import inspect
+
+    from promptpotter.application.runner.inner import spawn
+    from promptpotter.application.seed_screen import SeedScreenError, class_floor
+
+    labelled = [Sample(id=i, query=f"q{i}", ground_truth="A" if i else "B") for i in range(4)]
+    assert class_floor(labelled) == 0.75
+
+    with pytest.raises(SeedScreenError, match="verifier-graded"):
+        class_floor([Sample(id=i, query=f"q{i}", ground_truth=None) for i in range(4)])
+
+    # The guard at the caller, asserted on the source rather than by driving a whole inner spawn:
+    # reaching that call needs a container backend, an inner campaign and real spend, and what is
+    # actually load-bearing is that the refusal is not entered and its result is not compared.
+    src = inspect.getsource(spawn._run_inner_campaign)
+    assert "all_verifier_graded" in src, (
+        "the class_floor call must not be reached on a labelless bank"
+    )
+    assert "bank_floor is not None and bank_floor >=" in src, (
+        "a None floor must SKIP the collapse comparison, never compare as 0.0"
+    )
 
 
 def test_terminal_ranking_sources_the_prediction():
@@ -956,6 +1067,11 @@ def _health_row(
     one place is what stops them disagreeing about where a warning lives."""
     return {
         "hit": hit,
+        # LABELLED, because every scenario built from this row is: the grade reads the label's
+        # presence to tell "the model answered unreadably" from "this backend answers with a
+        # reward and there is no label to read". Omitting it made every case here silently claim
+        # to be the second one. Override with `ground_truth=""` for a verifier-graded row.
+        "ground_truth": "A",
         "pipeline_data": {"diagnostics": {"step_statuses": statuses, "warnings": list(warnings)}},
         **extra,
     }
@@ -1203,6 +1319,22 @@ def test_a_round_that_measured_nothing_usable_names_which_way_it_broke():
     assert (unscoreable.grade, unscoreable.cause) == ("critical", "unscoreable")
     assert unscoreable.no_result_count == 20
     assert unscoreable.suggested_action and "answer_format" in unscoreable.suggested_action
+
+    # …and the SAME rows without a label are a healthy round, not the same verdict. A
+    # verifier-graded backend (Harbor: one containerized agent episode, graded by the task's own
+    # `tests/test.sh`) has nothing for a ranker to emit, so its rows carry the NO_RESULT sentinel.
+    # Read as unscoreable that grades the origin `critical` at 100%, tells the operator to fix an
+    # `answer_format` that decides nothing, and reports a baseline that WAS measured — the reward
+    # came back — as unmeasured. The LABEL is what separates the two cases and the sentinel is
+    # not: whether it fires at all is a dataset's `node_role` declaration, so the other labelless
+    # backend (L4, which declares `l1_critique` a ranker) never carries it.
+    graded_by_verifier = [
+        _health_row({"agent": "success"}, predicted="NO_RESULT", ground_truth="") for _ in range(20)
+    ]
+    verifier_round = compute_round_health(results=graded_by_verifier, prior_healths=[])
+    assert verifier_round is not None
+    assert (verifier_round.grade, verifier_round.cause) == ("healthy", None)
+    assert verifier_round.no_result_count == 0
 
     unmeasured = compute_round_health(results=[], prior_healths=[], is_origin=True)
     assert unmeasured is not None

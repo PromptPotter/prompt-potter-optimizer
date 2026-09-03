@@ -11,7 +11,7 @@ from promptpotter.domain.results import (
     RoundResult,
     WarningDict,
 )
-from promptpotter.domain.scoring import modal_answer_share
+from promptpotter.domain.scoring import is_verifier_graded, modal_answer_share
 
 STRUCTURAL_FLAG_RATE: float = 0.30
 DEGRADED_RATE_FLAG: float = 0.20
@@ -336,7 +336,13 @@ def compute_round_health(
         # candidate → ``predicted == NO_RESULT``. The backend calls this a success and
         # stamps no warning, so it's invisible to ``classify_sample_failure`` below —
         # counted here as the PP-owned unscoreable signal.
-        if r.get("predicted") == NO_RESULT:
+        #
+        # NOT on a verifier-graded cell, where NO_RESULT is the SHAPE of the backend rather than
+        # a fault in it: the reward already graded the episode and no node emits a ranking, so
+        # every row would count and the round would grade `critical/unscoreable` at 100% —
+        # sending the operator to fix an `answer_format` that decides nothing, and (on an origin)
+        # reporting a measured baseline as unmeasured.
+        if r.get("predicted") == NO_RESULT and not is_verifier_graded(r.get("ground_truth")):
             no_result += 1
         # A HOLE: the row carries a typed error that is not a transport failure, so it has
         # no diagnostics and `classify_sample_failure({}, [])` scores it neither structural

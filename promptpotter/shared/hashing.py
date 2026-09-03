@@ -48,8 +48,12 @@ def module_source_digest(*modules: ModuleType) -> str:
 
 
 def _sorted_pairs(dataset: list[Any]) -> list[tuple[str, str]]:
-    """What the rows ARE, order-independent — the one definition both hashes below stand on."""
-    return sorted((d.query, d.ground_truth) for d in dataset)
+    """What the rows ARE, order-independent — the one definition both hashes below stand on.
+
+    A verifier-graded row carries no label (``Sample.ground_truth is None``) and reads as ``""``:
+    the sort has to be total, and a label that does not exist cannot be part of what was measured.
+    """
+    return sorted((d.query, d.ground_truth or "") for d in dataset)
 
 
 def dataset_hash(dataset: list[Any]) -> str:

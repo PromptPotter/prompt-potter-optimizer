@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.pipeline_schema import NodeType
-from promptpotter.domain.scoring import extract_item_label
+from promptpotter.domain.scoring import extract_item_label, is_verifier_graded
 from promptpotter.shared import text_list_items, text_list_rank
 from promptpotter.shared.errors import has_pipeline_warnings
 
@@ -94,12 +94,18 @@ def _diag_ranking(
     label: str,
 ) -> dict[str, float | bool | int | str | None]:
     """Diagnostics report the ground-truth position 0-based; :func:`find_rank` is the canonical
-    1-based walk."""
+    1-based walk.
+
+    ``gt_in_*`` is absent rather than ``False`` where there is no label — the same distinction
+    :func:`_diag_ranker` already draws for a width-1 ranking. ``False`` is a positive claim that
+    the truth was NOT in the pool, and a panel reading it hands the optimizer a retrieval fault
+    to chase on a backend whose verifier already answered. The COUNT beside it stays: how many
+    candidates a node emitted is a fact about the node, not about a label."""
     candidates = pd.get(key, [])
     rank = find_rank(candidates, gt)
     pos = rank - 1 if rank is not None else None
     return {
-        f"gt_in_{label}": pos is not None,
+        f"gt_in_{label}": None if is_verifier_graded(gt) else pos is not None,
         f"n_{label}_candidates": len(candidates),
         f"gt_{label}_rank": pos,
     }
@@ -131,9 +137,10 @@ def _diag_ranker(
         ]
         if len(scores) == 2:
             top_score_gap = scores[0] - scores[1]
-    # A width-1 ranking has no ranking to report, so the fact is absent rather than False —
-    # which is what the panel's `is not None` guard reads.
-    ranked = len(candidates) >= 2
+    # A width-1 ranking has no ranking to report, and a labelless cell has nothing to rank
+    # AGAINST, so in both the fact is absent rather than False — which is what the panel's
+    # `is not None` guard reads.
+    ranked = len(candidates) >= 2 and not is_verifier_graded(gt)
     return {
         "gt_in_ranked": (pos is not None) if ranked else None,
         "n_final_ranking": len(candidates),

@@ -124,12 +124,16 @@ def _assert_measured_content_matches(
         if prior is None:
             continue
         stored = (prior.get("query", ""), prior.get("ground_truth", ""))
-        if stored != (sample.query, sample.ground_truth):
+        # A labelless cell stores `""`, so the live side normalizes the same way `measure_sample`
+        # did when it wrote the row — comparing `None` against `""` would fail every cached row
+        # on a verifier-graded backend and read a working cache as an edited dataset.
+        current = (sample.query, sample.ground_truth or "")
+        if stored != current:
             raise DatasetIdentityError(
                 dataset_name=dataset_name,
                 sample_id=sample.id,
                 stored=stored,
-                current=(sample.query, sample.ground_truth),
+                current=current,
             )
 
 

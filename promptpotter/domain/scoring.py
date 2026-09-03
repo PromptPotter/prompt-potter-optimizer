@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import ast
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, NamedTuple, NotRequired, TypedDict, cast
 
 from promptpotter.config.settings import ANSWER_SPACE_CAP
@@ -340,6 +340,45 @@ def weighted_sum_weights(formula: str | None) -> dict[str, float] | None:
     return weights or None
 
 
+def is_verifier_graded(ground_truth: str | None) -> bool:
+    """Whether this cell was graded with NO label — the backend answered with a number and the
+    task's own verifier (or L4's outer proxies) decided it, so there is no truth string for
+    ``predicted`` to match.
+
+    **The one place that fact is asked.** It takes the LABEL rather than its carrier because the
+    two carriers are different types — a not-yet-measured ``Sample`` (``ground_truth: str | None``,
+    where ``None`` is the declaration) and a measured row (``QueryMeasurement.ground_truth: str``,
+    where the same fact arrives as ``""``) — and both ask this one question.
+
+    Ask this, never ``predicted == NO_RESULT``. That sentinel is set by ``terminal_ranking``
+    returning nothing, which a DATASET decides: Harbor's ``agent`` node declares no ``node_role``
+    so the sentinel fires, while ``promptpotter-self``'s ``l1_critique`` declares ``ranker`` so it
+    never does. Two labelless backends, opposite answers, from a proxy for something neither of
+    them is about. The label's absence is the same on both.
+    """
+    return not (ground_truth or "")
+
+
+def all_verifier_graded(labels: Iterable[str | None]) -> bool:
+    """The SET arity: whether a whole round, bank or dataset carries no labels.
+
+    Empty is False — a set with no members declares nothing, and the readers that ask this
+    (rank statistics, the recall evaluators, the formula gate) would otherwise treat "measured
+    nothing yet" as "this backend has no labels" and go silent on a real one.
+
+    What it decides is whether a LABEL-comparing reading means anything. With no label,
+    ``predicted`` can never equal ``ground_truth``, so every row is a miss, every rank is
+    ``not_found`` and every recall is ``0.0`` — a split that partitions nothing, reported as if it
+    had. Emit absence there, not zero.
+    """
+    seen = False
+    for label in labels:
+        if not is_verifier_graded(label):
+            return False
+        seen = True
+    return seen
+
+
 def enumerable_truth_labels(rows: Sequence[Mapping[str, Any]]) -> Counter[str] | None:
     """The ground-truth label tally, or ``None`` where collapse is not a meaningful question —
     above ``ANSWER_SPACE_CAP`` truths, or one truth per row, every prediction is its own bucket."""
@@ -382,9 +421,11 @@ __all__ = [
     "QueryMeasurement",
     "RoundScorer",
     "ScoringSpec",
+    "all_verifier_graded",
     "enumerable_truth_labels",
     "is_answer_collapsed",
     "is_hit",
+    "is_verifier_graded",
     "ledger_sample_view",
     "modal_answer_share",
 ]

@@ -22,7 +22,7 @@ from promptpotter.domain.round_diagnostics import (
     SampleDiag,
     TrendClass,
 )
-from promptpotter.domain.scoring import is_hit
+from promptpotter.domain.scoring import all_verifier_graded, is_hit
 from promptpotter.shared.errors import is_error_result
 
 __all__ = ["compute_round_diagnostics"]
@@ -77,6 +77,14 @@ def compute_round_diagnostics(
 def _rank_analysis(
     results: list[dict[str, Any]], ranked_item_keys: list[str] | None
 ) -> tuple[dict[str, int], dict[int, float], list[NearMiss], int]:
+    # A rank is a POSITION AGAINST A LABEL. With none, every walk below returns `None`, so every
+    # row lands in `not_found` and every top-k reads 0.0 — measured on a Harbor origin that solved
+    # eight of ten, this banked `not_found: 10` and `top-1: 0.0` into `RoundResult.diagnostics`.
+    # Absence, not zero: the empty dicts are what `RoundDiagnostics` defaults to, and the panel
+    # that reads them already self-suppresses on an undiscriminating distribution.
+    # `n_valid` still answers — it counts rows that were measured, which is not a rank claim.
+    if all_verifier_graded(r.get("ground_truth") for r in results):
+        return {}, {}, [], sum(1 for r in results if not is_error_result(r))
     keys = ranked_item_keys or None
     rank_map: dict[int, int | None] = {
         i: rank_ground_truth(
