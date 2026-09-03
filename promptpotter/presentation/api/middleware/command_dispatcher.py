@@ -147,9 +147,9 @@ __all__ = ["CommandAcceptedBody", "CommandDispatcher", "CommandOutcome"]
 Applier = Callable[[], Awaitable[Any]] | Callable[[], Any]
 
 # The one cap→verb ladder (ADR-0005 §3): every command kind that funnels through
-# `_record_and_apply` requires exactly one tier capability, checked at that single
-# seam. A tenant owner holds every tier (OWNER_COMMAND_CAPABILITIES); a delegated
-# sub-principal an attenuated subset. `fork-cycle` is RUN-tier — the babysit
+# `_record_and_apply` requires exactly one capability, checked at that single
+# seam. A tenant owner holds every one (OWNER_COMMAND_CAPABILITIES); a delegated
+# sub-principal an attenuated subset. `fork-cycle` sits at `campaign.run` — the babysit
 # grant that gates unlocking a LOCKED axis in the seed is a distinct slice.
 CAP_FOR_KIND: dict[str, str] = {
     "archive-campaign": CAMPAIGN_LIFECYCLE_CAP,
@@ -170,20 +170,20 @@ CAP_FOR_KIND: dict[str, str] = {
     "edit-draft-campaign": CAMPAIGN_CREATE_CAP,
     "resolve-origin": CAMPAIGN_CREATE_CAP,
     # Editing the allow-list DEFINES what a babysit steer may reach — strictly stronger
-    # authority than `campaign.babysit`. The owner-held lifecycle tier is what stops a
+    # authority than `campaign.babysit`. The owner-held `campaign.lifecycle` is what stops a
     # babysit-delegate self-authorizing by adding their own model to it.
     "set-allowed-models": CAMPAIGN_LIFECYCLE_CAP,
     # Renaming is how every OTHER surface addresses the campaign to a human, so it sits
-    # with the verbs that decide the campaign's existence rather than with the run tiers.
+    # with the verbs that decide the campaign's existence rather than with the run capabilities.
     "set-campaign-label": CAMPAIGN_LIFECYCLE_CAP,
     # A dataset slug is part of the measurement cache key, so repointing one re-addresses
     # every campaign that already measured against it — stronger authority than creating a
-    # dataset, which is why it sits at the lifecycle tier rather than beside `mint-campaign`.
+    # dataset, which is why it sits at `campaign.lifecycle` rather than beside `mint-campaign`.
     "replace-dataset": CAMPAIGN_LIFECYCLE_CAP,
     # Rewrites rows every campaign measured against, and its purge step destroys paid spend
     # outright — the same authority `replace-dataset` sits at, for the same reason.
     "compact-archive": CAMPAIGN_LIFECYCLE_CAP,
-    # Its own tier rather than a share of babysit: look-ahead spends the box's shared provider
+    # Its own capability rather than a share of babysit: look-ahead spends the box's shared provider
     # rate bucket, which is the one thing a multi-tenant host may want to withhold from a
     # delegate, and it steers no measurement (the overshoot sample is discarded).
     "set-sample-lookahead": CAMPAIGN_LOOKAHEAD_CAP,
@@ -825,7 +825,7 @@ class CommandDispatcher:
 
             seed = _parse_cycle_seed(payload.seed)
             # Steering the model OUTSIDE `allowed_models` (empty = nothing sanctioned) is the
-            # ADR-0005 §4 babysit action, a distinct cap above the RUN-tier fork. A steer to a
+            # ADR-0005 §4 babysit action, a distinct cap above the `campaign.run` fork. A steer to a
             # SANCTIONED model is a clean human fork.
             allowed_models = campaign.config.get("allowed_models") if campaign else None
             steers_disallowed_model = seed is not None and overlay_sets_model_outside_allowed(
@@ -864,7 +864,7 @@ class CommandDispatcher:
             return _apply_fork
         if isinstance(payload, StepCyclePayload):
             # Advance N rounds in place then auto-pause, on the resume machinery + RunMode's
-            # run-scoped stop — the `campaign.step` tier for a delegate without run.
+            # run-scoped stop — the `campaign.step` capability for a delegate without run.
             steps = payload.rounds
             return lambda: self._apply_start_run(
                 hop=hop,
@@ -1130,7 +1130,7 @@ class CommandDispatcher:
     # Helpers
     # ------------------------------------------------------------------
     def _require_capability_for(self, kind: str) -> None:
-        """Map the kind to its one tier, then defer to the shared denial. An UNMAPPED kind is
+        """Map the kind to its one capability, then defer to the shared denial. An UNMAPPED kind is
         unwritable — ``CAP_FOR_KIND`` is exhaustive over the dispatched set at import, so reaching
         here with no cap means a verb slipped past that raise, and refusing it is the safe read."""
         cap = CAP_FOR_KIND.get(kind)

@@ -1,11 +1,11 @@
-# The access model — four tiers, four boundaries
+# The access model — four boundaries
 
 > **The one page a security audit opens.** It names each trust boundary, the *kind*
 > of boundary it is, where it is enforced (by symbol), and the one honestly-deferred
 > gap. If a claim here disagrees with the code, the code wins and this page is wrong —
 > fix it.
 
-PromptPotter has four access tiers — **host-admin > owner > delegate > loop** — and they
+PromptPotter has four access boundaries — **host-admin > owner > delegate > loop** — and they
 are **four different kinds of boundary**. Conflating them is what made the model
 illegible; keeping them distinct, and never collapsing the hierarchy, is the whole design.
 
@@ -16,18 +16,18 @@ illegible; keeping them distinct, and never collapsing the hierarchy, is the who
 | **user ↔ user** | Tenancy (data isolation) | structural directory rooting + one `load_owned` ownership rule | 404 |
 | **loop ↔ everything** | OS privilege | systemd-hardened unit (kernel-enforced) | process denied (EACCES / cgroup) |
 
-> **A dataset read is not an authorization decision — it belongs to no tier.**
+> **A dataset read is not an authorization decision — it belongs to no boundary.**
 > Repo `datasets/` is install content — **tracked in git**, hence already on the disk
 > of anyone holding the install, so a capability over it would guard nothing while
 > blanking every panel bound to such a campaign. **Ownership, not permission, is the
 > split:** install content ships and is readable; private data belongs in the tenant,
-> where Tier 2 isolates it structurally. Putting a private cut in the repo dir and then
+> where the tenancy boundary isolates it structurally. Putting a private cut in the repo dir and then
 > gating the dir is the anti-pattern — move the cut. (`datasets.benchmarks.read` was
-> exactly that mistake and is gone; do not re-add it to Tier 1a.)
+> exactly that mistake and is gone; do not re-add it to the host-privilege boundary.)
 
 ---
 
-## Tier 1a — host-admin ↔ user: host privilege
+## host-admin ↔ user — host privilege
 
 The person who **runs the box** is not the same principal as a user who owns a tenant on
 it, and the two must never collapse — on the team-online deployment (our default), every
@@ -44,14 +44,15 @@ That is a decision, not an absence. The one verb that used to sit here —
 `set-sample-lookahead`, arming the scoring walk to hold several of a candidate's samples in
 flight — spends the **box's** shared provider key and rate bucket rather than the campaign's
 budget, so a user holding it can throttle every other user to finish sooner. It was
-host-admin for exactly that reason, and moved to `campaign.lookahead` (Tier 1b) when the
+host-admin for exactly that reason, and moved to `campaign.lookahead` (the authorization
+boundary) when the
 operator chose to let a downloaded install and a signed-up account both press it. What bounds
 the abuse now is the per-account spend ceiling plus the delegate carve: it is its OWN rung in
-`CAMPAIGN_CAP_BY_TIER`, so a host can withhold it from a delegate without withholding the
+`CAMPAIGN_CAP_BY_NAME`, so a host can withhold it from a delegate without withholding the
 run. It is still deliberately **not** `campaign.babysit` — babysit marks a cycle whose
 measurement an operator steered, and this verb cannot steer one (the overshoot sample is
 discarded precisely so the recorded rows stay identical at either depth). The ceiling and what
-one press buys are the CONNECTOR's declarations; the tier answers only who may press.
+one press buys are the CONNECTOR's declarations; the boundary answers only who may press.
 
 **It is reachable from the browser only** — no CLI verb, no config key, no dataset knob. It is
 also the one command whose address may DESCEND (`payload.descend`), because the arming is not
@@ -66,16 +67,16 @@ default-claim marker (`HOST_ADMIN_EMAIL` → `maybe_claim_default`) survives it,
 answers only *which tenant the terminal resolves* — never a capability, so a box with no
 marker is a workspace question rather than a privilege one.
 
-**Dataset reads are NOT part of this tier**, and adding them back is the regression to
+**Dataset reads are NOT part of this boundary**, and adding them back is the regression to
 watch for. `infrastructure/store/dataset_access.py` is a resolver, not a gate: tenant
-content first, then install content, no capability consulted. Tier 2 is what keeps one
+content first, then install content, no capability consulted. The tenancy boundary is what keeps one
 user's data from another's; a capability was never what did that work.
 
 ---
 
-## Tier 1b — owner ↔ delegate: authorization
+## owner ↔ delegate — authorization
 
-**What a principal may do** is one definition: `CAMPAIGN_CAP_BY_TIER` in
+**What a principal may do** is one definition: `CAMPAIGN_CAP_BY_NAME` in
 `shared/identity.py`, from which `OWNER_COMMAND_CAPABILITIES` is *derived* so the two can
 never drift. Adding a power = one line there — and it is the ONLY capability set, since host
 privilege rides the ADR-0004 channel rather than a capability.
@@ -87,8 +88,8 @@ one owns the same tenant and holds nothing. The single local operator gets the f
 **delegate** holds an attenuated subset — see below.
 
 **Command-verb authorization (ADR-0005).** Every
-control-plane command requires a **tier capability** — `CAMPAIGN_{STEP,RUN,CREATE,BUDGET,LIFECYCLE,BABYSIT}_CAP`
-(`shared/identity.py`, enumerated once as `CAMPAIGN_CAP_BY_TIER`). Enforcement is a
+control-plane command requires a **capability** — `CAMPAIGN_{STEP,RUN,CREATE,BUDGET,LIFECYCLE,BABYSIT,LOOKAHEAD}_CAP`
+(`shared/identity.py`, enumerated once as `CAMPAIGN_CAP_BY_NAME`). Enforcement is a
 **second one-chokepoint**: `_require_capability_for` reads `CAP_FOR_KIND[kind]` at the
 dispatcher's `_record_and_apply` (`command_dispatcher.py`) — the single site
 every command funnels through — before applying. An import-time assert keeps `CAP_FOR_KIND`
@@ -117,7 +118,7 @@ grants (require unspoofable channel identity) and the babysat *subtree* model.
 
 ---
 
-## Tier 2 — user ↔ user: tenancy
+## user ↔ user — tenancy
 
 **Cross-tenant isolation is structural, not a check.** `build_stores`
 (`infrastructure/store/stores.py`) roots every leaf store at `projects_root / tenant_id`; a
@@ -143,15 +144,19 @@ read-only.
 
 ---
 
-## Tier 3 — loop ↔ everything: OS privilege
+## loop ↔ everything — OS privilege
 
 This is the genuinely-partial boundary; the honest state:
 
 - **CLI-launched runs** (`python -m promptpotter`) are already a **separate OS process** from the
   API.
 - **Web-launched runs** (`/commands/start-run`) run **in-process** in the API worker by deliberate
-  design (`JobRegistry` capacity-1, orphan-reaping assumes one process). So a web-launched loop
-  shares the API's process, `.env`, and every provider key.
+  design (orphan-reaping assumes the runs it judges live in the process that judges them). So a
+  web-launched loop shares the API's process, `.env`, and every provider key.
+- **Both hold the same machine slot** (`jobs/launcher/admission.py::admit_and_hold`), so occupancy
+  is one number whichever door a run came through. Only the JOBS DIR is shared, not the process:
+  the terminal attaches to it read-mostly and never runs `reconcile_stale`, which would stamp the
+  server's live campaign stopped.
 
 **Shipped wall (3a) — the hardened service unit** (`deploy-linux/install-service.sh`): the
 systemd unit drops all capabilities, `ProtectSystem=strict`, a `@system-service` syscall filter,
@@ -191,7 +196,7 @@ not backend-supplied.
 
 ---
 
-## The perimeter (every tier that goes online)
+## The perimeter (every boundary that goes online)
 
 - **One public port behind Cloudflare Tunnel** (outbound-only; no inbound router port). uvicorn
   binds `127.0.0.1` with `--proxy-headers --forwarded-allow-ips=127.0.0.1`. TermNorm binds
@@ -215,7 +220,7 @@ not backend-supplied.
   cap, so an unclamped one is the way around this whole section.
   `oidc.py::resolve_access_state` (re-read live) answers
   `blocked` only for an email the operator has revoked; a `blocked` account resolves to an EMPTY
-  capability set, so Tier 1b's dispatcher gate refuses its every command with the same 404 a stranger
+  capability set, so the authorization boundary's dispatcher gate refuses its every command with the same 404 a stranger
   gets. Nothing else re-checks.
 - **Who may claim the box is DECLARED, never inferred.** The claim marker `maybe_claim_default`
   writes is what names the box's own tenant — the workspace a terminal run and a browser session
@@ -234,7 +239,8 @@ not backend-supplied.
 - **PP↔TermNorm** is authenticated with a shared bearer token (`Authorization: Bearer`,
   constant-time compared on the TermNorm side) plus TermNorm's IP allowlist. Both are already
   implemented; the deploy provisions the shared secret.
-- **Per-user quotas / spend caps** (`application/jobs/quota.py`) + capacity-1 run admission.
+- **Per-user quotas / spend caps** (`application/jobs/quota.py`) + run admission against a resolved
+  machine capacity (`application/jobs/capacity.py`), which every entry point shares.
 
 ---
 
@@ -243,7 +249,7 @@ not backend-supplied.
 | Concern | Look at |
 |---|---|
 | Entitlement (one derivation, feeds caps + the served state) | `middleware/oidc.py::resolve_access_state`; the browser reads it as `MeResponse.access_state` |
-| Host privilege (no capability set — the channel IS the tier) | [ADR-0004](../adr/0004-operator-admin-channels.md) + `presentation/admin_bot.py` |
+| Host privilege (no capability set — the channel IS the boundary) | [ADR-0004](../adr/0004-operator-admin-channels.md) + `presentation/admin_bot.py` |
 | What an authenticated session holds | `middleware/oidc.py::_session_capabilities` — the owner set, or nothing if blocked |
 | Who may CLAIM the box (declared, not inferred) | `auth.py::_is_declared_host_admin` over `Settings.HOST_ADMIN_EMAIL` + `HOST_ADMIN_ISSUER` |
 | Whether an email may act as an identity at all | `identity/verifier.py` (`email_verified` required; absent counts as unverified) and `identity/github.py` (the verified list only, never the profile field) |
@@ -251,7 +257,7 @@ not backend-supplied.
 | What every account spent + produced (cross-tenant, ADR-0004 channel only) | `jobs/install_spend.py::read_install_spend`, rendered by `admin_bot.py`'s `/spend` — never an inbound route |
 | Dataset resolution (NOT a capability gate) | `store/dataset_access.py::readable_dataset_dir` — tenant content, then install content |
 | Command-verb gate (the one chokepoint) | `command_dispatcher.py::_require_capability_for` + `CAP_FOR_KIND` |
-| Command tier caps (one enumeration) | `shared/identity.py::CAMPAIGN_CAP_BY_TIER`, `OWNER_COMMAND_CAPABILITIES` |
+| Command capabilities (one enumeration) | `shared/identity.py::CAMPAIGN_CAP_BY_NAME`, `OWNER_COMMAND_CAPABILITIES` |
 | Sealed sub-principal grant store | `infrastructure/identity/grants.py` (`.promptpotter/identity/grants.json`) |
 | Delegation attenuation (enforced at read) | `grants.py::resolve_effective_capabilities`, `middleware/oidc.py::_delegated_identity` |
 | Dataset visibility gateway | `infrastructure/store/dataset_access.py` |
@@ -301,8 +307,8 @@ Run on the box for the next test-linux update; each is idempotent.
    remote box. If you want it, add a conservative default-deny-inbound rule that **preserves SSH** by
    hand — do not wire it into `bootstrap.sh`.
 
-**Still open (design, not a box step):** tier-3 **3b** (dedicated loop user + secret split) and
-**3c** (web-launch out-of-process) — see the Tier-3 section above for the honest gating.
+**Still open (design, not a box step):** OS-privilege **3b** (dedicated loop user + secret split) and
+**3c** (web-launch out-of-process) — see the OS-privilege section above for the honest gating.
 
 ---
 
@@ -330,7 +336,7 @@ HOST_ADMIN_EMAIL=you@example.com                 # who may claim this box
 HOST_ADMIN_ISSUER=https://accounts.google.com    # ...and via which provider
 ```
 
-**`ADMIN_BOT_PASSPHRASE` belongs in the BOT's file, not the app's**, once `BOT_ENV_FILE` is set (`deploy.config`). It is the second factor on inbound `/block` and `/grant`, and only the bot daemon reads it — a copy in the API's environment makes a read of that process into command authority. Token and chat id must stay in **both**: the API announces new sign-ins (`auth.py`) and its own shutdown (`main.py`) on the same bot, and without them `notify_operator` returns False and logs — the bot keeps answering commands, so nothing reports the loss. `install-admin-bot.sh` warns when a split leaves them out. `HOST_ADMIN_EMAIL` is separate and required on a hosted box; it names the one sign-in allowed to write the claim marker granting the host-admin tier. Leave it unset and no browser identity ever claims the box, which also leaves the terminal on the `default` tenant while every browser session resolves its own — the app logs a warning saying so. Then `cd ~/deploy-linux && ./install-admin-bot.sh` runs the bot under systemd, the same way the app and tunnel run.
+**`ADMIN_BOT_PASSPHRASE` belongs in the BOT's file, not the app's**, once `BOT_ENV_FILE` is set (`deploy.config`). It is the second factor on inbound `/block` and `/grant`, and only the bot daemon reads it — a copy in the API's environment makes a read of that process into command authority. Token and chat id must stay in **both**: the API announces new sign-ins (`auth.py`) and its own shutdown (`main.py`) on the same bot, and without them `notify_operator` returns False and logs — the bot keeps answering commands, so nothing reports the loss. `install-admin-bot.sh` warns when a split leaves them out. `HOST_ADMIN_EMAIL` is separate and required on a hosted box; it names the one sign-in allowed to write the claim marker granting host-admin privilege. Leave it unset and no browser identity ever claims the box, which also leaves the terminal on the `default` tenant while every browser session resolves its own — the app logs a warning saying so. Then `cd ~/deploy-linux && ./install-admin-bot.sh` runs the bot under systemd, the same way the app and tunnel run.
 
 **Daily use** — message your bot:
 
@@ -339,11 +345,11 @@ HOST_ADMIN_ISSUER=https://accounts.google.com    # ...and via which provider
 | `/block alice@example.com` | Withdraws access. She stays signed in and keeps her account; every command she sends is refused from the next request on. |
 | `/unblock alice@example.com` | Gives it back. |
 | `/blocked` | Replies with everyone currently blocked. |
-| `/grant <sub_user_id> step,create` | Delegates an **attenuated** sub-principal (ADR-0005): the delegate acts in your workspace holding only those capability tiers. |
+| `/grant <sub_user_id> step,create` | Delegates an **attenuated** sub-principal (ADR-0005): the delegate acts in your workspace holding only those capabilities. |
 | `/revoke <sub_user_id>` | Removes a delegation (the user reverts to owning only their own empty workspace). |
 | `/grants` | Replies with the current delegations. |
 
-With `ADMIN_BOT_PASSPHRASE` set, prefix **every** message with it — it is not a session, so a bare `/spend` is refused like any other: `my-word /block alice@example.com`. A refused message and one that never arrived look identical in Telegram; `journalctl -u <service>-admin-bot` is where they differ (`Ignoring message (N chars, gated=…)`). Messages from any chat id other than yours are ignored the same way. Delegation tiers are the ladder above; a `<sub_user_id>` is the canonical id shown in the delegate's own account modal (`/auth/me`). The grant lives in the sealed `.promptpotter/identity/grants.json` a delegate cannot write, and its capabilities are clamped to yours at every use — a grant can never exceed what you hold. Every change is recorded to `blocklist_audit.jsonl` or `grants_audit.jsonl` beside it, an audit trail you can `cat` on the box.
+With `ADMIN_BOT_PASSPHRASE` set, prefix **every** message with it — it is not a session, so a bare `/spend` is refused like any other: `my-word /block alice@example.com`. A refused message and one that never arrived look identical in Telegram; `journalctl -u <service>-admin-bot` is where they differ (`Ignoring message (N chars, gated=…)`). Messages from any chat id other than yours are ignored the same way. Delegation capabilities are the ladder above; a `<sub_user_id>` is the canonical id shown in the delegate's own account modal (`/auth/me`). The grant lives in the sealed `.promptpotter/identity/grants.json` a delegate cannot write, and its capabilities are clamped to yours at every use — a grant can never exceed what you hold. Every change is recorded to `blocklist_audit.jsonl` or `grants_audit.jsonl` beside it, an audit trail you can `cat` on the box.
 
 ### New accounts into your CRM (optional)
 

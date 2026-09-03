@@ -369,6 +369,6 @@ browser `session.py`, `user.py`, and `migration.py` (the first web sign-in RENAM
 `projects/default/` to `projects/{user_id}/`). It builds the Stage-0 `IdentityContext`
 that `build_stores` takes; the capability vocabulary that reads it lives one layer out
 in `shared/identity.py`. **The access model itself is a constitution, not a layer
-note** — tiers, boundaries and enforcement are owned by
+note** — boundaries, capabilities and enforcement are owned by
 [`docs/adr/0002-identity-foundation.md`](../../docs/adr/0002-identity-foundation.md) and
 [`docs/operations/access-model.md`](../../docs/operations/access-model.md).

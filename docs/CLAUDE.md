@@ -34,7 +34,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | How does information flow through L1 / L2 / L3? How is L1's evidence surface built? | [`developer/dispatch-hub.md`](developer/dispatch-hub.md) (§ L1 layout for the latter) |
 | How does a layer heal a failure? | [`developer/self-healing-internals.md`](developer/self-healing-internals.md) |
 | What model + `reasoning_effort` for this dataset? | [`operations/dataset-reasoning-matrix.md`](operations/dataset-reasoning-matrix.md) (canonical — NOT self-optimizing campaign NOTES.md) |
-| What's the full access/security model — tiers, boundaries, enforcement, deploy checklist? | [`operations/access-model.md`](operations/access-model.md) |
+| What's the full access/security model — boundaries, enforcement, deploy checklist? | [`operations/access-model.md`](operations/access-model.md) |
 | How do I freeze a buggy cycle as a test fixture? | Vitest only — [`../webapp/CLAUDE.md`](../webapp/CLAUDE.md) § Testing posture. The pytest frozen manifests were deleted: [`../tests/CLAUDE.md`](../tests/CLAUDE.md) § Frozen cycle fixtures says why, and where the guarantee went instead. |
 | I changed the formula / a PoBB setting / the engine — do my measurements still carry over, or must I fork? | [`operations/mask-projection.md`](operations/mask-projection.md) |
 

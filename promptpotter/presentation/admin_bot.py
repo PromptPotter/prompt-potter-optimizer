@@ -29,7 +29,7 @@ from promptpotter.infrastructure.identity.grants import (
 )
 from promptpotter.infrastructure.identity.migration import registered_user_id
 from promptpotter.infrastructure.identity.paths import IdentityPaths, default_identity_paths
-from promptpotter.shared.identity import capabilities_from_tiers
+from promptpotter.shared.identity import CAMPAIGN_CAP_BY_NAME, capabilities_from_names
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ _POLL_TIMEOUT_S = 50
 _RETRY_BACKOFF_S = 5
 _USAGE = (
     "Commands:\n/block <email>\n/unblock <email>\n/blocked\n"
-    "/grant <sub_user_id> <tiers>\n/revoke <sub_user_id>\n/grants\n/spend"
+    "/grant <sub_user_id> <capabilities>\n/revoke <sub_user_id>\n/grants\n/spend"
 )
 
 
@@ -124,7 +124,7 @@ def _render_install_spend() -> str:
 
 
 def _handle_grant_command(command: str, argument: str, actor: str, paths: IdentityPaths) -> str:
-    """The delegation facet: /grants (list), /grant <sub> <tiers>, /revoke <sub>."""
+    """The delegation facet: /grants (list), /grant <sub> <capabilities>, /revoke <sub>."""
     if command == "grants":
         grants = list_grants(paths.grants)
         if not grants:
@@ -147,20 +147,21 @@ def _handle_grant_command(command: str, argument: str, actor: str, paths: Identi
         return (
             f"Revoked {argument.strip()}." if removed else f"No delegation for {argument.strip()}."
         )
-    # /grant <sub_user_id> <tiers>
+    # /grant <sub_user_id> <capabilities>
     parts = argument.split(maxsplit=1)
     if len(parts) < 2:
-        return "Usage: /grant <sub_user_id> <tiers>  (tiers e.g. step,create)"
-    sub_user_id, tiers_csv = parts[0].strip(), parts[1]
+        return "Usage: /grant <sub_user_id> <capabilities>  (e.g. step,create)"
+    sub_user_id, caps_csv = parts[0].strip(), parts[1]
     delegator = registered_user_id(paths.default_claim_marker)
     if delegator is None:
         return "Cannot grant: no registered operator to delegate from (sign in once first)."
     try:
-        caps = capabilities_from_tiers(tiers_csv.split(","))
+        caps = capabilities_from_names(caps_csv.split(","))
     except ValueError as exc:
         return f"Error: {exc}"
     if not caps:
-        return "Error: name at least one tier (step, run, create, budget, lifecycle, babysit)."
+        # Derived, never spelled: the hand-written list here had already lost `lookahead`.
+        return f"Error: name at least one capability ({', '.join(sorted(CAMPAIGN_CAP_BY_NAME))})."
     try:
         grant_principal(
             paths.grants,

@@ -179,7 +179,7 @@ def _armed_cells(session: Session) -> int:
     declarations beside them, and the ``campaign.lookahead`` cap. **Never "recover" the discarded
     acquisition** — recording it makes the run's rows depend on in-flight depth, forcing a
     ``human_intervened`` stamp and devaluing the campaign; that discard is the design. Why it is
-    browser-only with no CLI verb: ``docs/operations/access-model.md`` § Tier 1a."""
+    browser-only with no CLI verb: ``docs/operations/access-model.md`` § host-admin ↔ user."""
     check = session.sample_lookahead_check
     requested = check() if check is not None else 1
     return max(1, min(requested, session.backend_client.max_cells_in_flight))

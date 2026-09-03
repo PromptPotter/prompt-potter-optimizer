@@ -325,7 +325,7 @@ def cleanup_stub_fork_if_empty(
 
 def steer_is_babysit(stores: Stores, campaign_id: str, overlay: dict[str, Any] | None) -> bool:
     """Does *overlay* steer a node OUTSIDE the ORIGIN's sanctioned models — the ADR-0005 §4 babysit
-    action, a distinct capability above the RUN-tier fork?
+    action, a distinct capability above the `campaign.run` fork?
 
     ONE read of the sanction, off the campaign manifest where it is FROZEN. A session's resolved
     config is the wrong list — it has already been through the inherited overlay and the cycle

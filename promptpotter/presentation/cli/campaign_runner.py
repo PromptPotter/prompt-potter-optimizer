@@ -104,7 +104,7 @@ CLI_VERB_FOR_KIND: dict[str, str | None] = {
     "compact-archive": "compact-archive",
     # Browser-only ON PURPOSE, and the absence IS the boundary: look-ahead spends the box's shared
     # provider rate bucket, so an assistant may recommend the control but never press it. Root
-    # `CLAUDE.md` § Conventions; `docs/operations/access-model.md` § Tier 1a.
+    # `CLAUDE.md` § Conventions; `docs/operations/access-model.md` § host-admin ↔ user.
     "set-sample-lookahead": None,
 }
 _named_verbs = {v for v in CLI_VERB_FOR_KIND.values() if v is not None}
