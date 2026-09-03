@@ -48,7 +48,6 @@ __all__ = [
     "graduate_ruler_model",
     "observations_from_results",
     "parent_level_trajectory",
-    "ruler_expected_accuracy",
     "select_round_subset",
     "theta_lift_over_parent",
 ]
@@ -80,17 +79,6 @@ def graded_response(result: Mapping[str, Any]) -> float:
             "campaign's CellScorer."
         )
     return min(max(float(result["objective"] or 0.0), 0.0), 1.0)
-
-
-def ruler_expected_accuracy(theta: float | None, ruler: DeltaRuler | None) -> float | None:
-    """Ability re-projected onto the FIXED ruler — the subset-invariant peer of a round's raw accuracy.
-    ``None`` at cold start (no ability or ruler), where callers fall back to raw accuracy."""
-    if theta is None or ruler is None or not ruler.delta:
-        return None
-    etas = np.array(
-        [a * (theta - d) for d, a in (ruler_entry(v) for v in ruler.entries().values())]
-    )
-    return float(np.mean(1.0 / (1.0 + np.exp(-np.clip(etas, -50, 50)))))
 
 
 def parent_level_trajectory(

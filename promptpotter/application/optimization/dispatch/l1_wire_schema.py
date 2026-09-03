@@ -39,6 +39,15 @@ __all__ = [
     "effective_l1_field_names",
 ]
 
+# A ceiling is prompt text declared on a REWRITABLE PROMPT FIELD; an entry naming anything else
+# declares a bound the `.get(param)` below can never fire on, so it reads as a live cap while
+# binding nothing. The two tables are authored in two modules, and this is the one place both
+# are in scope — so the subset is asserted here rather than pinned by a test.
+assert set(OPTIMIZER_PROMPT_FIELD_MAX_CHARS) <= set(PROMPT_STRING_FIELDS), (
+    "OPTIMIZER_PROMPT_FIELD_MAX_CHARS declares a ceiling on a non-prompt field: "
+    f"{sorted(set(OPTIMIZER_PROMPT_FIELD_MAX_CHARS) - set(PROMPT_STRING_FIELDS))}"
+)
+
 
 def _inline_refs(node: Any, defs: dict[str, dict[str, Any]]) -> Any:
     """Provider ``response_format`` wants a self-contained schema, so Pydantic's ``$defs`` table is

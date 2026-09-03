@@ -192,17 +192,6 @@ namespace_packages = false
 # stat() tax that dominated every warm run.
 sqlite_cache = true
 
-# Tests are loosely typed by charter — strict applies to shipped code only.
-[[tool.mypy.overrides]]
-module = "tests.*"
-disallow_any_generics = false
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
-disallow_untyped_calls = false
-check_untyped_defs = false
-warn_return_any = false
-warn_unused_ignores = false
-
 # Deps we never type-check through. `follow_imports = "skip"` (not just
 # ignore_missing_imports, a no-op when the package is installed + typed) stops
 # mypy expanding their bodies — mlflow alone dragged the SQLAlchemy dialect tree

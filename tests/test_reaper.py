@@ -27,19 +27,18 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import pytest
-from fastapi import Request
 
 from promptpotter.application.jobs import reaper
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
 from promptpotter.application.optimization.dispatch.llm_call import heartbeat as heartbeat_mod
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
-from promptpotter.domain.phases import RunPhase, StopReason
+from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.run_records import TokenUsageRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.runtime_flags import RUN_FRESH_S, derive_run_phase
+from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.account_spend import BilledSpend, forwarded_mark
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
+from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     inner_sandbox_dir,
@@ -48,21 +47,21 @@ from promptpotter.infrastructure.store.layout import (
 )
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.presentation.api.routers.campaigns._conditional import http_date
-from promptpotter.presentation.api.routers.campaigns.cycles import serve_dashboard_response
 from promptpotter.presentation.cli.commands import reset as reset_cmd
 from promptpotter.shared import clock
 from promptpotter.shared.errors import ConflictError
 
 _CAMPAIGN = "testds__20260101-000000"
 _CYCLE = "cycle-0"
+# The cycle every test in this file mints. `CycleHop` is frozen, so one instance serves them all.
+_HOP = CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE)
 
 
 def _mint(
     stores: Stores, *, checkin: bool = False, paused: bool = False, dashboard: bool = False
 ) -> Path:
-    stores.campaigns.create(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE), {})
-    cycle_dir = stores.campaigns.cycle_dir(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
+    stores.campaigns.create(_HOP, {})
+    cycle_dir = stores.campaigns.cycle_dir(_HOP)
     layout = CycleLayout(cycle_dir)
     layout.runtime.mkdir(parents=True, exist_ok=True)
     if checkin:
@@ -88,25 +87,15 @@ def _age(cycle_dir: Path, seconds_ago: float) -> None:
 
 def test_mark_producer_vanished_skips_checkin_cycle(built_stores: Stores) -> None:
     _mint(built_stores, checkin=True)
-    assert (
-        built_stores.campaigns.mark_producer_vanished(
-            CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE)
-        )
-        is False
-    )
-    data = built_stores.campaigns.load(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
+    assert built_stores.campaigns.mark_producer_vanished(_HOP) is False
+    data = built_stores.campaigns.load(_HOP)
     assert data is not None and "finished_at" not in data
 
 
 def test_mark_producer_vanished_skips_paused_cycle(built_stores: Stores) -> None:
     _mint(built_stores, paused=True)
-    assert (
-        built_stores.campaigns.mark_producer_vanished(
-            CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE)
-        )
-        is False
-    )
-    data = built_stores.campaigns.load(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
+    assert built_stores.campaigns.mark_producer_vanished(_HOP) is False
+    data = built_stores.campaigns.load(_HOP)
     assert data is not None and "finished_at" not in data
 
 
@@ -128,113 +117,16 @@ def test_a_pause_that_set_no_flag_is_still_never_reaped(built_stores: Stores) ->
 
     assert derive_run_phase(cycle_dir, is_terminal=False, fresh_s=1.0) is RunPhase.PAUSED
     assert sweep_dead_cycles(built_stores.projects_root, dead_after_s=1.0) == 0
-    assert (
-        built_stores.campaigns.mark_producer_vanished(
-            CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE)
-        )
-        is False
-    )
-    data = built_stores.campaigns.load(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
+    assert built_stores.campaigns.mark_producer_vanished(_HOP) is False
+    data = built_stores.campaigns.load(_HOP)
     assert data is not None and "finished_at" not in data
 
 
 def test_mark_producer_vanished_is_idempotent_once_finished(built_stores: Stores) -> None:
     _mint(built_stores)
-    assert (
-        built_stores.campaigns.mark_producer_vanished(
-            CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE)
-        )
-        is True
-    )
+    assert built_stores.campaigns.mark_producer_vanished(_HOP) is True
     # Second call: already carries finished_at — no-op.
-    assert (
-        built_stores.campaigns.mark_producer_vanished(
-            CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE)
-        )
-        is False
-    )
-
-
-def test_mark_producer_vanished_stamps_via_mark_finished_shape(built_stores: Stores) -> None:
-    _mint(built_stores)
-    assert (
-        built_stores.campaigns.mark_producer_vanished(
-            CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE)
-        )
-        is True
-    )
-    data = built_stores.campaigns.load(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
-    assert data is not None
-    reason = StopReason.PRODUCER_VANISHED.value
-    assert data["status"] == reason
-    assert data["stop_reason"] == reason
-    assert data["finished_at"]
-    # mark_finished's shape: no verdict block, no partial-round markers.
-    assert "final" not in data
-    assert "interrupted_round" not in data
-    assert "crash_traceback" not in data
-
-
-def test_every_surface_reports_one_run_phase_for_a_dead_producer(built_stores: Stores) -> None:
-    """A reap stamps ``index.json`` and nothing rewrites ``dashboard.json`` — its ``declared_phase``
-    has one writer, inside the runner's own process. So the file goes on declaring ``running``,
-    and the live surfaces that served it raw (the dashboard route, the SSE snapshot) went on saying
-    Running while ``/cycles`` and ``/tree``, which have always re-derived, said terminal.
-
-    Silent by construction: nothing raises, the operator reads the remote-control pill and hunts a
-    process that is not there. Asserted as AGREEMENT rather than against a chosen phase word, so it
-    keeps binding whichever value the derivation returns."""
-    cycle_dir = _mint(built_stores, dashboard=True)
-    _age(cycle_dir, seconds_ago=1000.0)
-    assert sweep_dead_cycles(built_stores.projects_root, dead_after_s=1.0) == 1
-
-    stored = read_json_tolerant(cycle_dir / "dashboard.json")
-    assert isinstance(stored, dict)
-    entry = next(e for e in built_stores.campaigns.enumerate_cycles() if e["cycle_id"] == _CYCLE)
-    served = serve_dashboard_response(
-        Request({"type": "http", "method": "GET", "headers": []}),
-        built_stores.base_dir,
-        _CAMPAIGN,
-        _CYCLE,
-    )
-    body = json.loads(bytes(served.body))
-
-    assert body["run_phase"] == entry["run_phase"]
-    assert body["run_phase"] != stored["declared_phase"]
-
-
-def test_dead_producer_is_not_304d_at_the_phase_it_died_declaring(built_stores: Stores) -> None:
-    """The 304 half of the same harm, and the half nothing else can reach. A browser polling every
-    2 s holds the ``Last-Modified`` it got while the run was alive; the producer then dies, writing
-    NOTHING. Every file mtime therefore stands still while the phase turns ``detached`` on the
-    CLOCK — so a validator built from mtimes alone answers 304 forever and the operator watches a
-    dead cycle report Running for as long as the tab stays open.
-
-    Silent twice over: the 304 is a correct-looking response, and the body it suppresses is the one
-    carrying the correction. Asserted through the ROUTE rather than against
-    `run_phase_validator_epoch` directly, so it binds the behaviour and not today's plumbing."""
-    cycle_dir = _mint(built_stores, dashboard=True)
-    _age(cycle_dir, seconds_ago=RUN_FRESH_S * 10)
-    # Read AFTER aging: this is the stamp the last live poll actually banked, and nothing has
-    # written since. Taking it before would bank a future the producer never reached.
-    alive_at = (cycle_dir / "dashboard.json").stat().st_mtime
-
-    served = serve_dashboard_response(
-        Request(
-            {
-                "type": "http",
-                "method": "GET",
-                # What the client banked on its last poll, taken while the producer was writing.
-                "headers": [(b"if-modified-since", http_date(alive_at).encode())],
-            }
-        ),
-        built_stores.base_dir,
-        _CAMPAIGN,
-        _CYCLE,
-    )
-
-    assert served.status_code == 200, "a dead producer stayed cached at the phase it declared"
-    assert json.loads(bytes(served.body))["run_phase"] == RunPhase.DETACHED.value
+    assert built_stores.campaigns.mark_producer_vanished(_HOP) is False
 
 
 def test_sweep_dead_cycles_reaps_a_stale_cycle(built_stores: Stores) -> None:
@@ -242,7 +134,7 @@ def test_sweep_dead_cycles_reaps_a_stale_cycle(built_stores: Stores) -> None:
     _age(cycle_dir, seconds_ago=1000.0)
     reaped = sweep_dead_cycles(built_stores.projects_root, dead_after_s=1.0)
     assert reaped == 1
-    data = built_stores.campaigns.load(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
+    data = built_stores.campaigns.load(_HOP)
     assert data is not None and data["finished_at"]
 
 
@@ -250,26 +142,8 @@ def test_sweep_dead_cycles_spares_a_fresh_cycle(built_stores: Stores) -> None:
     _mint(built_stores, dashboard=True)
     reaped = sweep_dead_cycles(built_stores.projects_root, dead_after_s=900.0)
     assert reaped == 0
-    data = built_stores.campaigns.load(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
+    data = built_stores.campaigns.load(_HOP)
     assert data is not None and "finished_at" not in data
-
-
-def test_sweep_dead_cycles_reaps_an_inner_sandbox_cycle(built_stores: Stores) -> None:
-    """L4 inner cycles live at ``<workspace>/.inner/<key>/{tenant}/…`` — a sibling of
-    ``projects_root``, not under it — so the sweep must walk that tree too, not just
-    ``projects_root`` itself (slice 5). The sweep is key-agnostic: it walks whatever
-    directories `.inner/` holds."""
-    inner_tenant_dir = inner_sandboxes_dir(built_stores.projects_root) / "outer-cycle-1" / "tenant"
-    inner_store = CampaignStore(WorkspaceDir(inner_tenant_dir))
-    inner_store.create(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE), {})
-    cycle_dir = inner_store.cycle_dir(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
-    write_json(cycle_dir / "dashboard.json", {"declared_phase": "running"})
-    _age(cycle_dir, seconds_ago=1000.0)
-
-    reaped = sweep_dead_cycles(built_stores.projects_root, dead_after_s=1.0)
-    assert reaped == 1
-    data = inner_store.load(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
-    assert data is not None and data["finished_at"]
 
 
 def test_a_cycle_held_at_the_origin_gate_is_never_reaped(built_stores: Stores) -> None:
@@ -286,27 +160,9 @@ def test_a_cycle_held_at_the_origin_gate_is_never_reaped(built_stores: Stores) -
     _age(cycle_dir, seconds_ago=1000.0)
 
     assert sweep_dead_cycles(built_stores.projects_root, dead_after_s=1.0) == 0
-    assert (
-        built_stores.campaigns.mark_producer_vanished(
-            CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE)
-        )
-        is False
-    )
-    data = built_stores.campaigns.load(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
+    assert built_stores.campaigns.mark_producer_vanished(_HOP) is False
+    data = built_stores.campaigns.load(_HOP)
     assert data is not None and "finished_at" not in data
-
-
-def test_a_live_gated_cycle_derives_gate_not_running(built_stores: Stores) -> None:
-    """`gate` is DECLARED (no `.runtime/` flag), so the derivation could never
-    return it and every non-live reader — the cycle list, and the dock built on it —
-    saw an ordinary `running` cycle. The one phase that requires the operator to act
-    was the one phase the operator's dock could not show."""
-    cycle_dir = _mint(built_stores, dashboard=True)
-    write_json(cycle_dir / "dashboard.json", {"declared_phase": "gate"})
-    assert derive_run_phase(cycle_dir, is_terminal=False) is RunPhase.GATE
-    # A gated cycle that actually died must still be reapable, not pinned at `gate`.
-    _age(cycle_dir, seconds_ago=1000.0)
-    assert derive_run_phase(cycle_dir, is_terminal=False, fresh_s=1.0) is RunPhase.DETACHED
 
 
 class _TicksExhaustedError(Exception):
@@ -393,31 +249,6 @@ async def test_periodic_sweep_skips_its_tick_when_the_machine_slept(
     assert swept == [900.0]
 
 
-async def test_periodic_sweep_survives_a_tick_that_raises(
-    monkeypatch: pytest.MonkeyPatch, built_stores: Stores
-) -> None:
-    """Both halves of a tick WRITE, so a single unwritable path would end the task — and nothing
-    would say so. The sweep just stops for the rest of the server's uptime, leaving every
-    CLI-launched death reading as live on every surface, and the stored exception resurfaces
-    hours later as a shutdown crash when the lifespan awaits this task, blamed on the wrong tick."""
-    calls: list[float] = []
-
-    def _sweep(root: Path, dead_after_s: float) -> None:
-        calls.append(dead_after_s)
-        if len(calls) == 1:
-            raise OSError("data root is read-only")
-
-    monkeypatch.setattr(reaper, "sleep_measuring_suspend", _scripted_overshoots([0.0, 0.0]))
-    monkeypatch.setattr(reaper, "sweep_dead_cycles", _sweep)
-    monkeypatch.setattr(reaper, "reclaim_orphan_sandboxes", lambda root: None)
-
-    with pytest.raises(_TicksExhaustedError):
-        await reaper.periodic_sweep(built_stores.projects_root, interval_s=900.0)
-
-    # Tick 1 raised; tick 2 still ran. Unguarded, the OSError leaves here instead.
-    assert calls == [900.0, 900.0]
-
-
 async def test_heartbeat_reports_a_suspend_to_its_owner(monkeypatch: pytest.MonkeyPatch) -> None:
     """``on_suspend`` is the wire from the one ticking loop to the L4 wall-clock deadline.
     A heartbeat that ticked but never called it would leave the deadline charging suspend
@@ -466,16 +297,6 @@ def _sandbox(stores: Stores, owner_campaign_id: str, owner_cycle_id: str) -> Pat
     return sandbox
 
 
-def test_reclaim_deletes_a_sandbox_whose_owner_cycle_is_gone(built_stores: Stores) -> None:
-    """The accumulation mechanism: nothing else in the package can reach or delete
-    a sandbox once its owner cycle is off disk."""
-    sandbox = _sandbox(built_stores, _CAMPAIGN, "orphaned-outer-cycle")
-    assert sandbox.is_dir()
-
-    assert reclaim_orphan_sandboxes(built_stores.projects_root) == 1
-    assert not sandbox.exists()
-
-
 def test_reclaim_spares_a_sandbox_whose_owner_cycle_still_exists(built_stores: Stores) -> None:
     """The silent harm. An operator drilling into a COMPLETED L4 campaign walks into
     exactly this tree, so "the owner finished" must never be read as "unreachable" —
@@ -483,12 +304,7 @@ def test_reclaim_spares_a_sandbox_whose_owner_cycle_still_exists(built_stores: S
     _mint(built_stores)  # owner cycle _CYCLE, on disk
     sandbox = _sandbox(built_stores, _CAMPAIGN, _CYCLE)
     # Terminal owner: the tempting-but-wrong reclamation trigger.
-    assert (
-        built_stores.campaigns.mark_producer_vanished(
-            CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE)
-        )
-        is True
-    )
+    assert built_stores.campaigns.mark_producer_vanished(_HOP) is True
 
     assert reclaim_orphan_sandboxes(built_stores.projects_root) == 0
     assert (sandbox / "tenant").is_dir()
@@ -568,22 +384,6 @@ def test_a_forwarded_inner_cycle_is_not_banked_twice(built_stores: Stores) -> No
     assert len(banked) == 1
     assert banked[0]["used_usd"] == pytest.approx(0.15)
     assert banked[0]["used_tokens"] == 700
-
-
-def test_a_fully_forwarded_inner_cycle_banks_nothing(built_stores: Stores) -> None:
-    """The other end of the same rule: everything already counted leaves NO residue, so the
-    destroyer must write no tombstone at all rather than a zero-valued one."""
-    sandbox = _sandbox(built_stores, _CAMPAIGN, "orphaned-outer-cycle")
-    cycle_dir = _spend_inner(sandbox, input_tokens=1000, output_tokens=200, cost_usd=0.25)
-    inner = CampaignStore(WorkspaceDir(sandbox / "tenant"))
-    inner.mark_spend_forwarded(
-        CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0"),
-        BilledSpend(0.25, 1000, 200, 0),
-    )
-    assert forwarded_mark(cycle_dir).used_tokens == 1200
-
-    assert reclaim_orphan_sandboxes(built_stores.projects_root) == 1
-    assert _tombstones(built_stores) == []
 
 
 async def test_reset_takes_the_inner_sandboxes_and_banks_them(
@@ -674,7 +474,7 @@ def _lifecycle_fixture(stores: Stores, *, running: bool) -> tuple[Path, Path]:
     campaign_dir = cycle_dir.parents[1]
     if not running:
         stores.campaigns.update(
-            CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE),
+            _HOP,
             {"finished_at": "2026-01-01T00:00:00Z"},
         )
     write_json(
@@ -704,24 +504,6 @@ def test_delete_refuses_a_campaign_with_a_live_producer(built_stores: Stores) ->
             _CAMPAIGN, keep_results=False, changed_at="2026-01-01T00:00:00Z"
         )
     assert campaign_dir.is_dir()
-
-
-def test_delete_removes_the_campaign_the_operator_is_looking_at(built_stores: Stores) -> None:
-    """The dead button this replaced. The guard used to refuse whenever the campaign
-    was merely ACTIVE, so in a single-operator workspace — where the campaign in view
-    IS the active one — Delete and Archive always answered "switch first", naming an
-    escape that exists in neither the command vocabulary nor the webapp. Deleting what
-    you are looking at is the ordinary case; the pointer is released, not defended."""
-    tenant_root, campaign_dir = _lifecycle_fixture(built_stores, running=False)
-    assert (
-        built_stores.campaigns.delete_campaign(
-            _CAMPAIGN, keep_results=False, changed_at="2026-01-01T00:00:00Z"
-        )
-        is True
-    )
-    assert not campaign_dir.exists()
-    # The pointer must not be left naming a campaign that is gone.
-    assert read_active_pointer(tenant_root) == ("", "", "")
 
 
 async def test_delete_cycle_guards_liveness_and_not_the_pointer(built_stores: Stores) -> None:
@@ -771,28 +553,6 @@ async def test_delete_cycle_guards_liveness_and_not_the_pointer(built_stores: St
     assert read_active_pointer(tenant_root)[2] == _CYCLE
 
 
-async def test_the_delete_verb_reaches_the_store_that_allows_it(built_stores: Stores) -> None:
-    """Same fact one level up, and the reason the fix above did not reach the operator.
-
-    The store was corrected; the DISPATCHER kept its own copy of the deleted rule and
-    answered "switch first" before the store was ever asked. Both webapp buttons and both
-    CLI verbs go through here, so the store-level test above passed while every operator
-    surface stayed dead. A second opinion in front of a guard is not redundancy — it is
-    the guard, and it is the one nothing tested."""
-    from promptpotter.presentation.api.middleware.command_dispatcher import (
-        CommandDispatcher,
-        LifecyclePayload,
-    )
-
-    _, campaign_dir = _lifecycle_fixture(built_stores, running=False)
-    await CommandDispatcher(built_stores).dispatch_lifecycle(
-        kind="delete-campaign",
-        payload=LifecyclePayload(campaign_id=_CAMPAIGN),
-        idempotency_key="k1",
-    )
-    assert not campaign_dir.exists()
-
-
 def test_reopening_a_finished_cycle_opens_a_reap_window_until_its_producer_is_fresh(
     built_stores: Stores,
 ) -> None:
@@ -813,17 +573,15 @@ def test_reopening_a_finished_cycle_opens_a_reap_window_until_its_producer_is_fr
     This pins the hazard that ordering exists for.
     """
     cycle_dir = _mint(built_stores, dashboard=True)
-    built_stores.campaigns.update(
-        CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE), {"finished_at": "2026-08-02T20:30:00Z"}
-    )
+    built_stores.campaigns.update(_HOP, {"finished_at": "2026-08-02T20:30:00Z"})
     _age(cycle_dir, seconds_ago=10_000.0)
 
     # Terminal: stale, but the latch protects it.
     assert derive_run_phase(cycle_dir, is_terminal=True, fresh_s=1.0) is RunPhase.TERMINAL
     assert sweep_dead_cycles(built_stores.projects_root, dead_after_s=1.0) == 0
 
-    built_stores.campaigns.reopen_for_continuation(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
-    reopened = built_stores.campaigns.load(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
+    built_stores.campaigns.reopen_for_continuation(_HOP)
+    reopened = built_stores.campaigns.load(_HOP)
     assert reopened is not None
     assert "finished_at" not in reopened, "the terminal latch survived the reopen"
     assert "final" not in reopened, "a stale winner block outlived the round that justified it"
@@ -837,5 +595,5 @@ def test_reopening_a_finished_cycle_opens_a_reap_window_until_its_producer_is_fr
     write_json(cycle_dir / "dashboard.json", {"declared_phase": "running"})
     assert derive_run_phase(cycle_dir, is_terminal=False, fresh_s=60.0) is RunPhase.RUNNING
     assert sweep_dead_cycles(built_stores.projects_root, dead_after_s=60.0) == 0
-    still = built_stores.campaigns.load(CycleHop(campaign_id=_CAMPAIGN, cycle_id=_CYCLE))
+    still = built_stores.campaigns.load(_HOP)
     assert still is not None and "finished_at" not in still

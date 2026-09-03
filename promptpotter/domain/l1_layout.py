@@ -403,7 +403,13 @@ def coerce_l1_layout(raw_layout: Any, *, base: L1Layout) -> L1Layout | None:
     for slot in L1_LAYOUT_SLOTS:
         kept = [n for n in base.slot(slot) if moves.get(n, slot) == slot]
         update[slot] = kept + [n for n, s in moves.items() if s == slot and n not in kept]
-    return base.model_copy(update=update, deep=True)
+    out = base.model_copy(update=update, deep=True)
+    # "A panel is MOVED" is the whole contract above, and a panel placed twice is rendered twice
+    # into one prompt with no validator between here and the wire. Asserted over every real edit
+    # rather than over a test's enumeration of them.
+    placed = out.all_placeholders()
+    assert len(placed) == len(set(placed)), f"a layout edit placed one panel twice: {placed}"
+    return out
 
 
 class LayoutValidationResult:

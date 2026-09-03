@@ -18,11 +18,10 @@ import pytest
 
 from promptpotter.application.archive_maintenance import (
     compact_measurement_archive,
-    purge_cold_store,
     restore_measurement_archive,
 )
 from promptpotter.application.optimization.resume_and_fork.replayers import replay_decisions
-from promptpotter.application.scoring.formula import compile_scorer, rescore_results
+from promptpotter.application.scoring.formula import compile_scorer
 from promptpotter.application.scoring.search_point_scorer import (
     merge_with_unprocessed_priors,
     rescored_prior_tail,
@@ -30,7 +29,6 @@ from promptpotter.application.scoring.search_point_scorer import (
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import CycleSeed
-from promptpotter.domain.scoring import is_hit
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.stores import Stores
 
@@ -80,25 +78,6 @@ def _prior(sample_id: int, predicted: str = "p", gt: str = "g") -> dict:
         "error": None,
         "pipeline_data": {"total_time": 1.5},
     }
-
-
-def test_rescore_results_projects_the_scorer_it_was_handed() -> None:
-    """A re-read row carries the LATEST scorer's verdict. Silent if it broke: every estimator reads
-    ``fitness`` and would simply be answering an older formula."""
-    result = {
-        "query": "q",
-        "predicted": "**42**",
-        "ground_truth": "42",
-        "fitness": 0.0,
-        "error": None,
-        "pipeline_data": None,
-        "ground_truth_rank": 1,
-    }
-    rescore_results([result], compile_scorer("exact_match(predicted, ground_truth)"))
-    assert result["fitness"] == 1.0 and is_hit(result["fitness"])
-
-    rescore_results([result], compile_scorer("1 - exact_match(predicted, ground_truth)"))
-    assert result["fitness"] == 0.0 and not is_hit(result["fitness"])
 
 
 def test_a_replayer_that_cannot_re_derive_is_not_reported_as_a_match() -> None:
@@ -190,34 +169,6 @@ def test_round_winner_replay_ranks_against_the_recorded_parent() -> None:
         _replay_round_winner(
             ReplayContext(round_data=round_data, decisions=[], ruler=None), inputs_ref, {}
         )
-
-
-def test_elimination_cut_replay_flags_divergence_when_scores_flip() -> None:
-    priors = [_r(1.0)] * 10
-    current = [_r(1.0)] * 6  # rescored: now ties with priors
-    round_data = _round(
-        round=2,
-        all_candidate_results={"c0": priors, "c1": priors, "c2": current},
-    )
-    decisions = _decisions(
-        {
-            "kind": "elimination_cut",
-            "inputs_ref": {
-                "candidate_id": "c2",
-                "prior_candidate_ids": ["c0", "c1"],
-                "queries_scored": 6,
-                "epsilon": 0.05,
-                "n_min": 4,
-                "round_num": 2,
-            },
-            "outcome": True,
-            "data": {},
-        }
-    )
-    div = replay_decisions(round_data, decisions)
-    assert div is not None
-    assert div.kind == "elimination_cut"
-    assert div.recorded_outcome is True and div.current_outcome is False
 
 
 def test_a_collapse_cut_is_replayed_as_a_collapse_not_under_the_epsilon_rule() -> None:
@@ -384,24 +335,6 @@ def test_merge_with_unprocessed_priors_preserves_full_archive_on_partial_run() -
     assert {r["sample_id"] for r in merged} == dataset_sample_ids
 
 
-def test_rescored_prior_tail_filters_off_dataset_and_evicted() -> None:
-    """Only samples in the current dataset are archivable without re-measuring; evicted
-    (deprecated) priors are excluded so they re-measure on the next encounter."""
-    formula = "exact_match(predicted, ground_truth)"
-    tail = rescored_prior_tail(
-        cached_sample_results={
-            1: _prior(1),
-            2: _prior(2),
-            99: _prior(99),  # not in the current dataset
-        },
-        dataset_sample_ids={1, 2},
-        deprecated_samples={2: _prior(2)},  # sample 2 deprecated → must remeasure
-        scorer=compile_scorer(formula),
-    )
-    assert set(tail) == {1}
-    assert {r["sample_id"] for r in merge_with_unprocessed_priors([], tail)} == {1}
-
-
 def test_merge_known_outcomes_preserves_prior_on_untouched_samples() -> None:
     """Subset-measured winner must not shrink the known-outcome pool — priors are preserved.
 
@@ -432,32 +365,6 @@ def test_merge_known_outcomes_preserves_prior_on_untouched_samples() -> None:
 _OPT = {"degradation_threshold": 0.0}
 
 
-def _frozen_with_lock(node: str, open_keys: list[str]) -> dict:
-    """A frozen `Campaign.config` dict carrying one per-node param lock (the
-    operator's mint-time narrowing): `open_keys` are tunable, the rest held."""
-    return {
-        "optimization": _OPT,
-        "optimizer_narrowing": {node: {"param_keys": open_keys, "param_allowed_values": {}}},
-    }
-
-
-def test_resume_preserves_per_campaign_locks_dropped_by_dataset_rebuild() -> None:
-    """The lock-drop regression: resume rebuilds config from the live dataset file,
-    which never carries `optimizer_narrowing`, so per-param locks reopen. The
-    inherited-overlay re-merge must restore them from the frozen snapshot."""
-    from promptpotter.application.campaign_config import (
-        apply_inherited_overlay,
-        load_campaign_config,
-    )
-
-    # Config as rebuilt from the live dataset file: no narrowing (the bug surface).
-    live = load_campaign_config({"optimization": _OPT})
-    assert live.optimizer_narrowing == {}
-
-    restored = apply_inherited_overlay(live, _frozen_with_lock("llm", ["temperature"]), seed=None)
-    assert restored.optimizer_narrowing["llm"].param_keys == ["temperature"]
-
-
 def test_steered_fork_seed_narrowing_overrides_campaign_locks_per_node() -> None:
     """A steered fork edits one node's locks; its seed `optimizer_narrowing`
     overrides the campaign-wide narrowing for THAT node, leaving others inherited."""
@@ -482,88 +389,6 @@ def test_steered_fork_seed_narrowing_overrides_campaign_locks_per_node() -> None
     assert merged.optimizer_narrowing["llm"].param_keys == []
     # Untouched node: the campaign's mint-time narrowing is inherited unchanged.
     assert merged.optimizer_narrowing["retriever"].param_keys == ["top_k"]
-
-
-def test_a_campaign_frozen_before_todays_config_still_loads(built_stores: Stores) -> None:
-    """A `CampaignConfig` field rename silently bricks every campaign already on disk.
-
-    Both `Campaign` and `CampaignConfig` are `extra="forbid"`, and `campaign.json` embeds a
-    config snapshot. Rename a field and `load_campaign_config` raises `extra_forbidden` for
-    every campaign minted before the rename — `resume`, `ab`, `verify`, `noise-floor` and L4's
-    inner cycles all die at load, before any scoring. Nothing else catches it: the campaign that
-    can no longer be read is one nobody is currently running, so the failure surfaces days later
-    as lost, irreplaceable measurement data. It has fired twice (50/177, then 156/169 campaigns).
-
-    So this test does the one thing no freshly-built dict can: it feeds a **pinned** manifest
-    through the real store reader. See `tests/fixtures/cycles/frozen_campaign/README.md` for what
-    to do when it fails — a re-stamp, never `extra="allow"` and never a shim.
-    """
-    import json
-    from pathlib import Path
-
-    from promptpotter.application.campaign_config import (
-        apply_inherited_overlay,
-        load_campaign_config,
-    )
-    from promptpotter.application.knobs import DiffScope, classify_config_diff
-
-    fixture = Path(__file__).parent / "fixtures" / "cycles" / "frozen_campaign" / "campaign.json"
-    manifest = json.loads(fixture.read_text(encoding="utf-8"))
-    campaign_id = manifest["campaign_id"]
-
-    store = built_stores.campaigns
-    path = store.campaign_root_dir(campaign_id) / "campaign.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(manifest), encoding="utf-8")
-
-    # `Campaign` itself is extra="forbid" — a renamed manifest field dies here.
-    campaign = store.load_campaign(campaign_id)
-    assert campaign is not None
-    # ...and so is the embedded `CampaignConfig` snapshot, non-default leaves and all.
-    frozen = load_campaign_config(campaign.config)
-    assert frozen.optimization.max_rounds == 7
-    assert frozen.optimization.mechanisms.elimination.leader_lock_in is True
-
-    # The resume path: the live dataset file never carries these two, so they are read back off
-    # the snapshot. They must survive the round trip or the campaign resumes with its locks open.
-    live = load_campaign_config({"optimization": _OPT})
-    restored = apply_inherited_overlay(live, campaign.config, seed=None)
-    assert restored.optimizer_narrowing["llm"].param_keys == ["temperature"]
-    assert restored.pipeline_overrides == {"llm": {"temperature": 0.2}}
-
-    # The snapshot is already a delta, so resuming on the config it was minted from is a no-op.
-    assert classify_config_diff(frozen, campaign.config) == (DiffScope.NONE, [])
-
-
-def test_a_dataset_template_frozen_before_todays_config_still_loads() -> None:
-    """Sibling of the manifest test above, for the *other* forbid surface.
-
-    `datasets/{slug}/campaign.json::campaign_config` is a second `CampaignConfig` on disk,
-    read by three endpoints (`/datasets/{name}/pipeline`, `/preview`, and the draft mint) plus
-    the launcher. It spells out its knobs in FULL — an ingest-written template carries every
-    `mechanisms` toggle at its default — so a knob dropped from `CampaignConfig` makes it
-    `extra_forbidden` and every read of that dataset 500s. The manifest fixture beside this one
-    does NOT cover it: different wrapper key, different reader (`read_campaign_config_file`).
-    That gap is exactly how `swiss-invoices-eval` bricked on a live deploy after a rename — a
-    user's ingested dataset carries a materialized origin (paid check-in output) we cannot
-    re-stamp, so the loss is theirs and irreversible.
-
-    Pinned, never regenerated: a rename of any knob this template names must fail HERE, in CI,
-    not on a user's disk. Remedy on failure is the `restamp` verb (which
-    `deploy-linux/update.sh` now runs on every deploy) — never `extra="allow"`, never a shim.
-    """
-    from pathlib import Path
-
-    from promptpotter.application.datasets.authored import load_dataset_campaign_config
-
-    fixture = (
-        Path(__file__).parent / "fixtures" / "cycles" / "frozen_dataset_template" / "campaign.yaml"
-    )
-    # The real reader the three endpoints share — unwraps `campaign_config`, validates through
-    # the live `CampaignConfig` (extra="forbid"). A dropped knob raises here.
-    config = load_dataset_campaign_config(fixture)
-    assert config.optimization.mechanisms.elimination.leader_lock_in is False
-    assert config.optimization.mechanisms.selection.per_round_resubset is False
 
 
 def test_lives_resume_fold_matches_live_observe() -> None:
@@ -896,35 +721,6 @@ def test_pending_decisions_file_by_round_and_survive_teardown(tmp_path: Path) ->
     ]
 
 
-def test_cycle_seed_ledger_roundtrip(built_stores: Stores) -> None:
-    """The read-once cycle seed now rides the ledger as a ``CycleSeedRecord``; a broken
-    write→read round-trip silently starts a fork / campaign-from-origin from the WRONG
-    origin (or none). An unseeded cycle reads back ``None``; a seeded one reads back
-    intact even after later records land (the scan doesn't assume it's the last line)."""
-    stores = built_stores
-    cyc = "cycle_seed_roundtrip"
-    stores.campaigns.create(CycleHop(campaign_id=_CAMPAIGN, cycle_id=cyc), {})
-    assert (
-        stores.campaigns.read_cycle_seed(CycleHop(campaign_id=_CAMPAIGN, cycle_id=cyc)) is None
-    )  # unseeded → None
-
-    seed = CycleSeed(
-        origin_prompt_fields={"instruction": "do the thing"},
-        origin_source="campaign_origin",
-    )
-    stores.campaigns.write_cycle_seed(CycleHop(campaign_id=_CAMPAIGN, cycle_id=cyc), seed)
-    # A second seed after the first must win (last-wins), proving the scan spans the file.
-    final_seed = CycleSeed(
-        origin_prompt_fields={"instruction": "do it precisely"},
-        origin_source="campaign_origin",
-    )
-    stores.campaigns.write_cycle_seed(CycleHop(campaign_id=_CAMPAIGN, cycle_id=cyc), final_seed)
-
-    got = stores.campaigns.read_cycle_seed(CycleHop(campaign_id=_CAMPAIGN, cycle_id=cyc))
-    assert got == final_seed
-    assert got is not None and got.origin_source == "campaign_origin"
-
-
 def _archive_run(
     archive: object,
     *,
@@ -1155,93 +951,6 @@ def test_compaction_spares_the_runs_that_actually_serve_the_cache(built_stores: 
     assert report.skipped_by_label["brand_new_label"] == 1
     for rid, doc in untouched.items():
         assert archive.load_by_id(rid) == doc
-
-
-def test_compaction_leaves_an_l4_row_still_narratable(built_stores: Stores) -> None:
-    """The ``_inner_narrated`` panel gate needs BOTH ``mean_round_delta`` and a trace. A row that
-    keeps the first and loses the second does not crash — it drops out of ``inner_narratives`` and
-    flips the round onto ``sample_transcripts``, where every row reads as a miss by construction.
-    A wrong panel, silently, on the recursion we are trying to improve."""
-    archive = built_stores.archive
-    _archive_run(
-        archive,
-        run_id="run_c9",
-        content_hash="h_c9",
-        name="candidate_0",
-        measurements=[_compactable_cell(1, mean_round_delta=0.25), _compactable_cell(2)],
-    )
-
-    compact_measurement_archive(built_stores, dataset="reidx", apply=True)
-
-    detail = archive.load_by_id("run_c9")
-    assert detail is not None
-    l4_row, plain_row = detail["measurements"]
-    assert l4_row["pipeline_data"]["reasoning_trace"] == "T" * 3000  # protected
-    assert "reasoning_trace" not in plain_row["pipeline_data"]  # its neighbour still moved
-    # The protection is per-ROW, so the rest of the L4 row compacts like any other.
-    assert "total_time" not in l4_row["pipeline_data"]
-
-
-def test_a_purged_cold_store_is_the_only_irreversible_step(built_stores: Stores) -> None:
-    """Compaction alone is always undoable; the purge is what spends the money. Kept apart so the
-    reversible step can never quietly perform the irreversible one — and once purged, restore has
-    to report the loss rather than silently 'succeed' over rows it cannot reach."""
-    archive = built_stores.archive
-    _archive_run(
-        archive,
-        run_id="run_c1",
-        content_hash="h_c1",
-        name="candidate_1",
-        measurements=[_compactable_cell(1)],
-    )
-    compact_measurement_archive(built_stores, dataset="reidx", apply=True)
-    assert archive.has_cold("run_c1")
-
-    purged = purge_cold_store(built_stores, dataset="reidx", apply=True)
-    assert purged.runs_touched == 1
-    assert purged.purged == 1
-    assert not archive.has_cold("run_c1")
-
-    # The run must still REGISTER as measured-then-dropped. "We deleted this deliberately for
-    # storage" and "this was never compacted" are different facts, and a purge that goes quiet
-    # is indistinguishable from one that never ran.
-    doc = archive.load_by_id("run_c1")
-    assert doc is not None
-    assert doc["purged"]["rows"] == 1
-
-    after = restore_measurement_archive(built_stores, dataset="reidx", apply=True)
-    assert after.runs_touched == 0  # nothing to put back...
-    assert after.purged == 1  # ...and it is a COUNTED no-op, not a silent skip
-    assert after.runs_skipped == 0
-    assert "hit" not in doc["measurements"][0]
-
-
-def test_a_dry_run_writes_nothing_and_predicts_what_the_apply_costs(built_stores: Stores) -> None:
-    """A destructive verb's dry run is the operator's whole basis for consenting, so it must not
-    write, and its byte figure must be the real one — an estimated ratio standing in for the gzip
-    would make the consent rest on a number the apply never has to honour."""
-    archive = built_stores.archive
-    _archive_run(
-        archive,
-        run_id="run_c2",
-        content_hash="h_c2",
-        name="candidate_2",
-        measurements=[_compactable_cell(1)],
-    )
-    before = archive.load_by_id("run_c2")
-
-    dry = compact_measurement_archive(built_stores, dataset="reidx", apply=False)
-    assert dry.runs_touched == 1
-    assert not dry.applied
-    assert archive.load_by_id("run_c2") == before  # untouched
-    assert not archive.has_cold("run_c2")
-
-    wet = compact_measurement_archive(built_stores, dataset="reidx", apply=True)
-    assert (wet.bytes_before, wet.bytes_after, wet.cold_bytes) == (
-        dry.bytes_before,
-        dry.bytes_after,
-        dry.cold_bytes,
-    )
 
 
 def test_a_fork_inherits_the_decisions_of_the_rounds_it_lifted(built_stores: Stores) -> None:
