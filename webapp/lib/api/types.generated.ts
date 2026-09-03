@@ -75,9 +75,16 @@ export interface DashboardSample {
   /** Recorded elapsed seconds. Null where the row never reached the pipeline —
    * distinct from a cached replay's real 0.0. */
   time_s: number | null;
-  /** Prediction, trimmed for display. */
+  /** Prediction, trimmed for display. EMPTY on a verifier-graded row (see
+   * ground_truth) — the pair is both halves of a comparison nobody made
+   * there. */
   predicted: string;
-  /** Ground truth, trimmed for display. */
+  /** Ground truth, trimmed for display. EMPTY declares a VERIFIER-GRADED row: the
+   * backend answered with a number its own verifier decided (a Harbor task's
+   * tests/test.sh, L4's outer proxies), so there is no truth for `predicted`
+   * to match and `status` carries the whole verdict. A client tells that from
+   * a broken extraction by the pair: both empty is verifier-graded,
+   * `NO_RESULT` beside a real truth is extraction. */
   ground_truth: string;
   /** Query, trimmed for display. */
   query: string;

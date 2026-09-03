@@ -26,7 +26,7 @@ tests. Add new ones the same way — never as a `test_structure` scan.
 | An optimizer node | [§6](#6-an-optimizer-node) | Import-time: `validate_template()` at prompt load |
 | A CLI verb | [§7](#7-a-cli-verb) | Import-time: the `COMMANDS` ↔ `parser_verbs` assert |
 | A control-plane command kind | [§8](#8-a-control-plane-command-kind) | Import-time: three asserts over `ALL_DISPATCHED_KINDS` — cap, payload model, **and the CLI verb** |
-| A measurement field | [developer README §4](README.md#4-cross-run-memory) | **Nothing, on the way in** — an undeclared key is dropped at `sample_measurement.py::measure_sample`, silently. Declare it on `domain/scoring.py::QueryMeasurement` / `PipelineData`; a `pipeline_data` key also needs `_INFRA_KEYS` or a dataset `observation_mapping`. Import-time only afterwards: the compaction asserts beside those types |
+| A measurement field | [developer README §4](README.md#4-cross-run-memory) | **Arm-time where a connector declares the key** (`Connector.required_observation_keys`), otherwise nothing — it is dropped at `sample_measurement.py::measure_sample` in silence. Declare it on `domain/scoring.py::QueryMeasurement` / `PipelineData`; a `pipeline_data` key also needs `_INFRA_KEYS` or a dataset `observation_mapping`, plus the compaction asserts beside those types |
 
 ---
 
@@ -194,16 +194,88 @@ has one; `cli/commands/_shared.py` asserts the divergence hint lists every kind.
 A new backend kind — one file under `connectors/` plus a row in its `CONNECTORS` dict, owned
 step by step by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md).
 
+**The usual reader of this section is not us.** It is someone with a backend already running who
+wants it optimized, working through it in one conversation. **The wiring is the easy half** — the
+protocol is four required fields and the guard below catches a half-wired one at import. The half
+that decides whether the campaign is worth running is step 2, and nothing about their backend
+tells you the answer. Do the steps in order; each one's output is the next one's input.
+
+### Step 1 — Learn the shape, cheapest source first
+
+Three sources, and they are complementary rather than alternatives:
+
+1. **Read what they already have.** An OpenAPI spec, the request handler's source, a saved
+   response, a `curl` line from their README. Costs nothing and answers most of it.
+2. **Probe the live endpoint once**, with one real input they choose. This is the only way to see
+   what the backend *actually* returns rather than what it documents — but it **spends against
+   their provider and needs the service up**, so ask before firing it, and fire it once.
+3. **Ask only what neither answered.** Every question you can answer from 1 or 2 is a question
+   the integrator should not have to field.
+
+Come out of this knowing five things, and say them back before writing any code: the **request**
+shape, the **response** shape, **where the number is** in it (or that there isn't one), what one
+row **costs** in seconds and dollars, and which request fields are **safe to vary**.
+
+### Step 2 — Decide what is being improved, and how it is graded
+
+The hard half, and the one that has no default. Five questions, each with a consequence:
+
+- **What is ONE measured row — one request, or a whole run?** It decides `measured_unit`,
+  `max_cells_in_flight` and `concurrency_arming` —
+  [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § The measured unit.
+- **What decides whether that row was good — a label, or a number something else produced?**
+  That is the ANSWER SHAPE, declared in `extract_experiment` and nowhere else; § The answer shape
+  on the same page has what each choice commits you to.
+- **What is the formula?** `campaign.yaml::scoring` — `per_sample` is *was this cell RIGHT*,
+  `per_cell` the optional composite of what it was WORTH (latency, cost, reliability), and θ is
+  fit on the second. Namespace: [`stable-api.md`](stable-api.md) § 2. **Start with `per_sample`
+  alone.** A cost term needs a MEASURED anchor, and the first campaign is what measures it.
+- **What may the optimizer move?** `nodes.{node}.optimizer.param_keys` in `pipeline.yaml`. The
+  prompt is a lever only if the node declares `prompt_info` — a `remote_http` backend serves that
+  over `GET /pipeline`, an `in_process` one **must declare it or every variant scores identically
+  as no-skill**, which reads as "the prompt does not matter" and raises nothing.
+- **What must it never move?** Anything that is a cost rail rather than a search axis stays
+  pinned in `config` and out of `param_keys` (Harbor's `max_turns` moves a cell's cost by an
+  order of magnitude). `model` and `provider` are structurally unreachable and need no decision —
+  [`optimization/CLAUDE.md`](../../promptpotter/application/optimization/CLAUDE.md).
+
+And one question that is theirs, not ours: **which slice have they reserved as test?** Never
+optimize on the rows they will later report on. [`dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md)
+§ Adding a dataset — the wiring process owns the rest of that decision; its step 1 is about
+published benchmarks and does not apply to a private backend, but steps 2–4 do.
+
+### Step 3 — Wire it
+
+The connector file, then the dataset directory
+([`datasets/CLAUDE.md`](../../datasets/CLAUDE.md) § Canonical layout). Every tunable starts at its
+**floor**, never its centre —
+[`optimization/CLAUDE.md`](../../promptpotter/application/optimization/CLAUDE.md)
+§ Origin = conservative floor.
+
+### Step 4 — Screen the instrument before funding a campaign
+
+Set `max_rounds: 0` and measure the origin only. **Read the spread, not the mean.** An origin at
+0% is floor-pinned and an origin at 100% has nothing for a prompt to move; both are unusable
+instruments and neither is visible from a single cell. `seed-screen`, `noise-floor` and `verify`
+answer the sharper versions of this, and `evidence` answers whether two readings can be compared
+at all — [`persistence-and-state.md`](../operations/persistence-and-state.md).
+
 **Guard (import-time, no standing test):** the registry guard at the bottom of
 `connectors/__init__.py` raises at import if any row is half-wired, and its own raise
 enumerates every half-wiring it rejects — read the list there rather than a copy here.
 
-Two things the recipe cannot show you:
+Three things the recipe cannot show you:
 
 - **`BackendClient.run_query` dispatches on the declared `execution` mode, never the
   connector name**, so transport stays a capability rather than a core-loop branch. The
-  `in_process` arm is SHIPPED and one connector rides it — `promptpotter`, an inner cycle
-  (L4, via `runner/inner/spawn.py`). It does not raise `NotImplementedError`.
+  `in_process` arm is SHIPPED and three connectors ride it — `promptpotter` (an inner cycle,
+  L4, via `runner/inner/spawn.py`), `harbor` (one containerized agent episode) and `dspy`. It
+  does not raise `NotImplementedError`. **`in_process` is a statement about TRANSPORT and
+  nothing else** — a `harbor` cell holds a container, spends real money and takes minutes.
+- **The answer shape** — owned by
+  [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § The answer shape — decide
+  it while writing `extract_experiment`, which is where a verifier-graded backend yields
+  `ground_truth: None` and where it declares that nowhere else.
 - **A credential is a per-backend fact and belongs on the connector's `auth_token` hook**,
   never read at the construction site. `build_backend_client` (`infrastructure/backend.py`)
   is the one place a `BackendClient` is built and it takes the token off the connector it was

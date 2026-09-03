@@ -62,8 +62,19 @@ class DashboardSample(StrictModel):
         description="Recorded elapsed seconds. Null where the row never reached the pipeline — "
         "distinct from a cached replay's real 0.0.",
     )
-    predicted: str = Field(default="", description="Prediction, trimmed for display.")
-    ground_truth: str = Field(default="", description="Ground truth, trimmed for display.")
+    predicted: str = Field(
+        default="",
+        description="Prediction, trimmed for display. EMPTY on a verifier-graded row (see "
+        "ground_truth) — the pair is both halves of a comparison nobody made there.",
+    )
+    ground_truth: str = Field(
+        default="",
+        description="Ground truth, trimmed for display. EMPTY declares a VERIFIER-GRADED row: "
+        "the backend answered with a number its own verifier decided (a Harbor task's "
+        "tests/test.sh, L4's outer proxies), so there is no truth for `predicted` to match and "
+        "`status` carries the whole verdict. A client tells that from a broken extraction by the "
+        "pair: both empty is verifier-graded, `NO_RESULT` beside a real truth is extraction.",
+    )
     query: str = Field(default="", description="Query, trimmed for display.")
     input_tokens: int | None = Field(default=None)
     output_tokens: int | None = Field(default=None)

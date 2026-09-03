@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
 from promptpotter.domain.rendering import classify_result, extract_display_answer
-from promptpotter.domain.scoring import is_hit, recorded_elapsed_s
+from promptpotter.domain.scoring import is_hit, is_verifier_graded, recorded_elapsed_s
 from promptpotter.presentation.views.display import (
     DIM,
     DISPLAY_TAGS,
@@ -115,7 +116,7 @@ def fmt_query_result(
     # screen said `MISS --/1 … gt:'inner:justlogic-d234/seed-0' … best 0%` for hours at a stretch
     # while the instrument underneath was reading a real +19% inner lift, and the operator —
     # reasonably — concluded nothing was working. Show the measurement.
-    proxy_delta = pd.get("mean_round_delta")
+    proxy_delta = pd.get(OUTER_PROXY_KEYS[0])
     if isinstance(proxy_delta, int | float):
         fitness = r.get("fitness")
         fit_col = f" fit {fitness:.2f}" if isinstance(fitness, int | float) else ""
@@ -123,6 +124,13 @@ def fmt_query_result(
             f"{indent}{time_col} {sid_col} Δ{proxy_delta:+.3f}{fit_col}"
             f"{step_block}{tok_col} q:{q!r}"
         )
+
+    # A verifier-graded cell has no label, so the `-> pred gt:gt` tail is both halves of a
+    # comparison nobody made — and `predicted` there is the `NO_RESULT` sentinel, which beside a
+    # HIT reads as a contradiction. The tag IS the verdict: the task's own verifier already
+    # answered and the formula scored that number.
+    if is_verifier_graded(gt_full):
+        return f"{indent}{time_col} {sid_col} {tag}{step_block}{tok_col} q:{q!r}"
 
     line = f"{indent}{time_col} {sid_col} {tag}{step_block}{tok_col} -> {pred!r} gt:{gt!r} q:{q!r}"
 

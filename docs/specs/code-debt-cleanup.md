@@ -63,6 +63,49 @@ it.
   `promptpotter/assets/optimizer/pipeline.yaml` currently pins — read it off that file, never off
   this entry.
 
+- **Three mechanisms key on ground-truth LABELS and go silently inert on a verifier-graded
+  backend.** One subject, three sites, each needing a design answer rather than a guard — which is
+  why they are filed together and not fixed in the pass that found them. The wrong-number half of
+  this class (fabricated recall, fabricated rank statistics, `exact_match("", "")` scoring 1.0) was
+  fixed; these three are the half that *reports nothing* rather than something false. (1)
+  `pobb/checks.py::is_answer_collapsed` — `enumerable_truth_labels` returns `None` with no labels,
+  so the COLLAPSED elimination gate is permanently `False` and an L4 candidate driving every inner
+  cell to one lift is invisible to it; what collapse MEANS without labels is the open question. (2)
+  `intelligence/earned_blocks.py::answer_space_signature` — an empty label set returns
+  `OPEN_ANSWER_SPACE`, the same key a free-text labelled task gets, so Harbor's mined Agent-Skill
+  blocks pool with L4's optimizer-prompt blocks and with any open-answer benchmark's; separating
+  them needs an answer to what actually makes framing blocks transferable, not just a second
+  constant. (3) The `prompt_info` trap — stated at the decision point in
+  [`../developer/adding-a-surface.md`](../developer/adding-a-surface.md) § 5 — has no GUARD,
+  and the obvious one is wrong: prompt fields in `optimizer.param_keys` ⇒ `prompt_info` required
+  would trip on every L4 run, since `promptpotter-self` deliberately declares the first without
+  the second. **Re-test:** `.venv/Scripts/python.exe -m promptpotter
+  new spreadsheetbench-s10` past round 1 with `prompt_block_catalogue` on, then read the round file
+  for a COLLAPSED verdict and `earned_blocks` under `OPEN` — if either now discriminates, the entry
+  is stale.
+
+- **`InProcessRun` has no arming context, so both in-process connectors that need per-run state
+  invented the same ContextVar.** `InProcessRun = Callable[[str, dict], Awaitable[dict]]` — query
+  and payload, no session, no dataset, no resolved experiment. `dspy_module.py` holds `_PROGRAM`;
+  `harbor.py` holds `_PANEL`, armed as a **side effect of `extract_experiment`**, which neither
+  that function's name nor its protocol docstring mentions. Two connectors reaching the same
+  workaround independently is a missing NAME, and the author of connector #3 can only discover
+  the channel by debugging. The fix is a seam widening that DELETES both ContextVars — give
+  `in_process_run` the arming context (the resolved experiment doc, or the session handle). Both
+  are currently CORRECT, so this is cost-of-authoring, not a bug: campaigns are
+  `asyncio.create_task` siblings, so each copies the context and two concurrent Harbor campaigns
+  cannot clobber each other. **Re-test:** author a throwaway connector needing per-run state
+  without reading `harbor.py`; if it reaches for a ContextVar, the entry stands.
+
+- **The two harbor `pipeline.yaml`s duplicate 23 shared lines over 30 chars** — node type,
+  `prompt_info`, `param_keys`, the `env_reward` mapping and every comment explaining why; they
+  differ only in model, description and `max_turns`. `Connector.default_pipeline` /
+  `default_node_config` exist for exactly this and neither harbor dataset uses them. Not urgent at
+  two; at three it is a drift surface, and the third is the one that gets copied with a stale
+  comment. **Re-test:** `comm -12` the two files' sorted unique lines
+  (`awk 'length>30' | wc -l`) — under 23 means someone already split them; add a third harbor
+  dataset and if its node block is a copy-paste, the entry stands.
+
 ## Blocked — named blocker
 
 **Archive hygiene — the corpus it was sized against is gone again:**
