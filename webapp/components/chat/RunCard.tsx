@@ -222,7 +222,10 @@ function ConfigBox({
   return (
     <div className="run-box">
       <div className="run-box-head">
-        <p className="run-headline">
+        {/* A div, not a <p>: `Lift` hangs a HoverCard off the accuracy pair, and that
+            renders a <div> — which a <p> may not contain. Invalid nesting there is a
+            HYDRATION error, not a lint nit: the server and client trees disagree. */}
+        <div className="run-headline">
           <strong>{summary.usedUsd != null ? fmtUsd(summary.usedUsd) : "—"}</strong>
           <span className="run-headline-unit">spent</span>
           <span className="run-headline-sep" aria-hidden="true">
@@ -235,7 +238,7 @@ function ConfigBox({
             scored={shownRow?.n_samples ?? null}
             expected={shownRow?.n_expected ?? null}
           />
-        </p>
+        </div>
         {options.length > 1 ? (
           <SegmentedControl<ObserveState>
             options={options}

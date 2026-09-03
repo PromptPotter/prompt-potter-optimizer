@@ -72,12 +72,8 @@ del _arms
 
 
 class DerivedView:
-    #: Ledger offset of the last record folded — the ADDRESS of the state this view holds,
-    #: and the same number as ``ProjectionEnvelope.sequence`` and ``RayItem.offset``. A fold
-    #: that materializes itself STAMPS this, so a reader can ask which moment the file is
-    #: of and a check can re-fold ``ledger[0..at_offset]`` against it. ``-1`` = nothing
-    #: folded yet. It was discarded here (``del offset``) for as long as this class existed,
-    #: which is why no materialized state on disk could say when it was true.
+    #: The ``Cut`` this view is folded to. A fold that materializes itself STAMPS this, which is
+    #: the only way a state on disk can say which moment it is of. ``-1`` = nothing folded yet.
     at_offset: int = -1
 
     def on_record(self, record: CycleRecord, offset: int) -> None:

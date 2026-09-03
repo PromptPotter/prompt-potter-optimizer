@@ -10,9 +10,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-# No "regressing": `round_analysis._trajectory` is the sole producer and never returns it
+# No "regressing": `round_analysis._trend` is the sole producer and never returns it
 # (it computes a `regressions` counter, but only as an input to the OSCILLATING test).
-TrajectoryClass = Literal["healthy", "oscillating", "plateau", "ceiling"]
+#
+# **Not "trajectory".** This is the accuracy series CLASSIFIED — the same axis the webapp's
+# TrendChart plots — while a trajectory in this repo is a walk of points that each carry their
+# own reading (`evidence.py::TrajectoryPoint`, `p_best_trajectory`, the Sample-trajectory grid).
+# Two meanings under one word, and the reader could tell them apart from neither name.
+TrendClass = Literal["healthy", "oscillating", "plateau", "ceiling"]
 
 
 @dataclass(frozen=True)
@@ -49,7 +54,7 @@ class SampleDiag:
 
 @dataclass(frozen=True)
 class RoundDiagnostics:
-    """Post-scoring deterministics computed once per round; renderers READ this and never recompute. The ``trajectory``
+    """Post-scoring deterministics computed once per round; renderers READ this and never recompute. The ``trend``
     field type encodes which classifications the renderer must handle."""
 
     # Rank distribution — where does GT land in candidates?
@@ -67,8 +72,8 @@ class RoundDiagnostics:
 
     # Cycle arc (cumulative across rounds)
     evolution_rows: list[EvolutionRow] = field(default_factory=list)
-    trajectory: TrajectoryClass = "healthy"
-    trajectory_description: str = ""
+    trend: TrendClass = "healthy"
+    trend_description: str = ""
     anomalies: list[str] = field(default_factory=list)
 
     # Population this round
@@ -84,5 +89,5 @@ __all__ = [
     "NearMiss",
     "RoundDiagnostics",
     "SampleDiag",
-    "TrajectoryClass",
+    "TrendClass",
 ]

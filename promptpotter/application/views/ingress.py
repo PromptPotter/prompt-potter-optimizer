@@ -114,7 +114,6 @@ def _init_exit(d: dict[str, Any], ctx: ViewContext) -> InitExitView:
         l2_round=cycle.escalation.l2_round,
         composite_fitness_formula=full,
         composite_fitness_formula_short=short,
-        origin_composite_fitness=ctx.parent_composite_fitness or 0.0,
     )
 
 

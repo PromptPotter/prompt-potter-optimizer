@@ -35,7 +35,11 @@ class MaskCandidate(StrictModel):
 
 class MaskRound(StrictModel):
     """One round on a cycle's spine. The parent is round ``N-1``'s elected winner (empty at round 0),
-    and the verdict needs it to reproduce the "parent held, no promotion" outcome under a swap."""
+    and the verdict needs it to reproduce the "parent held, no promotion" outcome under a swap.
+
+    Under a SAMPLE-SET mask these two are re-derived from the round's own ``parent_results``
+    rather than carried (``load.py::_parent``), so the bar is read on the same cells as the arms;
+    empty means the round banked no parent panel and cannot be decided on a subset at all."""
 
     model_config = ConfigDict(frozen=True)
 

@@ -9,12 +9,18 @@ import logging
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-from typing import Any, NamedTuple, cast, get_args
+from typing import Any, NamedTuple, cast
 
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, encode_cycle_path
-from promptpotter.domain.projection_envelope import NON_ACTIVITY_KINDS, ProjectionKind
+from promptpotter.domain.projection_envelope import (
+    NON_ACTIVITY_KINDS,
+    RAY_PAYLOAD_FIELDS,
+    RENDERS_AS_ACTIVITY,
+    ProjectionKind,
+    ray_payload,
+)
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
@@ -45,7 +51,12 @@ MAX_RAY_LIMIT = 1000
 # so a rank baked into a cursor would not be comparable across requests.
 RayCursor = tuple[float, str, int]
 
-_VALID_KINDS: frozenset[str] = frozenset(get_args(ProjectionKind))
+# What a LEDGER LINE may say it is. `RENDERS_AS_ACTIVITY` is total over the record kinds and
+# nothing else — `stream_snapshot` is synthesized by the SSE tail and is on no ledger — so it is
+# the ray's vocabulary exactly. Taken from `ProjectionKind` instead, a hand-written line claiming
+# to be a `stream_snapshot` would pass the curation and then find no field projection, and one
+# corrupt line would 500 the whole chronology; every other malformed kind is already skipped here.
+_VALID_KINDS: frozenset[str] = frozenset(RENDERS_AS_ACTIVITY)
 
 # Dropped at EVERY depth: a kind no feed item is ever made of, so serving one is bytes the
 # renderer can only throw away. DERIVED from the single declaration rather than restated — this
@@ -72,15 +83,27 @@ assert _INNER_KINDS <= _VALID_KINDS, (
 # The curation is a validator input too — it decides the body, and it is the one input that
 # moves on DEPLOY rather than on a write. Left out, a changed drop set 304s every client into
 # the body it was served before, forever on a campaign whose ledger will never move again.
-_CURATION_TAG = (sorted(_NEVER_KINDS), sorted(_INNER_KINDS), sorted(_INNER_PHASES))
+# The FIELD projection is the same input for the same reason: it decides the body just as the
+# drop set does, and a field added back would otherwise never reach a client that already has
+# an ETag for that window.
+_CURATION_TAG = (
+    sorted(_NEVER_KINDS),
+    sorted(_INNER_KINDS),
+    sorted(_INNER_PHASES),
+    sorted((kind, sorted(paths)) for kind, paths in RAY_PAYLOAD_FIELDS.items()),
+)
 
 
 class RayItem(StrictModel):
     """One event on the ray: a projection envelope plus its address.
 
-    ``kind``/``payload`` are byte-identical to ``ProjectionEnvelope``'s, so the webapp's
-    ``projectionToActivity`` maps a ``RayItem`` unchanged. ``path`` is the address — a bare
-    ``cycle_id`` is ambiguous inside an L4 family (inner ids repeat across sandboxes).
+    ``kind`` is ``ProjectionEnvelope``'s and ``payload`` is a SUBSET of the same body, so the
+    webapp's ``projectionToActivity`` maps a ``RayItem`` unchanged — one translator, two
+    surfaces. The subset is why the two are not interchangeable in the other direction: the
+    live tail carries one record at a time and hands over the whole thing, while a ray window
+    is up to ``MAX_RAY_LIMIT`` of them and serves only what a chronology reads
+    (``RAY_PAYLOAD_FIELDS``). ``path`` is the address — a bare ``cycle_id`` is ambiguous
+    inside an L4 family (inner ids repeat across sandboxes).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -101,7 +124,12 @@ class RayItem(StrictModel):
     )
     kind: ProjectionKind = Field(description="The ledger record_type — ProjectionEnvelope.kind.")
     payload: dict[str, Any] = Field(
-        default_factory=dict, description="The record's model_dump — ProjectionEnvelope.payload."
+        default_factory=dict,
+        description="The chronology projection of the record's model_dump — identity, address "
+        "and the one-line reading, per domain/projection_envelope.py::RAY_PAYLOAD_FIELDS. A "
+        "SUBSET of ProjectionEnvelope.payload: the record's bulk (LLM I/O, a sample's query "
+        "and prediction, a phase's view) is addressable at the audit twin, the round document "
+        "and dashboard.json, each fetched one round at a time rather than a window at a time.",
     )
 
 
@@ -213,7 +241,12 @@ def _read_curated(
                 continue
             if len(window) == keep:
                 dropped = True
-            window.append(_Raw(offset, eff_epoch, eff_ts, kind, rec))
+            # Projected HERE rather than at `RayItem` construction: the window holds `keep`
+            # records per ledger across the whole family, so a merge over a deep L4 family
+            # would otherwise carry every dropped payload in memory to discard it at the end.
+            window.append(
+                _Raw(offset, eff_epoch, eff_ts, kind, ray_payload(cast(ProjectionKind, kind), rec))
+            )
     if clamped:
         logger.warning("clamped %d inverted timestamp(s) in %s", clamped, ledger)
     return list(window), dropped

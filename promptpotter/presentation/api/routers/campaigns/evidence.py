@@ -74,7 +74,7 @@ def get_evidence(
             )
         ),
     ] = False,
-    trajectory: Annotated[
+    winner_chain: Annotated[
         bool,
         Query(
             description=(
@@ -131,7 +131,7 @@ def get_evidence(
             stores,
             specs,
             include_ranking=ranking,
-            include_trajectory=trajectory,
+            include_winner_chain=winner_chain,
             include_config=config,
             metric=metric,
         )

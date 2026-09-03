@@ -145,3 +145,12 @@
 .wstorage-bar{height:5px;border-radius:3px;background:var(--color-background-secondary);overflow:hidden}
 .wstorage-bar-fill{height:100%;border-radius:3px;background:var(--color-accent)}
 
+
+/* Archive maintenance — preview-first controls under the storage rollup. */
+.wsmaint{margin-top:var(--space-16);padding-top:var(--space-14);border-top:0.5px solid var(--color-border)}
+.wsmaint-blurb{margin:var(--space-8) 0 var(--space-12);font-size:var(--text-sm);line-height:1.5;max-width:56ch}
+.wsmaint-actions{display:flex;gap:var(--space-8);flex-wrap:wrap}
+.wsmaint-report{display:flex;flex-wrap:wrap;gap:var(--space-14);margin:var(--space-12) 0 0}
+.wsmaint-report div{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
+.wsmaint-report dt{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.05em;color:var(--color-text-tertiary)}
+.wsmaint-report dd{margin:0;font-size:var(--text-base);color:var(--color-text-primary);font-variant-numeric:tabular-nums}

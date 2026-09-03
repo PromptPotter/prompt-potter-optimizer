@@ -11,6 +11,12 @@ on a scoring divergence, carrying the rounds before it.
 
 Pure over the record, no I/O. Every candidate on the chain was MEASURED — the fold picks among the
 arms the run actually ran and never invents one.
+
+**The lens cannot be ranked BY the election, at any price worth paying — don't file it as a
+one-line consistency fix.** θ under another formula must be re-fit from per-sample grades against a
+re-calibrated δ ruler, which is ``resume_and_fork/ab_replay.py``'s substrate: the lens and ``ab``
+are ONE mechanism at two prices, and the cheap one is what the tree route polls. Adopting the exact
+one puts a campaign-wide refit behind a 5 s poll.
 """
 
 from __future__ import annotations

@@ -157,3 +157,37 @@ describe("roundCandidates — the in-flight round", () => {
     expect(row?.n_expected).toBe(20);
   });
 });
+
+// A candidate REJECTED by validation never ran, and `INVALID_SCORES` gives it a synthetic 0.0 so
+// its row is not byte-identical to one that got everything wrong. The flag saying which it is was
+// dropped here for as long as this mapper existed, which is how `C4.3 · 0%` reached the strip.
+describe("roundCandidates — a rejected candidate", () => {
+  const live = dashboard({
+    current_round: currentRound({
+      round: 4,
+      candidates: [
+        liveRow({ label: "C4.1", accuracy: 0.65, composite_fitness: 0.65, scored_samples: 20 }),
+        liveRow({
+          label: "C4.3",
+          invalid: true,
+          // What the producer actually serves for one: the synthetic score, over no rows at all.
+          accuracy: 0,
+          composite_fitness: 0,
+          scored_samples: 0,
+        }),
+      ],
+    }),
+  });
+  const rows = roundCandidates(live).filter((r) => r.source === "inflight");
+
+  it("carries the flag through, so a renderer can tell the two apart", () => {
+    expect(rows.find((r) => r.label === "C4.1")?.invalid).toBe(false);
+    expect(rows.find((r) => r.label === "C4.3")?.invalid).toBe(true);
+  });
+
+  it("leaves the served synthetic score untouched — it feeds selection, and only the RENDER changes", () => {
+    const rejected = rows.find((r) => r.label === "C4.3");
+    expect(rejected?.accuracy).toBe(0);
+    expect(rejected?.n_samples).toBe(0);
+  });
+});

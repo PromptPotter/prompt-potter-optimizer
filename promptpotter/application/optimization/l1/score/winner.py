@@ -447,6 +447,11 @@ async def l1_score(
         ),
         results=best_results,
         all_candidate_results=dict(all_candidate_results),
+        # The bar, banked with the arms that were held to it. Every scalar this round stamps
+        # about the parent — `parent_accuracy`, `matched_parent_*`, the θ the election fit under
+        # `PARENT_ABILITY_ID` — is read off exactly these rows, and none of them could be
+        # re-derived, masked or checked without them.
+        parent_results=list(parent_election_results),
         candidates_scored=len(scored),
         electable_count=len(electable),
         candidate_scores=candidate_scores,

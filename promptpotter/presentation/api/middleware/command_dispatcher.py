@@ -9,10 +9,16 @@ import re
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal, cast, get_args
+from typing import Annotated, Any, Literal, cast
 
 from pydantic import BeforeValidator, ConfigDict, Field, ValidationError, model_validator
 
+from promptpotter.application.archive_maintenance import (
+    ArchiveReport,
+    compact_measurement_archive,
+    purge_cold_store,
+    restore_measurement_archive,
+)
 from promptpotter.application.datasets.dataset_replace import (
     NothingToReplaceError,
     version_and_repoint,
@@ -27,6 +33,14 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.runner.origin_gate import GateDecision, submit_gate_decision
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.command_kinds import (
+    ALL_DISPATCHED_KINDS,
+    CampaignConfigKind,
+    CheckinScopedKind,
+    CycleScopedKind,
+    LifecycleKind,
+    WorkspaceScopedKind,
+)
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.pipeline_overlay import overlay_sets_model_outside_allowed
 from promptpotter.domain.run_records import CommandAckRecord, CommandRecord, CycleSeed
@@ -130,26 +144,6 @@ logger = logging.getLogger(__name__)
 __all__ = ["CommandAcceptedBody", "CommandDispatcher", "CommandOutcome"]
 
 
-LifecycleKind = Literal["archive-campaign", "delete-campaign", "unarchive-campaign"]
-
-CycleScopedKind = Literal[
-    "fork-cycle",
-    "skip-searchpoint",
-    "delete-cycle",
-    "cleanup-empty-cycles",
-    "pause-cycle",
-    "set-sample-lookahead",
-    "origin-gate-decision",
-    "change-spend-budget",
-    "start-run",
-    "step-cycle",
-]
-WorkspaceScopedKind = Literal["register-backend", "mint-campaign", "replace-dataset"]
-CheckinScopedKind = Literal["edit-draft-campaign", "resolve-origin", "start-checkin"]
-# Campaign-scoped IN-PLACE manifest edits (the campaign persists — distinct from
-# `delete`, the one lifecycle verb that removes a tree). Rewrites `campaign.json`.
-CampaignConfigKind = Literal["set-allowed-models", "set-campaign-label"]
-
 Applier = Callable[[], Awaitable[Any]] | Callable[[], Any]
 
 # The one cap→verb ladder (ADR-0005 §3): every command kind that funnels through
@@ -186,6 +180,9 @@ CAP_FOR_KIND: dict[str, str] = {
     # every campaign that already measured against it — stronger authority than creating a
     # dataset, which is why it sits at the lifecycle tier rather than beside `mint-campaign`.
     "replace-dataset": CAMPAIGN_LIFECYCLE_CAP,
+    # Rewrites rows every campaign measured against, and its purge step destroys paid spend
+    # outright — the same authority `replace-dataset` sits at, for the same reason.
+    "compact-archive": CAMPAIGN_LIFECYCLE_CAP,
     # Its own tier rather than a share of babysit: look-ahead spends the box's shared provider
     # rate bucket, which is the one thing a multi-tenant host may want to withhold from a
     # delegate, and it steers no measurement (the overshoot sample is discarded).
@@ -193,17 +190,6 @@ CAP_FOR_KIND: dict[str, str] = {
 }
 
 # Import-time exhaustiveness — a dispatched kind with no cap is a silent unguarded verb.
-# Derived from the Literal types themselves, so the map cannot drift from the wire. Public
-# because the router subtracts its typed routes from this to wire the generic one: a verb
-# reachable over HTTP but absent HERE is gated by nothing, which is how `replace-dataset`
-# ran unguarded — it was in no Literal, so this raise could not see it.
-ALL_DISPATCHED_KINDS: frozenset[str] = frozenset(
-    get_args(LifecycleKind)
-    + get_args(CycleScopedKind)
-    + get_args(WorkspaceScopedKind)
-    + get_args(CheckinScopedKind)
-    + get_args(CampaignConfigKind)
-)
 if set(CAP_FOR_KIND) != ALL_DISPATCHED_KINDS:
     raise RuntimeError(
         "CAP_FOR_KIND out of sync with the dispatched command set: "
@@ -369,6 +355,23 @@ class ReplaceDatasetPayload(CommandPayload):
         return self
 
 
+class CompactArchivePayload(CommandPayload):
+    """``apply`` defaults to False on every mode, including the destructive one: a preview is what
+    the operator consents on, so the write has to be asked for rather than defaulted into."""
+
+    mode: Literal["compact", "restore", "purge-cold"]
+    dataset: str | None = Field(default=None, min_length=1, max_length=64)
+    apply: bool = False
+
+    @model_validator(mode="after")
+    def _dataset_is_a_dataset_name(self) -> CompactArchivePayload:
+        from promptpotter.infrastructure.store.layout import validate_dataset_name
+
+        if self.dataset is not None:
+            validate_dataset_name(self.dataset)
+        return self
+
+
 class _CheckinPayload(CommandPayload):
     """``draft_id`` and ``campaign_id`` are the same id, re-keyed at ``create_checkin_campaign``;
     each check-in verb names it whichever way its wire schema does."""
@@ -429,6 +432,7 @@ PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {
     "register-backend": RegisterBackendPayload,
     "mint-campaign": MintCampaignPayload,
     "replace-dataset": ReplaceDatasetPayload,
+    "compact-archive": CompactArchivePayload,
     "edit-draft-campaign": EditDraftCampaignPayload,
     "resolve-origin": ResolveOriginPayload,
     "start-checkin": StartCheckinPayload,
@@ -443,7 +447,7 @@ if set(PAYLOAD_MODEL_FOR_KIND) != ALL_DISPATCHED_KINDS:
 
 
 class CommandAcceptedBody(StrictModel):
-    """The 202 response shape declared in ``m12-api-openapi.yaml``."""
+    """The 202 response shape declared in ``api-openapi.yaml``."""
 
     command_id: str = Field(description="Stable id of the appended `CommandRecord`.")
     correlation_id: str = Field(description="Echo of the request's `Idempotency-Key`.")
@@ -651,6 +655,15 @@ class CommandDispatcher:
             slug = payload.slug
             applier = lambda: self._apply_replace_dataset(slug)  # noqa: E731
             on_replay = lambda: {"slug": slug}  # noqa: E731
+        elif isinstance(payload, CompactArchivePayload):
+            job = payload
+            applier = lambda: self._apply_compact_archive(job)  # noqa: E731
+            # A deduped retry must not re-run the pass: `purge-cold` would report a second deletion
+            # of bytes already gone. It replays an EMPTY report — the same model the applier
+            # answers with, because the route validates this body too, and a bespoke
+            # `{"replayed": true}` shape 500s the retry that an Idempotency-Key exists to make safe.
+            # All-zero is also the true answer: this attempt moved nothing.
+            on_replay = lambda: ArchiveReport().model_dump(mode="json")  # noqa: E731
         elif isinstance(payload, MintCampaignPayload):
             mint = payload
 
@@ -921,6 +934,20 @@ class CommandDispatcher:
                 str(exc), code="nothing_to_replace", details={"slug": exc.slug}
             ) from exc
         return {"slug": result.slug}
+
+    def _apply_compact_archive(self, payload: CompactArchivePayload) -> dict[str, Any]:
+        """Three modes, one application-layer function each — this arm only picks and reports.
+
+        A refusal is an OUTCOME, not an exception: ``archive_writers`` is on the response either
+        way, so a client learns "a cycle is still appending" from the same shape as a success
+        rather than from an error it has to special-case."""
+        run = {
+            "compact": compact_measurement_archive,
+            "restore": restore_measurement_archive,
+            "purge-cold": purge_cold_store,
+        }[payload.mode]
+        report = run(self._stores, dataset=payload.dataset, apply=payload.apply)
+        return report.model_dump(mode="json")
 
     def _apply_register_backend(self, payload: RegisterBackendPayload) -> None:
         backend_id = payload.id or _slugify_backend_id(payload.name)

@@ -12,7 +12,7 @@
 //
 // Cheap reads auto-load on any selection change — including the metric, every interval and every
 // pairwise test, which are arithmetic over values the roster read already had in hand. The edit
-// ranking and the per-channel trajectory are the two walks expensive enough to sit behind a press
+// ranking and the per-channel winner chain are the two walks expensive enough to sit behind a press
 // (see `useEvidence`).
 
 import { useCallback, useMemo, useState } from "react";
@@ -80,7 +80,7 @@ export function ComparePane() {
   // because the editor is a form and two side by side is a second answer to "which am I editing".
   const [masking, setMasking] = useState<string | null>(null);
   const [ranking, setRanking] = useState(false);
-  const [trajectory, setTrajectory] = useState(false);
+  const [winnerChain, setWinnerChain] = useState(false);
   // On by default, unlike the other two: "what are these two things" is the first question asked
   // of a searchpoint comparison, and it costs no extra document — the head's round file is
   // already open. It is a toggle only so a wall of prompt text can be put away.
@@ -96,7 +96,7 @@ export function ComparePane() {
   const { evidence, loading, error, invalidMetric } = useEvidence(
     selected,
     ranking,
-    trajectory,
+    winnerChain,
     config,
     metric,
   );
@@ -157,7 +157,11 @@ export function ComparePane() {
           {selected.length === 0 ? (
             <CardFrame title="Compare" headingTag="h2">
               <p className="l4-lede">
-                Tick <strong>▢</strong> beside two or more campaigns in the sidebar. Each lands on
+                {/* "the campaign list", not "the sidebar" — the same component is a
+                    docked sidebar on a desktop and the whole screen behind ← on a phone,
+                    and a phone reader sent to a sidebar that is not there is sent nowhere.
+                    Its own header says CAMPAIGNS at both widths. */}
+                Tick <strong>▢</strong> beside two or more campaigns in the campaign list. Each lands on
                 its own winner; open a channel&rsquo;s lineage to walk its cladogram — click any
                 searchpoint to move that channel onto it, or to put it on the board beside the
                 winner. They may come from different datasets — the read says what that costs
@@ -304,18 +308,18 @@ export function ComparePane() {
                     headingTag="h2"
                     actions={
                       hasBranch &&
-                      !trajectory && (
+                      !winnerChain && (
                         <button
                           type="button"
                           className="cmp-button"
-                          onClick={() => setTrajectory(true)}
+                          onClick={() => setWinnerChain(true)}
                         >
-                          Show trajectories
+                          Show winner chains
                         </button>
                       )
                     }
                   >
-                    <Trajectories evidence={evidence} shown={trajectory} hasBranch={hasBranch} />
+                    <WinnerChains evidence={evidence} shown={winnerChain} hasBranch={hasBranch} />
                   </CardFrame>
                   <PairwisePanel
                     reading={evidence.metric}
@@ -469,7 +473,7 @@ function MetricUnavailable({
 // The branch standing behind each channel — the winner chain from its origin to its head, each
 // point read on ITS OWN cells. The rows are drawn by `EvidenceCharts`' Merged view, on one scale
 // with the heads; this card says what the walk costs and what the chain means.
-function Trajectories({
+function WinnerChains({
   evidence,
   shown,
   hasBranch,
@@ -489,16 +493,16 @@ function Trajectories({
   if (!shown) {
     return (
       <p className="l4-lede">
-        Not fetched. Each channel above reads one searchpoint; a trajectory opens every round
+        Not fetched. Each channel above reads one searchpoint; a winner chain opens every round
         document its branch elected on, which is why it waits for a press.
       </p>
     );
   }
-  const points = evidence.subjects.reduce((n, s) => n + (s.trajectory?.length ?? 0), 0);
+  const points = evidence.subjects.reduce((n, s) => n + (s.winner_chain?.length ?? 0), 0);
   const parted = evidence.subjects.some((s) => s.scenario?.winner_changed);
   return (
     <p className="l4-lede">
-      {points} point(s) across {evidence.subjects.filter((s) => s.trajectory).length} branch(es),
+      {points} point(s) across {evidence.subjects.filter((s) => s.winner_chain).length} branch(es),
       shown under their heads in the <strong>Merged</strong> view. Each point is read on the cells
       that round actually scored — the subsets move between rounds, so a chain drawn on one shared
       axis would redraw earlier rounds on evidence they never had.

@@ -76,6 +76,7 @@ max — ask before exceeding.
 | `pause` | Ask a RUNNING cycle to stop at its next checkpoint — resumable, and the same dispatcher verb the webapp control fires. This is the HALT this skill keeps asking for. |
 | `verify` | Re-score one candidate on more samples and record the result WITHOUT touching the cycle. The sanctioned way to settle a candidate — never re-ask a cell it already answered. |
 | `evidence` | Read any set of campaigns together: roster, comparability, replicates, the variance split, resolving power, and (behind `--ranking`) which edits beat their own origin. Zero spend, writes nothing. |
+| `compact-archive <mode>` | Reclaim the measurement archive: `compact` moves the fields nothing reads out of candidate runs into a gzip store beside them, `restore` puts them back, `purge-cold` deletes that store. Dry-run by default; `--dataset` scopes it. `origin` / `round_parent` runs are never touched. **`purge-cold --apply` is the one irreversible verb in this table** — the rows it drops are paid LLM spend. Refuses outright while any cycle can still append. |
 
 **A budget halt is not the end of a run — it is two verbs.** `SPEND_BUDGET` / `TOKEN_BUDGET` mean
 the cycle hit *its own declared ceiling*, not that the work is done. Only `spend_budget_usd` is

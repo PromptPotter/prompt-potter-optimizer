@@ -24,8 +24,9 @@ tests. Add new ones the same way — never as a `test_structure` scan.
 | A resume / decision checkpoint | [§4](#4-a-resume--decision-checkpoint-kind) | Import-time: `decisions.py` + `replayers.py` asserts |
 | A connector (backend) | [§5](#5-a-connector-backend) | Import-time: the `CONNECTORS` registry guard |
 | An optimizer node | [§6](#6-an-optimizer-node) | Import-time: `validate_template()` at prompt load |
-| A CLI verb | [§7](#7-a-cli-verb) | Breaks loud — an unknown verb exits non-zero |
-| A measurement field | [developer README §4](README.md#4-cross-run-memory) | `MEASUREMENTS_SCHEMA_VERSION` bump |
+| A CLI verb | [§7](#7-a-cli-verb) | Import-time: the `COMMANDS` ↔ `parser_verbs` assert |
+| A control-plane command kind | [§8](#8-a-control-plane-command-kind) | Import-time: three asserts over `ALL_DISPATCHED_KINDS` — cap, payload model, **and the CLI verb** |
+| A measurement field | [developer README §4](README.md#4-cross-run-memory) | **Nothing, on the way in** — an undeclared key is dropped at `sample_measurement.py::measure_sample`, silently. Declare it on `domain/scoring.py::QueryMeasurement` / `PipelineData`; a `pipeline_data` key also needs `_INFRA_KEYS` or a dataset `observation_mapping`. Import-time only afterwards: the compaction asserts beside those types |
 
 ---
 
@@ -240,13 +241,49 @@ directory per verb bought a reader a hop to learn there was nothing to choose.
 **Two decisions the wiring does not make for you.** Honor the verb's class — **write**
 (`new` / `resume`, which mint or extend a cycle), **lifecycle** (`archive` / `delete` /
 `unarchive` / `reset`), **manifest-edit** (`rename`, which rewrites `campaign.json` in place
-and leaves the tree and every measurement where they are), or **diagnostic** (`ab` / `verify` /
-`noise-floor` / `reindex`, which must not perturb an existing cycle's measurements). And do
+and leaves the tree and every measurement where they are), **diagnostic** (`ab` / `verify` /
+`noise-floor` / `seed-screen`, which must not perturb an existing cycle's measurements), or
+**maintenance** (`reindex` / `restamp` / `compact-archive`, which rewrite stored artifacts on
+purpose). A maintenance verb owes two things a diagnostic does not: it is dry-run by default,
+and it refuses while a producer could still be writing what it rewrites
+(`application/archive_maintenance.py::archive_writers`). And do
 **not** add a read verb: reads happen by opening the artifact tree, and raw-file ingest is
 `new <file.csv>`, not an `ingest` verb.
 
-**Guard:** none needed — an unknown verb exits non-zero and a missing `COMMANDS` row breaks
-loud on first invocation. Both are the "breaks loud → no test" class.
+**Guard:** the import-time assert named above — `COMMANDS.keys()` must equal
+`parser_verbs(build_parser())`. Both halves fail *quietly* without it: a parser row with no
+handler raises a bare `KeyError` after the operator's verb already parsed, and a handler with no
+parser row is reported as an *unknown* verb rather than a missing one. If the verb answers a
+`/commands/{kind}`, §8 owns the other half.
+
+---
+
+## 8. A control-plane command kind
+
+A new `POST /commands/{kind}`. **The vocabulary is `domain/command_kinds.py`** — five `Literal`
+aliases by scope, and `ALL_DISPATCHED_KINDS` derived from them. It sits in `domain/` and not
+beside the dispatcher because the parties that must agree on it cannot all afford to import the
+dispatcher: the CLI resolves command bodies lazily so `--help` does not pay for the application
+tree, and `scripts/build_ts_types.py` emits the `CommandKind` union from these names alone.
+
+Join the right `Literal` and three import-time asserts start demanding the rest of the wiring:
+
+| Add | Where | The assert that demands it |
+|---|---|---|
+| a capability tier | `CAP_FOR_KIND` (`api/middleware/command_dispatcher.py`) | `set(CAP_FOR_KIND) != ALL_DISPATCHED_KINDS` — a kind with no cap is a silent unguarded verb |
+| a payload model | `PAYLOAD_MODEL_FOR_KIND` (same file) | the sibling raise beside it |
+| **the terminal's half** | `CLI_VERB_FOR_KIND` (`cli/campaign_runner.py`) | totality over `ALL_DISPATCHED_KINDS`, plus every named verb being a real `COMMANDS` key |
+
+`CLI_VERB_FOR_KIND` is the `<entry-point-parity>` guard, and it is the one that had to be written
+after the fact: five kinds shipped browser-only and were found one at a time. Its value is either
+a CLI verb or `None` — and `None` is a **declaration**, not an escape hatch. Exactly one exists
+(`set-sample-lookahead`, whose absence from the terminal is the contract; root `CLAUDE.md`
+§ Conventions). Writing a second one is a design decision with a reason, not a wiring shortcut.
+
+Then declare it on the wire: `docs/specs/api-openapi.yaml`, *before* the handler lands
+(root `CLAUDE.md` § Pre-flight gate). The router needs nothing — `_WIRED_KINDS` is
+`ALL_DISPATCHED_KINDS` minus the typed routes, so a new kind is wired by default and staying
+*unwired* is what has to be written down.
 
 ---
 

@@ -1,5 +1,6 @@
 "use client";
 import { cx } from "@/lib/cx";
+import { measurementNode } from "@/lib/derivations";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
@@ -83,7 +84,9 @@ export function OptimizerCard({ pipeline }: Props) {
           connector={null}
           schema={pipeline?.node_config_schema ?? null}
           scope="optimizer"
-          nestsNode={null}
+          // The card draws ONE level, so there is nothing to zoom into — but `l1_score`
+          // still runs the whole campaign pipeline, and saying so is the frame's job.
+          nestsNode={measurementNode(pipeline)}
           activeNode={isLive && viewingLive ? activeId : null}
           isLive={isLive}
           tone="neutral"

@@ -89,7 +89,7 @@ def _roster_lines(ev: Evidence) -> list[str]:
             f"{len(r.unscorable_cells):>6}  {r.cycle_rounds_scored:>6}"
         )
     lines += _scenario_lines(ev)
-    lines += _trajectory_lines(ev)
+    lines += _winner_chain_lines(ev)
     if ev.unread_subjects:
         lines.append(
             f"\nAsked for but not read: {', '.join(ev.unread_subjects)}. Each either does not "
@@ -199,16 +199,16 @@ def _scenario_lines(ev: Evidence) -> list[str]:
     return lines
 
 
-def _trajectory_lines(ev: Evidence) -> list[str]:
-    """The branch behind each subject that carries one — asked for with ``--trajectory``, silent
+def _winner_chain_lines(ev: Evidence) -> list[str]:
+    """The branch behind each subject that carries one — asked for with ``--winner-chain``, silent
     otherwise rather than restating that it was not."""
     spec = _UNIT_SPEC[ev.metric.spec.unit]
     lines: list[str] = []
     for r in ev.subjects:
-        if not r.trajectory:
+        if not r.winner_chain:
             continue
         lines.append(f"\n{r.label} — the branch behind it, origin first:")
-        for point in r.trajectory:
+        for point in r.winner_chain:
             value = "         ." if point.value is None else f"{spec.format(point.value):>10}"
             lines.append(
                 f"  r{point.round:<3} {point.label[:20]:<20}  {value}  "
@@ -371,7 +371,7 @@ async def cmd_evidence(args: argparse.Namespace) -> CommandResult:
             stores,
             specs,
             include_ranking=args.ranking,
-            include_trajectory=args.trajectory,
+            include_winner_chain=args.winner_chain,
             include_config=args.config,
             metric=args.metric or MEASURAND,
         )

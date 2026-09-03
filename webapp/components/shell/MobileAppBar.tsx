@@ -9,8 +9,8 @@ import s from "./MobileAppBar.module.css";
 // name, and its verbs. The LIST screen is the sidebar at full width, which carries its
 // own brand, CTA, filter and footer, so it gets no bar and `←` moves between the two.
 //
-// The VIEW axis is not here. The unit header's strip (components/shell/ViewTabs) owns
-// it at every width, so this bar has no segments and no views in its `⋯`.
+// The VIEW axis is not here — ViewTabs owns it, as the bottom tab bar at this
+// width, so this bar has no segments and no views in its `⋯`.
 //
 // `←` also carries the live-run dot, off the same `runningCycles` the desktop
 // sidebar-edge dock reads (I6, one server-owned answer) — not a second dock.

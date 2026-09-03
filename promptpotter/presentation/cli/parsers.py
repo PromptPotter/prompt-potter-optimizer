@@ -395,6 +395,29 @@ def build_parser() -> argparse.ArgumentParser:
         "after a crash mid-append or to reclaim orphaned bytes. Pure disk work, zero spend.",
     )
 
+    p_compact = sub.add_parser(
+        "compact-archive",
+        help="Move the fields nothing reads out of candidate measurement rows into a gzip cold "
+        "store beside them (`compact`), put them back (`restore`), or delete the store "
+        "(`purge-cold`). A measurement row is paid LLM spend, so `compact` never drops a field — "
+        "it moves `hit`/`scored`/`objective` plus pipeline_data's `reasoning_trace`, "
+        "`result_ranking`, `final_ranking` and `total_time`, and stamps the run header with what "
+        "left. `origin` and `round_parent` runs are never touched: they serve the overwhelming "
+        "majority of cache replays. Refuses while any cycle can still append. Dry-run by default; "
+        "`purge-cold --apply` is the ONE irreversible step. Pure disk work, zero spend.",
+    )
+    p_compact.add_argument(
+        "mode",
+        choices=["compact", "restore", "purge-cold"],
+        help="Which step to run.",
+    )
+    p_compact.add_argument(
+        "--dataset",
+        default=None,
+        help="Scope to one dataset (default: every dataset).",
+    )
+    p_compact.add_argument("--apply", action="store_true", help="Write (default: report only).")
+
     p_restamp = sub.add_parser(
         "restamp",
         help="Bring on-disk data onto today's shape. (1) Prune knobs the engine no longer "
@@ -450,8 +473,8 @@ def build_parser() -> argparse.ArgumentParser:
         "a prompt field is the largest thing this read carries.",
     )
     p_evidence.add_argument(
-        "--trajectory",
-        dest="trajectory",
+        "--winner-chain",
+        dest="winner_chain",
         action="store_true",
         help="Also print the branch behind each course / candidate subject — the winner chain "
         "from its origin to its head, each point read on its own cells. OFF by default: every "
@@ -590,6 +613,67 @@ def build_parser() -> argparse.ArgumentParser:
     p_rename.add_argument(
         "label", nargs="?", default="", help="The new name; omit it to clear the name."
     )
+
+    # The cycle/campaign controls the browser could already fire and the terminal could not.
+    # Each posts the SAME command kind the webapp posts — the two surfaces share the server's
+    # vocabulary and nothing else, which is why these needed no UI arrangement to land.
+    p_skip = sub.add_parser(
+        "skip-searchpoint",
+        help="Cut the candidate currently being scored, at its next sample boundary. The round "
+        "carries on with the rest. Defaults to the active cycle.",
+    )
+    p_skip.add_argument("--campaign", default="", help="Campaign id (default: the active one).")
+    p_skip.add_argument("--cycle", default="", help="Cycle id (default: the active one).")
+
+    p_step = sub.add_parser(
+        "step-cycle",
+        help="Let a paused cycle run a bounded number of rounds, then stop again.",
+    )
+    p_step.add_argument("--campaign", default="", help="Campaign id (default: the active one).")
+    p_step.add_argument("--cycle", default="", help="Cycle id (default: the active one).")
+    p_step.add_argument(
+        "--rounds", dest="rounds", type=int, default=1, help="How many rounds to run (default 1)."
+    )
+
+    p_cleanup = sub.add_parser(
+        "cleanup-empty-cycles",
+        help="Remove the stub cycles a mint left behind when it never reached round 0.",
+    )
+    p_cleanup.add_argument("--campaign", default="", help="Campaign id (default: the active one).")
+    p_cleanup.add_argument("--cycle", default="", help="Cycle id (default: the active one).")
+
+    p_del_cycle = sub.add_parser(
+        "delete-cycle",
+        help="Remove ONE named stub cycle — the singular of `cleanup-empty-cycles`. Refuses a "
+        "cycle that holds rounds, and refuses one with a live producer (pause it first).",
+    )
+    p_del_cycle.add_argument(
+        "--campaign", default="", help="Campaign id (default: the active one)."
+    )
+    # The one cycle-scoped verb whose `--cycle` is REQUIRED. Its siblings fall back to the active
+    # pointer, which for a delete would make the likeliest typo the destructive one.
+    p_del_cycle.add_argument("--cycle", required=True, help="Cycle id to remove.")
+
+    p_allowed = sub.add_parser(
+        "set-allowed-models",
+        help="Set the models a steered fork may pick from. `resume --steer-model` refuses "
+        "against exactly this list, so this is how that refusal is widened from the terminal. "
+        "Pass an empty list to clear it.",
+    )
+    p_allowed.add_argument("campaign_id", help="Target campaign id ({dataset}__{rand6_hex})")
+    p_allowed.add_argument(
+        "models",
+        nargs="?",
+        default="",
+        help="Comma-separated model ids; omit to clear the list.",
+    )
+
+    p_replace = sub.add_parser(
+        "replace-dataset",
+        help="Version a dataset slug and repoint what referenced it — the terminal half of what "
+        "the browser offers on a slug collision, where ingest otherwise asks for a new name.",
+    )
+    p_replace.add_argument("slug", help="The dataset slug to replace.")
 
     return parser
 

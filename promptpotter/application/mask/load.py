@@ -135,6 +135,38 @@ def _candidates(
     return out
 
 
+def _parent(
+    round_file: dict[str, Any],
+    samples: frozenset[int] | None,
+    carried: tuple[dict[str, float], float],
+) -> tuple[dict[str, float], float]:
+    """The bar this round's arms were held to, read under the same mask they were.
+
+    Unmasked it is *carried* — round ``N-1``'s elected winner, whose stored evaluators ARE the
+    record. Under a SAMPLE-SET mask it is not, and the gap was silent: ``_candidates`` re-derives
+    every arm's row-derivable evaluators on the selected cells while the carried scalars stay at
+    their full-set values, so every challenger moves and the bar it must clear does not. A round
+    could flip for no reason but the mask's asymmetry, and it renders exactly like a real
+    divergence. Re-derived from ``parent_results`` — the parent's own rows on THIS round's
+    subset — instead.
+
+    A round with no such rows cannot answer on a subset at all: round 0 has no parent, and a
+    round that closed before the field banked none. Empty evaluators, which
+    ``masked_election`` already reads as ``decidable=False`` — the answer it gives for every
+    other parent it cannot score, rather than a bar it made up.
+    """
+    if samples is None:
+        return carried
+    rows = [r for r in (round_file.get("parent_results") or []) if r.get("sample_id") in samples]
+    if not rows or not carried[0]:
+        return ({}, 0.0)
+    # The snapshot supplies the schema/opt_sp-bound names, the rows the derivable ones — the same
+    # merge `_candidates` makes, because the parent IS one of those candidates one round back and
+    # only the cell-dependent half of its namespace moves with the subset.
+    evaluators = {**carried[0], **materialize_row_derivable(rows)}
+    return (evaluators, evaluators["accuracy"])
+
+
 def _mask_candidate(
     sc: ScoredCandidate,
     evaluators: dict[str, float],
@@ -243,13 +275,14 @@ def load_mask_record(
         for rn in sorted(files[cid]):
             round_file = files[cid][rn]
             candidates = _candidates(round_file, samples, crowns.get(cid, {}).get(rn, ""))
+            parent_evaluators, parent_accuracy = _parent(round_file, samples, carried)
             rounds.append(
                 MaskRound(
                     cycle_id=cid,
                     round=rn,
                     candidates=candidates,
-                    parent_evaluators=carried[0],
-                    parent_accuracy=carried[1],
+                    parent_evaluators=parent_evaluators,
+                    parent_accuracy=parent_accuracy,
                     # Through the store's typed read, not a second ``model_validate`` here:
                     # that one is the sole typed read of a round document, and it RAISES on a
                     # file the current models cannot parse. Correct for a replay, which

@@ -54,7 +54,9 @@ class ExportMeasurement(StrictModel):
     # is a level nothing outside this cycle can be compared against. ``None`` when never fit.
     ability: AbilityReading | None = None
     origin_accuracy: float
-    origin_composite_fitness: float
+    # ``None`` where the origin was never scored — the bar the exported lift is read against, so a
+    # stand-in 0.0 hands another program a lift measured off nothing.
+    origin_composite_fitness: float | None
 
 
 class PromptExport(StrictModel):
@@ -121,7 +123,7 @@ def build_prompt_export(
     finished_at: str,
     formula: str | None,
     origin_accuracy: float,
-    origin_composite_fitness: float,
+    origin_composite_fitness: float | None,
 ) -> PromptExport:
     """Project the round that crowned the winner into the artifact.
 

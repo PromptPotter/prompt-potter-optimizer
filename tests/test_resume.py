@@ -16,6 +16,11 @@ from typing import Any
 
 import pytest
 
+from promptpotter.application.archive_maintenance import (
+    compact_measurement_archive,
+    purge_cold_store,
+    restore_measurement_archive,
+)
 from promptpotter.application.optimization.resume_and_fork.replayers import replay_decisions
 from promptpotter.application.scoring.formula import compile_scorer, rescore_results
 from promptpotter.application.scoring.search_point_scorer import (
@@ -96,6 +101,38 @@ def test_rescore_results_projects_the_scorer_it_was_handed() -> None:
     assert result["fitness"] == 0.0 and not is_hit(result["fitness"])
 
 
+def test_a_replayer_that_cannot_re_derive_is_not_reported_as_a_match() -> None:
+    """A record the replay cannot reproduce is a THIRD state, never agreement.
+
+    The replayers raise on purpose where a decision does not re-derive — a `ROUND_WINNER` with no
+    `parent_bias`/`parent_cells` anchor, `RulerCoverageError` on a cell the ruler never carried.
+    The walker caught every exception and counted it as a match, so the rounds nothing could verify
+    were exactly the rounds that reported clean: `--fork-on-divergence` never fired, and the resume
+    continued on a winner no rule had reproduced. Silent in the worst direction — a ledger that has
+    not been through `restamp --stamp-election-bias` replays green from end to end.
+    """
+    round_data = _round(
+        round=0,
+        all_candidate_results={"c1": [{**_r(1.0), "sample_id": 0}]},
+    )
+    div = replay_decisions(
+        round_data,
+        _decisions(
+            {
+                "kind": "round_winner",
+                "inputs_ref": {"candidate_ids": ["c1"], "round_num": 0, "coverage_floor": 1},
+                "outcome": "c1",
+                "data": {"parent_cells": [{**_r(0.0), "sample_id": 0}]},
+            }
+        ),
+    )
+    assert div is not None, "an unreproducible decision was reported as a clean replay"
+    assert div.kind == "replay_error:round_winner", (
+        "the mismatch must name WHICH check went blind, not just that one did"
+    )
+    assert "parent_bias" in str(div.current_outcome)
+
+
 def test_round_winner_replay_ranks_against_the_recorded_parent() -> None:
     """Rescoring preserves the recorded winner, and the panel it is re-ranked against is READ off
     the decision instead of reconstructed: c1 clears the cells the parent misses → a confident
@@ -109,7 +146,15 @@ def test_round_winner_replay_ranks_against_the_recorded_parent() -> None:
     def _m(sid: int, hit: bool) -> dict:
         return {**_r(1.0 if hit else 0.0), "sample_id": sid}
 
-    inputs_ref = {"candidate_ids": ["c1", "c2"], "round_num": 0, "coverage_floor": 4}
+    # `parent_bias` is read, never re-derived — a record lacking it RAISES, which the replay walker
+    # now reports as its own mismatch. Supplied so this test exercises the election rather than the
+    # unreproducible path (it asserted "no divergence" off a swallowed `KeyError` before).
+    inputs_ref = {
+        "candidate_ids": ["c1", "c2"],
+        "round_num": 0,
+        "coverage_floor": 4,
+        "parent_bias": 0.0,
+    }
     round_data = _round(
         round=0,
         all_candidate_results={
@@ -886,14 +931,18 @@ def _archive_run(
     run_id: str,
     content_hash: str,
     measurements: list[dict[str, object]] | None = None,
+    name: str | None = None,
 ) -> None:
-    """Minimal ``MeasurementArchive.append_run`` envelope — one dataset-tagged sample."""
+    """Minimal ``MeasurementArchive.append_run`` envelope — one dataset-tagged sample.
+
+    ``name`` is the run LABEL, which compaction reads to decide eligibility; it defaults to the
+    run_id, as it does for every other caller here."""
     items = measurements or [{"sample_id": 1, "query": f"q_{run_id}", "hit": True}]
     archive.append_run(  # type: ignore[attr-defined]
         run_id,
         {
             "run_id": run_id,
-            "name": run_id,
+            "name": name if name is not None else run_id,
             "content_hash": content_hash,
             "prompt_fields_id": "pf",
             "item_count": len(items),
@@ -905,6 +954,34 @@ def _archive_run(
         },
         items,
     )
+
+
+def _compactable_cell(sample_id: int, **extra: object) -> dict[str, object]:
+    """One richly-stamped measured cell — every field compaction may move, and every field the
+    ruler re-grades from, so a test can assert both halves off one row."""
+    return {
+        "sample_id": sample_id,
+        "query": f"q{sample_id}",
+        "ground_truth": "g",
+        "predicted": "p",
+        "fitness": 1.0,
+        "objective": 1.0,
+        "hit": True,
+        "scored": {"auto": {"fitness": 1.0, "formula": "exact_match(predicted, ground_truth)"}},
+        "error_category": "",
+        "ground_truth_rank": 0,
+        "pipeline_data": {
+            "terminal_node": "llm_only",
+            "diagnostics": {"warnings": []},
+            "step_tokens": {"llm_only": {"input": 10, "output": 5}},
+            "step_timings": {"llm_only": 0.5},
+            "reasoning_trace": "T" * 3000,
+            "result_ranking": [1, 2, 3],
+            "final_ranking": [1, 2, 3],
+            "total_time": 1.25,
+            **extra,
+        },
+    }
 
 
 def test_partial_walk_log_folds_to_the_full_record(built_stores: Stores) -> None:
@@ -950,30 +1027,221 @@ def test_partial_walk_log_folds_to_the_full_record(built_stores: Stores) -> None
     assert archive.load_by_id("r_a") is None
 
 
-def test_reindex_rebuilds_index_and_gcs_orphans_without_shrinking(built_stores: Stores) -> None:
-    """The measurement index is an append-only JSONL fold (last-wins by ``content_hash``);
-    ``reindex`` rebuilds it from the detail files and GCs orphans. Two silent harms it must
-    not commit: (1) a re-measure of the same hash under a NEW run_id must last-win, never
-    serve the stale row; (2) reindex must delete ONLY the orphaned detail file, never a live
-    winner — an over-eager GC silently shrinks an irreplaceable archive."""
+def test_two_readings_of_one_searchpoint_are_two_runs_and_reindex_destroys_neither(
+    built_stores: Stores,
+) -> None:
+    """A run is identified by ``run_id``; ``content_hash`` is a property of what it MEASURED, and
+    two runs legitimately share one. The label is not in the hash, so `origin_<h>` and
+    `round_parent_<h>` are the same searchpoint on the same rows read twice — the parent fold
+    scored `opt_sp=None, l1_diversity=1.0`, the origin with the round's real diversity.
+
+    Two silent harms, both of which keying the index on ``content_hash`` committed: (1) one entry
+    survived for the pair, so `scores`/`item_count`/`source`/`provenance` were whichever landed
+    last — and `_save_run` fires per sample, so an in-flight 3-of-30 could overwrite a complete
+    30-of-30 — while `AxisIndex` and `archive_top_runs` read exactly those fields into the
+    optimizer prompt; (2) ``reindex`` unlinked the loser's detail file as an orphan, destroying
+    paid LLM spend and reporting it as GC."""
     archive = built_stores.archive
     _archive_run(archive, run_id="run_10", content_hash="h_a")
     _archive_run(archive, run_id="run_11", content_hash="h_b")
-    # Re-measure h_a under a DIFFERENT run_id → the old detail (run_10) is now an orphan.
+    # The SAME searchpoint on the same rows, read a second time under its own label.
     _archive_run(archive, run_id="run_12", content_hash="h_a")
 
-    rows = {e["content_hash"]: e["run_id"] for e in archive.list_all(dataset_name="reidx")}
-    assert rows == {"h_a": "run_12", "h_b": "run_11"}  # last-wins fold
+    rows = {e["run_id"]: e["content_hash"] for e in archive.list_all(dataset_name="reidx")}
+    assert rows == {"run_10": "h_a", "run_11": "h_b", "run_12": "h_a"}
 
     counts = archive.reindex()
-    assert counts["indexed"] == 2  # two live hashes
-    assert counts["orphans_removed"] == 1  # run_10's detail
+    assert counts["indexed"] == 3  # three runs, not two hashes
 
-    after = {e["content_hash"]: e["run_id"] for e in archive.list_all(dataset_name="reidx")}
+    after = {e["run_id"]: e["content_hash"] for e in archive.list_all(dataset_name="reidx")}
     assert after == rows  # reindex reproduces the fold, doesn't shrink it
-    assert archive.load_by_id("run_12") is not None  # winners survive
-    assert archive.load_by_id("run_11") is not None
-    assert archive.load_by_id("run_10") is None  # orphan GC'd
+    for run_id in ("run_10", "run_11", "run_12"):
+        assert archive.load_by_id(run_id) is not None  # nothing was deleted
+
+
+def test_compaction_round_trips_every_field_it_moved(built_stores: Stores) -> None:
+    """Compaction MOVES fields out of a measurement row into a gzip cold store; restore puts them
+    back. If the round trip is lossy the harm is silent and irreversible in the worst way — the
+    rows are paid LLM spend, and nothing raises when one comes back missing a key.
+
+    Also pins the half that must survive compaction on its own: the archive is re-graded by the
+    READING campaign's scorer, so ``predicted``/``ground_truth``/``step_tokens``/``step_timings``
+    have to still be there while the run is compacted, or a later campaign start raises
+    ``ScoringTermMissingError`` over an archive that looks fine on disk."""
+    archive = built_stores.archive
+    # TWO saves, as the scoring walk makes them — so the log carries TWO header rows and the fold
+    # reads the LAST. A stamp cleared from only the first header leaves the winning row still
+    # reading as compacted after a restore, which nothing raises on; real logs here run to 12.
+    _archive_run(
+        archive,
+        run_id="run_c0",
+        content_hash="h_c0",
+        name="candidate_0",
+        measurements=[_compactable_cell(1)],
+    )
+    _archive_run(
+        archive,
+        run_id="run_c0",
+        content_hash="h_c0",
+        name="candidate_0",
+        measurements=[_compactable_cell(2)],
+    )
+    before = archive.load_by_id("run_c0")
+    assert before is not None
+    assert "compaction" not in before
+
+    report = compact_measurement_archive(built_stores, dataset="reidx", apply=True)
+    assert report.runs_touched == 1
+    assert report.rows_moved == 2
+    assert report.bytes_freed > 0
+
+    mid = archive.load_by_id("run_c0")
+    assert mid is not None
+    hot = mid["measurements"][0]
+    # Moved out...
+    assert "hit" not in hot
+    assert "scored" not in hot
+    assert "reasoning_trace" not in hot["pipeline_data"]
+    # ...and the re-grading inputs still present, which is the whole safety of the field choice.
+    assert hot["predicted"] == "p"
+    assert hot["ground_truth"] == "g"
+    assert hot["pipeline_data"]["step_tokens"] == {"llm_only": {"input": 10, "output": 5}}
+    assert hot["pipeline_data"]["step_timings"] == {"llm_only": 0.5}
+    # The compacted state is LEGIBLE — absent a stamp, "never had a trace" and "lost its trace to
+    # compaction" are the same read, and every consumer has to guess which.
+    assert mid["compaction"]["rows"] == 2
+
+    restored = restore_measurement_archive(built_stores, dataset="reidx", apply=True)
+    assert restored.runs_touched == 1
+    assert restored.conflicts == 0
+    assert archive.load_by_id("run_c0") == before
+    assert "compaction" not in (archive.load_by_id("run_c0") or {})
+
+
+def test_compaction_spares_the_runs_that_actually_serve_the_cache(built_stores: Stores) -> None:
+    """``origin`` and ``round_parent`` replay 78.6% and 84.5% of their cells from the archive
+    against 4.5% for a candidate — 82% of all cache value for a third of the bytes. Compacting one
+    of them would silently turn cache hits into re-measurements: no error, just spend.
+
+    An unrecognized label is SKIPPED and counted, never compacted on a guess."""
+    archive = built_stores.archive
+    _archive_run(
+        archive,
+        run_id="run_o1",
+        content_hash="h_o",
+        name="origin",
+        measurements=[_compactable_cell(1)],
+    )
+    _archive_run(
+        archive,
+        run_id="run_p1",
+        content_hash="h_p",
+        name="round_parent",
+        measurements=[_compactable_cell(1)],
+    )
+    _archive_run(
+        archive,
+        run_id="run_z1",
+        content_hash="h_z",
+        name="brand_new_label",
+        measurements=[_compactable_cell(1)],
+    )
+    untouched = {rid: archive.load_by_id(rid) for rid in ("run_o1", "run_p1", "run_z1")}
+
+    report = compact_measurement_archive(built_stores, dataset="reidx", apply=True)
+
+    assert report.runs_touched == 0
+    assert report.runs_skipped == 3
+    assert report.skipped_by_label["brand_new_label"] == 1
+    for rid, doc in untouched.items():
+        assert archive.load_by_id(rid) == doc
+
+
+def test_compaction_leaves_an_l4_row_still_narratable(built_stores: Stores) -> None:
+    """The ``_inner_narrated`` panel gate needs BOTH ``mean_round_delta`` and a trace. A row that
+    keeps the first and loses the second does not crash — it drops out of ``inner_narratives`` and
+    flips the round onto ``sample_transcripts``, where every row reads as a miss by construction.
+    A wrong panel, silently, on the recursion we are trying to improve."""
+    archive = built_stores.archive
+    _archive_run(
+        archive,
+        run_id="run_c9",
+        content_hash="h_c9",
+        name="candidate_0",
+        measurements=[_compactable_cell(1, mean_round_delta=0.25), _compactable_cell(2)],
+    )
+
+    compact_measurement_archive(built_stores, dataset="reidx", apply=True)
+
+    detail = archive.load_by_id("run_c9")
+    assert detail is not None
+    l4_row, plain_row = detail["measurements"]
+    assert l4_row["pipeline_data"]["reasoning_trace"] == "T" * 3000  # protected
+    assert "reasoning_trace" not in plain_row["pipeline_data"]  # its neighbour still moved
+    # The protection is per-ROW, so the rest of the L4 row compacts like any other.
+    assert "total_time" not in l4_row["pipeline_data"]
+
+
+def test_a_purged_cold_store_is_the_only_irreversible_step(built_stores: Stores) -> None:
+    """Compaction alone is always undoable; the purge is what spends the money. Kept apart so the
+    reversible step can never quietly perform the irreversible one — and once purged, restore has
+    to report the loss rather than silently 'succeed' over rows it cannot reach."""
+    archive = built_stores.archive
+    _archive_run(
+        archive,
+        run_id="run_c1",
+        content_hash="h_c1",
+        name="candidate_1",
+        measurements=[_compactable_cell(1)],
+    )
+    compact_measurement_archive(built_stores, dataset="reidx", apply=True)
+    assert archive.has_cold("run_c1")
+
+    purged = purge_cold_store(built_stores, dataset="reidx", apply=True)
+    assert purged.runs_touched == 1
+    assert purged.purged == 1
+    assert not archive.has_cold("run_c1")
+
+    # The run must still REGISTER as measured-then-dropped. "We deleted this deliberately for
+    # storage" and "this was never compacted" are different facts, and a purge that goes quiet
+    # is indistinguishable from one that never ran.
+    doc = archive.load_by_id("run_c1")
+    assert doc is not None
+    assert doc["purged"]["rows"] == 1
+
+    after = restore_measurement_archive(built_stores, dataset="reidx", apply=True)
+    assert after.runs_touched == 0  # nothing to put back...
+    assert after.purged == 1  # ...and it is a COUNTED no-op, not a silent skip
+    assert after.runs_skipped == 0
+    assert "hit" not in doc["measurements"][0]
+
+
+def test_a_dry_run_writes_nothing_and_predicts_what_the_apply_costs(built_stores: Stores) -> None:
+    """A destructive verb's dry run is the operator's whole basis for consenting, so it must not
+    write, and its byte figure must be the real one — an estimated ratio standing in for the gzip
+    would make the consent rest on a number the apply never has to honour."""
+    archive = built_stores.archive
+    _archive_run(
+        archive,
+        run_id="run_c2",
+        content_hash="h_c2",
+        name="candidate_2",
+        measurements=[_compactable_cell(1)],
+    )
+    before = archive.load_by_id("run_c2")
+
+    dry = compact_measurement_archive(built_stores, dataset="reidx", apply=False)
+    assert dry.runs_touched == 1
+    assert not dry.applied
+    assert archive.load_by_id("run_c2") == before  # untouched
+    assert not archive.has_cold("run_c2")
+
+    wet = compact_measurement_archive(built_stores, dataset="reidx", apply=True)
+    assert (wet.bytes_before, wet.bytes_after, wet.cold_bytes) == (
+        dry.bytes_before,
+        dry.bytes_after,
+        dry.cold_bytes,
+    )
 
 
 def test_a_fork_inherits_the_decisions_of_the_rounds_it_lifted(built_stores: Stores) -> None:

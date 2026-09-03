@@ -8,6 +8,7 @@
 
 export type {
   AbilityReading,
+  ArchiveReport,
   ActiveSessionResponse,
   CampaignListResponse,
   CampaignSummary,
@@ -15,7 +16,7 @@ export type {
   EffectProvenance,
   EditSpread,
   SubjectReading,
-  TrajectoryPoint,
+  WinnerChainPoint,
   Comparability,
   ArmReplicate,
   EvidenceVariance,
@@ -71,6 +72,7 @@ export type {
   RoundSummaryCandidate,
   ScoreboardRow,
   ScoredCandidate,
+  ValidationFailure,
   SampleSeries,
   SpendBucket,
   SpendRollup,

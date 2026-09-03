@@ -1,25 +1,35 @@
-"""``archive`` / ``unarchive`` / ``delete`` / ``pause`` / ``rename`` / ``set-budget`` — thin shells over
-``CommandDispatcher``, the sole writer of ``CommandRecord``. ``measurements/`` is never touched, so
-siblings still cache-hit."""
+"""The campaign/cycle control verbs — thin shells over ``CommandDispatcher``, the sole writer of
+``CommandRecord``. ``measurements/`` is never touched, so siblings still cache-hit.
+
+Every verb here is the SAME command the browser posts, by the same kind string: the two surfaces
+share the server's vocabulary and nothing else, which is why a CLI verb can land without waiting on
+any UI arrangement."""
 
 from __future__ import annotations
 
 import argparse
 import logging
 import uuid
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 
 from promptpotter.application.jobs.registry import JobRegistry, default_jobs_dir
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.domain.command_kinds import CycleScopedKind, LifecycleKind
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.presentation.api.middleware.command_dispatcher import (
     ChangeSpendBudgetPayload,
+    CleanupEmptyCyclesPayload,
     CommandDispatcher,
-    LifecycleKind,
+    CyclePayload,
+    DeleteCyclePayload,
     LifecyclePayload,
     PauseCyclePayload,
+    ReplaceDatasetPayload,
+    SetAllowedModelsPayload,
     SetCampaignLabelPayload,
+    SkipSearchpointPayload,
+    StepCyclePayload,
 )
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
@@ -32,10 +42,16 @@ logger = logging.getLogger("promptpotter.presentation.cli.lifecycle")
 
 __all__ = [
     "cmd_archive",
+    "cmd_cleanup_empty_cycles",
     "cmd_delete",
+    "cmd_delete_cycle",
     "cmd_pause",
     "cmd_rename",
+    "cmd_replace_dataset",
+    "cmd_set_allowed_models",
     "cmd_set_budget",
+    "cmd_skip_searchpoint",
+    "cmd_step_cycle",
     "cmd_unarchive",
 ]
 
@@ -123,30 +139,51 @@ async def cmd_unarchive(args: argparse.Namespace) -> CommandResult:
     )
 
 
-async def cmd_pause(args: argparse.Namespace) -> CommandResult:
-    """Ask a running cycle to stop at its next checkpoint. The SAME ``pause-cycle`` command the webapp fires, so the interrupt
-    lands on the ledger naming who asked — writing ``.runtime/pause.flag`` by hand leaves no such record."""
-    identity = identity_from_args(args)
-    store = build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
+async def _cycle_scoped(
+    args: argparse.Namespace,
+    kind: CycleScopedKind,
+    payload_for: Callable[[str, str], CyclePayload],
+    noun: str,
+) -> tuple[CommandResult | None, str, str]:
+    """Resolve the target, dispatch, map a refusal — the shape EVERY cycle-scoped verb here shares.
+
+    Returns ``(refusal_or_None, campaign_id, cycle_id)``; the caller owns only its success line.
+    One helper rather than a copy per verb, so "which cycle" and "what a refusal reads like"
+    cannot come to differ between two verbs that answer to the same dispatcher.
+    """
+    store = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
     campaign_id, cycle_id = _resolve_target(args, store)
     if not (campaign_id and cycle_id):
-        return CommandResult(
-            data={"status": "no_target"},
-            human="No active cycle to pause — name one with --campaign/--cycle.",
+        return (
+            CommandResult(
+                data={"status": "no_target"},
+                human=f"No active cycle to {noun} — name one with --campaign/--cycle.",
+            ),
+            campaign_id,
+            cycle_id,
         )
-
     refused = await _refused(
         CommandDispatcher(store).dispatch_cycle_command(
-            kind="pause-cycle",
-            payload=PauseCyclePayload(
-                campaign_id=campaign_id,
-                cycle_id=cycle_id,
-                reason=getattr(args, "reason", None) or "",
-            ),
+            kind=kind,
+            payload=payload_for(campaign_id, cycle_id),
             idempotency_key=uuid.uuid4().hex,
             expected_version=None,
         ),
         {"campaign_id": campaign_id, "cycle_id": cycle_id},
+    )
+    return refused, campaign_id, cycle_id
+
+
+async def cmd_pause(args: argparse.Namespace) -> CommandResult:
+    """Ask a running cycle to stop at its next checkpoint. The SAME ``pause-cycle`` command the webapp fires, so the interrupt
+    lands on the ledger naming who asked — writing ``.runtime/pause.flag`` by hand leaves no such record."""
+    refused, campaign_id, cycle_id = await _cycle_scoped(
+        args,
+        "pause-cycle",
+        lambda c, cy: PauseCyclePayload(
+            campaign_id=c, cycle_id=cy, reason=getattr(args, "reason", None) or ""
+        ),
+        "pause",
     )
     if refused is not None:
         return refused
@@ -249,6 +286,143 @@ async def cmd_rename(args: argparse.Namespace) -> CommandResult:
             if label
             else f"{campaign_id} -> name cleared (shows its dataset name again)"
         ),
+    )
+
+
+async def cmd_skip_searchpoint(args: argparse.Namespace) -> CommandResult:
+    """Cut the candidate currently being scored, at the next sample boundary.
+
+    The sharpest of the terminal's missing controls: an operator watching a candidate burn samples
+    had no sanctioned way to stop it — the in-run stdin reader (``runner/origin_gate.py``) answers
+    the origin gate only. Like ``pause``, it lands on the ledger naming who asked.
+    """
+    refused, campaign_id, cycle_id = await _cycle_scoped(
+        args,
+        "skip-searchpoint",
+        lambda c, cy: SkipSearchpointPayload(campaign_id=c, cycle_id=cy),
+        "skip a searchpoint in",
+    )
+    if refused is not None:
+        return refused
+    logger.info("run control: %s/%s -> searchpoint skip requested", campaign_id, cycle_id)
+    return CommandResult(
+        data={"campaign_id": campaign_id, "cycle_id": cycle_id, "status": "skip_requested"},
+        human=(
+            f"{campaign_id}/{cycle_id} -> skip requested. The scorer drops the current "
+            "candidate at its next sample boundary; the round continues with the rest."
+        ),
+    )
+
+
+async def cmd_step_cycle(args: argparse.Namespace) -> CommandResult:
+    """Let a paused cycle run a bounded number of rounds, then stop again."""
+    rounds = max(1, int(getattr(args, "rounds", 1) or 1))
+    refused, campaign_id, cycle_id = await _cycle_scoped(
+        args,
+        "step-cycle",
+        lambda c, cy: StepCyclePayload(campaign_id=c, cycle_id=cy, rounds=rounds),
+        "step",
+    )
+    if refused is not None:
+        return refused
+    logger.info("run control: %s/%s -> step %d round(s)", campaign_id, cycle_id, rounds)
+    return CommandResult(
+        data={"campaign_id": campaign_id, "cycle_id": cycle_id, "rounds": rounds},
+        human=f"{campaign_id}/{cycle_id} -> stepping {rounds} round(s), then stopping again.",
+    )
+
+
+async def cmd_delete_cycle(args: argparse.Namespace) -> CommandResult:
+    """Remove ONE named stub cycle. The singular of ``cleanup-empty-cycles``, which reaps every
+    empty sibling under a campaign — so this is the verb for a stub you can name and the other for
+    a mess you cannot. Both refuse a cycle that holds rounds, and both refuse a live producer."""
+    refused, campaign_id, cycle_id = await _cycle_scoped(
+        args,
+        "delete-cycle",
+        lambda c, cy: DeleteCyclePayload(campaign_id=c, cycle_id=cy),
+        "delete",
+    )
+    if refused is not None:
+        return refused
+    logger.info("lifecycle: %s/%s -> cycle deleted", campaign_id, cycle_id)
+    return CommandResult(
+        data={"campaign_id": campaign_id, "cycle_id": cycle_id, "status": "deleted"},
+        human=f"{campaign_id}/{cycle_id} -> removed.",
+    )
+
+
+async def cmd_cleanup_empty_cycles(args: argparse.Namespace) -> CommandResult:
+    """Reap the stub cycles a mint left behind when it never reached round 0."""
+    refused, campaign_id, cycle_id = await _cycle_scoped(
+        args,
+        "cleanup-empty-cycles",
+        lambda c, cy: CleanupEmptyCyclesPayload(campaign_id=c, cycle_id=cy),
+        "clean up under",
+    )
+    if refused is not None:
+        return refused
+    logger.info("lifecycle: %s/%s -> empty cycles cleaned", campaign_id, cycle_id)
+    return CommandResult(
+        data={"campaign_id": campaign_id, "cycle_id": cycle_id, "status": "cleaned"},
+        human=f"{campaign_id}/{cycle_id} -> empty sibling cycles removed.",
+    )
+
+
+async def cmd_set_allowed_models(args: argparse.Namespace) -> CommandResult:
+    """Set the models a steered fork may pick from.
+
+    Its absence had teeth: ``resume --steer-model`` refuses against exactly this list
+    (``fork_siblings.py::steer_is_babysit``), so a terminal-only operator could hit the refusal
+    with no terminal way to widen it. Empty clears the list.
+    """
+    raw: str = str(getattr(args, "models", "") or "")
+    models = [m.strip() for m in raw.split(",") if m.strip()]
+    stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
+    campaign_id = resolve_campaign_hint(stores, args.campaign_id)
+    refused = await _refused(
+        CommandDispatcher(stores).dispatch_campaign_config(
+            kind="set-allowed-models",
+            payload=SetAllowedModelsPayload(campaign_id=campaign_id, allowed_models=models),
+            idempotency_key=uuid.uuid4().hex,
+        ),
+        {"campaign_id": campaign_id},
+    )
+    if refused is not None:
+        return refused
+    logger.info("campaign %s -> allowed models %s", campaign_id, models)
+    return CommandResult(
+        data={"campaign_id": campaign_id, "allowed_models": models},
+        human=(
+            f"{campaign_id} -> steerable to {', '.join(models)}"
+            if models
+            else f"{campaign_id} -> allowed-model list cleared"
+        ),
+    )
+
+
+async def cmd_replace_dataset(args: argparse.Namespace) -> CommandResult:
+    """Version a dataset slug and repoint what referenced it.
+
+    The one verb here the browser answers differently: on a slug collision the CLI's ingest path
+    tells the operator to pick another name (``new.py::SlugTakenError``), where the browser offers
+    version-and-repoint. This is that offer, in the terminal.
+    """
+    slug: str = str(getattr(args, "slug", "") or "").strip()
+    stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
+    refused = await _refused(
+        CommandDispatcher(stores).dispatch_workspace_command(
+            kind="replace-dataset",
+            payload=ReplaceDatasetPayload(slug=slug),
+            idempotency_key=uuid.uuid4().hex,
+        ),
+        {"slug": slug},
+    )
+    if refused is not None:
+        return refused
+    logger.info("dataset %s -> replaced (versioned + repointed)", slug)
+    return CommandResult(
+        data={"slug": slug, "status": "replaced"},
+        human=f"{slug} -> replaced; the prior cut is versioned and references repointed.",
     )
 
 

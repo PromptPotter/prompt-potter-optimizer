@@ -524,6 +524,9 @@ class LedgerCandidate(StrictModel):
     accuracy: float | None = None
     composite_fitness: float | None = None
     state: CandidateState = "minted"
+    # The searchpoint id — the archive's `prompt_fields_id`, and the only key joining a node of
+    # the served tree to the rows it paid for.
+    sp_hash: str = ""
     # The candidate's stored evaluator namespace — what a `score:` lens re-scores against.
     evaluators: dict[str, float] = Field(default_factory=dict)
     scored_samples: int | None = None
@@ -585,7 +588,13 @@ class ElectionRecord(StrictModel):
     it, and every live surface reads in that gap. Keyed by LABEL, like ``winner_label`` and like
     ``LedgerRoundClose.abilities``, because a resume re-mints candidate ids.
 
-    ``winner_label`` empty = the round HELD; round 0 crowns the ``C0`` it adopted."""
+    ``winner_label`` empty = the round HELD; round 0 crowns the ``C0`` it adopted.
+
+    **θ and ``matched_parent_*`` do NOT belong here, and the shape invites re-proposing both.** θ is
+    RESTAMPED when the ruler warms, so it stays on ``round:complete``, which every close re-reads;
+    only the crown never moves, and only the crown belongs on a record that does not replay.
+    ``matched_parent_*`` is not merely unservable here but unwanted — nothing plots a floor on a
+    bar."""
 
     model_config = ConfigDict(frozen=True)
 

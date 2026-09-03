@@ -51,7 +51,7 @@ class MLflowSink:
         tags = {
             "improved": str(event.improved).lower(),
             "next_action": event.next_action,
-            "winner_prompt_fields_id": event.winner_prompt_fields_id,
+            "winner_lineage_id": event.winner_lineage_id,
         }
 
         with mlflow.start_run(run_name=f"round_{event.round_num}"):

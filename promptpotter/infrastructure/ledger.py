@@ -45,13 +45,13 @@ def _fork_link(cycle_dir: CycleDir) -> tuple[str, int] | None:
 
 
 def branch_offset(cycle_dir: CycleDir) -> int | None:
-    """Where this cycle's history begins on its PARENT's ledger — ``index.json::forked_at_offset``,
-    stamped at the cut by ``campaign_store``. ``None`` for a root, which inherits nothing.
+    """Where this cycle's history begins on its PARENT's ledger — a ``Cut`` on the parent, stored
+    as ``index.json::forked_at_offset``. ``None`` for a root, which inherits nothing.
 
-    The one copy of this number, and the only field that addresses the ray: ``forked_from_round``
-    is a round and ``forked_at`` a wall clock, so neither substitutes for it. A FORK whose manifest predates the
-    stamp raises rather than defaulting — inheriting ``0`` would silently serve a fork as though
-    it began from nothing, which reads as a real (and much shorter) history."""
+    The one copy of this number: ``forked_from_round`` is a round and ``forked_at`` a wall clock,
+    so neither substitutes for it. A FORK whose manifest predates the stamp raises rather than
+    defaulting — inheriting ``0`` would silently serve a fork as though it began from nothing,
+    which reads as a real (and much shorter) history."""
     link = _fork_link(cycle_dir)
     return None if link is None else link[1]
 
@@ -157,19 +157,11 @@ class CycleEventLog:
 
     def iter(self, own_limit: int | None = None) -> Iterator[tuple[int, CycleRecord]]:
         """The whole chain — a fork's parent prefix, then this ledger's own records — as
-        ``(offset, record)``, cut after ``own_limit`` of THIS ledger's own records.
-
-        The offset is the record's PHYSICAL line index in the file it lives in, the same space as
-        ``ProjectionEnvelope.sequence``, ``RayItem.offset`` and ``DerivedView.at_offset``. It was
-        dropped, so the one caller that wanted an address recovered it with ``enumerate`` and got a
-        VIRTUAL position instead — a number naming no line of any file, reported to clients as the
-        offset a record was appended at.
-
-        The cut is on OWN records because that is what ``forked_at_offset`` counts
-        (``campaign_store::_branch_offset`` reads the parent's ``next_offset``), and because that
-        is the address a caller holds: ``at_offset``, a ray item's, an SSE ``sequence``. The
-        parent bound was applied to the parent's whole CHAIN before, so a fork OF A FORK took the
-        first N records of its grandparent and dropped the parent entirely."""
+        ``(offset, record)``, cut after ``own_limit`` of THIS ledger's own records; ``offset`` is a
+        ``Cut``'s. ``own_limit`` counts OWN records, never the chain: that is what
+        ``forked_at_offset`` counts (``campaign_store::_branch_offset`` reads the parent's
+        ``next_offset``) and what a caller holds, and bounding the chain instead truncates a fork
+        of a fork inside its GRANDPARENT."""
         if self._inherit_parent is not None:
             yield from self._inherit_parent.iter(self._inherit_offset)
         if not self._path.exists():

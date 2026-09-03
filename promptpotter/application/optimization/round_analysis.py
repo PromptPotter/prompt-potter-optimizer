@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from promptpotter.application.intelligence.exploration import graded_response
 from promptpotter.application.optimization.pobb.classification import (
     get_ranked_items,
     ranked_item_keys_from_schema,
@@ -21,7 +20,7 @@ from promptpotter.domain.round_diagnostics import (
     NearMiss,
     RoundDiagnostics,
     SampleDiag,
-    TrajectoryClass,
+    TrendClass,
 )
 from promptpotter.domain.scoring import is_hit
 from promptpotter.shared.errors import is_error_result
@@ -49,7 +48,7 @@ def compute_round_diagnostics(
     rank_buckets, top_k, near_misses, n_valid = _rank_analysis(results, ranked_item_keys)
     error_rate, warning_rate = _pipeline_health(results)
     evolution_rows, anomalies = _evolution(rounds_history)
-    trajectory, trajectory_desc = _trajectory(rounds_history)
+    trend, trend_desc = _trend(rounds_history)
     diff_lines = _cross_candidate_diff(round_result)
     samples = _sample_diagnostics(results, ranked_item_keys, pipeline_schema)
 
@@ -61,8 +60,8 @@ def compute_round_diagnostics(
         error_rate=error_rate,
         warning_rate=warning_rate,
         evolution_rows=evolution_rows,
-        trajectory=trajectory,
-        trajectory_description=trajectory_desc,
+        trend=trend,
+        trend_description=trend_desc,
         anomalies=anomalies,
         cross_candidate_diff=diff_lines,
         l1_diversity=float(round_result.l1_yield),
@@ -175,8 +174,8 @@ def _evolution(rounds: list[RoundResult]) -> tuple[list[EvolutionRow], list[str]
     return rows, anomalies
 
 
-def _trajectory(rounds: list[RoundResult]) -> tuple[TrajectoryClass, str]:
-    """Classify the cycle's trajectory from the accuracy series — the SOLE owner of that decision. Returns the typed class
+def _trend(rounds: list[RoundResult]) -> tuple[TrendClass, str]:
+    """Classify the cycle's accuracy series — the SOLE owner of that decision. Returns the typed class
     plus a one-line description suitable for direct prompt inclusion."""
     if len(rounds) < 2:
         return "healthy", "Too few rounds to classify"
@@ -292,7 +291,11 @@ def _sample_diagnostics(
                 gt_in_source=(sd or {}).get("gt_in_source"),
                 gt_in_ranked=(sd or {}).get("gt_in_ranked"),
                 warnings=[_warning_str(w) for w in (diag.get("warnings") or ())],
-                fitness=graded_response(r),
+                # CORRECTNESS. Its one reader thresholds it with `is_hit`
+                # (`panels.py::_r_diagnostics`), which `CellScorer` declares a predicate on
+                # `fitness`; `graded_response` here fed it the composite instead, so under any
+                # `per_cell` penalty a correct-but-costly cell rendered to `l1_critique` as a MISS.
+                fitness=float(r["fitness"]),
             )
         )
     return out

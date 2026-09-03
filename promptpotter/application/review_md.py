@@ -51,7 +51,10 @@ def render_review_md(
         rounds, audits, ctx_items, l1_patience
     )
     final = index.get("final") or {}
-    origin_composite_fitness = float(final.get("origin_composite_fitness") or 0.0)
+    # Absent means the origin was never scored, which is not the same as scoring 0.0 — `_top_lifts`
+    # drops round 0's lift rather than measuring it against a bar nothing established.
+    origin_cf = final.get("origin_composite_fitness")
+    origin_composite_fitness = float(origin_cf) if isinstance(origin_cf, int | float) else None
     stats = compute_l1_stats(
         list(rounds),
         origin_composite_fitness=origin_composite_fitness,

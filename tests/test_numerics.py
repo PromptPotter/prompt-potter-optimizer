@@ -861,7 +861,6 @@ def _ruler(
         sigma_theta=1.5,
         calibration_model="1PL",
         anchor_id=anchor_id_of(delta, mu, sigma, "1PL"),
-        anchored_at_round=0,
     )
 
 
@@ -2460,13 +2459,20 @@ def test_persisted_params_drop_the_render_and_lose_nothing():
     assert inner["l1_generate"] == {"persona": "A"}
 
 
-def test_resolve_node_layout_l4_edit_and_guard_rail():
-    """Slice 6 Arc 3: the outer L4 layout edit rides the per-node override channel —
-    a valid edit merges onto the floor; a mandatory-dropping edit rolls back (guard rail)."""
+def test_an_l4_layout_edit_that_cannot_apply_is_rejected_not_silently_floored():
+    """The outer L4 layout edit rides the per-node override channel — a valid edit merges onto the
+    floor, and one that cannot apply is convicted where the arm can be TOLD.
+
+    Rolling silently back to the floor is the state this loop could enter and not report: the inner
+    cycle renders the parent's information flow, the arm banks it under an id of its own, and the
+    outer generator reads a lever it never pulled as one that did nothing — after paying a whole
+    inner campaign for the reading. The conviction is `l1_inner_layout_applies` at proposal time;
+    the render boundary raises rather than substituting a layout the declaration never asked for."""
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         resolve_node_layout,
         set_optimizer_prompt_overrides,
     )
+    from promptpotter.application.optimization.validators.l1_strict import L1_INNER_LAYOUT_APPLIES
 
     floor = NODE_LAYOUTS["l1_critique"].floor
     try:
@@ -2482,14 +2488,68 @@ def test_resolve_node_layout_l4_edit_and_guard_rail():
         assert applied.thinking_style == ["axis_memory"]
         assert "diagnostics" in applied.problem_description
         assert applied != floor
-
-        # Guard rail: a name outside `possible` rolls the whole edit back to the floor.
-        set_optimizer_prompt_overrides(
-            {"l1_critique": {"layout": {"made_up_signal": "thinking_style"}}}
+        assert (
+            L1_INNER_LAYOUT_APPLIES.run(
+                {"l1_critique": {"layout": {"axis_memory": "thinking_style"}}}
+            )
+            is None
         )
-        assert resolve_node_layout("l1_critique") == floor
+
+        # A name outside `possible` is rejected at the proposal boundary — the reason is the layout
+        # validator's own id, so the wound names WHICH rule the edit broke.
+        bad = {"l1_critique": {"layout": {"made_up_signal": "thinking_style"}}}
+        outcome = L1_INNER_LAYOUT_APPLIES.run(bad)
+        assert outcome is not None
+        assert [f.reason for f in outcome.evidence["failures"]] == ["l1_layout_unknown_placeholder"]
+        # ...and is fatal, so the arm never spawns an inner campaign to render the floor.
+        assert [f.reason for f in outcome.evidence["failures"]] != ["hallucinated_node"]
+
+        # The render boundary re-asks the SAME derivation and raises; it never substitutes the floor.
+        set_optimizer_prompt_overrides(bad)
+        with pytest.raises(ValueError, match="l1_layout_unknown_placeholder"):
+            resolve_node_layout("l1_critique")
+
+        # `l1_generate`'s layout is L2's in-campaign surface, so an L4 override naming it edits
+        # nothing at all — convicted, not raised, because it arrives as an ordinary proposal.
+        gen = L1_INNER_LAYOUT_APPLIES.run(
+            {"l1_generate": {"layout": {"axis_memory": "instruction"}}}
+        )
+        assert gen is not None
+        assert [f.reason for f in gen.evidence["failures"]] == ["layout_node_not_l4_editable"]
     finally:
         set_optimizer_prompt_overrides(None)
+
+
+def test_an_inner_cell_id_is_the_prompts_it_runs_not_the_bytes_that_declared_them():
+    """`inner_campaign_id` hashes the RESOLVED override. Two declarations that resolve to one set of
+    optimizer prompts are one configuration: hashing the declaration bought two inner campaigns for
+    it — two sandboxes, no shared cache, read as two independent observations of two levers — and
+    left neither able to continue the rounds the other banked."""
+    from promptpotter.application.optimization.dispatch.llm_call.prompts import resolved_overrides
+
+    declared = {"l1_critique": {"instruction": "x"}}
+    # Every drop the resolvers make: a rename that cannot be applied (self-rename), and a layout
+    # edit that lands back on the node's own floor. Neither reaches a prompt.
+    inert = {
+        "l1_critique": {
+            "instruction": "x",
+            "output_schema_field_names": {"reasoning": "reasoning"},
+            "layout": {},
+        }
+    }
+    assert resolved_overrides(declared) == resolved_overrides(inert)
+    assert declared != inert
+
+    # A layout edit that DOES apply is a different configuration and must not collide with it.
+    moved = {"l1_critique": {"instruction": "x", "layout": {"axis_memory": "thinking_style"}}}
+    assert resolved_overrides(moved) != resolved_overrides(declared)
+
+    # The model is the SINGLE inner-optimizer choice, fanned onto every node at render — so WHICH
+    # node carried it is not a fact about the configuration. Keyed per-node, these two rendered
+    # identical prompts under two ids and paid for two inner campaigns.
+    assert resolved_overrides({"l1_critique": {"model": "m"}}) == resolved_overrides(
+        {"l2_context": {"model": "m"}}
+    )
 
 
 # 10. PoBB posterior gate + leader eligibility
@@ -3190,7 +3250,7 @@ def _round_result(round_num: int, accuracy: float, results: list[dict]) -> Round
     )
 
 
-def test_round_diagnostics_read_rank_and_trajectory_off_the_rounds_it_is_given():
+def test_round_diagnostics_read_rank_and_trend_off_the_rounds_it_is_given():
     """With no schema there is no ranker to read a rank OFF, so every cell must land in
     ``not_found`` — a fabricated rank-1 bucket would report perfect retrieval on a pipeline that
     has none, and top-k accuracy is drawn straight off those buckets."""
@@ -3214,19 +3274,19 @@ def test_round_diagnostics_read_rank_and_trajectory_off_the_rounds_it_is_given()
     assert diag.rank_buckets["not_found"] == 3
     assert diag.top_k_accuracy[1] == 0.0 and diag.top_k_accuracy[10] == 0.0
 
-    def trajectory(*series: tuple[int, float]) -> tuple[str, str]:
+    def trend(*series: tuple[int, float]) -> tuple[str, str]:
         rounds = [_round_result(n, acc, rows(True)) for n, acc in series]
         diag = compute_round_diagnostics(rounds[-1], rounds, pipeline_schema=None)
         # The DESCRIPTION as well as the class: "healthy" is also the mixed-progress fallback,
         # so on the class alone a classifier that recognised nothing would pass the climbing arm.
-        return diag.trajectory, diag.trajectory_description.split(" —")[0]
+        return diag.trend, diag.trend_description.split(" —")[0]
 
     # A run that moved 0.01 once and then stopped. The escalation ladder reads this class, so a
     # "healthy" verdict here spends L1's whole patience on a search that has already finished.
-    assert trajectory((0, 0.50), (1, 0.51), (2, 0.51), (3, 0.51)) == ("plateau", "Plateau")
+    assert trend((0, 0.50), (1, 0.51), (2, 0.51), (3, 0.51)) == ("plateau", "Plateau")
     # …and one still climbing must be recognised AS climbing, or the class is a constant
     # dressed as a verdict. This arm is what the plateau case alone could never say.
-    assert trajectory((0, 0.20), (1, 0.45), (2, 0.70)) == ("healthy", "Improving")
+    assert trend((0, 0.20), (1, 0.45), (2, 0.70)) == ("healthy", "Improving")
 
 
 # 13. Adaptive-queue Bayesian math (θ posterior, decision-info, pick-score)
@@ -3783,6 +3843,74 @@ def test_delta_ruler_stays_flat_until_a_second_arm_exists() -> None:
     assert warm is not None and warm.calibration_model == "1PL"
 
 
+def test_best_theta_is_re_read_on_the_warm_ruler_it_will_be_differenced_against() -> None:
+    # SILENT, and it ends runs. `_restamp_on_warm` re-reads every banked θ onto the freshly locked
+    # δ scale — but `tracking.best_theta` is one of those θ and was left on the cold one, where θ is
+    # regularized logit-accuracy rather than a level centred on `mu_delta`. The ladder then
+    # differences a WARM current reading against a COLD peak (`escalation/state.py::_improved`, and
+    # the entry comparator `record_l2_fired` stamps): on an easy set the cold value is the larger,
+    # so it pins for the rest of the run and every round after reports "no advance" — feeding
+    # `l2_stall_count`, `l3_stall_count` and `STOP_L3_PATIENCE`, which terminates the cycle.
+    # Nothing raises; the numbers all render.
+    from types import SimpleNamespace
+
+    from promptpotter.application.intelligence.exploration import Observation
+    from promptpotter.application.optimization.cycle import (
+        Cycle,
+        CycleRoundState,
+        _calibrate_delta_ruler,
+        _cumulative_theta,
+        _reading,
+    )
+
+    def rows(hit: set[int]) -> list[dict[str, Any]]:
+        return [
+            {"sample_id": sid, "objective": 1.0 if sid in hit else 0.0, "fitness": 1.0}
+            for sid in range(8)
+        ]
+
+    origin_rows = rows({0, 1, 2, 3, 4, 5})
+    round1_rows = rows({0, 1, 2, 3, 4, 5, 6})
+
+    # An EASY set — most cells cleared by both arms, so the fit lands at mu_delta < 0 and the cold
+    # reading is the larger of the two. That sign is the whole bug, so it is asserted, not assumed.
+    ruler, _ = _calibrate_delta_ruler(
+        None,
+        4,
+        enable_2pl=False,
+        archive_obs=[Observation("a", sid, 1.0 if sid < 6 else 0.0) for sid in range(8)]
+        + [Observation("b", sid, 1.0 if sid < 7 else 0.0) for sid in range(8)],
+    )
+    assert ruler is not None and ruler.mu_delta < 0
+
+    cold = _reading(
+        _cumulative_theta(origin_rows, None), None, objective_id="obj", results=origin_rows
+    )
+    assert cold is not None
+
+    cycle = Cycle.__new__(Cycle)
+    cycle.session = SimpleNamespace(scoring=SimpleNamespace(scorer_id="obj"))  # type: ignore[assignment]
+    cycle.ruler = ruler
+    cycle.rounds = [
+        round_result(0, results=origin_rows, ability=cold),
+        round_result(1, results=round1_rows, ability=cold),
+    ]
+    # What a live cold cycle banked: the peak taken on the flat ruler.
+    cycle.tracking = CycleRoundState(best_theta=cold.theta, best_theta_se=cold.se)
+
+    cycle._restamp_on_warm(_cumulative_theta(origin_rows, ruler))
+
+    warm_thetas = [rr.ability.theta for rr in cycle.rounds if rr.ability is not None]
+    assert len(warm_thetas) == 2
+    assert cycle.tracking.best_theta == pytest.approx(max(warm_thetas))
+    # The peak is the ROUNDS' max, never the stale cold seed carried through as a floor.
+    assert cycle.tracking.best_theta < cold.theta
+    # And it names the scale it will be differenced on, so `comparable_to` can refuse a cross-scale
+    # read rather than silently making one.
+    assert cycle.origin_round.ability is not None
+    assert cycle.origin_round.ability.ruler_id == ruler.anchor_id
+
+
 def test_panel_precision_names_the_lever_the_panel_needs() -> None:
     # A candidate's `matched_parent_lift` interval is computed from the spread of the per-cell
     # diffs and nothing else, so it cannot distinguish two opposite problems: cells that each
@@ -4285,7 +4413,7 @@ def test_unstamped_ruler_reads_as_unknown_never_as_comparable() -> None:
             comparable_note="",
             mask=None,
             scenario=None,
-            trajectory=None,
+            winner_chain=None,
             config=None,
             arm_id="a",
             instrument_id=None,
@@ -4652,6 +4780,88 @@ def test_an_archive_row_is_graded_by_the_reading_scorer_not_its_stamp(monkeypatc
     assert [o.response for o in obs] == [1.0, 1.0], (
         "an archive row was graded from its stamp, not from the reading campaign's scorer"
     )
+
+
+def test_a_scorer_id_names_the_composite_it_grades_under() -> None:
+    """Two campaigns differing only in ``per_cell`` are two grading functions, so two ids.
+
+    The id keys the archive-observation memo (`hard_sample_archive`: `(archive dir, run_id,
+    scorer_id)`), whose values are `scorer.objective(...)` — the COMPOSITE. An id hashing only
+    ``per_sample`` therefore hands arm B the grades computed under arm A's composite, and those
+    grades are `Observation.response`, which is what `_calibrate_delta_ruler` fits δ on. The
+    trigger is shipped, not hypothetical: `ConfigOverrides` carries `scoring`, and `sweep_batch`
+    mints one fork per row inside a single process.
+
+    Silent harm: nothing raises and `comparable_to` PASSES, because the anchor genuinely is the
+    same one — the ruler is simply fit on the wrong arm's numbers.
+
+    The no-composite id is pinned unchanged in the same breath: `per_cell` is absent for most
+    campaigns, and a churned id would re-derive every archive fold that has one.
+    """
+    from promptpotter.application.scoring.formula import auto_scorer_id, split_scoring_block
+
+    per_sample = "exact_match(predicted, ground_truth)"
+    cheap = "fitness * 500.0 / max(1.0, latency)"
+    dear = "fitness * 1546.0 / (1546.0 + tokens)"
+
+    assert auto_scorer_id(per_sample, cheap) != auto_scorer_id(per_sample, dear), (
+        "two composites share one scorer id — their grades pool in one memo and one δ ruler"
+    )
+    assert auto_scorer_id(per_sample, cheap) != auto_scorer_id(per_sample, None)
+    assert auto_scorer_id(per_sample, None) == auto_scorer_id(per_sample, ""), (
+        "an absent composite must not churn the id every campaign without one already carries"
+    )
+
+    # The block reader is the path a campaign actually takes.
+    assert (
+        split_scoring_block({"per_sample": per_sample, "per_cell": cheap}).scorer_id
+        != split_scoring_block({"per_sample": per_sample, "per_cell": dear}).scorer_id
+    )
+
+    # The id is DERIVED, never declared: a hand-set one could name only `per_sample`, which is how
+    # two composites pooled onto one δ ruler. The key is gone from the block's vocabulary entirely.
+    with pytest.raises(ValueError, match="id"):
+        split_scoring_block({"per_sample": per_sample, "per_cell": cheap, "id": "mine"})
+
+
+def test_a_correct_but_costly_cell_is_a_HIT_everywhere_it_is_thresholded() -> None:
+    """`is_hit` is a predicate on CORRECTNESS, and two readers fed it the composite instead.
+
+    `domain/scoring.py::CellScorer` states the contract and names the readers: *"``fitness`` is
+    CORRECTNESS — what ``is_hit`` thresholds for the tape, the difficulty stratification and the
+    failing-samples panel"*. `datasets/justlogic-d234/campaign.yaml` repeats it: a correct-but-
+    expensive answer must stay a HIT, or L1 is sent to repair reasoning that was right.
+
+    Both shipped datasets declare a `per_cell` composite that scales BELOW 1.0 (a latency or token
+    penalty), so `objective < HIT_THRESHOLD` on every cell — `is_hit` returned False for all of
+    them. Two consequences, both silent: the MANDATORY `diagnostics` panel rendered every correct
+    sample to `l1_critique` as a miss, disagreeing with `failing_samples` in the same prompt; and
+    the parent-hit stratum emptied, so `build_round_order`'s regression probe never fired and the
+    round bought cells the composite penalised rather than cells the arm got wrong.
+    """
+    from promptpotter.application.intelligence.adaptive_queue_mechanism import build_round_order
+    from promptpotter.application.optimization.round_analysis import _sample_diagnostics
+    from promptpotter.domain.scoring import is_hit
+
+    # One cell the arm got RIGHT and was charged for: correctness 1.0, composite 0.4.
+    costly = {
+        "sample_id": 1,
+        "query": "q",
+        "predicted": "p",
+        "ground_truth": "g",
+        "fitness": 1.0,
+        "objective": 0.4,
+        "pipeline_data": {},
+    }
+
+    diag = _sample_diagnostics([costly], None, None)
+    assert [d.fitness for d in diag] == [1.0], "the diagnostics panel graded a cell on its cost"
+    assert is_hit(diag[0].fitness), "a correct cell rendered to l1_critique as a miss"
+
+    # The stratification reads the same number, so the cell is a parent HIT and can be probed.
+    order = build_round_order({1: 1.0, 2: 0.0}, None, [1, 2])
+    assert set(order) == {1, 2}
+    assert not is_hit(0.4), "guard: the composite really is below the hit threshold"
 
 
 def test_ruler_learning_cannot_take_the_whole_round_panel() -> None:

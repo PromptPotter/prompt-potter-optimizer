@@ -139,6 +139,14 @@ class EliminationMechanisms(StrictModel):
             "that threshold."
         ),
     )
+    # INVESTIGATED AND KEPT — do not re-file the lock-in mechanism as dead. This knob and its
+    # siblings (`pobb_lock_in`, `pobb_lock_in_n_min`, `PoBBConfig.lock_in`) default off and no
+    # committed campaign sets them, so the whole path reads as unreachable. It is not: the
+    # `LEADER_LOCKED` `EscalationTarget`/`CandidateOutcome`, the `abort:lock_in_off`
+    # lineage-overlay lens (the candidates card's Lens select, "No lock-in") and
+    # `tests/test_numerics.py` all exercise it. Deleting it removes a shipped analysis feature,
+    # not dead code. (The unreachable significance gate that sat beside it WAS deleted — that one
+    # had no live surface.)
     leader_lock_in: Annotated[bool, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
         False,
         description=(

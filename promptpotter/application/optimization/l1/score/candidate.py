@@ -72,6 +72,9 @@ async def score_one_candidate(
     dashboard seed, so the origin⊕delta merge happens at a single site."""
     label = candidate_label(round_num, idx)
     resolved_pipeline_params = candidate_sp.config_params
+    # Off `candidate_sp` — the SAME object the gateway hands `build_dataset_run_data`, so the id
+    # the report carries and the `prompt_fields_id` the rows are keyed on are one computation.
+    sp_hash = candidate_sp.sp_hash(cycle.session.pipeline_schema)
 
     # Who this pass measures, handed to the gateway rather than bound here — every
     # re-entrant asker declares its own, so none can inherit this one. The L4 recursion
@@ -98,6 +101,7 @@ async def score_one_candidate(
                 [],
                 dataset,
                 label=label,
+                sp_hash=sp_hash,
                 resolved_pipeline_params=resolved_pipeline_params,
                 invalid=True,
                 l1_diversity=l1_diversity,
@@ -151,6 +155,7 @@ async def score_one_candidate(
         results,
         dataset,
         label=label,
+        sp_hash=sp_hash,
         resolved_pipeline_params=resolved_pipeline_params,
         aborted=effect.aborted,
         elimination_stopped=effect.elimination_stopped,

@@ -12,6 +12,9 @@
 .dash-spine-narrow{width:100%;max-width:var(--dash-narrow-max);margin-left:auto;margin-right:auto;margin-bottom:var(--dash-zone-gap)}
 @media (max-width:880px){
   .content{padding:var(--space-12)}
+  /* Ceiling the BOX, never the list: four server-authored warnings fill half a
+     phone pane, and clamping the text would hide a state with nothing to report it. */
+  .run-error-banner{max-height:26vh;overflow-y:auto;overscroll-behavior:contain}
 }
 .dash-spine-narrow:last-child{margin-bottom:0}
 
@@ -126,15 +129,24 @@
 .trend-degraded-label{color:var(--color-warn);font-weight:600;flex:none}
 .trend-degraded-detail{color:var(--color-text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-/* Round samples view — one card whose body picks live vs historical
-   based on `selection.round`. Per-candidate `<details>` groups with
-   sticky headers; click the header to anchor lineage + fitness on
-   that candidate. */
-.round-samples-view{margin-bottom:14px}
-.round-back-live{background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);cursor:pointer;font-family:inherit;font-size:var(--text-xs);padding:2px var(--space-8);border-radius:10px}
-.round-back-live:hover{color:var(--color-text-primary);border-color:var(--color-text-secondary)}
+/* The measurement node's run — a REGION inside its node panel, never a card of its own; the
+   panel header already names the node and the round, and the round axis owns which round that
+   is. Its body picks live vs historical off the same `selection.round`. Per-candidate groups
+   with sticky headers; click a header to anchor lineage + fitness on that candidate.
+
+   The `.rsv-row*` half is shared: `SampleRowItem` renders it here and in `.inspector-samples`
+   above, so it stays in this file rather than moving with the component. */
 .rsv-filters{display:flex;align-items:center;gap:var(--space-12);flex-wrap:wrap;padding:var(--space-4) var(--space-4) var(--space-8)}
-.rsv-cand-select{background:var(--color-background-secondary);border:0;border-radius:4px;color:inherit;font:inherit;font-size:var(--text-sm);padding:var(--space-4) var(--space-8);cursor:pointer;max-width:320px}
+/* The candidate toggle. `min-width:0` is what lets it shrink inside the flex row at all, and
+   the scroll is what keeps a wide round from squeezing every label into illegibility. */
+.rsv-cand-strip{min-width:0;max-width:100%;overflow-x:auto;padding-bottom:2px}
+/* The candidate's own specification, folded under its group head. Indented so it reads as
+   belonging to the candidate rather than to the round, and bounded so a long prompt scrolls
+   inside the fold instead of pushing every sample row off the panel. */
+.rsv-spec{margin:var(--space-6) var(--space-8) var(--space-8);border-left:2px solid var(--color-border);padding-left:var(--space-10)}
+.rsv-spec > summary{font-size:var(--text-sm);color:var(--color-text-tertiary);cursor:pointer;padding:var(--space-4) 0}
+.rsv-spec[open] > summary{color:var(--color-text-secondary)}
+.rsv-spec > :not(summary){max-height:420px;overflow-y:auto}
 .rsv-count{margin-left:auto;color:var(--color-text-tertiary);font-size:var(--text-xs);font-family:var(--font-mono)}
 .rsv-groups{max-height:clamp(280px,46vh,640px);overflow-y:auto;font-family:var(--font-mono);font-size:var(--text-sm);line-height:1.5;padding:var(--space-4) 0}
 .rsv-group{margin-bottom:8px}
@@ -144,6 +156,15 @@
 .rsv-cand-label{color:var(--color-text-primary);font-weight:600}
 .rsv-tally{display:inline-flex;gap:var(--space-8);font-weight:500}
 .rsv-tally-score{color:var(--color-text-secondary)}
+/* A candidate REJECTED before it ran. Colour plus the word, never colour alone — the fact it
+   carries (this is not a measurement) has to survive a monochrome reading. */
+.rsv-rejected{color:var(--color-danger)}
+/* Under the group head: what the candidate tried, and — where it never ran — what validation
+   said. One line each, ellipsised, with the whole text on the `title`. */
+.rsv-why{padding:var(--space-4) var(--space-8) 0;display:flex;flex-direction:column;gap:2px}
+.rsv-why > p{margin:0;font-size:var(--text-xs);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rsv-changes{color:var(--color-text-tertiary)}
+.rsv-reject-reason{color:var(--color-danger)}
 .rsv-empty-row{padding:var(--space-4) var(--space-8);color:var(--color-text-tertiary)}
 .rsv-rows{display:flex;flex-direction:column}
 .rsv-row{padding:2px var(--space-8);display:block;border-bottom:0.5px dotted transparent}
@@ -151,7 +172,6 @@
 .rsv-row > summary::-webkit-details-marker{display:none}
 .rsv-row > summary:hover{background:var(--color-background-hover)}
 .rsv-row[open]{border-bottom-color:var(--color-border);padding-bottom:8px}
-.rsv-row-raw{padding:2px var(--space-8);color:var(--color-text-secondary)}
 .rsv-row .idx{color:var(--color-text-tertiary);flex:0 0 auto}
 .rsv-row .elapsed{color:var(--color-text-tertiary);flex:0 0 auto;min-width:42px;text-align:right}
 .rsv-row .scorer{color:var(--color-text-secondary);flex:0 0 auto;min-width:80px}

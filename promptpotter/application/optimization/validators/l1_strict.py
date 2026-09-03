@@ -26,6 +26,7 @@ from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
 __all__ = [
     "DROPPED_MANDATORY_PLACEHOLDER",
     "L1_CONFIG_NOT_IN_RUNTIME_FAILURES",
+    "L1_INNER_LAYOUT_APPLIES",
     "L1_INNER_STEER_IS_LEGAL",
     "L1_PROMPT_BLOCKS_IN_LIBRARY",
     "L1_PROMPT_FIELD_NOT_GUTTED",
@@ -517,4 +518,60 @@ def _check_l1_prompt_field_not_gutted(
 L1_PROMPT_FIELD_NOT_GUTTED: LLMOutputValidator = LLMOutputValidator(
     id="l1_prompt_field_not_gutted",
     check=_check_l1_prompt_field_not_gutted,
+)
+
+
+def _check_l1_inner_layout_applies(
+    source_output: Mapping[str, Any],
+    **_: Any,
+) -> ValidatorOutcome | None:
+    """A layout edit that does not apply is not a weak hypothesis — it is no hypothesis. The inner
+    cycle renders the node's floor, so the arm measures the PARENT's information flow and reports a
+    lever that was never pulled as one that did nothing. Convicting the PROPOSAL is what makes that
+    reportable: the apply site sits inside the inner campaign's own task, below every wound channel,
+    so it could reach a log line and nothing else while the arm paid a full campaign to render the
+    floor. ``resolve_layout_override`` is the ONE derivation, shared with that apply site, so the
+    boundary that rejects and the boundary that renders cannot disagree. Scoped to ``NODE_LAYOUTS``
+    and to the DELTA for the same reasons as the steer table above."""
+    if not source_output:
+        return None
+    failures: list[ValidationFailure] = []
+    for node_name, node_params in source_output.items():
+        spec = NODE_LAYOUTS.get(node_name)
+        if spec is None or not isinstance(node_params, dict) or "layout" not in node_params:
+            continue
+        axis, edit = f"{node_name}.layout", node_params["layout"]
+        if spec.editor != "l4":
+            # `l1_generate`'s layout is L2's in-campaign surface, so an L4 override naming it edits
+            # nothing. Convicted rather than raised: it is a proposal like any other.
+            failures.append(
+                ValidationFailure(
+                    axis=axis,
+                    value=str(edit)[:80],
+                    allowed=sorted(n for n, s in NODE_LAYOUTS.items() if s.editor == "l4"),
+                    reason="layout_node_not_l4_editable",
+                )
+            )
+            continue
+        for outcome in _opt_prompts.resolve_layout_override(node_name, edit)[1]:
+            named = [str(v) for vs in outcome.evidence.values() if isinstance(vs, list) for v in vs]
+            failures.append(
+                ValidationFailure(
+                    axis=axis,
+                    value=", ".join(sorted(named)),
+                    allowed=sorted(spec.possible),
+                    reason=outcome.validator_id,
+                )
+            )
+    if not failures:
+        return None
+    return ValidatorOutcome(
+        validator_id=L1_INNER_LAYOUT_APPLIES.id,
+        evidence={"failures": failures},
+    )
+
+
+L1_INNER_LAYOUT_APPLIES: LLMOutputValidator = LLMOutputValidator(
+    id="l1_inner_layout_applies",
+    check=_check_l1_inner_layout_applies,
 )

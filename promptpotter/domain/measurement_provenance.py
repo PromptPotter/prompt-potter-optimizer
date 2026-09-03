@@ -24,6 +24,14 @@ DELIBERATE_SOURCES = frozenset({"origin", "optimization_loop", "feedback_cycle"}
 # run to count as a real evaluation rather than a connector-retrieval batch.
 LLM_PATH_FLOOR = 0.5
 
+REUSABLE_MIN_GRADE = "B"
+"""Floor for serving a banked row back as a cache hit (ADR-0005: every consumer excludes ``C``).
+
+A ``C`` run is operator-intervened or off the deliberate LLM path, and replaying one launders it:
+the replayed copies are re-archived under the READING run, which `build_dataset_run_data` grades
+from its own ``source``/``human_intervened`` — so ``C`` cells re-enter as ``A`` and reach the δ
+ruler that `hard_sample_archive` keeps them out of."""
+
 _GRADE_RANK = {grade: rank for rank, grade in enumerate(reversed(MEASUREMENT_GRADES), start=1)}
 
 
@@ -120,6 +128,7 @@ def meets_grade(grade: str, min_grade: str) -> bool:
 
 
 __all__ = [
+    "REUSABLE_MIN_GRADE",
     "entry_grade",
     "grade_run",
     "meets_grade",

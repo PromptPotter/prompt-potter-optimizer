@@ -17,8 +17,9 @@ from promptpotter.domain.l1_layout import (
     coerce_l1_layout,
     validate_l1_layout,
 )
-from promptpotter.domain.opt_search_point import PromptTemplate
+from promptpotter.domain.opt_search_point import OptSearchPoint, PromptTemplate
 from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.store.io import read_json, read_yaml
 from promptpotter.shared.instrument import instrument_mode
 
@@ -33,10 +34,13 @@ __all__ = [
     "get_optimizer_schema",
     "load_optimizer_prompt",
     "load_optimizer_set_overrides",
+    "node_layout",
     "optimizer_manifest",
     "optimizer_resolved_schemas",
+    "resolve_layout_override",
     "resolve_node_layout",
     "resolve_node_override",
+    "resolved_overrides",
     "set_optimizer_prompt_overrides",
 ]
 
@@ -264,20 +268,20 @@ def _node_override(node: str) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
-def _single_model_override() -> tuple[str | None, str | None]:
+def _single_model(overrides: dict[str, Any]) -> tuple[str | None, str | None]:
     """The one inner-optimizer ``(model, provider)`` the outer carrier node set — fanned onto
     every node. Empty on every normal cycle and for an outer optimizer prompt SET (prose only)."""
-    for nd in (_OPTIMIZER_PROMPT_OVERRIDES.get() or {}).values():
+    for nd in overrides.values():
         if isinstance(nd, dict) and isinstance(nd.get("model"), str) and nd["model"]:
             prov = nd.get("provider")
             return nd["model"], prov if isinstance(prov, str) and prov else None
     return None, None
 
 
-def resolve_node_override(node: str) -> ResolvedNodeOverride:
-    """A rename target is dropped when it is a non-identifier, a self-rename, or a duplicate; a
-    collision is rejected at the apply site. A bad L4 mutation must score poorly, never break the run."""
-    raw = _node_override(node)
+def _resolved_prompt_parts(raw: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
+    """One node's prompt fields and the rename map that SURVIVES its declaration. A rename target is
+    dropped when it is a non-identifier, a self-rename, or a duplicate; a collision is rejected at
+    the apply site. A bad L4 mutation must score poorly, never break the run."""
     prompt_fields = {k: v for k, v in raw.items() if k in PromptTemplate.model_fields}
     names: dict[str, str] = {}
     rename_raw = raw.get("output_schema_field_names")
@@ -291,15 +295,28 @@ def resolve_node_override(node: str) -> ResolvedNodeOverride:
             names[field] = wire
         targets = list(names.values())
         names = {f: w for f, w in names.items() if targets.count(w) == 1}
-    model, provider = _single_model_override()
+    return prompt_fields, names
+
+
+def resolve_node_override(node: str) -> ResolvedNodeOverride:
+    prompt_fields, names = _resolved_prompt_parts(_node_override(node))
+    model, provider = _single_model(_OPTIMIZER_PROMPT_OVERRIDES.get() or {})
     return ResolvedNodeOverride(
         prompt_fields=prompt_fields, schema_field_names=names, model=model, provider=provider
     )
 
 
-def resolve_node_layout(node: str) -> L1Layout:
-    """Apply L4's ``{panel: slot}`` edit onto the node's floor. The GUARD RAIL rolls a bad edit back
-    to the floor, so it scores no-improvement, not starvation."""
+def resolve_layout_override(
+    node: str, raw_layout: object
+) -> tuple[L1Layout, list[ValidatorOutcome]]:
+    """One node's floor with an L4 ``{panel: slot}`` edit applied, and the outcomes that edit
+    breaks — empty on a clean apply, where the returned layout is what the inner cycle renders.
+
+    ONE derivation asked at two boundaries. `validators/l1_strict.py` convicts the PROPOSAL, where
+    the arm can be told and costs a synthetic 0; this module re-asks at render time, one recursion
+    level down, where nothing can be told and the arm has already paid for a whole inner campaign.
+    Two derivations would let the boundary that rejects and the boundary that applies disagree
+    about which edits are legal."""
     spec = NODE_LAYOUTS[node]
     # The `editor` field is a contract, so it is asked rather than assumed. `l1_generate`'s
     # layout is L2's in-campaign surface (`opt_sp.memory.l1_layout`) and nothing here applies
@@ -307,22 +324,85 @@ def resolve_node_layout(node: str) -> L1Layout:
     # code path, and silence would let the belief survive.
     if spec.editor != "l4":
         raise ValueError(
-            f"resolve_node_layout({node!r}): this node's layout is edited by {spec.editor!r}, "
+            f"resolve_layout_override({node!r}): this node's layout is edited by {spec.editor!r}, "
             "not L4. Only `editor='l4'` nodes resolve a layout through the per-node override "
             "channel; l1_generate's rides opt_sp.memory.l1_layout instead."
         )
-    merged = coerce_l1_layout(_node_override(node).get("layout"), base=spec.floor)
+    merged = coerce_l1_layout(raw_layout, base=spec.floor)
     if merged is None:
-        return spec.floor
+        # Absent is "no layout edit"; a non-empty declaration that coerces to nothing asked for one
+        # in a shape no slot can hold. Both land here, and treating them alike is the defect
+        # `escalation/firing.py::_parse_l2` already carries the L2 twin of — `l1_layout_unparseable`
+        # is that arm's id, shared so one shape cannot be a breach on one path and silence on the other.
+        if not raw_layout:
+            return spec.floor, []
+        return spec.floor, [
+            ValidatorOutcome(
+                validator_id="l1_layout_unparseable",
+                evidence={"keys": sorted(raw_layout) if isinstance(raw_layout, dict) else []},
+            )
+        ]
     result = validate_l1_layout(merged, spec=spec)
     if not result.is_valid:
-        logger.warning(
-            "L4 layout edit for %r rolled back to floor (guard rail): %s",
-            node,
-            [o.validator_id for o in result.outcomes],
+        return spec.floor, list(result.outcomes)
+    return merged, []
+
+
+def resolve_node_layout(node: str) -> L1Layout:
+    """The layout this node renders under. A declaration that does not apply RAISES: an L1 proposal
+    is convicted upstream by `l1_inner_layout_applies`, so what reaches here is operator-authored,
+    and rendering the floor for it would attribute the measurement to a layout nobody ran."""
+    layout, breaches = resolve_layout_override(node, _node_override(node).get("layout"))
+    if breaches:
+        raise ValueError(
+            f"resolve_node_layout({node!r}): the declared layout edit breaks "
+            f"{sorted(o.validator_id for o in breaches)} and cannot be applied"
         )
-        return spec.floor
-    return merged
+    return layout
+
+
+def node_layout(node: str, opt_sp: OptSearchPoint) -> L1Layout:
+    """**The layout ``node`` renders under, this cycle — the one question every fill asks.**
+
+    Two storage channels, because the two edits have different lifetimes and neither can hold the
+    other: L2's edit of `l1_generate` is per-cycle searchpoint state that must survive a resume, so
+    it lives on `opt_sp.memory.l1_layout`; an L4 edit binds a whole inner cycle from OUTSIDE its
+    searchpoint, so it rides the override ContextVar. `NodeLayoutSpec.editor` is what says which —
+    asked HERE and nowhere else. Every call site that branched on it wrote the ternary again, and
+    the split is what made "which panels does this node see" a three-file question."""
+    if NODE_LAYOUTS[node].editor == "l2":
+        return opt_sp.memory.l1_layout
+    return resolve_node_layout(node)
+
+
+def resolved_overrides(overrides: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """What a declaration RESOLVES to — the identity `inner_campaign_id` hashes. Everything the
+    resolvers above drop (a key no template carries, a rename that could not be applied, a layout
+    edit that lands back on the floor) is dropped here too, so two declarations that render ONE
+    prompt hash alike. Hashing the declaration instead bought two inner campaigns for one
+    configuration and left neither able to continue the rounds the other banked.
+
+    The model rides OUTSIDE the per-node map because that is where it renders: `_single_model` fans
+    one carrier node's choice onto every node, so WHICH node declared it is not a fact about the
+    configuration, and keying it per-node made `{a: {model: X}}` and `{b: {model: X}}` two ids for
+    one inner optimizer — the same defect one level down."""
+    nodes: dict[str, dict[str, Any]] = {}
+    for node, raw in overrides.items():
+        if not isinstance(raw, dict):
+            continue
+        prompt_fields, names = _resolved_prompt_parts(raw)
+        resolved: dict[str, Any] = dict(prompt_fields)
+        if names:
+            resolved["output_schema_field_names"] = names
+        spec = NODE_LAYOUTS.get(node)
+        if spec is not None and spec.editor == "l4":
+            layout, _breaches = resolve_layout_override(node, raw.get("layout"))
+            if layout != spec.floor:
+                resolved["layout"] = layout.model_dump(mode="json")
+        if resolved:
+            nodes[node] = resolved
+    model, provider = _single_model(overrides)
+    return {"nodes": nodes, "model": model, "provider": provider}
 
 
 def list_optimizer_prompts() -> list[str]:

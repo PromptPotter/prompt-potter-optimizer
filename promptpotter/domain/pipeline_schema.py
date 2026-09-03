@@ -15,6 +15,16 @@ from promptpotter.domain.strict_model import StrictModel
 # steer panel edits them through `PromptFieldsEditor`, not the config widgets).
 _PROMPT_OWNED_FIELDS = frozenset(PROMPT_STRING_FIELDS) | {"few_shot_examples", "plan"}
 
+MOVABLE_AGENTS: tuple[str, ...] = ("l1", "l2")
+"""Who may move a search axis — the closed set behind ``NodeConfigParam.movable_by``, in the
+order it is emitted (how often each fires). ``l1`` the generator, every round, over the target's
+axes; ``l2`` escalation, on a stall, over the OPTIMIZER's own.
+
+The OPERATOR is deliberately absent: they may move anything by fork, so listing them would make
+every axis movable and the field would say nothing. An outer optimizer (L4) needs no member
+either — at that depth the inner loop IS a target pipeline and its axes are ``l1``'s, one level
+up. That is the recursion working; a per-depth agent name would be a second spelling of it."""
+
 # Structured-output schema fields owned by the output-schema view. TWO reasons to
 # fence them off:
 #   1. Display — excluded from the operator lock-editor config surface the same way
@@ -208,6 +218,11 @@ class PipelineNode(StrictModel):
     wire_type: str = ""
     node_type: NodeType = NodeType.NONE
     param_keys: set[str] = Field(default_factory=set)
+    # What ``narrow`` TOOK AWAY — the axes this dataset declared and this campaign closed.
+    # Without it the two reasons an axis is shut are one state on the wire: "the dataset never
+    # offered it" (nobody acted) and "the operator held it at mint" (someone did, and could
+    # have chosen otherwise). Only the second is a lock, and only the second is worth a click.
+    param_keys_held: set[str] = Field(default_factory=set)
     param_descriptions: dict[str, str] = Field(default_factory=dict)
     param_allowed_values: dict[str, list[str]] = Field(default_factory=dict)
     # JSON-schema type per param — drives structured-output constraint + validate_overrides
@@ -250,21 +265,26 @@ class PipelineNode(StrictModel):
 
 
 class NodeConfigParam(StrictModel):
-    """One param a node carries — the COMPLETE per-node list, which is what lets
-    `optimizer_tunable` sum to the node's whole search space.
+    """One param a node carries — the COMPLETE per-node list, which is what lets a reader sum
+    `movable_by` into the node's whole search space.
 
     `kind` names the surface that OWNS the param: `model`/`enum` → a select,
     `number`/`bool`/`string` → a typed input, `prompt` → the prompt editor's (a
     `PromptTemplate` decomposition field), `nested` → structured, no scalar widget
     (`NESTED_PARAM_TYPES`). Only the first five are config-editor rows; the last two
-    are listed but not rendered. They are listed because dropping them made
-    `every(!optimizer_tunable)` answer "optimizer-locked" for a node whose every
-    axis is prose — do not re-filter this list at the source.
+    are listed but not rendered. They are listed because dropping them made an
+    all-axes-shut sum answer "locked" for a node whose every axis is prose — do not
+    re-filter this list at the source.
 
-    `optimizer_locked` = never an optimizer axis (`PARAM_FORBIDDEN_KEYS`), though a
-    cap-holding operator may still set it on a steered fork. `optimizer_tunable` =
-    the optimizer may currently MOVE it (sits in `param_keys`). A config-only key is
-    neither; a node with no tunable param is optimizer-fixed (origin-locked)."""
+    **A lock is (axis, AGENT), never an axis alone.** `movable_by` names the agents that may
+    move this param right now — the vocabulary is `MOVABLE_AGENTS` — and the empty list is the
+    only true lock: nobody may, and changing it costs a fork.
+
+    Two fields say WHY a shut axis is shut, and the difference is the whole point:
+    `optimizer_locked` = never an axis (`PARAM_FORBIDDEN_KEYS` — a confound guard, nobody's
+    decision); `held` = the dataset offered it and this campaign closed it (`param_keys_held`
+    — somebody's decision, and reversible). Neither = plain configuration, never an axis at
+    all."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -274,7 +294,8 @@ class NodeConfigParam(StrictModel):
     options: list[str] = Field(default_factory=list)
     description: str = ""
     optimizer_locked: bool = False
-    optimizer_tunable: bool = False
+    movable_by: list[str] = Field(default_factory=list)
+    held: bool = False
 
 
 class NodeSearchNarrowing(StrictModel):
@@ -351,9 +372,17 @@ class PipelineSchema(StrictModel):
         from the surface is not a locked node, it is nothing at all."""
         return self.declared_nodes or self.nodes
 
-    def node_config_schema(self) -> dict[str, list[NodeConfigParam]]:
-        """COMPLETE by contract, so a reader answers "may the optimizer move anything here?" by summing
-        ``optimizer_tunable``. A param dropped here is invisible to every caller — filter downstream."""
+    def node_config_schema(
+        self, l2_axes: dict[str, set[str]] | None = None
+    ) -> dict[str, list[NodeConfigParam]]:
+        """COMPLETE by contract, so a reader answers "may anything move here?" by summing
+        ``movable_by``. A param dropped here is invisible to every caller — filter downstream.
+
+        *l2_axes* is ``{node: {param}}`` the ESCALATION layers may move. A schema cannot know
+        whether it is the optimizer's own manifest or a target pipeline, so the one route that
+        serves the manifest passes it (``routers/active.py``) and everyone else passes nothing.
+        Its source is ``dispatch/schemas.py::L2_NODE_AXES`` — the same table L2's own override
+        parsing reads, so the picture and the parser cannot disagree about L2's reach."""
         # A model row is synthesized on the carrier only when no node OWNS a model —
         # otherwise the native row (justlogic's `llm_only.model`) is authoritative.
         model_declared = any(
@@ -363,7 +392,11 @@ class PipelineSchema(StrictModel):
         out: dict[str, list[NodeConfigParam]] = {}
         for n in self.config_nodes:
             params: list[NodeConfigParam] = []
-            for key in sorted((n.param_keys | set(n.current_config)) - SCHEMA_OWNED_FIELDS):
+            # `param_keys_held` joins the union: an axis the operator closed whose value was
+            # never written to `current_config` (`max_tokens`, declared and unset) otherwise
+            # leaves the surface entirely — the one row that most needed to say it was held.
+            keys = n.param_keys | n.param_keys_held | set(n.current_config)
+            for key in sorted(keys - SCHEMA_OWNED_FIELDS):
                 options: list[str] = []
                 if key in _PROMPT_OWNED_FIELDS:
                     kind = "prompt"
@@ -382,12 +415,14 @@ class PipelineSchema(StrictModel):
                         if t == "boolean"
                         else "string"
                     )
-                # Tunable = the optimizer may MOVE this param. model/provider are
-                # operator-owned axes the optimizer never searches (always locked);
-                # every other param is tunable iff the node advertises it in
-                # `param_keys`. A config-only key (in current_config, not param_keys)
-                # is fixed.
-                tunable = False if key in PARAM_FORBIDDEN_KEYS else key in n.param_keys
+                # Who may move this axis, in ``MOVABLE_AGENTS`` order — one source per agent,
+                # so a member added to that tuple has to be given one here. model/provider are
+                # operator-owned and searched by nobody, so they short-circuit to the empty
+                # list. A config-only key (in current_config, not param_keys) admits neither
+                # agent: it is a setting, not an axis.
+                forbidden = key in PARAM_FORBIDDEN_KEYS
+                reach = {"l1": n.param_keys, "l2": (l2_axes or {}).get(n.name, set())}
+                movable = [] if forbidden else [a for a in MOVABLE_AGENTS if key in reach[a]]
                 params.append(
                     NodeConfigParam(
                         key=key,
@@ -395,8 +430,13 @@ class PipelineSchema(StrictModel):
                         kind=kind,
                         options=options,
                         description=n.param_descriptions.get(key, ""),
-                        optimizer_locked=key in PARAM_FORBIDDEN_KEYS,
-                        optimizer_tunable=tunable,
+                        optimizer_locked=forbidden,
+                        movable_by=movable,
+                        # A forbidden key is never HELD, however it left `param_keys`: a
+                        # dataset may list `model` there and narrowing then drops it, but
+                        # nobody closed an axis — there was none to close, and saying
+                        # otherwise puts a padlock on the confound guard.
+                        held=not forbidden and key in n.param_keys_held,
                     )
                 )
             if n.name == model_carrier and self.available_models:
@@ -412,7 +452,6 @@ class PipelineSchema(StrictModel):
                         description="Optimizer model for this node — install-global by "
                         "default, operator-steerable on a fork.",
                         optimizer_locked=True,
-                        optimizer_tunable=False,
                     )
                 )
             out[n.name] = params
@@ -468,7 +507,16 @@ class PipelineSchema(StrictModel):
                         else list(vals)
                     )
                 out.append(
-                    n.model_copy(update={"param_keys": keys, "param_allowed_values": allowed})
+                    n.model_copy(
+                        update={
+                            "param_keys": keys,
+                            # Accumulated, not assigned: narrowing composes (campaign config,
+                            # then the frozen snapshot, then a fork seed), and a later pass
+                            # must not forget what an earlier one closed.
+                            "param_keys_held": n.param_keys_held | (n.param_keys - keys),
+                            "param_allowed_values": allowed,
+                        }
+                    )
                 )
             return out
 
@@ -534,6 +582,7 @@ class PipelineSchema(StrictModel):
 __all__ = [
     "CANDIDATE_LIBRARY",
     "CANDIDATE_LIBRARY_FILE",
+    "MOVABLE_AGENTS",
     "NodeConfigParam",
     "NodeOutputSchema",
     "NodePromptInfo",

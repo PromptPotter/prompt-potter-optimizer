@@ -8,7 +8,12 @@ only where the surface stands now — never a target to reach.
 from promptpotter.complexity_ledger import compute_ledger
 
 LEDGER_BASELINE = {
-    "modules": 328,
+    # +1: `domain/command_kinds.py` — the `/commands/{kind}` vocabulary, moved out of the
+    # dispatcher that applies it. Not a new concept: the four parties that must agree on it
+    # (dispatcher, router, CLI, TS codegen) could not all import the dispatcher, and the one that
+    # could not is the CLI — which is why nothing bound the terminal to the command set and five
+    # kinds shipped browser-only. The module is what makes `CLI_VERB_FOR_KIND` expressible.
+    "modules": 331,
     "init_files": 48,
     "reexport_shims": 5,
     "config_leaf_fields": 39,
@@ -19,12 +24,25 @@ LEDGER_BASELINE = {
     # `ThetaCaveat`, so a floor-pinned arm's θ is disclaimed on the row it invalidates rather
     # than only on the round's scale reading. A served state, not a derived one: the rows a
     # client would test are the per-sample arrays the candidate row exists to avoid shipping.
-    "cycle_result_fields": 159,
+    # +1: `sp_hash` on `ScoredCandidate` — the searchpoint id, so a candidate names the archive
+    # rows it paid for. Cannot be derived from what the model already carries: the sibling
+    # `resolved_pipeline_params` has the rendered prompt stripped, and the hash covers it.
+    # +1: `parent_results` on `RoundResult` — the bar the round's arms were measured against, on
+    # the round's own subset. Not derivable from anything banked: round N-1's winner is the same
+    # SEARCHPOINT but was read on cells this round never bought, and reconstructing it that way
+    # is what left a sample-set mask re-scoring the arms and not the bar.
+    "cycle_result_fields": 161,
     "any_params": 50,
     # +1: `results.py::is_floor_pinned(rows: Sequence[Mapping[str, Any]])`, the same signature as
     # `measured_cells` and `is_answer_collapsed` beside it — a round row read off disk is a plain
     # mapping, so a narrower annotation here would be a claim the callers cannot honour.
-    "domain_any_maps": 84,
+    # +4: `projection_envelope.py::ray_payload` and its `_pick` helper — the ray's field
+    # projection. Both ends are genuinely untyped: the input is a `CycleRecord.model_dump()`
+    # whose bulk sits under `payload: dict[str, Any]` on the models themselves, and the output is
+    # `RayItem.payload`, the same shape narrowed. A model for the projection would have to
+    # declare every kind's picked subset as a class, which is the hand-authored roster the
+    # declaration exists to avoid.
+    "domain_any_maps": 88,
     "models_lax": 3,
     "prompt_string_fields": 6,
     "injections": 32,

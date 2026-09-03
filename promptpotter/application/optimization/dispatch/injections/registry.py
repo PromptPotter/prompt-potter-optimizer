@@ -76,7 +76,17 @@ def citable_fields(
     rendered: Mapping[str, str] | None = None,
 ) -> tuple[str, ...]:
     """Narrowed to what actually RENDERED — offering a panel that said nothing is the phantom
-    citation one level down. Never empty: an empty ``evidence_grounding.field`` enum is unsatisfiable."""
+    citation one level down. Never empty: an empty ``evidence_grounding.field`` enum is unsatisfiable.
+
+    **Citability is DERIVED — never re-introduce a citable-panel list.** ``EVIDENCE_GROUNDING_FIELDS``
+    was a hand-maintained frozenset the validator checked *set membership* against, so a variant
+    could cite a panel the prompt never rendered and pass clean. It drifted twice: the phantom
+    ``parent_panel``/``sibling_yield`` names were excised, and by the time it was deleted four of its
+    nine names rendered nothing on ``l1_generate``'s floor while two rendered panels were uncitable.
+    ``@signal(citable=…)`` declares evidence-vs-menu at each renderer and this function intersects
+    it with the node's LIVE layout — one derivation feeding the prompt's ``{{citable_fields}}`` menu,
+    the wire-schema enum and ``evidence_grounding_present``. A citable panel that never renders
+    invites a fabricated citation; deriving one from the other is the only defence that holds."""
     names = [
         n
         for n in layout.all_placeholders()

@@ -49,7 +49,7 @@ Each emitted variant declares an `evidence_grounding: {field, citation}` naming 
 
 **Field order is load-bearing — never reorder `L1Variant` alone.** `evidence_grounding` generates second, above `changes_description` *and* the `*_override` slots (`dispatch/schemas.py`), because fields generate in schema order: emitted after the mutation, a citation can only rationalize it. Three surfaces state that order and move together — the Pydantic model (the SoT), `l1_generate`'s `answer_format` prose, and the regenerated `promptpotter/assets/optimizer/pipeline.yaml::resolved_schemas` (`scripts/build_optimizer_schemas.py`). A schema that disagrees with its own prose teaches twice, contradictorily. See [`docs/concepts/structured-output.md`](../../../docs/concepts/structured-output.md) § Which levers are actually free (lever 2, the coordinates).
 
-Channel: `task_context` (the operator's frozen framing) and `plan` (L3-set strategy) arrive on `OptSearchPoint` and surface alongside the panels — `l1_generate` is fan-in, reading both layers' outputs in the same round. Composed by `DispatchHub.fill` (`dispatch/facade.py` — the hub has no `hub.py`) walking `opt_sp.memory.l1_layout` (l1_generate's per-node layout from `NODE_LAYOUTS`, `domain/l1_layout.py`) over the `INJECTIONS` registry (`dispatch/injections/registry.py`).
+Channel: `task_context` (the operator's frozen framing) and `plan` (L3-set strategy) arrive on `OptSearchPoint` and surface alongside the panels — `l1_generate` is fan-in, reading both layers' outputs in the same round. Composed by `DispatchHub.fill` (`dispatch/facade.py` — the hub has no `hub.py`) over the `INJECTIONS` registry (`dispatch/injections/registry.py`). **`fill` takes no layout — it resolves the node's own**: `node_layout(node, opt_sp)` (`dispatch/llm_call/prompts.py`) is the single answer to "which panels does this node see", and the only place `NodeLayoutSpec.editor` is asked. It routes to `opt_sp.memory.l1_layout` for `l1_generate` (L2's in-campaign edit, per-cycle searchpoint state that must survive a resume) and to the override channel for the `editor="l4"` nodes (an outer cycle binding an inner one from outside its searchpoint). Two homes because the two edits have different lifetimes; one reader, so no caller re-derives the choice.
 
 **Reviewing an L1 round trace.** Walk the checklist in the `potter-self` skill (§ The round-trace
 checklist) before reporting findings on any operator-pasted round dump or cycle review — it enumerates
@@ -72,6 +72,8 @@ The steer is **evidence-anchored** — it cites a specific axis, sample, or yiel
 Channel: written to `OptSearchPoint.memory.l1_layout` / `.l1_overrides`. L2 does **not** write `task_context` — see § *The framing is frozen* below.
 
 ### Probe rounds — what they mean, and why the lever is not wired
+
+**This section stays at full length — it is a written SPEC, not stale description of an unwired lever.** It reads as prose about nothing because `L2ContextOutput` carries no `action` field, so a doc-shrink pass scores it as dead. Operator-decided: don't compress it, don't fold it into a code pointer, and don't file the missing field as drift.
 
 **A probe round spends its whole budget interrogating ONE thing** — one axis, one variable, one recurring mistake — instead of spreading a broad mutation set across the failure surface. The distinguishing move is **more candidates on a narrower question**, so the round returns a real answer about that one thing rather than one noisy sample of it.
 

@@ -17,6 +17,7 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import CandidateProposal, ScoredCandidate
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
+from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.instrument import MeasuredCandidate, MeasurementRole
 
 if TYPE_CHECKING:
@@ -103,8 +104,16 @@ async def score_population(
         elim_check.register_completed(
             cast("list[QueryMeasurement]", parent_results), candidate_id=parent_id, sp=parent_sp
         )
+        # CORRECTNESS, not the composite. `priors_by_sample` holds `graded_response` — the
+        # `objective` θ is fit on — and `build_round_order` thresholds these with `is_hit`, which
+        # `domain/scoring.py::CellScorer` declares a predicate on `fitness` and names the
+        # difficulty stratification as one of its readers. Under any `per_cell` composite the two
+        # differ, and where the composite scales below 1.0 (a latency or token penalty) EVERY cell
+        # reads as a miss: the hit stratum empties and the parent-HIT regression probe never fires.
         parent_grades = {
-            int(sid): grade for sid, grade in elim_check.priors_by_sample[parent_id].items()
+            int(sid): float(r["fitness"])
+            for r in parent_results
+            if (sid := r.get("sample_id")) is not None and not is_error_result(r)
         }
 
     # ONE deterministic shared order per round — parent-MISS samples front-loaded, a parent-HIT

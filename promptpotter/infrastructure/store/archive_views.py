@@ -22,19 +22,28 @@ if TYPE_CHECKING:
 __all__ = [
     "campaign_measurement_series",
     "capture_evidence_epoch",
+    "cold_payload_bytes",
+    "cold_payload_size",
     "compact_measurement_run",
     "cycle_measurement_series",
+    "drop_cold_payload",
+    "has_cold_payload",
     "list_runs",
     "load_run",
+    "maintenance_runs",
+    "measurement_detail_lines",
     "measurement_series_for_samples",
     "measurements_for_config",
     "measurements_for_sample",
+    "read_cold_payload",
     "record_measurement_run",
     "reindex_measurements",
+    "replace_measurement_detail",
     "reset_measurement_run",
     "reusable_results",
     "runs_since",
     "sample_fold_rows",
+    "write_cold_payload",
     "write_sample_fold",
 ]
 
@@ -187,7 +196,11 @@ def reusable_results(
     dataset_name: str,
 ) -> dict[int, dict[str, Any]]:
     """Per-sample cache reuse from prior runs sharing *node_configs*. *dataset_name* is required:
-    a ``sample_id`` only identifies a sample within one dataset."""
+    a ``sample_id`` only identifies a sample within one dataset.
+
+    The grade floor is the facade's, not the caller's: this is the seam ADR-0005's "every consumer
+    excludes ``C``" is enforced at, and a replayed row is re-archived under the reading run, so a
+    caller free to lower it could launder a ``C`` cell into the δ ruler."""
     return stores.archive.load_reusable_results(
         node_configs,
         is_fatal=is_fatal,
@@ -219,6 +232,52 @@ def reset_measurement_run(stores: Stores, run_id: str) -> None:
     """Discard the run's detail log — a ``force_fresh`` pass REPLACES its rows, and an
     append-only log does not overwrite. See :meth:`MeasurementArchive.reset_run`."""
     stores.archive.reset_run(run_id)
+
+
+# -- field compaction ---------------------------------------------------------
+#
+# The facade half of the archive's cold store. These are deliberately thin: WHICH fields move is
+# a policy the application layer owns (`application/archive_maintenance.py`), and the archive owns
+# the paths, the fold-key ordering invariant and the atomic swap.
+
+
+def maintenance_runs(stores: Stores, *, dataset_name: str | None = None) -> list[dict[str, Any]]:
+    """Every index entry, RAW — never epoch-filtered. ``list_runs`` is an EVIDENCE read and hides
+    an instrument's own runs; a maintenance pass that cannot see a run cannot maintain it."""
+    return stores.archive.list_all(dataset_name=dataset_name)
+
+
+def measurement_detail_lines(stores: Stores, run_id: str) -> list[str]:
+    return stores.archive.detail_lines(run_id)
+
+
+def replace_measurement_detail(stores: Stores, run_id: str, lines: Iterable[str]) -> int:
+    return stores.archive.replace_detail(run_id, lines)
+
+
+def write_cold_payload(stores: Stores, run_id: str, rows: Iterable[dict[str, Any]]) -> int:
+    return stores.archive.write_cold(run_id, rows)
+
+
+def cold_payload_size(stores: Stores, rows: Iterable[dict[str, Any]]) -> int:
+    """What writing *rows* would cost. One compression path serves the dry run and the apply."""
+    return stores.archive.cold_size(rows)
+
+
+def cold_payload_bytes(stores: Stores, run_id: str) -> int:
+    return stores.archive.cold_bytes_on_disk(run_id)
+
+
+def read_cold_payload(stores: Stores, run_id: str) -> list[dict[str, Any]] | None:
+    return stores.archive.read_cold(run_id)
+
+
+def drop_cold_payload(stores: Stores, run_id: str) -> int:
+    return stores.archive.drop_cold(run_id)
+
+
+def has_cold_payload(stores: Stores, run_id: str) -> bool:
+    return stores.archive.has_cold(run_id)
 
 
 def maintain_measurement_index(stores: Stores) -> bool:

@@ -4,6 +4,7 @@ is a cross-cutting SUBSET — surface it as a note, never a summed figure, or th
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from pydantic import Field
@@ -16,7 +17,12 @@ from promptpotter.presentation.api.routers.campaigns._router import campaigns_ro
 from promptpotter.shared.errors import NotFoundError
 
 # Per-sample arrays inside a public round file that the backend produced → ``connector``.
-_CONNECTOR_ROUND_KEYS = ("results", "all_candidate_results", "overlap_results")
+_CONNECTOR_ROUND_KEYS = (
+    "results",
+    "all_candidate_results",
+    "overlap_results",
+    "parent_results",
+)
 
 # Loop's four leaves, then the full six (top-level Connector / Loop / Dataset flattened).
 _LOOP_LEAVES = ("state", "trace", "history", "reports")
@@ -53,16 +59,35 @@ def _campaign_split(root: Path) -> dict[str, int]:
     return acc
 
 
-def _dir_size(root: Path) -> int:
+def _dir_size(root: Path, *, skip: frozenset[str] = frozenset()) -> int:
+    """Bytes under *root*, skipping the top-level names in *skip*.
+
+    ``os.scandir`` rather than ``rglob`` + ``stat``: on Windows a ``DirEntry`` carries the size from
+    the directory scan it already did, so this is one syscall per file where the glob spent three.
+    Over a workspace this size that is the difference between a panel that opens and one the
+    operator watches spin.
+
+    *skip* is what stops the two biggest directories being walked TWICE — once for their own figure
+    and again inside the tenant total."""
     total = 0
-    if not root.is_dir():
-        return total
-    for p in root.rglob("*"):
+    stack = [root]
+    first = True
+    while stack:
+        current = stack.pop()
         try:
-            if p.is_file():
-                total += p.stat().st_size
+            with os.scandir(current) as it:
+                for entry in it:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            if not (first and entry.name in skip):
+                                stack.append(Path(entry.path))
+                        elif entry.is_file(follow_symlinks=False):
+                            total += entry.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        continue
         except OSError:
             continue
+        first = False
     return total
 
 
@@ -188,10 +213,13 @@ def get_workspace_storage(stores: StoresDep) -> WorkspaceStorageResponse:
     entries.sort(key=lambda e: e.on_disk_bytes, reverse=True)
     base = stores.base_dir
     shared = _dir_size(base / "measurements") + _dir_size(base / "optimizer_reuse")
-    total = _dir_size(base)
+    # Each byte is counted ONCE and the three parts ARE the total, rather than the total being
+    # walked a third time and `other` recovered by subtraction — which needed a `max(0, …)` guard,
+    # and a clamp on a residual is the shape of two walks that disagreed.
+    other = _dir_size(base, skip=frozenset({"campaigns", "measurements", "optimizer_reuse"}))
     return WorkspaceStorageResponse(
-        total_bytes=total,
+        total_bytes=campaigns_total + shared + other,
         shared_cache_bytes=shared,
-        other_bytes=max(0, total - campaigns_total - shared),
+        other_bytes=other,
         campaigns=entries,
     )

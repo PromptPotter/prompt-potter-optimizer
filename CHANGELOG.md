@@ -4,7 +4,9 @@ All notable changes to this project will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.8.13] — 2026-09-02
+
+> Compare is a surface you click: tick any campaigns, walk each genealogy, move a card onto any searchpoint on the way — one drill-in where there were four. Which cells a comparison rests on is yours to pick, and picking a set moves the `overlap` bars alone. Underneath, the δ ruler was being fit on absences read as zeros, so a θ means what it says again. 43 commits since `v0.8.12`.
 
 ### Added
 
@@ -12,12 +14,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **What two searchpoints ARE, not just what they scored** — configurations lined up key by key, differing ones first, beside the parent chain that led to each.
 - **A cell nobody measured is not a zero.** A coverage strip says which absence each blank is, and a channel on a different ruler or dataset is tagged rather than averaged in.
 - **"What if we had scored it differently"** — put a branch on the chart twice, once as it ran and once under another formula or fewer samples, and read what changed: the winner, the round the two lineages part at, how much of the record survives.
+- **`compact-archive {compact,restore,purge-cold}`** — what `/compact` does for a coding agent's context, this does for a finished run: it shrinks what the run left on disk, and shows you what it would touch before touching anything. What it keeps is what you would want back — every searchpoint's input, and everything that dataset's ruler re-grades from — so compacting rows another campaign replays from costs that campaign nothing. `restore` puts the rest back; `purge-cold` throws it away for good. Refused while any cycle can still append, and the same verb on all five ways in.
 
 ### Changed
 
+- **An absent score was read as a wrong answer.** `objective` is a new field and it was read with a `0.0` default, so 63,808 of 68,526 live rows scored as misses. The δ ruler was fit on that matrix, which collapsed θ to logit-accuracy plus a constant. Absence raises now.
+- **One δ scale per dataset, and no floor under the error.** Every L4 spawn used to fit its own scale from whatever the archive held when it started, so one cell re-run on byte-identical rows returned a θ spread of 0.760 — against a round-1 winning margin of 0.234. There is one scale per inner dataset now, pooled over every arm, anchored cold and extended warm. θ's standard error sat on a floor constant on top of that: dispersion computed to 0.006–0.052 across nine arms and clipped on 8 of 9, which left the exceedance probability a monotone map of the raw gap. The floor is gone.
+- **No more winning by drawing well once.** A round's winner is the maximum over its arms, so it carries that round's largest noise draw, and replay serves its cached rows, so the inflation never washes out. Re-measured as the next round's parent, three winners of three fell −0.098, −0.095 and −0.365. The next round's bar subtracts that luck instead of inheriting it. The score itself is untouched, and elections that ran before the correction keep the bar they actually ran under.
+- **A round is won on the cells every arm shares.** The headline reads `overlap_accuracy`. Raw accuracy rides whatever subset the acquisition bought and θ is the elected arm's own best draw, so neither one survives being compared across rounds.
 - **A campaign starts when you say so.** A check-in that resolved cleanly used to mint and spawn the runner with no Start press, so the first sign of a launch was a round already scoring against real money. Every resolved draft now lands in review behind the button.
 - **Picking a set of cells moves only the `overlap` bars.** Accuracy, θ and the composite stay on each candidate's own cells instead of vanishing, and a candidate that answered part of the set is blank rather than drawn short beside a full one.
 - **The shared reading is `overlap` everywhere** — chart, terminal line, `log.md`, `review.md`, round document. It read "trajectory" on screen only, a word two other things already mean.
+
+### Fixed
+
+- **The terminal refused a backend it never talks to.** `new` and `resume` asked for `/status` unconditionally, but the `promptpotter` and `dspy` connectors run in-process with no wire, so `new promptpotter-self` worked only while an unrelated service happened to hold the port. All four ingresses run one preflight now. The origin gate gained an embedded channel in the same pass; a host program driving a run used to poll it until killed.
+- **Every resume fell back to round 0.** The rebuild handed the derivation a flattened shape with no shared-cell key in it, so the lookup found nothing and gave up quietly. The projection both carriers go through now refuses a row that claims an `overlap` reading without the pair behind it.
+- **Repair banked its work under an empty prompt.** It rebuilt the searchpoint from a field that strips the rendered prompt, so every hole it plugged reached the backend with no prompt and was filed under the hash of the empty string.
+
+### Technical Details
+
+- **43 commits since `v0.8.12`** (2026-08-24 → 2026-09-01): 14 refactors, 13 features, 9 fixes, 7 docs.
+- **BREAKING — start clean.** `winner_trajectory` is `adopted_line`, `LineageNode.id` is `sp_hash` — the archive's own address, so a tree node names the rows it paid for. `sample_set_n` counts scoreable rows rather than rows held, and `ElectionRecord.parent_bias` is required, since a default would re-derive a bar the round never ran under. Round documents predating the fields are not read back; the content-addressed archive replays by `sample_id`, so nothing is re-paid.
+- **The L4 instrument alarm moved to run time.** A hand-edited fingerprint held five values in six days and guarded nothing measurable: eight banked `promptpotter-self` campaigns carried eight distinct values, none ever replayed another's cells, and the pinned value matched none of them. `L4_FINGERPRINT_ROSTER` guards the opposite harm — a module dropping *out*, pooling two incomparable corpora under one id — and warns before the spend, with a count.
+- `pyproject.toml` → 0.8.13; `APP_VERSION` derives from it and `uv.lock` records it.
 
 ## [0.8.12] — 2026-08-24
 

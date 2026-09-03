@@ -6,7 +6,9 @@
 .verify-header{margin-bottom:18px}
 .verify-header h2{margin:0 0 var(--space-6);font-size:var(--text-2xl);font-weight:600;color:var(--color-text-primary)}
 .verify-subtitle{margin:0 0 var(--space-8);font-size:var(--text-base);color:var(--color-text-secondary);max-width:680px;line-height:1.55}
-.verify-cli{background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:6px;padding:var(--space-8) var(--space-12);margin:var(--space-8) 0;font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-text-primary)}
+/* `overflow-x:auto`: a <pre> does not wrap, and this one is a command that has to
+   be read in full. It grows with the campaign id, so any column can be too narrow. */
+.verify-cli{background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:6px;padding:var(--space-8) var(--space-12);margin:var(--space-8) 0;font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-text-primary);overflow-x:auto}
 /* overflow-x:auto, not hidden. Nine columns cannot fit a phone, and `hidden`
    did not make them fit — it deleted them from view with no scrollbar to say
    so. The table scrolls inside its own box now, the same way .l4-table-wrap

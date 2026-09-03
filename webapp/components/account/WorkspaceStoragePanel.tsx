@@ -3,6 +3,7 @@ import { useFetch } from "@/lib/hooks/useFetch";
 import { fetchWorkspaceStorage } from "@/lib/api";
 import { fmtBytes } from "@/lib/format";
 import { cx } from "@/lib/cx";
+import { ArchiveCompactionControl } from "./ArchiveCompactionControl";
 
 // Workspace-wide storage rollup — per-campaign on-disk totals, fattest first, plus
 // the shared caches and a residual "Other" line so the parts sum to the real total.
@@ -66,6 +67,7 @@ export function WorkspaceStoragePanel() {
           </div>
         </li>
       </ul>
+      <ArchiveCompactionControl />
     </div>
   );
 }

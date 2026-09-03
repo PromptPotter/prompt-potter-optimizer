@@ -92,6 +92,7 @@ export function scored(over: Partial<ScoredCandidate> = {}): ScoredCandidate {
     composite_fitness: 0,
     total: 0,
     evaluators: {},
+    sp_hash: "",
     pipeline_params_override: null,
     resolved_pipeline_params: null,
     prompt_fields: {},
@@ -125,7 +126,7 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
     round: 0,
     // No ledger behind a fixture, so the round closed at no offset — the same `null` a
     // diagnostic replay writes, never 0, which is a real record.
-    closed_at_offset: null,
+    at_offset: null,
     label: "C0",
     accuracy: 0,
     composite_fitness: 0,
@@ -151,6 +152,7 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
     parent_accuracy: 0,
     results: [],
     all_candidate_results: {},
+    parent_results: [],
     candidates_scored: 0,
     candidate_scores: [],
     evaluators: {},

@@ -13,33 +13,64 @@
      mount points (the sidebar footer, the phone app bar) share this. */
   .auth-chip{height:32px;padding:0 var(--space-12);font-size:var(--text-sm)}
 
-  /* Chat job bar — only rendered for authed-with-cycle. The head already
-     wraps + flows the chips in normal order by default (chat.css); here we
-     just tighten gaps and chip sizing for the phone. */
-  .chat-job-bar{padding:var(--space-6) var(--space-10) var(--space-8)}
-  .chat-job-head{gap:var(--space-6)}
-  .chat-job-toggle{flex-wrap:wrap;min-height:0;padding:var(--space-8) var(--space-10);gap:var(--space-6)}
-  .chat-job-toggle .chip-row{gap:var(--space-6)}
-  .chat-job-toggle .chip{padding:3px var(--space-10);font-size:var(--text-base)}
-
-  /* Pipeline hero — the flanking Input/Output boxes shrink to an icon + label so
-     the LLM chip keeps the centre. Every item in the nowrap row must be able to
-     SHRINK: fixed flanks plus a fixed 238px chip demanded ~390px inside a ~351px
-     box, and `justify-content:center` split the excess evenly, hanging Input and
-     Output off both edges. Each flank claims max-content so it owns its label
-     (its box is sized by a 24px icon, the centred label is wider); all the give
-     then lives in the chip and the two arrows. Desktop is unchanged (chat.css). */
-  .wf-hero{padding:var(--space-10) var(--space-12) var(--space-14);max-width:none}
-  .wf-hero-flow{justify-content:center;gap:0;padding:var(--space-10) 0 var(--space-4);flex-wrap:nowrap;overflow:visible;max-width:100%;min-width:0}
+  /* The hero is an anchor, not the subject — the thread is. Everything here is one
+     compact strip so the conversation gets the rest of the tab. The Input/Output
+     flanks drop to icons: `FlowEnd` names the button from `path.label`, so the word
+     costs a phone legibility it cannot spend (5 uppercase characters in a 34px
+     column) and buys nothing the position does not already say. */
+  .wf-hero{padding:var(--space-6) var(--space-12) var(--space-8);max-width:none}
+  .wf-hero-flow{justify-content:center;gap:0;padding:var(--space-4) 0;flex-wrap:nowrap;overflow:visible;max-width:100%;min-width:0}
   .wf-hero-node-toggle{
-    flex:0 0 auto;min-width:max-content;padding:0;gap:3px;flex-direction:column;
+    flex:0 0 auto;min-width:var(--touch-target-min);min-height:var(--touch-target-min);
+    padding:0;gap:0;flex-direction:column;justify-content:center;
     align-items:center;text-align:center;background:none;border:0;box-shadow:none
   }
-  .wf-hero-node-toggle .ico svg{width:24px;height:24px}
-  .wf-hero-node-toggle .text-col{gap:0;align-items:center}
-  .wf-hero-node-toggle .lbl{font-size:var(--text-xs);letter-spacing:.05em}
-  .wf-hero-node-toggle .val{display:none}
-  .wf-hero-node.llm{flex:1 1 auto;min-width:0;max-width:min(238px,100%);padding:var(--space-12) var(--space-16)}
+  .wf-hero-node-toggle .ico svg{width:22px;height:22px}
+  .wf-hero-node-toggle .text-col{display:none}
+  /* Connector, node and state on ONE line. Stacked they cost three rows of a
+     screen the conversation wants, and none of the three is the subject here.
+     The chip still gives its width to the arrows — `max-width` caps it, `flex` lets it. */
+  .wf-hero-node.llm{
+    flex:1 1 auto;min-width:0;max-width:min(238px,100%);
+    padding:var(--space-4) var(--space-10);gap:var(--space-8);
+    flex-direction:row;align-items:baseline;
+  }
+  .wf-hero-node.llm .lbl{font-size:var(--text-md)}
+  .wf-hero-node.llm .head{gap:var(--space-6)}
+  .wf-hero-node.llm .ico svg{width:18px;height:18px}
+  .wf-hero-sole{flex-direction:row;align-items:baseline;justify-content:center;gap:var(--space-6);width:auto}
+  .wf-hero-multi-tag{padding-bottom:0}
+  .pipeline-stack{padding:0}
+  /* The round axis scopes the pipeline above it, so it wears no label of its own,
+     and a 30px pill: dense inline controls are exempt from the 44px floor below.
+     The row it shares with the sample buttons is the hero's own, at every width. */
+  .round-axis-label{display:none}
+  .round-tab{min-width:30px;height:30px;min-height:30px;font-size:var(--text-xs)}
+  .hs-heat-mini-btn,.st-mini-btn{height:26px}
+  /* ── The chat's readouts, miniature ──────────────────────────────
+     Everything the Dashboard shows at size is still HERE, at a size that lets the
+     thread be the subject. Type down one step, padding halved, and the touch floor
+     released by container (see the block at the foot of this file) — these are
+     inline readouts whose targets are wide, and the 44px floor was adding 20px to
+     every row of them. */
+  /* `--touch-floor` INHERITS, so a container retunes the floor for its subtree
+     without out-specifying the rule that sets it. Every control in these is an
+     inline readout whose target is wide, not tall. */
+  .wf-hero,.run-card,.round-axis{--touch-floor:0px}
+  .run-card{font-size:var(--text-sm)}
+  /* The counts restate the headline's own before/after in a second unit — one line
+     up it already reads "55% from 30%". The comparison stays on screen; its second
+     spelling does not. */
+  .run-flips{display:none}
+  .run-box-head{gap:var(--space-6)}
+  .run-headline{font-size:var(--text-xs);gap:var(--space-4)}
+  .run-headline-acc,.run-headline-was{font-size:var(--text-xs)}
+  .run-diff{margin-top:var(--space-4);font-size:var(--text-xs)}
+  .hsp-row{font-size:var(--text-xs);line-height:1.5}
+  /* Three coverage buckets on ONE line — stacked they are a column of three words
+     next to a table that already fits the width. It wraps UNDER those rows here, so
+     the hairline dividing the two moves from its left edge to its top. */
+  .hsp-spread{flex-direction:row;align-items:baseline;gap:var(--space-8);width:100%;justify-content:space-between;border-left:0;border-top:1px solid var(--color-border);padding:var(--space-4) 0 0}
   .wf-hero-arrow{flex:0 1 auto;min-width:14px;max-width:32px}
   /* The connector pop centres on its dot (left:50% + translateX(-50%)), and that
      dot sits ~30px from the left edge — a 240px card centred there starts
@@ -47,26 +78,19 @@
      edge; position:fixed is out because .connector itself carries a transform. */
   .connector-pop{left:0;transform:none;min-width:0;max-width:calc(100vw - 48px)}
 
-  /* Chat grid — the 980px breakpoint already collapses to 1fr, but
-     desktop padding + pinned 620px panel-height create overflow on a
-     phone. Slim padding, set a phone-sized floor so the message stack
-     is readable in flow (desktop 620px is too tall here; <300px would
-     show only the first bubble + input). */
-  .chat-grid{padding:0 var(--space-12);gap:var(--space-14)}
-  .chat-panel{min-height:420px}
-  .chat-panel-header{padding:var(--space-12) var(--space-14)}
+  /* The thread FILLS the tab. An auto row is content-sized, so the panel used to
+     leave the slack empty above the remote; `1fr` hands it over, and the floor is
+     a minmax so an unmet one can never overflow through the bars below. */
+  .chat-grid{padding:0 var(--space-12);gap:var(--space-14);grid-template-rows:minmax(240px,1fr)}
   .chat-messages{padding:var(--space-14);gap:var(--space-10)}
   .chat-msg{max-width:88%;font-size:var(--text-base);padding:var(--space-8) var(--space-12)}
-  .chat-input-row{padding:var(--space-10) var(--space-12);gap:var(--space-6)}
-  /* 44×44 minimum on touch — Apple HIG floor. Bumped from 38×38 to
-     honor the foundation tokens; row-height grows by 12px which is
-     well within the chat-panel min-height budget. */
+  .chat-input-row{padding:var(--space-10) var(--space-8);gap:var(--space-6)}
   .chat-attach{width:44px;height:44px;flex-shrink:0}
   /* 16px suppresses iOS Safari's focus-zoom — under it, a tap permanently
      scales the layout until the operator pinches back. Literal, not --text-xl:
      a token that merely equals 16 today would take the suppressor with it the
      day someone retunes the scale. */
-  .chat-input{font-size:16px;min-height:44px}
+  .chat-input{font-size:16px;min-height:44px;padding-left:var(--space-8);padding-right:var(--space-8)}
   .chat-send{padding:var(--space-10) var(--space-18);font-size:var(--text-md);min-height:44px}
   /* Tools rows — the wand frame's overhang is halved so it stays inside a
      viewport-width popover. */
@@ -88,15 +112,6 @@
   .login-button{padding:var(--space-14) var(--space-16);min-height:44px;font-size:var(--text-md)}
 }
 
-/* Tighter band for iPhone-SE-class screens (≤380px). Only the
-   handful of cases where 640px already wraps to two rows. */
-@media (max-width:380px){
-  /* Drop the trailing chips in the chat-job-bar (Δ/$ + ETA — the
-     stalest numbers); Best + Budget are the headline. Only fires
-     for the authed-with-cycle code path where the bar is rendered. */
-  .chat-job-toggle .chip-row .chip:nth-child(n+3){display:none}
-}
-
 /* ── Touch hover-affordance reveal (Sweep-Group-B/C) ──────────────
    A few CSS classes hide controls behind `:hover` to keep the desktop
    surface clean (header tool icons, resize grips). On touch there's
@@ -110,11 +125,12 @@
 }
 
 /* ── Touch-pointer floor (Phase 0 foundation) ─────────────────────
-   Apple HIG / Material 3 / WCAG 2.5.8 — every interactive element on a
-   touch device must hit the 44px floor. Gated on (pointer:coarse) not
-   on viewport width so a touchscreen laptop also gets the larger
-   targets; a desktop with a mouse stays at the existing dense sizes.
-   The sweep tunes individual components; this is the safety net.
+   Apple HIG / Material 3 / WCAG 2.5.8 — an interactive element on a touch
+   device hits the 44px floor. Gated on (pointer:coarse) not on viewport width
+   so a touchscreen laptop also gets the larger targets; a mouse keeps the dense
+   sizes. The chat's MINIATURE readouts opt out below by container, not by a
+   growing `:not()` chain: every control in them is wide rather than tall, and
+   the Dashboard is where those same surfaces are read at size.
 
    Inputs additionally need ≥16px font-size to prevent iOS Safari's
    focus-zoom — the sweep applies that per-input, this block keeps the
@@ -125,7 +141,7 @@
   input[type="submit"],
   input[type="button"],
   select{
-    min-height:var(--touch-target-min);
+    min-height:var(--touch-floor,var(--touch-target-min));
   }
   /* Inputs (text, number, etc.) at touch density. Text fields specifically
      need the font-size floor to suppress iOS focus-zoom; the sweep then

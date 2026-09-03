@@ -7,7 +7,7 @@
 // check-in → Start conversation actually happens. It holds no flow of its own —
 // that is what let a modal opened over the chat tab carry a second live draft.
 //
-// Wire contract: `docs/specs/m12-api-openapi.yaml`
+// Wire contract: `docs/specs/api-openapi.yaml`
 //   POST /datasets/ingest                       (upload → DraftCampaign)
 //   POST /datasets/{name}/draft                 (existing dataset → DraftCampaign)
 //   POST /commands/edit-draft-campaign          (sparse-patch)

@@ -1,14 +1,15 @@
 // The time-ray, shaped for rendering. Pure: RayItem[] in, steps + a head state out.
 //
-// Two problems kept apart, deliberately. The SERVER bounds the payload (it drops
-// `token_usage`/`decision` everywhere and everything but milestones inside an inner run);
-// this file bounds the PIXELS (it collapses a run of consecutive inner-cycle steps into one
-// and marks silences). Neither can do the other's job — the server cannot know the viewport,
-// and the client cannot cheaply page a ledger.
+// Two problems kept apart, deliberately. The SERVER bounds the payload — by KIND (it drops
+// `token_usage`/`decision` everywhere and everything but milestones inside an inner run) and
+// by FIELD (`RAY_PAYLOAD_FIELDS`: identity, address and the one-line reading, never a
+// record's bulk); this file bounds the PIXELS (it collapses a run of consecutive inner-cycle
+// steps into one and marks silences). Neither can do the other's job — the server cannot know
+// the viewport, and the client cannot cheaply page a ledger.
 //
 // Curation is NOT re-implemented here. Each item goes through `projectionToActivity`, the
-// same translator the chat uses, because a RayItem's `kind` + `payload` are byte-identical
-// to a `ProjectionEnvelope`'s. One curated event vocabulary, two surfaces.
+// same translator the chat uses, because a RayItem's `kind` is a `ProjectionEnvelope`'s and
+// its `payload` is a subset of the same body. One curated event vocabulary, two surfaces.
 
 import type { RayItem } from "@/lib/api/types";
 import { projectionToActivity, type ActivityItem } from "@/lib/chat/activity";

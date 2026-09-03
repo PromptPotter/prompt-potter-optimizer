@@ -10,7 +10,7 @@ import type { PipelineView } from "@/components/workflow";
 
 // M13 chat-first dataset ingest: upload + mint a durable `checkin` campaign (`draft_id` IS the
 // `campaign_id`), sparse-patch the draft, then gate + commit + spawn. Wire contract pinned in
-// `docs/specs/m12-api-openapi.yaml`.
+// `docs/specs/api-openapi.yaml`.
 
 // One uploaded column header's provenance tag — mirrors the server's
 // `domain/origin_provenance.Provenance` StrEnum. `unset` = no value yet,
@@ -122,7 +122,7 @@ export interface OriginGap {
 }
 // Version-and-repoint a dataset so its name frees for new data — the "Replace" collision choice.
 // Data-safe: the old data and every prior campaign's results are preserved under `{slug}-vN`,
-// never overwritten. Wire contract: `docs/specs/m12-api-openapi.yaml::replaceDataset`.
+// never overwritten. Wire contract: `docs/specs/api-openapi.yaml::replaceDataset`.
 // A bare acknowledgement — the archival name and the repointed/re-stamped counts are
 // recorded by the migration itself (log + on-disk marker); no client reads them back.
 export interface ReplaceDatasetResponse {

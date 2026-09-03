@@ -2,7 +2,7 @@
 // `liveL1Candidates` / `roundOf` / `dash.rounds[]` for candidate-list purposes, and the
 // only list whose rows carry the `source` tag that routes a per-sample read live vs
 // historical (`samplesForRow`). Its consumers are the sample-scoped surfaces:
-// `ScoringInspector` and `RoundSamplesView`.
+// `ScoringInspector` and `MeasurementRun`.
 //
 // **It is not the bars.** The candidates card plots the children of the VIEWED node
 // straight off the served tree (`CandidatesCard`), because only the tree can express what
@@ -113,6 +113,8 @@ function rowOf(
     // of scoring, not at round close. `false` means nothing has been crowned yet — never
     // that this candidate lost (`derivations/election.ts::crownState` owns that reading).
     is_winner: c.is_winner,
+    // Served on both halves; the reading is `ElectedRow.invalid`'s.
+    invalid: c.invalid,
     n_samples: c.scored_samples,
     n_expected: c.expected_samples,
     cached_samples: c.cached_samples,
@@ -159,6 +161,7 @@ export function scoreboardRow(
     matchedParentLiftCiHi: c.matched_parent_lift_ci_hi,
     evaluators: {},
     is_winner: c.is_winner,
+    invalid: c.invalid,
     n_samples: c.total,
     n_expected: null,
     cached_samples: null,

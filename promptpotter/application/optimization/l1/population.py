@@ -8,6 +8,7 @@ from typing import Any
 
 from promptpotter.application.optimization.validators.l1_strict import (
     L1_CONFIG_NOT_IN_RUNTIME_FAILURES,
+    L1_INNER_LAYOUT_APPLIES,
     L1_INNER_STEER_IS_LEGAL,
     L1_PROMPT_BLOCKS_IN_LIBRARY,
     L1_PROMPT_FIELD_NOT_GUTTED,
@@ -105,6 +106,7 @@ def parse_population(
                 # length it judges is a COMPARISON — the delta alone cannot say what it replaced.
                 for outcome in (
                     L1_INNER_STEER_IS_LEGAL.run(pipeline_params_override),
+                    L1_INNER_LAYOUT_APPLIES.run(pipeline_params_override),
                     L1_PROMPT_FIELD_NOT_GUTTED.run(
                         pipeline_params_override,
                         pipeline_params=pipeline_params,
@@ -147,6 +149,7 @@ def build_score_report(
     dataset: list[Any],
     *,
     label: str,
+    sp_hash: str,
     resolved_pipeline_params: dict[str, Any] | None = None,
     aborted: bool = False,
     elimination_stopped: bool = False,
@@ -158,7 +161,9 @@ def build_score_report(
 ) -> ScoredCandidate:
     """Typed candidate score report. The CI is CARRIED from the gateway's own fold
     (`search_point_scorer::_composite`), never re-derived here — one writer, one band, and the
-    same band the live row already showed."""
+    same band the live row already showed. ``sp_hash`` is the scored searchpoint's own
+    ``sp_hash(session.pipeline_schema)`` — the call ``build_dataset_run_data`` makes to key the
+    rows — so the report and the archive name one identity; ``""`` where nothing was measured."""
     # Lazy: scoring → optimization circular.
     from promptpotter.application.scoring.evaluators import materialize_row_derivable
 
@@ -184,6 +189,7 @@ def build_score_report(
         changes_description=opt_sp.lineage.changes_description or "",
         pipeline_params_override=pipeline_params_override,
         resolved_pipeline_params=resolved_pipeline_params,
+        sp_hash=sp_hash,
         prompt_fields=opt_sp.prompt_field_dict(),
         accuracy=score_summary["accuracy"],
         composite_fitness=score_summary["composite_fitness"],

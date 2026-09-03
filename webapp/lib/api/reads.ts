@@ -393,7 +393,7 @@ export function fetchConfigMap(
 // the channel names the response echoes back in `metric.namespace`. The `expr:` prefix is spelled
 // HERE and nowhere else, so no component has to know the wire encoding.
 //
-// `ranking` and `trajectory` are the two walks that open round documents, and both are off by
+// `ranking` and `winnerChain` are the two walks that open round documents, and both are off by
 // default: everything else reads one document per subject. That is why the pane puts them behind
 // a press instead of a poll.
 //
@@ -471,12 +471,12 @@ export function maskedSubject(
 
 export function fetchEvidence(
   subjects: readonly string[],
-  opts: { ranking?: boolean; trajectory?: boolean; config?: boolean; metric?: string } = {},
+  opts: { ranking?: boolean; winnerChain?: boolean; config?: boolean; metric?: string } = {},
   signal?: AbortSignal,
 ): Promise<Evidence> {
   const qs = subjects.map((s) => `subject=${encodeURIComponent(s)}`);
   if (opts.ranking) qs.push("ranking=true");
-  if (opts.trajectory) qs.push("trajectory=true");
+  if (opts.winnerChain) qs.push("winner_chain=true");
   if (opts.config) qs.push("config=true");
   // A catalogue key or a composed `expr:…`, opaque here — the server owns both spellings, and
   // `components/compare/MetricPicker.tsx` is the one place the browser spells the prefix.

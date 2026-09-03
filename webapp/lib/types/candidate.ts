@@ -1,5 +1,5 @@
 // Canonical per-candidate row — one shape behind every surface that lists, plots or selects
-// candidates: the candidates card's bars, dendrogram + forest nodes, RoundSamplesView groups,
+// candidates: the candidates card's bars, dendrogram + forest nodes, MeasurementRun groups,
 // ScoringInspector target.
 //
 // Built by `lib/derivations/round-candidates.ts` from the raw `DashboardSnapshot`; components
@@ -76,6 +76,14 @@ export interface ElectedRow extends CandidateRow {
   // candidates outside the election fit — nothing matched them.
   matchedParentAccuracy: number | null;
   matchedParentComposite: number | null;
+  // REJECTED by validation before it cost a single sample — so `accuracy` and `composite` beside
+  // it are `INVALID_SCORES`' synthetic 0.0, served deliberately so the row is not byte-identical
+  // to one that got everything wrong. **Nothing may render either as a rate while this is true**:
+  // a rejection and a zero score are different facts, and `0%` spells the wrong one. WHY it was
+  // rejected is not here — that is the scoring node's own account (`candidateVerdicts`), read
+  // by the panel that shows the round. `/tree` says the same thing a third way, as
+  // `LineageNode.status === "invalid"` with a null accuracy.
+  invalid: boolean;
 }
 
 // The spine row PLUS the overlays the candidates card paints on it. ONE array feeds the bar

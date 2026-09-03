@@ -82,7 +82,6 @@ def _fit_or_extend(
             campaign_config.optimization.elimination_n_min,
             enable_2pl=campaign_config.optimization.enable_2pl_graduation,
             archive_obs=obs,
-            round_num=round_num,
         )
         if ruler is None:
             return None

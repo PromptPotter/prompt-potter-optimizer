@@ -1,8 +1,10 @@
 /* Remote control — the global bottom-fixed floating control strip
    (components/shell/RemoteControl.tsx). Present on every tab while a cycle is
-   live: run-phase, play/pause (the reused .run-ctl), Skip, concise round/spend,
-   and the babysat tag. Floats over content (position:fixed) — a remote control,
-   not a layout band, which is why it is not named for the band it isn't. */
+   live: run-phase, play/pause (the reused .run-ctl), Skip, where the run is, and
+   the Lift readout that opens the panel holding everything else — spend, outcome,
+   look-ahead, the tags. Floats over content (position:fixed) — a remote control,
+   not a layout band, which is why it is not named for the band it isn't. It DOES
+   dock as a band below --bp-md, where a phone has no whitespace to hover over. */
 .remote-control{
   position:fixed;
   left:50%;
@@ -41,22 +43,39 @@
    labelled so the operator knows the state on screen may lag. */
 .remote-control-offline{opacity:.6}
 
-/* It floats (position:fixed) and so reserves no space. On a desktop it hovers
-   over the whitespace below a short page and nobody notices; on a phone the
-   content reaches the bottom of the viewport, so it sat on top of the last
-   ~45px of EVERY tab with no way to scroll it clear. Reserve its height —
-   but only while it is actually mounted, which `:has` answers without the shell
-   having to publish a state class for it. */
-.shell:has(> .remote-control) .content{
-  padding-bottom:calc(62px + env(safe-area-inset-bottom,0px));
-}
-/* The phone's LIST screen has no `.content` — its scroller is the campaign
-   forest — so the same reservation has to name it, or the pill sits on the last
-   rows. It stays mounted there on purpose: pausing a run is exactly what you
-   might want from the list. */
+/* It floats and reserves no space of its own, so it publishes its height to the
+   spacer shell.css puts at the foot of every pane — only while mounted. */
+.shell:has(> .remote-control){--remote-dock-h:62px}
+/* ≤bp-md: a docked band, not a floating pill — a phone has no whitespace to
+   hover over, and squeezed to `100vw - 24px` the pill crushed its own contents. */
 @media (max-width:880px){
-  .shell.mobile-list:has(> .remote-control) .unit-library-list{
-    padding-bottom:calc(62px + env(safe-area-inset-bottom,0px));
+  .remote-control{
+    left:0;right:0;transform:none;max-width:none;
+    bottom:calc(var(--nav-dock-h) + env(safe-area-inset-bottom,0px));
+    display:flex;flex-wrap:wrap;justify-content:center;
+    gap:var(--space-4) var(--space-6);
+    padding:var(--space-6) var(--space-8);
+    border-radius:0;border-left:0;border-right:0;border-bottom:0;
+    box-shadow:0 -2px 12px rgba(0,0,0,.16);
+  }
+  /* Nothing shrinks below its own text; a row that no longer fits wraps. Five slots
+     fit 390px only at these gaps — the sixth is what the panel is for. */
+  .remote-control > *{flex:0 0 auto}
+  .phase-chip{white-space:nowrap}
+  /* The masthead carries a REAL follow-active button two bands up; this one is a
+     `pointer-events:none` label that `(pointer:coarse)` reveals permanently, so on a
+     phone it was the same control twice, one of which ignores taps. The phase chip
+     still follows on tap — its `aria-label` says so. */
+  .remote-follow .follow-active-btn{display:none}
+  /* One touch-sized row — the one place this height is stated, for the spacer and
+     the list screen alike. Measure under touch emulation: `pointer:coarse` does not
+     match in a desktop browser, where the band draws shorter than any phone. */
+  .shell:has(> .remote-control){--remote-dock-h:64px}
+  /* The list screen's scroller is the forest, not `.content`, so it reserves its own;
+     the footer is a flex sibling BELOW the scroller, under the band, so it lifts too. */
+  .shell.mobile-list:has(> .remote-control) .unit-library-list,
+  .shell.mobile-list:has(> .remote-control) .sidebar-footer{
+    padding-bottom:calc(var(--remote-dock-h) + env(safe-area-inset-bottom,0px));
   }
 }
 .remote-offline{display:inline-flex;align-items:center;gap:var(--space-4);padding:2px var(--space-8);border-radius:999px;background:var(--color-background-tertiary);color:var(--color-text-tertiary);font-weight:600}
@@ -175,12 +194,11 @@
 .spend-control-hint{color:var(--color-text-tertiary);font-size:var(--text-xs);line-height:1.4}
 .spend-control-note{color:var(--color-success);font-size:var(--text-xs)}
 
-/* On narrow widths drop the button word labels + spend to keep it compact. The
-   readout keeps Lift only — the one number worth the width. */
 @media (max-width:640px){
-  .remote-control{gap:var(--space-8);padding:var(--space-6) var(--space-10)}
-  .remote-btn-label,.remote-spend{display:none}
-  .remote-readout .chip:not(:first-child){display:none}
+  /* Lift is the headline; the origin it is measured against is a panel row. Skip
+     keeps its glyph and drops its word — scoped to the STRIP, so the look-ahead
+     button now living in the panel keeps a label the panel has room for. */
   .remote-readout .chip-origin{display:none}
+  .remote-control > .remote-btn .remote-btn-label{display:none}
 }
 @media (prefers-reduced-motion:reduce){.remote-readout .chev{transition:none}}

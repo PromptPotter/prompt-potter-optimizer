@@ -1705,6 +1705,62 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
+  /commands/compact-archive:
+    post:
+      operationId: compactArchive
+      summary: Move unread measurement fields into a gzip cold store, restore them, or purge it.
+      description: |
+        Archive maintenance over the CONTENT-ADDRESSED measurement store.
+        Workspace-scoped — `measurements/` belongs to no campaign — so no
+        `Expected-Version`. `Idempotency-Key` required.
+
+        **This is a deletion with a receipt.** A measurement row is paid LLM
+        spend, so `compact` never drops a field: it MOVES the ones nothing
+        reads (`hit`, `scored`, `objective`, and `pipeline_data`'s
+        `reasoning_trace` / `result_ranking` / `final_ranking` / `total_time`)
+        into `measurements/cold/{run_id}.jsonl.gz`, and stamps the run header
+        with what left so a compacted row is never mistaken for one that never
+        carried the field. `restore` puts them back. `purge-cold` is the only
+        step that destroys, and `compact` cannot perform it.
+
+        Applies to `candidate_*` runs only: `origin` and `round_parent` serve
+        the overwhelming majority of cache replays, so they are never touched.
+        A row carrying `mean_round_delta` keeps its `reasoning_trace` — the L4
+        narrative panel gate needs both, and a row with one but not the other
+        silently changes which panel the round renders.
+
+        Refuses outright (`archive_writers` > 0, nothing written) while any
+        cycle can still append: the archive is shared across every cycle and
+        appended to per sample, so a rewrite could lose a row another run is
+        landing.
+      tags: [datasets]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: compact-archive }
+                    payload: { $ref: '#/components/schemas/CompactArchivePayload' }
+      responses:
+        '200':
+          description: |
+            The pass completed, or previewed. `applied` says which; every other
+            field means the same thing either way.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArchiveReport'
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
   /commands/replace-dataset:
     post:
       operationId: replaceDataset
@@ -2512,7 +2568,7 @@ components:
           type: string
           description: |
             The ledger `record_type`, identical to `ProjectionEnvelope.kind`. The set is
-            the same closed set declared in `m12-events-asyncapi.yaml`.
+            the same closed set declared in `events-asyncapi.yaml`.
         payload:
           type: object
           additionalProperties: true
@@ -3695,10 +3751,16 @@ components:
           additionalProperties: true
           description: |
             Every param each node carries, keyed by node id — COMPLETE, because
-            clients sum `optimizer_tunable` across it to answer "is this node
-            optimizer-locked". An EMPTY list is a different answer from "has
-            params, none tunable" — the node carries nothing to change at all —
-            and `[].every()` collapses the two, so test length before the sum.
+            clients sum `movable_by` across it to answer "where does the search
+            reach on this node". A lock is (axis, AGENT): `movable_by` names who
+            may move it now (`l1` the generator each round, `l2` escalation over
+            the optimizer's own knobs), and the EMPTY list is the only true lock —
+            nobody may, and changing it costs a fork. Two fields say why a shut
+            axis is shut: `optimizer_locked` (never an axis — model/provider, a
+            confound guard) and `held` (the dataset offered it, this campaign
+            closed it). Neither is plain configuration. An EMPTY param list is a
+            third answer again — nothing here to change at all — and
+            `[].every()` collapses it into the others, so test length first.
             Each param's `kind` names the surface that owns it:
             the five widget kinds (`model`/`enum`/`number`/`bool`/`string`) are
             config-editor rows; `prompt` (a PromptTemplate decomposition field) and
@@ -4075,6 +4137,88 @@ components:
         slug:
           type: string
           description: The name that was freed (the request's `slug`).
+
+    CompactArchivePayload:
+      type: object
+      required: [mode]
+      additionalProperties: false
+      description: |
+        Which archive maintenance step to run, and over which dataset. `apply`
+        is false by default on purpose: every mode is previewable, and the
+        preview is the operator's whole basis for consenting to a step that
+        costs real money to undo.
+      properties:
+        mode:
+          type: string
+          enum: [compact, restore, purge-cold]
+          description: |
+            `compact` moves the unread fields of candidate runs into the gzip
+            cold store. `restore` puts them back and drops the payload.
+            `purge-cold` deletes the cold store — the ONE irreversible step,
+            and deliberately not something `compact` can do on its own.
+        dataset:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: |
+            Scopes the pass to one dataset. Omitted means every dataset, which
+            no entry point offers as a default.
+        apply:
+          type: boolean
+          default: false
+          description: Write. Omitted or false previews and touches nothing.
+
+    ArchiveReport:
+      type: object
+      required:
+        [runs_touched, runs_skipped, rows_moved, bytes_before, bytes_after,
+         cold_bytes, bytes_freed, archive_writers, conflicts, purged, applied]
+      additionalProperties: false
+      description: |
+        What the pass did, or would do. Identical shape for a preview and an
+        apply — `applied` is what separates them — so a client cannot render a
+        preview in units the apply does not honour.
+      properties:
+        runs_touched: { type: integer, description: Runs compacted, restored, or purged. }
+        runs_skipped:
+          type: integer
+          description: |
+            Runs deliberately passed over — an `origin` or `round_parent` label,
+            or a run already carrying a cold payload.
+        rows_moved: { type: integer, description: Measurement rows whose fields moved. }
+        bytes_before: { type: integer }
+        bytes_after: { type: integer }
+        cold_bytes:
+          type: integer
+          description: What the moved payload costs gzipped. Measured, never a ratio.
+        bytes_freed:
+          type: integer
+          description: |
+            `bytes_before - bytes_after - cold_bytes`. Net, because the payload
+            does not vanish — it moves.
+        archive_writers:
+          type: integer
+          description: |
+            Non-zero means the pass REFUSED: a cycle can still append to the
+            shared archive, and a rewrite would lose rows it is landing.
+        conflicts:
+          type: integer
+          description: |
+            Restore only. Runs whose cold payload no longer lines up with the
+            detail log; each is refused whole rather than half-restored.
+        purged:
+          type: integer
+          description: |
+            Runs whose moved payload is gone for good — measured, then dropped
+            for storage on purpose. A COUNTED no-op on restore, never folded
+            into `runs_skipped`: "we dropped this deliberately" and "this was
+            never compacted" are different facts. A purged run still fits a
+            ruler and still serves a cache hit; only its traces are gone.
+        applied: { type: boolean }
+        skipped_by_label:
+          type: object
+          additionalProperties: { type: integer }
+          description: Skip counts per run label, so a label nobody planned for is visible.
 
     DatasetIndexEntry:
       type: object

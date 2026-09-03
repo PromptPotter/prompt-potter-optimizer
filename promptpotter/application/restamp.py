@@ -5,7 +5,11 @@ PRUNING never touches a round document: a row repairs by pruning to ``model_fiel
 cannot restore a renamed field's value, so a repair there would be silently wrong. A migration that
 RECOVERS a value from a surviving record may write one — :func:`backfill_inner_facts` does. Which
 drift is fatal, and why that is correct, is owned by ``domain/CLAUDE.md`` § Tolerance is scoped by
-what a payload is FOR."""
+what a payload is FOR.
+
+It DOES prune a LEDGER record (:func:`_prune_record`, inside the compaction pass), for the opposite
+reason: that reader is tolerant by SKIP rather than by default, so a stale key costs the whole
+line rather than one value, and nothing raises when it does."""
 
 from __future__ import annotations
 
@@ -20,6 +24,11 @@ from typing import Any, NamedTuple, Union, get_args, get_origin
 import yaml
 from pydantic import BaseModel, ValidationError
 
+from promptpotter.application.archive_maintenance import (
+    archive_writers,
+    iter_cycle_ledgers,
+    workspace_trees,
+)
 from promptpotter.application.campaign_config import CampaignConfig, freeze_campaign_config
 from promptpotter.application.run_observers import QUERY_PREVIEW_CHARS
 from promptpotter.application.views.view_models import (
@@ -33,6 +42,7 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
 from promptpotter.domain.phases import CampaignPhase, RunPhase
 from promptpotter.domain.results import DiagnosticRunRecord, RoundResult
+from promptpotter.domain.run_records import CycleRecord
 from promptpotter.domain.scoring import ledger_sample_view
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.campaign_store.store import reproject_round_index
@@ -42,11 +52,7 @@ from promptpotter.infrastructure.store.io import (
     write_json,
     write_yaml,
 )
-from promptpotter.infrastructure.store.layout import (
-    ROUND_GLOB,
-    CycleLayout,
-    inner_sandboxes_dir,
-)
+from promptpotter.infrastructure.store.layout import ROUND_GLOB, CycleLayout
 from promptpotter.infrastructure.store.user_store import User
 from promptpotter.shared.errors import graceful
 
@@ -54,6 +60,7 @@ __all__ = [
     "backfill_inner_facts",
     "check_round_documents",
     "compact_cycle_ledgers",
+    "rename_round_trend",
     "reproject_cycle_indexes",
     "restamp_campaign_configs",
     "shrink_measurement_runs",
@@ -61,30 +68,12 @@ __all__ = [
 ]
 
 
-def _workspace_trees() -> list[pathlib.Path]:
-    """Inner sandboxes are a SIBLING tree, not a subtree, so a ``*``-per-level glob silently
-    misses every one — it reports a plausible smaller number rather than raising."""
-    root = DEFAULT_PROJECTS_ROOT
-    if not root.is_dir():
-        return []
-    trees = [root]
-    inner = inner_sandboxes_dir(root)
-    if inner.is_dir():
-        trees.extend(p for p in inner.iterdir() if p.is_dir())
-    return trees
-
-
-def _iter_cycle_ledgers() -> list[pathlib.Path]:
-    """Every cycle ledger under the workspace, inner sandboxes included."""
-    return [p for tree in _workspace_trees() for p in sorted(tree.glob("**/.runtime/ledger.jsonl"))]
-
-
 def _iter_round_documents() -> list[pathlib.Path]:
     """``**`` descends dot-directories, so the ``.runtime`` filter is what excludes the audit
     twins under ``.runtime/cache/rounds/`` — same basename, and never a ``RoundResult``."""
     return [
         p
-        for tree in _workspace_trees()
+        for tree in workspace_trees(DEFAULT_PROJECTS_ROOT)
         for p in sorted(tree.glob(f"**/rounds/{ROUND_GLOB}"))
         if ".runtime" not in p.parts
     ]
@@ -357,6 +346,32 @@ _COMPACTABLE_PHASES: frozenset[RunPhase] = frozenset(
 )
 
 
+# Every ledger arm by its `record_type` discriminator. DERIVED from the union, so a record kind
+# added, renamed or retired reaches this pass without a second edit here.
+_LEDGER_ARMS: dict[str, type[BaseModel]] = {
+    str(arm.model_fields["record_type"].default): arm for arm in get_args(get_args(CycleRecord)[0])
+}
+
+
+def _prune_record(rec: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Drop the keys no ``CycleRecord`` arm declares any more, and name them.
+
+    This is the one migration a field DELETE on a ledger record needs, and it is needed because
+    the reader is tolerant BY SKIP: ``ledger.py::iter`` logs the line and continues, so a deleted
+    field raises nowhere — the record is simply gone, and ``read_ruler``, every projection rebuild
+    and every fork lookup behave as though it was never written. ``DeltaRuler.anchored_at_round``
+    is the case that named it: dropping a reader-less field would have silently un-ruled every
+    banked cycle, which reads downstream as "θ that cannot be reproduced".
+
+    A RENAME is still not this — pruning cannot restore the value under its new name, and the
+    module docstring says which act may."""
+    arm = _LEDGER_ARMS.get(str(rec.get("record_type")))
+    if arm is None:
+        return rec, []
+    pruned, dropped = _prune_to_schema(rec, arm)
+    return (pruned, [dotted for dotted, _ in dropped]) if dropped else (rec, [])
+
+
 def _compact_record(rec: dict[str, Any]) -> dict[str, Any] | None:
     """One stored record → what the writer would emit for it today. ``None`` ⇒ already current."""
     payload = rec.get("payload")
@@ -406,7 +421,7 @@ def _compact_record(rec: dict[str, Any]) -> dict[str, Any] | None:
     return None if new == payload else rec | {"payload": new}
 
 
-def _compact_one(path: pathlib.Path, *, apply: bool) -> tuple[int, int, int]:
+def _compact_one(path: pathlib.Path, *, apply: bool, gone: Counter[str]) -> tuple[int, int, int]:
     """``(bytes_before, bytes_after, records_rewritten)``. A tmp + ``os.replace``, never in
     place — ``CycleEventLog.append`` is not crash-atomic, so a torn rewrite loses the cycle."""
     before = after = rewritten = 0
@@ -421,11 +436,16 @@ def _compact_one(path: pathlib.Path, *, apply: bool) -> tuple[int, int, int]:
                 lines.append(line)
                 after += len(line)
                 continue
+            # Prune BEFORE projecting: the projections read `payload`, and a stale key sits one
+            # level above it on the record itself.
+            rec, dropped = _prune_record(rec)
+            gone.update(dropped)
             out = _compact_record(rec)
-            if out is None:
+            if out is None and not dropped:
                 lines.append(line)
                 after += len(line)
                 continue
+            out = out if out is not None else rec
             rewritten += 1
             new_line = json.dumps(out, separators=(",", ":"), default=str) + "\n"
             lines.append(new_line)
@@ -441,8 +461,9 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
     """Re-project every finished cycle's ``.runtime/ledger.jsonl`` onto today's record shape."""
     total_before = total_after = touched = 0
     skipped: Counter[RunPhase] = Counter()
+    gone: Counter[str] = Counter()
     rows: list[tuple[int, str]] = []
-    for ledger_path in _iter_cycle_ledgers():
+    for ledger_path in iter_cycle_ledgers(DEFAULT_PROJECTS_ROOT):
         cycle_dir = ledger_path.parent.parent
         manifest = read_json_optional(CycleLayout(cycle_dir).manifest)
         finished = bool(manifest.get("finished_at")) if isinstance(manifest, dict) else False
@@ -450,7 +471,7 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
         if phase not in _COMPACTABLE_PHASES:
             skipped[phase] += 1
             continue
-        before, after, rewritten = _compact_one(ledger_path, apply=apply)
+        before, after, rewritten = _compact_one(ledger_path, apply=apply, gone=gone)
         total_before += before
         total_after += after
         if rewritten:
@@ -472,6 +493,11 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
         print(f"  {'saved':>12}: {(total_before - total_after) / mb:8.2f} MB  ({pct:.1f}%)")
     for saved, name in sorted(rows, reverse=True)[:10]:
         print(f"  {saved / mb:8.2f} MB  {name}")
+    if gone:
+        print("\nDropped — record keys the engine no longer declares, which the reader was")
+        print("silently SKIPPING the whole line over:")
+        for key, n in gone.most_common():
+            print(f"  {n:4d}x  {key}")
     if not apply and touched:
         print("\nDry run. Re-run with --apply to rewrite.")
     return {
@@ -479,6 +505,7 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
         "skipped_checkin": skipped.get(RunPhase.CHECKIN, 0),
         "skipped_producing": sum(n for p, n in skipped.items() if p is not RunPhase.CHECKIN),
         "bytes_saved": total_before - total_after,
+        "record_keys_dropped": sum(gone.values()),
     }
 
 
@@ -526,7 +553,7 @@ def stamp_election_bias(*, apply: bool) -> dict[str, int]:
     round was decided under, and writing it down is what makes the replay reproduce the decision
     instead of re-deciding it."""
     stamped = touched = 0
-    for ledger_path in _iter_cycle_ledgers():
+    for ledger_path in iter_cycle_ledgers(DEFAULT_PROJECTS_ROOT):
         lines = ledger_path.read_text(encoding="utf-8").splitlines()
         out: list[str] = []
         dirty = False
@@ -560,9 +587,9 @@ def _inner_cycle_index() -> dict[tuple[str, str, int, str], pathlib.Path]:
     The pointer between an outer cell and the inner campaign that produced it lives on the INNER
     side — ``index.json::spawned_by``, written by ``runner/inner/spawn.py`` — so building this
     index is the only join back. Sandboxes are a SIBLING tree of the workspace, which
-    :func:`_workspace_trees` already knows and a ``*``-per-level glob silently misses."""
+    :func:`workspace_trees` already knows and a ``*``-per-level glob silently misses."""
     index: dict[tuple[str, str, int, str], pathlib.Path] = {}
-    for tree in _workspace_trees():
+    for tree in workspace_trees(DEFAULT_PROJECTS_ROOT):
         for cycle_dir in sorted(tree.glob("*/campaigns/*/cycles/*")):
             spawned = (read_json_tolerant(cycle_dir / "index.json", {}) or {}).get("spawned_by")
             if not isinstance(spawned, dict) or not spawned.get("task"):
@@ -671,24 +698,55 @@ def backfill_inner_facts(*, apply: bool) -> dict[str, int]:
     return {"inner_rows_filled": filled, "inner_rows_orphaned": orphaned}
 
 
-# --- (7) the run-level pipeline config re-stored on every measurement row --------------------
-
-# One live producer ANYWHERE blocks this pass: the measurement archive is shared across every
-# cycle (`build_stores`'s `shared_root`) and appended to per sample, so a rewrite of any run
-# file can lose a row another cycle is landing. CHECKIN is pre-loop and writes no measurement.
-_ARCHIVE_WRITER_PHASES: frozenset[RunPhase] = frozenset({RunPhase.RUNNING, RunPhase.GATE})
+# --- (7) the diagnostics key a rename left behind on the round documents ---------------------
 
 
-def _archive_writers() -> int:
-    """Cycles that could append to the archive while this pass runs."""
-    n = 0
-    for ledger_path in _iter_cycle_ledgers():
-        cycle_dir = ledger_path.parent.parent
-        manifest = read_json_optional(CycleLayout(cycle_dir).manifest)
-        finished = bool(manifest.get("finished_at")) if isinstance(manifest, dict) else False
-        if derive_run_phase(cycle_dir, is_terminal=finished) in _ARCHIVE_WRITER_PHASES:
-            n += 1
-    return n
+def rename_round_trend(*, apply: bool) -> dict[str, int]:
+    """Move ``diagnostics.trajectory`` onto ``diagnostics.trend`` on every banked round document.
+
+    A rename that ships without one of these is the recurring shape, and this field's version of
+    it is the quiet kind. ``RoundDiagnostics`` is a stdlib dataclass reached through
+    ``RoundResult``, so the old key does not raise on load — it is dropped, and ``trend`` reads
+    its DEFAULT. The default is ``"healthy"``. A resumed cycle rebuilds ``cycle.rounds`` from
+    these documents and ``dispatch/facade.py`` hands the newest one's diagnostics to the TREND
+    panel, so a run that had plateaued or hit a ceiling resumes telling the optimizer it is
+    climbing — no error, no log line, and the panel reads exactly as it does when true.
+
+    Pruning cannot do this (it drops the stale key and its value together); this recovers the
+    value from the record that still holds it, which is what the module docstring sanctions.
+    """
+    moved = touched = 0
+    for path in _iter_round_documents():
+        with graceful(f"rename trend {path}"):
+            doc = read_json_tolerant(path, {})
+            diag = doc.get("diagnostics") if isinstance(doc, dict) else None
+            if not isinstance(diag, dict):
+                continue
+            dirty = False
+            for old, new in (
+                ("trajectory", "trend"),
+                ("trajectory_description", "trend_description"),
+            ):
+                if old in diag:
+                    # A document carrying BOTH was written by the new code and re-read by the
+                    # old; the live spelling is the one to keep.
+                    diag.setdefault(new, diag[old])
+                    del diag[old]
+                    dirty = True
+                    moved += 1
+            if dirty:
+                touched += 1
+                if apply:
+                    write_json(path, doc)
+
+    verb = "moved" if apply else "would move"
+    print(f"\nRound trend — {verb} {moved} key(s) across {touched} round document(s)")
+    if not apply and moved:
+        print("\nDry run. Re-run with --apply to rewrite.")
+    return {"trend_keys_moved": moved, "trend_documents": touched}
+
+
+# --- (8) the run-level pipeline config re-stored on every measurement row --------------------
 
 
 def _iter_measurement_runs() -> list[pathlib.Path]:
@@ -696,7 +754,9 @@ def _iter_measurement_runs() -> list[pathlib.Path]:
     content-addressed caches, so in practice these all live under the real projects root — the
     sandbox trees are walked anyway rather than asserting that from here."""
     return [
-        p for tree in _workspace_trees() for p in sorted(tree.glob("*/measurements/runs/*.jsonl"))
+        p
+        for tree in workspace_trees(DEFAULT_PROJECTS_ROOT)
+        for p in sorted(tree.glob("*/measurements/runs/*.jsonl"))
     ]
 
 
@@ -743,7 +803,7 @@ def shrink_measurement_runs(*, apply: bool) -> dict[str, int]:
     Safe against the cache key by construction: ``content_hash`` is sha256 over the rendered
     prompt, the dataset pairs and the search point's ``pipeline_params`` (``shared/hashing.py``) —
     never the stored row bytes — so no archived cell moves."""
-    writers = _archive_writers()
+    writers = archive_writers(DEFAULT_PROJECTS_ROOT)
     if writers:
         print(f"\nMeasurement rows — SKIPPED, {writers} cycle(s) can still append to the archive")
         return {"runs_shrunk": 0, "run_bytes_saved": 0, "archive_writers": writers}

@@ -518,6 +518,10 @@ class CampaignStore:
     # ------------------------------------------------------------------
 
     def load(self, hop: CycleHop) -> dict[str, Any] | None:
+        """``dict``, not a model, and that was MEASURED rather than assumed: 43 files / 24 top-level
+        keys / 0 unreadable against ~+60–100 LOC, the complexity ledger scores the typing zero, and
+        ``extra="forbid"`` would break the deliberately tolerant reads in ``enumerate_cycles`` and
+        the lineage surveys. Re-verify those counts before re-opening it."""
         data: dict[str, Any] | None = read_json_optional(self._index_path(hop))
         if data is None:
             return None

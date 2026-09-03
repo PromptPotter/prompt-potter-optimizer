@@ -410,7 +410,7 @@ function AppShellInner() {
       <main className="main" id="main-content" tabIndex={-1}>
         {/* Phone chrome — the back arrow to the list screen and the campaign's
             verbs. Hidden above --bp-md, where the sidebar carries both. The view
-            axis is NOT here: the unit header below owns it at every width. */}
+            axis is NOT here: ViewTabs owns it, at the foot of the screen. */}
         <MobileAppBar
           listScreen={listScreen}
           onBack={() => setListScreen(true)}

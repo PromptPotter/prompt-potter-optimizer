@@ -3,6 +3,7 @@ is new (the scoring walk re-saves per sample), and a read tails only the bytes s
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import logging
@@ -11,9 +12,18 @@ from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
-from promptpotter.domain.measurement_provenance import entry_grade, meets_grade
+from promptpotter.domain.measurement_provenance import (
+    REUSABLE_MIN_GRADE,
+    entry_grade,
+    meets_grade,
+)
 from promptpotter.domain.sample import Measurement
-from promptpotter.infrastructure.store.io import write_jsonl
+from promptpotter.infrastructure.store.io import (
+    read_bytes_optional,
+    write_bytes,
+    write_jsonl,
+    write_text,
+)
 from promptpotter.infrastructure.store.read_model import (
     append_row,
     compact,
@@ -26,7 +36,17 @@ logger = logging.getLogger(__name__)
 # The detail log's fold key, and the one row that is not a measurement.
 _FOLD_KEY = "k"
 _HEADER_KEY = "run"
+# The INDEX's fold key — a run's identity, which is what addresses its detail file
+# (`runs/{run_id}.jsonl`). It was `content_hash` while the file was `{label}_{content_hash}`, and
+# the two disagree by construction: the label is not in the hash, so `origin_<h>` and
+# `round_parent_<h>` are one entry, last-wins. Those two are the SAME searchpoint on the same rows
+# and different readings of it — the parent fold is scored `opt_sp=None, l1_diversity=1.0` — so the
+# surviving entry's `scores`, `item_count`, `source` and `provenance` were whichever landed last,
+# a per-sample write could overwrite a complete run with a 3-of-30 one, and `reindex` unlinked the
+# loser's detail as an orphan: paid measurement, destroyed and reported as GC.
+_INDEX_FOLD_KEY = "run_id"
 _DETAIL_SUFFIX = ".jsonl"
+_COLD_SUFFIX = ".jsonl.gz"
 
 
 def _measurement_key(item: dict[str, Any]) -> str:
@@ -44,7 +64,11 @@ def _measurement_key(item: dict[str, Any]) -> str:
 
 def _summary(data: dict[str, Any]) -> dict[str, Any]:
     """Shared by :meth:`MeasurementArchive.save` and :meth:`MeasurementArchive.reindex`, so the
-    summary the two write can never drift."""
+    summary the two write can never drift.
+
+    The defaulted ``.get(…)`` reads LOOK like tolerance for a drifted writer and are not: test
+    fixtures call ``save`` with partial dicts, so tightening them to subscripts breaks the callers
+    rather than catching one. The subscripted keys above are the ones every writer supplies."""
     return {
         "run_id": data["run_id"],
         "name": data.get("name", data["run_id"]),
@@ -153,13 +177,13 @@ class MeasurementArchive:
         if self._rows is not None and sig == self._stat:
             return self._rows
         if self._rows is not None and st.st_size > self._offset:
-            fresh, self._offset = fold_jsonl_from(path, "content_hash", self._offset)
+            fresh, self._offset = fold_jsonl_from(path, _INDEX_FOLD_KEY, self._offset)
             self._rows.update(fresh)
         else:
             # Fold from 0 through the same primitive: it returns the newline-aligned
             # offset, so a crash-truncated trailing line stays pending instead of being
             # skipped forever once the writer completes it.
-            self._rows, self._offset = fold_jsonl_from(path, "content_hash", 0)
+            self._rows, self._offset = fold_jsonl_from(path, _INDEX_FOLD_KEY, 0)
         self._stat = sig
         return self._rows
 
@@ -188,6 +212,82 @@ class MeasurementArchive:
         against ONE live one, so the default 2× guard would never fire."""
         return compact(self._detail_path(run_id), _FOLD_KEY, factor=1)
 
+    # -- field compaction: the cold store -------------------------------------
+    #
+    # Dropping a field from a measurement row destroys paid LLM spend, so the archive does not
+    # offer a way to drop one. It offers a way to MOVE one: the payload lands gzipped beside the
+    # runs and `restore_cold` puts it back. Deleting the cold store is a separate act, and the
+    # only one that is irreversible.
+
+    def _cold_dir(self) -> Path:
+        return self._store_dir() / "cold"
+
+    def cold_path(self, run_id: str) -> Path:
+        return self._cold_dir() / f"{run_id}{_COLD_SUFFIX}"
+
+    def has_cold(self, run_id: str) -> bool:
+        return self.cold_path(run_id).exists()
+
+    def detail_lines(self, run_id: str) -> list[str]:
+        """The detail log's raw lines, IN ORDER. Order is load-bearing — the file folds last-wins on
+        ``k``, so a caller rewriting it must preserve both the sequence and the unparseable lines."""
+        path = self._detail_path(run_id)
+        try:
+            with path.open(encoding="utf-8") as fh:
+                return fh.readlines()
+        except FileNotFoundError:
+            return []
+
+    def replace_detail(self, run_id: str, lines: Iterable[str]) -> int:
+        """Swap the whole detail log atomically; returns the byte count written. ``append`` is not
+        crash-atomic and neither is a truncate-then-write, so a rewrite never happens in place."""
+        content = "".join(lines)
+        write_text(self._detail_path(run_id), content)
+        return len(content.encode("utf-8"))
+
+    @staticmethod
+    def _encode_cold(rows: Iterable[dict[str, Any]]) -> bytes:
+        blob = "\n".join(json.dumps(r, separators=(",", ":"), default=str) for r in rows)
+        return gzip.compress(blob.encode("utf-8"), 6)
+
+    def cold_size(self, rows: Iterable[dict[str, Any]]) -> int:
+        """What :meth:`write_cold` WOULD cost, without writing it — so a dry run reports the same
+        number the apply produces rather than a ratio someone guessed."""
+        return len(self._encode_cold(rows))
+
+    def cold_bytes_on_disk(self, run_id: str) -> int:
+        """Bytes the run's cold payload occupies; 0 when absent."""
+        try:
+            return self.cold_path(run_id).stat().st_size
+        except OSError:
+            return 0
+
+    def write_cold(self, run_id: str, rows: Iterable[dict[str, Any]]) -> int:
+        """Persist the moved payload; returns bytes on disk. Written WHOLE rather than appended: a
+        second compaction of the same run must not leave two generations under one name."""
+        data = self._encode_cold(rows)
+        write_bytes(self.cold_path(run_id), data)
+        return len(data)
+
+    def read_cold(self, run_id: str) -> list[dict[str, Any]] | None:
+        """``None`` when the run was never compacted — distinct from a compaction that moved
+        nothing, which reads as an empty list."""
+        raw = read_bytes_optional(self.cold_path(run_id))
+        if raw is None:
+            return None
+        text = gzip.decompress(raw).decode("utf-8")
+        return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+    def drop_cold(self, run_id: str) -> int:
+        """Delete one run's cold payload for good; returns the bytes reclaimed, 0 if absent."""
+        path = self.cold_path(run_id)
+        try:
+            size = path.stat().st_size
+        except OSError:
+            return 0
+        path.unlink(missing_ok=True)
+        return size
+
     def reset_run(self, run_id: str) -> None:
         """Append-only does not overwrite, so a re-measure meaning to REPLACE has to say so — an
         interrupted force-fresh otherwise leaves post-fix and pre-fix rows under one header."""
@@ -196,7 +296,7 @@ class MeasurementArchive:
     def maintain_index(self) -> bool:
         """Self-limiting — ``compact`` no-ops on a tight log, so calling this every run costs one fold
         and usually rewrites nothing."""
-        if compact(self._index_path(), "content_hash"):
+        if compact(self._index_path(), _INDEX_FOLD_KEY):
             self._invalidate()
             return True
         return False
@@ -226,7 +326,7 @@ class MeasurementArchive:
         no-op. Each rename is one appended row per log — no measurement is rewritten."""
         index_path = self._index_path()
         count = 0
-        for entry in list(fold_jsonl(index_path, "content_hash").values()):
+        for entry in list(fold_jsonl(index_path, _INDEX_FOLD_KEY).values()):
             if entry.get("dataset_name") != old_name:
                 continue
             count += 1
@@ -238,7 +338,7 @@ class MeasurementArchive:
             else:
                 append_row(index_path, {**entry, "dataset_name": new_name})
         if count:
-            compact(index_path, "content_hash")
+            compact(index_path, _INDEX_FOLD_KEY)
             self._invalidate()
         return count
 
@@ -255,37 +355,23 @@ class MeasurementArchive:
         return [e for e in entries if _entry_matches_dataset(e, dataset_name)]
 
     def reindex(self) -> dict[str, int]:
-        """GC is positive-identification-only: a log is deleted only if it folded to a detail carrying a
-        ``content_hash`` and lost to a newer run. Losing the index loses nothing — this reproduces it."""
-        parsed: list[tuple[Path, dict[str, Any]]] = []
+        """Rebuild ``index.jsonl`` from the detail files — losing the index loses nothing, because
+        every entry is a fold of the run that owns it. **It deletes nothing.** The GC that stood here
+        unlinked a detail whose ``content_hash`` a later run repeated, which is not a duplicate but a
+        second reading of one searchpoint — the cache replay outliving the original it was replayed
+        from, reported as ``orphans_removed``. A run is identified by ``run_id``, which is also its
+        filename, so no two details can claim one entry and nothing can lose."""
+        indexed: list[dict[str, Any]] = []
         for path in self._runs_dir().glob(f"*{_DETAIL_SUFFIX}"):
             data = _fold_detail(path)
-            if data is not None and "content_hash" in data:
-                parsed.append((path, data))
+            # Positive identification only: a detail that folded to no header, or to one carrying
+            # neither identity, is left where it is rather than indexed or removed.
+            if data is not None and "run_id" in data and "content_hash" in data:
+                indexed.append(_summary(data))
 
-        winners: dict[str, tuple[Path, dict[str, Any]]] = {}
-        for path, data in parsed:
-            ch = data["content_hash"]
-            prev = winners.get(ch)
-            if prev is None or str(data.get("created_at", "")) >= str(
-                prev[1].get("created_at", "")
-            ):
-                winners[ch] = (path, data)
-
-        write_jsonl(self._index_path(), [_summary(d) for _, d in winners.values()])
+        write_jsonl(self._index_path(), indexed)
         self._invalidate()
-        winner_paths = {path for path, _ in winners.values()}
-        orphans = 0
-        for path, _ in parsed:
-            if path not in winner_paths:
-                path.unlink(missing_ok=True)
-                path.with_suffix(path.suffix + ".lock").unlink(missing_ok=True)
-                orphans += 1
-        return {
-            "indexed": len(winners),
-            "orphans_removed": orphans,
-            "details_scanned": len(parsed),
-        }
+        return {"indexed": len(indexed)}
 
     def load_since(
         self,
@@ -409,10 +495,12 @@ class MeasurementArchive:
         is_fatal: Callable[[dict[str, Any]], bool] | None = None,
         *,
         dataset_name: str,
-        min_grade: str | None = None,
     ) -> dict[int, dict[str, Any]]:
         """*dataset_name* is REQUIRED — ``sample_id`` identifies a sample WITHIN a dataset, so a pooled
-        slice serves one dataset's measurement under another's. A config change at node N re-measures past N."""
+        slice serves one dataset's measurement under another's. A config change at node N re-measures past N.
+
+        The grade floor is `REUSABLE_MIN_GRADE`, not a caller's argument: replay is the fourth consumer
+        of the grade and a per-call floor is what let it be the one that excluded nothing."""
         if not dataset_name:
             raise ValueError("load_reusable_results requires a dataset_name — see the docstring")
         if not node_configs:
@@ -424,7 +512,7 @@ class MeasurementArchive:
             node_configs,
             dataset_name=dataset_name,
         ):
-            if min_grade is not None and not meets_grade(entry_grade(entry), min_grade):
+            if not meets_grade(entry_grade(entry), REUSABLE_MIN_GRADE):
                 continue
             detail = self.load_by_id(entry["run_id"])
             if not detail:

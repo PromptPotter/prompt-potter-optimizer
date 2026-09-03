@@ -2,21 +2,30 @@
    expands the native dropdown.
 
    Run masthead — ONE header over every view (components/shell/RunMasthead): the
-   picker restyled as the title line, the leaf cycle id beneath in mono, the view
+   picker restyled as the title line with the cycle id beside it in mono, the view
    strip under both. The BAND is full-bleed and carries the hairline that closes
    the chrome; the inner box takes the same width tier and the same main-column
    centering as the dashboard spine and the chat column, so all three align. Its
    horizontal padding matches `.content`'s, which is what puts the title on the
    spine's left edge rather than 18px inside it. */
-.run-header{border-bottom:0.5px solid var(--color-border);padding:var(--space-14) var(--space-18) var(--space-10)}
-.run-header-inner{display:flex;flex-direction:column;align-items:flex-start;gap:var(--space-4);width:100%;max-width:var(--dash-narrow-max);margin:0 auto}
+.run-header{border-bottom:0.5px solid var(--color-border);padding:var(--space-10) var(--space-18) var(--space-8)}
+/* `stretch`, not `flex-start`: a column flex cross-sizes children to their own
+   content, and every `%` max-width below then resolves against nothing. */
+.run-header-inner{display:flex;flex-direction:column;align-items:stretch;gap:var(--space-4);width:100%;max-width:var(--dash-narrow-max);margin:0 auto}
+/* The id shares the title's baseline rather than taking a line of its own: it is a
+   copy-paste fact about the thing the title names, not a second answer to it. */
+.run-title{display:flex;align-items:baseline;gap:var(--space-8);min-width:0}
+.run-title .cycle-picker{max-width:100%;min-width:0}
 .run-title .cycle-picker select{
-  font-size:var(--text-4xl);font-weight:700;letter-spacing:-0.015em;
+  font-size:var(--text-3xl);font-weight:700;letter-spacing:-0.015em;
   color:var(--color-text-primary);background-color:transparent;
   padding-left:0;max-width:min(640px,100%);
 }
 .run-title .cycle-picker select:hover{background-color:var(--color-background-hover)}
-.run-id{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-tertiary)}
+/* Hard right, not simply after the picker: a native <select> is as wide as its widest
+   OPTION, so "after" lands the id in the middle of the band on whichever cycle happens
+   to have the longest name. */
+.run-id{flex:0 0 auto;margin-left:auto;white-space:nowrap;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-tertiary)}
 .cycle-picker{display:inline-flex;align-items:center;gap:var(--space-4)}
 /* The native <select> popup itself is browser-native and not CSS-styleable
    on Windows. The trigger should read as a subtle background region — a
@@ -27,3 +36,21 @@
 .cycle-picker select:hover{color:var(--color-text-primary);background-color:var(--color-background-hover)}
 .cycle-picker select:focus{outline:none}
 .cycle-picker-err{color:var(--color-danger);font-size:var(--text-base)}
+
+/* ≤bp-md: the masthead is ONE tappable line. The app bar names the campaign, so
+   this keeps only which cycle; the id is a copy-paste fact with no keyboard here. */
+@media (max-width:880px){
+  /* No rule between the app bar and this: they are ONE identity band, the campaign
+     on the first line and the cycle on the second. Two bordered bands stacked read
+     as two levels of nesting for one answer. */
+  .run-header{padding:0 var(--space-12) var(--space-6)}
+  .run-header-inner{gap:0}
+  .run-id{display:none}
+  /* The title is the only thing here that may shrink; the follow chip may not. */
+  .run-title .cycle-picker select{
+    font-size:var(--text-lg);font-weight:600;letter-spacing:0;
+    flex:1 1 auto;min-width:0;width:auto;max-width:100%;
+    min-height:var(--touch-target-min);padding-left:var(--space-8);
+  }
+  .run-title .follow-active-btn{flex:0 0 auto}
+}

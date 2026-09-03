@@ -75,6 +75,48 @@ def test_content_hash_distinguishes_pipeline_params() -> None:
     assert sp_a.content_hash(dataset) == content_hash(sp_a.render(), dataset, sp_a.pipeline_params)
 
 
+def test_sp_hash_is_not_recoverable_from_the_stripped_config() -> None:
+    """``sp_hash`` is the ONE key joining a candidate to the rows it paid for, and the only
+    config a candidate carries forward (``ScoredCandidate.resolved_pipeline_params``) is that
+    config with the rendered ``prompt`` STRIPPED. So the hash cannot be re-derived downstream —
+    a reader doing it gets a well-formed id that addresses no run, and neither the archive nor
+    the ruler raises: they simply find nothing and report an arm with no measurements.
+
+    That is not hypothetical. `repair.py` rebuilt its re-measurement point from the stripped
+    field, so every hole it plugged went to the backend with no prompt and banked under a run
+    keyed on ``sha256("")``. Both halves are pinned here: the recompute diverges, and the
+    reconstruction through the OSP restores the point that ran."""
+    from promptpotter.domain.pipeline_schema import (
+        NodePromptInfo,
+        PipelineNode,
+        PipelineSchema,
+    )
+
+    schema = PipelineSchema(
+        name="t",
+        version="1",
+        nodes=[
+            PipelineNode(
+                name="llm_only",
+                wire_type="llm",
+                node_type="",
+                param_keys=[],
+                prompt_info=NodePromptInfo(),
+            )
+        ],
+    )
+    opt_sp = OptSearchPoint(persona="Expert", instruction="Solve it.")
+    sp = opt_sp.to_job_search_point(base_pipeline_params={}, schema=schema)
+    assert sp.render(), "the point that runs carries the rendered prompt in its node config"
+
+    stripped = JobSearchPoint(pipeline_params=sp.config_params, prompt_fields=sp.prompt_fields)
+    assert stripped.sp_hash(schema) != sp.sp_hash(schema)
+    assert not stripped.render(), "and the stripped twin reaches the backend with no prompt"
+
+    restored = opt_sp.to_job_search_point(base_pipeline_params=sp.config_params, schema=schema)
+    assert restored.sp_hash(schema) == sp.sp_hash(schema)
+
+
 def test_pipeline_params_rejects_flat_param_map() -> None:
     """``pipeline_params`` is nested-by-node ⇒ a flat ``{param: value}`` map is
     rejected, never silently misread as a node-keyed config."""
@@ -225,7 +267,13 @@ def test_earned_block_mining_is_blind_inside_an_instrument() -> None:
 
 
 def _archive(archive: MeasurementArchive, run_id: str, data: dict[str, Any]) -> None:
-    """Seed one complete run — the whole measurement set is what is new."""
+    """Seed one complete run — the whole measurement set is what is new.
+
+    Grade A unless the caller stamps its own: `entry_grade` reads an unstamped row as C, and the
+    reuse path excludes C, so an ungraded fixture is not replayable at all — every test here that
+    is ABOUT matching would then pass or fail on provenance instead. Production rows always carry
+    one (`loaders.py::build_dataset_run_data` grades every run it banks)."""
+    data.setdefault("provenance", {"grade": "A", "deliberate_source": True})
     archive.append_run(run_id, data, data["measurements"])
 
 
@@ -330,11 +378,19 @@ def _seed_graded(
     )
 
 
-def test_reusable_results_min_grade_drops_connector_runs(tmp_path: Path) -> None:
-    """``min_grade`` lets a clean-substrate read reuse only deliberately-explored
-    measurements: a grade-C connector run is excluded, so its stale sample is not
-    silently served as if it were a real evaluation. The default (no floor) keeps
-    every run, so ordinary scoring caching is unchanged."""
+def test_a_grade_C_run_is_never_replayed_from_either_entry(tmp_path: Path) -> None:
+    """A grade-C run is never served back as a cache hit, so its stale sample cannot pose as a real
+    evaluation: replayed rows are re-archived under the READING run, which `build_dataset_run_data`
+    grades from its own ``source``/``human_intervened``, so a served C cell re-enters as A and
+    reaches the δ ruler `hard_sample_archive` keeps it out of (ADR-0005: every consumer excludes C).
+
+    Both entries are pinned because the floor used to be a PARAMETER — the facade passed it and the
+    core defaulted to serving everything, so reuse was the one consumer of the grade that excluded
+    nothing, and reaching the core directly was enough to launder a C cell into the ruler."""
+    import types
+
+    from promptpotter.infrastructure.store import archive_views
+
     archive = MeasurementArchive(tmp_path)
     _seed_graded(archive, run_id="clean", grade="A", terminal_node="llm_only", sample_id=7)
     _seed_graded(
@@ -342,12 +398,14 @@ def test_reusable_results_min_grade_drops_connector_runs(tmp_path: Path) -> None
     )
     node_configs = [("llm_only", {"model": "X"})]
 
-    everything = archive.load_reusable_results(node_configs, dataset_name="aime")
-    assert set(everything) == {7, 8}
+    from_core = archive.load_reusable_results(node_configs, dataset_name="aime")
+    assert set(from_core) == {7}, "the DB core served a grade-C run without being asked to exclude"
+    assert from_core[7]["query"] == "q_clean"
 
-    clean_only = archive.load_reusable_results(node_configs, dataset_name="aime", min_grade="A")
-    assert set(clean_only) == {7}
-    assert clean_only[7]["query"] == "q_clean"
+    served = archive_views.reusable_results(
+        types.SimpleNamespace(archive=archive), node_configs, dataset_name="aime"
+    )
+    assert set(served) == {7}, "the reuse facade served a grade-C run as a cache hit"
 
 
 def test_reuse_serves_the_best_match_not_the_last_one_walked(tmp_path: Path) -> None:
@@ -1553,6 +1611,91 @@ def test_the_time_ray_pages_without_a_hole_and_never_doubles_a_forks_parent(
     assert [item.ts for item in fresh.items] == [stamp(8), stamp(20), stamp(21)]
 
 
+def test_the_ray_projection_keeps_the_reading_it_drops_the_record_around() -> None:
+    """A ray item's payload is a projection, and every way it can be wrong is silent.
+
+    The by-kind half fails loud — an undeclared kind raises at import. The by-FIELD half
+    cannot: `RAY_PAYLOAD_FIELDS` names paths into `dict[str, Any]` payloads, so only the
+    first segment is checked against the model, and a nested key that moves picks nothing.
+    The step still renders. It renders without its number, which reads as a candidate that
+    has not been scored rather than as a bug — the same shape as the whisker that twice went
+    undrawn. Pinned here, in both directions:
+
+      * **The reading survives the projection.** `composite_fitness` under
+        `payload.result._running` and under `payload.scores`, the usage block, the round
+        headline — each two or three levels down an untyped dict.
+      * **The record's bulk does not.** An LLM's prompt and response, a sample's query and
+        pipeline data, a phase's whole view. These are what make a window unservable, and
+        each is already addressable one round at a time somewhere else.
+      * **Absent stays absent.** A declared path the record does not carry yields no key
+        rather than a null — a served null reads as a measurement under the browser's
+        absent-vs-zero rule — and a nested path that finds nothing leaves no empty ``{}``
+        behind either, which reads the same way one level down.
+    """
+    from promptpotter.domain.projection_envelope import ray_payload
+    from promptpotter.domain.run_records import LLMCallRecord, PhaseRecord, SnapshotRecord
+
+    scored = SnapshotRecord(
+        event="sample_scored",
+        round=2,
+        candidate_idx=1,
+        sample_idx=3,
+        sample_total=8,
+        payload={
+            "result": {
+                "sample_id": "s3",
+                "query": "x" * 400,
+                "predicted": "y" * 400,
+                "pipeline_data": {"steps": ["z" * 400]},
+                "_running": {"accuracy": 0.5, "composite_fitness": 0.61, "evaluators": {"a": 1.0}},
+            },
+            "scores": {"label": "C2.1", "composite_fitness": 0.61, "prompt_fields": "p" * 400},
+        },
+    )
+    body = ray_payload("snapshot", scored.model_dump())
+    assert body["payload"]["result"] == {"_running": {"accuracy": 0.5, "composite_fitness": 0.61}}
+    assert body["payload"]["scores"] == {"label": "C2.1", "composite_fitness": 0.61}
+    assert (body["sample_idx"], body["sample_total"], body["round"]) == (3, 8, 2)
+    # `accuracy` is declared on `scores` and this record has none: the key is gone, not null.
+    assert "accuracy" not in body["payload"]["scores"]
+    assert "record_type" not in body and "timestamp" not in body, "RayItem carries both itself"
+
+    call = LLMCallRecord(
+        node="l1_generate",
+        round=2,
+        call_id="c-1",
+        payload={
+            "template_fields": {"task": "t" * 2000},
+            "reasoning": "r" * 2000,
+            "response": "s" * 2000,
+            "usage": {"total_tokens": 900},
+            "duration_s": 12.5,
+            "cached": True,
+        },
+    )
+    body = ray_payload("llm_call", call.model_dump())
+    assert body["payload"] == {"usage": {"total_tokens": 900}, "duration_s": 12.5, "cached": True}
+    assert body["call_id"] == "c-1"
+
+    phase = PhaseRecord(
+        phase="round",
+        event="display",
+        round=2,
+        payload={"view": {"bulk": "v" * 4000}, "round_result": {"round": 2, "accuracy": 0.75}},
+    )
+    body = ray_payload("phase", phase.model_dump())
+    assert body["payload"] == {"round_result": {"round": 2, "accuracy": 0.75}}
+
+    # A phase carrying only the bulk: the projection finds nothing under `payload`, so `payload`
+    # is absent — not an empty dict, which a reader takes for "opened it, nothing there".
+    bare = PhaseRecord(phase="control", event="start", payload={"view": {"bulk": "v" * 400}})
+    assert ray_payload("phase", bare.model_dump()) == {
+        "phase": "control",
+        "event": "start",
+        "round": None,
+    }
+
+
 def test_a_conditional_validator_moves_when_its_inputs_do(built_stores) -> None:
     """A validator that misses an input 304s a changed body FOREVER — the operator reads a
     stale tree or ray as current, and nothing anywhere errors. The two ways that happens,
@@ -2320,7 +2463,7 @@ def test_declared_command_payloads_match_their_models() -> None:
     )
 
     doc = yaml.safe_load(
-        (Path(__file__).resolve().parents[1] / "docs/specs/m12-api-openapi.yaml").read_text(
+        (Path(__file__).resolve().parents[1] / "docs/specs/api-openapi.yaml").read_text(
             encoding="utf-8"
         )
     )
@@ -2382,7 +2525,7 @@ def test_declared_command_payloads_match_their_models() -> None:
 def test_declared_command_kinds_match_the_wired_set() -> None:
     """A command kind that LOOKS live in the spec but is not wired, or the reverse.
 
-    ``m12-api-openapi.yaml`` is schema-first by design: a kind is declared before its
+    ``api-openapi.yaml`` is schema-first by design: a kind is declared before its
     handler exists, and those carry ``x-status: declared-not-wired``. That makes the
     ABSENCE of the marker a positive claim — "this one is live" — and nothing checked
     it. The claim is read by humans and by us: `chat-foundation.md` once advertised
@@ -2412,7 +2555,7 @@ def test_declared_command_kinds_match_the_wired_set() -> None:
     }
     wired = set(_WIRED_KINDS) | typed_routes
 
-    spec_path = Path(__file__).resolve().parents[1] / "docs" / "specs" / "m12-api-openapi.yaml"
+    spec_path = Path(__file__).resolve().parents[1] / "docs" / "specs" / "api-openapi.yaml"
     spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
 
     declared_live: set[str] = set()
@@ -2432,13 +2575,13 @@ def test_declared_command_kinds_match_the_wired_set() -> None:
             target.add(kind)
 
     assert not (declared_live - wired), (
-        f"declared live in m12-api-openapi.yaml but NOT wired: {sorted(declared_live - wired)}. "
+        f"declared live in api-openapi.yaml but NOT wired: {sorted(declared_live - wired)}. "
         "A POST to one 404s `command_kind_unknown`. Either wire it, or mark the operation "
         "`x-status: declared-not-wired`."
     )
     assert not (wired - declared_live), (
         f"wired but not declared live: {sorted(wired - declared_live)}. Every inbound command "
-        "is declared in m12-api-openapi.yaml BEFORE its handler lands (ADR-0001). Add the "
+        "is declared in api-openapi.yaml BEFORE its handler lands (ADR-0001). Add the "
         "operation, or drop the `x-status: declared-not-wired` marker it still carries."
     )
     assert not (declared_not_wired & wired), (
@@ -2466,7 +2609,7 @@ def test_declared_reads_are_served_paths() -> None:
     disagreement there is information rather than drift. A promised path that does not
     exist is not a disagreement; it is a dead link.
     """
-    spec_path = Path(__file__).resolve().parents[1] / "docs" / "specs" / "m12-api-openapi.yaml"
+    spec_path = Path(__file__).resolve().parents[1] / "docs" / "specs" / "api-openapi.yaml"
     generated = Path(__file__).resolve().parents[1] / "docs" / "specs" / "openapi.generated.json"
     spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
     served = set(json.loads(generated.read_text(encoding="utf-8"))["paths"])
@@ -2479,7 +2622,7 @@ def test_declared_reads_are_served_paths() -> None:
         and f"/api/v1{path}" not in served
     )
     assert not dead, (
-        f"declared in m12-api-openapi.yaml but served at no such path: {dead}. Either the "
+        f"declared in api-openapi.yaml but served at no such path: {dead}. Either the "
         "path parameter is spelled differently from the handler's argument (the camelCase "
         "case), the route moved, or the operation needs `x-status: declared-not-wired`."
     )
@@ -3957,27 +4100,27 @@ def test_a_course_reads_at_the_winner_its_LEDGER_crowned(built_stores: Any) -> N
     _write_election(built_stores, "gsm8k__aaaaaa", "cycle_0", round_num=1, winner_label="C1.1")
 
     course = SubjectSpec("course", "gsm8k__aaaaaa", "cycle_0")
-    ev = subject_evidence(built_stores, [course], include_trajectory=True)
+    ev = subject_evidence(built_stores, [course], include_winner_chain=True)
     head = ev.subjects[0]
     assert head.values == {"q1": 0.6, "q2": 0.9}, "the branch reads at its crowned winner"
     # The channel is named for the BRANCH; the searchpoint it currently reads at is resolved
-    # beside it, so "which point am I looking at" needs no trajectory to answer.
+    # beside it, so "which point am I looking at" needs no winner chain to answer.
     assert (head.label, head.candidate_id) == ("cycle_0", "c1")
 
     # The branch BEHIND it — origin first, each point on its own cells, so a round that scored a
     # different subset is not redrawn on evidence it never had.
-    assert head.trajectory is not None
-    assert [(p.round, p.label, p.n_cells) for p in head.trajectory] == [
+    assert head.winner_chain is not None
+    assert [(p.round, p.label, p.n_cells) for p in head.winner_chain] == [
         (0, "C0", 2),
         (1, "C1.1", 2),
     ]
-    assert head.trajectory[0].value == pytest.approx(0.3)
+    assert head.winner_chain[0].value == pytest.approx(0.3)
 
     # A campaign subject is the ORIGIN of the same cycle and stays there — the two are different
     # questions, and collapsing them would make "compare the branches" unaskable.
     root = subject_evidence(built_stores, [SubjectSpec("campaign", "gsm8k__aaaaaa")])
     assert root.subjects[0].values == {"q1": 0.2, "q2": 0.4}
-    assert root.subjects[0].trajectory is None
+    assert root.subjects[0].winner_chain is None
 
     # One searchpoint, addressed directly: the same rows, keyed and labelled as itself.
     point = subject_evidence(
@@ -4276,7 +4419,7 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         load_optimizer_prompt,
     )
-    from promptpotter.domain.l1_layout import NODE_LAYOUTS, default_l1_layout
+    from promptpotter.domain.l1_layout import NODE_LAYOUTS
     from promptpotter.domain.opt_search_point import PROMPT_STRING_FIELDS, OptSearchPoint
     from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
     from promptpotter.domain.round_diagnostics import RoundDiagnostics
@@ -4326,10 +4469,7 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
     )
 
     filled, _, rendered, coverage = DispatchHub.fill(
-        load_optimizer_prompt("l1_generate"),
-        default_l1_layout(),
-        bundle,
-        node="l1_generate",
+        load_optimizer_prompt("l1_generate"), bundle, node="l1_generate"
     )
     assert "CURRENT INNER OPTIMIZER PROMPTS" in filled.render(), (
         "the generator was handed no subject — it is rewriting text it cannot see"
@@ -4417,7 +4557,6 @@ def test_digest_reads_the_ruler_off_the_cycle_not_the_unabsorbed_round() -> None
         sigma_theta=1.0,
         calibration_model="1PL",
         anchor_id="anchor-x",
-        anchored_at_round=1,
     )
     cycle = Cycle(
         session=session,
@@ -4508,7 +4647,7 @@ def test_a_replayed_fold_rebuilds_the_trajectory_and_a_forks_history_is_bounded_
     parent's whole CHAIN, so a fork OF A FORK replayed the first N of its grandparent and dropped
     its parent entirely — a plausible, shorter history in place of the real one.
     """
-    from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+    from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
     from promptpotter.domain.run_records import PhaseRecord
     from promptpotter.infrastructure.ledger import CycleEventLog, open_with_history
     from promptpotter.infrastructure.projections.live_dashboard.view import (
@@ -4552,7 +4691,7 @@ def test_a_replayed_fold_rebuilds_the_trajectory_and_a_forks_history_is_bounded_
     live_rounds = [r.round for r in view.state.rounds]
     assert live_rounds == [0, 1]
 
-    replayed = fold_at(root_dir, hop)
+    replayed = fold_at(Cut(cycle=CycleDir(root_dir), hop=hop))
     assert [r.round for r in replayed.rounds] == live_rounds, (
         "the replay rebuilds the trajectory from the round documents, not from a prior dashboard"
     )

@@ -52,13 +52,20 @@
 .steer-fork-confirm{background:var(--color-accent);color:var(--color-text-on-accent);border:0;border-radius:6px;padding:var(--space-6) var(--space-14);font-size:var(--text-base);font-family:inherit;cursor:pointer}
 .steer-fork-cancel:disabled,.steer-fork-confirm:disabled{opacity:0.5;cursor:not-allowed}
 
-/* Node structured-output — read-only contract shown beside the config. */
+/* Node structured-output — read-only contract shown beside the config. One row per PARAMETER,
+   nesting drawn as an indent rather than a fold: a contract read one disclosure at a time is a
+   contract nobody reads. The name column grows with depth so the tree is legible without a rule. */
 .node-output-schema{display:flex;flex-direction:column;gap:var(--space-4)}
 .node-output-title{font-size:var(--text-xs);font-weight:600;color:var(--color-text-secondary)}
 .node-output-list{margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
 .node-output-row{display:grid;grid-template-columns:minmax(90px,auto) 1fr;align-items:baseline;gap:var(--space-8)}
+.node-output-row[data-depth="1"]{padding-left:var(--space-10)}
+.node-output-row[data-depth="2"]{padding-left:var(--space-18)}
 .node-output-field{font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-text-primary)}
-.node-output-desc{margin:0;font-size:var(--text-xs);color:var(--color-text-tertiary)}
+.node-output-req{color:var(--color-accent);margin-left:2px}
+.node-output-desc{margin:0;font-size:var(--text-xs);color:var(--color-text-tertiary);display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--space-6)}
+.node-output-type{font-family:var(--font-mono);color:var(--color-text-secondary)}
+.node-output-limit,.node-output-enum{font-family:var(--font-mono);color:var(--color-text-secondary);border:0.5px solid var(--color-border);border-radius:4px;padding:0 var(--space-4)}
 
 /* Limit reconcile — rounds + spend defaults to the parent's remaining. */
 .limit-reconcile{display:flex;flex-direction:column;gap:var(--space-8);padding:var(--space-8);border:0.5px solid var(--color-border);border-radius:6px}

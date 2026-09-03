@@ -1,13 +1,13 @@
 "use client";
 import { useState, type ReactNode } from "react";
-import { interiorNodes } from "@/lib/derivations";
+import { measurementNode } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useNestedPipelines } from "@/lib/hooks/useNestedPipelines";
 import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import type { NodeConfigParam } from "@/lib/api";
 import type { NodeScope } from "@/lib/SelectionContext";
-import type { PipelineDoc, PipelineView } from "@/components/workflow";
+import type { PipelineView } from "@/components/workflow";
 import type { PipelineStatus } from "@/lib/types";
 import { ConnectorInspector } from "./ConnectorInspector";
 import { PipelineFlow } from "./PipelineFlow";
@@ -25,12 +25,6 @@ import { PipelineFlow } from "./PipelineFlow";
 // jumping straight to its own depth); zoom back in through a level's nesting node, which
 // drops everything above it. `outermost` is the whole of that state — nothing else about
 // the chain is stored, since a zoom re-parents every flow and re-parented state dies.
-
-// The optimizer has no parent to be named by, so its nesting node is derived the way the
-// server derives `nests`: the measurement node is what runs something else.
-function measurementNode(doc: PipelineDoc | null): string | null {
-  return interiorNodes(doc?.view).find((n) => n.kind === "measurement")?.id ?? null;
-}
 
 interface Layer {
   key: string;

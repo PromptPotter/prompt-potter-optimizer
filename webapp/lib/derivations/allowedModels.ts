@@ -1,5 +1,5 @@
 // Client twin of the Python `overlay_sets_model_outside_allowed`
-// (`promptpotter/domain/opt_search_point.py`). True iff a fork's `pipeline_overlay`
+// (`promptpotter/domain/pipeline_overlay.py`). True iff a fork's `pipeline_overlay`
 // steers a node's model/provider to a value the origin has NOT sanctioned — the
 // ADR-0005 babysit (grade-C) trigger. Keeps the client warning on the SAME predicate
 // the server gate enforces at `fork-cycle` (`dispatcher.py`).

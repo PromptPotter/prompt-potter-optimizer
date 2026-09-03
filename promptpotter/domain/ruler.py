@@ -180,7 +180,6 @@ class DeltaRuler(StrictModel):
     sigma_theta: float
     calibration_model: CalibrationModel
     anchor_id: str
-    anchored_at_round: int
 
     def entries(self) -> dict[int, RulerEntry]:
         """``{sid: δ}`` under 1PL, ``{sid: (δ, a)}`` where discrimination was estimated — the shape

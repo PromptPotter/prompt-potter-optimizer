@@ -156,7 +156,7 @@ def _rebank_on_branch(
         cb.on_election(corrected)
         # The re-close MOVES the document's address: its numbers now come from the branch's own
         # record, so a stamp still naming the retired close would re-fold to the holed round.
-        corrected.closed_at_offset = cb.on_round_close(corrected)
+        corrected.at_offset = cb.on_round_close(corrected)
     return len(retirements)
 
 
@@ -207,7 +207,6 @@ async def repair_incomplete_rounds(
     from promptpotter.application.scoring.search_point_scorer import score_search_point
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.results import is_leader_eligible, unscoreable_cells
-    from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.shared.errors import is_error_result
 
     by_id = {str(s.id): s for s in dataset}
@@ -237,8 +236,12 @@ async def repair_incomplete_rounds(
                     cs.label,
                 )
                 continue
-            sp = JobSearchPoint(
-                pipeline_params=cs.resolved_pipeline_params, prompt_fields=cs.prompt_fields
+            # Through the OSP, never `JobSearchPoint(pipeline_params=cs.resolved_pipeline_params)`:
+            # that field has each node's rendered `prompt` stripped, so such a point reaches the
+            # backend with no prompt and banks under a run keyed on `sha256("")`.
+            sp = cand_osp.to_job_search_point(
+                base_pipeline_params=cs.resolved_pipeline_params,
+                schema=session.pipeline_schema,
             )
             stamp = MeasuredCandidate(
                 idx=i,
@@ -291,6 +294,7 @@ async def repair_incomplete_rounds(
                 results,
                 attempted,
                 label=cs.label,
+                sp_hash=sp.sp_hash(session.pipeline_schema),
                 resolved_pipeline_params=cs.resolved_pipeline_params,
                 elimination_stopped=cs.elimination_stopped,
             )

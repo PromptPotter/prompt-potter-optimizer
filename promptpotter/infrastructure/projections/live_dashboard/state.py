@@ -168,13 +168,9 @@ class LiveDashboardState(StrictModel):
     cycle_id: str
     session_id: str
 
-    # WHICH MOMENT this file is of — the ledger offset of the last record folded into it
-    # (``DerivedView.at_offset``), which is the same number as ``ProjectionEnvelope.sequence``
-    # and ``RayItem.offset``. It is this state's ADDRESS on the cycle's one chronology, and
-    # without it a holder of this file cannot say when it was true, cannot tell a lagging copy
-    # from a current one, and cannot join it to the event stream except by guessing — which is
-    # why the SSE snapshot had to invent a private ``snapshot_at_offset`` for itself. ``-1``
-    # until the first record lands.
+    # WHICH MOMENT this file is of — its ``Cut``. Without it a holder cannot tell a lagging copy
+    # from a current one, nor join this file to the event stream except by guessing. ``-1`` until
+    # the first record lands.
     at_offset: int = -1
 
     # Composed at construction because the webapp can't — LANGFUSE_HOST is backend-only.

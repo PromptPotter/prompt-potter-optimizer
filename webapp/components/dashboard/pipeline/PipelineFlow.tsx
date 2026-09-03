@@ -11,7 +11,14 @@ import type { NodeScope } from "@/lib/SelectionContext";
 import type { PipelineStatus } from "@/lib/types";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useSelection } from "@/lib/SelectionContext";
-import { cycleOf, interiorNodes, layoutGrid, liveObserveConfig } from "@/lib/derivations";
+import {
+  agentLabel,
+  cycleOf,
+  interiorNodes,
+  layoutGrid,
+  liveObserveConfig,
+  nodeReach,
+} from "@/lib/derivations";
 import { TERMS } from "@/lib/terms";
 import { cx } from "@/lib/cx";
 
@@ -125,9 +132,11 @@ interface BoxProps {
   // Which namespace a node click writes. Null makes every node inert — a level whose
   // detail panel does not exist must not offer a click that opens nothing.
   scope: NodeScope | null;
-  // The node that runs a nested pipeline, and what clicking it does. Null unless that
-  // level is on screen, so the frame glyph means "there IS a level below" by construction.
-  nest: { node: string; onIsolate: () => void } | null;
+  // The node that runs a nested pipeline, and what clicking it does. The FRAME is a fact
+  // about the node — it runs another pipeline — so it draws wherever that node is named;
+  // `onIsolate` is null where no level below is on screen (the dashboard's Optimizer card
+  // draws one level and zooms nowhere), and the node then selects like any other.
+  nest: { node: string; onIsolate: (() => void) | null } | null;
   // Drawn around another level ⇒ context, not subject: no labels, a third of the height.
   // From the flow, not from `nest`, which is null when the nesting node is unresolved.
   compact: boolean;
@@ -177,7 +186,7 @@ function PipelineBox({
   const nestAt = (id: string) => (nest != null && id === nest.node ? nest : null);
   const activate = (id: string) => {
     const here = nestAt(id);
-    if (here) return here.onIsolate();
+    if (here?.onIsolate) return here.onIsolate();
     if (scope == null) return;
     setSelected(isSel(id) ? null : { id, scope });
   };
@@ -309,11 +318,13 @@ function PipelineBox({
         <button
           type="button"
           className="wf-hero-sole"
-          aria-pressed={soleNest ? undefined : isSelected}
+          aria-pressed={soleNest?.onIsolate ? undefined : isSelected}
           aria-label={
-            soleNest ? `${sole.label} — show what it runs, alone` : `Node: ${sole.label}`
+            soleNest?.onIsolate
+              ? `${sole.label} — show what it runs, alone`
+              : `Node: ${sole.label}`
           }
-          disabled={scope == null && soleNest == null}
+          disabled={scope == null && soleNest?.onIsolate == null}
           onClick={() => activate(sole.id)}
         >
           <div className="head">
@@ -389,20 +400,42 @@ function PipelineBox({
             isSelected && "selected",
             isActive && "active",
           );
-          // Four shapes, by what the optimizer vs the operator may move:
-          //   dot         — the optimizer moves it (some param is tunable)
-          //   OPEN lock   — only the operator may, and on a live cycle that stamps
-          //                 `human_intervened` (grade C)
-          //   CLOSED lock — no params at all, nothing to change
-          //   FRAME       — runs a whole nested pipeline, so neither tunable here nor
-          //                 paramless; claims no lock either way
-          // A null schema is UNKNOWN (demo / not yet loaded) and keeps the dot.
+          // The glyph answers WHERE THE SEARCH REACHES, and the POSITIVE state is the one that
+          // gets the mark: most nodes in a real pipeline declare no axis at all — tools,
+          // measurement, plumbing — so marking that case makes the default the loudest thing
+          // on screen and leaves the product's own behaviour unmarked.
+          //
+          //   FRAME    — runs a whole nested pipeline; what it IS, before any axis question
+          //   RING     — some agent searches here. The optimizer's actual reach.
+          //   PADLOCK  — nothing here is searched, though it COULD be: opening an axis is
+          //              adding its key to `param_keys`, so a config param no agent moves is
+          //              shut, not exempt. Closed shackle = every openable axis shut; open
+          //              shackle = some shut, some searched.
+          //   bare dot — nothing here could ever be opened (`model`/`provider` only, or no
+          //              params at all), or the reading is unknown.
+          //
+          // Ring and padlock COMPOSE on a partial node: it is searched AND partly shut, and
+          // those are two facts rather than a choice between two glyphs.
           const nests = nestAt(n.id);
-          const params = schema?.[n.id];
-          const tunable = params != null && params.some((p) => p.optimizer_tunable);
-          const paramless = params != null && params.length === 0;
-          const lock: "open" | "closed" | null =
-            nests || params == null || tunable ? null : paramless ? "closed" : "open";
+          const reach = nodeReach(schema, n.id);
+          // Drawn on a nesting node too: the badge sits BESIDE the glyph, so "this runs a
+          // pipeline" and "its own axes are shut" never compete for one mark. `l1_score` is both.
+          const lock: "open" | "closed" | null = !reach
+            ? null
+            : reach.state === "locked"
+              ? "closed"
+              : reach.state === "partial"
+                ? "open"
+                : null;
+          const reached = reach != null && reach.open > 0;
+          // Said in words too: the glyph carries three shapes and the operator's question is
+          // "which params, and moved by whom", which only a count and a name can answer.
+          const reachNote =
+            reach == null || reach.state === "nothing"
+              ? null
+              : reach.open === 0
+                ? `no axis open of ${reach.openable}${reach.held ? " — narrowed at mint" : ""}; open one by forking`
+                : `${reach.open} of ${reach.openable} axes open — ${reach.agents.map(agentLabel).join(", ")}`;
           // Wrapped while narrow, whole id once widened — that is what expanding buys. A
           // grid never wraps: it is already pitched wide enough for the id and the model.
           const parts = isSelected || ring ? [n.label] : labelLines(n.label);
@@ -417,7 +450,7 @@ function PipelineBox({
           // property of the node id, not of the surface drawing it.
           const tip = TERMS[`node_${n.id}`];
           const subDy = labelDy + parts.length * 11;
-          const inert = scope == null && nests == null;
+          const inert = scope == null && nests?.onIsolate == null;
           return (
             <g
               key={n.id}
@@ -425,8 +458,14 @@ function PipelineBox({
               transform={`translate(${cxPos} 0)`}
               role={inert ? undefined : "button"}
               tabIndex={inert ? undefined : 0}
-              aria-pressed={inert || nests ? undefined : isSelected}
-              aria-label={nests ? `${n.label} — show what it runs, alone` : n.label}
+              aria-pressed={inert || nests?.onIsolate ? undefined : isSelected}
+              aria-label={
+                nests?.onIsolate
+                  ? `${n.label} — show what it runs, alone`
+                  : reachNote
+                    ? `${n.label} — ${reachNote}`
+                    : n.label
+              }
               onClick={inert ? undefined : () => activate(n.id)}
               onKeyDown={(e) => {
                 if (inert) return;
@@ -447,12 +486,21 @@ function PipelineBox({
                 fill="transparent"
               />
               <title>
-                {nests
-                  ? `${n.label} — runs the pipeline below; show it alone`
-                  : tip
-                    ? `${n.label} — ${tip}`
-                    : n.label}
+                {[
+                  n.label,
+                  nests
+                    ? nests.onIsolate
+                      ? "runs the pipeline below; show it alone"
+                      : "runs a whole pipeline of its own"
+                    : tip,
+                  reachNote,
+                ]
+                  .filter(Boolean)
+                  .join(" — ")}
               </title>
+              {/* The node's OWN glyph, never replaced — reach and locking are things TRUE OF a
+                  node, so they adorn it. Swapping the dot for a padlock spends the kind
+                  vocabulary and leaves "what is this node" unanswerable at a glance. */}
               {nests ? (
                 <g
                   className={cx("node-nest", isActive && "active")}
@@ -461,18 +509,27 @@ function PipelineBox({
                   <rect className="frame" x={-8} y={-6} width={16} height={12} rx={2.5} />
                   <rect className="inner" x={-4.5} y={-2.5} width={9} height={5} rx={1.5} />
                 </g>
-              ) : lock ? (
+              ) : (
+                <circle className={dotCls} cx={0} cy={nodeY} r={RADIUS} />
+              )}
+              {/* Halo where the search works. Wider than the dot, under nothing. */}
+              {reached && (
+                <circle
+                  className={cx("node-reach", isActive && "active")}
+                  cx={0}
+                  cy={nodeY}
+                  r={RADIUS + 3.5}
+                />
+              )}
+              {/* Corner badge: axes nothing searches, though they could be opened. Dropped on a
+                  compact level, which draws context rather than subject and has no room. */}
+              {lock && !compact && (
                 <g
-                  className={cx(
-                    "node-lock",
-                    `is-${lock}`,
-                    isSelected && "selected",
-                    isActive && "active",
-                  )}
-                  transform={`translate(0 ${nodeY})`}
+                  className={cx("node-lock", `is-${lock}`)}
+                  transform={`translate(${RADIUS + 3.4} ${nodeY - RADIUS - 1.5}) scale(0.78)`}
                 >
-                  {/* Open = the right leg never meets the body, which is the only
-                      shape difference legible at this size. */}
+                  {/* Open = the right leg never meets the body, the only shape difference
+                      legible at this size. */}
                   <path
                     className="shackle"
                     d={
@@ -483,8 +540,6 @@ function PipelineBox({
                   />
                   <rect className="body" x={-4.6} y={-1.6} width={9.2} height={7.4} rx={1.4} />
                 </g>
-              ) : (
-                <circle className={dotCls} cx={0} cy={nodeY} r={RADIUS} />
               )}
               {showLabel && (
                 <text className="node-label" x={0} y={nodeY + labelDy} textAnchor="middle">
@@ -531,7 +586,9 @@ export interface PipelineFlowProps {
   };
   // The level this pipeline runs and what its nesting node does when clicked. Which levels
   // are drawn is owned by the STACK, never a `useState` here: a zoom re-parents this flow,
-  // and React destroys the state of a re-parented component.
+  // and React destroys the state of a re-parented component. Absent where a host draws one
+  // level only — `nestsNode` still marks the nesting node, which is a fact about the node
+  // rather than about how many levels this host happens to show.
   nest?: { level: ReactNode; onIsolate: () => void };
   // Half of the depth alternation, from the stack — a level cannot know its own depth and
   // CSS cannot count from the inside out.
@@ -604,9 +661,8 @@ export function PipelineFlow({
         isLive={isLive}
         schema={schema}
         scope={scope}
-        // Joining the served id to the level here keeps "the frame glyph means there IS a
-        // level below" true by construction.
-        nest={nest && nestsNode ? { node: nestsNode, onIsolate: nest.onIsolate } : null}
+        // The frame follows the served id; only the ZOOM follows the level being drawn.
+        nest={nestsNode ? { node: nestsNode, onIsolate: nest?.onIsolate ?? null } : null}
         compact={nest != null}
         models={models}
       />

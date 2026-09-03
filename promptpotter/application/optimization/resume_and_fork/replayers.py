@@ -76,13 +76,22 @@ def _iter_mismatches(ctx: ReplayContext) -> Iterator[ReplayMismatch]:
 
         try:
             current = fn(ctx, rec["inputs_ref"], rec["data"])
-        except Exception:
-            # No mismatch on replayer crash, but surface — silent skip hides scorer drift.
+        except Exception as exc:
+            # A replayer that cannot ANSWER is a third state, never a match: they raise on a record
+            # that does not re-derive (`RulerCoverageError` on an uncarried cell, a `ROUND_WINNER`
+            # missing its `parent_cells` anchor), so counting that as agreement reports a clean pass
+            # for exactly the rounds nothing verified and `--fork-on-divergence` never fires. Its own
+            # kind, so the operator reads WHICH check went blind.
+            # `.get` here only: the raise may BE the missing key, and an error path may not raise.
             logger.warning(
-                "replayer for decision kind %r crashed during the replay check; "
-                "treating as a match",
-                kind,
-                exc_info=True,
+                "replayer for decision kind %r could not re-derive its record", kind, exc_info=True
+            )
+            yield ReplayMismatch(
+                round_num=round_data.round,
+                kind=f"replay_error:{kind.value}",
+                recorded_outcome=rec.get("outcome"),
+                current_outcome=f"{type(exc).__name__}: {exc}",
+                inputs_ref=dict(rec.get("inputs_ref") or {}),
             )
             continue
         recorded = rec["outcome"]

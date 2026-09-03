@@ -49,6 +49,10 @@ export interface RoundAuditDoc {
 export interface NodeBlock {
   input?: Record<string, unknown>;
   output?: Record<string, unknown>;
+  // The node's resolved call config — what was ASKED FOR, and the only place a routing suffix
+  // survives (`:nitro` picks which provider serves the call, at that provider's own price).
+  config?: Record<string, unknown>;
+  // The provider's ECHO of the model it served, which OpenRouter returns without the suffix.
   model?: string;
   duration_s?: number;
   timestamp?: string;

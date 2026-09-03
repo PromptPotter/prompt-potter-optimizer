@@ -10,10 +10,6 @@
 /* The job-bar that lived here — cycle picker, KPI chips, identity/spend dropdown and the
    finishing-criteria control — moved to the shell's remote strip (domains/remote.css), which
    renders on every tab instead of this one. */
-/* Width and positioning only — no card. The alternating levels ARE the framing, so a
-   panel around them was a second box holding one picture, mostly empty. */
-.pipeline-frame{position:relative;max-width:980px;margin:0 auto;width:100%}
-.pipeline-frame > .wf-hero{max-width:none}
 /* Inline with the Input/Output ends rather than a row of its own: the strip costs no
    vertical, and it reads as "one more level out" beside the thing it wraps. */
 .pipeline-zoom{display:flex;align-items:center;gap:var(--space-4);flex-shrink:0;margin-right:var(--space-8)}
@@ -26,11 +22,21 @@
 }
 .pipeline-zoom-btn:hover{color:var(--color-accent);border-color:var(--color-accent)}
 .pipeline-zoom-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
-/* Horizontal room for the outermost frame. The vertical rhythm stays on `.wf-hero-flow`,
-   which owns it at every depth. */
-.pipeline-stack{padding:0 var(--space-16)}
+/* The picture claims a row of its own. Horizontal room for the outermost level; the
+   vertical rhythm stays on `.wf-hero-flow`, which owns it at every depth. */
+.pipeline-stack{flex:1 1 100%;padding:0 var(--space-16)}
 
-.wf-hero{position:relative;padding:var(--space-16) var(--space-16) var(--space-18);max-width:980px;margin:0 auto;width:100%}
+/* ONE wrapping row: the pipeline picture takes the first, the round pills and the two
+   mini strips share the next. Two rows for two inline controls was the hero's own empty
+   space, and the picture's size is untouched by the change. */
+.wf-hero{position:relative;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:var(--space-6) var(--space-10);padding:var(--space-16) var(--space-16) var(--space-18);max-width:980px;margin:0 auto;width:100%}
+/* Two that need the whole row back. NodeDetail is a 560px column and would otherwise sit
+   BESIDE the pills; the expanded heat table breaks out full-bleed off its own wrap's box
+   (`margin-left:calc(50% - 50vw)`), which a shrink-to-fit wrap resolves against nothing.
+   Scoped to the hero — the same component mounts on the Dashboard at its own width. */
+.wf-hero > .bnode{flex:1 1 100%}
+.wf-hero .hs-heat-wrap{flex:0 1 auto;width:auto;margin-top:0;padding:0}
+.wf-hero .hs-heat-wrap:has(.hs-expand-wrap){flex-basis:100%;width:100%}
 .wf-hero-flow{display:flex;align-items:center;justify-content:center;gap:0;padding:var(--space-10) 0}
 .wf-hero-node{background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:10px;padding:var(--space-14) var(--space-24);text-align:left;min-width:140px;display:flex;flex-direction:row;align-items:center;gap:var(--space-12);position:relative;z-index:2}
 .wf-hero-node .ico{color:var(--color-text-tertiary);display:flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -175,27 +181,31 @@
 .wf-hero-multi-node .node{fill:var(--color-accent);stroke:var(--color-accent);stroke-width:1;filter:drop-shadow(0 0 4px var(--color-accent-glow));transition:transform .15s,filter .15s}
 .wf-hero-multi-node:hover .node{transform-box:fill-box;transform-origin:center;transform:scale(1.18)}
 .wf-hero-multi-node .node.selected{filter:drop-shadow(0 0 7px var(--color-accent-glow)) drop-shadow(0 0 11px var(--color-accent-glow))}
-/* Padlock instead of a dot. CLOSED = the node carries no params at all, so there
-   is nothing to change. OPEN = the optimizer will not move it, but the operator
-   can — and doing that on a live cycle stamps `human_intervened`, which forces
-   the run's provenance to grade C. Both read quieter than a dot on purpose:
-   they are the parts of the pipeline the search is not working on. */
+/* Padlock BESIDE the node, never instead of it — a corner badge, so the kind glyph stays
+   readable and "what is this node" is still answerable at a glance. CLOSED shackle = every
+   openable axis is shut; OPEN = some shut, some searched. A node with nothing openable at
+   all (model/provider only) wears none. Reopening an axis on a live cycle stamps
+   `human_intervened`, which forces the run's provenance to grade C. Both read quieter than
+   the reach ring on purpose: the ring is where the search works, the lock where it stops. */
 /* Running node — success fill + the `pulse-active` keyframe declared in `workflow.css`,
    so the hero and the Optimizer card say "this one is executing" in one language. */
 .wf-hero-multi-node .node.active{fill:var(--color-success);stroke:var(--color-success);filter:drop-shadow(0 0 7px rgba(var(--color-success-rgb),0.55));animation:pulse-active 1.6s ease-in-out infinite}
 .wf-hero-multi-node .node-lock .body{fill:var(--color-text-tertiary)}
 .wf-hero-multi-node .node-lock .shackle{fill:none;stroke:var(--color-text-tertiary);stroke-width:1.5;stroke-linecap:round}
 .wf-hero-multi-node .node-lock.is-open .body,
-.wf-hero-multi-node .node-lock.is-open .shackle{opacity:.75}
-.wf-hero-multi-node .node-lock.selected .body{fill:var(--color-accent)}
-.wf-hero-multi-node .node-lock.selected .shackle{stroke:var(--color-accent)}
+.wf-hero-multi-node .node-lock.is-open .shackle{opacity:.7}
 .wf-hero-multi-node:hover .node-lock .body{fill:var(--color-text-secondary)}
 .wf-hero-multi-node:hover .node-lock .shackle{stroke:var(--color-text-secondary)}
-/* Last, so RUNNING outranks selected and hover on the lock exactly as it does on
-   the dot — a node that is executing says so no matter what else is true of it. */
-.wf-hero-multi-node .node-lock.active .body{fill:var(--color-success)}
-.wf-hero-multi-node .node-lock.active .shackle{stroke:var(--color-success)}
-.wf-hero-multi-node .node-lock.active{animation:pulse-active 1.6s ease-in-out infinite}
+/* No `selected` or `active` variant: the badge is an adornment and the NODE carries
+   both states. Two things pulsing for one fact reads as two things happening. */
+/* The REACH ring — a halo where the search actually works. It is the positive statement
+   the picture was missing: most nodes in a real pipeline declare no axis, so marking the
+   absence made the default case the loudest thing on screen. Accent, unfilled, wider than
+   every other glyph, and it composes with them rather than replacing one — a node can be
+   searched AND partly held. */
+.wf-hero-multi-node .node-reach{fill:none;stroke:var(--color-accent);stroke-width:1.1;opacity:.55}
+.wf-hero-multi-node:hover .node-reach{opacity:.9}
+.wf-hero-multi-node .node-reach.active{stroke:var(--color-success);opacity:.95}
 /* Container glyph — a frame with something in it. Not a lock in either state:
    the node's knobs are real, they just live in another cycle. */
 .wf-hero-multi-node .node-nest .frame{fill:none;stroke:var(--color-text-tertiary);stroke-width:1.4}
@@ -266,28 +276,29 @@
 .wf-hero-nested .wf-hero-node .ico svg{width:20px;height:20px}
 @media (max-width:640px){
   .wf-hero-nested{padding-left:var(--space-4);padding-right:var(--space-4)}
-  .pipeline-stack{padding-left:var(--space-8);padding-right:var(--space-8)}
 }
-/* The thread is the ONE flexible block on the tab; everything above it (masthead,
-   pipeline hero) keeps its natural height. Without this they shrink too, and a
-   squeezed hero clips its SVG against the tab's `overflow:hidden` rather than
-   scaling — no scrollbar, nothing on screen to say so. */
-.chat-content > *:not(.chat-grid){flex:0 0 auto}
+/* The hero keeps its natural height while there is room and gives way when there is
+   not — an open node detail or an expanded sample table is taller than the whole tab,
+   and pinned at `flex:0 0 auto` it drove the thread and the composer to zero height.
+   The thread's 240px basis with no shrink is the other half: the hero can only take
+   the room the conversation is not using.
+   It SCROLLS rather than clips — squeezed against the tab's `overflow:hidden` it would
+   cut the pipeline SVG with no scrollbar anywhere to say so — but only while one of
+   those two is open. An unconditional `auto` puts a scrollbar on a hero that FITS: the
+   connector's hover card is positioned below its dot and counts as scrollable overflow
+   whether or not it is visible. */
+.chat-content > .wf-hero{flex:0 1 auto;min-height:0}
+.wf-hero:has(> .bnode),.wf-hero:has(.hs-expand-wrap){overflow-y:auto}
 /* ONE column at every width. The 360px settings rail that used to sit beside the
    thread is gone — its switches are the composer's Tools popover now, which is
    reachable without scrolling past the input on a phone. */
-.chat-grid{display:grid;grid-template-columns:minmax(0,600px);gap:var(--space-24);justify-content:center;flex:1;min-height:0;padding:0 var(--space-18)}
-/* Below this width the page scrolls again and the thread takes a height of its own
-   rather than the viewport's. */
-@media (max-width:980px){
-  .chat-content{overflow-y:auto}
-  .chat-panel{min-height:620px}
-}
-/* No height floor: the panel takes the height the tab has left, so its input row
-   lands at the bottom of the screen. A floor is what pushed that row below the fold. */
+.chat-grid{display:grid;grid-template-columns:minmax(0,600px);gap:var(--space-24);justify-content:center;flex:1 0 240px;min-height:0;padding:0 var(--space-18)}
+/* No height floor at ANY width, and no band where the tab scrolls instead of the thread.
+   The panel takes the height the tab has left, so its input row lands at the bottom of the
+   screen; a floor is what pushed that row below the fold. No header either — a title bar
+   naming the surface the composer under it already is, one band under a masthead that
+   names the cycle. */
 .chat-panel{background:var(--color-background-primary);border:1px solid var(--color-border);border-radius:var(--border-radius-lg);display:flex;flex-direction:column;overflow:hidden;min-height:0;min-width:0}
-.chat-panel-header{padding:var(--space-14) var(--space-18);border-bottom:1px solid var(--color-border);display:flex;align-items:center;justify-content:space-between}
-.chat-panel-title{font-size:var(--text-lg);font-weight:500;color:var(--color-text-primary)}
 .chat-messages{flex:1;overflow-y:auto;padding:var(--space-18);display:flex;flex-direction:column;gap:var(--space-12)}
 /* A column flex child defaults to shrinking, so an overfull thread COMPRESSES its
    entries instead of scrolling — and the live feed loses, being the one child with no
@@ -342,8 +353,8 @@
   .chat-attach,.chat-send{min-height:44px}
   /* The touch floor grows Tools' HIT BOX, never its ink — the button reaches 44px
      and sits flush in the field's bottom corner, so the field stays 44px too. */
-  .chat-tools-wrap{margin-bottom:0}
-  .chat-tools{padding:0 var(--space-8)}
+  .chat-tools-wrap{margin:0 var(--space-4) 0 0}
+  .chat-tools{padding:0 var(--space-4)}
 }
 .chat-msg.user-file{padding:var(--space-6)}
 .chat-msg.user-file .file-chip{
@@ -502,42 +513,36 @@
 .chat-decision-err{margin:0;font-size:var(--text-sm);color:var(--color-danger)}
 
 /* ── The run card ─────────────────────────────────────────────────
-   THREE boxes, not one compartment: stats and config side by side, the
-   samples preview full-width beneath them. The card itself is only a grid
-   — no border, no fill — so the boxes read as separate objects sitting on
-   the chat's own background rather than as panels planted in a frame.
+   ONE frame, and everything inside it flat: the card carries the border and the
+   fill the thread's own AI messages wear, so it reads as the last thing the Potter
+   said rather than as a pane planted in the log. Its sections — stats and config,
+   then the samples preview — are separated by hairlines, never by boxes of their
+   own; a single readout arriving inside four nested borders was the shape this
+   replaced.
 
-   Each box is compact BY DEFAULT and complete on click, so keep summaries
-   to one line and put everything else behind the disclosures.
+   Each section is compact BY DEFAULT and complete on click, so keep summaries
+   to one line and put everything else behind the disclosures. No titles on either:
+   the card gets about six lines in a chat thread, and three of them used to go to
+   headings that named what the content already showed.
 
    IN FLOW at the tail of the log, live or stopped — never pinned. Sticking
    it to the bottom of the scrollport (`.chat-messages`) buried the thread it
-   reports on the moment the reader scrolled up. The columns wrap via
-   auto-fit — no breakpoint of its own, which keeps this out of the
-   css-breakpoints allowlist. */
-/* Two boxes SIDE BY SIDE, and no titles on either: the card gets about six
-   lines in a chat thread, and three of them used to go to headings that named
-   what the content already showed. `flex-wrap` stacks them again when the
-   thread is too narrow to hold both — no breakpoint of its own. */
-.run-card{display:flex;flex-direction:row;flex-wrap:wrap;gap:var(--space-8);width:100%;align-self:stretch}
-/* The SECONDARY surface, not the primary one: `.chat-panel` is primary, so a
-   primary box was a card the reader could not see the edges of. This is the
-   same surface the thread's own AI messages sit on. */
-.run-box{flex:1 1 340px;min-width:0;display:flex;flex-direction:column;gap:var(--space-6);padding:var(--space-8) var(--space-10);border:1px solid var(--color-border);border-radius:var(--border-radius-md);background:var(--color-background-secondary)}
-.run-card.is-live .run-box{border-color:rgba(var(--color-accent-rgb),0.45)}
-/* Opening a disclosure takes the whole row back. Half a card is the right size
-   for a summary and the wrong size for a prompt or a 400-row table, and the
-   thing the reader just opened is the thing that should get the width. */
-.run-box:has(.run-diff[open]),.run-box:has(.hsp-full){flex-basis:100%}
-/* The head is ONE row and stays one — the picker and the copy button hold their
-   width, the numbers give theirs up first. */
-.run-box-head{display:flex;align-items:center;gap:var(--space-8);flex-wrap:nowrap;min-height:20px}
+   reports on the moment the reader scrolled up. A COLUMN, because the thread is
+   capped at 600px at every width: two side-by-side boxes never once fitted, so the
+   row-and-wrap machinery was a mechanism with no state it could reach. */
+.run-card{display:flex;flex-direction:column;gap:var(--space-6);width:100%;align-self:stretch;padding:var(--space-8) var(--space-10);border:1px solid var(--color-border);border-radius:var(--border-radius-md);background:var(--color-background-secondary)}
+.run-card.is-live{border-color:rgba(var(--color-accent-rgb),0.45)}
+.run-box{min-width:0;display:flex;flex-direction:column;gap:var(--space-6)}
+.run-box+.run-box{border-top:1px solid var(--color-border);padding-top:var(--space-6)}
+/* Wraps rather than clips: the head is numbers, and `overflow:hidden` on a nowrap
+   row cut "from 30%" to "from 3". The picker drops to its own line instead. */
+.run-box-head{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap;min-height:20px}
 .run-box-head>*{flex:0 0 auto}
 .run-box-note{margin:0;font-size:var(--text-sm);color:var(--color-text-tertiary)}
 
 /* The headline — cost, lift, and the accuracy pair, on one line. `spent` sits
    in the same row as the figure so the box needs no label above it. */
-.run-headline{flex:0 1 auto;margin:0;margin-right:auto;display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:nowrap;min-width:0;overflow:hidden;font-size:var(--text-xs);color:var(--color-text-secondary)}
+.run-headline{flex:0 1 auto;margin:0;margin-right:auto;display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:nowrap;min-width:0;font-size:var(--text-xs);color:var(--color-text-secondary)}
 .run-headline strong{font-family:var(--font-mono);font-size:var(--text-md);font-weight:600;color:var(--color-text-primary)}
 .run-headline-unit{font-size:var(--text-xs);color:var(--color-text-tertiary)}
 .run-headline-sep{color:var(--color-border)}
@@ -615,9 +620,10 @@
    from it, so it never reads as a control with nothing to do. */
 .hsp-nav-home{background:none;border:0;padding:0;width:14px;font:inherit;font-size:var(--text-xs);line-height:1;color:var(--color-accent);cursor:pointer}
 
-/* REAL rows: one bordered block, banded, with a rule between each. Three
-   floating lines read as a fragment of a paragraph; this reads as a table. */
-.hsp-rows{list-style:none;margin:0;padding:0;flex:1 1 260px;min-width:0;display:flex;flex-direction:column;border:1px solid var(--color-border);border-radius:var(--border-radius-sm);background:var(--color-background-primary);overflow:hidden}
+/* REAL rows: banded, with a rule between each — which is what makes them read as a
+   table. No box of its own: the card is the frame, and a bordered block inside a
+   bordered card inside a bordered panel is three frames for one readout. */
+.hsp-rows{list-style:none;margin:0;padding:0;flex:1 1 260px;min-width:0;display:flex;flex-direction:column}
 /* ONE line per row, always. No query text lives here — a JustLogic row is 1,500
    characters of premises, and printing it rebuilds the wall this box replaces. The
    text is on `title`; the full table is one click below. */
@@ -642,11 +648,12 @@
 .hsp-row.is-now .hsp-tag{color:var(--color-accent)}
 
 /* The spread summarises the roster, so it IS the control that opens the roster
-   — a separate "show all" line said the same thing and cost a row. Its own box
-   beside the rows: same three lines, a different question, so a shared frame
-   would have read as three more rows. */
-.hsp-spread{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:1px var(--space-8);border:1px solid var(--color-border);border-radius:var(--border-radius-sm);background:var(--color-background-primary);font:inherit;text-align:left;cursor:pointer}
-.hsp-spread:hover{border-color:var(--color-accent)}
+   — a separate "show all" line said the same thing and cost a row. A hairline
+   divides it from the rows beside it: same three lines, a different question, and
+   a box of its own would have been one more frame inside the card's.
+   It is a button with no border, so hover tints instead of colouring one. */
+.hsp-spread{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:1px var(--space-8);border:0;border-left:1px solid var(--color-border);background:none;font:inherit;text-align:left;cursor:pointer}
+.hsp-spread:hover{background:var(--color-background-hover)}
 .hsp-spread:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
 .hsp-b{display:flex;align-items:baseline;gap:var(--space-4);font-size:var(--text-xs);line-height:1.7;color:var(--color-text-tertiary)}
 .hsp-b strong{font-family:var(--font-mono);color:var(--color-text-primary)}

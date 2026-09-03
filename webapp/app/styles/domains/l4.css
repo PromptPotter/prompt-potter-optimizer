@@ -92,16 +92,6 @@
   color: var(--color-text-tertiary);
   width: 2ch;
 }
-.l4-state {
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
-  white-space: nowrap;
-}
-.l4-state code {
-  font-family: var(--font-mono);
-  color: var(--color-text-primary);
-}
 
 .l4-effect {
   white-space: nowrap;

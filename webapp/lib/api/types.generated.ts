@@ -2,6 +2,25 @@
 // Run `python scripts/build_ts_types.py` to regenerate from the Pydantic
 // models in `promptpotter/` and commit the diff alongside any schema change.
 
+/** What a pass did, or would do. */
+export interface ArchiveReport {
+  runs_touched: number;
+  runs_skipped: number;
+  rows_moved: number;
+  bytes_before: number;
+  bytes_after: number;
+  cold_bytes: number;
+  archive_writers: number;
+  conflicts: number;
+  purged: number;
+  skipped_by_label: unknown;
+  applied: boolean;
+  /** Net, and net is the honest number: the payload does not vanish, it moves to
+   * the cold store, so the hot-side saving is reported against what the cold
+   * side cost. */
+  bytes_freed: number;
+}
+
 /** A Rasch θ and the δ scale it was read on — meaningless apart, so they are one value. */
 export interface AbilityReading {
   theta: number;
@@ -253,6 +272,7 @@ export interface ScoredCandidate {
   evaluators: Record<string, number>;
   pipeline_params_override: Record<string, unknown> | null;
   resolved_pipeline_params: Record<string, unknown> | null;
+  sp_hash: string;
   prompt_fields: Record<string, unknown>;
   escalation_aborted: boolean;
   elimination_stopped: boolean;
@@ -286,6 +306,7 @@ export interface ScoreboardRow {
   composite_fitness: number;
   total: number;
   escalation_aborted: boolean;
+  invalid: boolean;
   matched_parent_accuracy: number | null;
   matched_parent_composite: number | null;
   mean_fitness_ci_lo: number | null;
@@ -381,7 +402,7 @@ export interface OptSearchPoint {
 /** Per-round outcome — and the round document itself. */
 export interface RoundResult {
   round: number;
-  closed_at_offset: number | null;
+  at_offset: number | null;
   label: string;
   accuracy: number;
   composite_fitness: number;
@@ -404,6 +425,7 @@ export interface RoundResult {
   parent_accuracy: number;
   results: Record<string, unknown>[];
   all_candidate_results: Record<string, Record<string, unknown>[]>;
+  parent_results: Record<string, unknown>[];
   candidates_scored: number;
   electable_count: number;
   candidate_scores: ScoredCandidate[];
@@ -681,7 +703,7 @@ export interface MeasurementSeriesResponse {
   mean_fitness: number | null;
 }
 
-/** One param a node carries — the COMPLETE per-node list, which is what lets */
+/** One param a node carries — the COMPLETE per-node list, which is what lets a reader sum */
 export interface NodeConfigParam {
   key: string;
   value: unknown;
@@ -689,7 +711,8 @@ export interface NodeConfigParam {
   options: string[];
   description: string;
   optimizer_locked: boolean;
-  optimizer_tunable: boolean;
+  movable_by: string[];
+  held: boolean;
 }
 
 /** Resolved output schema for a TARGET pipeline node — the structured output the */
@@ -832,7 +855,7 @@ export interface CyclesResponse {
   cycles: CycleListEntry[];
 }
 
-/** The 202 response shape declared in ``m12-api-openapi.yaml``. */
+/** The 202 response shape declared in ``api-openapi.yaml``. */
 export interface CommandAcceptedBody {
   /** Stable id of the appended `CommandRecord`. */
   command_id: string;
@@ -989,7 +1012,7 @@ export interface ScenarioReading {
 }
 
 /** One step of the branch standing behind a subject — the winner chain from the origin up to */
-export interface TrajectoryPoint {
+export interface WinnerChainPoint {
   candidate_id: string;
   round: number;
   label: string;
@@ -1014,7 +1037,7 @@ export interface SubjectReading {
   comparable_note: string;
   mask: SubjectMask | null;
   scenario: ScenarioReading | null;
-  trajectory: TrajectoryPoint[] | null;
+  winner_chain: WinnerChainPoint[] | null;
   config: Record<string, string> | null;
   arm_id: string | null;
   instrument_id: string | null;
@@ -1144,6 +1167,17 @@ export interface LineageNode {
   children: LineageNode[];
   /** Column hint. Candidates only. */
   round: number | null;
+  /** THE address of this candidate's measurements — the searchpoint id the archive
+   * stores on every row it wrote, under its own spelling `prompt_fields_id`.
+   * Neither `id` (a per-individual `uuid4`) nor `label` joins to a row; this
+   * does. Served rather than derived: it hashes the node configs INCLUDING
+   * the rendered prompt, which no served field carries, so a client
+   * recomputing it would match nothing and see no error. Empty on a course,
+   * on a candidate minted before the stamp existed, and on one that measured
+   * nothing. NOT unique — one searchpoint scored on two subsets is one
+   * `sp_hash` over two runs, and a re-proposed configuration shares it across
+   * rounds. */
+  sp_hash: string;
   accuracy: number | null;
   composite_fitness: number | null;
   /** Candidate: minted | measured | invalid — never 'winner' (that rides
@@ -1279,7 +1313,13 @@ export interface RayItem {
   ts: string;
   /** The ledger record_type — ProjectionEnvelope.kind. */
   kind: 'candidate_minted' | 'decision' | 'command' | 'command_ack' | 'cycle_seed' | 'election' | 'error' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'round_warning' | 'ruler' | 'snapshot' | 'spend_tombstone' | 'token_usage' | 'stream_snapshot';
-  /** The record's model_dump — ProjectionEnvelope.payload. */
+  /** The chronology projection of the record's model_dump — identity, address and
+   * the one-line reading, per
+   * domain/projection_envelope.py::RAY_PAYLOAD_FIELDS. A SUBSET of
+   * ProjectionEnvelope.payload: the record's bulk (LLM I/O, a sample's query
+   * and prediction, a phase's view) is addressable at the audit twin, the
+   * round document and dashboard.json, each fetched one round at a time
+   * rather than a window at a time. */
   payload: Record<string, unknown>;
 }
 
@@ -1703,8 +1743,8 @@ export type RunPhase = 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 
 // The fine-grained activity axis, `dashboard.json::state` (domain/phases.py::DashboardState).
 export type DashboardState = 'init' | 'origin' | 'scoring' | 'between_samples' | 'between_candidates' | 'l1_generate' | 'l2_refining' | 'l3_replanning' | 'escalation' | 'stopped';
 
-// Every kind `POST /commands/{kind}` dispatches (command_dispatcher.py).
-export type CommandKind = 'archive-campaign' | 'change-spend-budget' | 'cleanup-empty-cycles' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-allowed-models' | 'set-campaign-label' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign';
+// Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).
+export type CommandKind = 'archive-campaign' | 'change-spend-budget' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-allowed-models' | 'set-campaign-label' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign';
 
 // Kinds no activity item is ever made of — the ray drops them and the translator
 // returns null. Complement of domain/projection_envelope.py::RENDERS_AS_ACTIVITY.
@@ -1765,3 +1805,30 @@ export const EVALUATOR_META: EvaluatorMeta[] = [
   { name: 'retrieval_shortfall', scope: 'per_sample', direction: 'high', node_type: null, from_rows: false, description: 'Per-sample min(observed/target, 1.0) across nodes with max_*/num_* limits on list-valued outputs. 1.0 = target met or exceeded.' },
   { name: 'mean_retrieval_shortfall', scope: 'per_round', direction: 'high', node_type: null, from_rows: false, description: "Mean of retrieval_shortfall across the round's results." },
 ];
+
+// The cycle-address grammar. Mirror of domain/cycle_paths.py, which owns it and
+// asserts at import that no separator matches the id charset — the precondition that
+// makes encode/decode round-trip. Don't hand-declare these.
+//
+// Two deliberate asymmetries with the Python side, both correct, neither drift:
+//  - decodeCyclePath('') is null here and () there. A CyclePath is non-empty by
+//    construction in the browser; in Python () is a real value meaning depth 1.
+//  - This decoder validates the charset inline; the Python one defers to
+//    descend_store, which must validate anyway because it also receives hops the
+//    codec never produced. The browser has no such downstream boundary.
+export const CYCLE_PATH_HOP_SEP = "~";
+export const CYCLE_PATH_UNIT_SEP = "::";
+export const ID_COMPONENT_RE = /^[a-zA-Z0-9_.-]+$/;
+export const ALL_DOTS_RE = /^\.+$/;
+
+// The PromptTemplate decomposition field SET. Mirror of
+// config/settings.py::PROMPT_STRING_FIELDS — canonical MEMBERSHIP only, since each
+// prompt kind orders its own render (PromptTemplate.RENDER_ORDER). Don't hand-list these.
+export const PROMPT_STRING_FIELDS = [
+  "persona",
+  "task_intent",
+  "problem_description",
+  "instruction",
+  "thinking_style",
+  "answer_format",
+] as const;

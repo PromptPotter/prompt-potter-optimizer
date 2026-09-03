@@ -19,11 +19,12 @@ import { SpendBudgetControl } from "@/components/dashboard/control/SpendBudgetCo
 // hears (`aria-label` below); it is not named for its shape, because "pill" in
 // this codebase means a border-radius and already belongs to four other things
 // (Badge, the round-axis LIVE marker, the provenance tag, the round strip).
-// It consolidates the run controls
-// that were scattered (play/pause was buried in the Chat-tab heat-map): one
-// strip with run-phase, play/pause (the reused RunControlButton), Skip, and
-// concise round/spend status, plus the babysat tag once the operator has
-// intervened. Pause is the single interrupt verb — there is no separate Stop;
+// It consolidates the run controls that were scattered (play/pause was buried in
+// the Chat-tab heat-map). The STRIP carries only what is read at a glance —
+// run-phase, play/pause (the reused RunControlButton), Skip, where the run is, and
+// the Lift readout that toggles the panel; every other number and control is a row
+// in that panel, because nine slots on one bar is a paragraph, not a remote.
+// Pause is the single interrupt verb — there is no separate Stop;
 // pausing exits the worker cleanly and the play button resumes from the last
 // completed round.
 //
@@ -148,7 +149,6 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
     (c) => c.campaign_id === leafCampaignId && c.cycle_id === leafCycleId,
   );
   const babysat = Boolean(leafEntry?.human_intervened);
-  const spend = dash?.spend;
   // One parser for the whole block, ceilings included — `readSpend` already reads the armed
   // `run_limits` pair (the gate's own source). This bar used to re-spell the USD ceiling
   // inline, which is the second spelling that lets two surfaces disagree.
@@ -274,8 +274,75 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
             <div className="row"><span className="lbl">Loop</span><span className="val">{rateKnown ? fmtUsd(loopUsd) : `${loopTokens} tok`}</span></div>
             <div className="row"><span className="lbl">Total</span><span className="val">{usedUsd != null ? fmtUsd(usedUsd) : "—"}</span></div>
             <div className="row"><span className="lbl">Tokens</span><span className="val">{fmtTokens(totalTokens)}</span></div>
+            {unpricedTokens > 0 ? (
+              <div className="row">
+                <span className="lbl">USD cap</span>
+                <span className="val remote-spend-warn" title="USD cost couldn't be resolved for some calls (e.g. Groq returns no wire cost and the model isn't in the rate table). The $ figure undercounts real spend and the USD cap can't see it — the token cap is the backstop.">
+                  <span aria-hidden="true">⚠</span> inactive
+                </span>
+              </div>
+            ) : null}
+            <div className="section-title">Outcome</div>
+            {!terminal && (
+              <div className="row" title={TERMS.remote_eta}>
+                <span className="lbl">ETA</span><span className="val">{etaChip}</span>
+              </div>
+            )}
+            <div className="row" title={TERMS.remote_eff}>
+              <span className="lbl">Δ/$</span><span className="val">{effChip}</span>
+            </div>
+            {babysat ? (
+              <div className="row">
+                <span className="lbl">Provenance</span>
+                <span className="val remote-babysat" title="An operator manually intervened (skip) — this cycle is no longer purely reproducible.">
+                  <span aria-hidden="true">✎</span> babysat
+                </span>
+              </div>
+            ) : null}
           </div>
-          <div className="remote-panel-section" title={TERMS.newjob_bar_adjust}>
+          {/* An ARM control, not a switch: it spends itself. `batch` is a FIELD rather than a
+              button, because only there does the operator pick the number — and an input nested
+              inside a button is neither valid nor operable. */}
+          <div className="remote-panel-section">
+            <div className="section-title">Samples in flight</div>
+            {perGroup ? (
+              // An EXCLUSIVE choice over a range the connector caps at 4, so: the shared
+              // segmented control. One click is one press, which removes the commit question.
+              <span className="remote-cells-group" title={concurrencyTitle}>
+                <span aria-hidden="true" className="remote-cells-icon">
+                  ⇉
+                </span>
+                <SegmentedControl
+                  ariaLabel={`Samples to release together, up to ${maxCells}`}
+                  className={cx("remote-cells", armPending && "pending")}
+                  value={String(shownCells)}
+                  onChange={(v) => armCells(v)}
+                  options={Array.from({ length: maxCells }, (_, i) => ({
+                    value: String(i + 1),
+                    label: String(i + 1),
+                    disabled: armDisabled,
+                    title: i === 0 ? "One at a time" : `Release ${i + 1} together`,
+                  }))}
+                />
+              </span>
+            ) : (
+              <button
+                type="button"
+                className={cx("remote-btn", "remote-sample-lookahead", sampleLookaheadArmed && "armed")}
+                onClick={() => armCells(sampleLookaheadArmed ? 1 : maxCells)}
+                disabled={armDisabled}
+                aria-pressed={sampleLookaheadArmed}
+                aria-label={`Samples in flight, up to ${maxCells}`}
+                title={concurrencyTitle}
+              >
+                <span aria-hidden="true">⇉</span>
+                <span className="remote-btn-label">
+                  {sampleLookaheadArmed ? `${lookahead}×` : "Look-ahead"}
+                </span>
+              </button>
+            )}
+          </div>
+          <div className="remote-panel-section">
             <div className="section-title">Finishing criteria</div>
             <SpendBudgetControl
               currentBudgetUsd={budgetUsd}
@@ -356,45 +423,6 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
         {SKIP_ICON}
         <span className="remote-btn-label">Skip</span>
       </button>
-      {/* An ARM control, not a switch: it spends itself. `batch` is a FIELD rather than a
-          button, because only there does the operator pick the number — and an input nested
-          inside a button is neither valid nor operable. */}
-      {perGroup ? (
-        // An EXCLUSIVE choice over a range the connector caps at 4, so: the shared segmented
-        // control. One click is one press, which removes the commit question entirely.
-        <span className="remote-cells-group" title={concurrencyTitle}>
-          <span aria-hidden="true" className="remote-cells-icon">
-            ⇉
-          </span>
-          <SegmentedControl
-            ariaLabel={`Samples to release together, up to ${maxCells}`}
-            className={cx("remote-cells", armPending && "pending")}
-            value={String(shownCells)}
-            onChange={(v) => armCells(v)}
-            options={Array.from({ length: maxCells }, (_, i) => ({
-              value: String(i + 1),
-              label: String(i + 1),
-              disabled: armDisabled,
-              title: i === 0 ? "One at a time" : `Release ${i + 1} together`,
-            }))}
-          />
-        </span>
-      ) : (
-        <button
-          type="button"
-          className={cx("remote-btn", "remote-sample-lookahead", sampleLookaheadArmed && "armed")}
-          onClick={() => armCells(sampleLookaheadArmed ? 1 : maxCells)}
-          disabled={armDisabled}
-          aria-pressed={sampleLookaheadArmed}
-          aria-label={`Samples in flight, up to ${maxCells}`}
-          title={concurrencyTitle}
-        >
-          <span aria-hidden="true">⇉</span>
-          <span className="remote-btn-label">
-            {sampleLookaheadArmed ? `${lookahead}×` : "Look-ahead"}
-          </span>
-        </button>
-      )}
       <span className="remote-status" aria-live="off">
         {/* The candidate label ("C2.3") already encodes the round (the 2), so
             show it INSTEAD of "R{n}" while scoring — round only when there's no
@@ -404,32 +432,13 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
         ) : dashRound != null ? (
           <span className="remote-round">R{dashRound}</span>
         ) : null}
-        {spend ? (
-          <span className="remote-spend">
-            ${spend.total_used_usd.toFixed(2)}
-            {budgetUsd != null ? ` / $${budgetUsd.toFixed(2)}` : ""}
-          </span>
-        ) : null}
-        {unpricedTokens > 0 ? (
-          <span
-            className="remote-spend-warn"
-            title="USD cost couldn't be resolved for some calls (e.g. Groq returns no wire cost and the model isn't in the rate table). The $ figure undercounts real spend and the USD cap can't see it — the token cap is the backstop."
-          >
-            <span aria-hidden="true">⚠</span> USD cap inactive
-          </span>
-        ) : null}
       </span>
-      {babysat ? (
-        <span
-          className="remote-babysat"
-          title="An operator manually intervened (skip) — this cycle is no longer purely reproducible."
-        >
-          <span aria-hidden="true">✎</span> babysat
-        </span>
-      ) : null}
-      {/* The outcome readout, and the panel's own toggle. It reads as decoration mid-run and
-          as the answer once the run stops — which is why the strip now survives `terminal`
-          and `detached` rather than unmounting exactly when these numbers start mattering. */}
+      {/* The one headline number, and the panel's own toggle. Everything the strip used to
+          spell out — spend, ETA, Δ/$, look-ahead, the babysat and unpriced tags — is a row
+          in that panel now: a control strip is read at a glance, and nine slots is a
+          paragraph. It reads as decoration mid-run and as the answer once the run stops,
+          which is why the strip survives `terminal` rather than unmounting exactly when
+          these numbers start mattering. */}
       <button
         type="button"
         className="remote-readout"
@@ -437,20 +446,9 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
         onClick={() => setOpen((v) => !v)}
         aria-label="Job status and configuration"
       >
-        <span className="chip" title={TERMS.newjob_bar_best}>
+        <span className="chip" title={TERMS.remote_best}>
           <span className="chip-lbl">Lift</span> <strong>{deltaTheta}</strong>
           {best != null && <span className="chip-origin"> · best {fmtPct0(best)}</span>}
-        </span>
-        {/* A finished run has no remaining work to project, and WHY it stopped is already
-            the phase chip above — rendering it here too printed "Spend budget reached"
-            twice on one bar. Absent, so the slot never restates its neighbour. */}
-        {!terminal && (
-          <span className="chip" title={TERMS.newjob_bar_eta}>
-            <span className="chip-lbl">ETA</span> <strong>{etaChip}</strong>
-          </span>
-        )}
-        <span className="chip" title={TERMS.newjob_bar_eff}>
-          <span className="chip-lbl">Δ/$</span> <strong>{effChip}</strong>
         </span>
         <svg className="chev" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="m3 4.5 3 3 3-3" />

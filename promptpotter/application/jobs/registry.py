@@ -168,6 +168,8 @@ class JobRegistry:
         self._persist(job)
 
     def update_target(self, job_id: str, *, hop: CycleHop) -> None:
+        """Bind a reservation admitted at :data:`UNRESOLVED_HOP` to the cycle the mint resolved.
+        Until it lands the job answers no hop-keyed query, so a held cap is unreachable."""
         job = self.get(job_id)
         if job is None:
             return

@@ -49,7 +49,7 @@ export interface Incident {
   count: number;
   /** The server's trace handle — greps to the log line. Null if it never answered. */
   errorId: string | null;
-  /** The `ErrorEnvelope` code (closed enum, m12-api-openapi.yaml). */
+  /** The `ErrorEnvelope` code (closed enum, api-openapi.yaml). */
   code: string | null;
   kind: FailureKind;
   status: number | null;

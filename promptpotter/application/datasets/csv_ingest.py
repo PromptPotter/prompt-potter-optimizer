@@ -28,7 +28,7 @@ _JSON_RECORD_KEYS = ("data", "rows", "items", "records", "examples")
 
 
 class IngestError(PayloadInvalidError):
-    """``reason`` is a stable code declared in ``m12-api-openapi.yaml::ErrorEnvelope``. A
+    """``reason`` is a stable code declared in ``api-openapi.yaml::ErrorEnvelope``. A
     :class:`PayloadInvalidError`, so the central ``PotterError`` handler maps it with no arm."""
 
     code = "ingest_failed"

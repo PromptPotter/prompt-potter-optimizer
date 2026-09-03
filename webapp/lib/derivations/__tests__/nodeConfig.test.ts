@@ -3,6 +3,7 @@ import {
   applyFlatEdits,
   configRows,
   nodeOverlayPatch,
+  nodeReach,
   overlayEdits,
   seedOverlayFromRows,
   type ConfigRow,
@@ -19,6 +20,8 @@ function row(over: Partial<ConfigRow> & { key: string; kind: string }): ConfigRo
     allowed: [],
     fromCandidate: false,
     optimizerLocked: false,
+    movableBy: [],
+    held: false,
     description: "",
     ...over,
   };
@@ -96,7 +99,8 @@ const schema: Record<string, NodeConfigParam[]> = {
       options: ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
       description: "",
       optimizer_locked: true,
-      optimizer_tunable: false,
+      movable_by: [],
+      held: false,
     },
     {
       key: "reasoning_effort",
@@ -105,7 +109,8 @@ const schema: Record<string, NodeConfigParam[]> = {
       options: ["low", "medium", "high"],
       description: "",
       optimizer_locked: false,
-      optimizer_tunable: true,
+      movable_by: ["l1"],
+      held: false,
     },
     {
       key: "temperature",
@@ -114,7 +119,8 @@ const schema: Record<string, NodeConfigParam[]> = {
       options: [],
       description: "",
       optimizer_locked: false,
-      optimizer_tunable: true,
+      movable_by: ["l1"],
+      held: false,
     },
     {
       key: "max_tokens",
@@ -123,7 +129,8 @@ const schema: Record<string, NodeConfigParam[]> = {
       options: [],
       description: "",
       optimizer_locked: false,
-      optimizer_tunable: true,
+      movable_by: ["l1"],
+      held: false,
     },
   ],
 };
@@ -222,5 +229,82 @@ describe("overlayEdits + applyFlatEdits", () => {
 
   it("leaves the seed alone with nothing edited", () => {
     expect(applyFlatEdits(seed, new Map())).toBe(seed);
+  });
+});
+
+// The reading the picture draws. The denominator is what is OPENABLE — nearly every param,
+// since opening an axis is adding its key to `param_keys`. Only model/provider sit outside.
+describe("nodeReach", () => {
+  const param = (over: Partial<NodeConfigParam> & { key: string }): NodeConfigParam => ({
+    value: null,
+    kind: "number",
+    options: [],
+    description: "",
+    optimizer_locked: false,
+    movable_by: [],
+    held: false,
+    ...over,
+  });
+
+  it("is null for a node the schema has not loaded — never a lock", () => {
+    expect(nodeReach(null, "llm_only")).toBeNull();
+    expect(nodeReach({}, "llm_only")).toBeNull();
+  });
+
+  it("config nothing searches is LOCKED, not exempt — it could be opened", () => {
+    const r = nodeReach({ n: [param({ key: "output_format" }), param({ key: "max_tokens" })] }, "n");
+    expect(r).toMatchObject({ state: "locked", open: 0, openable: 2, held: false });
+  });
+
+  it("a narrowed axis is locked AND held — the tooltip's only difference", () => {
+    const r = nodeReach({ n: [param({ key: "temperature", held: true })] }, "n");
+    expect(r).toMatchObject({ state: "locked", open: 0, openable: 1, held: true });
+  });
+
+  it("model and provider alone leave nothing to lock", () => {
+    const r = nodeReach(
+      {
+        n: [
+          param({ key: "model", kind: "model", optimizer_locked: true }),
+          param({ key: "provider", kind: "string", optimizer_locked: true }),
+        ],
+      },
+      "n",
+    );
+    expect(r).toMatchObject({ state: "nothing", open: 0, openable: 0 });
+  });
+
+  it("every openable axis searched reads as open, and forbidden keys do not dilute it", () => {
+    const r = nodeReach(
+      {
+        n: [
+          param({ key: "model", kind: "model", optimizer_locked: true }),
+          param({ key: "instruction", kind: "prompt", movable_by: ["l1"] }),
+        ],
+      },
+      "n",
+    );
+    expect(r).toMatchObject({ state: "open", open: 1, openable: 1, agents: ["l1"] });
+  });
+
+  it("some open, some shut reads as partial and names its agents", () => {
+    const r = nodeReach(
+      {
+        n: [
+          param({ key: "instruction", kind: "prompt", movable_by: ["l1"] }),
+          param({ key: "temperature", held: true }),
+        ],
+      },
+      "n",
+    );
+    expect(r).toMatchObject({ state: "partial", open: 1, openable: 2, agents: ["l1"], held: true });
+  });
+
+  it("an axis only escalation reaches is still reach", () => {
+    const r = nodeReach(
+      { l1_generate: [param({ key: "temperature", movable_by: ["l2"] })] },
+      "l1_generate",
+    );
+    expect(r).toMatchObject({ state: "open", open: 1, openable: 1, agents: ["l2"] });
   });
 });

@@ -9,6 +9,7 @@ from promptpotter.application.restamp import (
     backfill_inner_facts,
     check_round_documents,
     compact_cycle_ledgers,
+    rename_round_trend,
     reproject_cycle_indexes,
     restamp_campaign_configs,
     shrink_measurement_runs,
@@ -27,6 +28,7 @@ async def cmd_restamp(args: argparse.Namespace) -> CommandResult:
     indexes = reproject_cycle_indexes(apply=apply)
     elections = stamp_election_bias(apply=apply)
     inner = backfill_inner_facts(apply=apply)
+    trend = rename_round_trend(apply=apply)
     # Read-only, so --apply does not change what it does.
     rounds = check_round_documents()
     verb = "re-stamped" if apply else "would re-stamp"
@@ -40,7 +42,9 @@ async def cmd_restamp(args: argparse.Namespace) -> CommandResult:
         f"restamp: {verb} {counts['rewritten']} file(s); "
         f"{counts['failed']} still invalid, {counts['skipped']} unreadable. "
         f"Ledgers: {ledgers['cycles']} cycle(s), "
-        f"{ledgers['bytes_saved'] / (1024 * 1024):.1f} MB reclaimed "
+        f"{ledgers['bytes_saved'] / (1024 * 1024):.1f} MB reclaimed, "
+        f"{ledgers['record_keys_dropped']} record key(s) the engine no longer declares pruned "
+        f"off — every line carrying one was being skipped whole by the reader "
         f"({ledgers['skipped_producing']} producing + "
         f"{ledgers['skipped_checkin']} pre-loop, left alone). "
         f"Rounds: {rounds['rounds_checked'] - rounds['rounds_unreadable']}"
@@ -53,8 +57,11 @@ async def cmd_restamp(args: argparse.Namespace) -> CommandResult:
         f"Inner seed facts {verb} onto {inner['inner_rows_filled']} row(s) from the inner "
         f"campaigns themselves; {inner['inner_rows_orphaned']} cell(s) no longer have one on "
         f"disk and stay absent. Peak lift and round budget are never backfilled — no surviving "
-        f"record reproduces them exactly."
+        f"record reproduces them exactly. "
+        f"Round trend: {trend['trend_keys_moved']} key(s) {'moved' if apply else 'to move'} off "
+        f"the retired `trajectory` spelling, which a resume would otherwise read as `healthy`."
     )
     return CommandResult(
-        data={**counts, **ledgers, **runs, **rounds, **indexes, **elections, **inner}, human=human
+        data={**counts, **ledgers, **runs, **rounds, **indexes, **elections, **inner, **trend},
+        human=human,
     )

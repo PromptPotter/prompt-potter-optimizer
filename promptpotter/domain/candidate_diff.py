@@ -178,7 +178,14 @@ def idea_fingerprint(values: Iterable[str]) -> frozenset[str]:
     own cycle's next round well above chance across pairs this test calls distinct. That argues for
     a better signal on the VALUES, never for tightening ``IDEA_MATCH_REJECT`` — the same reading
     cannot separate a re-proposal from the critique steering two rounds at one failure. Run on
-    ``changes_description`` instead it sits at chance, so build no successor on that prose."""
+    ``changes_description`` instead it sits at chance, so build no successor on that prose.
+
+    **Measured miss rate, and the successor is HELD rather than owed:** content-word overlap caught
+    **0 of 15** real re-proposal pairs on the banked corpus, so ``l1_n_repeat`` reads 0 while the
+    generator restates one hypothesis indefinitely — worse than no counter, because a 0 reads as
+    hygiene. Every fix is a NEW mechanism (embeddings, an LLM judge per pair) and the closing phase
+    opens none. The cheaper twin is already planned — ``l1_generate`` semantic widening, owed
+    anyway. Revisit only if widening lands and repeats persist."""
     words = re.findall(r"[a-z]+", " ".join(values).lower())
     return frozenset(w for w in words if len(w) >= IDEA_MIN_TOKEN_CHARS and w not in IDEA_STOPWORDS)
 

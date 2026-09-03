@@ -3,7 +3,7 @@
 
 **Two API documents, and they answer different questions — do not merge them.**
 
-``m12-api-openapi.yaml`` is hand-written and **schema-first**: a command kind is
+``api-openapi.yaml`` is hand-written and **schema-first**: a command kind is
 declared there *before* its handler lands, so it legitimately describes operations
 that do not exist yet (``x-status: declared-not-wired``). It is the design contract
 for the inbound command surface, and its declared/wired partition is pinned against
@@ -43,7 +43,7 @@ _DESCRIPTION = """\
 GENERATED — do not edit. Regenerate with `python scripts/build_openapi.py`.
 
 Every operation the running app serves, derived from the FastAPI routers. The
-hand-written command contract is `m12-api-openapi.yaml`; it is schema-first and
+hand-written command contract is `api-openapi.yaml`; it is schema-first and
 may declare operations that are not wired yet, so the two documents are expected
 to differ. This one describes reality.
 """

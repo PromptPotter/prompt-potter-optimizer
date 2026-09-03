@@ -177,10 +177,14 @@ class RaschPosterior:
     discrimination: dict[int, float] = field(default_factory=dict)
     discrimination_se: dict[int, float] = field(default_factory=dict)
 
-    def anchored(self, calibration_model: CalibrationModel, round_num: int) -> DeltaRuler:
+    def anchored(self, calibration_model: CalibrationModel) -> DeltaRuler:
         """LOCK this fit as a cycle's ruler. Carries the priors the fit converged to, which the one-shot
         version discarded — without them an extension cannot regularize a new cell the way the anchored
-        ones were, and the scale bends. The anchor id is stamped HERE, once, and never recomputed."""
+        ones were, and the scale bends. The anchor id is stamped HERE, once, and never recomputed.
+
+        It carries no round: the anchor is a fact about the δ scale, and the round the lock happened
+        on is already the ``RulerRecord``'s own — stamping it twice invited a reader to compare a
+        ruler to the round that minted it, which an anchored extension deliberately makes untrue."""
         return DeltaRuler(
             delta=dict(self.delta),
             delta_se=dict(self.delta_se),
@@ -190,7 +194,6 @@ class RaschPosterior:
             sigma_theta=self.sigma_theta,
             calibration_model=calibration_model,
             anchor_id=anchor_id_of(self.delta, self.mu_delta, self.sigma_delta, calibration_model),
-            anchored_at_round=round_num,
         )
 
 

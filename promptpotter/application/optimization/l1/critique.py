@@ -17,7 +17,6 @@ from promptpotter.application.optimization.dispatch.llm_call.call import (
 )
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     load_optimizer_prompt,
-    resolve_node_layout,
 )
 from promptpotter.application.optimization.dispatch.schemas import L1CritiqueOutput
 from promptpotter.application.run_phase_control import declare_run_phase
@@ -113,10 +112,7 @@ async def run_l1_critique(
     drag Pydantic into the domain serialization path."""
     bundle = build_bundle(cycle, latest_round=round_result)
     template, prompt_vars, rendered, coverage = DispatchHub.fill(
-        load_optimizer_prompt("l1_critique"),
-        resolve_node_layout("l1_critique"),
-        bundle,
-        node="l1_critique",
+        load_optimizer_prompt("l1_critique"), bundle, node="l1_critique"
     )
 
     result, _prompt, _repairs = await run_optimizer_node(

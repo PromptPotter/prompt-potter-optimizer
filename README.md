@@ -12,6 +12,25 @@
 
 **PromptPotter evolves better prompts.** Most prompt engineering is manual. PromptPotter automates the generate → score → critique cycle. It tries multiple prompt and pipeline variations together, keeps memory across runs, and recovers automatically when a generated prompt produces broken output. Weak candidates get eliminated early on statistical confidence (*Posterior-of-Being-Best — [PoBB](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/methods/candidate-elimination.md)*) so you don't burn LLM budget on losers. Built for RAG pipelines, LLM agents, and multi-step LLM workflows — drop in via CLI, Python SDK, the `/potter-run` Claude Code skill, or as a [**DSPy optimizer**](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/dspy-optimizer.md) where you would reach for GEPA.
 
+## The model
+
+A campaign is not a log with a pointer. It is a **family: a partial order over cuts.**
+
+A **cut** is `(cycle, offset)` — a physical line index in one cycle's own append-only ledger. That is the whole address space, and it is total: no two records share one.
+
+Everything else is one of two operations over it:
+
+- **Iterate** cuts by time → the *ray*: one chronology, forks interleaved with their parents. `GET /campaigns/{c}/cycles/{cy}/ray`
+- **Reduce** to a cut by causality → a *fold*: the parent's prefix up to the branch, then the cycle's own. `GET /campaigns/{c}/cycles/{cy}/dashboard?at=<offset>`
+
+Every artifact on disk stamps the cut it is of, so any moment is reconstructible off disk and a new view is a new fold — not a new writer, a new file, or a migration. Nothing is ever recomputed in the browser.
+
+Depth: [`stable-api.md` § The cut](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/stable-api.md#the-cut).
+
+## 📺 Watch it work
+
+- **[Live #2 — a Swiss-invoice campaign, run raw](https://www.youtube.com/watch?v=DLhb26ppX_s)** — small, unedited, cut with an opencode-go friction test.
+
 ## How to Optimize LLM Prompts in 3 Steps
 
 Describe your 1️⃣ **task**, drop in a labeled 2️⃣ **dataset**, and 3️⃣ **run the loop**. The task is the goal you want the AI to hit; the dataset is examples of hitting it. Each round, PromptPotter generates variations 🧪, scores them ⚖️, and keeps the winners 🏆. It stops when results plateau. ✨ **Prompt optimized.**

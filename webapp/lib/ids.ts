@@ -4,6 +4,16 @@
 // same job, and the id is the ONE authority for both — neither side stores the kind.
 // We mirror the regex rather than round-trip per sidebar / lineage render, and the
 // short label needs the family TAIL as well, which only the id carries.
+//
+// The cycle-ADDRESS grammar below is not mirrored at all any more: its two separators
+// and two charset patterns are generated from `domain/cycle_paths.py`, which owns them.
+
+import {
+  ALL_DOTS_RE,
+  CYCLE_PATH_HOP_SEP,
+  CYCLE_PATH_UNIT_SEP,
+  ID_COMPONENT_RE,
+} from "@/lib/api/types.generated";
 
 const SIBLING_LAST_SEP_RE = /_(fork|diag|sweep)_(?!.*_(?:fork|diag|sweep)_)([^/]*)$/;
 const SIBLING_FIRST_SEP_RE = /_(fork|diag|sweep)_/;
@@ -28,8 +38,9 @@ export function shortFamilyTail(cycleId: string): string {
 
 // Composite unit key — a cycle_id is unique only within its campaign, so
 // pickers key/value/store the pair `{campaign}::{cycle}`. Split it back on
-// `UNIT_SEP`.
-export const UNIT_SEP = "::";
+// `UNIT_SEP`, re-exported from the generated grammar so a picker importing it
+// gets the server's separator and not a second spelling of it.
+export const UNIT_SEP = CYCLE_PATH_UNIT_SEP;
 
 export function unitKey(campaignId: string, cycleId: string): string {
   return `${campaignId}${UNIT_SEP}${cycleId}`;
@@ -56,20 +67,20 @@ interface PathHop {
 // Non-empty by construction — every real address has at least the root hop.
 export type CyclePath = PathHop[];
 
-// Hops are joined by `HOP_SEP`; each hop's ids by `UNIT_SEP`. Neither separator
-// can occur inside an id (ids are `_SAFE_PATH_RE = ^[a-zA-Z0-9_.-]+$` on the
-// Python side, `validate_path_component`), so encode/decode round-trips exactly.
-const HOP_SEP = "~";
-const ID_RE = /^[a-zA-Z0-9_.-]+$/;
-const ALL_DOTS_RE = /^\.+$/;
+// Hops are joined by `HOP_SEP`; each hop's ids by `UNIT_SEP`. Neither separator can occur
+// inside an id, which is what makes encode/decode round-trip exactly — and that precondition
+// is now ASSERTED at import on the Python side rather than promised in this comment.
+const HOP_SEP = CYCLE_PATH_HOP_SEP;
 
-// Mirrors `store/io.py::validate_path_component`, whose dot-allowing regex is paired
-// with an all-dots rejection: `.` / `..` / `...` pass ID_RE but are traversal segments
-// the server refuses, so without this the browser hands back a path Python rejects.
+// The server's own charset and its all-dots rejection: `.` / `..` / `...` match the
+// dot-allowing pattern but are traversal segments the server refuses, so without the second
+// test the browser hands back a path Python rejects. Both come from
+// `domain/cycle_paths.py` through the generated block — this file declared its own copies
+// until then, and nothing could have caught them drifting apart.
 // Exported for `lib/address.ts`, which parses the SAME ids out of a different syntax —
 // re-testing them there against a second regex is how the two would come to disagree.
 export function validIdComponent(s: string): boolean {
-  return ID_RE.test(s) && !ALL_DOTS_RE.test(s);
+  return ID_COMPONENT_RE.test(s) && !ALL_DOTS_RE.test(s);
 }
 
 export function encodeCyclePath(path: CyclePath): string {

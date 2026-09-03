@@ -18,8 +18,11 @@ from promptpotter.domain.results import overlap_series
 from promptpotter.shared.composite import render_composite_fitness_block
 
 
-def _fmt_pct(x: float) -> str:
-    return f"{x:.1%}"
+def _fmt_pct(x: float | None) -> str:
+    """``—`` for a measurement that was never taken. Rendering absence as ``0.0%`` is the one
+    reading an operator cannot recover from: it looks like a campaign whose origin scored nothing,
+    which is the shape of a broken pipeline rather than of a cycle that never got there."""
+    return "—" if x is None else f"{x:.1%}"
 
 
 def _json_block(label: str, value: Any) -> list[str]:

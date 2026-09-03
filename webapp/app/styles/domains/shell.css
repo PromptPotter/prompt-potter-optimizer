@@ -1,11 +1,16 @@
 /* Shell + sidebar + main.
-   The sidebar is the campaign FOREST; the per-campaign view axis is the unit
-   header's strip (components/shell/ViewTabs) at every width. The phone's app bar
+   The sidebar is the campaign FOREST; the per-campaign view axis is
+   components/shell/ViewTabs — the unit header's strip, and the bottom tab bar the
+   ≤bp-md block at the foot of this file restyles it into. The phone's app bar
    (components/shell/MobileAppBar) carries the back arrow and the campaign's verbs,
    revealed by the ≤bp-md block at the foot of this file.
    --sidebar-width drives the sidebar's flex slot.
    Toggle the .sidebar-collapsed class on .shell to switch widths. */
-.shell{--sidebar-width:200px;position:relative;display:flex;height:var(--vh-full);min-height:700px}
+.shell{--sidebar-width:200px;--nav-dock-h:0px;--remote-dock-h:0px;position:relative;display:flex;height:var(--vh-full);min-height:700px}
+/* Bottom-docked chrome floats, so every pane ends with a spacer for it. A spacer
+   ITEM, not padding: Chrome omits a flex container's end padding from scrollable
+   overflow, and the chat pane is one. Heights come from whoever is docked. */
+.content::after{content:"";display:block;flex:0 0 auto;height:calc(var(--nav-dock-h) + var(--remote-dock-h) + var(--safe-bottom))}
 /* The right-hand column: the app bar (phone only), the alert banner, the unit
    header, the pane. */
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
@@ -51,8 +56,8 @@
 .sidebar-footer-chrome{display:flex;align-items:center;gap:var(--space-6);margin-bottom:var(--space-8)}
 .sidebar-footer-chrome .account-trigger{margin-left:auto}
 .sidebar-footer-auth{display:flex;flex-wrap:wrap;gap:var(--space-6);margin-bottom:var(--space-8)}
-/* Search — a disabled placeholder (analytics, M13+). Holds its spot and stays
-   legibly inert; see code-debt-cleanup.md § intentional placeholders. */
+/* Search — a disabled placeholder (analytics). Holds its spot and stays legibly
+   inert; the refusal that keeps it lives in `components/shell/Sidebar.tsx`'s header. */
 .sidebar-search{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;background:transparent;border:0;border-radius:var(--border-radius-md);color:var(--color-text-tertiary);cursor:pointer;font-family:inherit;flex-shrink:0;padding:0}
 .sidebar-search:hover:not(:disabled){background:var(--color-background-hover);color:var(--color-text-primary)}
 .sidebar-search:disabled{cursor:default}
@@ -252,7 +257,7 @@
 /* Breadcrumb affordance shown only while the view is pinned to a campaign
    (workspace `following` is false) — one click resumes following the
    CLI's active campaign. */
-.follow-active-btn{display:inline-flex;align-items:center;gap:var(--space-4);margin-left:8px;padding:2px var(--space-8);border-radius:10px;background:var(--color-background-secondary);border:0.5px solid var(--color-border);color:var(--color-text-secondary);font-family:inherit;font-size:var(--text-xs);cursor:pointer;transition:color .15s,border-color .15s}
+.follow-active-btn{display:inline-flex;align-items:center;gap:var(--space-4);margin-left:8px;padding:2px var(--space-8);border-radius:10px;background:var(--color-background-secondary);border:0.5px solid var(--color-border);color:var(--color-text-secondary);font-family:inherit;font-size:var(--text-xs);cursor:pointer;white-space:nowrap;transition:color .15s,border-color .15s}
 .follow-active-btn:hover{color:var(--color-accent);border-color:var(--color-accent)}
 /* The ORIGIN tier — renders only when one origin holds 2+ runs (a lone run wears
    its own row). It groups, it doesn't navigate: no cycle is addressed by it, so
@@ -318,4 +323,35 @@
      sidebar is either full-width or gone. The live-run signal on a phone is the
      dot on the app bar's back arrow, off the same `liveCycles`. */
   .jobs-dock{display:none}
+
+  /* ViewTabs becomes the bottom tab bar — same DOM, same segments, one form per
+     width. `column-reverse` docks the always-present primary row on the edge. */
+  .view-tabs{
+    position:fixed;left:0;right:0;bottom:0;z-index:60;
+    flex-direction:column-reverse;align-items:stretch;gap:0;
+    margin-top:0;overflow:visible;
+    background:var(--color-background-primary);
+    border-top:0.5px solid var(--color-border);
+    padding-bottom:var(--safe-bottom);
+  }
+  .view-tabs > [role="group"]{display:flex;width:100%;border:0;border-radius:0;overflow:visible}
+  .view-tabs > [role="group"] > button{flex:1 1 0;min-width:0;border-right:0;background:transparent;color:var(--color-text-tertiary)}
+  .view-tabs > [role="group"]:first-child > button{
+    flex-direction:column;justify-content:center;gap:2px;
+    min-height:56px;padding:var(--space-6) var(--space-4);font-size:var(--text-xs);
+  }
+  .view-tabs > [role="group"]:first-child > button svg{width:22px;height:22px}
+  /* Inked, never filled: an accent block across a third of the bar reads as a
+     pressed button rather than "you are here". */
+  .view-tabs > [role="group"]:first-child > button[aria-pressed="true"]{color:var(--color-accent);font-weight:600}
+  .view-tabs > [role="group"]:nth-child(2){border-bottom:0.5px solid var(--color-border);background:var(--color-background-secondary)}
+  .view-tabs > [role="group"]:nth-child(2) > button{justify-content:center;min-height:38px;font-size:var(--text-sm)}
+  .view-tabs > [role="group"]:nth-child(2) > button[aria-pressed="true"]{
+    color:var(--color-text-primary);font-weight:600;box-shadow:inset 0 -2px 0 var(--color-accent);
+  }
+  /* `:not(.mobile-list)` is load-bearing: `:has()` takes its argument's specificity
+     and outscores the reset otherwise. */
+  .shell{--nav-dock-h:56px}
+  .shell:not(.mobile-list):has(.view-tabs > [role="group"]:nth-child(2)){--nav-dock-h:94px}
+  .shell.mobile-list{--nav-dock-h:0px}
 }

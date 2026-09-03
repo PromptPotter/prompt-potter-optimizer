@@ -10,6 +10,7 @@ from fastapi import APIRouter, Header, Path, Request
 from fastapi.routing import APIRoute
 from pydantic import Field, ValidationError
 
+from promptpotter.application.archive_maintenance import ArchiveReport
 from promptpotter.application.jobs.launcher.checkin import (
     load_checkin_draft,
     save_checkin_draft,
@@ -18,29 +19,32 @@ from promptpotter.application.jobs.launcher.checkin import (
 from promptpotter.application.jobs.launcher.mint_and_start import OriginIncompleteError
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.connectors import BackendUnreachableError
+from promptpotter.domain.command_kinds import (
+    ALL_DISPATCHED_KINDS,
+    CampaignConfigKind,
+    CheckinScopedKind,
+    CycleScopedKind,
+    LifecycleKind,
+    WorkspaceScopedKind,
+)
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import resolve_cycle_path
 from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.middleware.command_dispatcher import (
-    ALL_DISPATCHED_KINDS,
     PAYLOAD_MODEL_FOR_KIND,
-    CampaignConfigKind,
     CampaignPayload,
-    CheckinScopedKind,
     CommandAcceptedBody,
     CommandDispatcher,
     CommandPayload,
+    CompactArchivePayload,
     CyclePayload,
-    CycleScopedKind,
     DescendableCyclePayload,
     EditDraftCampaignPayload,
-    LifecycleKind,
     LifecyclePayload,
     ReplaceDatasetPayload,
     ResolveOriginPayload,
     StartCheckinPayload,
-    WorkspaceScopedKind,
     dispatch_draft_patch,
     dispatch_origin_resolution,
 )
@@ -55,15 +59,20 @@ logger = logging.getLogger(__name__)
 
 commands_router = APIRouter(prefix="/commands", tags=["Commands"])
 
-# Derived from the dispatcher's kind Literals (the SoT), never re-authored here — so a new
-# kind reaches the router the moment it joins its Literal.
+# Derived from the `domain/command_kinds.py` Literals (the SoT), never re-authored here — so a
+# new kind reaches the router the moment it joins its Literal.
 _LIFECYCLE_KINDS: frozenset[str] = frozenset(get_args(LifecycleKind))
 _CYCLE_SCOPED_KINDS: frozenset[str] = frozenset(get_args(CycleScopedKind))
 _WORKSPACE_SCOPED_KINDS: frozenset[str] = frozenset(get_args(WorkspaceScopedKind))
 _CAMPAIGN_CONFIG_KINDS: frozenset[str] = frozenset(get_args(CampaignConfigKind))
 # A kind answering a domain object rather than a 202 keeps its own typed route and stays off
-# the generic one; `replace-dataset` is the one such kind outside `CheckinScopedKind`.
-_TYPED_ROUTE_KINDS: frozenset[str] = frozenset(get_args(CheckinScopedKind)) | {"replace-dataset"}
+# the generic one. Two such kinds sit outside `CheckinScopedKind`.
+_TYPED_ROUTE_KINDS: frozenset[str] = frozenset(get_args(CheckinScopedKind)) | {
+    "replace-dataset",
+    # Its whole point is the report: a preview the operator consents on cannot be delivered
+    # through a 202 envelope, and the apply must answer in the same shape the preview did.
+    "compact-archive",
+}
 # SUBTRACTED from the dispatched set rather than re-authored as a union of the four Literals,
 # because a union silently omits whatever it forgets to name — so a new kind is wired by
 # default and going unwired is the thing you have to write down.
@@ -71,7 +80,7 @@ _WIRED_KINDS: frozenset[str] = ALL_DISPATCHED_KINDS - _TYPED_ROUTE_KINDS
 
 
 class CommandEnvelope(StrictModel):
-    """Inbound envelope per ``m12-api-openapi.yaml#/components/schemas/CommandEnvelope``."""
+    """Inbound envelope per ``api-openapi.yaml#/components/schemas/CommandEnvelope``."""
 
     kind: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9-]*$")
     payload: dict[str, Any] = Field(default_factory=dict)
@@ -112,7 +121,7 @@ async def edit_draft_campaign(
 ) -> dict[str, Any]:
     """Sparse-patch a `DraftCampaign`. Returns the post-mutation full shape.
 
-    Per ``docs/specs/m12-api-openapi.yaml::editDraftCampaign``. The mutation rides
+    Per ``docs/specs/api-openapi.yaml::editDraftCampaign``. The mutation rides
     `CommandDispatcher` (architecture.md §0: sole writer of `CommandRecord`); only
     the response shape differs from the generic 202 verbs, never the ingress.
     """
@@ -137,7 +146,7 @@ async def resolve_origin(
 ) -> dict[str, Any]:
     """Run one origin-resolver turn against a draft. Returns ``{resolution, draft}``.
 
-    Per ``docs/specs/m12-api-openapi.yaml::resolveOrigin``. Synchronous, like
+    Per ``docs/specs/api-openapi.yaml::resolveOrigin``. Synchronous, like
     ``edit-draft-campaign`` — the resolver's findings apply in-line and the
     deterministic checklist re-gates before the response.
     """
@@ -161,7 +170,7 @@ async def start_checkin(
     """Flip a CHECKIN campaign to ``active`` + spawn the runner. Synchronous;
     returns ``{campaign_id, cycle_id, job_id}``.
 
-    Per ``docs/specs/m12-api-openapi.yaml::startCheckin``. The campaign already
+    Per ``docs/specs/api-openapi.yaml::startCheckin``. The campaign already
     exists durably (minted on the first ingest action); this gate-checks the
     origin (incomplete → 422, stays ``checkin``), materializes the dataset, mints
     the run cycle, and detaches the loop.
@@ -217,6 +226,37 @@ async def start_checkin(
     return cast("dict[str, Any]", outcome.result)
 
 
+@commands_router.post("/compact-archive")
+async def compact_archive(
+    request: Request,
+    stores: StoresDep,
+    envelope: CommandEnvelope,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> ArchiveReport:
+    """Compact, restore, or purge the measurement archive's cold store.
+
+    Per ``docs/specs/api-openapi.yaml::compactArchive``. Typed rather than 202 because the
+    preview IS the product: an operator consents to a step that costs money to undo on the byte
+    counts this returns, and the apply answers in the same shape so the two are comparable.
+    """
+    _require_kind(envelope, "compact-archive")
+    idemp = ensure_idempotency_key(idempotency_key)
+    payload = cast(CompactArchivePayload, _validated_payload("compact-archive", envelope.payload))
+    dispatcher = CommandDispatcher(stores)
+    outcome = await dispatcher.dispatch_workspace_command(
+        kind="compact-archive",
+        payload=payload,
+        idempotency_key=idemp,
+    )
+    result = cast("dict[str, Any]", outcome.result)
+    # The applier hands back a dump so the dispatcher can carry it like every other payload, and a
+    # dump carries COMPUTED fields. `ArchiveReport` is a `StrictModel`, so feeding one straight back
+    # in trips `extra_forbidden` on `bytes_freed` and the route 500s on every call — invisible to
+    # mypy and to any test that does not cross the serializer.
+    computed = set(ArchiveReport.model_computed_fields)
+    return ArchiveReport.model_validate({k: v for k, v in result.items() if k not in computed})
+
+
 @commands_router.post("/replace-dataset")
 async def replace_dataset(
     request: Request,
@@ -226,7 +266,7 @@ async def replace_dataset(
 ) -> dict[str, Any]:
     """Version-and-repoint a colliding dataset so its name frees for new data.
 
-    Per ``docs/specs/m12-api-openapi.yaml::replaceDataset``. Data-safe: never overwrites — the
+    Per ``docs/specs/api-openapi.yaml::replaceDataset``. Data-safe: never overwrites — the
     old data + every prior campaign's results are preserved under ``{slug}-vN``.
     Synchronous (the migration is a bounded set of renames + JSON rewrites); the
     freed name is re-ingested in a separate ``/datasets/ingest`` call.
@@ -255,7 +295,7 @@ async def post_command(
     expected_version: Annotated[int | None, Header(alias="Expected-Version")] = None,
 ) -> CommandAcceptedBody:
     """Closed-set command surface — every wired kind validates against the
-    declared schema in ``m12-api-openapi.yaml`` and dispatches through
+    declared schema in ``api-openapi.yaml`` and dispatches through
     ``CommandDispatcher``."""
     idemp = ensure_idempotency_key(idempotency_key)
     if kind != envelope.kind:
@@ -265,7 +305,7 @@ async def post_command(
     if kind not in _WIRED_KINDS:
         raise NotFoundError(
             f"Command kind {kind!r} not wired. See "
-            f"docs/specs/m12-api-openapi.yaml for the declared set.",
+            f"docs/specs/api-openapi.yaml for the declared set.",
             code="command_kind_unknown",
         )
 

@@ -95,8 +95,12 @@ class L1Layout(StrictModel):
 
 
 class NodeLayoutSpec(StrictModel):
-    """One optimizer node's searchable injection axis. ``editor`` is READ, not decoration — ``l2`` is
-    ``l1_generate`` alone, and NO path applies an L4 layout override to it. ``mandatory`` is the guard rail."""
+    """One optimizer node's searchable injection axis. ``mandatory`` is the guard rail.
+
+    ``editor`` is READ, not decoration — ``l2`` is ``l1_generate`` alone, and NO path applies an L4
+    layout override to it. It is asked in exactly ONE place, ``prompts.py::node_layout``, which is
+    where a node's live layout comes from; every caller that branched on it here instead was
+    re-deriving that function badly."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -403,8 +407,11 @@ def coerce_l1_layout(raw_layout: Any, *, base: L1Layout) -> L1Layout | None:
 
 
 class LayoutValidationResult:
-    """L1-layout validation result. `is_valid=False` ⇒ HARD failure → rollback to prior; outcomes
-    surface to L2's next fire either way as self-healing evidence."""
+    """L1-layout validation result. What `is_valid=False` COSTS is the caller's, and the two differ:
+    L2's edit of `l1_generate` keeps the prior layout, so the fire is spent but the cycle runs on;
+    an L4 override is rejected at proposal (`l1_inner_layout_applies`), because substituting the
+    floor there would spend a whole inner campaign measuring the parent's information flow and
+    report it as the edit's own reading. Outcomes surface as self-healing evidence either way."""
 
     __slots__ = ("is_valid", "outcomes")
 
@@ -419,7 +426,8 @@ def validate_l1_layout(
     spec: NodeLayoutSpec,
     prior_layout: L1Layout | None = None,
 ) -> LayoutValidationResult:
-    """Deterministic layout checks against a node's ``spec``; a HARD failure rolls back to floor or prior."""
+    """Deterministic layout checks against a node's ``spec``; what a HARD failure costs is the
+    caller's, and ``LayoutValidationResult`` states the two."""
     outcomes: list[ValidatorOutcome] = []
     is_valid = True
 

@@ -221,6 +221,11 @@ class ScoredCandidate(StrictModel):
     # config verbatim and never re-merges client-side. Distinct from the sparse
     # ``pipeline_params_override`` above (the fork transport) — two data classes, not a stitch.
     resolved_pipeline_params: dict[str, Any] | None = None
+    # THE join to the archive, stored there on every row as ``prompt_fields_id``. Stamped, never
+    # recomputed downstream: it covers each node's rendered ``prompt`` and the field above has
+    # that stripped, so a re-derivation addresses no row and nothing raises. ``""`` where no
+    # schema was in scope (the unmeasured origin) or the searchpoint configures no node.
+    sp_hash: str = ""
     # Paired with ``pipeline_params_override``, the full searchpoint an operator selects to seed
     # an operator-steered fork.
     prompt_fields: dict[str, Any] = Field(default_factory=dict)
@@ -325,6 +330,10 @@ _SCOREBOARD_INCLUDE: set[str] = {
     "mean_fitness_ci_lo",
     "mean_fitness_ci_hi",
     "escalation_aborted",
+    # Without this the table cannot tell a candidate REJECTED before it cost a sample from one
+    # that got everything wrong — the two are byte-identical otherwise, and the display half was
+    # the one surface still rendering the first as a rate.
+    "invalid",
     "matched_parent_accuracy",
     "matched_parent_composite",
     # The election's own number and the margin it was decided on. Without these the table can
@@ -351,6 +360,10 @@ class ScoreboardRow(StrictModel):
     composite_fitness: float
     total: int
     escalation_aborted: bool
+    # Rejected by validation before it ran, so the ``accuracy`` / ``composite_fitness`` beside it
+    # are ``INVALID_SCORES``' synthetic 0.0 — see ``DashboardCandidate.invalid`` for why that
+    # number is served at all. Nothing may render those two as a rate while this is true.
+    invalid: bool
     # ``None`` for a row that did not cover the parent's panel — see ``ScoredCandidate``: the
     # file carries the absence rather than a 0.0 that reads as a verdict the parent never gave.
     matched_parent_accuracy: float | None
@@ -604,13 +617,10 @@ class RoundResult(StrictModel):
 
     # --- checkpoint-critical scalars (no raw payloads) ---
     round: int
-    # WHERE ON THE LEDGER this round closed — the offset of its own ``round:complete`` record,
-    # which is this document's address on the cycle's one chronology. It is what lets a reader
-    # ask for the state AT this round rather than for a document somebody assembled, and what
-    # lets a check re-fold ``ledger[0..closed_at_offset]`` and compare. ``None`` where no ledger
-    # was bound (a diagnostic replay, an in-memory repair) — absent, never 0, which is a real
-    # offset and would name the cycle's first record.
-    closed_at_offset: int | None = None
+    # This document's ``Cut`` — the offset of its own ``round:complete`` record, so a reader can
+    # ask for the state AT this round. ``None`` where no ledger was bound (a diagnostic replay, an
+    # in-memory repair): absent, never 0, which is a real offset naming the cycle's first record.
+    at_offset: int | None = None
     label: str
     accuracy: float
     composite_fitness: float = 0.0
@@ -659,6 +669,29 @@ class RoundResult(StrictModel):
     results: list[dict[str, Any]] = Field(default_factory=list)
     # Per-candidate scored results — lets resume rescore under a changed scorer + replay decisions.
     all_candidate_results: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+    # The PARENT's rows on THIS round's subset — the incumbent every arm was measured against,
+    # and until now the one panel the round threw away. `results` is the winner's (byte-identical
+    # to that candidate's rows on every round that promoted), and `all_candidate_results` holds
+    # the arms; the parent is neither, so nothing persisted it and every reader that needed the
+    # bar reconstructed it from round N-1's winner instead. **Subsets move between rounds**, so
+    # that reconstruction reads the parent on cells this round never bought — which is how a
+    # sample-set mask came to re-score every arm on the selected cells while leaving the bar they
+    # must clear at its full-set value (`mask/load.py`). Empty at round 0, which has no parent,
+    # and on any round that closed before this field. A repair re-measures the ARMS and not the
+    # bar, so on a repaired round this stays the reading the round was actually decided under —
+    # which is what a record is for.
+    #
+    # On a HELD round `results` already IS these rows (the retained parent is the headline), so
+    # the panel is banked twice there. Deliberately: a reader wanting the bar must not first have
+    # to work out whether this round promoted, which is exactly the question the field exists to
+    # stop being asked.
+    #
+    # Its own field rather than a reserved key in `all_candidate_results`, for the reason
+    # `OverlapReading` states about `overlap_results`: those two maps are where the election, the
+    # parent floor, the lift, the ruler and the acquisition all read, and ten call sites walk
+    # `.values()` treating each entry as an arm. A pseudo-candidate there is a silent extra arm
+    # in every one of them.
+    parent_results: list[dict[str, Any]] = Field(default_factory=list)
     candidates_scored: int
     # How many candidates actually entered the election — measured, leader-eligible, not
     # answer-collapsed. `candidates_scored` counts one step earlier, so the gap is exactly the
@@ -795,7 +828,11 @@ class CycleResult(StrictModel):
     # They travel together because a consumer reading one against a composite computed on some
     # other basis is comparing two different measurements.
     origin_accuracy: float
-    origin_composite_fitness: float = 0.0
+    # `None`, not 0.0, on a cycle that never started: the same rule `origin_level` below states,
+    # and the pair was violated and honoured in this one constructor call. A stand-in 0.0 becomes
+    # round 0's lift bar in `l1/stats.py::_top_lifts`, which reports the first round's whole
+    # composite as its improvement over an origin nothing ever scored.
+    origin_composite_fitness: float | None = None
     # The L4 outer proxy's inner-search signal: the origin's level and the ability each round
     # The PARENT each round ended on — the winner it crowned, or the one carried forward when it
     # crowned nobody — never the proposals, which turn the metric NEGATIVE for exactly the
