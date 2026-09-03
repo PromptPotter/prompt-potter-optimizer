@@ -35,6 +35,11 @@ class OuterSampleProxies(StrictModel):
 # The observation keys one outer sample emits — DERIVED from the model, never hand-listed.
 OUTER_PROXY_KEYS: tuple[str, ...] = tuple(OuterSampleProxies.model_fields)
 
+# The outer pipeline's prediction key. Here beside its siblings rather than at the emit site,
+# because the `promptpotter` connector declares it too (`required_observation_keys`) and a
+# connector may not import `application/runner` to learn what it emits.
+INNER_RESULT_KEY = "final_ranking"
+
 # ONE spelling of the `pipeline_data` key, shared by the emit site (`runner/inner/spawn.py`),
 # the infra-key allow-list carrying it (`scoring/sample_measurement.py`), and
 # `panel_precision` below.

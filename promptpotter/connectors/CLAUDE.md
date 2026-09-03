@@ -3,10 +3,21 @@
 Each connector packages everything PromptPotter needs to talk to one
 backend kind. A connector is one file under this package exporting a
 ``Connector(...)`` binding (`protocol.py`), registered via the dict in
-`__init__.py`. Adding a connector is intentionally local — no edits to
-`application/campaign_config.py` or `infrastructure/backend.py`. Operating one is
-local too: model/provider switches go in `datasets/{name}/pipeline.yaml::
-nodes.{name}.config`, never in the backend's repo.
+`__init__.py`. Operating one is local too: model/provider switches go in
+`datasets/{name}/pipeline.yaml::nodes.{name}.config`, never in the backend's repo.
+
+**Adding one is local to `connectors/<name>.py` + a dataset directory, and the way that
+claim fails is what to watch for.** Naming two files it must not edit
+(`application/campaign_config.py`, `infrastructure/backend.py`) is true and beside the point:
+`harbor` needed edits to five core files, none of them those two. Every one
+was core INFERRING something a connector should DECLARE. So the rule to hold this to is not a
+file list; it is that **whatever the next connector has to reach into core to fix, the fix is a
+declaration on `Connector` or a fact derived from what `extract_experiment` already returns —
+never a branch at the site where the symptom showed up.**
+
+**Connector authoring is a product surface.** If adding one is hard, integrators ask the
+operator instead of doing it themselves. The bar on any defect found while adding one is not
+"this connector works" but *whatever it tripped over, connector #3 does not.*
 
 ## Registered connectors
 
@@ -15,6 +26,7 @@ nodes.{name}.config`, never in the backend's repo.
 | `termnorm` | `termnorm.py` | `{query, steps, node_config}` posted to `/matches` | `POST /sessions` handshake with terms array | TermNorm production backend |
 | `promptpotter` | `promptpotter.py` | `{query, optimizer_prompt_overrides}` → in-process inner cycle (`in_process_run` → `runner/inner/spawn.py`) | Noop (no remote service) | Optimizer-of-the-optimizer (L4) |
 | `dspy` | `dspy_module.py` | `{query, prompt, params}` → the caller's `dspy.Module` | Noop (no remote service) | PromptPotter as a DSPy `Teleprompter` (`presentation/teleprompter.py`) |
+| `harbor` | `harbor.py` | `{query, prompt, model_name, agent_kwargs}` → one containerized Harbor trial (`in_process_run` → `Trial.create(...).run()`) | Noop (no remote service) | Tuning an agent that works in a sandbox, graded by the task's own verifier |
 
 > **`import dspy` is function-local, and must stay that way.** `__init__.py` imports every
 > built-in eagerly, so a module-level import would break `import promptpotter.connectors` for
@@ -69,7 +81,11 @@ backend's transport is a capability it declares, not a branch in the core loop.
 connector-supplied `Connector.in_process_run(query, payload) -> {"data": {…}}` —
 the same shape the scorer parses from an HTTP `/matches` body. The registry guard
 (`__init__.py`) enforces the pairing: an `in_process` connector MUST supply
-`in_process_run`, a `remote_http` one MUST NOT. One connector rides the seam today:
+`in_process_run`, a `remote_http` one MUST NOT. Three connectors ride the seam today, and
+`harbor` is the one that shows the mode is not a synonym for "cheap and local": its cell holds a
+container, spends real money and takes minutes, so it declares `measured_unit="cell"` and
+`concurrency_arming="batch"` exactly as the recursion does. **`in_process` is a statement about
+TRANSPORT — there is no HTTP — and about nothing else.**
 
 - **`promptpotter` (Feature B, SHIPPED)** — `in_process_run` is a thin delegate to
   `application/runner/inner/spawn.py::run_inner_cycle` (running a whole inner
@@ -99,11 +115,65 @@ the same shape the scorer parses from an HTTP `/matches` body. The registry guar
   networking. The localhost-endpoint option is retained only as the future
   hosted/multi-tenant worker mode: a new `execution` value, dispatched on
   uniformly, with no core-loop edit.
+- **`harbor` (SHIPPED)** — `in_process_run` builds a `TrialConfig` and awaits Harbor's own
+  `Trial.create(...).run()`; the container, the verifier and the reward file are all theirs, so
+  this connector shapes payloads and reads a number rather than orchestrating anything. Three
+  things it decides that the next episodic backend will face too. **The candidate prompt ships as
+  an Agent Skill** — written to a temp `<dir>/<name>/SKILL.md` and passed through
+  `AgentConfig.skills`, because that is the injection channel Harbor already has and the artifact
+  class the skill-evolution literature evolves; the frontmatter `description` is FIXED and never a
+  search axis, since the agent sees only that eagerly and a candidate free to write its own could
+  win by making itself uninviting. **The panel is published from `extract_experiment`**, which
+  init already calls with the parsed `harbor_tasks.yaml` — a second channel carrying the same file
+  would be a redundant path, and `in_process_run` has no argument to carry pins in. **Trial
+  scratch goes to the system temp dir, not the workspace**: Harbor nests
+  `<trials_dir>/<trial>/<role>/…` and a workspace path is already deep, which is the same
+  `MAX_PATH` wall that forced `.inner` flat. Nothing durable lives there — reward, digest and
+  token counts are projected into the measurement archive, which is where a fact belongs.
+
+## The answer shape — declared in `extract_experiment`, never inferred
+
+**What one cell's ANSWER is, a connector declares by whether the queries it yields carry a
+`ground_truth`.** Two shapes, and every core reader that needs to know asks the LABEL:
+
+| shape | `extract_experiment` yields | who decides the score | the formula reads |
+|---|---|---|---|
+| **ranked-label** (`termnorm`, `dspy`) | `ground_truth: "<label>"` | a node emitting a ranking; `predicted` is compared to the label | `exact_match(predicted, ground_truth)` |
+| **verifier-graded** (`harbor`, `promptpotter`) | `ground_truth: None` | something else, with a NUMBER — the task's own verifier, L4's outer proxies | a `required_observation_keys` entry: `max(0.0, min(1.0, env_reward))` |
+
+`domain/scoring.py::is_verifier_graded` (one label) and `all_verifier_graded` (a round, a bank,
+a dataset) are the ONE place that is asked. **Never `predicted == NO_RESULT`** — the natural
+proxy, and it does not work: that sentinel is set by `terminal_ranking` returning nothing, which
+a *dataset* decides. Harbor's `agent` node declares no `node_role` so it fires;
+`promptpotter-self`'s `l1_critique` declares `ranker` so it never does. Two labelless backends,
+opposite answers, from a proxy for something neither is about.
+
+**There is deliberately no second declaration** — never a `Connector` flag beside it: an author
+who writes `extract_experiment` correctly and forgets the flag gets back the entire class of
+misdiagnosis the flag would exist to prevent. Same reasoning `__init__.py::_validate` applies to
+an `auth_token` on an in-process connector — dead config that reads as protection.
+
+Four things that follow, each one a defect this cost before it was a rule:
+
+- **Do not invent a ranking to look ranked-label shaped.** Harbor emitted a one-element
+  `final_ranking` holding a summary line; nothing read it and three readers had to un-believe it.
+- **Do not reach the same place by declaring the node a `RANKER`.** That switches on
+  `candidate_recall`, which walks a ranking for a ground truth the backend does not have and
+  banks the resulting `0.0` into `rounds/round_NNNN.json` and `index.jsonl::scores`.
+- **A label-comparing formula is refused at compile** (`formula/compiler.py`), because
+  `exact_match` strips both sides and scores an empty answer against an empty label as a PERFECT
+  `1.0` — and that is the launcher's own default formula shape.
+- **Emit absence, not zero.** Rank buckets, top-k and recall are all comparisons against a label;
+  with none, every one reads `not_found` / `0.0` and reports a round that solved eight of ten as
+  having solved none.
 
 ## The measured unit — declared, never sniffed
 
 A connector declares what ONE measured row IS via `Connector.measured_unit` (`MeasuredUnit`):
-`sample` by default, `cell` on `promptpotter`, where one outer row is a whole inner campaign. It
+`sample` by default, `cell` on `promptpotter` (one outer row is a whole inner campaign) and on
+`harbor` (one row is a whole agent episode in a container). What the two share is not their
+transport but their SHAPE — a row that takes minutes, spends on its own account and can fail
+halfway — which is what the word marks. It
 rides the same declared-capability channel as `execution` — `Connector` → `build_backend_client` →
 `BackendClient.measured_unit` → the dispatch bundle, the terminal readout and
 `dashboard.json::measured_unit` — so **no prompt panel, CLI line or browser surface holds a literal
@@ -168,6 +238,13 @@ no wire, so declaring a token on one fails the registry guard at import.
   No I/O, no logging beyond debug-level drops.
 - `extract_experiment` returns `(queries, index_terms)` — the index_terms
   list may be empty for connectors with no retrieval index.
+- **Declare every key the payload always carries** in
+  `Connector.required_observation_keys`. An undeclared key is dropped at
+  `sample_measurement.py::measure_sample` and never reaches `pipeline_data`, so the
+  scoring formula grades a measurement it never received and nothing raises;
+  `wiring.py::_verify_required_observation_keys` RAISES at init instead. Unlike
+  revision pinning below this is a wrong number, not drift — so it fails the run.
+  Empty (default) = the backend guarantees no key.
 - **Revision pinning is opt-in.** A connector can set
   `Connector.expected_revision` (the backend SHA/version this rev was
   developed against) and a `Connector.version_check(http, base_url) -> str | None`

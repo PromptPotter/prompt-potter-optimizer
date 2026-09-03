@@ -7,6 +7,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.connectors.protocol import Connector
+from promptpotter.domain.l4.proxies import INNER_RESULT_KEY, OUTER_PROXY_KEYS
 from promptpotter.domain.pipeline_overlay import node_config_items
 
 if TYPE_CHECKING:
@@ -228,15 +229,15 @@ class PromptPotterSession:
 def _extract_experiment(
     experiment_data: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """Inner-benchmark tasks → ``(queries, index_terms)``. **There is no label to match in L4**:
-    ``ground_truth`` is the ``inner:{query}`` token ``run_inner_cycle`` emits — keep the two in sync."""
+    """Inner-benchmark tasks → ``(queries, index_terms)``. **There is no label to match in L4** —
+    the cell is graded by ``compute_outer_proxies``, so ``ground_truth`` is ``None`` and says so."""
     tasks = experiment_data.get("tasks", [])
     queries: list[dict[str, Any]] = []
     for t in tasks:
         tid = t.get("id")
         if not tid:
             continue
-        queries.append({"query": tid, "ground_truth": f"inner:{tid}"})
+        queries.append({"query": tid, "ground_truth": None})
     return queries, []
 
 
@@ -260,6 +261,9 @@ CONNECTOR = Connector(
     max_cells_in_flight=MAX_CELLS_IN_FLIGHT,
     concurrency_arming="batch",
     measured_unit="cell",
+    # Every key `run_inner_cycle` puts on the wire that the outer formula reads. Verified against
+    # the dataset's declared observation_mappings at init.
+    required_observation_keys=(INNER_RESULT_KEY, *OUTER_PROXY_KEYS),
     # The outer "samples" are the inner tasks — read from this file in the dataset
     # config dir and fed through ``extract_experiment`` at init (no CSV table).
     experiment_file="inner_tasks.yaml",

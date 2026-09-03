@@ -121,7 +121,13 @@ def draft_from_dataset(
     if not rows:
         raise IngestError(
             reason="empty",
-            message=f"Dataset {dataset_name!r} has no usable (query, ground_truth) rows.",
+            message=(
+                f"Dataset {dataset_name!r} has no usable (query, ground_truth) rows. A draft is "
+                f"built from a labelled sample table; a VERIFIER-GRADED dataset (backend_type "
+                f"`harbor` or `promptpotter`) has none — its cells come from the connector's "
+                f"`experiment_file` and carry no label — so it cannot be drafted through this "
+                f"path yet and is launched with `python -m promptpotter new {dataset_name}`."
+            ),
         )
 
     # One validated parse of the dataset's config files. The `or` ladders below

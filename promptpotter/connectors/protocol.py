@@ -98,7 +98,10 @@ class Connector:
     """Fresh session instance per ``BackendClient`` — sessions hold per-client state."""
 
     extract_experiment: Callable[[dict[str, Any]], tuple[list[dict[str, Any]], list[str]]]
-    """Backend experiment data → ``(queries, index_terms)``."""
+    """Backend experiment data → ``(queries, index_terms)``, each a ``{"query", "ground_truth"}``.
+
+    **The answer shape — owned by** ``connectors/CLAUDE.md`` § The answer shape: a query yielding
+    ``ground_truth: None`` declares it here, and never a second time anywhere else."""
 
     experiment_file: str = ""
     """Filename of an on-disk experiment doc in the dataset's config dir, read +
@@ -123,6 +126,13 @@ class Connector:
 
     measured_unit: MeasuredUnit = "sample"
     """What one measured row of this backend is CALLED — see :data:`MeasuredUnit`."""
+
+    required_observation_keys: tuple[str, ...] = ()
+    """Observation keys this backend ALWAYS emits. ``init_services`` verifies the resolved
+    ``PipelineSchema`` declares an ``observation_mapping`` for each: an undeclared key is dropped
+    by ``sample_measurement`` and never reaches ``pipeline_data``, so the scoring formula grades a
+    measurement it never received — silently, since a dropped key raises nothing. Declared on the
+    connector because only it knows what its own payload carries. Empty = nothing guaranteed."""
 
     in_process_run: InProcessRun | None = None
 
