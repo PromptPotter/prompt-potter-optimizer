@@ -1,0 +1,29 @@
+campaign_config:
+  dataset_name: spreadsheetbench-s10
+  exclude_nodes: []
+  scoring:
+    # The task's own verifier IS the score. Clamped because the formula's range is a contract the
+    # δ ruler and PoBB both read, and a reward is upstream's number — SpreadsheetBench writes 0
+    # or 1, but Harbor's channel permits any float and a task returning 3.0 would silently widen
+    # it.
+    per_sample: max(0.0, min(1.0, env_reward))
+    # NO `per_cell` cost term, deliberately. Its siblings price a cell against a MEASURED anchor
+    # (justlogic's 1546.0 tokens, pp-self's 500.0s); one cell of this panel has been measured and
+    # one cell is not a distribution. Add it once this screen has priced the ten, with the figures
+    # and their source written here.
+  optimization:
+    # ORIGIN ONLY. `max_rounds: 0` is the declared "measure round 0 and stop" — this campaign is
+    # an INSTRUMENT CHECK, not a search: it answers whether the model lands mid-range on these
+    # ten cells. It must not, so it cannot, proceed to round 1: an arm that scores 0 on every
+    # cell pins to a floor constant and every lift downstream reads 0.000, and an arm that scores
+    # 1 on every cell leaves no room for a prompt to show anything. Either way there is nothing
+    # for a round to win on, and finding that out AFTER paying for a round is the mistake this
+    # file exists to avoid.
+    max_rounds: 0
+    n_variants: 2
+    l1_patience: 3
+    degradation_threshold: 0.4
+    # A RAIL, not an estimate. One measured cell of this panel cost $0.0101 on a different model;
+    # ten cells of a screen should land far under this, and the ceiling exists so that being
+    # wrong about it costs less than the operator agreed to.
+    spend_budget_usd: 2.00

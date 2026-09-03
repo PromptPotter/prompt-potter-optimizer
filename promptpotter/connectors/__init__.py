@@ -4,6 +4,7 @@ import typing
 from importlib.metadata import entry_points
 
 from promptpotter.connectors.dspy_module import CONNECTOR as _DSPY
+from promptpotter.connectors.harbor import CONNECTOR as _HARBOR
 from promptpotter.connectors.promptpotter import CONNECTOR as _PROMPTPOTTER
 from promptpotter.connectors.protocol import (
     BackendUnreachableError,
@@ -32,6 +33,7 @@ _BUILTIN: dict[str, Connector] = {
     "termnorm": _TERMNORM,
     "promptpotter": _PROMPTPOTTER,
     "dspy": _DSPY,
+    "harbor": _HARBOR,
 }
 
 DEFAULT_CONNECTOR = "termnorm"
