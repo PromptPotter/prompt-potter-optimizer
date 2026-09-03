@@ -13,13 +13,13 @@
 # app runs; read this one to learn what it promises. A difference between them
 # is information (something declared-not-wired), not automatically drift.
 #
-# Drift detection, both enforced now rather than reviewed by eye:
-#   - `tests/test_integrity.py::test_declared_command_kinds_match_the_wired_set`
-#     pins the declared/wired partition below against `commands.py::_WIRED_KINDS`,
-#     so an operation cannot silently look live while a POST to it 404s.
-#   - CI regenerates `openapi.generated.json` and fails on any diff.
-# (There is no `test_contracts.py` — the structural/contract suite was cut to the
-# silent-harm core, see tests/CLAUDE.md.)
+# Drift detection:
+#   - CI regenerates `openapi.generated.json` and fails on any diff, so what the app
+#     SERVES is always current.
+#   - The declared/wired partition below is read against `commands.py::_WIRED_KINDS`
+#     at commit time, not by a standing test: a kind declared live whose POST 404s is
+#     a loud, first-call failure, and a test comparing two YAML key sets breaks on
+#     every rename instead. See tests/CLAUDE.md for the three admission axes.
 #
 # DECLARED != WIRED. Because this file is schema-first, a declared operation may
 # have no handler yet. Those carry `x-status: declared-not-wired`; a POST to one
