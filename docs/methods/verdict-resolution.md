@@ -133,8 +133,11 @@ responses. A sound round can carry a pinned arm, and a pinned arm can sit on a s
 
   **The question this state makes unanswerable — "is the round-N winner better than C0?" — has its
   own answer, and it is not θ.** `RoundResult.overlap` (`domain/results.py::OverlapReading`) reads
-  C0 and every winner since on ONE set of cells all of them answered, chosen from what the line
-  already shares and topped up on the new winner alone. It is a rate, not an ability, so it needs
+  C0 and every winner since on the ORIGIN PANEL (`domain/results.py::origin_panel`) — cells the
+  origin answered, fixed for the life of the cycle, each winner topped up onto them at its own
+  election. Fixed because a set re-chosen from what the line happened to share CONTRACTED as the
+  line grew, so consecutive rounds' bars answered different questions and a winner that shared
+  too little simply had no bar. It is a rate, not an ability, so it needs
   no ruler and no adjustment — which is the point: it is what remains readable when the scale
   underneath θ has collapsed. It is REPORT-ONLY and deliberately so; fed to the election it would
   identify the parent better than the arms it judges. Round documents, `log.md`, `review.md`,

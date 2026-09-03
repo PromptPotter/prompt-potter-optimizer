@@ -578,6 +578,70 @@ def stamp_election_bias(*, apply: bool) -> dict[str, int]:
     return {"elections_stamped": stamped, "election_ledgers": touched}
 
 
+def stamp_election_objective(*, apply: bool) -> dict[str, int]:
+    """Write ``objective`` onto every recorded ``parent_cells`` row that predates it.
+
+    ``elect_round_winner`` fits θ through ``exploration.py::graded_response``, which RAISES on a
+    row carrying no ``objective``, so a record lacking it cannot be replayed at all — and `resume`
+    surfaces that raise as a DIVERGENCE, offering the fork that abandons the line.
+
+    NOT a guess, and not derived: the round document's ``parent_results`` is the SAME list
+    ``winner.py`` projected these cells from, in the same constructor call, so the join on
+    ``sample_id`` recovers the exact number the election graded. A cell the document cannot answer
+    is LEFT ABSENT — it still raises, which is the honest outcome for a row nothing ever stamped.
+    """
+    stamped = touched = orphaned = 0
+    for ledger_path in iter_cycle_ledgers(DEFAULT_PROJECTS_ROOT):
+        rounds_dir = ledger_path.parents[1] / "rounds"
+        lines = ledger_path.read_text(encoding="utf-8").splitlines()
+        out: list[str] = []
+        dirty = False
+        for line in lines:
+            parsed = json.loads(line) if line.strip() else None
+            rec: dict[str, Any] = parsed if isinstance(parsed, dict) else {}
+            data = rec.get("data")
+            cells = data.get("parent_cells") if isinstance(data, dict) else None
+            if isinstance(cells, list) and any(
+                isinstance(c, dict) and "objective" not in c for c in cells
+            ):
+                doc = read_json_tolerant(rounds_dir / f"round_{int(rec['round']):04d}.json", {})
+                graded = {
+                    r.get("sample_id"): r
+                    for r in (doc.get("parent_results") or [])
+                    if isinstance(r, dict)
+                }
+                filled = 0
+                for cell in cells:
+                    src = graded.get(cell.get("sample_id")) if isinstance(cell, dict) else None
+                    if isinstance(cell, dict) and isinstance(src, dict) and "objective" in src:
+                        cell["objective"] = src["objective"]
+                        filled += 1
+                    else:
+                        orphaned += 1
+                # A cycle whose documents carry no `parent_results` recovers nothing, and
+                # re-serialising its ledger to write the same bytes back is a rewrite that
+                # buys an operator no repair and one more chance to lose the file.
+                if filled:
+                    line = json.dumps(rec, ensure_ascii=False)
+                    stamped += filled
+                    dirty = True
+            out.append(line)
+        if dirty:
+            touched += 1
+            if apply:
+                ledger_path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+    verb = "stamped" if apply else "would stamp"
+    print(f"\nElection grade — {verb} objective onto {stamped} cell(s) in {touched} ledger(s)")
+    if not apply and stamped:
+        print("\nDry run. Re-run with --apply to rewrite.")
+    return {
+        "election_cells_graded": stamped,
+        "election_grade_ledgers": touched,
+        "election_cells_ungraded": orphaned,
+    }
+
+
 # --- (6) the L4 seed facts that reached the row as prose and nothing else --------------------
 
 
@@ -832,6 +896,49 @@ def shrink_measurement_runs(*, apply: bool) -> dict[str, int]:
         "runs_shrunk": touched,
         "run_bytes_saved": total_before - total_after,
         "archive_writers": 0,
+    }
+
+
+# --- (9) the overlap rows a flat list cannot attribute ---------------------------------------
+
+
+def rekey_overlap_results(*, apply: bool) -> dict[str, int]:
+    """Key ``RoundResult.overlap_results`` by the individual each row MEASURED.
+
+    A flat list names nobody, so a document carrying one does not load at all. It can only ever
+    have held the round's own winner's cells, and ``OverlapReading.members`` already names that
+    arm last — adoption order, C0 first. Rows no document can attribute that way are DROPPED
+    rather than guessed onto a member: they are report-only, and the archive still holds them, so
+    the next election re-buys them on a cache hit.
+    """
+    rekeyed = dropped = touched = 0
+    for path in _iter_round_documents():
+        with graceful(f"rekey overlap {path}"):
+            doc = read_json_tolerant(path, {})
+            rows = doc.get("overlap_results") if isinstance(doc, dict) else None
+            if not isinstance(rows, list):
+                continue
+            reading = doc.get("overlap")
+            members = reading.get("members") if isinstance(reading, dict) else None
+            winner = members[-1].get("candidate_id") if members else None
+            if rows and winner:
+                doc["overlap_results"] = {winner: rows}
+                rekeyed += len(rows)
+            else:
+                doc["overlap_results"] = {}
+                dropped += len(rows)
+            touched += 1
+            if apply:
+                write_json(path, doc)
+
+    verb = "rekeyed" if apply else "would rekey"
+    print(f"\nOverlap rows — {verb} {rekeyed} row(s) across {touched} round document(s)")
+    if not apply and touched:
+        print("\nDry run. Re-run with --apply to rewrite.")
+    return {
+        "overlap_rows_rekeyed": rekeyed,
+        "overlap_rows_dropped": dropped,
+        "overlap_documents": touched,
     }
 
 

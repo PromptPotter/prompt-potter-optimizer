@@ -9,11 +9,13 @@ from promptpotter.application.restamp import (
     backfill_inner_facts,
     check_round_documents,
     compact_cycle_ledgers,
+    rekey_overlap_results,
     rename_round_trend,
     reproject_cycle_indexes,
     restamp_campaign_configs,
     shrink_measurement_runs,
     stamp_election_bias,
+    stamp_election_objective,
 )
 from promptpotter.presentation.cli.commands._shared import CommandResult
 
@@ -27,6 +29,8 @@ async def cmd_restamp(args: argparse.Namespace) -> CommandResult:
     runs = shrink_measurement_runs(apply=apply)
     indexes = reproject_cycle_indexes(apply=apply)
     elections = stamp_election_bias(apply=apply)
+    grades = stamp_election_objective(apply=apply)
+    overlaps = rekey_overlap_results(apply=apply)
     inner = backfill_inner_facts(apply=apply)
     trend = rename_round_trend(apply=apply)
     # Read-only, so --apply does not change what it does.
@@ -53,7 +57,14 @@ async def cmd_restamp(args: argparse.Namespace) -> CommandResult:
         f"Cycle indexes: {indexes['cycle_indexes_reprojected']}"
         f"/{indexes['cycle_indexes']} re-derived from their round documents. "
         f"Elections: parent_bias {verb} onto {elections['elections_stamped']} decision(s) so a "
-        f"replay reads the bar each one ran under. "
+        f"replay reads the bar each one ran under; objective {verb} onto "
+        f"{grades['election_cells_graded']} recorded parent cell(s) — without it the replay "
+        f"raises and `resume` reports a divergence that never happened "
+        f"({grades['election_cells_ungraded']} cell(s) no round document can grade, left absent). "
+        f"Overlap rows: {overlaps['overlap_rows_rekeyed']} row(s) keyed onto the individual they "
+        f"measured across {overlaps['overlap_documents']} round document(s), without which the "
+        f"document does not load at all ({overlaps['overlap_rows_dropped']} row(s) no reading "
+        f"names an arm for, dropped). "
         f"Inner seed facts {verb} onto {inner['inner_rows_filled']} row(s) from the inner "
         f"campaigns themselves; {inner['inner_rows_orphaned']} cell(s) no longer have one on "
         f"disk and stay absent. Peak lift and round budget are never backfilled — no surviving "
@@ -62,6 +73,17 @@ async def cmd_restamp(args: argparse.Namespace) -> CommandResult:
         f"the retired `trajectory` spelling, which a resume would otherwise read as `healthy`."
     )
     return CommandResult(
-        data={**counts, **ledgers, **runs, **rounds, **indexes, **elections, **inner, **trend},
+        data={
+            **counts,
+            **ledgers,
+            **runs,
+            **rounds,
+            **indexes,
+            **elections,
+            **grades,
+            **overlaps,
+            **inner,
+            **trend,
+        },
         human=human,
     )

@@ -169,7 +169,7 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
     optimizer_prompt_hashes: {},
     status: "",
     overlap: null,
-    overlap_results: [],
+    overlap_results: {},
     round_id: "round_0",
     scoreboard: [],
     ...over,

@@ -1824,15 +1824,18 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
     denominator, at a rate nothing measured, side by side as if comparable.
 
     Also pins the three rules that keep the set affordable and honest: a HELD round's parent
-    re-score widens the parent's coverage; the choice prefers cells the new member already
-    holds; and a member is a CONFIGURATION, not a lineage id — an L2/L3 transition re-mints the
-    parent's OSP from the same prompt fields, which put one configuration on the chart twice,
-    at the same rate by construction, under a label naming no candidate.
+    re-score widens the parent's coverage; the panel is the ORIGIN's own cells and does not move,
+    so a late member is topped up onto it rather than narrowing it for everyone before it; and a
+    member is a CONFIGURATION — the RENDERED target prompt, not the six fields and not a lineage
+    id. An L2/L3 transition re-mints the parent's OSP from the same fields, and `task_context`
+    moves the render without moving the fields; either one mistaken puts two individuals' cells
+    inside one bar, at a rate neither of them scored.
     """
+    from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint
     from promptpotter.domain.results import (
         ScoredCandidate,
-        choose_overlap_set,
         measured_cells,
+        origin_panel,
         parent_line,
     )
 
@@ -1844,19 +1847,27 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
             candidate_id=cid, label=label, accuracy=0.5, composite_fitness=0.5, total=1
         )
 
-    def rnd(n: int, cid: str, label: str, instruction: str, *ids: int) -> RoundResult:
+    def rnd(
+        n: int, cid: str, label: str, instruction: str, *ids: int, upstream: str = ""
+    ) -> RoundResult:
+        # `instruction` and `upstream` BOTH make the configuration here — the second only
+        # through the render, which is the whole point.
+        osp = OptSearchPoint(
+            instruction=instruction,
+            lineage=IndividualLineage(id=cid),
+            memory={"task_context": {"upstream_context": upstream}},
+        )
         return RoundResult(
             round=n,
             label=label,
             accuracy=0.5,
             total=len(ids),
             improved=n > 0,
-            # `instruction` IS the configuration here — two rounds sharing it are one member
-            # however their lineage ids differ.
-            prompt_fields={"instruction": instruction, "lineage": {"id": cid}},
+            prompt_fields={**osp.prompt_field_dict(), "lineage": osp.lineage.model_dump()},
             results=rows(*ids),
             candidates_scored=1,
             candidate_scores=[scored(cid, label)],
+            opt_sp=osp,
         )
 
     # C0 on 1..6; round 1 HELD (C0 re-scored on 7,8); round 2 crowned C2.1 on 5,6,7,9; round 3
@@ -1871,22 +1882,32 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
     # TWO members, not three: the L2 re-mint is the same configuration as C2.1, so it folds in
     # and keeps C2.1's label rather than appearing beside it as an unnamed twin.
     assert [(s.candidate_id, s.label) for s in line] == [("c0", "C0"), ("w2", "C2.1")]
+
+    # A round-4 winner carrying C2.1's six fields verbatim and an emptied `task_context` is a
+    # DIFFERENT individual: it runs a shorter prompt. Folded in, it would take C2.1's label and
+    # bar, and its rows would overwrite C2.1's on every cell they share.
+    ctx = parent_line([*history, rnd(4, "w4", "C4.1", "edited", 5, 6, 7, upstream="framing")])
+    assert [s.candidate_id for s in ctx] == ["c0", "w2", "w4"]
     # The held round WIDENED the parent rather than replacing it — without that, 7 and 8 are
     # lost and cell 7 could never join the set below.
     assert measured_cells(line[0].rows) == {1, 2, 3, 4, 5, 6, 7, 8}
 
     c0, w2 = measured_cells(line[0].rows), measured_cells(line[1].rows)
-    chosen = choose_overlap_set(c0, already_measured=w2, previous=(), size=4)
+    panel = origin_panel(c0, poolable=range(100), size=4)
+    # THE invariant: C0 has answered every cell of the panel, so every bar is read on one exam
+    # and C0 itself is never asked to re-measure.
+    assert set(panel) <= c0
     # 9 is w2's but C0 never answered it, so it cannot be a shared basis at any price.
-    assert 9 not in chosen
-    # THE invariant: C0 has answered every chosen cell, so both bars are read on the same exam.
-    assert set(chosen) <= c0
-    # Free-first: the three cells w2 already holds are taken before any that must be bought.
-    assert {5, 6, 7} <= set(chosen)
-    assert len([s for s in chosen if s not in w2]) == 1
+    assert 9 not in panel
 
-    # Stickiness is the tiebreak, never an override — a cheaper cell still wins the slot.
-    assert choose_overlap_set(c0, already_measured=w2, previous=[1, 2, 3], size=3) == [5, 6, 7]
+    # FIXED, and a function of the ORIGIN alone: w2 shares NOT ONE cell with the panel and the
+    # panel does not move an inch for it. An intersection over the members would contract to
+    # nothing here; the cost of holding it still is w2 buying its own four cells, once.
+    assert set(panel).isdisjoint(w2)
+    assert origin_panel(c0, poolable=range(100), size=4) == panel
+    assert sorted(set(panel) - w2) == [1, 2, 3, 4]
+    # A cell the cycle can no longer buy is out, or a member is short one with no way to sit it.
+    assert origin_panel(c0, poolable={1, 2, 3}, size=4) == [1, 2, 3]
 
 
 # 7. Paired readings over shared cells
