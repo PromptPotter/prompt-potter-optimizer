@@ -445,6 +445,27 @@ run; audit for accumulated cruft but don't delete the underlying
 mechanism. New webapp panels arrive as ordinary sub-specs, not
 silent additions.
 
+### Run admission — one seam in, one queue
+
+**Every entry point that starts a loop admits through `jobs/launcher/admission.py`** —
+a launch that reserves its own slot is the bug, because the machine cannot report
+occupancy it was not told about. Two steps, and which one a caller waits in decides
+where it waits: `request_launch` accepts (the caller's own ceilings, then a machine
+slot or a place in line), `admit_and_hold` holds it through the irreversible half.
+
+A full box queues rather than refuses. **The queue is `Job` records in the jobs dir** —
+the same entity earlier in its life, not a second one — and **it is not a run phase**:
+`derive_run_phase` is store-free and takes a `cycle_dir`, and a queued mint has none.
+
+The jobs dir is machine-global — the terminal holds slots in it beside the server — so
+both facts a slot count rests on are OS file locks (`jobs/interlock.py`): admission is
+atomic across processes, and a job names a lock its producer holds for its own lifetime.
+Judge liveness any other way and a terminal verb reaps the server's live campaign, or a
+killed run wedges the box until a restart.
+
+**What bounds a launch, and in what order the queue drains** — owned by
+[`operations/access-model.md`](operations/access-model.md) § What bounds resource use.
+
 ### Tracing, Langfuse-shaped, lightweight by default
 
 Optimizer LLM calls and backend matches emit structured events in **Langfuse-compatible shape**,
@@ -522,6 +543,14 @@ the PR description.
 - **Connector pattern** (`promptpotter/connectors/`) — the only
   sanctioned place backend identity is named. Pipeline-agnosticity
   depends on it.
+
+- **`jobs/interlock.py`** — the OS file locks under run admission. Two
+  empty files in the jobs dir read as litter, and they are the only
+  facts about the box that outlive a process: drop the admission lock
+  and two processes take one free slot, drop the producer lock and a
+  killed run holds its slot until the owner restarts. A heartbeat is
+  not the simpler version of this — it is the version with a window
+  during which the answer is wrong.
 
 - **Langfuse JSONL events + Langfuse-shape compatibility** — the
   Tracing bucket's foundation. Don't simplify the schema "because
