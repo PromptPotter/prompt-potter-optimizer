@@ -1,7 +1,7 @@
 """The embedded launch entry — a host Python program driving one campaign inside its own event loop.
 
-Peer of ``jobs/launcher/mint_and_start.py``, which detaches the run onto a background task and holds
-the capacity-1 machine slot; this one blocks in the caller's loop and takes no slot. Three steps
+Peer of ``jobs/launcher/mint_and_start.py``, which detaches the run onto a background task and takes
+a machine slot or queues for one; this one blocks in the caller's loop and takes no slot. Three steps
 rather than one because every caller does its own work between them — build the config, resolve the
 pipeline, slice the trainset, read the origin before deciding to spend.
 

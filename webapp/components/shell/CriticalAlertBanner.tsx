@@ -57,6 +57,10 @@ export function CriticalAlertBanner({
     machineBusy: machine.busy,
     machineBusyHolder: machine.holder?.user ?? null,
     machineBusySince: machine.holder?.started_at ?? null,
+    // The served queue is already ordered and already scoped to this caller, so the
+    // first entry IS their nearest place in line — no client-side sort, and no second
+    // opinion about a position the drain owns.
+    queuePosition: machine.queue[0]?.position ?? null,
   });
   if (!alert) return null;
 

@@ -33,7 +33,13 @@ CycleScopedKind = Literal[
     "step-cycle",
 ]
 WorkspaceScopedKind = Literal[
-    "register-backend", "mint-campaign", "replace-dataset", "compact-archive"
+    "register-backend",
+    "mint-campaign",
+    "replace-dataset",
+    "compact-archive",
+    # Workspace-scoped because a queued MINT has no cycle to address — the campaign it will
+    # create does not exist yet, which is also why `pause-cycle` cannot serve one.
+    "cancel-queued-run",
 ]
 CheckinScopedKind = Literal["edit-draft-campaign", "resolve-origin", "start-checkin"]
 # Campaign-scoped IN-PLACE manifest edits (the campaign persists — distinct from

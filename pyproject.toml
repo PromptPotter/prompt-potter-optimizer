@@ -35,7 +35,7 @@ dependencies = [
                                # `env_file`, and asks only for >=0.21.0. The direct pin is the
                                # floor past CVE-2026-28684 that the transitive one would not give.
     "httpx>=0.26.0",           # why kept: BackendClient (TermNorm) wire transport
-    "filelock>=3.12.0",        # why kept: MeasurementArchive index lock under concurrent writers
+    "filelock>=3.12.0",        # why kept: MeasurementArchive index lock + run admission across processes
     "numpy>=1.26",             # why kept: PoBB posterior + Rasch fit
     "json-repair>=0.30,<1.0",  # why kept: structured repair of provider-returned JSON (invalid \X escapes, etc.) at the LLM boundary
     "pyyaml>=6.0",             # why kept: parse/emit the operator-authored config tier (store/io.py::read_yaml/write_yaml). It used to ride in transitively behind uvicorn[standard]; that is an extra now, so this line is what installs it.

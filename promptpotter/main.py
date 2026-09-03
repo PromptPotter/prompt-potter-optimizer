@@ -14,6 +14,7 @@ from scalar_fastapi import get_scalar_api_reference
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.reaper import periodic_sweep, reap_cycle_by_id
 from promptpotter.application.jobs.registry import Job, JobRegistry, default_jobs_dir
 from promptpotter.config.logging import setup_logging, silence_proactor_disconnect_noise
@@ -77,16 +78,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
 
     # Liveness reconciler. The registry stamps a cycle terminal the moment its
-    # API job is proven dead (torn task, or stale-on-restart) via on_reap; the
-    # background periodic sweep clears CLI-launched dead cycles the registry
-    # never saw, for the server's whole uptime (not just at boot). Both keep the
-    # OS-style dock and the on-disk truth honest — a vanished producer is not a
-    # live unit. See application/jobs/reaper.py.
+    # job is proven dead (torn task, or a producer process that is gone) via
+    # on_reap — including, at the first read after a restart, every job this
+    # server's previous incarnation left behind. The background periodic sweep
+    # clears dead CYCLES the registry never saw, for the server's whole uptime.
+    # Both keep the OS-style dock and the on-disk truth honest — a vanished
+    # producer is not a live unit. See application/jobs/reaper.py.
     def _on_reap(job: Job) -> None:
         reap_cycle_by_id(DEFAULT_PROJECTS_ROOT, job.hop)
 
     registry = JobRegistry(
-        default_jobs_dir(), capacity=settings.MACHINE_RUN_CAPACITY, on_reap=_on_reap
+        default_jobs_dir(),
+        capacity=resolve_run_capacity,
+        on_reap=_on_reap,
     )
     app.state.job_registry = registry
     sweep_task = asyncio.create_task(periodic_sweep(DEFAULT_PROJECTS_ROOT))

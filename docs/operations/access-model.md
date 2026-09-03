@@ -154,9 +154,11 @@ This is the genuinely-partial boundary; the honest state:
   design (orphan-reaping assumes the runs it judges live in the process that judges them). So a
   web-launched loop shares the API's process, `.env`, and every provider key.
 - **Both hold the same machine slot** (`jobs/launcher/admission.py::admit_and_hold`), so occupancy
-  is one number whichever door a run came through. Only the JOBS DIR is shared, not the process:
-  the terminal attaches to it read-mostly and never runs `reconcile_stale`, which would stamp the
-  server's live campaign stopped.
+  is one number whichever door a run came through. Only the JOBS DIR is shared, not the process, so
+  no process may sweep what it did not start: admitting takes a machine-wide OS lock, and a slot is
+  released only by proving its producer's own lock gone (`jobs/interlock.py`). That is what lets the
+  terminal and the server release each other's dead slots without either being able to stamp the
+  other's live campaign stopped.
 
 **Shipped wall (3a) — the hardened service unit** (`deploy-linux/install-service.sh`): the
 systemd unit drops all capabilities, `ProtectSystem=strict`, a `@system-service` syscall filter,
@@ -241,6 +243,52 @@ not backend-supplied.
   implemented; the deploy provisions the shared secret.
 - **Per-user quotas / spend caps** (`application/jobs/quota.py`) + run admission against a resolved
   machine capacity (`application/jobs/capacity.py`), which every entry point shares.
+
+---
+
+## What bounds resource use — and what does not
+
+**There is no load balancer and there is no machine-resource reading.** Replicating the process
+would create neither of the two scarce things: the provider's rate limit and the host's wallet are
+external and singular. So what a second campaign costs is bounded by admission, not by spreading.
+
+Four gates, each with a different owner, and only the first two adapt on their own:
+
+| Gate | Set by | Adapts? |
+|---|---|---|
+| Campaigns admitted at once | `Settings.MACHINE_RUN_CAPACITY` | Yes — lowered under provider back-pressure, never raised above the ceiling |
+| Share of the provider's 60 s window | nothing — derived per call | Yes — least-served tenant next (`infrastructure/llm/rate_limit.py`) |
+| Campaigns ONE person may hold | `user.json::max_concurrent_cycles` | No |
+| What an account may ever spend | the free-tier ceilings above, in both units | No |
+
+**The first gate WAITS; the third refuses.** A full machine is temporary and nobody's fault, so a
+launch that finds no slot joins a queue and starts by itself (`JobRegistry.request_slot`); an
+account at its own concurrency ceiling is refused, because waiting cannot change that fact. The
+queue is drained **least-served-first** — the oldest waiting launch belonging to whoever has the
+fewest runs going — which is the same rule the provider window uses one row up, so there is one
+idea to hold rather than two. It is starvation-free by arithmetic: the third gate bounds how many
+entries one account can hold, so a quiet account's launch always overtakes a busy one's.
+
+Waiting is bounded by `Settings.QUEUE_MAX_WAIT_S`, and a launch can be withdrawn before it starts
+(`cancel-queued-run`, owner-only whatever capability the caller holds) — a queue with no way out is
+a trap, and `pause-cycle` cannot serve one, since a queued mint has no cycle to write a flag into.
+
+**The one automatic signal is throttle stall, and it is gathered without configuration.** Every exit
+from the rate limiter reports how long that call sat blocked (`_report_throttle_stall`), summed
+across all tasks into a rolling 60-second total; `resolve_run_capacity` reads it per admission and
+stops admitting while the box is oversubscribed. It is deliberately **lagging** — it rises only once
+the machine is already too busy — which is why it may only ever LOWER the operator's ceiling. That
+one-directional property is what makes an automatic input safe here at all.
+
+**It reads no CPU, no memory, no load average and no disk**, and that is a decision rather than an
+omission: `os.getloadavg` is Unix-only, cgroup and `/proc` files are Linux-only, `psutil` would be a
+new dependency, and a number that silently reads zero on half the machines it runs on is worse than
+no number. `capacity.py`'s docstring owns the reasoning and names the shape an added signal takes.
+
+**So nothing in the application stops the box running out of memory.** The guard for that is
+kernel-enforced and lives in the service unit — `MemoryMax` in § loop ↔ everything above — plus
+keeping `MACHINE_RUN_CAPACITY` sized to the box. A campaign is mostly waiting on a provider, so
+concurrency costs far more in *quota* than in RAM; size it against the provider tier first.
 
 ---
 

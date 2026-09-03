@@ -11,7 +11,6 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-from promptpotter import connectors
 from promptpotter.application.campaign_config import (
     CampaignConfig,
     apply_inherited_overlay,
@@ -27,6 +26,12 @@ from promptpotter.application.datasets.draft_campaign import DraftCampaign
 from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
+from promptpotter.application.jobs.launcher.admission import (
+    admit_and_hold,
+    job_status_for,
+    launch_interrupted,
+    release_slot,
+)
 from promptpotter.application.jobs.launcher.draft_build import (
     _build_default_campaign_json,
     _build_origin_pipeline_json,
@@ -34,12 +39,8 @@ from promptpotter.application.jobs.launcher.draft_build import (
     split_overlay,
 )
 from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
-from promptpotter.application.jobs.quota import (
-    QuotaExceededError,
-    admit_launch,
-    check_launch_quotas,
-)
-from promptpotter.application.jobs.registry import Job, JobRegistry, JobStatus, ReserveResult
+from promptpotter.application.jobs.quota import QuotaExceededError
+from promptpotter.application.jobs.registry import Job, JobRegistry
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
@@ -53,32 +54,9 @@ from promptpotter.infrastructure.store.dataset_access import (
 from promptpotter.infrastructure.store.io import read_yaml_optional
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import MachineBusyError, PayloadInvalidError
-from promptpotter.shared.identity import claim_email
+from promptpotter.shared.errors import PayloadInvalidError
 
 logger = logging.getLogger(__name__)
-
-
-def launch_interrupted(exc: BaseException) -> bool:
-    """True when the launch stopped because someone ASKED — the pause flag's synthetic
-    ``KeyboardInterrupt``, a Ctrl+C's ``CancelledError``, a host cancel. None is visible to ``except Exception``."""
-    return isinstance(exc, KeyboardInterrupt | asyncio.CancelledError)
-
-
-def _release_slot(
-    job_registry: JobRegistry, job_id: str, exc: BaseException, *, admitted: bool = True
-) -> None:
-    """Hand the machine slot back so a failed launch never wedges the box at capacity. EVERY launch
-    failure answers for the job; only one that already bound the cycle answers for the cycle too.
-
-    A launch that never got past ADMISSION is ``stopped``, not ``failed`` — the account's ceiling, a
-    dark backend and a busy machine each REFUSE it before anything runs or spends."""
-    if launch_interrupted(exc):
-        job_registry.mark_finished(job_id, status="stopped", stop_reason="launch_interrupted")
-    elif not admitted:
-        job_registry.mark_finished(job_id, status="stopped", stop_reason="launch_not_admitted")
-    else:
-        job_registry.mark_finished(job_id, status="failed", stop_reason="launch_aborted")
 
 
 def _record_launch_stop(
@@ -114,18 +92,6 @@ def _record_launch_stop(
         logger.exception("failed to record launch stop for %s/%s", hop.campaign_id, hop.cycle_id)
 
 
-# Sole bridge from the StopReason outcome table to JobRegistry's lifecycle vocabulary; there
-# is no per-reason reconciler.
-_JOB_STATUS_BY_OUTCOME: dict[StopOutcome, JobStatus] = {
-    StopOutcome.SUCCESS: "completed",
-    StopOutcome.HALTED: "stopped",
-    StopOutcome.FAILED: "failed",
-    # A pause exits the worker but the cycle stays resumable — a fresh start-run mints a new
-    # job to continue it.
-    StopOutcome.PAUSED: "stopped",
-}
-
-
 class LaunchError(PayloadInvalidError):
     """Mint-time failure (missing dataset, malformed config) — a ``PayloadInvalidError``, so the
     central seam maps it to 422 and only routes ADDING context catch it explicitly."""
@@ -152,42 +118,6 @@ def _assert_origin_ready(draft: DraftCampaign) -> None:
     readiness = origin_readiness(draft)
     if not readiness.complete:
         raise OriginIncompleteError(readiness.gaps)
-
-
-async def run_preflight(backend_type: str, backend_url: str) -> None:
-    """Resolve the connector and run its reachability probe. A connector opts out by leaving
-    ``Connector.preflight = None``; a raised ``BackendUnreachableError`` becomes a 503.
-
-    **Every launch ingress asks the CONNECTOR, never a bare wire probe.** An `in_process`
-    connector has no wire, so probing one refuses a campaign over a backend it never touches —
-    which is what `python -m promptpotter new promptpotter-self` did from the terminal for as
-    long as the CLI called ``BackendClient.check_status`` directly.
-
-    An empty ``backend_type`` is the tolerant answer ``wiring.backend_type_of_dataset`` gives when
-    a campaign has outlived its dataset dir. There is no declared connector to ask, so there is no
-    probe — and ``connectors.get`` is strict, so resolving it would raise past every caller's
-    ``BackendUnreachableError`` handler."""
-    if not backend_type:
-        return
-    connector = connectors.get(backend_type)
-    if connector.preflight is None:
-        return
-    await connector.preflight(backend_url)
-
-
-def _admit(reservation: ReserveResult) -> Job:
-    """Unwrap an admission, or raise 409 ``machine_busy`` from the slot holder. Both launchers gate
-    through it, so the busy 409 reads identically whichever command was attempted."""
-    if reservation.job is not None:
-        return reservation.job
-    holder = reservation.holder
-    assert holder is not None  # reserve() sets exactly one side
-    raise MachineBusyError(
-        holder_user=holder.user_id,
-        campaign_id=holder.campaign_id,
-        cycle_id=holder.cycle_id,
-        started_at=holder.started_at,
-    )
 
 
 def build_cycle_config(
@@ -217,6 +147,7 @@ async def mint_campaign_command(
     stores: Stores,
     dataset_name: str,
     job_registry: JobRegistry,
+    job: Job,
     halt_at_accuracy: float | None = None,
     spend_budget_usd: float | None = None,
     token_budget: int | None = None,
@@ -225,7 +156,10 @@ async def mint_campaign_command(
     backend_url: str = DEFAULT_BACKEND_URL,
 ) -> tuple[str, str, Job]:
     """Mint a fresh campaign + cycle, then spawn the runner detached; the caller's 202 goes out the
-    moment this returns. ``pipeline_overlay`` is ``None`` for a fresh upload, which commits its own."""
+    moment this returns. ``pipeline_overlay`` is ``None`` for a fresh upload, which commits its own.
+
+    *job* is the accepted launch (``launcher.admission::request_launch``) — already holding a slot,
+    or queued for one, in which case the first ``await`` below is the wait."""
     # A crashed version-and-repoint leaves a campaign pointing at a name whose data has moved
     # to `-vN`, so heal before resolving a pin. Cheap no-op when nothing is pending.
     recover_pending_replacements(stores=stores)
@@ -236,59 +170,31 @@ async def mint_campaign_command(
 
     backend_type = _read_backend_type_from_dataset(dataset_root, dataset_name)
 
-    user = stores.users.get_or_create(
-        user_id=str(stores.identity.user_id),
-        tenant_id=str(stores.identity.tenant_id),
-        email=claim_email(stores.identity),
+    spend_budget_usd, token_budget = await admit_and_hold(
+        stores=stores,
+        job_registry=job_registry,
+        job=job,
+        verb="mint",
+        dataset_name=dataset_name,
+        backend_type=backend_type,
+        backend_url=backend_url,
+        requested_cap_usd=spend_budget_usd,
+        requested_cap_tokens=token_budget,
     )
-    # Per-user gates first (they count the caller's PRIOR runs), then the atomic global slot.
-    # `reserve` writes its pending reservation before any ``await``, so a second
-    # near-simultaneous launch sees it and is rejected; the real ids land once the mint does.
-    check_launch_quotas(user=user, job_registry=job_registry, rate_limited=True)
-    job = _admit(
-        job_registry.reserve(user_id=str(stores.identity.user_id), dataset_name=dataset_name)
-    )
-
-    # ADMISSION — nothing here touches a cycle, so a refusal answers for the machine slot alone.
-    try:
-        # Pre-202 phase timing — the synchronous init is what the operator waits on
-        # (round-0 scoring is already backgrounded), so the dominant cost lands on disk.
-        _t0 = time.perf_counter()
-        await run_preflight(backend_type, backend_url)
-        _t_preflight = time.perf_counter()
-        # Admission globs + reads every cycle ledger — offload so the scan never blocks the
-        # single event loop on the launch path.
-        spend_budget_usd, token_budget = await asyncio.to_thread(
-            admit_launch,
-            requested_cap_usd=spend_budget_usd,
-            requested_cap_tokens=token_budget,
-            user=user,
-            stores=stores,
-            job_registry=job_registry,
-        )
-        job_registry.set_caps(job.job_id, cap_usd=spend_budget_usd, cap_tokens=token_budget)
-        _t_spendcap = time.perf_counter()
-    except BaseException as exc:
-        _release_slot(job_registry, job.job_id, exc, admitted=False)
-        raise
 
     # SETUP — the ids bind only once the mint resolves; init them so the failure handler can tell
     # "crashed before a cycle existed" (nothing to mark) from "crashed after mint" (mark it).
     campaign_id = cycle_id = ""
     try:
+        # The operator waits on this one synchronously (round-0 scoring is already backgrounded),
+        # so it is the dominant pre-202 cost and lands on disk beside admission's own line.
+        _t0 = time.perf_counter()
         session = await init_services(
             backend_url=backend_url,
             dataset_name=dataset_name,
             identity=stores.identity,
         )
-        _t_init = time.perf_counter()
-        logger.info(
-            "mint-timing[%s]: preflight=%.2fs spend_cap=%.2fs init_services=%.2fs",
-            dataset_name,
-            _t_preflight - _t0,
-            _t_spendcap - _t_preflight,
-            _t_init - _t_spendcap,
-        )
+        logger.info("mint[%s]: init_services=%.2fs", dataset_name, time.perf_counter() - _t0)
 
         # Reused-dataset setup edits ride the overlay onto a per-campaign snapshot;
         # prepare_fresh_cycle freezes the result into the Campaign manifest.
@@ -309,13 +215,13 @@ async def mint_campaign_command(
         campaign_id, cycle_id = minted.campaign_id, minted.cycle_id
         # Resolve the reservation onto the cycle it now names. Every hop-keyed join reads this —
         # `running_job_for` (how `change-spend-budget` reaches the held cap), `reap_cycle_by_id`,
-        # the busy 409 — and each answers nothing at all against `UNRESOLVED_HOP`.
+        # the holder readout — and each answers nothing at all against `UNRESOLVED_HOP`.
         job_registry.update_target(
             job.job_id, hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
         )
 
     except BaseException as exc:
-        _release_slot(job_registry, job.job_id, exc)
+        release_slot(job_registry, job.job_id, exc)
         if campaign_id and cycle_id:
             _record_launch_stop(
                 stores=stores,
@@ -392,6 +298,7 @@ async def start_run_command(
     *,
     stores: Stores,
     job_registry: JobRegistry,
+    job: Job,
     hop: CycleHop,
     kind: str,
     halt_at_accuracy: float | None = None,
@@ -419,56 +326,26 @@ async def start_run_command(
     backend_type = _read_backend_type_from_dataset(dataset_root, campaign.dataset_name)
     dataset_name = campaign.dataset_name
 
-    user = stores.users.get_or_create(
-        user_id=str(stores.identity.user_id),
-        tenant_id=str(stores.identity.tenant_id),
-        email=claim_email(stores.identity),
-    )
-    # Per-user gates first, then the atomic global slot; the ids are known up front here, so
-    # the reservation carries them directly.
-    check_launch_quotas(user=user, job_registry=job_registry, rate_limited=False)
-    job = _admit(
-        job_registry.reserve(
-            user_id=str(stores.identity.user_id),
-            dataset_name=dataset_name,
-            hop=hop,
-        )
+    spend_budget_usd, token_budget = await admit_and_hold(
+        stores=stores,
+        job_registry=job_registry,
+        job=job,
+        verb=kind,
+        dataset_name=dataset_name,
+        backend_type=backend_type,
+        backend_url=backend_url,
+        requested_cap_usd=spend_budget_usd,
+        requested_cap_tokens=token_budget,
     )
 
-    # ADMISSION — this seam shares ``mint_campaign_command``'s preflight + spend-cap prologue and
-    # its instrumentation, including the rule that a refusal here leaves the cycle untouched.
     try:
         _t0 = time.perf_counter()
-        await run_preflight(backend_type, backend_url)
-        _t_preflight = time.perf_counter()
-        spend_budget_usd, token_budget = await asyncio.to_thread(
-            admit_launch,
-            requested_cap_usd=spend_budget_usd,
-            requested_cap_tokens=token_budget,
-            user=user,
-            stores=stores,
-            job_registry=job_registry,
-        )
-        job_registry.set_caps(job.job_id, cap_usd=spend_budget_usd, cap_tokens=token_budget)
-        _t_spendcap = time.perf_counter()
-    except BaseException as exc:
-        _release_slot(job_registry, job.job_id, exc, admitted=False)
-        raise
-
-    try:
         session = await init_services(
             backend_url=backend_url,
             dataset_name=dataset_name,
             identity=stores.identity,
         )
-        _t_init = time.perf_counter()
-        logger.info(
-            "start-timing[%s]: preflight=%.2fs spend_cap=%.2fs init_services=%.2fs",
-            dataset_name,
-            _t_preflight - _t0,
-            _t_spendcap - _t_preflight,
-            _t_init - _t_spendcap,
-        )
+        logger.info("start[%s]: init_services=%.2fs", dataset_name, time.perf_counter() - _t0)
 
         # Resume/fork rebuild config from the LIVE dataset file so declaration edits stay
         # drift-detected, then re-apply the per-campaign overlay that file never holds —
@@ -496,7 +373,7 @@ async def start_run_command(
     except BaseException as exc:
         # No cycle stamp — everything above resolves services and builds config in memory, so the
         # cycle is untouched, and a launch failure is recorded where it happened: the job.
-        _release_slot(job_registry, job.job_id, exc)
+        release_slot(job_registry, job.job_id, exc)
         raise
 
     task = asyncio.create_task(
@@ -558,10 +435,9 @@ async def _run_in_background(
             token_budget=token_budget,
         )
         stop_reason = result.stop_reason
-        # The SAME classification index.json / dashboard.json / the webapp read — a private
-        # reconciler here is how a cycle comes to read "failed" here and "completed" there.
+        # The SAME classification index.json / dashboard.json / the webapp read.
         outcome = stop_reason_outcome(stop_reason)
-        status: JobStatus = _JOB_STATUS_BY_OUTCOME[outcome]
+        status = job_status_for(stop_reason)
         if outcome is StopOutcome.FAILED and result.error is not None:
             persisted_reason: str | None = result.error.message
         else:

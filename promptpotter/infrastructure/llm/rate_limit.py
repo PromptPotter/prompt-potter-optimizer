@@ -8,6 +8,7 @@ import asyncio
 import logging
 import re
 import sys
+import threading
 import time
 from collections import deque
 from collections.abc import Callable, Mapping
@@ -52,9 +53,59 @@ def set_throttle_stall_sink(sink: Callable[[float], None] | None) -> None:
     _THROTTLE_STALL_SINK.set(sink)
 
 
+# WHOSE share of the shared provider window this task draws on. Per-task like the two above, and
+# for the same reason: one ``RateLimiter`` per provider serves every concurrent campaign on the box,
+# so an attribute would credit the wrong account. Unset — the CLI, tests, a standalone install —
+# reads as one tenant, which is what makes the single-operator deployment pay nothing for fairness.
+_RATE_TENANT: ContextVar[str] = ContextVar("rate_limit_tenant", default="")
+
+
+def set_rate_tenant(tenant: str) -> None:
+    """Bind whose share of the shared window this run draws on — the ACCOUNT, not the campaign, so
+    one user cannot take N shares by starting N campaigns. Bound at the same seam as the cycle
+    ledger (``application/run_observers.py::build_run_observers``), so it covers every run on every
+    entry point. **Not** the two one-shot check-in resolver turns, which draw on the default share:
+    they are single calls bounded by their own per-user token bucket (``jobs/quota.py``), not a
+    stream that could starve anyone."""
+    _RATE_TENANT.set(tenant)
+
+
+# The SAME stall seconds, accumulated across every task as a rolling window — the one readable
+# saturation signal this module offers. It rides `_report_throttle_stall` rather than a second
+# ContextVar sink because a sink is per-task and an L4 cell already binds one (`runner/inner/
+# spawn.py`); a second `set()` would shadow whichever bound last. Module-global on purpose: "is this
+# box oversubscribed" is a question about the machine, not about a cycle. Locked because the reader
+# runs in FastAPI's threadpool (via `JobRegistry.reserve`) while every writer runs on the event loop.
+_STALL_WINDOW_S = 60.0
+_stall_events: deque[tuple[float, float]] = deque()
+_stall_lock = threading.Lock()
+
+
+def _prune_stalls(now: float, window_s: float) -> None:
+    cutoff = now - window_s
+    while _stall_events and _stall_events[0][0] < cutoff:
+        _stall_events.popleft()
+
+
+def throttle_stall_seconds(window_s: float = _STALL_WINDOW_S) -> float:
+    """Seconds every task TOGETHER spent blocked in the shared throttle over the trailing window.
+
+    Deliberately a LAGGING signal: it rises only once the box is already oversubscribed, and says
+    nothing about headroom before then. That is why its one consumer (``application/jobs/capacity``)
+    may only ever LOWER a configured ceiling with it, never raise one."""
+    now = time.monotonic()
+    with _stall_lock:
+        _prune_stalls(now, window_s)
+        return sum(seconds for _, seconds in _stall_events)
+
+
 def _report_throttle_stall(seconds: float) -> None:
     if seconds <= 0:
         return
+    now = time.monotonic()
+    with _stall_lock:
+        _prune_stalls(now, _STALL_WINDOW_S)
+        _stall_events.append((now, seconds))
     sink = _THROTTLE_STALL_SINK.get()
     if sink is None:
         return
@@ -303,12 +354,35 @@ class _TokenReservation:
 
     ts: float
     tokens: int
+    tenant: str = ""
+
+
+@dataclass(eq=False)
+class _Waiter:
+    """One caller queued for the window. ``eq=False`` so the list holds it by IDENTITY — two
+    waiters of one tenant with the same estimate are different callers, and removing the wrong one
+    would leave a caller waiting on a slot already handed out."""
+
+    tenant: str
+    tokens: int
+
+
+# How long a waiter that fits the window but lost the pick sleeps before re-checking. Only ever
+# paid while the window is contended, and only against calls that take seconds to minutes.
+_YIELD_S = 0.05
 
 
 @dataclass
 class RateLimiter:
-    """Rolling-window request/token limiter. `*_pinned` slots are caller-configured and never
-    overwritten by `apply_discovered()`. `None` cap disables that axis.
+    """Rolling-window request/token limiter, **admitting tenants fairly rather than in arrival
+    order**. `*_pinned` slots are caller-configured and never overwritten by `apply_discovered()`.
+    `None` cap disables that axis.
+
+    One bucket per provider, because the bucket models the provider's cap — a property of the KEY,
+    not of our users — and dividing it per tenant cannot manufacture quota. What is divided is the
+    ORDER into it: :meth:`_next_up` picks the least-served tenant, so a burst cannot push a
+    neighbour behind it. That is deficit round-robin, and it is work-conserving: an idle tenant
+    costs nothing and a lone tenant takes the fast path with no sleep at all.
     """
 
     rpm: int | None = None
@@ -317,8 +391,9 @@ class RateLimiter:
     rpm_pinned: bool = False
     tpm_pinned: bool = False
 
-    _requests: deque[float] = field(default_factory=deque)
+    _requests: deque[tuple[float, str]] = field(default_factory=deque)
     _tokens: deque[_TokenReservation] = field(default_factory=deque)
+    _waiting: list[_Waiter] = field(default_factory=list)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def apply_discovered(self, rpm: int | None, tpm: int | None) -> None:
@@ -328,24 +403,53 @@ class RateLimiter:
             self.tpm = tpm
 
     async def acquire(self, estimated_tokens: int) -> _TokenReservation:
-        """Block until the request fits RPM+TPM; reserves both. Timed from OUTSIDE ``_lock``, which
-        is held across the sleep — the convoy behind a throttled caller is most of the stall under
-        concurrency and is invisible from within it."""
+        """Block until the request fits RPM+TPM **and this tenant's turn comes**; reserves both.
+
+        The lock guards state mutation only and is never held across a sleep. It used to be, which
+        made ``asyncio.Lock``'s FIFO queue the scheduler: a tenant issuing ten calls put ten of them
+        ahead of a neighbour's one, so the greedier account took the window and the quieter one
+        waited behind all of it. Timed from OUTSIDE the lock either way — the queue is most of the
+        stall under concurrency and is invisible from within it."""
         started = time.monotonic()
+        waiter = _Waiter(tenant=_RATE_TENANT.get(), tokens=estimated_tokens)
+        self._waiting.append(waiter)
         try:
-            async with self._lock:
-                while True:
+            while True:
+                async with self._lock:
                     now = time.monotonic()
                     self._prune(now)
-                    wait = self._wait_needed(now, estimated_tokens)
-                    if wait <= 0:
-                        self._requests.append(now)
-                        entry = _TokenReservation(ts=now, tokens=estimated_tokens)
+                    if self._next_up(now) is waiter:
+                        self._waiting.remove(waiter)
+                        self._requests.append((now, waiter.tenant))
+                        entry = _TokenReservation(
+                            ts=now, tokens=estimated_tokens, tenant=waiter.tenant
+                        )
                         self._tokens.append(entry)
                         return entry
-                    await asyncio.sleep(wait)
+                    wait = self._wait_needed(now, estimated_tokens)
+                # Whoever was picked wakes on its own sleep and takes the slot, so a lost pick
+                # costs one short yield rather than a place at the back of a queue.
+                await asyncio.sleep(wait if wait > 0 else _YIELD_S)
         finally:
+            if waiter in self._waiting:
+                self._waiting.remove(waiter)
             _report_throttle_stall(time.monotonic() - started)
+
+    def _served(self, tenant: str) -> float:
+        """What *tenant* has already taken from the current window, in the axis that BINDS. Derived
+        from the window entries themselves rather than a second ledger, so ``_prune`` keeps it
+        honest for free and a tenant that goes quiet forfeits its deficit as its entries age out."""
+        if self.tpm is not None:
+            return float(sum(e.tokens for e in self._tokens if e.tenant == tenant))
+        return float(sum(1 for _, t in self._requests if t == tenant))
+
+    def _next_up(self, now: float) -> _Waiter | None:
+        """Whose turn it is: the least-served tenant among the waiters that fit RIGHT NOW, earliest
+        arrival breaking a tie (``min`` over an arrival-ordered list returns the first minimum)."""
+        ready = [w for w in self._waiting if self._wait_needed(now, w.tokens) <= 0]
+        if not ready:
+            return None
+        return min(ready, key=lambda w: self._served(w.tenant))
 
     async def acquire_with_estimation(
         self,
@@ -367,7 +471,7 @@ class RateLimiter:
 
     def _prune(self, now: float) -> None:
         cutoff = now - self.window_s
-        while self._requests and self._requests[0] < cutoff:
+        while self._requests and self._requests[0][0] < cutoff:
             self._requests.popleft()
         while self._tokens and self._tokens[0].ts < cutoff:
             self._tokens.popleft()
@@ -375,7 +479,7 @@ class RateLimiter:
     def _rpm_wait(self, now: float) -> float:
         if self.rpm is None or len(self._requests) < self.rpm:
             return 0.0
-        return self._requests[0] + self.window_s - now
+        return self._requests[0][0] + self.window_s - now
 
     def _tpm_wait(self, now: float, estimated_tokens: int) -> float:
         if self.tpm is None:
@@ -429,6 +533,8 @@ __all__ = [
     "parse_retry_after",
     "raise_if_request_too_large",
     "set_abort_check",
+    "set_rate_tenant",
     "set_throttle_stall_sink",
+    "throttle_stall_seconds",
     "wait_with_countdown",
 ]

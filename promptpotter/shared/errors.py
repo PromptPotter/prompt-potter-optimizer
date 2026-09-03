@@ -67,8 +67,9 @@ class ConflictError(PotterError):
 
 
 class MachineBusyError(PotterError):
-    """The single sequential run slot is taken — 409, carrying the holder's presence record. At
-    capacity 1 the holder may be the caller's OWN run, so the message stays neutral."""
+    """Every run slot on the machine is taken — 409, carrying the oldest live run as the holder.
+    Occupancy is not relative to who asks, so the holder may be the caller's OWN run and the
+    message stays neutral."""
 
     http_status = 409
     code = "machine_busy"
@@ -82,8 +83,7 @@ class MachineBusyError(PotterError):
         started_at: str | None,
     ) -> None:
         super().__init__(
-            "A campaign is already running — the machine processes one at a "
-            "time. Try again once it finishes.",
+            "Every run slot on this machine is taken. Try again once one finishes.",
             details={
                 "holder_user": holder_user,
                 "campaign_id": campaign_id,

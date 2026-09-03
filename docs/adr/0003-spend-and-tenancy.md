@@ -255,8 +255,10 @@ point; the halt is its price.
 *A run in flight holds its ceiling.* The admitted caps are stamped on the `Job`
 (`JobRegistry.set_caps`) and subtracted from the next admission's headroom for as long as that job
 runs; ending it releases them. Without the reservation, two concurrent launches are each admitted
-against the same remainder and the pair spends double the ceiling — which `MACHINE_RUN_CAPACITY`
-above 1 makes reachable.
+against the same remainder and the pair spends double the ceiling. A launch that has reserved but
+not yet stamped is the same hole with a shorter window, so an account with an earlier unstamped
+sibling is refused rather than quoted (`quota.py::_outstanding_reservations`). A QUEUED launch
+holds nothing in either sense — it has been admitted by nobody yet.
 
 *The residue is the operator's number.* Admission bounds what a run may declare, not what a round
 boundary overshoots or what an unpriced call turns out to have cost, so `SpendCeilings.overrun`

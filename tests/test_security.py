@@ -333,7 +333,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
     mis-clamp hands a delegate a capability it was never given, and nothing errors —
     the privileged command simply succeeds. Pins four properties: attenuation clamps
     an over-broad grant, the rebind binds to the delegator's tenant (not an arbitrary
-    one), the dispatcher gate denies a tier the delegate lacks, and a malformed grant
+    one), the dispatcher gate denies a capability the delegate lacks, and a malformed grant
     fails secure (no caps) rather than promoting to owner.
     """
     import types
@@ -484,6 +484,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
             user=generous,
             stores=_oidc_stores({"spend_ceiling_usd": 2.0}),
             job_registry=idle_registry,
+            job_id="job-a",
         ).usd
         == 2.0
     )
@@ -494,6 +495,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
             user=generous,
             stores=_oidc_stores({}),
             job_registry=idle_registry,
+            job_id="job-a",
         ).usd
         == 10.0
     )
@@ -516,6 +518,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
             user=thin,
             stores=_oidc_stores({"spend_ceiling_usd": 2.0}),
             job_registry=idle_registry,
+            job_id="job-a",
         ).usd
         == 1.0
     )
@@ -693,9 +696,9 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
 
     stores = built_stores
     hop = CycleHop(campaign_id="camp-3", cycle_id="cycle_budget0000")
-    registry = JobRegistry(tmp_path / "jobs")
-    job = registry.reserve(user_id="default", dataset_name="ds1", hop=hop).job
-    assert job is not None
+    registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    job = registry.request_slot(user_id="default", dataset_name="ds1", hop=hop)
+    assert job.status == "pending", "an empty box must hand out a slot, not a place in line"
     registry.set_caps(job.job_id, cap_usd=0.30, cap_tokens=5_000_000)
 
     await CommandDispatcher(stores, registry)._apply_change_spend_budget(
@@ -723,7 +726,9 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
         max_tokens=1_000,
         user=User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01"),
         stores=delegated,
-        job_registry=types.SimpleNamespace(list_running=lambda *, user_id: []),
+        job_registry=types.SimpleNamespace(
+            list_running=lambda *, user_id: [], running_job_for=lambda _hop: None
+        ),
         hop=hop,
     )
     assert caps.usd is None, "a grant became a ceiling on an arm the caller left alone"
@@ -959,6 +964,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
         user=free_tier,
         stores=_stores(issuer=web, ledgers=[]),
         job_registry=idle,
+        job_id="job-a",
     )
     assert fresh.usd == pytest.approx(settings.FREE_TIER_LAUNCH_STEP_USD)
     assert fresh.usd < settings.FREE_TIER_SPEND_CAP_USD
@@ -973,25 +979,39 @@ def test_host_wallet_ceilings_hold_in_both_units(
             user=free_tier,
             stores=_stores(issuer=web, ledgers=[]),
             job_registry=idle,
+            job_id="job-a",
         )
 
     # A cycle already in flight holds its whole declared ceiling, or two concurrent launches are
     # both admitted against one remainder and the pair spends double it.
+    def _sibling(**caps: Any) -> Any:
+        held = types.SimpleNamespace(job_id="job-b", hop=None, **caps)
+        return types.SimpleNamespace(list_running=lambda *, user_id: [held])
+
     with pytest.raises(QuotaExceededError):
         admit_launch(
             requested_cap_usd=None,
             requested_cap_tokens=None,
             user=free_tier,
             stores=_stores(issuer=web, ledgers=[]),
-            job_registry=types.SimpleNamespace(
-                list_running=lambda *, user_id: [
-                    types.SimpleNamespace(
-                        hop=None,
-                        cap_usd=settings.FREE_TIER_SPEND_CAP_USD,
-                        cap_tokens=settings.FREE_TIER_TOKEN_CAP,
-                    )
-                ]
+            job_registry=_sibling(
+                cap_usd=settings.FREE_TIER_SPEND_CAP_USD,
+                cap_tokens=settings.FREE_TIER_TOKEN_CAP,
             ),
+            job_id="job-a",
+        )
+
+    # ...and one admitted but not yet STAMPED holds an amount nothing can read. Counted as zero,
+    # both launches inside that window are quoted the same remainder and the pair spends twice the
+    # ceiling, with no error at any step. It must refuse instead.
+    with pytest.raises(QuotaExceededError):
+        admit_launch(
+            requested_cap_usd=None,
+            requested_cap_tokens=None,
+            user=free_tier,
+            stores=_stores(issuer=web, ledgers=[]),
+            job_registry=_sibling(cap_usd=None, cap_tokens=None),
+            job_id="job-a",
         )
 
     # `:nitro` is a route selector, so the call is unpriceable BY DESIGN and the account's USD
@@ -1005,6 +1025,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
             issuer=web, ledgers=_ledger("blind.jsonl", model="openai/gpt-oss-20b:nitro")
         ),
         job_registry=idle,
+        job_id="job-a",
     )
     assert blind.usd <= settings.UNPRICED_GRACE_USD
     assert blind.usd == pytest.approx(settings.FREE_TIER_LAUNCH_STEP_USD)
@@ -1032,6 +1053,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
         user=free_tier,
         stores=_stores(issuer=None, ledgers=[]),
         job_registry=idle,
+        job_id="job-a",
     ) == (None, None)
 
 

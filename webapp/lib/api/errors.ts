@@ -64,9 +64,6 @@ export class IngestApiError extends Error {
       const what = this.backendType ? ` ‘${this.backendType}’` : "";
       return `Backend${what}${where} is not running. Start the backend and try again.`;
     }
-    if (this.errorCode === "machine_busy") {
-      return "A campaign is already running — the machine processes one at a time. Try again once it finishes.";
-    }
     if (this.suggestedSlug) {
       return `${this.message} Suggested slug: ${this.suggestedSlug}.`;
     }

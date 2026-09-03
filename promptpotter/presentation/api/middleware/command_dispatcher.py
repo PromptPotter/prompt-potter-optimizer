@@ -166,6 +166,10 @@ CAP_FOR_KIND: dict[str, str] = {
     "start-checkin": CAMPAIGN_RUN_CAP,
     "change-spend-budget": CAMPAIGN_BUDGET_CAP,
     "mint-campaign": CAMPAIGN_CREATE_CAP,
+    # Leaving the queue is the same authority as joining it — and the OWNER check is stricter
+    # still, enforced in `JobRegistry.cancel_queued`, so a delegate holding `campaign.run`
+    # cannot withdraw somebody else's launch.
+    "cancel-queued-run": CAMPAIGN_RUN_CAP,
     "register-backend": CAMPAIGN_CREATE_CAP,
     "edit-draft-campaign": CAMPAIGN_CREATE_CAP,
     "resolve-origin": CAMPAIGN_CREATE_CAP,
@@ -394,6 +398,10 @@ class StartCheckinPayload(_CheckinPayload):
     campaign_id: str = Field(min_length=8, max_length=128)
 
 
+class CancelQueuedRunPayload(CommandPayload):
+    job_id: str = Field(min_length=1, max_length=128)
+
+
 class MintCampaignPayload(CommandPayload):
     dataset_name: str = Field(min_length=1, max_length=64)
     halt_at_accuracy: WireFloat | None = Field(default=None, ge=0.0, le=1.0)
@@ -431,6 +439,7 @@ PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {
     "set-campaign-label": SetCampaignLabelPayload,
     "register-backend": RegisterBackendPayload,
     "mint-campaign": MintCampaignPayload,
+    "cancel-queued-run": CancelQueuedRunPayload,
     "replace-dataset": ReplaceDatasetPayload,
     "compact-archive": CompactArchivePayload,
     "edit-draft-campaign": EditDraftCampaignPayload,
@@ -664,6 +673,9 @@ class CommandDispatcher:
             # `{"replayed": true}` shape 500s the retry that an Idempotency-Key exists to make safe.
             # All-zero is also the true answer: this attempt moved nothing.
             on_replay = lambda: ArchiveReport().model_dump(mode="json")  # noqa: E731
+        elif isinstance(payload, CancelQueuedRunPayload):
+            job_id = payload.job_id
+            applier = lambda: self._apply_cancel_queued_run(job_id)  # noqa: E731
         elif isinstance(payload, MintCampaignPayload):
             mint = payload
 
@@ -818,6 +830,9 @@ class CommandDispatcher:
         model, so the branch that reads a field is the branch its type reached. Nothing here
         re-validates: the model is the only validation, and a second lenient pass over an
         already-recorded payload can only disagree with the record."""
+        # Every launch this dispatcher starts runs the campaign's own dataset; the queue entry has
+        # to name it, and this is the one place the manifest is already open.
+        dataset_name = campaign.dataset_name if campaign else ""
         if isinstance(payload, ForkCyclePayload):
             from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
                 mint_operator_fork,
@@ -854,12 +869,26 @@ class CommandDispatcher:
                     steered_by=payload.steered_by,
                     keep_rounds=payload.keep_rounds,
                 )
-                await self._apply_start_run(
-                    hop=CycleHop(campaign_id=hop.campaign_id, cycle_id=new_cycle_id),
-                    kind="resume",
-                    halt_at_accuracy=None,
-                    spend_budget_usd=None,
-                )
+                try:
+                    await self._apply_start_run(
+                        hop=CycleHop(campaign_id=hop.campaign_id, cycle_id=new_cycle_id),
+                        kind="resume",
+                        dataset_name=dataset_name,
+                        halt_at_accuracy=None,
+                        spend_budget_usd=None,
+                    )
+                except BaseException:
+                    # ONE act, so it either lands whole or leaves nothing: the launch can still be
+                    # refused (a full machine, an exhausted wallet, a dark backend) after the mint
+                    # has already written the seeded fork, and what was left behind was a cycle
+                    # awaiting a resume nobody sends — the operator sees a fork in the tree that
+                    # never starts and cannot tell it from one that stopped. `sweep_batch.py` owes
+                    # the same debt and pays it in its `finally`; this site did not.
+                    # `_apply_start_run` raises only from BEFORE its background task exists, so the
+                    # stub is provably idle and the shared cleanup's own emptiness test is the
+                    # backstop.
+                    self._cleanup_failed_fork(hop, new_cycle_id)
+                    raise
 
             return _apply_fork
         if isinstance(payload, StepCyclePayload):
@@ -869,6 +898,7 @@ class CommandDispatcher:
             return lambda: self._apply_start_run(
                 hop=hop,
                 kind="resume",
+                dataset_name=dataset_name,
                 halt_at_accuracy=None,
                 spend_budget_usd=None,
                 stop_after_rounds=steps,
@@ -899,6 +929,7 @@ class CommandDispatcher:
                 await self._apply_start_run(
                     hop=hop,
                     kind=run.kind,
+                    dataset_name=dataset_name,
                     halt_at_accuracy=run.halt_at_accuracy,
                     spend_budget_usd=run.spend_budget_usd,
                     token_budget=run.token_budget,
@@ -1041,23 +1072,28 @@ class CommandDispatcher:
         )
 
     async def _apply_mint_campaign(self, payload: MintCampaignPayload) -> None:
-        """The 202 returns once the manifest + root cycle index are written; the run proceeds via
-        JobRegistry and the webapp discovers the new ids by polling ``/api/v1/active``."""
+        """The 202 returns once the manifest + root cycle index are written — or, when the box is
+        full, the moment the launch takes its place in line and the mint moves behind the wait. The
+        webapp discovers the new ids by polling ``/api/v1/active`` either way."""
+        from promptpotter.application.jobs.launcher.admission import launch
         from promptpotter.application.jobs.launcher.mint_and_start import mint_campaign_command
 
-        if self._job_registry is None:
-            raise ServiceUnavailableError(
-                "job registry not initialised", code="job_registry_unavailable"
-            )
+        registry = self._require_job_registry()
         # Campaign-from-origin rides the check-in path, not this workspace verb, so there is no
         # origin_override here. Its PotterErrors map centrally in `_record_and_apply`.
-        await mint_campaign_command(
+        await launch(
             stores=self._stores,
+            job_registry=registry,
             dataset_name=payload.dataset_name,
-            job_registry=self._job_registry,
-            halt_at_accuracy=payload.halt_at_accuracy,
-            spend_budget_usd=payload.spend_budget_usd,
-            token_budget=payload.token_budget,
+            run=lambda job: mint_campaign_command(
+                stores=self._stores,
+                dataset_name=payload.dataset_name,
+                job_registry=registry,
+                job=job,
+                halt_at_accuracy=payload.halt_at_accuracy,
+                spend_budget_usd=payload.spend_budget_usd,
+                token_budget=payload.token_budget,
+            ),
         )
 
     async def _apply_start_run(
@@ -1065,30 +1101,87 @@ class CommandDispatcher:
         *,
         hop: CycleHop,
         kind: str,
+        dataset_name: str,
         halt_at_accuracy: float | None,
         spend_budget_usd: float | None,
         token_budget: int | None = None,
         stop_after_rounds: int | None = None,
     ) -> None:
-        """``stop_after_rounds`` bounds the run in place — the ``step-round`` verb's mechanism."""
+        """``stop_after_rounds`` bounds the run in place — the ``step-round`` verb's mechanism.
+
+        ``dataset_name`` comes from the campaign the dispatcher already loaded: the queue entry has
+        to name what it will run from the moment it joins, and re-reading the manifest here would
+        be a second answer to a question one caller up already has."""
+        from promptpotter.application.jobs.launcher.admission import launch
         from promptpotter.application.jobs.launcher.mint_and_start import start_run_command
 
+        registry = self._require_job_registry()
+        # Quota / Launch / BackendUnreachable are PotterErrors mapped centrally
+        # by _record_and_apply — no per-applier arm here.
+        await launch(
+            stores=self._stores,
+            job_registry=registry,
+            dataset_name=dataset_name,
+            hop=hop,
+            # The launch-rate and daily-campaign arms bound a STRANGER spending the host's key;
+            # starting a campaign that already exists is not a second campaign.
+            rate_limited=False,
+            run=lambda job: start_run_command(
+                stores=self._stores,
+                job_registry=registry,
+                job=job,
+                hop=hop,
+                kind=kind,
+                halt_at_accuracy=halt_at_accuracy,
+                spend_budget_usd=spend_budget_usd,
+                token_budget=token_budget,
+                stop_after_rounds=stop_after_rounds,
+            ),
+        )
+
+    def _apply_cancel_queued_run(self, job_id: str) -> None:
+        """Withdraw a launch that is still waiting for a slot. A queue with no way out is a trap:
+        `pause-cycle` cannot serve one, because a queued mint has no cycle to write a flag into.
+
+        Whose launch it is decides, not which capability the caller holds — ``cancel_queued``
+        refuses anyone else's, and an already-started or already-gone job answers 404 rather than
+        silently doing nothing. Cancelling a queued FORK leaves its stub behind for
+        ``cleanup-empty-cycles``; the fork was minted before it queued and deleting a cycle is that
+        verb's authority, not this one's."""
+        registry = self._require_job_registry()
+        if not registry.cancel_queued(job_id, user_id=str(self._stores.identity.user_id)):
+            raise NotFoundError("Not found", code="not_found")
+
+    def _require_job_registry(self) -> JobRegistry:
+        """The registry every launch verb needs, or the 503 that says why not."""
         if self._job_registry is None:
             raise ServiceUnavailableError(
                 "job registry not initialised", code="job_registry_unavailable"
             )
-        # Quota / Launch / BackendUnreachable are PotterErrors mapped centrally
-        # by _record_and_apply — no per-applier arm here.
-        await start_run_command(
-            stores=self._stores,
-            job_registry=self._job_registry,
-            hop=hop,
-            kind=kind,
-            halt_at_accuracy=halt_at_accuracy,
-            spend_budget_usd=spend_budget_usd,
-            token_budget=token_budget,
-            stop_after_rounds=stop_after_rounds,
+        return self._job_registry
+
+    def _cleanup_failed_fork(self, parent_hop: CycleHop, new_cycle_id: str) -> None:
+        """Undo a fork whose launch never started. Best-effort and never masks the launch failure —
+        the operator has to be told why the fork was refused, not why the tidy-up went wrong."""
+        from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
+            cleanup_stub_fork_if_empty,
         )
+
+        try:
+            deleted, reason = cleanup_stub_fork_if_empty(
+                campaign_store=self._stores.campaigns,
+                hop=CycleHop(campaign_id=parent_hop.campaign_id, cycle_id=new_cycle_id),
+                parent_cycle_id=parent_hop.cycle_id,
+            )
+        except Exception:
+            logger.exception(
+                "fork %s: launch failed and its stub could not be cleaned", new_cycle_id
+            )
+            return
+        if not deleted:
+            logger.warning(
+                "fork %s: launch failed and its stub was kept (%s)", new_cycle_id, reason
+            )
 
     def _apply_cleanup_empty(self, hop: CycleHop) -> None:
         from promptpotter.application.optimization.resume_and_fork.fork_siblings import (

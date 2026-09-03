@@ -2739,13 +2739,48 @@
         "title": "MachineHolder",
         "type": "object"
       },
+      "MachineQueueEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "dataset_name": {
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "position": {
+            "description": "1-based place in the machine-wide drain order at the moment of this read. Least-served-first, so it moves as other accounts start and finish — it is where this launch stands now, not a countdown.",
+            "title": "Position",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "job_id",
+          "dataset_name",
+          "created_at",
+          "position"
+        ],
+        "title": "MachineQueueEntry",
+        "type": "object"
+      },
       "MachineStatusResponse": {
         "additionalProperties": false,
         "properties": {
           "busy": {
-            "description": "True iff a *different* user holds a running job (the server runs one campaign at a time).",
+            "description": "True iff `running >= capacity` — no slot free for anyone, the caller included. A launch is then QUEUED rather than refused, so this reads as 'you will wait', not 'you cannot start'.",
             "title": "Busy",
             "type": "boolean"
+          },
+          "capacity": {
+            "description": "Campaigns the machine admits right now. Resolved per read against the same rule a launch is admitted on, and lowered from the operator's ceiling while the shared provider throttle is saturated.",
+            "title": "Capacity",
+            "type": "integer"
           },
           "holder": {
             "anyOf": [
@@ -2756,10 +2791,31 @@
                 "type": "null"
               }
             ],
-            "description": "Who holds the slot; null when free for this caller."
+            "description": "The oldest live run, whoever owns it; null when nothing is running."
+          },
+          "queue": {
+            "description": "The CALLER's own waiting launches, oldest first — everything a client needs to say 'queued, position 3' and to offer a cancel. Other tenants' entries are counted in `queued` and never listed.",
+            "items": {
+              "$ref": "#/components/schemas/MachineQueueEntry"
+            },
+            "title": "Queue",
+            "type": "array"
+          },
+          "queued": {
+            "description": "Launches waiting for a slot, machine-wide — an occupancy figure like `running`, not a list. Who they belong to is deliberately not served; `queue` carries the caller's own.",
+            "title": "Queued",
+            "type": "integer"
+          },
+          "running": {
+            "description": "Campaigns currently live on the machine.",
+            "title": "Running",
+            "type": "integer"
           }
         },
         "required": [
+          "capacity",
+          "running",
+          "queued",
           "busy"
         ],
         "title": "MachineStatusResponse",
@@ -6994,7 +7050,7 @@
     },
     "/api/v1/machine-status": {
       "get": {
-        "description": "Whether another user is currently running a campaign on this machine.\n\nThe server is single-process and runs campaigns in sequence, so a launch\nis rejected (409 ``machine_busy``) while anyone else's run is live. This\nread is the poll that lets the webapp surface that state as a critical-alert\nbanner *before* the operator tries — the always-on twin of the 409. Reads\nthe same :meth:`JobRegistry.machine_holder` the launch gate uses, so banner\nand gate never disagree. Cross-user holder info is intentionally exposed\n(the seed of an admin presence view).",
+        "description": "Machine occupancy — how many campaigns may run here, and how many do.\n\nWhat the webapp polls to say the machine is full *before* the operator presses. ``busy`` is\n``running >= capacity`` against the same :func:`resolve_run_capacity`\n:meth:`JobRegistry.request_slot` admits on, so banner and gate cannot disagree — and it means\n\"you will wait\", not \"you cannot start\". Cross-user holder info is intentionally exposed (the\nseed of an admin presence view).\n\nOccupancy is not relative to who asks, so the caller's own run counts. Excluding it makes\nbanner and gate disagree exactly where it matters: on an auth-off box every request is the same\noperator, so the banner reads free while that operator's own launch is queued.\n\nThe QUEUE is served two ways on purpose. ``queued`` is occupancy — how deep the line is,\nwhich anyone may see because it is a fact about the machine. ``queue`` is the caller's own\nentries with their places in it, which is what a client needs to say \"queued, position 3\" and\nto offer a cancel; other tenants' waiting launches are counted and never named.\n\n``identity`` decides which entries those are, and it is what 401s an unauthenticated read —\nso it was already load-bearing here before the queue, since dropping it would publish\ncross-user holder info.",
         "operationId": "get_machine_status_api_v1_machine_status_get",
         "responses": {
           "200": {

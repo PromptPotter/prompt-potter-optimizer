@@ -201,11 +201,29 @@ class Settings(BaseSettings):
     USER_RATE_BURST: int = 5
     USER_RATE_PER_MIN: float = 1.0
 
-    # How many campaigns the server admits at once; 1 = strictly sequential, and a launch
-    # while a run is in flight gets 409 `machine_busy`. This is the concurrent-serving lever,
-    # but DO NOT raise it above 1 until BYO per-user keys and a per-tenant RateLimiter land —
-    # N parallel runs on the shared key/rate-bucket would cross-bill and throttle.
-    MACHINE_RUN_CAPACITY: int = 1
+    # The CEILING on campaigns admitted at once — `jobs/capacity.py::resolve_run_capacity` reads it
+    # per admission and may only ever LOWER it (provider back-pressure), never raise it. 1 = strictly
+    # sequential.
+    #
+    # **This is the MACHINE's ceiling, not anyone's allowance**, and it is deliberately not the
+    # binding limit: `user.max_concurrent_cycles` is what the host turns down to bound one person,
+    # and each account answers to its own lifetime wallet besides. So the default is sized to leave
+    # both of those the actual gate — one user at their own default allowance of 2, and room for a
+    # second person beside them, which is the case that has to work on a shared box.
+    #
+    # Raising it further is safe where concurrent runs cannot take from each other. They no longer
+    # can: the shared provider window admits tenants least-served-first
+    # (`infrastructure/llm/rate_limit.py`) rather than in lock-arrival order, so one account's burst
+    # cannot starve another inside the 60 s window. What more concurrency cannot manufacture is
+    # provider QUOTA — two busy tenants on one key each get about half the throughput however the
+    # window is divided, and only a higher tier or per-user keys change that.
+    MACHINE_RUN_CAPACITY: int = 3
+
+    # How long a launch may wait in line before it is withdrawn. A full box QUEUES rather than
+    # refuses, and an unbounded queue is a promise the machine may never keep — a run that waited
+    # overnight starts against a world the operator has moved on from. Six hours is "still the same
+    # working day"; past it the honest answer is to say so and let them press again.
+    QUEUE_MAX_WAIT_S: float = 6 * 3600.0
 
     # File-based observability (traces, events.jsonl)
     OBS_ENABLED: bool = True

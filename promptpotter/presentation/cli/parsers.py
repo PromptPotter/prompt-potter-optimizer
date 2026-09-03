@@ -38,8 +38,15 @@ def _add_global_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_runtime_halts(p: argparse.ArgumentParser) -> None:
-    """Shared ``--halt-at`` / ``--spend-budget`` / ``--token-budget``. Any source halts at the next
-    round boundary once its own cumulative total (optimizer + backend) crosses the threshold."""
+    """The two LOOP verbs' shared run controls: ``--halt-at`` / ``--spend-budget`` /
+    ``--token-budget``, which halt at the next round boundary once their own cumulative total
+    (optimizer + backend) crosses the threshold, plus ``--no-wait``, which is about starting at all.
+    Only `new` and `resume` take these — no diagnostic verb holds a machine slot or runs a loop."""
+    p.add_argument(
+        "--no-wait",
+        action="store_true",
+        help="Refuse instead of waiting when every run slot on the machine is taken.",
+    )
     p.add_argument(
         "--halt-at",
         dest="halt_at_accuracy",
@@ -674,6 +681,13 @@ def build_parser() -> argparse.ArgumentParser:
         "the browser offers on a slug collision, where ingest otherwise asks for a new name.",
     )
     p_replace.add_argument("slug", help="The dataset slug to replace.")
+
+    p_cancel_q = sub.add_parser(
+        "cancel-queued",
+        help="Withdraw a launch waiting for a machine slot. A terminal run leaves the queue by "
+        "Ctrl+C; this reaches the ones that cannot, such as a browser launch behind a full box.",
+    )
+    p_cancel_q.add_argument("job_id", help="The queued job id, as served by /machine-status.")
 
     return parser
 

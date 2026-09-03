@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 from pydantic import Field
 
+from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     optimizer_manifest,
     optimizer_resolved_schemas,
@@ -193,41 +194,103 @@ class MachineHolder(StrictModel):
     )
 
 
+class MachineQueueEntry(StrictModel):
+    job_id: str
+    dataset_name: str
+    created_at: str
+    position: int = Field(
+        description="1-based place in the machine-wide drain order at the moment of this read. "
+        "Least-served-first, so it moves as other accounts start and finish — it is where this "
+        "launch stands now, not a countdown."
+    )
+
+
 class MachineStatusResponse(StrictModel):
+    capacity: int = Field(
+        description="Campaigns the machine admits right now. Resolved per read against the same "
+        "rule a launch is admitted on, and lowered from the operator's ceiling while the shared "
+        "provider throttle is saturated."
+    )
+    running: int = Field(description="Campaigns currently live on the machine.")
+    queued: int = Field(
+        description="Launches waiting for a slot, machine-wide — an occupancy figure like "
+        "`running`, not a list. Who they belong to is deliberately not served; `queue` carries "
+        "the caller's own."
+    )
     busy: bool = Field(
-        description="True iff a *different* user holds a running job (the server runs one campaign at a time)."
+        description="True iff `running >= capacity` — no slot free for anyone, the caller "
+        "included. A launch is then QUEUED rather than refused, so this reads as 'you will wait', "
+        "not 'you cannot start'."
     )
     holder: MachineHolder | None = Field(
-        default=None, description="Who holds the slot; null when free for this caller."
+        default=None,
+        description="The oldest live run, whoever owns it; null when nothing is running.",
+    )
+    queue: list[MachineQueueEntry] = Field(
+        default_factory=list,
+        description="The CALLER's own waiting launches, oldest first — everything a client needs "
+        "to say 'queued, position 3' and to offer a cancel. Other tenants' entries are counted in "
+        "`queued` and never listed.",
     )
 
 
 @active_router.get("/machine-status", response_model=MachineStatusResponse, tags=["Sessions"])
 def get_machine_status(identity: IdentityDep, jobs: JobRegistryDep) -> MachineStatusResponse:
-    """Whether another user is currently running a campaign on this machine.
+    """Machine occupancy — how many campaigns may run here, and how many do.
 
-    The server is single-process and runs campaigns in sequence, so a launch
-    is rejected (409 ``machine_busy``) while anyone else's run is live. This
-    read is the poll that lets the webapp surface that state as a critical-alert
-    banner *before* the operator tries — the always-on twin of the 409. Reads
-    the same :meth:`JobRegistry.machine_holder` the launch gate uses, so banner
-    and gate never disagree. Cross-user holder info is intentionally exposed
-    (the seed of an admin presence view).
+    What the webapp polls to say the machine is full *before* the operator presses. ``busy`` is
+    ``running >= capacity`` against the same :func:`resolve_run_capacity`
+    :meth:`JobRegistry.request_slot` admits on, so banner and gate cannot disagree — and it means
+    "you will wait", not "you cannot start". Cross-user holder info is intentionally exposed (the
+    seed of an admin presence view).
+
+    Occupancy is not relative to who asks, so the caller's own run counts. Excluding it makes
+    banner and gate disagree exactly where it matters: on an auth-off box every request is the same
+    operator, so the banner reads free while that operator's own launch is queued.
+
+    The QUEUE is served two ways on purpose. ``queued`` is occupancy — how deep the line is,
+    which anyone may see because it is a fact about the machine. ``queue`` is the caller's own
+    entries with their places in it, which is what a client needs to say "queued, position 3" and
+    to offer a cancel; other tenants' waiting launches are counted and never named.
+
+    ``identity`` decides which entries those are, and it is what 401s an unauthenticated read —
+    so it was already load-bearing here before the queue, since dropping it would publish
+    cross-user holder info.
     """
-    # Sync on purpose, like every other read here: `machine_holder` reads every job file and, on a
+    # Sync on purpose, like every other read here: `list_running` reads every job file and, on a
     # zombie, writes one and globs the projects tree. On a 5 s always-on poll that belongs in the
     # threadpool, never on the one event loop every other route shares.
-    holder = jobs.machine_holder(exclude_user_id=str(identity.user_id))
-    if holder is None:
-        return MachineStatusResponse(busy=False)
+    running = jobs.list_running()
+    live = len(running)
+    capacity = resolve_run_capacity(live)
+    oldest = jobs.holder()
+    # ONE ordering, the drain's own, so a position the browser shows is the position the queue
+    # will honour. Numbering the caller's slice separately would read 1, 2, 3 to everyone.
+    order = jobs.queue_order()
+    mine = str(identity.user_id)
     return MachineStatusResponse(
-        busy=True,
-        holder=MachineHolder(
-            user=holder.user_id,
-            campaign_id=holder.campaign_id,
-            cycle_id=holder.cycle_id,
-            started_at=holder.started_at,
+        capacity=capacity,
+        running=live,
+        queued=len(order),
+        busy=live >= capacity,
+        holder=None
+        if oldest is None
+        else MachineHolder(
+            user=oldest.user_id,
+            campaign_id=oldest.campaign_id,
+            cycle_id=oldest.cycle_id,
+            started_at=oldest.started_at,
         ),
+        queue=[
+            MachineQueueEntry(
+                job_id=job.job_id,
+                dataset_name=job.dataset_name,
+                created_at=job.created_at,
+                position=index,
+            )
+            for index, job in enumerate(order, 1)
+            if job.user_id == mine
+        ],
     )
 
 
@@ -268,5 +331,6 @@ __all__ = [
     "CycleListEntry",
     "CyclesResponse",
     "MachineHolder",
+    "MachineQueueEntry",
     "MachineStatusResponse",
 ]

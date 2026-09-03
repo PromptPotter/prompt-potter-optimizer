@@ -13,11 +13,29 @@ LEDGER_BASELINE = {
     # (dispatcher, router, CLI, TS codegen) could not all import the dispatcher, and the one that
     # could not is the CLI — which is why nothing bound the terminal to the command set and five
     # kinds shipped browser-only. The module is what makes `CLI_VERB_FOR_KIND` expressible.
-    "modules": 331,
+    # +1: `application/jobs/capacity.py` — how many campaigns the machine admits right now, which
+    # was a startup constant and is now asked per admission. It folds into neither neighbour:
+    # `quota.py` answers per-USER limits, and `registry.py` is a slot counter that must not learn
+    # the LLM layer to read provider back-pressure. One module is what lets the number LOWER under
+    # a stalled provider without a restart, and lets it do so where it cannot also raise.
+    # +1: `application/jobs/launcher/admission.py` — the prologue every launch runs before anything
+    # irreversible, held by three launchers as three copies. A module rather than a function on one
+    # of them because the CLI must reach it too and cannot import a web launcher; the copies it
+    # replaces are the reason the terminal ran no admission at all.
+    # +1: `application/jobs/interlock.py` — the two facts about the machine-global jobs dir that
+    # must outlive a process: who may admit, and whether a job's producer is alive. It is a module
+    # and not a `registry.py` private because both are OS-lock semantics with their own failure
+    # mode (reentrancy, release-on-death, token reclaim), and the registry beside it is a slot
+    # counter. It PAID for itself: `reconcile_stale` and `reaper.producer_gone` both went, and the
+    # injected `producer_gone` oracle with them — one liveness rule now, in one place.
+    "modules": 334,
     "init_files": 48,
     "reexport_shims": 5,
     "config_leaf_fields": 39,
-    "settings_env": 31,
+    # +1: `QUEUE_MAX_WAIT_S` — how long a launch may wait in line before it is withdrawn. It is a
+    # setting and not a constant because it is the one queue number a HOST has to be able to
+    # answer for: on a shared box it decides when someone else's waiting launch is given up on.
+    "settings_env": 32,
     "settings_const": 14,
     "opt_search_point_fields": 39,
     # +1: `theta_caveat` on `ScoredCandidate` and `ScoreboardRow` — the per-ARM half of

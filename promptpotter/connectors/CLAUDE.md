@@ -81,7 +81,7 @@ the same shape the scorer parses from an HTTP `/matches` body. The registry guar
   not per call; the child gets a COPY, which is
   how `_ABORT_CHECK` carries the outer's pause into the inner run) under **sandboxed stores in a
   flat per-cycle registry `<workspace>/.inner/<key>/`**
-  (`init_services(store=…)`; no active-pointer / capacity-1 collision). It is
+  (`init_services(store=…)`; no active-pointer collision, and it holds no machine slot). It is
   named by (owned by) the spawning cycle but kept **flat, not physically nested** —
   physical nesting (`…/.runtime/inner/…/.runtime/inner/…`) blows past Windows'
   260-char `MAX_PATH` at depth 1; a flat registry stays shallow at every depth, so

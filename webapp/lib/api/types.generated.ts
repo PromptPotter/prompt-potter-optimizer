@@ -433,7 +433,7 @@ export interface RoundResult {
   l1_yield: number;
   l1_parse_failure: string | null;
   overlap: OverlapReading | null;
-  overlap_results: Record<string, unknown>[];
+  overlap_results: Record<string, Record<string, unknown>[]>;
   diagnostics: unknown | null;
   critique: unknown | null;
   health: DegradationHealth | null;
@@ -1458,12 +1458,37 @@ export interface MachineHolder {
   started_at: string | null;
 }
 
+export interface MachineQueueEntry {
+  job_id: string;
+  dataset_name: string;
+  created_at: string;
+  /** 1-based place in the machine-wide drain order at the moment of this read.
+   * Least-served-first, so it moves as other accounts start and finish — it
+   * is where this launch stands now, not a countdown. */
+  position: number;
+}
+
 export interface MachineStatusResponse {
-  /** True iff a *different* user holds a running job (the server runs one campaign
-   * at a time). */
+  /** Campaigns the machine admits right now. Resolved per read against the same
+   * rule a launch is admitted on, and lowered from the operator's ceiling
+   * while the shared provider throttle is saturated. */
+  capacity: number;
+  /** Campaigns currently live on the machine. */
+  running: number;
+  /** Launches waiting for a slot, machine-wide — an occupancy figure like
+   * `running`, not a list. Who they belong to is deliberately not served;
+   * `queue` carries the caller's own. */
+  queued: number;
+  /** True iff `running >= capacity` — no slot free for anyone, the caller included.
+   * A launch is then QUEUED rather than refused, so this reads as 'you will
+   * wait', not 'you cannot start'. */
   busy: boolean;
-  /** Who holds the slot; null when free for this caller. */
+  /** The oldest live run, whoever owns it; null when nothing is running. */
   holder: MachineHolder | null;
+  /** The CALLER's own waiting launches, oldest first — everything a client needs to
+   * say 'queued, position 3' and to offer a cancel. Other tenants' entries
+   * are counted in `queued` and never listed. */
+  queue: MachineQueueEntry[];
 }
 
 /** One row in the dataset registry — backs the Dashboard ``New campaign`` view. */
@@ -1744,7 +1769,7 @@ export type RunPhase = 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 
 export type DashboardState = 'init' | 'origin' | 'scoring' | 'between_samples' | 'between_candidates' | 'l1_generate' | 'l2_refining' | 'l3_replanning' | 'escalation' | 'stopped';
 
 // Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).
-export type CommandKind = 'archive-campaign' | 'change-spend-budget' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-allowed-models' | 'set-campaign-label' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign';
+export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-spend-budget' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-allowed-models' | 'set-campaign-label' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign';
 
 // Kinds no activity item is ever made of — the ray drops them and the translator
 // returns null. Complement of domain/projection_envelope.py::RENDERS_AS_ACTIVITY.
