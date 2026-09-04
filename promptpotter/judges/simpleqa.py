@@ -154,10 +154,10 @@ def _parse(reply: str) -> str | None:
 
 def _build_grade_fn(rubric: str, judge_name: str) -> object:
     async def grade(spec: JudgeSpec, result: QueryMeasurement) -> JudgeVerdict:
-        from promptpotter.judges.call import graded
+        from promptpotter.judges.call import graded, judge_question
 
         prompt = rubric.format(
-            question=result.get("query", ""),
+            question=judge_question(result),
             target=result.get("ground_truth", ""),
             predicted_answer=result.get("predicted", ""),
         )

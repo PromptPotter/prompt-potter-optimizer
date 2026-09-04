@@ -438,6 +438,13 @@ async def measure_sample(
         if terminal_node is not None:
             pd["terminal_node"] = terminal_node
 
+        # The bare question, where the dataset declared one distinct from `query` — banked so a
+        # JUDGE can read it, since a judge is handed this row and never the `Sample`. Absent on
+        # every dataset where the two are the same string, which is what keeps the judges'
+        # fallback to `query` the normal path rather than a special case.
+        if sample.question:
+            pd["question"] = sample.question
+
         step_tokens = _compute_step_tokens(data, pipeline_schema, wire_params)
         if step_tokens:
             pd["step_tokens"] = step_tokens

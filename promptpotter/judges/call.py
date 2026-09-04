@@ -17,6 +17,7 @@ import uuid
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
+from typing import Any
 
 from promptpotter.infrastructure.llm.rate_limit import (
     MAX_429_ATTEMPTS,
@@ -35,7 +36,7 @@ from promptpotter.judges.protocol import JudgeStage, JudgeVerdict
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ask", "bind_cache", "graded"]
+__all__ = ["ask", "bind_cache", "graded", "judge_question"]
 
 
 _CACHE: ContextVar[LLMReuseCache | None] = ContextVar("judge_reuse_cache", default=None)
@@ -133,6 +134,24 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
         cache.save(key, response.model_dump())
 
     return response.content or "", ""
+
+
+def judge_question(result: Mapping[str, Any]) -> str:
+    """What a judge should read as "the question" — the bare one where the dataset declared it,
+    else ``query``.
+
+    ONE reader, because the fallback is the whole point and a judge writing its own copy gets it
+    right until the day it does not. On an ordinary bank the two are identical and this is
+    ``query``. On a long-context bank ``query`` is the question PLUS the material the model had to
+    read, and a grader re-sent that material once per judge — four long-context calls per cell for
+    evidence no rubric here consults (``domain/sample.py::Sample.question``).
+
+    Reads ``pipeline_data``, because that is where ``measure_sample`` banks it and the only channel
+    that reaches a judge: ``GradeFn`` is handed the measured row, never the ``Sample``."""
+    pd = result.get("pipeline_data")
+    if isinstance(pd, dict) and (q := pd.get("question")):
+        return str(q)
+    return str(result.get("query", ""))
 
 
 async def graded(

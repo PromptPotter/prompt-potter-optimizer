@@ -75,7 +75,7 @@ def _build_grade_fn(
     rubric: str, judge_name: str, *, letters: dict[str, str], to_score: dict[str, float]
 ) -> object:
     async def grade(spec: JudgeSpec, result: QueryMeasurement) -> JudgeVerdict:
-        from promptpotter.judges.call import graded
+        from promptpotter.judges.call import graded, judge_question
 
         trace = _trace(result)
         if not trace:
@@ -94,7 +94,7 @@ def _build_grade_fn(
                 ),
             )
         prompt = rubric.format(
-            question=result.get("query", ""),
+            question=judge_question(result),
             predicted_answer=result.get("predicted", ""),
             trace=trace,
         )
