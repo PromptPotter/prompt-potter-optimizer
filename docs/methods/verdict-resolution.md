@@ -414,9 +414,12 @@ Three things gate it, none of them theory:
   cells fits noise that reads as signal.
 - **Step-schema stability.** Per-step δ pools only if "step 2" is the same KIND of thing across
   cells. An agentic episode takes however many turns it takes, so a turn *index* is not an item.
-  This needs a fixed SEMANTIC schema (e.g. retrieve → ground → answer), decided when the dataset is
-  cut — [`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md)
+  This needs a fixed SEMANTIC schema, decided when the dataset is cut —
+  [`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md)
   § Adding a dataset owns that obligation, because retrofitting one means re-paying for every row.
+  The `retrieve → ground → answer` schema and the three graders that measure it have SHIPPED, and
+  [`../../promptpotter/judges/CLAUDE.md`](../../promptpotter/judges/CLAUDE.md) § The step schema
+  owns them; what has not shipped is fitting anything per step off what they bank.
 - **A new parameter space is a new `ruler_id`** — a hard cut, not an anchored extension, so nothing
   measured before it is comparable across the line.
 

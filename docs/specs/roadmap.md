@@ -130,14 +130,18 @@ selection criterion 5, which rejected them
 ([`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md)).
 
 **The grading call path has SHIPPED** — reuse cache, 429 retry, heartbeat and metering all decided
-once at `judges/call.py::ask`, which `promptpotter/judges/CLAUDE.md` owns. Two open items remain,
-in the order they should land. *Plural judges* — `campaign.yaml::judge` is singular, so two turns
-cannot be graded by one rubric; the map should be keyed by **the term the formula reads**, not the
-judge's name. It reuses the node grammar but must NOT live in `pipeline.yaml::nodes`, because
-`node_config_items` is the walk a bulk model steer follows and that is exactly the boundary a judge
-may not sit behind. *Per-step difficulty* — the larger prize, sketched with its blockers and its
-one non-skippable precondition at
-[`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § Phase 3.
+once at `judges/call.py::ask`. **Plural judges and the `retrieve → ground → answer` step schema
+have SHIPPED too**: `campaign_config.judges` is keyed by the term the formula reads, so one cell
+carries several graded observations, and `promptpotter/judges/CLAUDE.md` owns both contracts. It
+deliberately does NOT live in `pipeline.yaml::nodes` — `node_config_items` is the walk a bulk model
+steer follows, and that is exactly the boundary a judge may not sit behind.
+
+What remains in this lane is *per-step difficulty* — the larger prize, and the only part that
+needs a run rather than a decision, since it fits on cells. Its blockers and its one non-skippable
+precondition (bank each step's term separately, which the shipped schema now does) are at
+[`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § Phase 3. The two authored
+rubrics are unscreened; read them on `seed-screen` / `noise-floor` before a campaign is funded on
+them.
 
 One thing the cache deliberately does NOT fix: a grading that fails past its retry omits the term,
 so `rescore_results` raises inside `measure_sample` and the catch-all there banks the cell as an

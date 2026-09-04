@@ -302,11 +302,13 @@ def test_adopt_advances_identity_and_carries_the_wound_ledger():
 
 
 def test_judge_identity_moves_the_searchpoint_hash() -> None:
-    """Swapping the judge, its models, or its rubric re-cuts the measurement key.
+    """Swapping a judge, its models, its rubric, or the TERM it is read under re-cuts the key.
 
     An archive row is keyed on node configs. A judge that changed without moving the key would
     have every verdict taken under the OLD grader replayed under the new one — silently, and in
-    whichever direction the new grader happens to be more lenient."""
+    whichever direction the new grader happens to be more lenient. Re-keying is the same fact one
+    level up: the same rubric read under a different term banks a different set of observations,
+    so a formula naming the old term would raise on rows that look eligible."""
     from promptpotter.application.pipeline_resolve import resolve_pipeline_config_params
     from promptpotter.domain.pipeline_parsing import parse_pipeline_response
     from promptpotter.judges.protocol import JudgeSpec, JudgeStage
@@ -321,22 +323,35 @@ def test_judge_identity_moves_the_searchpoint_hash() -> None:
     )
     active = schema.active_steps_excluding([])
 
-    def sp_hash(judge: JudgeSpec | None) -> str:
-        return schema.sp_hash(resolve_pipeline_config_params(active, {}, None, schema, judge=judge))
+    def sp_hash(judges: dict[str, JudgeSpec]) -> str:
+        return schema.sp_hash(
+            resolve_pipeline_config_params(active, {}, None, schema, judges=judges)
+        )
 
-    sealqa_a = JudgeSpec(name="sealqa", stages=[JudgeStage(model="a", provider="p")])
+    def spec(name: str, model: str) -> JudgeSpec:
+        return JudgeSpec(name=name, stages=[JudgeStage(model=model, provider="p")])
+
+    one = {"answer": spec("sealqa", "a")}
     hashes = {
-        "none": sp_hash(None),
-        "sealqa@a": sp_hash(sealqa_a),
-        "sealqa@b": sp_hash(JudgeSpec(name="sealqa", stages=[JudgeStage(model="b", provider="p")])),
+        "none": sp_hash({}),
+        "sealqa@a": sp_hash(one),
+        "sealqa@b": sp_hash({"answer": spec("sealqa", "b")}),
         # Same models, different RUBRIC — the fingerprint hashes the prompt text, so this moves
         # even though nothing an operator wrote in the config differs.
-        "simpleqa@a": sp_hash(
-            JudgeSpec(name="simpleqa", stages=[JudgeStage(model="a", provider="p")])
-        ),
+        "simpleqa@a": sp_hash({"answer": spec("simpleqa", "a")}),
+        # Same judge, same models, read under a different TERM.
+        "rekeyed": sp_hash({"correctness": spec("sealqa", "a")}),
+        # A step ADDED. The cell now carries two graded observations, not one.
+        "two_steps": sp_hash({"answer": spec("sealqa", "a"), "grounded": spec("simpleqa", "a")}),
     }
     assert len(set(hashes.values())) == len(hashes), f"judge identity collides: {hashes}"
-    assert sp_hash(sealqa_a) == hashes["sealqa@a"], "an unchanged judge must not move the key"
+    assert sp_hash(one) == hashes["sealqa@a"], "an unchanged judge must not move the key"
+    # Declaration order is the STEP order for a reader, never part of what was measured — two
+    # campaigns declaring the same graders in a different order graded the same cells identically.
+    assert (
+        sp_hash({"grounded": spec("simpleqa", "a"), "answer": spec("sealqa", "a")})
+        == hashes["two_steps"]
+    ), "declaration order must not re-cut the measurement key"
 
 
 def test_a_judge_graded_row_rescores_without_calling_a_model() -> None:
@@ -1844,7 +1859,7 @@ async def _grade_twice(
     from factories import measurement
 
     from promptpotter.infrastructure.store.stores import LLMReuseCache
-    from promptpotter.judges import build_evaluator
+    from promptpotter.judges import build_evaluators
     from promptpotter.judges import call as judge_call
     from promptpotter.judges.protocol import JudgeSpec, JudgeStage
 
@@ -1854,8 +1869,9 @@ async def _grade_twice(
     monkeypatch.setattr(judge_call, "emit_token_usage", lambda **kw: metered.append(kw))
 
     cache = LLMReuseCache(tmp_path, "judge_reuse")
-    ev = build_evaluator(
-        JudgeSpec(name="sealqa", stages=[JudgeStage(model="grader-1", provider="p")]), cache=cache
+    (ev,) = build_evaluators(
+        {"answer": JudgeSpec(name="sealqa", stages=[JudgeStage(model="grader-1", provider="p")])},
+        cache=cache,
     )
     for _ in range(2):
         row = measurement(sample_id=0, fitness=0.0)
@@ -1911,7 +1927,7 @@ async def test_an_unusable_cache_entry_costs_a_re_sample_and_never_the_cell(
     from factories import measurement
 
     from promptpotter.infrastructure.store.stores import LLMReuseCache
-    from promptpotter.judges import build_evaluator
+    from promptpotter.judges import build_evaluators
     from promptpotter.judges import call as judge_call
     from promptpotter.judges.protocol import JudgeSpec, JudgeStage
 
@@ -1920,8 +1936,9 @@ async def test_an_unusable_cache_entry_costs_a_re_sample_and_never_the_cell(
     monkeypatch.setattr(judge_call, "emit_token_usage", lambda **_kw: None)
 
     cache = LLMReuseCache(tmp_path, "judge_reuse")
-    ev = build_evaluator(
-        JudgeSpec(name="sealqa", stages=[JudgeStage(model="grader-1", provider="p")]), cache=cache
+    (ev,) = build_evaluators(
+        {"answer": JudgeSpec(name="sealqa", stages=[JudgeStage(model="grader-1", provider="p")])},
+        cache=cache,
     )
     row = measurement(sample_id=0, fitness=0.0)
     row["query"], row["predicted"], row["ground_truth"] = "who?", "Ada", "Ada"
@@ -1935,6 +1952,33 @@ async def test_an_unusable_cache_entry_costs_a_re_sample_and_never_the_cell(
 
     assert await ev.compute(result=row, schema=None) == 1.0, "a bad entry cost the cell its grade"
     assert client.calls == 2, "an unusable entry must fall through to a fresh sample"
+
+
+def test_a_judge_term_cannot_take_a_name_that_already_measures_something() -> None:
+    """A judge's TERM is the one evaluator name an operator picks, so it is the one that collides.
+
+    Two collisions, both silent and both the same harm — a formula reads a number measuring
+    something else. A term `cell_namespace` binds itself is dropped by the ``pipeline_data`` splat,
+    so the formula scores the intrinsic; a term a package evaluator owns is written AFTER it by
+    ``materialize_sample_values``, so the formula scores the judge under a name promising retrieval
+    coverage. Neither raises anywhere downstream, and both reach the archive.
+
+    Both names are read off the live registries rather than typed here: what is asserted is that
+    the sets stay disjoint, not what is in them."""
+    from promptpotter.application.scoring.evaluators import all_evaluators
+    from promptpotter.application.scoring.formula.compiler import CELL_INTRINSIC_NAMES
+    from promptpotter.judges import build_evaluators
+    from promptpotter.judges.protocol import JudgeSpec, JudgeStage
+
+    stage = JudgeStage(model="grader-1", provider="p")
+    taken = [
+        next(ev.name for ev in all_evaluators() if ev.scope == "per_sample"),
+        next(iter(sorted(CELL_INTRINSIC_NAMES))),
+        "not an identifier",
+    ]
+    for term in taken:
+        with pytest.raises(ValueError):
+            build_evaluators({term: JudgeSpec(name="sealqa", stages=[stage])})
 
 
 # 8. Where the package reads and writes

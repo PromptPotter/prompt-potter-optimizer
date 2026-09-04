@@ -499,15 +499,19 @@ class CampaignConfig(StrictModel):
         "non-empty set is the operator explicitly sanctioning those models.",
     )
     scoring: Annotated[str | dict[str, str] | None, Knob(Scope.DATA, Estimand.GATE)] = Field(None)
-    judge: Annotated[JudgeSpec | None, Knob(Scope.DATA, Estimand.GATE)] = Field(
-        None,
-        description="An LLM-as-judge for datasets whose answer is free text, where no "
-        "deterministic matcher can grade a cell. Names a registered judge "
+    judges: Annotated[dict[str, JudgeSpec], Knob(Scope.DATA, Estimand.GATE)] = Field(
+        default_factory=dict,
+        description="LLM-as-judge graders for datasets whose answer is free text, where no "
+        "deterministic matcher can grade a cell. Each value names a registered judge "
         "(`promptpotter.judges`) and the models to run it on; its verdict is banked as a "
-        "per-sample observation the `scoring` formula then reads by name. "
-        "`Scope.DATA` because swapping the judge invalidates every verdict taken under the "
+        "per-sample observation the `scoring` formula reads. "
+        "**The KEY is the term that formula reads, not the judge's name** — so one cell can "
+        "carry several graded terms, which is what a multi-step schema (retrieve -> ground -> "
+        "answer) is, and two terms may run the same rubric on different models without one "
+        "verdict landing on top of the other. Declaration order is the step order. "
+        "`Scope.DATA` because swapping a judge invalidates every verdict taken under the "
         "old one, so a resume must run divergence detection rather than carry them forward. "
-        "**Its models are declared here and inherited from nowhere** — not from "
+        "**Their models are declared here and inherited from nowhere** — not from "
         "`allowed_models`, not from the pipeline's node config, not from the optimizer's own "
         "LLMs. A judge is a ruler, and a ruler that moved with whatever the search was last "
         "steered to would not be one.",

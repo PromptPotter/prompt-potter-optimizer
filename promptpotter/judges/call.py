@@ -14,7 +14,7 @@ import asyncio
 import logging
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 
@@ -31,11 +31,11 @@ from promptpotter.infrastructure.llm.telemetry import (
     emit_token_usage,
 )
 from promptpotter.infrastructure.store.stores import LLMReuseCache, hash_call
-from promptpotter.judges.protocol import JudgeStage
+from promptpotter.judges.protocol import JudgeStage, JudgeVerdict
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ask", "bind_cache"]
+__all__ = ["ask", "bind_cache", "graded"]
 
 
 _CACHE: ContextVar[LLMReuseCache | None] = ContextVar("judge_reuse_cache", default=None)
@@ -133,6 +133,45 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
         cache.save(key, response.model_dump())
 
     return response.content or "", ""
+
+
+async def graded(
+    stage: JudgeStage,
+    prompt: str,
+    *,
+    judge: str,
+    parse: Callable[[str], str | None],
+    to_score: Mapping[str, float],
+) -> JudgeVerdict:
+    """One asked-and-labelled grading: :func:`ask`, then the verdict shaping every judge repeats.
+
+    Here rather than copied per judge for the same reason :func:`ask` is here — the two absence
+    arms are not formatting, they are the rule that **a grader which FAILED must never be bankable
+    as a graded answer**. Both return ``score=None``, which omits the term and makes the formula
+    halt loud; a judge writing its own copy of this is one edit away from defaulting an unreadable
+    reply to a category instead, which is precisely the upstream behaviour ``simpleqa.py``
+    documents diverging from.
+
+    ``parse`` maps a raw reply to one of ``to_score``'s labels, or ``None`` when it carries none.
+    A judge whose taxonomy needs no model call at all — an absent input, say — should return its
+    own ``JudgeVerdict`` and never reach here, so nothing is billed for a grading that cannot run.
+    """
+    reply, error = await ask(stage, prompt, judge=judge)
+    if error:
+        return JudgeVerdict(name=judge, score=None, error=error)
+    label = parse(reply)
+    if label is None:
+        return JudgeVerdict(
+            name=judge,
+            score=None,
+            error=f"grader returned no verdict in {sorted(to_score)}: {reply[:120]!r}",
+        )
+    return JudgeVerdict(
+        name=judge,
+        score=to_score[label],
+        label=label,
+        explanation=f"graded {label} by {stage.model}",
+    )
 
 
 def _replay(cache: LLMReuseCache, key: str, *, judge: str, role: str) -> LLMResponse | None:

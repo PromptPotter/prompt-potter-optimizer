@@ -463,18 +463,18 @@ async def measure_sample(
         # is what makes a per-sample evaluator addressable from a scoring formula. Nested under an
         # `evaluators` key it was not: `cell_namespace` turns a dict into a `SimpleNamespace`, and
         # the AST allowlist bans attribute access, so the value was materialized into a shape no
-        # formula could name. `_validate_evaluator` refuses a name that would collide here.
+        # formula could name. `validate_campaign_evaluator` refuses a name that would collide here.
         #
         # Banked BEFORE `rescore_results`, and that ordering is the contract: the cached-replay
         # path (`query_loop.py::_materialize_cached`) never re-enters this function, so a value
         # not written into the row now is one the formula raises `ScoringTermMissingError` on for
-        # every later cache hit. For an LLM-backed evaluator it is also what stops a re-bill.
-        judge = session.scoring.judge
+        # every later cache hit. For an LLM-backed evaluator it is also what stops a re-bill —
+        # which is per TERM, so a multi-step schema's three gradings are three banked keys.
         pd.update(
             await materialize_sample_values(
                 pipeline_schema,
                 result,  # type: ignore[arg-type]
-                extra=() if judge is None else (judge,),
+                extra=session.scoring.judges,
             )
         )
         from promptpotter.application.scoring.formula import rescore_results

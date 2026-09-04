@@ -47,11 +47,12 @@ class ScorerSetup:
     headline_metric: HeadlineMetric = "accuracy"
     scoring_set: list[Sample] = field(default_factory=list)
     degradation_checks: list[StopRule] = field(default_factory=list)
-    judge: Evaluator | None = None
-    """The campaign's LLM-as-judge, already built into a ``per_sample`` evaluator, or ``None``
-    where the campaign declared none. It lives beside the compiled scorer because it is the same
-    kind of fact — how this campaign grades a cell — and it is built ONCE per run rather than per
-    sample, so the registry lookup and the spec validation happen before any money is spent."""
+    judges: tuple[Evaluator, ...] = ()
+    """The campaign's LLM-as-judge graders, already built into ``per_sample`` evaluators — one per
+    declared TERM, empty where the campaign declared none. They live beside the compiled scorer
+    because they are the same kind of fact — how this campaign grades a cell — and are built ONCE
+    per run rather than per sample, so the registry lookup, the term validation and the spec
+    validation all happen before any money is spent."""
 
     def require_scorer(self) -> CellScorer:
         """The compiled scorer, or a loud stop. ``None`` means ``populate_session_scoring`` has not

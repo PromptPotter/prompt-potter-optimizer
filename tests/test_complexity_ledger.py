@@ -40,16 +40,23 @@ LEDGER_BASELINE = {
     # third-party text that must not sit in the same file as the registry that validates it, and
     # `call.py` is a second LLM chokepoint on purpose: routing grading through the optimizer's
     # would bank judge spend in the loop's bucket, which is the boundary this whole arc draws.
-    "modules": 339,
+    # +1: `judges/grounding.py` — the two graders that read a cell's EVIDENCE rather than its
+    # answer, which is what makes the `retrieve -> ground -> answer` step schema measurable. Not
+    # foldable into `simpleqa.py`: that module's whole discipline is that its text is upstream's,
+    # quoted down to its typos, and these two rubrics are ours — a reader must be able to tell
+    # which is which without reading the git history. It pays for itself in the same commit by
+    # collapsing the ask-parse-verdict body every judge repeated into `call.py::graded`.
+    "modules": 340,
     "init_files": 49,
     # +1: `judges/__init__.py` — flagged for the same reason `connectors/__init__.py` is, and by
     # the same text test: a registry module has both an `__all__` and imports. Named rather than
     # emptied; the protocol types are deliberately NOT re-exported through it.
     "reexport_shims": 6,
-    # +1: `CampaignConfig.judge` — which LLM-as-judge grades this campaign's cells, and on which
-    # models. One leaf though it nests: `Knob` marks a field as a leaf whatever its shape, and the
-    # judge spec IS one decision. `Scope.DATA` because swapping the judge invalidates every verdict
-    # taken under the old one; `Estimand.GATE` because it decides what counts as a correct answer.
+    # +1: `CampaignConfig.judges` — which LLM-as-judge grades this campaign's cells, on which
+    # models, and under which TERM. One leaf though it nests twice: `Knob` marks a field as a leaf
+    # whatever its shape, and how a campaign grades a cell IS one decision however many steps it
+    # takes. `Scope.DATA` because swapping a judge invalidates every verdict taken under the old
+    # one; `Estimand.GATE` because it decides what counts as a correct answer.
     "config_leaf_fields": 40,
     # +1: `QUEUE_MAX_WAIT_S` — how long a launch may wait in line before it is withdrawn. It is a
     # setting and not a constant because it is the one queue number a HOST has to be able to

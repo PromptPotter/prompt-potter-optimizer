@@ -23,9 +23,9 @@ observation the backend emits instead."* A judge is that sentence with a differe
 
 ## The seam — a judge IS an `Evaluator`
 
-No new concept reaches the scoring layer. `build_evaluator(spec)` returns an ordinary
-`application/scoring/evaluators.py::Evaluator` at `per_sample` scope, and four of its existing
-fields already do the work:
+No new concept reaches the scoring layer. `build_evaluators(specs)` returns ordinary
+`application/scoring/evaluators.py::Evaluator`s at `per_sample` scope — one per declared TERM —
+and four of their existing fields already do the work:
 
 | field | what it buys |
 |---|---|
@@ -40,13 +40,21 @@ archived rows — that refusal is what stops the re-billing bug being reintroduc
 side. The values land **top-level in `pipeline_data`**, where `cell_namespace`'s splat binds them;
 nested under a dict they would be unreachable, since the AST allowlist bans attribute access.
 
+**Every judge evaluator goes through `validate_campaign_evaluator`, and that call is the contract
+rather than a courtesy.** The rules were written as if they already covered a judge and covered
+only `_REGISTRY`, so the one evaluator name an OPERATOR picks — a judge's term — was the one
+nothing checked. Three ways a term is unreachable or wrong, all silent: a non-identifier the
+formula's AST allowlist cannot resolve, a name `cell_namespace` binds itself (dropped by the splat,
+so the formula scores the intrinsic), and a name a package evaluator owns (`extra` is written
+last, so the formula scores the judge under a name promising something else).
+
 ## Scoring, never the optimizer loop — and it is structural
 
 **Nothing that sets the loop's LLMs may reach a judge.** `allowed_models`,
 `nodes.{node}.config.model`, the optimizer's own `assets/optimizer/pipeline.yaml`, and any global
 "set every model" steer are all not consulted. A judge's models are declared in
-`campaign.yaml::campaign_config.judge.stages` and inherited from nowhere; absent means absent, and
-never a borrow.
+`campaign.yaml::campaign_config.judges.{term}.stages` and inherited from nowhere — not from the
+loop, and not from a sibling term either; absent means absent, and never a borrow.
 
 Three things enforce it rather than describe it: `JudgeStage.model`/`provider` are **required**
 fields with no default; the judge sits outside `param_keys` entirely, so the optimizer can never
@@ -62,13 +70,71 @@ search its own grader (a candidate free to move its ruler would optimize the rul
 of the scoring seam knows. Token accounting is per underlying call via `call.py::ask`, so a
 two-model chain prices correctly with no special case.
 
+`call.py::graded` is the other half of that: `ask` plus the verdict shaping every judge repeats,
+in one place because its two absence arms are not formatting. **A grader that FAILED must never be
+bankable as a graded answer** — an unreachable model and an unparseable reply both return
+`score=None`, and a judge writing its own copy of that is one edit from defaulting to a category
+instead, which is precisely the upstream behaviour `simpleqa.py` documents diverging from.
+
+## The step schema — `retrieve → ground → answer`
+
+`campaign_config.judges` is keyed by **the term the scoring formula reads, never by the judge's
+name**, and that is what makes a multi-STEP cell expressible: three entries, three rubrics, three
+banked observations per cell. Keyed by judge, two terms sharing a rubric would collapse into one
+and the second verdict would land on top of the first.
+
+**The schema is `retrieve → ground → answer`, it is a semantic decision, and it is fixed BEFORE a
+cell is bought.** Per-step δ pools only if "step 2" is the same KIND of thing across cells, so a
+turn *index* is not an item and an agentic episode takes however many turns it takes. Retrofitting
+a schema means re-paying for every row — the fingerprint folds the whole term → judge mapping
+(`pipeline_resolve.py::_identity_contributions`), so re-keying a grader is a new measurement, by
+construction. Declaration order is the step order; nothing reads it yet, and what a later testlet
+or partial-credit fit reads is the banked terms, not a re-measure
+([`../../docs/methods/verdict-resolution.md`](../../docs/methods/verdict-resolution.md) § Phase 3).
+
+Three steps, and which half of a failure each isolates:
+
+| step | graded by | reads | needs gold | what it separates |
+|---|---|---|---|---|
+| retrieve | `evidence_retrieval` | question, `reasoning_trace` | no | did the system gather evidence that SETTLES the question — whether or not it then used it |
+| ground | `answer_grounding` | question, answer, `reasoning_trace` | no | is the answer traceable to the system's OWN evidence — a grounded answer can still be wrong, and that separation is the measurement |
+| answer | `sealqa` / `simpleqa`, **or the backend's own verifier** | question, gold, answer | yes, for the judge | is the final answer correct |
+
+**On a verifier-graded backend the answer step needs no judge**, and that is what makes the schema
+complete where it matters most. A harbor cell declares `ground_truth: None`, so every `needs_gold`
+judge is skipped — but the task's verifier already grades the answer and banks it as `env_reward`,
+which a formula reads like any other term. The two evidence graders need no gold precisely so the
+other two thirds survive there; a gold-comparing `evidence_retrieval` would have been dead on the
+only backend whose cells are turn-structured enough to have steps at all.
+
+Asking for SUFFICIENCY rather than correctness is also the better instrument, not just the
+reachable one: handing a grader the gold invites it to accept any trace that merely *contains* the
+gold string, and keeps the answer out of what is supposed to be measuring the search.
+
+Two things the first two judges get right that are easy to get wrong. **A cell with no
+`reasoning_trace` is ABSENT, never zero, and costs no model call** — a backend that emits no trace
+has not produced a badly-grounded answer, and scoring it `UNGROUNDED` would report "the system
+never uses evidence" for a run that simply routed through a backend with no trace channel. And
+**the middle score is a prior we invented**: `PARTIAL = 0.5` is the same class of hand-set
+threshold `verdict-resolution.md` § Phase 3 warns about, which is survivable only because
+`_compute` banks the LABEL beside the score, so a later fit re-derives its own thresholds from
+archived rows.
+
+**Their rubrics are OURS, and that is the difference from `simpleqa.py`.** Nothing published grades
+these two steps, so screen them (`seed-screen`, `noise-floor`) before funding a campaign on them
+and record the reading in the dataset's `dataset.md`, exactly as any other instrument decision is
+recorded.
+
 ## Identity — a judge that changed must re-cut the key
 
 `Judge.fingerprint(spec)` hashes the judge name, its declared `version`, **its rubric text**, and
-the whole stage chain. It rides
-`pipeline_resolve.py::_identity_contributions` into `node_configs` under
-`JUDGE_INSTRUMENT_KEY`, so `sp_hash` moves — an archive row is keyed on config, and a judge
-swapped silently would have every prior verdict replayed under the new grader.
+the whole stage chain. `pipeline_resolve.py::_identity_contributions` folds the whole term → judge
+mapping into ONE `node_configs` entry under `JUDGE_INSTRUMENT_KEY`, so `sp_hash` moves — an archive
+row is keyed on config, and a judge swapped silently would have every prior verdict replayed under
+the new grader. **The TERM is inside that hash**: re-keying a grader banks a different set of
+observations, so it is a different measurement even when the rubric and the models are identical.
+Declaration order is not, because two campaigns declaring the same graders in a different order
+measured the same thing.
 
 **Hashing the rubric is why this is stronger than every published judge abstraction.** MLflow
 versions server-side; pydantic-evals offers a hand-maintained `get_evaluator_version()` defaulting
@@ -139,10 +205,12 @@ Both the read and the validate raise, and `ask` sits under `measure_sample`'s ca
 here banks the whole cell as an ERROR and discards a backend answer already paid for. A cache
 exists to make grading cheaper; nothing in it may ever cost a measurement.
 
-**The handle reaches `ask` through a ContextVar, never through `GradeFn`.** `build_evaluator` takes
+**The handle reaches `ask` through a ContextVar, never through `GradeFn`.** `build_evaluators` takes
 the cache, `_compute` scopes it with `call.py::bind_cache`, and `ask` reads it. Threading it
 through `grade` would put a store handle in the judge protocol, so every judge author — ours and a
-third party's — would carry infrastructure they have nothing to do with.
+third party's — would carry infrastructure they have nothing to do with. **One cache across every
+term**, because the key is the rendered prompt: two graders cannot read each other's replies, and
+a step schema's three gradings of one comparison are each bought once.
 
 `ask` also heartbeats and retries a 429, for the same reason the cache exists: a failed grade omits
 the term, which halts the formula on that cell, which discards a backend answer already paid for.

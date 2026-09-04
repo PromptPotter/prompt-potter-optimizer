@@ -200,11 +200,17 @@ If the canonical answer isn't obvious in 5 minutes, delegate it to a fresh agent
 **2b. If the task is TURN-STRUCTURED, decide the step schema now.** A multi-turn or multi-step
 task is ONE cell — a conversation is a testlet, not a series of items
 ([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § Phase 3 sketch). Two
-things follow, both cheap now and expensive later. **Name a fixed SEMANTIC step schema** (retrieve
-→ ground → answer, say) rather than a turn index: an agentic episode takes however many turns it
-takes, so "step 3" pools nothing across rows. And **bank each step's score as its own named term**,
-letting the `scoring` formula do the collapsing — that sketch owns why, and it is the one part of
-this that cannot be added later. Record both in `dataset.md`.
+things follow, both cheap now and expensive later. **Name a fixed SEMANTIC step schema** rather
+than a turn index: an agentic episode takes however many turns it takes, so "step 3" pools nothing
+across rows. And **bank each step's score as its own named term**, letting the `scoring` formula do
+the collapsing — that sketch owns why, and it is the one part of this that cannot be added later.
+Record both in `dataset.md`.
+
+A search-augmented task should adopt the shipped `retrieve → ground → answer` schema rather than
+coin one: it is three `campaign_config.judges` entries, and the measurement identity folds the
+whole mapping, so re-keying later re-pays for every row
+([`../../promptpotter/judges/CLAUDE.md`](../../promptpotter/judges/CLAUDE.md) § The step schema —
+which also carries the obligation to screen the two authored rubrics before funding a campaign).
 
 **3. Operator confirms the cut — before any wire.** The cut + protocol decision is operator-directed once the canonical protocol is on the table. **Never invent a split. Never consume a canonical test set as an optimization pool** without the operator explicitly accepting that the resulting number is not leaderboard-comparable. Any deviation from the canonical protocol gets said out loud in `dataset.md`, with the reason.
 

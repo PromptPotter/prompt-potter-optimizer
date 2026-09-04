@@ -30,7 +30,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 JUDGE_INSTRUMENT_KEY = "judge_instrument"
-"""The node-config key a judge's fingerprint rides into measurement identity.
+"""The node-config key the judges' fingerprint rides into measurement identity — ONE key over the
+whole term → judge mapping, not one per term.
 
 Twin of `connectors/harbor.py::INSTRUMENT_KEY`, and named apart from it because they answer
 different questions: that one says which task bytes were run, this one says which grader read the
@@ -79,7 +80,7 @@ def resolve_pipeline_config_params(
     pipeline_overrides: Mapping[str, Any],
     dataset_dir: Path | None,
     schema: PipelineSchema,
-    judge: JudgeSpec | None = None,
+    judges: Mapping[str, JudgeSpec] | None = None,
 ) -> dict[str, Any]:
     """The SINGLE definition of which node config a cycle id and a measurement key hash — shared
     with ``GET /origins``, so the prospective origin and the real one cannot diverge."""
@@ -114,11 +115,11 @@ def resolve_pipeline_config_params(
     pipeline_params = apply_node_overlay(pipeline_params, valid_overrides, schema)
     # Identity contributions — LAST, never overridable: per-node entries that are part of what a
     # measurement was taken UNDER but that no operator wrote into a node config. ONE channel with
-    # two contributors (the connector, and the judge); a second overlay pass beside this one would
+    # two contributors (the connector, and the judges); a second overlay pass beside this one would
     # be a second place a fact can enter the archive key.
     identity = {
         node: cfg
-        for node, cfg in _identity_contributions(dataset_dir, judge, active).items()
+        for node, cfg in _identity_contributions(dataset_dir, judges, active).items()
         if node in active
     }
     if identity:
@@ -127,14 +128,21 @@ def resolve_pipeline_config_params(
 
 
 def _identity_contributions(
-    dataset_dir: Path | None, judge: JudgeSpec | None, active: list[str]
+    dataset_dir: Path | None, judges: Mapping[str, JudgeSpec] | None, active: list[str]
 ) -> dict[str, dict[str, Any]]:
     """What this measurement was taken UNDER, beyond the node configs themselves.
 
     Both contributors answer the same question and so share one channel. The CONNECTOR's is
     resolved from the dataset dir's own ``backend_type`` (e.g. harbor's resolved task pins); the
-    JUDGE's is its fingerprint, because an archive row is keyed on config and a judge swapped
-    without moving the key would have every prior verdict replayed under the new grader.
+    JUDGES' is a fingerprint per declared term, because an archive row is keyed on config and a
+    judge swapped without moving the key would have every prior verdict replayed under the new
+    grader.
+
+    **The TERM is inside the fingerprint, not just the judge.** Re-keying a grader — the same
+    rubric on the same models, read by the formula under a different name — produces a different
+    set of banked observations, so it is a different measurement and must not replay the old rows.
+    Sorted by term: the mapping's declaration ORDER is the step order for a reader, but two
+    campaigns declaring the same graders in a different order measured the same thing.
 
     Pure over its inputs, which is what keeps the live setup and the prospective-origin id
     (`GET /origins`) agreeing by construction rather than by both remembering to.
@@ -145,14 +153,20 @@ def _identity_contributions(
         connector = CONNECTORS.get(str((raw or {}).get("backend_type") or ""))
         if connector is not None and connector.identity_config is not None:
             out.update(connector.identity_config(dataset_dir))
-    if judge is not None and active:
+    if judges and active:
+        from promptpotter.domain.pipeline_schema import stable_hash
         from promptpotter.judges import get as get_judge
 
-        # Attached to the TERMINAL step: the judge grades the pipeline's answer, and that is the
+        # Attached to the TERMINAL step: a judge grades the pipeline's answer, and that is the
         # node the answer comes out of. Any stable node would move the hash, but this one says
         # what the fingerprint actually qualifies.
         node = active[-1]
-        out.setdefault(node, {})[JUDGE_INSTRUMENT_KEY] = get_judge(judge.name).fingerprint(judge)
+        out.setdefault(node, {})[JUDGE_INSTRUMENT_KEY] = stable_hash(
+            [
+                [term, get_judge(spec.name).fingerprint(spec)]
+                for term, spec in sorted(judges.items())
+            ]
+        )
     return out
 
 
@@ -310,7 +324,7 @@ def configure_and_apply_pipeline(
         campaign_config.pipeline_overrides,
         dataset_dir,
         filtered,
-        judge=campaign_config.judge,
+        judges=campaign_config.judges,
     )
 
     # Starting prompts from `{dataset_dir}/prompts/[<node>|default].yaml`, per prompt-bearing node.

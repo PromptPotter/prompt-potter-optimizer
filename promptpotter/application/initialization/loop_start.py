@@ -10,7 +10,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_overlay import node_config_items
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle
@@ -84,7 +84,7 @@ def populate_session_scoring(
     scoring_cell_formula: str | None = None,
     scorer_id: str,
     headline_metric: HeadlineMetric = "accuracy",
-    judge_spec: JudgeSpec | None = None,
+    judge_specs: Mapping[str, JudgeSpec] | None = None,
     source: str = "optimization_loop",
 ) -> None:
     """Attach scoring + obs to *session* in place (step 2 of run init).
@@ -107,16 +107,17 @@ def populate_session_scoring(
     session.scoring.scorer_id = scorer_id
     session.scoring.scorer_cell_formula = scoring_cell_formula
     session.scoring.headline_metric = headline_metric
-    # Built ONCE, here, so an unregistered judge name or a spec with no stages fails at init —
-    # beside the formula compile, before a cell is bought — rather than on the first sample.
+    # Built ONCE, here, so an unregistered judge name, a spec with no stages, or a TERM that no
+    # formula could reach fails at init — beside the formula compile, before a cell is bought —
+    # rather than on the first sample.
     #
     # THE one place the reuse cache reaches a judge. This function is the sole judge builder and
     # serves both the runner and the four verbs that score outside it (`arm_diagnostic_scoring`),
     # so one line arms grading reuse on every entry point rather than on whichever was edited.
-    if judge_spec is not None:
-        from promptpotter.judges import build_evaluator
+    if judge_specs:
+        from promptpotter.judges import build_evaluators
 
-        session.scoring.judge = build_evaluator(judge_spec, cache=session.store.judge_reuse)
+        session.scoring.judges = build_evaluators(judge_specs, cache=session.store.judge_reuse)
 
 
 def arm_diagnostic_scoring(
@@ -149,7 +150,7 @@ def arm_diagnostic_scoring(
         scoring_cell_formula=spec.per_cell,
         scorer_id=spec.scorer_id,
         headline_metric=campaign_config.headline_metric,
-        judge_spec=campaign_config.judge,
+        judge_specs=campaign_config.judges,
         source=source,
     )
     return pipeline_params
@@ -277,7 +278,7 @@ def _start_observability_and_scoring(
         scoring_cell_formula=scoring_cell_formula,
         scorer_id=scorer_id,
         headline_metric=config.headline_metric,
-        judge_spec=config.judge,
+        judge_specs=config.judges,
     )
     return tracing_campaign_id, obs
 

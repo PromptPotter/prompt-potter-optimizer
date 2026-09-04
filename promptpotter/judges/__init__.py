@@ -6,19 +6,21 @@ learn, not two. A ``_BUILTIN`` data dict, a published entry-point group, one val
 over built-ins and third-party plugins alike, a plugin may not shadow a built-in, and a broken
 plugin is fatal rather than skipped.
 
-**A judge is not a new kind of thing to the scoring layer.** :func:`build_evaluator` turns a
-registered judge plus a campaign's :class:`~promptpotter.judges.protocol.JudgeSpec` into an
-ordinary ``Evaluator`` at ``per_sample`` scope, which the existing materializer runs once at
-measure time and banks into the row. Everything downstream — the formula namespace, the webapp's
-scoring-mask editor, the read-side mask's refusal to recompute it — already works.
+**A judge is not a new kind of thing to the scoring layer.** :func:`build_evaluators` turns a
+campaign's term → :class:`~promptpotter.judges.protocol.JudgeSpec` mapping into ordinary
+``Evaluator``s at ``per_sample`` scope, which the existing materializer runs once at measure time
+and banks into the row. Everything downstream — the formula namespace, the webapp's scoring-mask
+editor, the read-side mask's refusal to recompute them — already works.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from functools import partial
 from importlib.metadata import entry_points
 from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.judges.grounding import ANSWER_GROUNDING, EVIDENCE_RETRIEVAL
 from promptpotter.judges.protocol import Judge, JudgeSpec
 from promptpotter.judges.simpleqa import SEALQA, SIMPLEQA
 
@@ -32,7 +34,7 @@ __all__ = [
     "ENTRY_POINT_GROUP",
     "JUDGES",
     "JUDGE_ORIGINS",
-    "build_evaluator",
+    "build_evaluators",
     "get",
 ]
 # The protocol TYPES are deliberately absent: import them from `promptpotter.judges.protocol`,
@@ -46,6 +48,8 @@ Renaming it un-registers every plugin at once."""
 _BUILTIN: dict[str, Judge] = {
     "simpleqa": SIMPLEQA,
     "sealqa": SEALQA,
+    "evidence_retrieval": EVIDENCE_RETRIEVAL,
+    "answer_grounding": ANSWER_GROUNDING,
 }
 
 
@@ -132,6 +136,7 @@ async def _compute(
     result: QueryMeasurement,
     judge: Judge,
     spec: JudgeSpec,
+    term: str,
     cache: LLMReuseCache | None = None,
     schema: PipelineSchema | None = None,
     **_: Any,
@@ -147,6 +152,11 @@ async def _compute(
     writer-with-no-reader this whole arc exists to stop repeating. ``measure_sample`` banks
     ``pipeline_data`` after this returns, so a write here reaches the archive and the round file.
 
+    **Everything banked is keyed by TERM, never by judge name.** Two terms may run the same
+    registered judge — the same rubric on two models, or one step's grader reused — and under a
+    judge-named key the second verdict would land on top of the first, leaving one label to
+    describe two gradings. The term is unique by construction: it is a mapping key.
+
     The reuse cache is bound HERE and read at ``call.py::ask``, so it never appears in ``GradeFn``
     — see :func:`~promptpotter.judges.call.bind_cache` for why an infrastructure handle stays out
     of the judge protocol. This is also the scope that makes it matter: the stale-data ladder
@@ -158,36 +168,69 @@ async def _compute(
         verdict = await judge.grade(spec, result)
     banked = result.get("pipeline_data")
     if isinstance(banked, dict):
-        # Cast because the keys are judge-NAMED, so `PipelineData` cannot declare them — the same
+        # Cast because the keys are TERM-named, so `PipelineData` cannot declare them — the same
         # reason a connector's observation keys (`env_reward`) are written through a plain dict.
         pd = cast("dict[str, Any]", banked)
         if verdict.label:
-            pd[f"{judge.name}_label"] = verdict.label
+            pd[f"{term}_label"] = verdict.label
         if detail := (verdict.error or verdict.explanation):
-            pd[f"{judge.name}_why"] = detail
+            pd[f"{term}_why"] = detail
     return verdict.score
 
 
-def build_evaluator(spec: JudgeSpec, *, cache: LLMReuseCache | None = None) -> Evaluator:
-    """A campaign's judge, as an ordinary ``per_sample`` evaluator.
+def build_evaluators(
+    specs: Mapping[str, JudgeSpec], *, cache: LLMReuseCache | None = None
+) -> tuple[Evaluator, ...]:
+    """A campaign's judges, as ordinary ``per_sample`` evaluators — one per TERM.
 
-    ``partial`` binds the campaign's spec the same way ``_compute_recall`` is bound to its
-    candidate key — a parameterized evaluator is an existing shape here, not a new one.
+    **The mapping is keyed by the term the scoring formula reads, never by the judge's name**, and
+    that is what makes a multi-STEP schema expressible at all: `retrieve → ground → answer` is
+    three entries whose graders are three different rubrics, and one keyed by judge would collapse
+    any two sharing a rubric into a single term. It also keeps the operator's vocabulary in one
+    place — the formula names `answer_correct`, so the config declares `answer_correct`, rather
+    than naming a registry key here and a derived term there.
 
-    ``cache`` is ``Stores.judge_reuse``. It defaults to ``None`` so a test or a one-off construction
-    re-samples rather than reaching a store it was never given; every real caller passes one, and
-    there is exactly one — ``initialization/loop_start.py::populate_session_scoring``, which the
-    runner and the four diagnostic verbs both arm through.
+    Declaration ORDER is the step order and is preserved (a YAML mapping loads ordered, and so does
+    the dict it becomes). Nothing reads it yet; a later per-step difficulty model does, off the
+    banked terms rather than off a re-measure — [`docs/methods/verdict-resolution.md`] § Phase 3.
+
+    Every term is validated against the same rules a package evaluator obeys, which is what
+    :func:`~promptpotter.application.scoring.evaluators.validate_campaign_evaluator` exists for:
+    the name an OPERATOR picks is the one that can collide with something, and both collisions —
+    a term `cell_namespace` binds itself, a term a package evaluator already owns — are silent.
+
+    ``cache`` is ``Stores.judge_reuse``, shared by every term: it is keyed on the rendered prompt,
+    so two judges cannot read each other's replies and a repeated grading of one comparison is
+    bought once. It defaults to ``None`` so a test or a one-off construction re-samples rather than
+    reaching a store it was never given; every real caller passes one, and there is exactly one —
+    ``initialization/loop_start.py::populate_session_scoring``, which the runner and the four
+    diagnostic verbs both arm through.
     """
-    from promptpotter.application.scoring.evaluators import Evaluator
-
-    judge = get(spec.name)
-    return Evaluator(
-        name=judge.name,
-        description=judge.description,
-        scope="per_sample",
-        compute=partial(_compute, judge=judge, spec=spec, cache=cache),
-        # A judge compares against a gold, so it is UNDEFINED on a verifier-graded bank rather
-        # than zero there. `materialize_sample_values` reads this and skips.
-        needs_labels=judge.needs_gold,
+    from promptpotter.application.scoring.evaluators import (
+        Evaluator,
+        validate_campaign_evaluator,
     )
+
+    out: list[Evaluator] = []
+    for term, spec in specs.items():
+        if not term.isidentifier():
+            raise ValueError(
+                f"judge term {term!r}: a scoring formula reaches a term by NAME, and the compiler's "
+                f"AST allowlist resolves a bare name only — so a term that is not a Python "
+                f"identifier materializes a value no formula can address."
+            )
+        judge = get(spec.name)
+        ev = Evaluator(
+            name=term,
+            description=judge.description,
+            scope="per_sample",
+            # `partial` binds the term and the campaign's spec the same way `_compute_recall` is
+            # bound to its candidate key — a parameterized evaluator is an existing shape here.
+            compute=partial(_compute, judge=judge, spec=spec, term=term, cache=cache),
+            # A judge comparing against a gold is UNDEFINED on a verifier-graded bank rather than
+            # zero there. `materialize_sample_values` reads this and skips.
+            needs_labels=judge.needs_gold,
+        )
+        validate_campaign_evaluator(ev, f"campaign judge {spec.name!r}")
+        out.append(ev)
+    return tuple(out)

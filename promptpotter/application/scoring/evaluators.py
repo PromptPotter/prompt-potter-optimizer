@@ -44,6 +44,7 @@ __all__ = [
     "materialize_row_derivable",
     "materialize_sample_values",
     "resolve_cell_formula",
+    "validate_campaign_evaluator",
 ]
 
 
@@ -291,7 +292,9 @@ _REGISTRY: list[Evaluator] = [
 
 def _validate_evaluator(ev: Evaluator, origin: str) -> None:
     """Every invariant an ``Evaluator`` must satisfy, applied to built-ins and to anything a judge
-    constructor produces alike — that equivalence IS the contract. Raises at import.
+    constructor produces alike — that equivalence IS the contract, and
+    :func:`validate_campaign_evaluator` is how the judge half of it reaches this code. Raises at
+    import for a built-in, and at run init for a campaign's judge — both before a cell is bought.
 
     The load-bearing one is the ``per_round`` × awaitable refusal. ``materialize_round_values`` and
     ``materialize_row_derivable`` are called from SYNC read paths that re-derive over already-archived
@@ -324,6 +327,27 @@ def _validate_evaluator(ev: Evaluator, origin: str) -> None:
                 f"skips every per_sample entry — so setting it here is dead config that reads as "
                 f"protection."
             )
+
+
+def validate_campaign_evaluator(ev: Evaluator, origin: str) -> None:
+    """Every invariant an evaluator a CAMPAIGN declares must satisfy — a judge's, today.
+
+    Exists because the equivalence :func:`_validate_evaluator` claims was only ever half true: it
+    ran over ``_REGISTRY`` at import and over nothing else, so the one evaluator whose name an
+    OPERATOR picks — a judge's term — was the one nothing checked. A term colliding with
+    ``CELL_INTRINSIC_NAMES`` materialized a value the ``pipeline_data`` splat drops on the floor.
+
+    The extra clause here is the roster collision, and it is this function's alone because it is a
+    property of the PAIR rather than of either evaluator: ``materialize_sample_values`` iterates
+    ``(*_REGISTRY, *extra)`` writing ``values[ev.name]``, so a campaign term repeating a package
+    evaluator's name overwrites it — silently, and with a number measuring something else."""
+    _validate_evaluator(ev, origin)
+    if ev.name in {e.name for e in _REGISTRY}:
+        raise ValueError(
+            f"evaluator {ev.name!r} ({origin}): the name is a package evaluator's. A campaign term "
+            f"is materialized after the registry and would overwrite it, so the formula would read "
+            f"this value under a name that promises the other one. Pick another term."
+        )
 
 
 def _validate_registry() -> None:
@@ -445,9 +469,11 @@ async def materialize_sample_values(
     so the asymmetry is a declared invariant rather than a convention.
 
     ``extra`` carries the evaluators a CAMPAIGN declares rather than the package — today, its
-    judge. They are not appended to ``_REGISTRY``: that dict is process-global and a campaign's
-    grader is not, so registering one would leak it into every other run in the process, inner L4
-    cells included.
+    judges, one per term. They are not appended to ``_REGISTRY``: that dict is process-global and a
+    campaign's graders are not, so registering them would leak into every other run in the process,
+    inner L4 cells included. It is also why the roster collision is checked once at init
+    (:func:`validate_campaign_evaluator`) rather than here — ``extra`` is written last and would
+    otherwise overwrite a package name silently, per cell.
 
     The caller writes these TOP-LEVEL into ``pipeline_data``, which is what makes them addressable
     from a scoring formula — see :func:`materialize_row_derivable` for the complement."""

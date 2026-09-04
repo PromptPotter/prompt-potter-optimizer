@@ -143,41 +143,26 @@ _LETTER_RE = re.compile(r"\b([ABC])\b")
 
 
 def _parse(reply: str) -> str | None:
-    """The graded letter, or ``None`` when the reply carries none.
+    """The graded LABEL, or ``None`` when the reply carries no letter.
 
     Upstream defaults to ``"C"`` here. We do not: an unreadable grading reply is a failed
     measurement, and banking it as ``NOT_ATTEMPTED`` would let provider flakiness masquerade as a
     model that declined to answer — in the direction that flatters the arm under test."""
     match = _LETTER_RE.search(reply.strip().upper())
-    return match.group(1) if match else None
+    return _LETTER_TO_LABEL[match.group(1)] if match else None
 
 
 def _build_grade_fn(rubric: str, judge_name: str) -> object:
     async def grade(spec: JudgeSpec, result: QueryMeasurement) -> JudgeVerdict:
-        from promptpotter.judges.call import ask
+        from promptpotter.judges.call import graded
 
-        stage = spec.stages[0]
         prompt = rubric.format(
             question=result.get("query", ""),
             target=result.get("ground_truth", ""),
             predicted_answer=result.get("predicted", ""),
         )
-        reply, error = await ask(stage, prompt, judge=judge_name)
-        if error:
-            return JudgeVerdict(name=judge_name, score=None, error=error)
-        letter = _parse(reply)
-        if letter is None:
-            return JudgeVerdict(
-                name=judge_name,
-                score=None,
-                error=f"grader returned no A/B/C verdict: {reply[:120]!r}",
-            )
-        label = _LETTER_TO_LABEL[letter]
-        return JudgeVerdict(
-            name=judge_name,
-            score=_LABEL_TO_SCORE[label],
-            label=label,
-            explanation=f"graded {label} by {stage.model}",
+        return await graded(
+            spec.stages[0], prompt, judge=judge_name, parse=_parse, to_score=_LABEL_TO_SCORE
         )
 
     return grade
