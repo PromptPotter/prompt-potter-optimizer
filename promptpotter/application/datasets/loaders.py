@@ -232,10 +232,18 @@ def dataset_loader(dataset_name: str) -> Callable[[], list[Sample]] | None:
 
 def loadable_dataset_names() -> list[str]:
     """Names a caller can offer today, DERIVED from the dirs on disk. The family is open, so this is a
-    *listing* and never a validity test — ask :func:`dataset_loader` for that."""
+    *listing* and never a validity test — ask :func:`dataset_loader` for that.
+
+    The cut half asks the RESOLVER rather than re-matching the family's pattern here. Spelled as a
+    list of regexes this rots one family at a time: a second family lands, nothing lists it, and
+    the omission looks like the dir is missing rather than like this line is stale."""
     root = benchmark_datasets_root()
     cuts = (
-        sorted(p.name for p in root.iterdir() if p.is_dir() and _JUSTLOGIC_CUT_RE.match(p.name))
+        sorted(
+            p.name
+            for p in root.iterdir()
+            if p.is_dir() and p.name not in DATASET_LOADERS and dataset_loader(p.name) is not None
+        )
         if root.is_dir()
         else []
     )
