@@ -1,0 +1,71 @@
+campaign_config:
+  dataset_name: sealqa-longseal-12
+  exclude_nodes: []
+  scoring:
+    # The ANSWER step alone decides the round, and the two evidence terms ride beside it rather
+    # than inside it. Three reasons, in the order they bind. A grading that fails past its retry
+    # omits its term, `rescore_results` raises inside `measure_sample`, and the catch-all there
+    # banks the whole cell as an ERROR — so a formula naming a judge term can discard a paid
+    # answer. The two evidence rubrics are ours and unscreened. And this campaign exists to find
+    # out whether they SAY anything; a term that decides the election cannot also be the term
+    # under test.
+    #
+    # `materialize_sample_values` banks every applicable per-sample evaluator whether or not the
+    # formula names it, so all three readings reach the archive and the round file either way.
+    # Fold `evidence_settled` in once the screen has shown it separates arms — and when you do,
+    # weight it: the composite is what reaches theta, and per-step terms are only ever allowed to
+    # reach theta through it (`docs/methods/verdict-resolution.md` § Phase 3).
+    #
+    # `env_reward` is deliberately NOT here even though the connector always emits it. On this
+    # dataset it reports whether the episode left an answer file at all — the gold is held outside
+    # the container, so a verifier inside it cannot decide correctness — and scoring it would grade
+    # every arm that wrote a file as perfect. It is read as instrument health, not as the score.
+    per_sample: exact_match(predicted, ground_truth)
+    # NO `per_cell` cost term, deliberately. Its siblings price a cell against a MEASURED anchor
+    # (justlogic's 1546.0 tokens, pp-self's 500.0s), and no episode of this panel has been measured
+    # yet — an invented anchor would grade every arm against a number nobody read, and would be
+    # indistinguishable from a measured one on the round file. Add it once a cost distribution
+    # exists, with the figures and their source written here.
+  # The `retrieve -> ground -> answer` schema, keyed by the term the formula reads.
+  #
+  # The ANSWER step is `sealqa`, and using SealQA's own published auto-rater is the point: it is
+  # what the paper's numbers were produced with, so our number can sit beside theirs. It grades
+  # against the gold, which this bank HAS — `harbor_tasks.yaml` declares an `answer` per task, so
+  # `_extract_experiment` yields it as `ground_truth` and every `needs_gold` judge stays alive.
+  # A harbor bank is normally verifier-graded with no gold, and there they would all be skipped.
+  #
+  # Their models are declared HERE and inherited from nowhere — not from `available_models`, not
+  # from `nodes.agent.config`. A ruler that moved with whatever the search was last steered to
+  # would not be one.
+  judges:
+    evidence_settled:
+      name: evidence_retrieval
+      stages:
+        - model: openai/gpt-oss-120b
+          provider: openrouter
+    answer_grounded:
+      name: answer_grounding
+      stages:
+        - model: openai/gpt-oss-120b
+          provider: openrouter
+    answer_correct:
+      name: sealqa
+      stages:
+        - model: openai/gpt-oss-120b
+          provider: openrouter
+  # NEITHER budget is declared — both take the package default (origin 40, round 20), which is what
+  # every other dataset in this tree runs. Raising them was priced and did not pay: at the measured
+  # ~10% origin rate, a 10%->15% candidate ranks above its parent 0.68 of the time on 20 cells and
+  # 0.75 on 40, so doubling the round budget buys +0.07 for double the wall clock (83s a cell, so
+  # 2.8h of rounds against 5.5h). Re-price this against the rate an arm actually lands on before
+  # raising either — a rate near the paper's 26-33% band moves these numbers a long way.
+  optimization:
+    # The instrument check is DONE (origin 5% exact_match / 10% `answer_correct`, err=0.000, both
+    # evidence rubrics separating). These rounds search.
+    max_rounds: 3
+    n_variants: 2
+    l1_patience: 3
+    degradation_threshold: 0.4
+    # Wall clock is the real budget here, not money: a cell is $0.0015 and 41s, so three rounds
+    # cost well under a dollar and roughly three hours serial. This rail only stops a runaway.
+    spend_budget_usd: 5.00

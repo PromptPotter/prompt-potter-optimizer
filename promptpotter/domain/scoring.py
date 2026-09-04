@@ -13,22 +13,12 @@ from promptpotter.shared.errors import ErrorCategory
 
 
 class TurnRecord(TypedDict, total=False):
-    """ONE turn of a multi-turn cell — a projection of ATIF's ``Step``, never a schema of ours.
+    """ONE turn of a multi-turn cell — a projection of ATIF's ``Step``
+    (``harbor/models/trajectories/step.py``), never a schema of ours, narrowed to drop the training
+    surface no prompt, ruler or formula reads.
 
-    **Adopted rather than authored.** Harbor's agents already emit the Agent Trajectory
-    Interchange Format (``harbor/models/trajectories/step.py``), whose ``step_id`` field says in
-    its own words *"Ordinal index of the turn"*. Inventing a turn shape beside a published one
-    would make us a second owner of it, and the copy would drift the first time upstream added a
-    field. What is narrowed away is the training surface — token ids, logprobs, per-turn metrics —
-    which no prompt, ruler or formula reads.
-
-    **A turn is not a step and not an item.** ``step`` here NAMES the semantic segment this turn
-    served (the backend's own declaration — Harbor's ``[[steps]]`` name), and that name is the
-    axis per-step terms pool on. The turn's ORDINAL is not an axis: an episode takes however many
-    turns it takes, so pooling on position compares turn 3 of a four-turn cell against turn 3 of a
-    twelve-turn one. Promoting either to an item claims kN observations where there are N and
-    shrinks every SE by ~√k — see ``intelligence/exploration.py::dedup_observations``, which owns
-    the rule, and ``docs/methods/verdict-resolution.md`` § Phase 3."""
+    **The three rules a connector author gets wrong — owned by** ``connectors/CLAUDE.md``
+    § A multi-turn cell."""
 
     index: int
     # Who spoke: ``system`` | ``user`` | ``agent``. ATIF's ``source``, renamed to the word this
@@ -47,6 +37,37 @@ class TurnRecord(TypedDict, total=False):
     # What the environment answered — the half a `reasoning_trace` scrape loses first, and the
     # only evidence in the record that is not the model's own assertion.
     observation: str
+
+
+# Checked against `CELL_INTRINSIC_NAMES` in the tests: `cell_namespace`'s splat drops a colliding
+# key in silence.
+TURN_SCALAR_KEYS: frozenset[str] = frozenset({"n_turns", "n_tool_calls"})
+
+
+def turn_scalars(turns: list[TurnRecord] | None) -> dict[str, float]:
+    """The conversation, reduced to floats a scoring formula can name.
+
+    A formula cannot reach :attr:`PipelineData.turns` and must not learn to — the compiler allows
+    no subscript, no attribute access and no ``len``, and the list is in
+    :data:`UNREAD_PIPELINE_KEYS`. So scoring reads a conversation two ways only: this projection,
+    or a judge that grades the turns at measure time and banks a term.
+
+    Few keys on purpose, since each rides every archived row forever. Per-step keys are
+    ``{step}_turns``, identifier-safe because a formula can name nothing else."""
+    if not turns:
+        return {}
+    out: dict[str, float] = {
+        "n_turns": float(len(turns)),
+        "n_tool_calls": float(sum(len(t.get("tools") or ()) for t in turns)),
+    }
+    per_step: dict[str, int] = {}
+    for t in turns:
+        if name := str(t.get("step") or ""):
+            per_step[name] = per_step.get(name, 0) + 1
+    for name, count in per_step.items():
+        if (term := f"{name}_turns").isidentifier():
+            out[term] = float(count)
+    return out
 
 
 class LedgerPipelineData(TypedDict, total=False):
@@ -95,11 +116,9 @@ class PipelineData(LedgerPipelineData, total=False):
     # The task model's chain-of-thought, head-capped at the backend. The critique tier reads
     # it to diagnose WHERE a deduction broke, off the in-memory trajectory.
     reasoning_trace: str
-    # The cell's conversation, where the backend HAS one. Structured beside `reasoning_trace`
-    # rather than instead of it: the trace is one prose blob a backend composes for reading, and
-    # every backend emits one, while this is the record a judge segments by step and a panel
-    # renders turn by turn. A backend with no turn concept emits neither key nor an empty list —
-    # absent is "this backend has no turns", `[]` would be "it had none", and only one is true.
+    # The cell's conversation, beside `reasoning_trace` rather than instead of it: the trace is one
+    # prose blob every backend composes, this is the record a judge segments by step. Absent means
+    # "this backend has no turn concept"; `[]` would mean "it had none", and only one is ever true.
     turns: list[TurnRecord]
     # The SE beside ``mean_round_delta`` is this arm's OWN half of a paired cell difference — the
     # shared origin level is excluded because it cancels in that difference (`domain/l4/proxies.py`).
@@ -212,11 +231,9 @@ UNREAD_PIPELINE_KEYS: frozenset[str] = frozenset({"reasoning_trace", "total_time
 """``pipeline_data`` keys no estimator, cache, ruler or index reads.
 
 ``reasoning_trace`` reaches only the three L1 transcript panels, and only for rows live in the
-current cycle; ``total_time`` is zeroed on replay anyway. ``turns`` joins them for the same reason
-and one more: a judge grades it at MEASURE time and banks a term, and every judge evaluator is
-``from_rows=False``, so no re-grade over an archived row ever reaches back for the conversation
-that produced it. It is also the largest thing a turn-structured cell carries, which is what makes
-it the one most worth moving.
+current cycle; ``total_time`` is zeroed on replay anyway. ``turns`` joins them because a judge
+grades it at MEASURE time and every judge evaluator is ``from_rows=False``, so no re-grade ever
+reaches back for the conversation — and it is the largest thing such a cell carries.
 
 **A ranking may not be moved.** The `candidate_recall` / `source_recall` evaluators walk
 `final_ranking` / `candidate_ranking` for GT membership, and a row cannot tell a MOVED key from a

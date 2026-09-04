@@ -11,7 +11,9 @@ comparison is against their object rather than against something merely analogou
 
 from __future__ import annotations
 
+import codecs
 import json
+import locale
 import logging
 import re
 import tempfile
@@ -42,22 +44,16 @@ AGENT_NODE = "agent"
 REWARD_KEY = "env_reward"
 DEFAULT_TASK_REWARD_KEY = "reward"
 
-# Where the episode's ANSWER TEXT arrives, and the file the task writes it to. An agent episode is
-# graded by its verifier, but it still ANSWERED something, and until this existed nothing carried
-# that: no ranking means `predicted` is the `NO_RESULT` sentinel on every harbor cell, so a judge
-# reading the answer graded the literal string `NO_RESULT` and banked a category for it. The task
-# writes the file into Harbor's own convention artifacts dir; `Connector.answer_key` is what makes
-# core read it as `predicted` instead of asking a ranking that does not exist.
+# Where the episode's answer text arrives. A verifier grades the cell, but the episode still
+# ANSWERED something; `Connector.answer_key` is what makes core read this as `predicted` rather
+# than asking a ranking that does not exist.
 ANSWER_KEY = "agent_answer"
 ANSWER_FILENAME = "answer.txt"
 
-# NO `final_ranking` here, and its absence is the declaration. This connector emitted one — a
-# one-element list holding `harbor:{task} reward={x}` — purely so it would look ranked-label
-# shaped, and its own comment conceded it decided nothing. Nothing read it: the `agent` node
-# declares no `node_role`, so `emits_ranking` is False and `terminal_ranking` returns `[]`
-# regardless. What it cost was three readers having to un-believe it. Do not restore it, and do
-# not reach the same place by declaring the agent a RANKER: that switches on `candidate_recall`,
-# which walks a ranking for a ground truth this backend does not have and banks the 0.0.
+# NO `final_ranking`, and its absence is the declaration: the `agent` node declares no
+# `node_role`, so nothing would read one. Do not restore it, and do not reach the same place by
+# declaring the agent a RANKER — that switches on `candidate_recall`, which walks a ranking for a
+# ground truth this backend does not have and banks the 0.0.
 
 # Declares the tasks, their pins and the agent. Same role `inner_tasks.yaml` plays for L4: the
 # dataset's "samples" ARE the tasks named here, so there is no CSV table.
@@ -78,27 +74,20 @@ AGENT_KWARG_KEYS = frozenset(
         "enable_summarize",
         "interleaved_thinking",
         "max_thinking_tokens",
-        # terminus-2's own switch for putting the whole chat history on
-        # `agent_result.metadata["all_messages"]`. Tunable rather than pinned because it is a
-        # SIZE decision the dataset owns: it buys a cross-check on the trajectory file at the
-        # cost of carrying the conversation twice through one result object.
+        # terminus-2's switch for the whole chat history on `agent_result.metadata`. Tunable
+        # rather than pinned because it is a SIZE decision the dataset owns.
         "store_all_messages",
     }
 )
 
-# Where trial scratch goes. NOT under the workspace, and that is deliberate: Harbor nests
-# `<trials_dir>/<trial_name>/<role>/…` and a workspace path is already deep, which is the same
-# 260-char MAX_PATH wall that forced L4's `.inner` registry flat. Nothing durable lives here —
-# the reward, the digest and the token counts are projected into the measurement archive, which
-# is where a fact is supposed to land.
+# Trial scratch, NOT under the workspace: Harbor nests `<trials_dir>/<trial>/<role>/…` and a
+# workspace path is already deep — the MAX_PATH wall that forced L4's `.inner` registry flat.
+# Nothing durable lives here; reward, digest and token counts land in the measurement archive.
 _TRIALS_ROOT = Path(tempfile.gettempdir()) / "promptpotter-harbor"
 
-# The skill's frontmatter `description` — FIXED, never a search axis, and that is an instrument
-# decision rather than a shortcut. The agent sees only name + description eagerly and must open
-# the file to read the body, so a candidate free to write its own description could win by
-# making itself uninviting: the agent never reads the skill, the arm scores as no-skill, and a
-# degenerate hiding strategy reads as a discovery. Holding the hook constant is what makes the
-# body the thing that varied.
+# FIXED, never a search axis. The agent sees only name + description eagerly and must open the
+# file to read the body, so a candidate free to write its own could win by making itself
+# uninviting — the skill goes unread, the arm scores as no-skill, and hiding reads as discovery.
 _SKILL_NAME = "task-approach"
 _SKILL_DESCRIPTION = (
     "Read this before acting. Required approach, conventions and completion criteria for "
@@ -120,42 +109,26 @@ class HarborSession:
         return True
 
 
-# The declared panel. A ContextVar for the same reason the dspy connector holds its student in
-# one: ``in_process_run`` is a module-level hook the loop calls with ``(query, payload)`` and no
-# call-site state, so a task's pins have to be reachable without an argument to carry them.
-#
-# **Read it as a ContextVar, not as a module global.** Campaigns run as `asyncio.create_task`
-# siblings (`jobs/launcher/mint_and_start.py`), so each COPIES the context at spawn and two
-# concurrent Harbor campaigns cannot see each other's panel. Simplify this to a plain global on
-# the belief that it is one, and they clobber each other silently.
-#
-# That both in-process connectors needing per-run state invented this independently is the tell
-# that `InProcessRun` is missing an arming argument — filed in
-# `docs/specs/code-debt-cleanup.md`; the fix DELETES both ContextVars.
+# The declared panel. A ContextVar because ``in_process_run`` is a module-level hook called with
+# ``(query, payload)`` and no call-site state. NOT a module global: campaigns run as sibling
+# `asyncio.create_task`s, each copying the context at spawn, so two concurrent Harbor campaigns
+# cannot clobber each other's panel. That both in-process connectors invented this independently is
+# the tell that `InProcessRun` lacks an arming argument (`docs/specs/code-debt-cleanup.md`).
 _PANEL: ContextVar[dict[str, Any] | None] = ContextVar("harbor_panel", default=None)
 
 
-# Rosters already resolved, keyed by ``(dataset, version)``. Harbor's registry is one JSON file
-# fetched over the network, and init asks for the roster twice — once for the samples, once for
-# the instrument fingerprint — so resolving per process is the difference between one fetch and a
-# fetch per question.
+# Resolved rosters, keyed by ``(dataset, version)``. Init asks twice — once for the samples, once
+# for the fingerprint — so caching is the difference between one network fetch and one per task.
 _ROSTER_CACHE: dict[tuple[str, str], list[dict[str, Any]]] = {}
 
 
 def _registry_tasks(dataset: str, version: str) -> list[dict[str, Any]]:
     """The roster of a PUBLISHED Harbor dataset, resolved from Harbor's own registry.
 
-    **The task list is not ours to copy.** Harbor publishes it, pins every task to a commit, and
-    versions the set. Committing those rows into this repo would make us a second owner of a list
-    that already has one, and the copy would drift the moment upstream repinned — silently, since
-    nothing compares them. What a dataset here commits is the NAME and the VERSION.
-
-    That is safe only because the resolved pins are folded into the instrument fingerprint
-    (:func:`_identity_config`): if upstream moves a commit under a version, measurement identity
-    changes and the banked rows are not reused, instead of being quietly re-served as if they
-    described the new bytes. The version is REQUIRED for the same reason — resolving "latest"
-    would put a moving target behind a fixed dataset name.
-    """
+    The task list is not ours to copy: a dataset here commits the NAME and the VERSION, and a
+    second owner of upstream's list would drift the moment it repinned. Safe only because the
+    resolved pins fold into the instrument fingerprint (:func:`_identity_config`), so a moved
+    commit lands as a new measurement identity. The version is required for the same reason."""
     if (cached := _ROSTER_CACHE.get((dataset, version))) is not None:
         return cached
 
@@ -210,10 +183,8 @@ def _panel_tasks(panel: dict[str, Any]) -> list[dict[str, Any]]:
         )
     tasks = _registry_tasks(str(dataset), str(version))
 
-    # `tasks_include` selects a SLICE of the published roster by task id. A dataset that names one
-    # is a different dataset from one that names ten — `sample_id` is scoped by dataset name and
-    # the row text is not in the key — so the selection belongs in measurement identity, which is
-    # why `_identity_config` hashes the resolved pins AFTER this filter rather than before.
+    # A dataset naming one task is a different dataset from one naming ten, so the selection
+    # belongs in measurement identity — `_identity_config` hashes the pins AFTER this filter.
     include = panel.get("tasks_include")
     if not include:
         return tasks
@@ -233,25 +204,17 @@ def _extract_experiment(
     """Harbor tasks → ``(queries, index_terms)``, and **the one place this backend's answer shape
     is declared** (``connectors/CLAUDE.md`` § The answer shape).
 
-    Normally there is no label: the task's own verifier grades the cell, so ``ground_truth`` is
-    ``None`` and says so. A task MAY declare an ``answer``, and then this bank is label-carrying —
-    which is what lets a published auto-rater grade the answer step. On LongSeal that rater is
-    SealQA's own, so it is what makes our number comparable to the paper's; without it every
-    ``needs_gold`` judge is skipped and the answer step has no reading at all.
+    Normally there is no label — the task's own verifier grades the cell. A task MAY declare an
+    ``answer``, making the bank label-carrying, which is what keeps a published auto-rater alive on
+    the answer step; without it every ``needs_gold`` judge is skipped.
 
-    **Declared per task, checked as a SET.** ``all_verifier_graded`` is whole-bank, so a panel that
-    labels some tasks and not others has no answer shape — every label-reading surface would take
-    the bank's shape from whichever rows it happened to see. That raises here rather than yielding
-    a half-labelled bank, because the failure downstream is silent: rank statistics and the recall
+    Checked as a SET: ``all_verifier_graded`` is whole-bank, so a half-labelled panel has no answer
+    shape and raises here. Downstream it would be silent — rank statistics and the recall
     evaluators would report the unlabelled rows as misses.
 
-    Also PUBLISHES the panel — RESOLVED, so an episode reads the same pins the samples were built
-    from rather than resolving again and possibly differently. Done here rather than in a seam of
-    its own because init hands this function the parsed ``harbor_tasks.yaml``, so a second channel
-    carrying the same file would be a redundant path. Never reset: the binding lives as long as
-    the context it was set in, and arming a second dataset re-binds it there — see :data:`_PANEL`
-    for why that is per-task and not per-process.
-    """
+    Also PUBLISHES the panel, RESOLVED, so an episode reads the pins its samples were built from.
+    Done here because init already hands this function the parsed ``harbor_tasks.yaml``. Never
+    reset: the binding lives as long as its context (:data:`_PANEL`)."""
     resolved = dict(experiment_data)
     resolved["tasks"] = _panel_tasks(experiment_data)
     _PANEL.set(resolved)
@@ -270,11 +233,9 @@ def _extract_experiment(
             "query": t["id"],
             "ground_truth": str(t["answer"]).strip() if labelled else None,
         }
-        # `query` here is the TASK ID, not a question — that is what addresses an episode, and it
-        # is the whole of what this backend's "sample" is. So a judge falling back to `query` gets
-        # `Question: longseal-042` rendered into its rubric and grades against an identifier. A
-        # task that declares its `question` carries it on `Sample.question`, which is the channel
-        # built for exactly this (`domain/sample.py`) and the only one that reaches a judge.
+        # `query` is the TASK ID, so a judge falling back to it would grade against an
+        # identifier. A declared `question` rides `Sample.question`, the only channel a judge
+        # reads (`domain/sample.py`).
         if question := str(t.get("question") or "").strip():
             row["question"] = question
         out.append(row)
@@ -316,12 +277,9 @@ def harbor_wire_adapter(
         if prompt := cfg.get("prompt"):
             payload["prompt"] = prompt
         if model := cfg.get("model"):
-            # Harbor names a model the way litellm does — the PREFIX *is* the provider
-            # (`resolve_model_connection` splits on the first `/`). This repo splits the two, so
-            # `model: openai/gpt-oss-120b` + `provider: openrouter` must be composed here into
-            # `openrouter/openai/gpt-oss-120b`. Sending our spelling raw is not an error anyone
-            # sees: Harbor reads `openai/` as the provider, asks `api.openai.com` for a model it
-            # does not serve, and the cell fails for a reason that looks like the agent's.
+            # Harbor names a model the way litellm does — the PREFIX *is* the provider — while
+            # this repo splits the two, so they compose here. Sending our spelling raw is silent:
+            # Harbor reads `openai/` as the provider and asks a host that does not serve it.
             provider = cfg.get("provider")
             payload["model_name"] = (
                 f"{provider}/{model}"
@@ -333,13 +291,9 @@ def harbor_wire_adapter(
     return payload
 
 
-# NO credential bridge here, and that is the boundary, not an omission. TermNorm reaches its
-# provider with a key configured in TermNorm's own environment; `settings.TERMNORM_TOKEN` is the
-# bearer token for OUR wire to that service, never the provider key behind it. Harbor is the same
-# shape: the agent spends against the provider directly, outside our LLM client and its ledger,
-# so its key belongs in the environment Harbor runs in — where litellm already looks — and a
-# separate one there is what makes that spend readable and revocable on its own. Forwarding
-# `settings.OPENROUTER_API_KEY` into the container would quietly merge the two.
+# NO credential bridge, and that is the boundary rather than an omission. The agent spends
+# against the provider directly, outside our LLM client and its ledger, so its key belongs in the
+# environment Harbor runs in — where litellm already looks — and stays separately revocable.
 
 
 def _read_tasks(dataset_dir: Path) -> dict[str, Any]:
@@ -351,17 +305,12 @@ def _read_tasks(dataset_dir: Path) -> dict[str, Any]:
 def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
     """What the cell was measured ON, folded into measurement identity.
 
-    A Harbor task is pinned bytes — a git commit plus a path — and the agent that drives it is
-    the rest of the instrument. Repoint a task at a newer commit, or swap the agent, and the
-    banked rows describe a benchmark that no longer exists; without this they would be silently
-    replayed under the new declaration. Narrow on purpose: the task PINS, the agent name and the
-    reward key, not the whole file, so a comment or a retimed timeout voids nothing.
+    A task is pinned bytes and the agent driving it is the rest of the instrument; repoint either
+    and the banked rows describe a benchmark that no longer exists. Narrow on purpose — the pins,
+    the agent name and the reward key, so a comment or a retimed timeout voids nothing.
 
-    Hashes the RESOLVED pins, never the declaration. That is what lets the dataset commit only a
-    name and a version (:func:`_registry_tasks`): upstream moving a commit under that version
-    moves this fingerprint, so the change lands as a new measurement identity rather than as
-    stale rows served against bytes nobody read.
-    """
+    Hashes the RESOLVED pins, never the declaration, which is what lets a dataset commit only a
+    name and a version (:func:`_registry_tasks`)."""
     from promptpotter.domain.pipeline_schema import stable_hash
 
     tasks = _read_tasks(dataset_dir)
@@ -373,10 +322,8 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
             "path": (t or {}).get("path"),
             "name": (t or {}).get("name"),
             "ref": (t or {}).get("ref"),
-            # The declared question and answer are part of the INSTRUMENT, not of the task's
-            # pinned bytes: they are what a judge reads and grades against, and they live in our
-            # file rather than upstream's commit, so no other pin here moves when one is edited.
-            # Without them, fixing a wrong gold would replay every banked verdict under the old one.
+            # Question and answer are INSTRUMENT, not pinned bytes: they live in our file, and
+            # without them here a corrected gold would replay every verdict taken under the old.
             "question": (t or {}).get("question"),
             "answer": (t or {}).get("answer"),
         }
@@ -415,10 +362,11 @@ async def _version_check(_http: httpx.AsyncClient, _base_url: str) -> str | None
 
 
 async def _preflight(backend_url: str) -> None:
-    """Two things must be true before a campaign starts spending: Harbor imports, and a
-    container runtime answers. Both fail LOUDLY here rather than as N identical errored rows —
-    a missing extra and a stopped Docker daemon are the two ways this backend is 'down', and
-    neither is visible from a reward of 0."""
+    """Three things must be true before a campaign starts spending: Harbor imports, this
+    interpreter decodes UTF-8 by default, and a container runtime answers. All three fail LOUDLY
+    here rather than as N identical errored rows — a missing extra, a locale-encoded interpreter
+    and a stopped Docker daemon are the ways this backend is 'down', and none is visible from a
+    reward of 0."""
     try:
         from harbor.trial.trial import Trial  # noqa: F401
     except ImportError as exc:
@@ -427,6 +375,22 @@ async def _preflight(backend_url: str) -> None:
             backend_url,
             "the 'harbor' extra is not installed — `pip install -e \".[harbor]\"`",
         ) from exc
+
+    # Harbor reads `task.toml`, `instruction.md` and the ATIF trajectory with a bare `read_text()`,
+    # so the decode falls to the locale encoding and any task carrying a byte outside it raises
+    # inside `Task.__init__`. Upstream's to fix; ours is to refuse rather than discover it per cell.
+    if "utf-8" not in codecs.lookup(locale.getpreferredencoding(False)).name:
+        raise BackendUnreachableError(
+            "harbor",
+            backend_url,
+            f"this interpreter decodes files as {locale.getpreferredencoding(False)!r}, not UTF-8, "
+            # ASCII only in this string, deliberately: it is printed to the very console whose
+            # encoding it is complaining about, and an em dash there renders as a replacement char.
+            f"and Harbor reads its task files without naming an encoding. Every task whose "
+            f"instruction is not pure Latin-1 would raise before its container is built. Launch "
+            f"with UTF-8 mode on: `PYTHONUTF8=1` in the environment, or `python -X utf8 -m "
+            f"promptpotter …`",
+        )
 
     import asyncio
 
@@ -466,11 +430,9 @@ def _write_skill(root: Path, prompt: str) -> Path:
     return root
 
 
-# Every escape a terminal recording carries and a prompt must not: SGR colour, the cursor and
-# mode sequences (`\x1b[?2004h`), the charset selectors, and the bare control bytes — backspace
-# among them, which is what a `printf` of a `\b` literal leaves behind. Local rather than
-# `presentation/views/display.py::_ANSI_RE`, which matches colour ALONE and sits in a layer this
-# one may not import; a pane run through that filter is still two-thirds punctuation.
+# Every escape a terminal recording carries and a prompt must not: SGR colour, cursor and mode
+# sequences, charset selectors, bare control bytes. Local rather than `views/display.py::_ANSI_RE`,
+# which matches colour alone and sits in a layer this one may not import.
 _TERMINAL_ESC = re.compile(
     r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b[]()#][0-9A-Za-z]|\x1b.|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]"
 )
@@ -507,11 +469,9 @@ def _read_tail(path: Path, cap: int) -> str:
         return ""
 
 
-# Per-turn budgets. A conversation is stored once and read many times, and `_digest`'s note
-# applies here with more force: bytes no prompt will ever show still ride every archive row, every
-# replay and every compaction. The message keeps its HEAD (a turn opens by stating what it is about
-# to do) and the observation its TAIL (a command's output ends with the part that mattered) —
-# the same split `_tail` argues for the pane.
+# Per-turn budgets: a conversation is stored once and read many times. The message keeps its HEAD
+# (a turn opens by saying what it will do), the observation its TAIL (output ends with what
+# mattered) — the same split `_tail` argues for the pane.
 _TURN_MESSAGE_CAP = 1200
 _TURN_OBSERVATION_CAP = 800
 
@@ -584,12 +544,10 @@ def _read_trajectory(path: Path) -> list[dict[str, Any]]:
 def _turns(result: TrialResult) -> list[dict[str, Any]]:
     """The cell's conversation, in order, each turn stamped with the STEP it served.
 
-    Two layouts, because Harbor archives a multi-step trial's agent dir per step: the single-step
-    trajectory sits at ``<trial>/agent/trajectory.json`` and a multi-step one at
-    ``<trial>/steps/<name>/agent/trajectory.json``. Walking ``step_results`` rather than globbing
-    is what makes the STEP NAME available — the semantic axis per-step terms pool on, and the whole
-    reason a turn ordinal never becomes one (``domain/scoring.py::TurnRecord``).
-    """
+    Two layouts: ``<trial>/agent/trajectory.json`` single-step, ``<trial>/steps/<name>/agent/`` per
+    step. Walking ``step_results`` rather than globbing is what makes the STEP NAME available — the
+    axis per-step terms pool on, and why a turn ordinal never becomes one
+    (``domain/scoring.py::TurnRecord``)."""
     root = _TRIALS_ROOT / str(getattr(result, "trial_name", "") or "")
     steps = getattr(result, "step_results", None) or []
     sources: list[tuple[Path, str | None]] = (
@@ -618,21 +576,33 @@ _ANSWER_CAP = 4000
 def _answer(result: TrialResult) -> str:
     """The episode's answer text, from the artifact the task declared, or ``""``.
 
-    Harbor downloads the container's convention dir (``/logs/artifacts/``) into the trial's
-    ``artifacts/``, and archives it per step on a multi-step trial. The LAST step to write one
-    wins: on a ``retrieve → answer`` task both may leave a file, and the answer step's is the
-    answer. Absent is ``""``, which core turns into the ``NO_RESULT`` sentinel — the honest
-    reading for a task that declared no answer artifact at all."""
+    Collection MIRRORS the absolute container path under the trial's ``artifacts/``, so the file
+    lands at ``artifacts/logs/artifacts/answer.txt``. ``TrialPaths.host_artifact_path`` is asked
+    rather than that rule re-derived — the one read in this module going through a public accessor
+    instead of Harbor's private trial dir, because the placement is upstream's to change and a
+    wrong guess here returns ``""`` for an answer that is on disk.
+
+    Archived per step on a multi-step trial, and the LAST step to write one wins: on a
+    ``retrieve → answer`` task both may leave a file, and the answer step's is the answer. Absent
+    is ``""``, which core turns into the ``NO_RESULT`` sentinel — the honest reading for a task
+    that declared no answer artifact at all."""
+    from harbor.models.task.config import MAIN_SERVICE_NAME
+    from harbor.models.trial.paths import EnvironmentPaths, TrialPaths
+
+    source = str(EnvironmentPaths.artifacts_dir / ANSWER_FILENAME)
     root = _TRIALS_ROOT / str(getattr(result, "trial_name", "") or "")
-    candidates = [root / "artifacts" / ANSWER_FILENAME]
-    candidates += [
-        root / "steps" / str(sr.step_name) / "artifacts" / ANSWER_FILENAME
-        for sr in getattr(result, "step_results", None) or []
+    roots = [root] + [
+        root / "steps" / str(sr.step_name) for sr in getattr(result, "step_results", None) or []
     ]
     answer = ""
-    for path in candidates:
+    for base in roots:
         try:
-            text = path.read_text(encoding="utf-8", errors="replace").strip()
+            text = (
+                TrialPaths(base)
+                .host_artifact_path(MAIN_SERVICE_NAME, source)
+                .read_text(encoding="utf-8", errors="replace")
+                .strip()
+            )
         except OSError:
             continue
         if text:
@@ -641,18 +611,15 @@ def _answer(result: TrialResult) -> str:
 
 
 def _step_rewards(result: TrialResult) -> dict[str, float]:
-    """Each step's OWN verifier rewards, keyed ``{step}_{reward}`` — the per-step terms a formula
-    reads beside the cell's aggregate.
+    """Each step's OWN verifier rewards, keyed ``{step}_{reward}`` — per-step terms a formula reads
+    beside the cell's aggregate.
 
-    **Beside, never instead of.** ``TrialResult.verifier_result`` is already Harbor's fold of these
-    into one number (``multi_step_reward_strategy``), and that fold is the cell's score. Taking the
-    per-step rewards as independent observations would claim kN readings where there are N, shrink
-    every SE by ~√k, and let PoBB eliminate on confidence it never earned. They are TERMS of one
-    cell; a genuine per-step ability parameter is a different model, not a different key.
+    Beside, never instead of: ``TrialResult.verifier_result`` is already Harbor's fold of these into
+    the cell's score. Taking them as independent observations would claim kN readings where there
+    are N and let PoBB eliminate on confidence it never earned. A genuine per-step ability
+    parameter is a different model, not a different key.
 
-    Only identifier-safe names are emitted, because a formula can name nothing else. A dataset that
-    wants per-step terms names its steps as identifiers; one that does not still scores on the
-    aggregate, and a formula reaching for the missing term raises rather than reading a zero."""
+    Only identifier-safe names are emitted, because a formula can name nothing else."""
     out: dict[str, float] = {}
     for sr in getattr(result, "step_results", None) or []:
         name = str(getattr(sr, "step_name", "") or "")
@@ -666,15 +633,12 @@ def _step_rewards(result: TrialResult) -> dict[str, float]:
 def _unscoreable_step(result: TrialResult) -> str | None:
     """Why this trial's reward cannot be believed, or ``None``.
 
-    **The flattering silence.** ``MultiStepTrial._aggregate_step_rewards`` excludes steps with no
-    verifier result from the denominator, and ``_should_stop_after_step`` aborts the rest when a
-    step raises. So a cell whose first step scored 1.0 and whose second CRASHED reports a
-    trial reward of 1.0 — a perfect cell — while an honest run that answered wrongly reports 0.5.
-    The crash is rewarded, and nothing on any surface says so.
+    ``_aggregate_step_rewards`` excludes steps with no verifier result from the denominator, so a
+    cell whose first step scored 1.0 and whose second CRASHED reports 1.0 while an honest wrong
+    answer reports 0.5 — the crash is rewarded, silently.
 
-    A ``min_reward`` abort is deliberately NOT caught here: every step it appended carries a
-    verifier result, the failing one included, so the mean is over real readings and the operator
-    declared that gate. What this catches is the step that produced no reading at all."""
+    A ``min_reward`` abort is NOT caught here: every step it appended carries a verifier result, so
+    the mean is over real readings and the operator declared that gate."""
     for sr in getattr(result, "step_results", None) or []:
         if getattr(sr, "verifier_result", None) is None:
             exc = getattr(sr, "exception_info", None)
@@ -712,14 +676,9 @@ def _digest(result: TrialResult, task_id: str, reward: float | int | None) -> st
     """What the optimizer reads about the episode — prose on ``reasoning_trace``, which reaches
     ``pipeline_data`` as an infra key with no mapping and renders through ``sample_transcripts``.
 
-    A DIGEST, never the transcript: a 40-turn terminal log is a wall, not a prompt, and
-    `<dispatch-first>` puts the shaping here rather than downstream of it. **What earns its place
-    is what the next candidate could act on** — the COMMANDS the agent ran and the verifier's own
-    last words. A reward and a turn count name the outcome and nothing about how it was reached,
-    which is a critique node handed two scalars and asked to find a root cause; the first real
-    episode failed because ``printf`` ate the ``\\b`` escapes out of a regex, and every number we
-    were emitting was blind to it.
-    """
+    A DIGEST, never the transcript: a 40-turn terminal log is a wall, not a prompt. What earns its
+    place is what the next candidate could act on — the COMMANDS the agent ran and the verifier's
+    last words. A reward and a turn count name the outcome and nothing about how it was reached."""
     lines = [f"task={task_id} reward={reward}"]
     exc = getattr(result, "exception_info", None)
     if exc is not None:
@@ -844,10 +803,9 @@ async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]
         result = await trial.run()
         elapsed = time.monotonic() - start
 
-    # BEFORE the reward is read: on a multi-step trial a step that produced no verifier result is
-    # dropped from Harbor's own denominator, so the number below would describe a different set of
-    # steps than the task declared — and describe it as a success. Same answer as an absent reward:
-    # the cell is unscoreable, not a zero and not a one.
+    # BEFORE the reward is read: Harbor drops a step with no verifier result from its own
+    # denominator, so the number below would describe fewer steps than the task declared, and
+    # describe it as a success.
     if unscoreable := _unscoreable_step(result):
         from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
 
@@ -856,12 +814,10 @@ async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]
     rewards = result.verifier_result.rewards if result.verifier_result else None
     reward = (rewards or {}).get(reward_key)
     if reward is None:
-        # No number came back, so there is nothing to grade — and a 0.0 here would be a LIE
-        # about the candidate, indistinguishable from an episode that ran and failed. The
-        # campaign excludes the cell instead.
-        # NOTE: this error's name and home are now wrong — it has a second, non-L4 consumer.
-        # Generalizing it to `CellUnscoreableError` outside `domain/l4/` is a mechanical rename
-        # across 23 sites and is deliberately NOT bundled into this connector's first commit.
+        # Nothing to grade, and a 0.0 here would be indistinguishable from an episode that ran
+        # and failed. The campaign excludes the cell instead.
+        # NOTE: this error's name and home are wrong now that it has a non-L4 consumer;
+        # generalizing it outside `domain/l4/` is a rename across 23 sites.
         from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
 
         raise InnerCycleUnscoreableError(
@@ -878,10 +834,8 @@ async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]
         "reasoning_trace": _digest(result, query, reward),
         ANSWER_KEY: _answer(result),
     }
-    # Absent rather than empty for both, and the difference is a real one: `[]` would say this
-    # episode had no turns, `{}` that its steps scored nothing. A single-step task has neither
-    # concept, and a reader must be able to tell "this backend does not do that" from "it did
-    # that and got nothing".
+    # Absent, never empty: `[]` would claim this episode had no turns and `{}` that its steps
+    # scored nothing. A single-step task has neither concept.
     if turns := _turns(result):
         data["turns"] = turns
     data.update(_step_rewards(result))
@@ -909,10 +863,9 @@ CONNECTOR = Connector(
     # Each cell holds a container. Two is the shipped default elsewhere and is the right floor
     # here too: the ceiling is the operator's machine, not the provider.
     max_cells_in_flight=2,
-    # The one key `_in_process_run` always emits that the campaign formula reads. Verified against
-    # the dataset's declared observation_mappings at init. Per-step rewards are deliberately NOT
-    # here — a single-step task emits none, so declaring them would fail init for every task that
-    # is not multi-step; a dataset wanting them declares its own `observation_mapping`.
+    # The one key always emitted that a formula reads, verified against the dataset's declared
+    # mappings at init. Per-step rewards are NOT here — a single-step task emits none, so
+    # declaring them would fail init for every task that is not multi-step.
     required_observation_keys=(REWARD_KEY,),
     # An episode answers even though a verifier grades it, and until this existed nothing carried
     # the answer: no ranking means `predicted` was the `NO_RESULT` sentinel on every cell here.

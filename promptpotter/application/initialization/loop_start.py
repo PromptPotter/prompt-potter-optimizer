@@ -84,7 +84,7 @@ def populate_session_scoring(
     scoring_cell_formula: str | None = None,
     scorer_id: str,
     headline_metric: HeadlineMetric = "accuracy",
-    judge_specs: Mapping[str, JudgeSpec] | None = None,
+    judge_specs: Mapping[str, JudgeSpec],
     source: str = "optimization_loop",
 ) -> None:
     """Attach scoring + obs to *session* in place (step 2 of run init).
@@ -107,17 +107,13 @@ def populate_session_scoring(
     session.scoring.scorer_id = scorer_id
     session.scoring.scorer_cell_formula = scoring_cell_formula
     session.scoring.headline_metric = headline_metric
-    # Built ONCE, here, so an unregistered judge name, a spec with no stages, or a TERM that no
-    # formula could reach fails at init — beside the formula compile, before a cell is bought —
-    # rather than on the first sample.
-    #
-    # THE one place the reuse cache reaches a judge. This function is the sole judge builder and
-    # serves both the runner and the four verbs that score outside it (`arm_diagnostic_scoring`),
-    # so one line arms grading reuse on every entry point rather than on whichever was edited.
-    if judge_specs:
-        from promptpotter.judges import build_evaluators
+    # The sole judge builder, serving the runner and the four verbs that score outside it
+    # (`arm_diagnostic_scoring`) — so one line arms grading reuse on every entry point, and a
+    # bad spec fails here rather than on the first cell. Required and assigned unconditionally:
+    # `{}` declares none, and never means "keep what was armed before".
+    from promptpotter.judges import build_evaluators
 
-        session.scoring.judges = build_evaluators(judge_specs, cache=session.store.judge_reuse)
+    session.scoring.judges = build_evaluators(judge_specs, cache=session.store.judge_reuse)
 
 
 def arm_diagnostic_scoring(

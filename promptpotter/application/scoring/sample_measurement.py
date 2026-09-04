@@ -17,7 +17,7 @@ from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.l4.proxies import INNER_FACT_KEYS, PARENT_LEVEL_SE_KEY
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import QueryMeasurement, is_hit
+from promptpotter.domain.scoring import QueryMeasurement, is_hit, turn_scalars
 from promptpotter.infrastructure.llm.telemetry import emit_token_usage
 from promptpotter.shared.errors import ErrorCategory, has_pipeline_warnings
 
@@ -442,6 +442,8 @@ async def measure_sample(
             val = data.get(key)
             if val is not None:
                 pd[key] = val
+        # Here, not in a connector: every backend that emits `turns` earns the same terms.
+        pd.update(turn_scalars(pd.get("turns")))
         terminal_node = data.get("terminal_node")
         if terminal_node is None:
             st = pd.get("step_timings") or {}
@@ -498,9 +500,20 @@ async def measure_sample(
             )
         )
         from promptpotter.application.scoring.formula import rescore_results
+        from promptpotter.application.scoring.formula.compiler import ScoringFormulaError
 
         assert session.scoring.scorer is not None, "session.scoring.scorer required for measurement"
-        rescore_results([result], session.scoring.scorer)
+        try:
+            rescore_results([result], session.scoring.scorer)
+        except ScoringFormulaError as exc:
+            # The measurement succeeded and only the SCORE failed — typically a judge that could
+            # not grade, leaving its term absent from a formula that names it. Unscorable is not
+            # unmade: `pipeline_data` is kept, so the backend call stays in the archive and a
+            # re-grade recovers it. The outer catch-all would have banked `pipeline_data=None` and
+            # thrown a paid cell away.
+            logger.warning("measure_sample could not score %s: %s", query[:60], exc)
+            result["error"] = str(exc)
+            result["error_category"] = ErrorCategory.PIPELINE
         return result  # type: ignore[return-value]
     except httpx.HTTPStatusError as exc:
         category, error_msg = _classify_http_error(exc)

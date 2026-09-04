@@ -92,27 +92,25 @@ async def _verify_connector_revision(
 def _warn_if_labels_have_no_ranker(
     schema: PipelineSchema,
     samples: list[Sample],
+    connector: connectors.Connector | None,
     status: Callable[[str], None],
 ) -> None:
-    """**Labels and a ranker travel together.** A dataset carrying ground truth and no node
-    emitting a ranked list is mis-wired — every sample silently scores ``NO_RESULT`` against a
-    real label — so it is surfaced loudly at setup, on the status line, not at score time.
+    """**Labels and a ranker travel together.** A dataset carrying ground truth and no node emitting
+    a ranked list is mis-wired — every sample silently scores ``NO_RESULT`` against a real label —
+    so it is surfaced at setup, on the status line, not at score time.
 
-    Both halves of that are needed to judge it, which is why this is called from ``init_services``
-    after the samples resolve rather than from inside ``_resolve_pipeline_schema``. That seam sees
-    the schema and nothing else, and half an invariant is exactly what a connector then has to
-    hand it a flag to complete: `harbor` and `promptpotter` grade with no label, so the same
-    observation was TRUE on them and the remedy nonsense — nothing is meant to be extracted, the
-    verifier already answered, and "check node_role on the final node" points at a node behaving
-    correctly.
+    Judging it needs the schema AND the samples, which is why it is called from ``init_services``
+    after they resolve rather than from ``_resolve_pipeline_schema``, which sees neither.
 
-    The CONVERSE is deliberately not warned. A ranker with no labels is not a fault:
-    ``promptpotter-self`` declares ``l1_critique`` as one so its critique summary reaches
-    ``predicted`` for a human reading the round file, and warning there would fire on every L4
-    run — the same false alarm in the other direction."""
+    **The converse is deliberately not warned.** A ranker with no labels is not a fault —
+    ``promptpotter-self`` declares ``l1_critique`` as one so its summary reaches ``predicted`` for
+    a human reading the round file — and neither is a backend that carries its answer elsewhere,
+    which a declared ``Connector.answer_key`` says."""
     if not schema.nodes or not samples:
         return
     if all_verifier_graded(s.ground_truth for s in samples):
+        return
+    if connector is not None and connector.answer_key:
         return
     if any(n.emits_ranking and n.output_keys for n in schema.nodes):
         return
@@ -130,10 +128,9 @@ def _verify_required_observation_keys(
     connector: connectors.Connector,
     dataset_name: str | None,
 ) -> None:
-    """A key the backend emits but the schema never declares is dropped by ``sample_measurement``
-    and never reaches ``pipeline_data`` — so the formula grades a measurement it never received,
-    and nothing raises. Fail at arm time instead. RAISES, unlike its advisory revision sibling:
-    a silently dropped term is a wrong number, not drift."""
+    """Fails at arm time rather than letting a dropped key reach the formula as a measurement
+    nobody took. RAISES, unlike its advisory revision sibling — a silently dropped term is a wrong
+    number, not drift (``connectors/CLAUDE.md`` § Conventions)."""
     required = connector.required_observation_keys
     if not required:
         return
@@ -239,12 +236,14 @@ def _load_dataset_into_session(
     *,
     connector: connectors.Connector | None = None,
 ) -> None:
-    """Populate session.samples + index_terms — tenant Origin, then repo benchmark, then the
-    loader's one-shot download. A connector declaring an ``experiment_file`` loads through that."""
-    items = resolve_dataset_items(session.store, dataset_name, status=status)
-    if not items and connector is not None and connector.experiment_file:
+    """Populate session.samples + index_terms — a connector's own experiment file where it declares
+    one, else tenant Origin, then repo benchmark, then the loader's one-shot download."""
+    # First, never a fallback: a connector declaring an `experiment_file` OWNS its panel, and rows
+    # cached under the same dataset name describe a different instrument.
+    if connector is not None and connector.experiment_file:
         _load_experiment_file_into_session(session, connector, status)
         return
+    items = resolve_dataset_items(session.store, dataset_name, status=status)
     if not items:
         status(f"Dataset '{dataset_name}' not available")
         raise ValueError(
@@ -392,7 +391,7 @@ async def init_services(
 
     _load_dataset_into_session(session, dataset_name, status, connector=connector)
     # After the samples, never before: the invariant is about the schema AND the bank together.
-    _warn_if_labels_have_no_ranker(pipeline_schema, session.samples, status)
+    _warn_if_labels_have_no_ranker(pipeline_schema, session.samples, connector, status)
     return session
 
 

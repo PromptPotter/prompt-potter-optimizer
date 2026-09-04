@@ -1,9 +1,10 @@
 # SealQA LongSeal — answering from a haystack of conflicting documents
 
-One cell is one long-context call. The question arrives with twelve documents that were retrieved
-automatically for it, and the answer has to be found among them. There are no tools and nothing to
-search: the retrieval already happened, badly, and what is being tested is what the model does with
-the result.
+One cell is one episode in a container. The question arrives with twelve documents that were
+retrieved automatically for it, and the answer has to be found among them. There is a shell, but
+nothing to search with: the retrieval already happened, badly, and what is being tested is what the
+model does with the result. The episode finishes by writing the answer to a file, and that file is
+what gets graded.
 
 The documents are not neutral. SealQA selects questions whose web search returns **conflicting**
 results (sources that disagree, with no marker of which is right) or **unhelpful** ones (sources

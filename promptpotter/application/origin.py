@@ -359,7 +359,9 @@ async def prepare_scoring_context(
 
     if session.index_terms:
         await session.backend_client.init_session(session.index_terms)
-    else:
+    elif session.backend_client.execution == "remote_http":
+        # Only a wired backend can be broken by an empty term index; an `in_process` one has no
+        # `/matches` to fail.
         logger.warning("No session terms available — /matches calls will fail.")
 
     if obs:
@@ -380,6 +382,7 @@ async def prepare_scoring_context(
         scoring_cell_formula=spec.per_cell,
         scorer_id=spec.scorer_id,
         headline_metric=campaign_config.headline_metric,
+        judge_specs=campaign_config.judges,
         source="origin",
     )
 
