@@ -13,16 +13,6 @@ export const TERMS: Record<string, string> = {
   status_nowall:      "Dashboard has no wallclock yet — optimizer probably has not started.",
   status_stamp_mismatch: "dashboard.json keeps reporting a different (campaign, cycle) than this view expects — the optimizer may be re-instantiating, or this unit's session never wrote a dashboard.",
 
-  // Phase tag (dash.state) → one-sentence definition
-  phase_origin:           "Origin scoring of the unmodified starting prompt — the floor the optimizer beats.",
-  phase_l1_generate:        "L1 Generate — produces candidate prompt mutations from current framing + critique.",
-  phase_l1_critique:        "L1 Critique — reads round results, writes the critique L1 Generate consumes next round.",
-  phase_scoring:            "Scoring — running candidates against the dataset to compute composite_fitness.",
-  phase_l2_refining:        "L2 — framing refinement. Fires when L1 stalls; rewrites the task framing L1 reads.",
-  phase_l3_replanning:      "L3 — strategic plan. Fires when L2 stalls; replans the optimizer approach.",
-  phase_between_samples:    "Between samples — short pause between dataset queries during scoring.",
-  phase_between_candidates: "Between candidates — short pause between candidate evaluations.",
-
   // Workflow nodes
   node_checkin:   "Check-in & origin: resolves the dataset's origin, then scores the unmodified starting prompt as the floor.",
   node_l1_generate: "L1 Generate: produces N candidate prompts from current framing + critique.",

@@ -4,9 +4,8 @@ h1{font-size:var(--text-4xl);font-weight:600;line-height:1.2}
 .meta{font-size:var(--text-base);color:var(--color-text-secondary);display:flex;align-items:center;gap:var(--space-6)}
 .avatar{width:18px;height:18px;border-radius:50%;background:var(--color-background-tint-icon);display:inline-flex;align-items:center;justify-content:center;font-size:var(--text-xs);color:var(--color-accent);font-weight:500}
 
-/* TopStrip — merged hero + progress. Three columns at >=640px, stacks
-   below. One card, one paddings set, one source for the five stats the
-   operator scans first: best%, phase, round, query progress, throughput. */
+/* TopStrip — merged hero + progress. One frameless status line for the
+   stats the operator scans first: best%, last query time. */
 .topstrip{display:flex;align-items:center;gap:var(--space-12);flex-wrap:wrap;padding:2px 0;font-family:var(--font-mono)}
 .topstrip-label{font-size:var(--text-xs);letter-spacing:.08em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:600}
 .topstrip-sep{width:1px;height:13px;background:var(--color-border);flex:0 0 auto}
@@ -15,25 +14,17 @@ h1{font-size:var(--text-4xl);font-weight:600;line-height:1.2}
 .topstrip-spark{width:88px;height:15px;display:block}
 .topstrip-spark .line{stroke:var(--color-accent);stroke-width:1.5;fill:none}
 .topstrip-spark .area{fill:var(--color-accent-glow);stroke:none}
-.topstrip-phase,.topstrip-prog,.topstrip-last{display:inline-flex;align-items:center;gap:var(--space-6);font-size:var(--text-xs);color:var(--color-text-secondary)}
-.topstrip-round{font-weight:600;color:var(--color-text-primary)}
-/* Current candidate being scored ("C3.2"), beside the round — the finer
-   position marker, shown only while scoring (see TopStrip). */
-.topstrip-cand{font-weight:600;color:var(--color-success)}
-/* Banked lives ("hearts") — pips beside the round in improvement-banked-budget
-   mode. Warm/danger hue reads as "lives" in both themes; the heart SVG inherits
-   it via currentColor. The hollow pips (`fill-opacity` on the icon) are the
-   denominator, so they share the hue rather than fading to a neutral. */
+.topstrip-last{display:inline-flex;align-items:center;gap:var(--space-6);font-size:var(--text-xs);color:var(--color-text-secondary)}
+/* Banked lives ("hearts") — improvement-banked-budget mode. Warm/danger hue
+   reads as "lives" in both themes; the heart SVG inherits it via currentColor.
+   The hollow pips (`fill-opacity` on the icon) are the denominator, so they
+   share the hue rather than fading to a neutral. */
 .topstrip-hearts,.chat-activity-hearts{display:inline-flex;align-items:center;gap:1px;color:var(--color-danger);line-height:0}
 .chat-activity-hearts{margin-left:auto;padding-left:8px}
 .hearts-dead{line-height:1;font-size:.85em}
-.topstrip-qps{color:var(--color-text-tertiary)}
 .topstrip-counter-val{font-size:var(--text-base);color:var(--color-text-primary);font-family:var(--font-mono);font-weight:500}
 .topstrip-trace{font-size:var(--text-xs);color:var(--color-accent);text-decoration:none;font-weight:600}
 .topstrip-trace:hover{text-decoration:underline}
-.phase-tag{font-size:var(--text-xs);color:var(--color-success);background:var(--color-success-bg);border:0.5px solid var(--color-success-border);padding:0 var(--space-4);border-radius:3px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
-.phase-tag.is-error{color:var(--color-danger);background:var(--color-danger-bg);border-color:var(--color-danger-border)}
-.phase-tag.is-warn{color:var(--color-warn);background:var(--color-warn-bg);border-color:var(--color-warn-border)}
 
 .card{background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-lg);padding:var(--space-16)}
 .card-title{font-size:var(--text-md);font-weight:500;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between}

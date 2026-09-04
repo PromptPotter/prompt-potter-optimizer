@@ -582,7 +582,6 @@ export interface LiveDashboardState {
   stop_reason: string | null;
   round: number;
   candidate: string;
-  query: string;
   patience: string;
   hearts: number | null;
   rounds: RoundSummary[];

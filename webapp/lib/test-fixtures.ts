@@ -197,7 +197,6 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
     stop_reason: null,
     round: 0,
     candidate: "",
-    query: "",
     patience: "",
     hearts: null,
     rounds: [],

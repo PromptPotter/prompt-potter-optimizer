@@ -194,9 +194,9 @@ class LiveDashboardView(DerivedView):
         self._buffer = RoundBuffer()
         # Launched, not yet absorbed, in launch order: HEAD drives the in-flight markers, and
         # whatever remains at candidate close was discarded.
-        # sample_id -> (query_text, sample_idx, sample_total, candidate_idx, cand_total, depth)
+        # sample_id -> (query_text, candidate_idx, cand_total, depth)
         # The depth it LAUNCHED at is what separates look-ahead cost from a plain failure.
-        self._open_samples: dict[int, tuple[str, int, int, int, int, int]] = {}
+        self._open_samples: dict[int, tuple[str, int, int, int]] = {}
         # Sticky LLM-call mirror for ``current_round.nodes`` — owned here, not on the
         # audit-trail, which records the same event independently into its round flush.
         self._sticky_llm_calls: dict[str, dict[str, Any]] = dict(initial_llm_nodes or {})
@@ -388,6 +388,11 @@ class LiveDashboardView(DerivedView):
             if event_phase == RunPhase.TERMINAL:
                 self.state.stop_reason = str(record.payload.get("stop_reason") or "")
                 self._set_state(DashboardState.STOPPED)
+                # A stopped cycle is running nothing (the STOPPED half of `_STATE_TO_NODE`), so it
+                # is scoring no candidate: drop the marker rather than leave the final round's
+                # last candidate claiming the slot on every surface that outlives the run.
+                # Paused keeps it — it says where the run stopped.
+                self.state.candidate = ""
             self._flush_pending_persist()
             return
 
@@ -556,8 +561,6 @@ class LiveDashboardView(DerivedView):
             if sid is not None:
                 self._open_samples[int(sid)] = (
                     str(payload.get("query_preview") or ""),
-                    qi,
-                    qt,
                     ci,
                     ct,
                     self.state.sample_lookahead,
@@ -659,11 +662,6 @@ class LiveDashboardView(DerivedView):
         # and must NOT feed ``s.best``, whose sole writer is ``_absorb_round_complete``.
         apply_phase(self._core, event, view)
 
-    def _update_sample_markers(self, ci: int, ct: int, qi: int, qt: int) -> None:
-        s = self.state
-        s.candidate = f"{candidate_label(s.round, ci)}/{ct}"
-        s.query = f"{qi + 1}/{qt}"
-
     def _refresh_open_sample_markers(self) -> None:
         """Point the in-flight scalars at the OLDEST open sample. Derived, not assigned: under
         look-ahead ``sample_started`` for *n+1* precedes ``sample_scored`` for *n*."""
@@ -673,11 +671,11 @@ class LiveDashboardView(DerivedView):
             s.current_sample_id = None
             s.open_sample_ids = []
             return
-        sid, (query_text, qi, qt, ci, ct, _depth) = next(iter(self._open_samples.items()))
+        sid, (query_text, ci, ct, _depth) = next(iter(self._open_samples.items()))
         s.current_query_payload = query_text
         s.current_sample_id = sid
         s.open_sample_ids = list(self._open_samples)
-        self._update_sample_markers(ci, ct, qi, qt)
+        s.candidate = f"{candidate_label(s.round, ci)}/{ct}"
 
     def _absorb_sample_scored(self, result: dict[str, Any], *, last_in_candidate: bool) -> None:
         s = self.state
