@@ -21,7 +21,7 @@ A focus dataset for L1 optimizer prompt evolution must satisfy:
 2. **Reachable ceiling.** Plausible **50–75%** under strong prompt engineering. The origin-to-ceiling gap is what L1 climbs; bigger gap = cleaner signal/noise.
 3. **N ≥ 400, preferably 800+.** For stable cycle-to-cycle verdicts under PoBB (thresholds: `pobb_epsilon` / `elimination_n_min`, defaults on `OptimizationConfig`). Smaller N usable with per-subtask stratification.
 4. **Multiple distinct subtask categories.** Each subtask is an independent L1 prompt lever (decomposition, scaffolding, role-priming, anti-shortcut framing, format pinning). Single-axis datasets give L1 only one knob to turn.
-5. **Deterministic per-sample grading.** Exact match, MC, F1, regex extraction. **No LLM-judge scoring** (breaks PoBB's per-candidate independence model; cost-prohibitive at cycle scale).
+5. **Deterministic per-sample grading.** Exact match, MC, F1, regex extraction. **An LLM judge is admissible only through `promptpotter/judges/`, and its two original objections have not aged equally.** *Cost-prohibitive at cycle scale* was written when a cell was one LLM call; beside an episodic cell (one measured harbor cell: 172 s, $0.00137) a grader call is rounding error, and the judge runs once per cell and is banked, so no re-grade re-bills. *Breaks PoBB's per-candidate independence model* still stands and is **unverified against the model** — a judge adds a measurement error that is larger and model-dependent, even at `temperature: 0.0`. So: wire one where no matcher can grade the answer at all, validate it against the published grader before quoting a number, and do not treat a judged dataset as comparable to a deterministically-graded one until that check is done.
 6. **No mode-collapse on a single gold class.** A dataset where the modal answer covers >40% of the gold set, or where the model collapses 3-class to 2-class (BoardgameQA's missing `disproved`), will be label-bias coasted and produce inflated origin. Stratify by `prop` / `category` / `subtask` to spot the trap before commit.
 7. **HF-loadable.** Single jsonl on Hugging Face = trivial loader. Custom scraper = real plumbing cost.
 8. **Contamination-resistant.** 2024+ release preferred. Synthetic generation a plus.
@@ -157,7 +157,8 @@ Captured here so they don't get re-investigated next time:
 - **HumanEval / CRUX** — single axis (code format); no decomposition lever.
 - **IFEval** — predecessor to IFBench; superseded by IFBench's expanded constraint set and 2025-12 release.
 - **Tau-Bench** — needs tool-call infrastructure; outside the current connector boundary.
-- **AA-LCR** — LLM-judge per sample at cycle scale = budget-incompatible. Same disqualifier as GDPval-AA.
+- **AA-LCR** — LLM-judge per sample at cycle scale = budget-incompatible. Same disqualifier as GDPval-AA; re-read that disqualifier against criterion 5's revision above before re-rejecting it.
+- **SealQA** (`vtllms/sealqa`, arXiv 2506.01062, ICLR 2026) — **rejected on the LLM-judge ground, and that ground has since been half-lifted.** Its auto-rater is GPT-4o-mini adapted from OpenAI's SimpleQA grader, validated by the authors at 98% agreement with two human annotators over 100 answers; it ships here as the `sealqa` built-in (`promptpotter/judges/simpleqa.py`). Three configs: `seal_0` (111), `seal_hard` (254), `longseal` (254, documents inline at k=12/20/30 distractors). Published no-skill origins across five models run **26.3–33.0%** and WikiSkill's skill-evolved ceiling **39.4–44.7%** — in band by criterion 1 with demonstrated headroom, which is why the rejection is worth revisiting rather than restating. **Not wired**: no loader, no cut confirmed by the operator. Note WikiSkill used the live-search flavour with `web_search` + `read_file`, not LongSeal, and found SealQA the least skill-amenable of its five benchmarks.
 - **GDPval-AA** — pairwise Elo scoring (breaks PoBB), artifact outputs (docs/slides/diagrams — beyond `llm_only` node), agentic published scores (tool use, not raw completion). Right tool for benchmarking agents, wrong tool for L1 optimizer prompt evolution.
 
 ## Deferred research
@@ -195,6 +196,15 @@ If the canonical answer isn't obvious in 5 minutes, delegate it to a fresh agent
 > Report findings only. Do not write code. Do not propose an implementation. Under 400 words.
 
 **2. Report findings in `dataset.md`.** The new `datasets/{name}/dataset.md` must have a **Data** section quoting the authors' protocol verbatim, with citations (URL + section). State sample counts and any sister training dataset.
+
+**2b. If the task is TURN-STRUCTURED, decide the step schema now.** A multi-turn or multi-step
+task is ONE cell — a conversation is a testlet, not a series of items
+([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § Phase 3 sketch). Two
+things follow, both cheap now and expensive later. **Name a fixed SEMANTIC step schema** (retrieve
+→ ground → answer, say) rather than a turn index: an agentic episode takes however many turns it
+takes, so "step 3" pools nothing across rows. And **bank each step's score as its own named term**,
+letting the `scoring` formula do the collapsing — that sketch owns why, and it is the one part of
+this that cannot be added later. Record both in `dataset.md`.
 
 **3. Operator confirms the cut — before any wire.** The cut + protocol decision is operator-directed once the canonical protocol is on the table. **Never invent a split. Never consume a canonical test set as an optimization pool** without the operator explicitly accepting that the resulting number is not leaderboard-comparable. Any deviation from the canonical protocol gets said out loud in `dataset.md`, with the reason.
 

@@ -36,6 +36,7 @@ Sequenced into lanes by dependency, not milestone number. **Front priority = Lan
 |---|---|---|
 | C1 | **Chat-first front door** — one thread: ingest/check-in → curated activity stream → inline decision buttons (existing verbs). | Arc 2 (conversation endpoint) deferred — [`chat-foundation.md`](chat-foundation.md) |
 | C2 | Composite fitness P2–P4 (P1 = spend, done) — data rollup anytime; **scatter panel after P3** | pending (see § Connectors + L4) |
+| C2b | **Judged + turn-structured scoring** — an LLM-as-judge as a measured observation, and the per-step ruler it opens | judge SHIPPED (`promptpotter/judges/`); open: plural judges, the verdict cache, the per-step ruler (see § Judged and turn-structured scoring) |
 | C3 | L4 closure — the recursion + the L4 campaign + `proxy_lift_corr ≥ 0.6` re-validation | Open: the bounded cheap default config, and the `proxy_lift_corr` gate — itself gated on the panel being able to resolve one optimizer prompt from another — [`l4-outer-loop.md`](l4-outer-loop.md) § Open |
 | C4 | Cross-user measurement panel (after P3) | pending (see § Ingest + chat-first web) |
 | C5 | MCP server mode (= **agent-tool parity**, see § Agent-tool parity) · user-editable `pipeline.yaml` in UI | pending |
@@ -117,6 +118,26 @@ Sibling to § Agent-tool parity: that one widens how PromptPotter is *invoked*, 
 **The artifact** is `cycles/{id}/export.json`; its reader contract and the four rules it obeys are owned by [`../developer/stable-api.md`](../developer/stable-api.md) § 5c. Two rules there invert findings in DSPy's source and only read correctly with them: `Signature.dump_state` writes fields positionally and `load_state` zips them back with `strict=False`, so a signature that gained a field reloads a scrambled prompt with no error at all — hence **field names, never positions**. And their artifact carries no provenance, so you cannot ask it *"how good is this, and how do you know?"* — the half we compute and they do not, which is what makes ours a receipt that travels with the prompt.
 
 **Open — two of the three consumers.** (a) our own runtime is built. (b) `to_dspy` lives in the `promptpotteropt` repo, never here (the dependency arrow is one-way — [`ADR-0006`](../adr/0006-embeddable-core-and-extras.md)), and waits on Phase C; it applies the winner to a *live* program and never emits DSPy state, sidestepping the positional-zip corruption rather than inheriting it. (c) MLflow is unwritten, and targets the **Prompt Registry** (`register_prompt` / `load_prompt` / `search_prompts`), **not a model flavor**, because we produce prompts, not programs. So is § Captured "Export / copy from dashboard" — the same artifact behind a button.
+
+### Judged and turn-structured scoring
+
+**Tracked as C2b. The judge half has SHIPPED** — `promptpotter/judges/`, whose `CLAUDE.md` owns the
+contract and every reason behind it; read it there. What this lane owes is the rest.
+
+It unblocks datasets no matcher can grade — SealQA, and the two already recording that they are
+stuck on it (`email-tagging`'s free-text CRM fields, `screen-taste-v0`'s rating) — and revises
+selection criterion 5, which rejected them
+([`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md)).
+
+**Three open items, in the order they should land.** *Plural judges* — `campaign.yaml::judge` is
+singular, so two turns cannot be graded by one rubric; the map should be keyed by **the term the
+formula reads**, not the judge's name. It reuses the node grammar but must NOT live in
+`pipeline.yaml::nodes`, because `node_config_items` is the walk a bulk model steer follows and that
+is exactly the boundary a judge may not sit behind. *The verdict cache* — modelled on
+`OptimizerReuseCache`, and before any real spend: the stale-data ladder re-enters `measure_sample`
+twice per degraded sample and each re-entry re-grades. *Per-step difficulty* — the larger prize,
+sketched with its blockers and its one non-skippable precondition at
+[`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § Phase 3.
 
 ### Selection-clean reporting
 **Why, and the statistical statement, are owned by [`../research/metrics.md`](../research/metrics.md) § The winner's own number is biased upward.** What this lane owes: a reserved per-dataset partition the loop never scores on, and two readers pointed at it — `verify` (which already re-scores a frozen candidate without touching the cycle, so it is the closest existing shape) and the reported fitness in `export.json`, whose provenance block advertises a deployment estimate it cannot currently claim. The published BBEH comparison is not what this fixes — its split already satisfies the requirement ([`../research/bbeh-comparison/README.md`](../research/bbeh-comparison/README.md) § The protocol).

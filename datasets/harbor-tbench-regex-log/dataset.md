@@ -26,7 +26,8 @@ agent episode is a measurable cell in this loop — not to publish a competitive
 Each task ships its own `tests/test.sh`, written by the benchmark authors, which inspects the
 container and writes a reward to `/logs/verifier/reward.txt`. **Deterministic, and not an LLM
 judge** — the bar `dataset-selection-rationale.md` sets, and the ground on which `AA-LCR` and
-SealQA were previously rejected. We did not write, port or reimplement any of it, which is why
+SealQA were previously rejected — both now filed there, with what has since changed about that
+bar and what has not. We did not write, port or reimplement any of it, which is why
 parity with the published benchmark is not a claim this directory has to defend.
 
 ## Two things this dataset is NOT

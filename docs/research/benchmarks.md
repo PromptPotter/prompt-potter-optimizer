@@ -85,9 +85,11 @@ upward before trusting it.
 ZebraLogic · ARC-AGI-2 · FrontierMath · SimpleBench · LiveBench · AGIEval-EN · DROP · ReClor ·
 StrategyQA · ANLI R3 · LogiQA 2.0 · HumanEval/CRUX · IFEval · τ-bench · AA-LCR · GDPval-AA. The
 recurring reasons are *above the bar*, *below the floor*, *unstable test set*, and *outside PoBB's
-cost model* (LLM-judge or tool-call dependent — the budget gate polls at the sample edge, so one
-agent episode is unbounded spend between polls). The connector *boundary* is not one of them: a
-containerized agent episode is a measured cell through `connectors/harbor.py`.
+cost model* (tool-call dependent — the budget gate polls at the sample edge, so one
+agent episode is unbounded spend between polls). Neither *boundary* is a reason any more: a
+containerized agent episode is a measured cell through `connectors/harbor.py`, and an LLM-judge
+grade is a banked per-sample observation through `promptpotter/judges/` — so a row rejected for
+either reads on the revised criterion 5, not on this list.
 
 ## Protocol
 
