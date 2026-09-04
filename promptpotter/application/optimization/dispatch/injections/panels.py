@@ -400,8 +400,31 @@ def _r_sample_transcripts(b: InjectionBundle) -> list[Item]:
             predicted = _head_at_line(str(r.get("predicted") or ""), TRANSCRIPT_PREDICTED_CAP)
             gt = str(r.get("ground_truth") or "")[:60]
             parts.append(f"PREDICTED: {predicted}\nGROUND TRUTH: {gt}")
+        if verdict := _judge_verdict(r):
+            # WHY the grader said no, where a judge graded this cell. The score alone says a
+            # miss happened; "wrong entity" and "right but hedged" are different repairs, and
+            # this is the only channel carrying that distinction to the node that must fix it.
+            parts.append(verdict)
         sections.append(Item("\n".join(parts), trusted=False))
     return sections
+
+
+def _judge_verdict(row: dict[str, Any]) -> str:
+    """The judge's own reading of this cell, or ``""`` where none graded it.
+
+    Derived from the banked keys rather than from a campaign's judge config: this renderer reads
+    rows off a bundle and has no session, and a row measured before the judge was declared
+    legitimately carries none. Self-suppressing, like every panel here."""
+    pd = row.get("pipeline_data") or {}
+    # Keyed off `_why`, not `_label`: a grading that FAILED carries a reason and no verdict, and
+    # that is the case a reader most needs to see — a cell with no judge term is otherwise
+    # indistinguishable from one the judge was never asked about.
+    names = [k.removesuffix("_why") for k in pd if k.endswith("_why") and pd[k]]
+    if not names:
+        return ""
+    name = names[0]
+    label = str(pd.get(f"{name}_label") or "NOT GRADED")
+    return f"JUDGE ({name}): {label} — {str(pd[f'{name}_why'])[:200]}"
 
 
 # A cell is called WORSE only when its paired difference clears this many of its own SEs. Two —

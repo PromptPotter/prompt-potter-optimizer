@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
+    from promptpotter.judges.protocol import JudgeSpec
 
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,7 @@ def populate_session_scoring(
     scoring_cell_formula: str | None = None,
     scorer_id: str,
     headline_metric: HeadlineMetric = "accuracy",
+    judge_spec: JudgeSpec | None = None,
     source: str = "optimization_loop",
 ) -> None:
     """Attach scoring + obs to *session* in place (step 2 of run init).
@@ -105,6 +107,12 @@ def populate_session_scoring(
     session.scoring.scorer_id = scorer_id
     session.scoring.scorer_cell_formula = scoring_cell_formula
     session.scoring.headline_metric = headline_metric
+    # Built ONCE, here, so an unregistered judge name or a spec with no stages fails at init —
+    # beside the formula compile, before a cell is bought — rather than on the first sample.
+    if judge_spec is not None:
+        from promptpotter.judges import build_evaluator
+
+        session.scoring.judge = build_evaluator(judge_spec)
 
 
 def arm_diagnostic_scoring(
@@ -137,6 +145,7 @@ def arm_diagnostic_scoring(
         scoring_cell_formula=spec.per_cell,
         scorer_id=spec.scorer_id,
         headline_metric=campaign_config.headline_metric,
+        judge_spec=campaign_config.judge,
         source=source,
     )
     return pipeline_params
@@ -264,6 +273,7 @@ def _start_observability_and_scoring(
         scoring_cell_formula=scoring_cell_formula,
         scorer_id=scorer_id,
         headline_metric=config.headline_metric,
+        judge_spec=config.judge,
     )
     return tracing_campaign_id, obs
 

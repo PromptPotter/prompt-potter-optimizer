@@ -7,15 +7,27 @@ want on its own terms, so the seam is a file rather than a section to carve out.
 
 from __future__ import annotations
 
+from typing import Literal, get_args
+
 from pydantic import Field
 
 from promptpotter.domain.strict_model import StrictModel
 
-__all__ = ["SpendBucket", "SpendRollup"]
+__all__ = ["TOKEN_KIND_BUCKET", "SpendBucket", "SpendRollup", "TokenUsageKind"]
+
+
+TokenUsageKind = Literal["optimizer", "backend", "judge"]
+"""Who spent it, and therefore which bucket it lands in.
+
+``judge`` is its own arm rather than a flavour of the other two, and that is a BOUNDARY rather
+than a label: a judge is scoring infrastructure, not part of the optimizer loop and not the
+backend under test. Folded into ``loop`` an operator reads grading cost as optimizer cost;
+folded into ``backend`` they read it as the measured system's. The third arm is what makes the
+separation visible in the rollup instead of only in prose."""
 
 
 class SpendBucket(StrictModel):
-    """One spend sub-bucket (backend or optimizer-loop). Mutated only by
+    """One spend sub-bucket (backend, optimizer-loop, or judge). Mutated only by
     ``_handle_token_usage``. ``used_usd`` is the BILL; ``incurred_usd`` prices cache hits too."""
 
     used_usd: float = 0.0
@@ -47,6 +59,10 @@ class SpendRollup(StrictModel):
 
     backend: SpendBucket = Field(default_factory=SpendBucket)
     loop: SpendBucket = Field(default_factory=SpendBucket)
+    # Scoring's own LLM spend — an LLM-as-judge evaluator. Kept apart from `loop` on purpose:
+    # see `TokenUsageKind`. Absent on every rollup written before judges existed, which the
+    # default covers; a campaign declaring no judge simply leaves it at zero.
+    judge: SpendBucket = Field(default_factory=SpendBucket)
     total_used_usd: float = 0.0
     total_incurred_usd: float = 0.0
     # Cumulative BILLED tokens across both buckets — the token halt probe's source. Cache hits are
@@ -61,7 +77,33 @@ class SpendRollup(StrictModel):
     # Serving them is also what keeps the gauge and the halt gate one computation.
 
     @property
+    def buckets(self) -> tuple[SpendBucket, ...]:
+        """Every sub-bucket, in declaration order. The ONE walk each total folds over — a caller
+        naming them by hand is how a new bucket lands on disk and is left out of the totals the
+        budget gate reads, silently, in the direction that under-reports spend."""
+        return tuple(getattr(self, attr) for attr in TOKEN_KIND_BUCKET.values())
+
+    @property
     def incurred_unpriced_tokens(self) -> int:
         """Incurred-side twin of :attr:`unpriced_tokens`. >0 ⇒ the L4 efficiency proxy would divide by
         an understated cost and read cheapness that never happened, so such a cell is refused."""
-        return self.backend.incurred_unpriced_tokens + self.loop.incurred_unpriced_tokens
+        return sum(b.incurred_unpriced_tokens for b in self.buckets)
+
+
+TOKEN_KIND_BUCKET: dict[TokenUsageKind, str] = {
+    "optimizer": "loop",
+    "backend": "backend",
+    "judge": "judge",
+}
+"""Which :class:`SpendRollup` bucket each :data:`TokenUsageKind` lands in — declared once.
+
+TOTAL over the Literal, asserted at import. A two-way ``if kind == "optimizer" else backend``
+at the banking site is what this replaces: it does not fail when a third kind appears, it
+silently files the new one under ``backend``."""
+
+assert set(TOKEN_KIND_BUCKET) == set(get_args(TokenUsageKind)), (
+    "TOKEN_KIND_BUCKET must be total over TokenUsageKind"
+)
+assert set(TOKEN_KIND_BUCKET.values()) <= set(SpendRollup.model_fields), (
+    "TOKEN_KIND_BUCKET names a bucket SpendRollup does not declare"
+)

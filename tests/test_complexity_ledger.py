@@ -32,10 +32,25 @@ LEDGER_BASELINE = {
     # one module: the whole point of `connectors/` is that adding one touches no other file. The
     # surface it buys is a containerized agent episode as a measured cell, which is the first
     # backend shape whose row is graded by a verifier rather than matched against a label.
-    "modules": 335,
-    "init_files": 48,
-    "reexport_shims": 5,
-    "config_leaf_fields": 39,
+    # +4: `judges/` — `protocol.py`, `simpleqa.py`, `call.py`, `__init__.py`. The surface it buys
+    # is an LLM-as-judge as a measured observation, which is what a dataset whose answer is free
+    # text has no other way to score: `exact_match` on a bold span cannot grade a factoid, and
+    # three datasets already record being blocked on it. It is FOUR and not one because a judge is
+    # not a connector — the protocol is a public extension point, the built-in rubric is verbatim
+    # third-party text that must not sit in the same file as the registry that validates it, and
+    # `call.py` is a second LLM chokepoint on purpose: routing grading through the optimizer's
+    # would bank judge spend in the loop's bucket, which is the boundary this whole arc draws.
+    "modules": 339,
+    "init_files": 49,
+    # +1: `judges/__init__.py` — flagged for the same reason `connectors/__init__.py` is, and by
+    # the same text test: a registry module has both an `__all__` and imports. Named rather than
+    # emptied; the protocol types are deliberately NOT re-exported through it.
+    "reexport_shims": 6,
+    # +1: `CampaignConfig.judge` — which LLM-as-judge grades this campaign's cells, and on which
+    # models. One leaf though it nests: `Knob` marks a field as a leaf whatever its shape, and the
+    # judge spec IS one decision. `Scope.DATA` because swapping the judge invalidates every verdict
+    # taken under the old one; `Estimand.GATE` because it decides what counts as a correct answer.
+    "config_leaf_fields": 40,
     # +1: `QUEUE_MAX_WAIT_S` — how long a launch may wait in line before it is withdrawn. It is a
     # setting and not a constant because it is the one queue number a HOST has to be able to
     # answer for: on a shared box it decides when someone else's waiting launch is given up on.
@@ -54,7 +69,11 @@ LEDGER_BASELINE = {
     # SEARCHPOINT but was read on cells this round never bought, and reconstructing it that way
     # is what left a sample-set mask re-scoring the arms and not the bar.
     "cycle_result_fields": 161,
-    "any_params": 50,
+    # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
+    # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
+    # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
+    # reason. Narrowing it would make this the one evaluator the shared call site cannot invoke.
+    "any_params": 51,
     # +1: `results.py::is_floor_pinned(rows: Sequence[Mapping[str, Any]])`, the same signature as
     # `measured_cells` and `is_answer_collapsed` beside it — a round row read off disk is a plain
     # mapping, so a narrower annotation here would be a claim the callers cannot honour.
@@ -74,7 +93,12 @@ LEDGER_BASELINE = {
     "prompt_string_fields": 6,
     "injections": 32,
     "escalation_rules": 6,
-    "claude_md": 7,
+    # +1: `judges/CLAUDE.md` — the per-layer contract for a new top-level package, indexed from
+    # `promptpotter/CLAUDE.md` like every other. It earns a page rather than a section in
+    # `connectors/CLAUDE.md` because its load-bearing rule is the OPPOSITE concern: a connector
+    # says where a measurement comes from, a judge says a grader is a measurement and never a
+    # formula term — and that rule is what stops six re-derivation sites re-billing the archive.
+    "claude_md": 8,
 }
 
 

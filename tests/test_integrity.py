@@ -301,6 +301,76 @@ def test_adopt_advances_identity_and_carries_the_wound_ledger():
     assert cyc.opt_sp.memory.task_context.domain == "biotech"
 
 
+def test_judge_identity_moves_the_searchpoint_hash() -> None:
+    """Swapping the judge, its models, or its rubric re-cuts the measurement key.
+
+    An archive row is keyed on node configs. A judge that changed without moving the key would
+    have every verdict taken under the OLD grader replayed under the new one — silently, and in
+    whichever direction the new grader happens to be more lenient."""
+    from promptpotter.application.pipeline_resolve import resolve_pipeline_config_params
+    from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+    from promptpotter.judges.protocol import JudgeSpec, JudgeStage
+
+    schema = parse_pipeline_response(
+        {
+            "nodes": {
+                "llm_only": {"type": "generation", "config": {"model": "m", "provider": "p"}}
+            },
+            "pipelines": {"default": ["llm_only"]},
+        }
+    )
+    active = schema.active_steps_excluding([])
+
+    def sp_hash(judge: JudgeSpec | None) -> str:
+        return schema.sp_hash(resolve_pipeline_config_params(active, {}, None, schema, judge=judge))
+
+    sealqa_a = JudgeSpec(name="sealqa", stages=[JudgeStage(model="a", provider="p")])
+    hashes = {
+        "none": sp_hash(None),
+        "sealqa@a": sp_hash(sealqa_a),
+        "sealqa@b": sp_hash(JudgeSpec(name="sealqa", stages=[JudgeStage(model="b", provider="p")])),
+        # Same models, different RUBRIC — the fingerprint hashes the prompt text, so this moves
+        # even though nothing an operator wrote in the config differs.
+        "simpleqa@a": sp_hash(
+            JudgeSpec(name="simpleqa", stages=[JudgeStage(model="a", provider="p")])
+        ),
+    }
+    assert len(set(hashes.values())) == len(hashes), f"judge identity collides: {hashes}"
+    assert sp_hash(sealqa_a) == hashes["sealqa@a"], "an unchanged judge must not move the key"
+
+
+def test_a_judge_graded_row_rescores_without_calling_a_model() -> None:
+    """Re-grading an archived row is FREE, and must stay free.
+
+    ``rescore_results`` runs at six sites that re-derive over already-banked rows — the δ ruler,
+    A/B replay, resume, exploration, the origin gate, the hard-sample archive. The judge's verdict
+    is banked into ``pipeline_data`` at measure time precisely so those paths read a number instead
+    of re-billing one LLM call per archived row, every time an index warms."""
+    from factories import measurement
+
+    from promptpotter.application.scoring.formula import compile_scorer, rescore_results
+    from promptpotter.judges import call as judge_call
+
+    calls: list[str] = []
+
+    async def _explode(*_a: Any, **_k: Any) -> tuple[str, str]:
+        calls.append("asked a model")
+        return "", ""
+
+    original, judge_call.ask = judge_call.ask, _explode
+    try:
+        # The banked verdict, exactly as `materialize_sample_values` lands it: top-level in
+        # pipeline_data, which is what makes it addressable from the formula at all.
+        row = measurement(sample_id=0, fitness=0.0, pipeline_data={"sealqa": 1.0})
+        scorer = compile_scorer("sealqa", None, verifier_graded=False)
+        rescore_results([row], scorer)
+    finally:
+        judge_call.ask = original
+
+    assert row["fitness"] == 1.0, "the banked verdict is what the formula must read"
+    assert calls == [], f"rescoring an archived row reached a model: {calls}"
+
+
 # 2. Replay eligibility — which banked row may be served back
 
 

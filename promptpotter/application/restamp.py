@@ -44,6 +44,7 @@ from promptpotter.domain.phases import CampaignPhase, RunPhase
 from promptpotter.domain.results import DiagnosticRunRecord, RoundResult
 from promptpotter.domain.run_records import CycleRecord
 from promptpotter.domain.scoring import ledger_sample_view
+from promptpotter.domain.spend import TOKEN_KIND_BUCKET
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.campaign_store.store import reproject_round_index
 from promptpotter.infrastructure.store.io import (
@@ -691,7 +692,9 @@ def _facts_from_inner_cycle(cycle_dir: pathlib.Path) -> dict[str, Any]:
         return {}
     spend = dash.get("spend")
     spend = spend if isinstance(spend, dict) else {}
-    buckets = [spend.get("backend"), spend.get("loop")]
+    # Off the declared bucket roster, so a new spend kind is counted here the day it lands
+    # rather than the day someone notices this list is short.
+    buckets = [spend.get(name) for name in TOKEN_KIND_BUCKET.values()]
     tokens = sum(
         int(b.get(k) or 0)
         for b in buckets

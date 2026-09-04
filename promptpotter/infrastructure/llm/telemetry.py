@@ -16,6 +16,7 @@ from promptpotter.domain.run_records import (
     RoundWarningRecord,
     TokenUsageRecord,
 )
+from promptpotter.domain.spend import TokenUsageKind
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -60,7 +61,7 @@ def _append_record(record: CycleRecord) -> int | None:
 def emit_token_usage(
     *,
     node: str,
-    kind: Literal["optimizer", "backend"],
+    kind: TokenUsageKind,
     input_tokens: int,
     output_tokens: int,
     duration_s: float,

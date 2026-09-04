@@ -231,6 +231,7 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
     spend: {
       backend: { used_usd: 0, input_tokens: 0, output_tokens: 0, reasoning_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, rate_known: false, model: null, unpriced_tokens: 0, incurred_usd: 0, incurred_unpriced_tokens: 0 },
       loop: { used_usd: 0, input_tokens: 0, output_tokens: 0, reasoning_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, rate_known: false, model: null, unpriced_tokens: 0, incurred_usd: 0, incurred_unpriced_tokens: 0 },
+      judge: { used_usd: 0, input_tokens: 0, output_tokens: 0, reasoning_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, rate_known: false, model: null, unpriced_tokens: 0, incurred_usd: 0, incurred_unpriced_tokens: 0 },
       total_used_usd: 0,
       total_incurred_usd: 0,
       total_tokens_used: 0,

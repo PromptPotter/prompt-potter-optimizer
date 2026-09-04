@@ -8,6 +8,7 @@ from pydantic import ConfigDict, Field, model_validator
 
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler, ThetaCaveat
+from promptpotter.domain.spend import TokenUsageKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
@@ -124,7 +125,10 @@ class TokenUsageRecord(StrictModel):
     model_config = ConfigDict(frozen=True)
 
     record_type: Literal["token_usage"] = "token_usage"
-    kind: Literal["optimizer", "backend"]
+    kind: TokenUsageKind
+    """Which spend bucket this lands in — ``domain/spend.py::TOKEN_KIND_BUCKET`` is the mapping,
+    and it is the only place that decides. ``judge`` is scoring's own LLM spend and is deliberately
+    neither of the other two."""
     node: str
     model: str | None = None
     provider: str | None = None

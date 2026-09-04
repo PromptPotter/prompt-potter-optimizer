@@ -80,7 +80,7 @@ Configured per dataset via `campaign.yaml::scoring`:
 **Addressable namespace** (`application/scoring/formula/compiler.py`):
 
 - **Builtins:** the `_SAFE_BUILTINS` map in that module — arithmetic and `math` only. Nothing else from `__builtins__`.
-- **Evaluators:** any registered name, per-sample or per-round. `all_evaluators()` (`application/scoring/evaluators.py`) is the registry, `evaluators_meta()` its served projection. Names are stable and implementations may change — read the registry, not a list here.
+- **Evaluators:** any registered name, per-sample or per-round. `all_evaluators()` (`application/scoring/evaluators.py`) is the PACKAGE registry, `evaluators_meta()` its served projection; a campaign's own `judge` (§3) is addressable by its judge name too, and is deliberately not in that registry — a grader belongs to one campaign, not to the process. Names are stable and implementations may change — read the registry, not a list here.
 
 Constants, name lookups, arithmetic operators (`+ - * / % **`) addressable. **Calls outside the registry are rejected at compile time** (enforced, not convention).
 
@@ -110,7 +110,9 @@ Connector-described pipeline (the shape `GET /pipeline` exposes, plus an operato
 
 Campaign knobs + scoring + optimizer LLM. Validated by `application/campaign_config.py::CampaignConfig` with `extra="forbid"` — unknown keys raise at boot. See `CampaignConfig` for the full field list.
 
-**Top-level keys.** `dataset_name`, `scoring`, `sp_budget_ttest`, `exclude_nodes` (drop pipeline nodes by name), `pipeline_overrides` (per-node config overlay), `optimization`. (The optimizer LLM is install-global — `promptpotter/assets/optimizer/pipeline.yaml` — not a campaign key.)
+**Top-level keys.** `dataset_name`, `scoring`, `judge`, `sp_budget_ttest`, `exclude_nodes` (drop pipeline nodes by name), `pipeline_overrides` (per-node config overlay), `optimization`. (The optimizer LLM is install-global — `promptpotter/assets/optimizer/pipeline.yaml` — not a campaign key.)
+
+`judge` names a registered LLM-as-judge and the models to run it on — `{name, stages: [{role, model, provider, temperature}]}` — for datasets whose answer no matcher can grade. Its verdict is banked as a per-sample observation the `scoring` formula reads by NAME (never a call: a judge is a measurement, not a formula term). **Its models are inherited from nothing** — not `allowed_models`, not node config, not the optimizer's. A third party ships a judge through the `promptpotter.judges` entry-point group, validated like §1's connectors; contract: [`../../promptpotter/judges/CLAUDE.md`](../../promptpotter/judges/CLAUDE.md).
 
 **`optimization` knobs:** the stable contract is the mechanism, not a
 frozen key/default table (same rule as §4). Every knob is a

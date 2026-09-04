@@ -14,6 +14,10 @@ from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.results import HardSampleOrder, HeadlineMetric
 from promptpotter.domain.strict_model import StrictModel
 
+# From the LEAF, never `promptpotter.judges`: importing the package would pull the registry (and
+# every built-in rubric with it) into a module whose whole point is to import nothing heavy.
+from promptpotter.judges.protocol import JudgeSpec
+
 if TYPE_CHECKING:
     from promptpotter.domain.run_records import CycleSeed
 
@@ -495,6 +499,19 @@ class CampaignConfig(StrictModel):
         "non-empty set is the operator explicitly sanctioning those models.",
     )
     scoring: Annotated[str | dict[str, str] | None, Knob(Scope.DATA, Estimand.GATE)] = Field(None)
+    judge: Annotated[JudgeSpec | None, Knob(Scope.DATA, Estimand.GATE)] = Field(
+        None,
+        description="An LLM-as-judge for datasets whose answer is free text, where no "
+        "deterministic matcher can grade a cell. Names a registered judge "
+        "(`promptpotter.judges`) and the models to run it on; its verdict is banked as a "
+        "per-sample observation the `scoring` formula then reads by name. "
+        "`Scope.DATA` because swapping the judge invalidates every verdict taken under the "
+        "old one, so a resume must run divergence detection rather than carry them forward. "
+        "**Its models are declared here and inherited from nowhere** — not from "
+        "`allowed_models`, not from the pipeline's node config, not from the optimizer's own "
+        "LLMs. A judge is a ruler, and a ruler that moved with whatever the search was last "
+        "steered to would not be one.",
+    )
     headline_metric: Annotated[HeadlineMetric, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
         "accuracy",
         description="Which fitness number headlines the operator's text surfaces "

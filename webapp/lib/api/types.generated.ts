@@ -463,7 +463,7 @@ export interface RoundResult {
   scoreboard: ScoreboardRow[];
 }
 
-/** One spend sub-bucket (backend or optimizer-loop). Mutated only by */
+/** One spend sub-bucket (backend, optimizer-loop, or judge). Mutated only by */
 export interface SpendBucket {
   used_usd: number;
   input_tokens: number;
@@ -482,6 +482,7 @@ export interface SpendBucket {
 export interface SpendRollup {
   backend: SpendBucket;
   loop: SpendBucket;
+  judge: SpendBucket;
   total_used_usd: number;
   total_incurred_usd: number;
   total_tokens_used: number;

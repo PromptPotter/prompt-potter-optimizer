@@ -300,6 +300,38 @@ def cell_namespace(result: dict[str, Any]) -> dict[str, Any]:
     return ns
 
 
+CELL_INTRINSIC_NAMES: frozenset[str] = frozenset(
+    {
+        "ground_truth_rank",
+        "error",
+        "predicted",
+        "ground_truth",
+        "n_candidates",
+        "input_tokens",
+        "output_tokens",
+        *SCORING_FUNCTIONS,
+    }
+)
+"""What :func:`cell_namespace` binds ITSELF, before the ``pipeline_data`` splat.
+
+A ``pipeline_data`` key colliding with one of these is **silently dropped** by that splat's
+``elif key not in ns`` — so a per-sample evaluator claiming one would materialize a value no
+formula could ever reach. ``evaluators.py::_validate_evaluator`` refuses that name at import.
+Asserted against the real function below rather than maintained by hand."""
+
+_INTRINSIC_PROBE: dict[str, Any] = {
+    # Maximal: `n_candidates` and the token pair are each bound only when the row carries their
+    # source, so a thinner probe would under-report and let a real collision through.
+    "n_candidates": 0,
+    "pipeline_data": {"step_tokens": {"_": {}}},
+}
+
+assert (
+    set(cell_namespace(_INTRINSIC_PROBE)) - set(_INTRINSIC_PROBE["pipeline_data"])
+    == CELL_INTRINSIC_NAMES
+), "CELL_INTRINSIC_NAMES drifted from what cell_namespace binds"
+
+
 def objective_namespace(result: dict[str, Any]) -> dict[str, Any]:
     """What the per-cell COMPOSITE reads: the declared channels and row health, plus everything
     the per-sample formula already reaches.

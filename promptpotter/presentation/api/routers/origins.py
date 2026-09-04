@@ -142,7 +142,7 @@ def _dataset_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) -> 
         if not active:
             return None
         base_pp = resolve_pipeline_config_params(
-            active, cfg.pipeline_overrides, dataset_dir, schema
+            active, cfg.pipeline_overrides, dataset_dir, schema, judge=cfg.judge
         )
         opt_sp = resolve_origin_opt_search_point(
             prompt_node_names=schema.prompt_node_names(),

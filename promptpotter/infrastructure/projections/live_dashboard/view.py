@@ -34,6 +34,7 @@ from promptpotter.domain.scoring import (
     recorded_elapsed_s,
     weighted_sum_weights,
 )
+from promptpotter.domain.spend import TOKEN_KIND_BUCKET, SpendBucket
 from promptpotter.infrastructure.ledger import open_with_history
 from promptpotter.infrastructure.projections.audit_trail import (
     audit_rounds_dir,
@@ -711,7 +712,9 @@ class LiveDashboardView(DerivedView):
         """EVERY call lands in ``incurred``; only one that reached the wire lands in the bill. A
         cached call spent nothing, so billing it would halt a run over money it never cost."""
         spend = self.state.spend
-        bucket = spend.loop if record.kind == "optimizer" else spend.backend
+        # Through the declared mapping, never a branch here: a two-way `if kind == "optimizer"`
+        # does not fail when a third kind appears, it files it under `backend` in silence.
+        bucket: SpendBucket = getattr(spend, TOKEN_KIND_BUCKET[record.kind])
         in_tok = int(record.input_tokens)
         out_tok = int(record.output_tokens)
         if record.model and not bucket.model:
@@ -749,12 +752,12 @@ class LiveDashboardView(DerivedView):
                 # Tracked so the dashboard flags the cap as inactive.
                 bucket.unpriced_tokens += in_tok + out_tok
 
-        spend.total_used_usd = round(spend.backend.used_usd + spend.loop.used_usd, 6)
-        spend.total_incurred_usd = round(spend.backend.incurred_usd + spend.loop.incurred_usd, 6)
-        spend.total_tokens_used = sum(
-            b.input_tokens + b.output_tokens for b in (spend.backend, spend.loop)
-        )
-        spend.unpriced_tokens = spend.backend.unpriced_tokens + spend.loop.unpriced_tokens
+        # Over `spend.buckets`, never a hand-named pair: the budget gate reads `total_used_usd`,
+        # so a bucket left out of this fold is spend the cap cannot see.
+        spend.total_used_usd = round(sum(b.used_usd for b in spend.buckets), 6)
+        spend.total_incurred_usd = round(sum(b.incurred_usd for b in spend.buckets), 6)
+        spend.total_tokens_used = sum(b.input_tokens + b.output_tokens for b in spend.buckets)
+        spend.unpriced_tokens = sum(b.unpriced_tokens for b in spend.buckets)
         self._schedule_persist()
 
     @property
