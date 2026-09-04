@@ -11,6 +11,7 @@ comparison is against their object rather than against something merely analogou
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import tempfile
@@ -41,6 +42,15 @@ AGENT_NODE = "agent"
 REWARD_KEY = "env_reward"
 DEFAULT_TASK_REWARD_KEY = "reward"
 
+# Where the episode's ANSWER TEXT arrives, and the file the task writes it to. An agent episode is
+# graded by its verifier, but it still ANSWERED something, and until this existed nothing carried
+# that: no ranking means `predicted` is the `NO_RESULT` sentinel on every harbor cell, so a judge
+# reading the answer graded the literal string `NO_RESULT` and banked a category for it. The task
+# writes the file into Harbor's own convention artifacts dir; `Connector.answer_key` is what makes
+# core read it as `predicted` instead of asking a ranking that does not exist.
+ANSWER_KEY = "agent_answer"
+ANSWER_FILENAME = "answer.txt"
+
 # NO `final_ranking` here, and its absence is the declaration. This connector emitted one — a
 # one-element list holding `harbor:{task} reward={x}` — purely so it would look ranked-label
 # shaped, and its own comment conceded it decided nothing. Nothing read it: the `agent` node
@@ -68,6 +78,11 @@ AGENT_KWARG_KEYS = frozenset(
         "enable_summarize",
         "interleaved_thinking",
         "max_thinking_tokens",
+        # terminus-2's own switch for putting the whole chat history on
+        # `agent_result.metadata["all_messages"]`. Tunable rather than pinned because it is a
+        # SIZE decision the dataset owns: it buys a cross-check on the trajectory file at the
+        # cost of carrying the conversation twice through one result object.
+        "store_all_messages",
     }
 )
 
@@ -215,8 +230,20 @@ def _panel_tasks(panel: dict[str, Any]) -> list[dict[str, Any]]:
 def _extract_experiment(
     experiment_data: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """Harbor tasks → ``(queries, index_terms)``. **There is no label to match** — the cell is
-    graded by the task's own verifier, so ``ground_truth`` is ``None`` and says so.
+    """Harbor tasks → ``(queries, index_terms)``, and **the one place this backend's answer shape
+    is declared** (``connectors/CLAUDE.md`` § The answer shape).
+
+    Normally there is no label: the task's own verifier grades the cell, so ``ground_truth`` is
+    ``None`` and says so. A task MAY declare an ``answer``, and then this bank is label-carrying —
+    which is what lets a published auto-rater grade the answer step. On LongSeal that rater is
+    SealQA's own, so it is what makes our number comparable to the paper's; without it every
+    ``needs_gold`` judge is skipped and the answer step has no reading at all.
+
+    **Declared per task, checked as a SET.** ``all_verifier_graded`` is whole-bank, so a panel that
+    labels some tasks and not others has no answer shape — every label-reading surface would take
+    the bank's shape from whichever rows it happened to see. That raises here rather than yielding
+    a half-labelled bank, because the failure downstream is silent: rank statistics and the recall
+    evaluators would report the unlabelled rows as misses.
 
     Also PUBLISHES the panel — RESOLVED, so an episode reads the same pins the samples were built
     from rather than resolving again and possibly differently. Done here rather than in a seam of
@@ -228,7 +255,30 @@ def _extract_experiment(
     resolved = dict(experiment_data)
     resolved["tasks"] = _panel_tasks(experiment_data)
     _PANEL.set(resolved)
-    return [{"query": t["id"], "ground_truth": None} for t in resolved["tasks"] if t.get("id")], []
+    tasks = [t for t in resolved["tasks"] if t.get("id")]
+    labelled = [t for t in tasks if str(t.get("answer") or "").strip()]
+    if labelled and len(labelled) != len(tasks):
+        unlabelled = [t["id"] for t in tasks if not str(t.get("answer") or "").strip()]
+        raise ValueError(
+            f"harbor connector: {TASKS_FILE} declares an `answer` for {len(labelled)} of "
+            f"{len(tasks)} tasks. A bank's answer shape is whole-bank — declare one for every "
+            f"task or for none. Missing: {unlabelled[:5]}"
+        )
+    out: list[dict[str, Any]] = []
+    for t in tasks:
+        row: dict[str, Any] = {
+            "query": t["id"],
+            "ground_truth": str(t["answer"]).strip() if labelled else None,
+        }
+        # `query` here is the TASK ID, not a question — that is what addresses an episode, and it
+        # is the whole of what this backend's "sample" is. So a judge falling back to `query` gets
+        # `Question: longseal-042` rendered into its rubric and grades against an identifier. A
+        # task that declares its `question` carries it on `Sample.question`, which is the channel
+        # built for exactly this (`domain/sample.py`) and the only one that reaches a judge.
+        if question := str(t.get("question") or "").strip():
+            row["question"] = question
+        out.append(row)
+    return out, []
 
 
 def _current_task(query: str) -> tuple[dict[str, Any], str, dict[str, Any]]:
@@ -323,6 +373,12 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
             "path": (t or {}).get("path"),
             "name": (t or {}).get("name"),
             "ref": (t or {}).get("ref"),
+            # The declared question and answer are part of the INSTRUMENT, not of the task's
+            # pinned bytes: they are what a judge reads and grades against, and they live in our
+            # file rather than upstream's commit, so no other pin here moves when one is edited.
+            # Without them, fixing a wrong gold would replay every banked verdict under the old one.
+            "question": (t or {}).get("question"),
+            "answer": (t or {}).get("answer"),
         }
         for t in _panel_tasks(tasks)
     ]
@@ -449,6 +505,186 @@ def _read_tail(path: Path, cap: int) -> str:
         return _tail(path.read_text(encoding="utf-8", errors="replace"), cap)
     except OSError:
         return ""
+
+
+# Per-turn budgets. A conversation is stored once and read many times, and `_digest`'s note
+# applies here with more force: bytes no prompt will ever show still ride every archive row, every
+# replay and every compaction. The message keeps its HEAD (a turn opens by stating what it is about
+# to do) and the observation its TAIL (a command's output ends with the part that mattered) —
+# the same split `_tail` argues for the pane.
+_TURN_MESSAGE_CAP = 1200
+_TURN_OBSERVATION_CAP = 800
+
+
+def _atif_text(value: object) -> str:
+    """One ATIF message / observation body as text — a plain string, or the TEXT parts of a
+    multimodal ``ContentPart`` array (ATIF-v1.6). An image part contributes a path, not bytes."""
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, list):
+        return ""
+    parts: list[str] = []
+    for part in value:
+        if isinstance(part, str):
+            parts.append(part)
+        elif isinstance(part, dict):
+            if text := part.get("text"):
+                parts.append(str(text))
+            elif isinstance(src := part.get("source"), dict) and (path := src.get("path")):
+                parts.append(f"[image {path}]")
+    return "\n".join(parts)
+
+
+def _turn(raw: dict[str, Any], index: int, step: str | None) -> dict[str, Any]:
+    """One ATIF ``Step`` → one ``domain/scoring.py::TurnRecord``.
+
+    ``index`` is the CELL's running turn ordinal, not the one in the file: on a multi-step trial
+    each step writes its own trajectory numbered from 1, and re-using those would give a two-step
+    cell two turn 1s. The record is deliberately narrower than the source — no token ids, no
+    logprobs, no per-turn metrics — because none of it is read by a prompt, a ruler or a formula.
+    """
+    out: dict[str, Any] = {"index": index, "source": str(raw.get("source") or "")}
+    if step is not None:
+        out["step"] = step
+    if message := _atif_text(raw.get("message"))[:_TURN_MESSAGE_CAP].strip():
+        out["message"] = message
+    if reasoning := str(raw.get("reasoning_content") or "")[:_TURN_MESSAGE_CAP].strip():
+        out["reasoning"] = reasoning
+    if tools := [
+        name
+        for call in raw.get("tool_calls") or []
+        if isinstance(call, dict) and (name := call.get("function_name"))
+    ]:
+        out["tools"] = [str(t) for t in tools]
+    results = (raw.get("observation") or {}).get("results") or []
+    observed = "\n".join(
+        text for r in results if isinstance(r, dict) and (text := _atif_text(r.get("content")))
+    )
+    if observed := _tail(observed, _TURN_OBSERVATION_CAP):
+        out["observation"] = observed
+    return out
+
+
+def _read_trajectory(path: Path) -> list[dict[str, Any]]:
+    """The raw ATIF turns in one trajectory file, or nothing.
+
+    Parsed as plain JSON rather than through Harbor's own ``Trajectory`` model on purpose: this
+    reads their PRIVATE trial layout, exactly as ``_digest`` does, so a field they add or move must
+    degrade the record rather than raise inside a cell the backend already paid for. ``extra`` is
+    forbidden on their model, so validating here would turn an upstream addition into a dead run.
+    """
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ValueError):
+        return []
+    steps = payload.get("steps") if isinstance(payload, dict) else None
+    return [s for s in steps or [] if isinstance(s, dict)]
+
+
+def _turns(result: TrialResult) -> list[dict[str, Any]]:
+    """The cell's conversation, in order, each turn stamped with the STEP it served.
+
+    Two layouts, because Harbor archives a multi-step trial's agent dir per step: the single-step
+    trajectory sits at ``<trial>/agent/trajectory.json`` and a multi-step one at
+    ``<trial>/steps/<name>/agent/trajectory.json``. Walking ``step_results`` rather than globbing
+    is what makes the STEP NAME available — the semantic axis per-step terms pool on, and the whole
+    reason a turn ordinal never becomes one (``domain/scoring.py::TurnRecord``).
+    """
+    root = _TRIALS_ROOT / str(getattr(result, "trial_name", "") or "")
+    steps = getattr(result, "step_results", None) or []
+    sources: list[tuple[Path, str | None]] = (
+        [
+            (root / "steps" / str(sr.step_name) / "agent" / "trajectory.json", str(sr.step_name))
+            for sr in steps
+        ]
+        if steps
+        else [(root / "agent" / "trajectory.json", None)]
+    )
+    turns: list[dict[str, Any]] = []
+    for path, step in sources:
+        for raw in _read_trajectory(path):
+            turns.append(_turn(raw, len(turns) + 1, step))
+    if not turns:
+        _warn_layout_drift(f"no agent trajectory under {root}")
+    return turns
+
+
+# An answer is read, graded and displayed, never scanned — so the HEAD, and generous enough for a
+# long-form answer without letting a task that dumps a log into the file become the `predicted`
+# column on every surface.
+_ANSWER_CAP = 4000
+
+
+def _answer(result: TrialResult) -> str:
+    """The episode's answer text, from the artifact the task declared, or ``""``.
+
+    Harbor downloads the container's convention dir (``/logs/artifacts/``) into the trial's
+    ``artifacts/``, and archives it per step on a multi-step trial. The LAST step to write one
+    wins: on a ``retrieve → answer`` task both may leave a file, and the answer step's is the
+    answer. Absent is ``""``, which core turns into the ``NO_RESULT`` sentinel — the honest
+    reading for a task that declared no answer artifact at all."""
+    root = _TRIALS_ROOT / str(getattr(result, "trial_name", "") or "")
+    candidates = [root / "artifacts" / ANSWER_FILENAME]
+    candidates += [
+        root / "steps" / str(sr.step_name) / "artifacts" / ANSWER_FILENAME
+        for sr in getattr(result, "step_results", None) or []
+    ]
+    answer = ""
+    for path in candidates:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            continue
+        if text:
+            answer = text
+    return answer[:_ANSWER_CAP]
+
+
+def _step_rewards(result: TrialResult) -> dict[str, float]:
+    """Each step's OWN verifier rewards, keyed ``{step}_{reward}`` — the per-step terms a formula
+    reads beside the cell's aggregate.
+
+    **Beside, never instead of.** ``TrialResult.verifier_result`` is already Harbor's fold of these
+    into one number (``multi_step_reward_strategy``), and that fold is the cell's score. Taking the
+    per-step rewards as independent observations would claim kN readings where there are N, shrink
+    every SE by ~√k, and let PoBB eliminate on confidence it never earned. They are TERMS of one
+    cell; a genuine per-step ability parameter is a different model, not a different key.
+
+    Only identifier-safe names are emitted, because a formula can name nothing else. A dataset that
+    wants per-step terms names its steps as identifiers; one that does not still scores on the
+    aggregate, and a formula reaching for the missing term raises rather than reading a zero."""
+    out: dict[str, float] = {}
+    for sr in getattr(result, "step_results", None) or []:
+        name = str(getattr(sr, "step_name", "") or "")
+        rewards = getattr(getattr(sr, "verifier_result", None), "rewards", None) or {}
+        for key, value in rewards.items():
+            if (term := f"{name}_{key}").isidentifier():
+                out[term] = float(value)
+    return out
+
+
+def _unscoreable_step(result: TrialResult) -> str | None:
+    """Why this trial's reward cannot be believed, or ``None``.
+
+    **The flattering silence.** ``MultiStepTrial._aggregate_step_rewards`` excludes steps with no
+    verifier result from the denominator, and ``_should_stop_after_step`` aborts the rest when a
+    step raises. So a cell whose first step scored 1.0 and whose second CRASHED reports a
+    trial reward of 1.0 — a perfect cell — while an honest run that answered wrongly reports 0.5.
+    The crash is rewarded, and nothing on any surface says so.
+
+    A ``min_reward`` abort is deliberately NOT caught here: every step it appended carries a
+    verifier result, the failing one included, so the mean is over real readings and the operator
+    declared that gate. What this catches is the step that produced no reading at all."""
+    for sr in getattr(result, "step_results", None) or []:
+        if getattr(sr, "verifier_result", None) is None:
+            exc = getattr(sr, "exception_info", None)
+            detail = f": {getattr(exc, 'exception_type', '?')}" if exc is not None else ""
+            return (
+                f"step {getattr(sr, 'step_name', '?')!r} produced no verifier result{detail} — "
+                f"Harbor drops it from the reward denominator, so the trial reward would describe "
+                f"only the steps that survived"
+            )
+    return None
 
 
 # Names already warned about, so a ten-cell round says it once rather than ten times. Process-
@@ -608,6 +844,15 @@ async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]
         result = await trial.run()
         elapsed = time.monotonic() - start
 
+    # BEFORE the reward is read: on a multi-step trial a step that produced no verifier result is
+    # dropped from Harbor's own denominator, so the number below would describe a different set of
+    # steps than the task declared — and describe it as a success. Same answer as an absent reward:
+    # the cell is unscoreable, not a zero and not a one.
+    if unscoreable := _unscoreable_step(result):
+        from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
+
+        raise InnerCycleUnscoreableError(f"harbor task {query!r}: {unscoreable}.")
+
     rewards = result.verifier_result.rewards if result.verifier_result else None
     reward = (rewards or {}).get(reward_key)
     if reward is None:
@@ -624,16 +869,23 @@ async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]
             f"(rewards={rewards}); the episode is unscoreable, not a zero."
         )
 
-    return {
-        "data": {
-            REWARD_KEY: float(reward),
-            "terminal_node": AGENT_NODE,
-            "total_time": elapsed,
-            "step_timings": {AGENT_NODE: elapsed},
-            "step_tokens": _step_tokens(result, model_name),
-            "reasoning_trace": _digest(result, query, reward),
-        }
+    data: dict[str, Any] = {
+        REWARD_KEY: float(reward),
+        "terminal_node": AGENT_NODE,
+        "total_time": elapsed,
+        "step_timings": {AGENT_NODE: elapsed},
+        "step_tokens": _step_tokens(result, model_name),
+        "reasoning_trace": _digest(result, query, reward),
+        ANSWER_KEY: _answer(result),
     }
+    # Absent rather than empty for both, and the difference is a real one: `[]` would say this
+    # episode had no turns, `{}` that its steps scored nothing. A single-step task has neither
+    # concept, and a reader must be able to tell "this backend does not do that" from "it did
+    # that and got nothing".
+    if turns := _turns(result):
+        data["turns"] = turns
+    data.update(_step_rewards(result))
+    return {"data": data}
 
 
 CONNECTOR = Connector(
@@ -658,8 +910,13 @@ CONNECTOR = Connector(
     # here too: the ceiling is the operator's machine, not the provider.
     max_cells_in_flight=2,
     # The one key `_in_process_run` always emits that the campaign formula reads. Verified against
-    # the dataset's declared observation_mappings at init.
+    # the dataset's declared observation_mappings at init. Per-step rewards are deliberately NOT
+    # here — a single-step task emits none, so declaring them would fail init for every task that
+    # is not multi-step; a dataset wanting them declares its own `observation_mapping`.
     required_observation_keys=(REWARD_KEY,),
+    # An episode answers even though a verifier grades it, and until this existed nothing carried
+    # the answer: no ranking means `predicted` was the `NO_RESULT` sentinel on every cell here.
+    answer_key=ANSWER_KEY,
     # The "samples" ARE the tasks declared there — read from the dataset config dir at init.
     experiment_file=TASKS_FILE,
     default_pipeline=(AGENT_NODE,),
@@ -670,6 +927,8 @@ CONNECTOR = Connector(
 
 __all__ = [
     "AGENT_NODE",
+    "ANSWER_FILENAME",
+    "ANSWER_KEY",
     "CONNECTOR",
     "REWARD_KEY",
     "TASKS_FILE",

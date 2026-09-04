@@ -117,6 +117,10 @@ _INFRA_KEYS: frozenset[str] = frozenset(
         "total_time",
         "diagnostics",
         "reasoning_trace",
+        # The cell's conversation, where the backend has one. An infra key like the trace beside
+        # it: a dataset does not declare an `observation_mapping` for how its backend talks, and
+        # a formula must never read a turn — see `domain/scoring.py::TurnRecord`.
+        "turns",
         # L4: the arm's own half of a paired cell difference (`domain/l4/proxies.py`). It rides
         # here rather than as a declared observation because the panel reads it and the scoring
         # formula must not — see the emit site in `runner/inner/spawn.py`.
@@ -413,7 +417,16 @@ async def measure_sample(
         from promptpotter.domain.scoring import extract_item_label
 
         ranked = terminal_ranking({"pipeline_data": data}, pipeline_schema)
-        predicted = extract_item_label(ranked[0]) if ranked else NO_RESULT
+        # Where the backend DECLARED an answer key, that is the answer — the ranking is not
+        # consulted, because two sources for one fact is how they come to disagree. A backend
+        # declaring none keeps the ranking as its only source, which is every ranked-label one.
+        # Either way an absent answer is `NO_RESULT`, and that sentinel is the honest reading:
+        # the pipeline ran and emitted nothing nameable (`domain/results.py`).
+        answer_key = session.backend_client.answer_key
+        if answer_key is not None:
+            predicted = str(data.get(answer_key) or "").strip() or NO_RESULT
+        else:
+            predicted = extract_item_label(ranked[0]) if ranked else NO_RESULT
         if predicted == "ERROR":
             return _error_result(
                 sample,

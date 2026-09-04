@@ -134,6 +134,25 @@ class Connector:
     measurement it never received — silently, since a dropped key raises nothing. Declared on the
     connector because only it knows what its own payload carries. Empty = nothing guaranteed."""
 
+    answer_key: str | None = None
+    """The ``data`` key carrying this cell's ANSWER TEXT, where the backend produces one outside a
+    ranking. ``None`` (default) = ``predicted`` comes from the terminal ranker, as it does on every
+    ranked-label backend.
+
+    Declared because ``measure_sample`` otherwise has exactly one source for ``predicted`` — the
+    terminal ranking — and a backend that emits no ranking gets the ``NO_RESULT`` sentinel. That
+    is correct for a cell whose whole verdict is a number, and WRONG the moment anything reads the
+    answer as text: an agent episode graded by its own verifier still has an answer, and a judge
+    handed the sentinel grades the string ``NO_RESULT`` and returns a number for it.
+
+    **Not a ranking, and not a second answer-shape flag.** Emitting a one-element ``final_ranking``
+    to look ranked-label shaped was tried and reverted (``connectors/harbor.py``): nothing read it
+    and three readers had to un-believe it. Declaring the node a ``ranker`` is worse — that switches
+    on ``candidate_recall``, which walks a ranking for a ground truth the backend does not have.
+    Whether a cell HAS a label stays where it is, on what ``extract_experiment`` yields
+    (``connectors/CLAUDE.md`` § The answer shape); this says only where the text lives when there
+    is one, so the two facts cannot disagree."""
+
     in_process_run: InProcessRun | None = None
 
     expected_revision: str | None = None

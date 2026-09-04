@@ -13,10 +13,11 @@ whose rubric nobody validated is a measurement, not an authority. Screen it (``s
 ``noise-floor``) before a campaign is funded on it, and record the reading in the dataset's
 ``dataset.md`` the same way any other instrument decision is recorded.
 
-Both read the trace the backend already emits on ``pipeline_data::reasoning_trace`` — the declared
-"what the system did" channel that ``sample_transcripts`` renders and Harbor's episode digest
-fills. **No second channel and no config key for it:** a grader that could be pointed somewhere
-else would be one whose input is not part of what the fingerprint says it graded.
+Both read what the backend already emitted about what the system DID — ``pipeline_data::turns``
+where it has a conversation, else the ``reasoning_trace`` digest, in that preference order and
+never as a choice (:func:`_trace`). **No config key for it:** a grader that could be pointed
+somewhere else would be one whose input is not part of what the fingerprint says it graded, so
+which channel a cell offers is the backend's fact and never a dataset's setting.
 
 **Neither needs a gold, and that is load-bearing rather than convenient.** A verifier-graded
 backend declares ``ground_truth: None`` for every cell, so a gold-comparing judge is skipped by
@@ -28,12 +29,12 @@ and needs no judge at all, so these two plus that reward are the whole schema.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.judges.protocol import Judge, JudgeSpec, JudgeVerdict
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping, Sequence
 
     from promptpotter.domain.scoring import QueryMeasurement
 
@@ -49,9 +50,48 @@ _TRACE_CAP = 6000
 _LETTER_RE = re.compile(r"\b([ABC])\b")
 
 
+def _render_turns(turns: Sequence[Mapping[str, Any]]) -> str:
+    """A turn-structured cell's conversation, as a grader should read it.
+
+    **Three labels, because the rubrics turn on exactly this distinction.** ``thought`` and ``say``
+    are the system's own assertions; ``saw`` is what the environment answered, and only that is
+    evidence. Flattened into one prose blob — which is what ``reasoning_trace`` is — a grader
+    cannot tell a fact the system LOOKED UP from one it stated, so the retrieval rubric's "an
+    answer asserted with no evidence does not make a trace SETTLED" has nothing to bite on and the
+    grounding rubric cannot separate a claim from its support.
+
+    The step name rides each turn rather than heading a section: a grader reads linearly, and a
+    turn that has drifted out of its step's job is exactly what the reading should surface."""
+    out: list[str] = []
+    for turn in turns:
+        head = f"[{turn.get('index', '?')}] {turn.get('source') or 'agent'}"
+        if step := turn.get("step"):
+            head += f" | step={step}"
+        if tools := turn.get("tools"):
+            head += f" | used {', '.join(str(t) for t in tools)}"
+        out.append(head)
+        for label, key in (("thought", "reasoning"), ("say", "message"), ("saw", "observation")):
+            if text := str(turn.get(key) or "").strip():
+                out.append(f"  {label}: {text}")
+    return "\n".join(out)
+
+
 def _trace(result: QueryMeasurement) -> str:
+    """What this cell DID, tail-capped — the structured conversation where the backend emits one,
+    else the prose digest every backend emits.
+
+    Turns FIRST, and the fallback is not a shim: a backend with no turn concept has one channel and
+    always will, so this is two different facts read in preference order rather than an old path
+    kept alive beside a new one. Tail-biased either way — a trace opens with setup identical across
+    candidates and closes with what this one actually found — and now the tail lands on whole turns
+    rather than slicing through the middle of one."""
     pd = result.get("pipeline_data") or {}
-    text = str(pd.get("reasoning_trace") or "").strip()
+    turns = pd.get("turns")
+    text = (
+        _render_turns(turns)
+        if isinstance(turns, list) and turns
+        else str(pd.get("reasoning_trace") or "")
+    ).strip()
     return text[-_TRACE_CAP:] if len(text) > _TRACE_CAP else text
 
 
@@ -72,30 +112,41 @@ def _parser(letters: dict[str, str]) -> Callable[[str], str | None]:
 
 
 def _build_grade_fn(
-    rubric: str, judge_name: str, *, letters: dict[str, str], to_score: dict[str, float]
+    rubric: str,
+    judge_name: str,
+    *,
+    letters: dict[str, str],
+    to_score: dict[str, float],
+    reads_answer: bool,
 ) -> object:
     async def grade(spec: JudgeSpec, result: QueryMeasurement) -> JudgeVerdict:
-        from promptpotter.judges.call import graded, judge_question
+        from promptpotter.judges.call import absent, graded, judge_answer, judge_question
 
         trace = _trace(result)
         if not trace:
             # ABSENT, never a zero, and never a model call. A backend that emits no trace has not
             # produced a badly-grounded answer — it has produced nothing this judge can read, and
             # scoring that as UNGROUNDED would report "the system never uses evidence" for every
-            # cell of a run that simply routed through a backend with no trace channel. The term is
-            # omitted, the formula raises `ScoringTermMissingError`, and the operator finds out on
-            # the first cell rather than after a round of zeros.
-            return JudgeVerdict(
-                name=judge_name,
-                score=None,
-                error=(
-                    "no `reasoning_trace` on this cell — this judge grades the evidence a backend "
-                    "emitted, so a backend that emits none is unmeasurable here, not ungrounded."
-                ),
+            # cell of a run that simply routed through a backend with no trace channel.
+            return absent(
+                judge_name,
+                "no `reasoning_trace` on this cell — this judge grades the evidence a backend "
+                "emitted, so a backend that emits none is unmeasurable here, not ungrounded.",
+            )
+        answer = judge_answer(result)
+        if reads_answer and answer is None:
+            # Same rule one axis over: a cell with no answer has not produced an UNGROUNDED one.
+            # This arm is load-bearing rather than defensive — `predicted` is the `NO_RESULT`
+            # sentinel on every cell of a backend that emits no ranking, so without it the rubric
+            # is handed the literal string `NO_RESULT` as the answer and grades it.
+            return absent(
+                judge_name,
+                "this cell carries no answer text — grading the absence as ungrounded would "
+                "score the sentinel, so the term is omitted instead.",
             )
         prompt = rubric.format(
             question=judge_question(result),
-            predicted_answer=result.get("predicted", ""),
+            predicted_answer=answer or "",
             trace=trace,
         )
         return await graded(
@@ -183,6 +234,9 @@ EVIDENCE_RETRIEVAL = Judge(
         "evidence_retrieval",
         letters=_RETRIEVAL_LETTERS,
         to_score=_RETRIEVAL_SCORES,
+        # Grades the EVIDENCE, deliberately not the answer — so it still reads on a cell whose
+        # answer never arrived, which is the case the retrieve step most wants measured.
+        reads_answer=False,
     ),
     labels=tuple(_RETRIEVAL_SCORES),
     to_score=_RETRIEVAL_SCORES,
@@ -210,6 +264,7 @@ ANSWER_GROUNDING = Judge(
         "answer_grounding",
         letters=_GROUNDING_LETTERS,
         to_score=_GROUNDING_SCORES,
+        reads_answer=True,
     ),
     labels=tuple(_GROUNDING_SCORES),
     to_score=_GROUNDING_SCORES,

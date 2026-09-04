@@ -154,12 +154,19 @@ def _parse(reply: str) -> str | None:
 
 def _build_grade_fn(rubric: str, judge_name: str) -> object:
     async def grade(spec: JudgeSpec, result: QueryMeasurement) -> JudgeVerdict:
-        from promptpotter.judges.call import graded, judge_question
+        from promptpotter.judges.call import absent, graded, judge_answer, judge_question
 
+        answer = judge_answer(result)
+        if answer is None:
+            # A cell with no answer text is UNMEASURED here, not NOT_ATTEMPTED — that label is a
+            # reading of what the model said, and there is nothing to read. Banking it would put
+            # a real category on a cell whose pipeline emitted the `NO_RESULT` sentinel, in the
+            # one direction `_parse` below already refuses to default.
+            return absent(judge_name, "this cell carries no answer text to grade against the gold.")
         prompt = rubric.format(
             question=judge_question(result),
             target=result.get("ground_truth", ""),
-            predicted_answer=result.get("predicted", ""),
+            predicted_answer=answer,
         )
         return await graded(
             spec.stages[0], prompt, judge=judge_name, parse=_parse, to_score=_LABEL_TO_SCORE

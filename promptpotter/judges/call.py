@@ -19,6 +19,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
+from promptpotter.config.settings import NO_RESULT
 from promptpotter.infrastructure.llm.rate_limit import (
     MAX_429_ATTEMPTS,
     decide_429_wait,
@@ -36,7 +37,7 @@ from promptpotter.judges.protocol import JudgeStage, JudgeVerdict
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ask", "bind_cache", "graded", "judge_question"]
+__all__ = ["absent", "ask", "bind_cache", "graded", "judge_answer", "judge_question"]
 
 
 _CACHE: ContextVar[LLMReuseCache | None] = ContextVar("judge_reuse_cache", default=None)
@@ -136,6 +137,39 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
     return response.content or "", ""
 
 
+def absent(judge: str, reason: str) -> JudgeVerdict:
+    """The verdict for a grading that COULD NOT RUN — the one shape, named once.
+
+    Every arm that declines to grade returns this: a failed model call, an unparseable reply, an
+    input the judge needs and this cell does not carry. They are one fact — *this term has no
+    reading* — and the term is omitted, which makes the formula raise ``ScoringTermMissingError``
+    and the operator find out on the first cell.
+
+    **Never a zero, and that is the whole reason this has a name.** A zero says the candidate did
+    the thing badly; absence says we did not measure. Written per site, the two collapse the first
+    time someone reaches for a "sensible default" — which is exactly the upstream behaviour
+    ``simpleqa.py`` documents diverging from, and it defaults in the direction that flatters the
+    arm under test."""
+    return JudgeVerdict(name=judge, score=None, error=reason)
+
+
+def judge_answer(result: Mapping[str, Any]) -> str | None:
+    """The cell's ANSWER as text, or ``None`` where it has none — the ONE reader, for the reason
+    :func:`judge_question` is one.
+
+    ``None`` covers both spellings of "no answer": empty, and the ``NO_RESULT`` sentinel
+    ``measure_sample`` writes when the pipeline ran and emitted nothing nameable. A judge reading
+    ``predicted`` raw grades the literal string ``NO_RESULT`` against the rubric and banks a
+    category for it — a real number, from a real model call, measuring nothing. That was live on
+    every ``harbor`` cell, where no ranking exists and the sentinel is therefore the norm rather
+    than the exception (``Connector.answer_key`` is the channel that fixed it).
+
+    Callers turn ``None`` into :func:`absent` BEFORE rendering a prompt, so nothing is billed for a
+    grading that cannot run."""
+    predicted = str(result.get("predicted") or "").strip()
+    return None if not predicted or predicted == NO_RESULT else predicted
+
+
 def judge_question(result: Mapping[str, Any]) -> str:
     """What a judge should read as "the question" — the bare one where the dataset declared it,
     else ``query``.
@@ -166,25 +200,19 @@ async def graded(
 
     Here rather than copied per judge for the same reason :func:`ask` is here — the two absence
     arms are not formatting, they are the rule that **a grader which FAILED must never be bankable
-    as a graded answer**. Both return ``score=None``, which omits the term and makes the formula
-    halt loud; a judge writing its own copy of this is one edit away from defaulting an unreadable
-    reply to a category instead, which is precisely the upstream behaviour ``simpleqa.py``
-    documents diverging from.
+    as a graded answer**. Both go through :func:`absent`, which owns what that verdict IS.
 
     ``parse`` maps a raw reply to one of ``to_score``'s labels, or ``None`` when it carries none.
-    A judge whose taxonomy needs no model call at all — an absent input, say — should return its
-    own ``JudgeVerdict`` and never reach here, so nothing is billed for a grading that cannot run.
+    A judge whose taxonomy needs no model call at all — an input this cell does not carry, say —
+    returns :func:`absent` itself and never reaches here, so nothing is billed for a grading that
+    cannot run.
     """
     reply, error = await ask(stage, prompt, judge=judge)
     if error:
-        return JudgeVerdict(name=judge, score=None, error=error)
+        return absent(judge, error)
     label = parse(reply)
     if label is None:
-        return JudgeVerdict(
-            name=judge,
-            score=None,
-            error=f"grader returned no verdict in {sorted(to_score)}: {reply[:120]!r}",
-        )
+        return absent(judge, f"grader returned no verdict in {sorted(to_score)}: {reply[:120]!r}")
     return JudgeVerdict(
         name=judge,
         score=to_score[label],

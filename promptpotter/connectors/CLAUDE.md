@@ -153,6 +153,17 @@ who writes `extract_experiment` correctly and forgets the flag gets back the ent
 misdiagnosis the flag would exist to prevent. Same reasoning `__init__.py::_validate` applies to
 an `auth_token` on an in-process connector — dead config that reads as protection.
 
+**`Connector.answer_key` is not that flag, and the difference is the whole point.** The shape above
+answers *is this cell graded against a label* — one fact, one home, on what `extract_experiment`
+yields. `answer_key` answers *where the answer TEXT lives*, a different question the table never
+asked: a verifier-graded cell still ANSWERED something. `measure_sample` had exactly one source for
+`predicted` — the terminal ranking — so a backend emitting none got the `NO_RESULT` sentinel, right
+for a verdict that is purely a number and wrong the moment anything reads the answer as text. It
+was live: every `harbor` cell handed `answer_grounding` the literal string `NO_RESULT`, which the
+rubric graded and banked a category for. The two declarations cannot disagree, because neither can
+answer the other's question. **Declaring it is also what closes the ranking hack for good** — the
+first bullet below exists because there was nowhere else to put an answer, and now there is.
+
 Four things that follow, each one a defect this cost before it was a rule:
 
 - **Do not invent a ranking to look ranked-label shaped.** Harbor emitted a one-element
@@ -166,6 +177,33 @@ Four things that follow, each one a defect this cost before it was a rule:
 - **Emit absence, not zero.** Rank buckets, top-k and recall are all comparisons against a label;
   with none, every one reads `not_found` / `0.0` and reports a round that solved eight of ten as
   having solved none.
+
+## A multi-turn cell — the turns are the backend's, the steps are the task's
+
+A backend whose cell is a CONVERSATION emits `pipeline_data::turns`
+(`domain/scoring.py::TurnRecord`), and everything about that channel is settled there. Three rules
+belong here, because they are what a connector author gets wrong:
+
+- **Project a published turn format; never author one.** Harbor's agents already write ATIF
+  (`harbor/models/trajectories/step.py`), whose own field description calls `step_id` *"ordinal
+  index of the turn"* — `TurnRecord` is a narrowing of it, dropping the training surface (token
+  ids, logprobs, per-turn metrics) that no prompt, ruler or formula reads. Parse it as plain JSON:
+  the file is upstream's PRIVATE trial layout, so a field they add must degrade the record, not
+  raise inside a cell already paid for.
+- **A turn carries the STEP it served, and never becomes one.** A step is a NAMED segment the task
+  declares (Harbor's `[[steps]]`, whose name we author to match the schema term, so there is no
+  third word for it); the turn's ordinal is not an axis, because an episode takes however many
+  turns it takes. Per-step rewards ride the row as TERMS beside the cell's aggregate — Harbor's own
+  `multi_step_reward_strategy` folds them into one number and that fold is the cell's score.
+  Treating either as an item claims kN observations where there are N.
+- **Absent is not empty.** No `turns` key means "this backend has no turn concept"; `[]` would mean
+  "it had none". Only one of those is ever true, and a reader has to be able to tell them apart.
+
+**A per-step aggregate can flatter, and Harbor's does.** `_aggregate_step_rewards` drops a step
+with no verifier result from the denominator, so a cell whose first step scored 1.0 and whose
+second CRASHED reports a perfect 1.0 while an honest wrong answer reports 0.5. `harbor.py::
+_unscoreable_step` raises instead. Whatever the next episodic backend rolls up, ask what its
+roll-up does with a step that produced nothing — the answer is usually silence.
 
 ## The measured unit — declared, never sniffed
 
@@ -238,6 +276,16 @@ no wire, so declaring a token on one fails the registry guard at import.
   No I/O, no logging beyond debug-level drops.
 - `extract_experiment` returns `(queries, index_terms)` — the index_terms
   list may be empty for connectors with no retrieval index.
+- **A dataset read through `experiment_file` must have NO loader registered under its name.**
+  `wiring.py::_load_dataset_into_session` asks the loader registry FIRST and falls through to the
+  experiment file only when it returns nothing — so a registered loader does not merely go unused,
+  it WINS: the connector's panel is never published, every cell raises, and the loader quietly
+  supplies rows shaped for a backend the campaign is not running on. This is the one place a
+  dataset NAME is load-bearing across two subsystems, and neither of them says so on its own.
+- **`query` is whatever addresses one unit of work, and on an episodic backend that is an ID.**
+  A judge falling back to it then grades against an identifier, so a task carrying a real question
+  declares it and it rides `Sample.question` (`domain/sample.py`) — the only channel that reaches
+  a judge, which is handed the measured row and never the `Sample`.
 - **Declare every key the payload always carries** in
   `Connector.required_observation_keys`. An undeclared key is dropped at
   `sample_measurement.py::measure_sample` and never reaches `pipeline_data`, so the

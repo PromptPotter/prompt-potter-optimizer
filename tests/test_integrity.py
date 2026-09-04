@@ -386,6 +386,51 @@ def test_a_judge_graded_row_rescores_without_calling_a_model() -> None:
     assert calls == [], f"rescoring an archived row reached a model: {calls}"
 
 
+def test_a_judge_never_grades_a_cell_that_has_no_answer() -> None:
+    """A cell with no answer must cost nothing and bank nothing.
+
+    ``predicted`` is the ``NO_RESULT`` sentinel on every cell of a backend that emits no ranking —
+    which is the whole of ``harbor``, and any episodic backend after it. A judge reading it raw
+    renders ``Answer: NO_RESULT`` into its rubric, bills a model call, and banks whatever category
+    comes back as a graded observation of an answer that does not exist. Both halves are the harm:
+    a fabricated reading enters the composite the election is decided on, and it is paid for.
+
+    Absence is the only honest verdict here, and it must be reached BEFORE the prompt is rendered,
+    so the assertion is a score AND a spend."""
+    import asyncio
+
+    from factories import measurement
+
+    from promptpotter.config.settings import NO_RESULT
+    from promptpotter.judges import call as judge_call
+    from promptpotter.judges.grounding import ANSWER_GROUNDING
+    from promptpotter.judges.protocol import JudgeSpec, JudgeStage
+
+    calls: list[str] = []
+
+    async def _explode(*_a: Any, **_k: Any) -> tuple[str, str]:
+        calls.append("asked a model")
+        return "A", ""
+
+    # A cell that RAN and left a trace — so nothing but the missing answer can explain the
+    # absence, and the no-trace arm cannot be what fired.
+    row = measurement(
+        sample_id=0,
+        fitness=0.0,
+        predicted=NO_RESULT,
+        pipeline_data={"reasoning_trace": "searched the docs, found the founding date"},
+    )
+    spec = JudgeSpec(name="answer_grounding", stages=[JudgeStage(model="m", provider="p")])
+    original, judge_call.ask = judge_call.ask, _explode
+    try:
+        verdict = asyncio.run(ANSWER_GROUNDING.grade(spec, row))
+    finally:
+        judge_call.ask = original
+
+    assert verdict.score is None, f"a sentinel answer was graded as {verdict.label!r}"
+    assert calls == [], f"a cell with no answer was billed a grading: {calls}"
+
+
 # 2. Replay eligibility — which banked row may be served back
 
 

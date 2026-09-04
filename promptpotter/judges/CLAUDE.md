@@ -71,10 +71,19 @@ of the scoring seam knows. Token accounting is per underlying call via `call.py:
 two-model chain prices correctly with no special case.
 
 `call.py::graded` is the other half of that: `ask` plus the verdict shaping every judge repeats,
-in one place because its two absence arms are not formatting. **A grader that FAILED must never be
+in one place because its absence arms are not formatting. **A grader that FAILED must never be
 bankable as a graded answer** — an unreachable model and an unparseable reply both return
 `score=None`, and a judge writing its own copy of that is one edit from defaulting to a category
 instead, which is precisely the upstream behaviour `simpleqa.py` documents diverging from.
+
+**`call.py::absent(judge, reason)` is what that verdict IS**, and every arm that declines to grade
+goes through it — a failed call, an unreadable reply, an input the cell does not carry. They are
+one fact, *this term has no reading*, and writing it per site is how it collapses into a zero the
+first time someone reaches for a sensible default. Two readers feed it: `judge_question` (the bare
+question, not the question plus its haystack) and **`judge_answer`** (the answer, or `None` for
+empty and for the `NO_RESULT` sentinel). One reader each, for the reason there is one of anything
+here — `judge_answer` exists because reading `predicted` raw graded the literal string `NO_RESULT`
+on every cell of a backend that emits no ranking, and banked a category for it.
 
 ## The step schema — `retrieve → ground → answer`
 
@@ -96,8 +105,8 @@ Three steps, and which half of a failure each isolates:
 
 | step | graded by | reads | needs gold | what it separates |
 |---|---|---|---|---|
-| retrieve | `evidence_retrieval` | question, `reasoning_trace` | no | did the system gather evidence that SETTLES the question — whether or not it then used it |
-| ground | `answer_grounding` | question, answer, `reasoning_trace` | no | is the answer traceable to the system's OWN evidence — a grounded answer can still be wrong, and that separation is the measurement |
+| retrieve | `evidence_retrieval` | question, what the cell DID | no | did the system gather evidence that SETTLES the question — whether or not it then used it |
+| ground | `answer_grounding` | question, answer, what the cell DID | no | is the answer traceable to the system's OWN evidence — a grounded answer can still be wrong, and that separation is the measurement |
 | answer | `sealqa` / `simpleqa`, **or the backend's own verifier** | question, gold, answer | yes, for the judge | is the final answer correct |
 
 **On a verifier-graded backend the answer step needs no judge**, and that is what makes the schema
@@ -111,14 +120,24 @@ Asking for SUFFICIENCY rather than correctness is also the better instrument, no
 reachable one: handing a grader the gold invites it to accept any trace that merely *contains* the
 gold string, and keeps the answer out of what is supposed to be measuring the search.
 
-Two things the first two judges get right that are easy to get wrong. **A cell with no
-`reasoning_trace` is ABSENT, never zero, and costs no model call** — a backend that emits no trace
-has not produced a badly-grounded answer, and scoring it `UNGROUNDED` would report "the system
-never uses evidence" for a run that simply routed through a backend with no trace channel. And
-**the middle score is a prior we invented**: `PARTIAL = 0.5` is the same class of hand-set
-threshold `verdict-resolution.md` § Phase 3 warns about, which is survivable only because
-`_compute` banks the LABEL beside the score, so a later fit re-derives its own thresholds from
-archived rows.
+**"What the cell DID" is `pipeline_data::turns` where the backend has a conversation, else the
+`reasoning_trace` digest** — a preference order in `grounding.py::_trace`, never a choice, and
+never a config key: a grader that could be pointed elsewhere is one whose input is not part of
+what the fingerprint says it graded. The structured read is what lets the rubrics work at all —
+they turn on separating what the system ASSERTED from what the environment ANSWERED, and a single
+prose blob cannot carry that distinction, so `_render_turns` labels the three (`thought` / `say` /
+`saw`) rather than concatenating them.
+
+Three things these judges get right that are easy to get wrong. **A cell missing an input they
+need is ABSENT, never zero, and costs no model call** — twice over: no trace (a backend that emits
+none has not produced a badly-grounded answer, and scoring it `UNGROUNDED` reports "the system
+never uses evidence" for a run that merely routed through a backend with no trace channel), and no
+answer (grading the absence scores the sentinel). **`evidence_retrieval` deliberately does not read
+the answer at all**, so it still reads on a cell whose answer never arrived — the case the retrieve
+step most wants measured. And **the middle score is a prior we invented**: `PARTIAL = 0.5` is the
+same class of hand-set threshold `verdict-resolution.md` § Phase 3 warns about, survivable only
+because `_compute` banks the LABEL beside the score, so a later fit re-derives its own thresholds
+from archived rows.
 
 **Their rubrics are OURS, and that is the difference from `simpleqa.py`.** Nothing published grades
 these two steps, so screen them (`seed-screen`, `noise-floor`) before funding a campaign on them
