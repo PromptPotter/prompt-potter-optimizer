@@ -36,7 +36,7 @@ Sequenced into lanes by dependency, not milestone number. **Front priority = Lan
 |---|---|---|
 | C1 | **Chat-first front door** — one thread: ingest/check-in → curated activity stream → inline decision buttons (existing verbs). | Arc 2 (conversation endpoint) deferred — [`chat-foundation.md`](chat-foundation.md) |
 | C2 | Composite fitness P2–P4 (P1 = spend, done) — data rollup anytime; **scatter panel after P3** | pending (see § Connectors + L4) |
-| C2b | **Judged + turn-structured scoring** — an LLM-as-judge as a measured observation, and the per-step ruler it opens | judge SHIPPED (`promptpotter/judges/`); open: plural judges, the verdict cache, the per-step ruler (see § Judged and turn-structured scoring) |
+| C2b | **Judged + turn-structured scoring** — an LLM-as-judge as a measured observation, and the per-step ruler it opens | judge + grading call path SHIPPED (`promptpotter/judges/`); open: plural judges, the per-step ruler (see § Judged and turn-structured scoring) |
 | C3 | L4 closure — the recursion + the L4 campaign + `proxy_lift_corr ≥ 0.6` re-validation | Open: the bounded cheap default config, and the `proxy_lift_corr` gate — itself gated on the panel being able to resolve one optimizer prompt from another — [`l4-outer-loop.md`](l4-outer-loop.md) § Open |
 | C4 | Cross-user measurement panel (after P3) | pending (see § Ingest + chat-first web) |
 | C5 | MCP server mode (= **agent-tool parity**, see § Agent-tool parity) · user-editable `pipeline.yaml` in UI | pending |
@@ -129,15 +129,21 @@ stuck on it (`email-tagging`'s free-text CRM fields, `screen-taste-v0`'s rating)
 selection criterion 5, which rejected them
 ([`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md)).
 
-**Three open items, in the order they should land.** *Plural judges* — `campaign.yaml::judge` is
-singular, so two turns cannot be graded by one rubric; the map should be keyed by **the term the
-formula reads**, not the judge's name. It reuses the node grammar but must NOT live in
-`pipeline.yaml::nodes`, because `node_config_items` is the walk a bulk model steer follows and that
-is exactly the boundary a judge may not sit behind. *The verdict cache* — modelled on
-`OptimizerReuseCache`, and before any real spend: the stale-data ladder re-enters `measure_sample`
-twice per degraded sample and each re-entry re-grades. *Per-step difficulty* — the larger prize,
-sketched with its blockers and its one non-skippable precondition at
+**The grading call path has SHIPPED** — reuse cache, 429 retry, heartbeat and metering all decided
+once at `judges/call.py::ask`, which `promptpotter/judges/CLAUDE.md` owns. Two open items remain,
+in the order they should land. *Plural judges* — `campaign.yaml::judge` is singular, so two turns
+cannot be graded by one rubric; the map should be keyed by **the term the formula reads**, not the
+judge's name. It reuses the node grammar but must NOT live in `pipeline.yaml::nodes`, because
+`node_config_items` is the walk a bulk model steer follows and that is exactly the boundary a judge
+may not sit behind. *Per-step difficulty* — the larger prize, sketched with its blockers and its
+one non-skippable precondition at
 [`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § Phase 3.
+
+One thing the cache deliberately does NOT fix: a grading that fails past its retry omits the term,
+so `rescore_results` raises inside `measure_sample` and the catch-all there banks the cell as an
+ERROR — discarding a backend answer already paid for. The root is one `except Exception` that
+cannot tell a measurement failure from a scoring failure. Measure the residual rate before
+splitting it, and do not compensate downstream.
 
 ### Selection-clean reporting
 **Why, and the statistical statement, are owned by [`../research/metrics.md`](../research/metrics.md) § The winner's own number is biased upward.** What this lane owes: a reserved per-dataset partition the loop never scores on, and two readers pointed at it — `verify` (which already re-scores a frozen candidate without touching the cycle, so it is the closest existing shape) and the reported fitness in `export.json`, whose provenance block advertises a deployment estimate it cannot currently claim. The published BBEH comparison is not what this fixes — its split already satisfies the requirement ([`../research/bbeh-comparison/README.md`](../research/bbeh-comparison/README.md) § The protocol).

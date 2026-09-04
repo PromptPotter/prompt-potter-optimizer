@@ -56,11 +56,13 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
           ledger.jsonl                 # append-only Decision/Phase/Snapshot/LLMCall/TokenUsage spine
           streams/round_NNNN_p_best.jsonl   # PoBB telemetry (sparkline in log.md)
           cache/rounds|candidates/     # per-round node I/O + pre-scoring checkpoint
-    measurements/                       # PAID cache 1 — measurements. Cross-cycle/session/tenant, peer of campaigns/
+    measurements/                       # PAID — measurements. Cross-cycle/session/tenant, peer of campaigns/
       index.jsonl                  # append-only, last-wins by run_id; `reindex` rebuilds it from runs/
       runs/{run_id}.jsonl          # one append-only log per run: a `k:"run"` header row + a `k:"m:{sample_id}"` row each
       derived/                     # read models folded FROM the runs (regenerable)
-    optimizer_reuse/{hash}.json         # PAID cache 2 — optimizer-LLM answers, replayed instead of re-sampled
+    optimizer_reuse/{hash}.json         # PAID — optimizer-LLM answers, replayed instead of re-sampled
+    judge_reuse/{hash}.json             # PAID — LLM-as-judge grading replies (`promptpotter/judges/`), same
+                                        #   shape, own tree: a grader must not read the loop's answers
     diagnostics/                        # seed-screen + noise-floor + verify — the three verbs that mint no cycle
       runs/{ts}_{config_hash}.json      #   verify + noise-floor, as a typed DiagnosticRunRecord
       seed-screen-{dataset}-{date}.json #   seed-screen's own shape — it screens SEATS, before a campaign
@@ -71,7 +73,7 @@ Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [o
     datasets/  benchmark-rows/  task-context/   # dataset tier — definition, materialized rows, decomposed context
 ```
 
-**Why this shape.** Telemetry is *temporal* — each cycle owns its `dashboard.json`, so `tail cycles/{cycle_id}/dashboard.json` follows exactly the cycle you're watching (a fork seeds from its parent, then diverges). Audit is *structural* — frozen records keyed by the cycle that produced them. Cycles sit flat because a fork tree keyed by `parent_cycle_id` scales where nested fork-of-fork directories don't. The measurement store (`measurements/`) is a cross-cycle peer of `campaigns/`, so a fresh `new` on an unchanged declaration cache-hits every origin sample (zero LLM calls, byte-identical origin score) yet still gets its own `campaign_id` and trajectory. `optimizer_reuse/` is its peer on the optimizer's own leg: the same optimizer call, asked again, replays its stored answer rather than being re-sampled. **The two are the only paid tiers** — everything else in the root is campaign state, regenerable, or config, which is what `reset` acts on. There is deliberately no recycle bin: an archived campaign stays in `campaigns/` and is hidden by `campaign.json::lifecycle_status`, so a campaign has ONE home and no enumerator has a second parent to remember. The `langfuse/` mirror is observability only — resume/rewind read solely from `rounds/round_NNNN.json`.
+**Why this shape.** Telemetry is *temporal* — each cycle owns its `dashboard.json`, so `tail cycles/{cycle_id}/dashboard.json` follows exactly the cycle you're watching (a fork seeds from its parent, then diverges). Audit is *structural* — frozen records keyed by the cycle that produced them. Cycles sit flat because a fork tree keyed by `parent_cycle_id` scales where nested fork-of-fork directories don't. The measurement store (`measurements/`) is a cross-cycle peer of `campaigns/`, so a fresh `new` on an unchanged declaration cache-hits every origin sample (zero LLM calls, byte-identical origin score) yet still gets its own `campaign_id` and trajectory. `optimizer_reuse/` is its peer on the optimizer's own leg, and `judge_reuse/` on scoring's: the same call, asked again, replays its stored answer rather than being re-sampled. **`store/layout.py::SHARED_CACHE_DIRS` is the whole of the paid tier** — that tuple is what `reset` preserves and what the workspace storage report counts as shared, so a cache is added to it or it is silently destroyed by the first. Everything else in the root is campaign state, regenerable, or config, which is what `reset` acts on. There is deliberately no recycle bin: an archived campaign stays in `campaigns/` and is hidden by `campaign.json::lifecycle_status`, so a campaign has ONE home and no enumerator has a second parent to remember. The `langfuse/` mirror is observability only — resume/rewind read solely from `rounds/round_NNNN.json`.
 
 ## File reference
 

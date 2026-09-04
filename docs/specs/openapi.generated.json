@@ -4596,7 +4596,7 @@
             "type": "integer"
           },
           "shared_cache_bytes": {
-            "description": "Cross-campaign reuse caches (measurements/ + optimizer_reuse/) — survive delete",
+            "description": "Cross-campaign reuse caches (measurements/, optimizer_reuse/, judge_reuse/) — survive delete",
             "title": "Shared Cache Bytes",
             "type": "integer"
           },

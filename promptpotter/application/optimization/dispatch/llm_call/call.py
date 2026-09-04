@@ -41,7 +41,7 @@ from promptpotter.infrastructure.llm.rate_limit import (
 from promptpotter.infrastructure.llm.registry import get_llm_client
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning, emit_token_usage
-from promptpotter.infrastructure.store.stores import OptimizerReuseCache, hash_call
+from promptpotter.infrastructure.store.stores import LLMReuseCache, hash_call
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -59,7 +59,7 @@ class LLMCallContext:
     ledger: CycleEventLog | None = None
     round_num: int | None = None
     candidate_idx: int | None = None
-    cache: OptimizerReuseCache | None = None
+    cache: LLMReuseCache | None = None
     # `DispatchHub.fill`'s third return value, measured — the composition behind `prompt_chars`.
     # It rides the context rather than `trace_meta` because it belongs on the START record: the
     # over-budget warning fires there, and a breakdown that lands only after the call cannot
@@ -189,6 +189,8 @@ async def llm_call(
             json_schema=response_schema,
             response_model=response_model.__name__ if response_model else None,
             seed=merged.get("seed"),
+            max_tokens=merged.get("max_tokens"),
+            reasoning_effort=merged.get("reasoning_effort"),
         )
         cached_payload = context.cache.load(cache_key)
 
@@ -205,7 +207,7 @@ async def llm_call(
         if response_model is not None and isinstance(response.parsed, dict):
             response.parsed = response_model.model_validate(response.parsed)
         duration_s = round(time.monotonic() - _t0, 2)
-        logger.debug("OptimizerReuseCache hit for %s (%s)", label, cache_key)
+        logger.debug("optimizer_reuse hit for %s (%s)", label, cache_key)
     else:
         prompt_chars = sum(len(m.get("content") or "") for m in messages)
         start_record = LLMCallStartRecord(

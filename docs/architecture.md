@@ -153,9 +153,9 @@ PromptPotter's persisted
 world is a strict containment hierarchy:
 
 - **Workspace** — the tenant-level container and **queryable
-  datastore**: every user-uploaded dataset, every campaign, and the two
-  shared content-addressed caches — `measurements/` (the measurement
-  store) and `optimizer_reuse/` (optimizer-LLM answers). On disk it is
+  datastore**: every user-uploaded dataset, every campaign, and the
+  shared content-addressed caches, enumerated by
+  `store/layout.py::SHARED_CACHE_DIRS` and nowhere else. On disk it is
   `projects/{tenant}/`, whose every directory is named for what it holds.
 - **Dataset** — the optimization target plus its config. Two
   first-class tiers, served by one read path: (a) **user-uploaded**

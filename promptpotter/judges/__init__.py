@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from promptpotter.application.scoring.evaluators import Evaluator
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import QueryMeasurement
+    from promptpotter.infrastructure.store.stores import LLMReuseCache
 
 __all__ = [
     "ENTRY_POINT_GROUP",
@@ -131,6 +132,7 @@ async def _compute(
     result: QueryMeasurement,
     judge: Judge,
     spec: JudgeSpec,
+    cache: LLMReuseCache | None = None,
     schema: PipelineSchema | None = None,
     **_: Any,
 ) -> float | None:
@@ -144,8 +146,16 @@ async def _compute(
     "right but hedged"), and a judge that produced them with nowhere to put them would be the
     writer-with-no-reader this whole arc exists to stop repeating. ``measure_sample`` banks
     ``pipeline_data`` after this returns, so a write here reaches the archive and the round file.
+
+    The reuse cache is bound HERE and read at ``call.py::ask``, so it never appears in ``GradeFn``
+    — see :func:`~promptpotter.judges.call.bind_cache` for why an infrastructure handle stays out
+    of the judge protocol. This is also the scope that makes it matter: the stale-data ladder
+    re-enters ``measure_sample`` twice more per degraded sample, and each re-entry lands here.
     """
-    verdict = await judge.grade(spec, result)
+    from promptpotter.judges.call import bind_cache
+
+    with bind_cache(cache):
+        verdict = await judge.grade(spec, result)
     banked = result.get("pipeline_data")
     if isinstance(banked, dict):
         # Cast because the keys are judge-NAMED, so `PipelineData` cannot declare them — the same
@@ -158,11 +168,16 @@ async def _compute(
     return verdict.score
 
 
-def build_evaluator(spec: JudgeSpec) -> Evaluator:
+def build_evaluator(spec: JudgeSpec, *, cache: LLMReuseCache | None = None) -> Evaluator:
     """A campaign's judge, as an ordinary ``per_sample`` evaluator.
 
     ``partial`` binds the campaign's spec the same way ``_compute_recall`` is bound to its
     candidate key — a parameterized evaluator is an existing shape here, not a new one.
+
+    ``cache`` is ``Stores.judge_reuse``. It defaults to ``None`` so a test or a one-off construction
+    re-samples rather than reaching a store it was never given; every real caller passes one, and
+    there is exactly one — ``initialization/loop_start.py::populate_session_scoring``, which the
+    runner and the four diagnostic verbs both arm through.
     """
     from promptpotter.application.scoring.evaluators import Evaluator
 
@@ -171,7 +186,7 @@ def build_evaluator(spec: JudgeSpec) -> Evaluator:
         name=judge.name,
         description=judge.description,
         scope="per_sample",
-        compute=partial(_compute, judge=judge, spec=spec),
+        compute=partial(_compute, judge=judge, spec=spec, cache=cache),
         # A judge compares against a gold, so it is UNDEFINED on a verifier-graded bank rather
         # than zero there. `materialize_sample_values` reads this and skips.
         needs_labels=judge.needs_gold,

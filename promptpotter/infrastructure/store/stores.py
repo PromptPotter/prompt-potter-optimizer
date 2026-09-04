@@ -22,7 +22,12 @@ from promptpotter.infrastructure.store.io import (
     validate_path_component,
     write_json,
 )
-from promptpotter.infrastructure.store.layout import inner_sandbox_dir, tenant_workspace
+from promptpotter.infrastructure.store.layout import (
+    JUDGE_REUSE_DIR,
+    OPTIMIZER_REUSE_DIR,
+    inner_sandbox_dir,
+    tenant_workspace,
+)
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 from promptpotter.infrastructure.store.session_store import SessionStore
 from promptpotter.infrastructure.store.sweep_store import SweepStore
@@ -44,9 +49,16 @@ def hash_call(
     json_schema: dict[str, Any] | None,
     response_model: str | None = None,
     seed: int | None = None,
+    max_tokens: int | None = None,
+    reasoning_effort: str | None = None,
 ) -> str:
-    """``response_model`` in the key lets typed and dict responses cohabit. ``seed`` is a decoding
-    input like ``temperature`` — omitting it would serve one seed's answer to another."""
+    """The key covers EVERY input that can change the answer, and nothing else.
+
+    ``response_model`` lets typed and dict responses cohabit. ``seed``, ``max_tokens`` and
+    ``reasoning_effort`` are decoding inputs exactly as ``temperature`` is — omitting any one of
+    them serves one configuration's answer to another. ``max_tokens`` is the one with a reachable
+    caller: ``JudgeStage.max_tokens`` is a declared field, so two graders differing only in their
+    cap would otherwise share a cached reply, one of them truncated."""
     blob = json.dumps(
         {
             "messages": messages,
@@ -56,32 +68,37 @@ def hash_call(
             "json_schema": json_schema,
             "response_model": response_model,
             "seed": seed,
+            "max_tokens": max_tokens,
+            "reasoning_effort": reasoning_effort,
         },
         sort_keys=True,
     )
     return hashlib.sha256(blob.encode()).hexdigest()[:HASH_TRUNCATE]
 
 
-class OptimizerReuseCache:
-    """Content-addressed optimizer-LLM answers: on a hash hit ``llm_call`` replays the stored
-    ``LLMResponse.model_dump()`` rather than re-sampling it. Named for the reuse, not for the calls —
-    the ledger's ``LLMCallStartRecord`` already owns the chronology of the same events."""
+class LLMReuseCache:
+    """Content-addressed LLM answers under ONE namespace: on a hash hit the caller replays the
+    stored ``LLMResponse.model_dump()`` rather than re-sampling it. Named for the reuse, not for the
+    calls — the ledger's ``LLMCallStartRecord`` already owns the chronology of the same events.
 
-    def __init__(self, base_dir: Path):
-        self._base_dir = base_dir
+    ``namespace`` IS the directory, and the instances never share one. The optimizer's answers and a
+    judge's are both LLM replies, but a grader able to read the loop's cache would be a ruler fed by
+    the thing it measures — and the two are separately purgeable only while they are separate trees.
+    """
 
-    def _dir(self) -> Path:
-        return self._base_dir / "optimizer_reuse"
+    def __init__(self, base_dir: Path, namespace: str):
+        self._namespace = namespace
+        self._dir = base_dir / namespace
 
     def _path(self, key: str) -> Path:
-        return self._dir() / f"{key}.json"
+        return self._dir / f"{key}.json"
 
     def load(self, key: str) -> dict[str, Any] | None:
         return read_json_optional(self._path(key))
 
     def save(self, key: str, value: dict[str, Any]) -> None:
         write_json(self._path(key), value)
-        logger.debug("OptimizerReuseCache: saved %s", key)
+        logger.debug("LLMReuseCache[%s]: saved %s", self._namespace, key)
 
 
 @dataclass(frozen=True)
@@ -101,7 +118,12 @@ class Stores:
     checkin: CheckinDraftStore
     sweeps: SweepStore
     archive: MeasurementArchive
-    optimizer_reuse: OptimizerReuseCache
+    optimizer_reuse: LLMReuseCache
+    # Scoring's own reuse cache, and a SECOND instance rather than a shared one: see
+    # `LLMReuseCache`. Rooted on `shared_root` with the other two, because a judge grading an
+    # identical (question, gold, answer) must hit whatever measured it first — including across a
+    # campaign delete, and including from inside an L4 sandbox.
+    judge_reuse: LLMReuseCache
     diagnostic_runs: DiagnosticRunStore
     users: UserStore
 
@@ -137,7 +159,8 @@ def build_stores(
         checkin=CheckinDraftStore(tenant_dir),
         sweeps=SweepStore(tenant_dir),
         archive=MeasurementArchive(shared_tenant),
-        optimizer_reuse=OptimizerReuseCache(shared_tenant),
+        optimizer_reuse=LLMReuseCache(shared_tenant, OPTIMIZER_REUSE_DIR),
+        judge_reuse=LLMReuseCache(shared_tenant, JUDGE_REUSE_DIR),
         diagnostic_runs=DiagnosticRunStore(tenant_dir),
         users=UserStore(tenant_dir),
     )
@@ -190,7 +213,7 @@ def resolve_cycle_path(stores: Stores, path: CyclePath) -> tuple[Stores, CycleHo
 
 
 __all__ = [
-    "OptimizerReuseCache",
+    "LLMReuseCache",
     "Stores",
     "build_stores",
     "descend_store",

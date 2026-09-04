@@ -211,16 +211,24 @@ writes, and why — [`docs/operations/persistence-and-state.md`](../../docs/oper
 
 `store/stores.py`: `Stores` frozen dataclass + `build_stores(identity,
 *, projects_root=…, benchmarks_root=…, shared_root=…)` builder.
-`shared_root` roots the two CONTENT-ADDRESSED caches (`measurements/`,
-`optimizer_reuse/`) and equals `projects_root` everywhere except an L4
-inner sandbox, which isolates campaign state but must NOT isolate a
-cache keyed by content hash. `identity` is the
+`shared_root` roots every CONTENT-ADDRESSED cache and equals
+`projects_root` everywhere except an L4 inner sandbox, which isolates
+campaign state but must NOT isolate a cache keyed by content hash.
+**`store/layout.py::SHARED_CACHE_DIRS` is the sole enumeration of that set**,
+because three surfaces have to agree on it and each had authored its own copy —
+`build_stores` roots them, `cli/commands/reset.py` preserves them, and the
+workspace storage report counts them as shared rather than residual. A cache
+named in one list and not the others is destroyed by `reset` or double-counted,
+silently, and one of those costs money. `identity` is the
 Stage-0 `IdentityContext` (`shared/identity.py`); `Stores.identity` is
 the sole source of tenant scope, with `Stores.tenant_id` a derived
 `@property` returning the `TenantId` newtype (identity-foundation
 no-drift gate #4 — never an independent field). Composite over the leaf stores
 `Stores` declares as its own fields — one attribute each, one class per
-`store/*.py`, except `optimizer_reuse`, which `stores.py` defines inline.
+`store/*.py`, except `optimizer_reuse` and `judge_reuse` — two instances of the one
+`LLMReuseCache`, which `stores.py` defines inline and which differ only in their
+namespace directory. Separate attributes rather than a shared instance: a grader
+able to read the loop's cached answers would be a ruler fed by what it measures.
 **Cite one as attribute → class → file**: the attribute is what a call site
 shows you, the file is what you have to open. Shared I/O in
 `store/io.py` — **format follows authorship**: `write_json`/`read_json*` for what

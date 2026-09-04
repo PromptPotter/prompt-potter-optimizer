@@ -1582,8 +1582,8 @@ export interface WorkspaceStorageEntry {
 export interface WorkspaceStorageResponse {
   /** The tenant's real on-disk total — campaigns + caches + other */
   total_bytes: number;
-  /** Cross-campaign reuse caches (measurements/ + optimizer_reuse/) — survive
-   * delete */
+  /** Cross-campaign reuse caches (measurements/, optimizer_reuse/, judge_reuse/) —
+   * survive delete */
   shared_cache_bytes: number;
   /** Everything else under the tenant: sessions, workspace ledger, dataset/backend
    * stores */

@@ -10,6 +10,7 @@ from promptpotter.config.settings import (
     DEFAULT_BACKEND_URL,
     settings,
 )
+from promptpotter.infrastructure.store.layout import SHARED_CACHE_DIRS
 
 
 def _add_global_args(parser: argparse.ArgumentParser) -> None:
@@ -314,7 +315,7 @@ def _add_noise_floor_args(p_noise_floor: argparse.ArgumentParser) -> None:
 
 def _add_reset_args(p_reset: argparse.ArgumentParser) -> None:
     """Tenant scope + safety flags for ``reset``. Drops campaigns + sessions + the active pointer;
-    ``measurements/`` (the DB core) and ``optimizer_reuse/`` are PRESERVED. ``--dry-run`` first."""
+    every ``layout.py::SHARED_CACHE_DIRS`` tree is PRESERVED. ``--dry-run`` first."""
     scope = p_reset.add_mutually_exclusive_group()
     scope.add_argument(
         "--all-tenants",
@@ -378,8 +379,9 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_parser(
             "reset",
             help="Drop campaigns/ + sessions/ + active_session.json for the "
-            "selected tenant; preserve the two paid caches, measurements/ (DB core) "
-            "+ optimizer_reuse/. The escape hatch for cycles "
+            "selected tenant; preserve the paid caches ("
+            + ", ".join(f"{d}/" for d in SHARED_CACHE_DIRS)
+            + "). The escape hatch for cycles "
             "obsoleted by code changes — per-sample measurements survive so the "
             "next `new` hits cache immediately.",
         )

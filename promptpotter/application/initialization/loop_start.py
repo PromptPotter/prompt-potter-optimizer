@@ -109,10 +109,14 @@ def populate_session_scoring(
     session.scoring.headline_metric = headline_metric
     # Built ONCE, here, so an unregistered judge name or a spec with no stages fails at init —
     # beside the formula compile, before a cell is bought — rather than on the first sample.
+    #
+    # THE one place the reuse cache reaches a judge. This function is the sole judge builder and
+    # serves both the runner and the four verbs that score outside it (`arm_diagnostic_scoring`),
+    # so one line arms grading reuse on every entry point rather than on whichever was edited.
     if judge_spec is not None:
         from promptpotter.judges import build_evaluator
 
-        session.scoring.judge = build_evaluator(judge_spec)
+        session.scoring.judge = build_evaluator(judge_spec, cache=session.store.judge_reuse)
 
 
 def arm_diagnostic_scoring(

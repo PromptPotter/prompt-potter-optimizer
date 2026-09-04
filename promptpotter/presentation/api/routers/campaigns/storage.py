@@ -11,7 +11,7 @@ from pydantic import Field
 
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import read_json_tolerant
-from promptpotter.infrastructure.store.layout import FileKind, classify
+from promptpotter.infrastructure.store.layout import SHARED_CACHE_DIRS, FileKind, classify
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError
@@ -178,7 +178,9 @@ class WorkspaceStorageResponse(StrictModel):
         description="The tenant's real on-disk total — campaigns + caches + other"
     )
     shared_cache_bytes: int = Field(
-        description="Cross-campaign reuse caches (measurements/ + optimizer_reuse/) — survive delete"
+        description="Cross-campaign reuse caches ("
+        + ", ".join(f"{d}/" for d in SHARED_CACHE_DIRS)
+        + ") — survive delete"
     )
     other_bytes: int = Field(
         description="Everything else under the tenant: sessions, workspace ledger, dataset/backend stores"
@@ -212,11 +214,12 @@ def get_workspace_storage(stores: StoresDep) -> WorkspaceStorageResponse:
         )
     entries.sort(key=lambda e: e.on_disk_bytes, reverse=True)
     base = stores.base_dir
-    shared = _dir_size(base / "measurements") + _dir_size(base / "optimizer_reuse")
+    shared = sum(_dir_size(base / name) for name in SHARED_CACHE_DIRS)
     # Each byte is counted ONCE and the three parts ARE the total, rather than the total being
     # walked a third time and `other` recovered by subtraction — which needed a `max(0, …)` guard,
-    # and a clamp on a residual is the shape of two walks that disagreed.
-    other = _dir_size(base, skip=frozenset({"campaigns", "measurements", "optimizer_reuse"}))
+    # and a clamp on a residual is the shape of two walks that disagreed. Both halves read the ONE
+    # declaration: named in the sum but not the skip set, a cache would be counted twice.
+    other = _dir_size(base, skip=frozenset({"campaigns", *SHARED_CACHE_DIRS}))
     return WorkspaceStorageResponse(
         total_bytes=campaigns_total + shared + other,
         shared_cache_bytes=shared,

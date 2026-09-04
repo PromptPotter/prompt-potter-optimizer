@@ -94,8 +94,9 @@ class _UnworkedTime:
 
 @dataclass(frozen=True)
 class InnerSpawnContext:
-    """``shared_root`` stays the REAL workspace root so ``measurements`` + ``optimizer_reuse`` remain
-    tenant-global: sandboxing them re-scored every inner origin, injecting more noise than the lift."""
+    """``shared_root`` stays the REAL workspace root so every ``layout.py::SHARED_CACHE_DIRS`` tree
+    remains tenant-global: sandboxing them re-scored every inner origin, injecting more noise than
+    the lift."""
 
     inner_sandbox_root: Path
     dataset_config_dir: Path

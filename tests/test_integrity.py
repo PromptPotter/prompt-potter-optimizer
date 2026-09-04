@@ -1819,6 +1819,124 @@ async def test_sample_lookahead_changes_the_bill_and_never_the_record() -> None:
     assert r["depths"] == [2] * len(dataset)
 
 
+class _CountingClient:
+    """One provider, counting round-trips. ``chat`` is the seam a judge actually reaches."""
+
+    def __init__(self, reply: str = "A") -> None:
+        self.reply = reply
+        self.calls = 0
+
+    async def chat(self, **_kw: Any) -> Any:
+        from promptpotter.infrastructure.llm.response import LLMResponse
+
+        self.calls += 1
+        return LLMResponse(
+            content=self.reply,
+            model="grader-1",
+            usage={"prompt_tokens": 11, "completion_tokens": 1},
+        )
+
+
+async def _grade_twice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, reply: str
+) -> tuple[_CountingClient, list[Any], Any]:
+    """Grade one identical cell twice through the real evaluator, and report what it cost."""
+    from factories import measurement
+
+    from promptpotter.infrastructure.store.stores import LLMReuseCache
+    from promptpotter.judges import build_evaluator
+    from promptpotter.judges import call as judge_call
+    from promptpotter.judges.protocol import JudgeSpec, JudgeStage
+
+    client = _CountingClient(reply)
+    monkeypatch.setattr(judge_call, "get_llm_client", lambda _p: client)
+    metered: list[Any] = []
+    monkeypatch.setattr(judge_call, "emit_token_usage", lambda **kw: metered.append(kw))
+
+    cache = LLMReuseCache(tmp_path, "judge_reuse")
+    ev = build_evaluator(
+        JudgeSpec(name="sealqa", stages=[JudgeStage(model="grader-1", provider="p")]), cache=cache
+    )
+    for _ in range(2):
+        row = measurement(sample_id=0, fitness=0.0)
+        row["query"], row["predicted"], row["ground_truth"] = "who?", "Ada", "Ada"
+        last = await ev.compute(result=row, schema=None)
+    return client, metered, last
+
+
+async def test_a_second_grading_of_one_comparison_is_not_re_billed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stale-data ladder re-enters ``measure_sample`` twice more per degraded sample, and two
+    candidates whose mutation did not change the answer present the grader an identical comparison
+    — so without reuse a judged campaign pays for the same verdict over and over, invisibly.
+
+    Both halves are asserted, because each fails on its own. The provider is reached ONCE, and the
+    replay is still METERED — flagged ``cached`` — since the cell was still graded and grading cost
+    must stay invariant to our cache history, exactly as ``llm_call`` and ``emit_step_token_usage``
+    keep it."""
+    client, metered, score = await _grade_twice(tmp_path, monkeypatch, reply="A")
+
+    assert score == 1.0, "the replayed reply must grade identically, not merely cheaply"
+    assert client.calls == 1, f"an identical comparison re-billed the provider: {client.calls}x"
+    assert [m["cached"] for m in metered] == [False, True], "a served grading went unmetered"
+    assert {m["kind"] for m in metered} == {"judge"}, "grading spend landed outside its own bucket"
+
+
+async def test_an_empty_grading_reply_is_never_made_permanent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Emptiness is a TRANSIENT provider failure, and the key is the prompt hash — so storing one
+    makes it permanent for every future grading of that comparison, in a tenant-global tree that
+    outlives the run and the campaign both. A re-run does not clear it, and nothing on any surface
+    points at the cache: the operator sees a cell that cannot be graded, forever.
+
+    Same scar as ``llm_call``'s, at the judge's own chokepoint."""
+    client, _metered, score = await _grade_twice(tmp_path, monkeypatch, reply="   ")
+
+    assert score is None, "an unreadable grading is an absent verdict, never a zero"
+    assert client.calls == 2, "an empty reply was cached and replayed as if it were a verdict"
+
+
+async def test_an_unusable_cache_entry_costs_a_re_sample_and_never_the_cell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reuse cache exists to make grading cheaper, so nothing in it may cost a MEASUREMENT.
+
+    A truncated write or an entry an older build shaped raises on read and on validate alike — and
+    ``ask`` sits under ``measure_sample``'s catch-all, so a raise there banks the whole cell as an
+    ERROR and discards a backend answer already paid for. Worse, it does so on every future run:
+    the key is the prompt hash, and the tree is tenant-global. Absent, unreadable and stale are one
+    answer — sample it again."""
+    from factories import measurement
+
+    from promptpotter.infrastructure.store.stores import LLMReuseCache
+    from promptpotter.judges import build_evaluator
+    from promptpotter.judges import call as judge_call
+    from promptpotter.judges.protocol import JudgeSpec, JudgeStage
+
+    client = _CountingClient("A")
+    monkeypatch.setattr(judge_call, "get_llm_client", lambda _p: client)
+    monkeypatch.setattr(judge_call, "emit_token_usage", lambda **_kw: None)
+
+    cache = LLMReuseCache(tmp_path, "judge_reuse")
+    ev = build_evaluator(
+        JudgeSpec(name="sealqa", stages=[JudgeStage(model="grader-1", provider="p")]), cache=cache
+    )
+    row = measurement(sample_id=0, fitness=0.0)
+    row["query"], row["predicted"], row["ground_truth"] = "who?", "Ada", "Ada"
+    assert await ev.compute(result=row, schema=None) == 1.0
+
+    # Poison every entry the first grading wrote — a half-written file is the realistic shape.
+    poisoned = list(tmp_path.glob("judge_reuse/*.json"))
+    assert poisoned, "the first grading banked nothing, so this proves nothing"
+    for path in poisoned:
+        path.write_text('{"content": ', encoding="utf-8")
+
+    assert await ev.compute(result=row, schema=None) == 1.0, "a bad entry cost the cell its grade"
+    assert client.calls == 2, "an unusable entry must fall through to a fresh sample"
+
+
 # 8. Where the package reads and writes
 
 # Bare scalars YAML 1.1 resolves to a non-string: the write-side hazard `write_yaml` must quote.
