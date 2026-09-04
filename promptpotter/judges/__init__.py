@@ -1,20 +1,7 @@
-"""The judge registry — how a judge becomes available, and how one becomes an ``Evaluator``.
-
-Shaped exactly like ``connectors/__init__.py``, and that is the point rather than a coincidence:
-that module is this repo's answer to "make it exchangeable", so a judge author has one pattern to
-learn, not two. A ``_BUILTIN`` data dict, a published entry-point group, one validator that runs
-over built-ins and third-party plugins alike, a plugin may not shadow a built-in, and a broken
-plugin is fatal rather than skipped.
-
-**A judge is not a new kind of thing to the scoring layer.** :func:`build_evaluators` turns a
-campaign's term → :class:`~promptpotter.judges.protocol.JudgeSpec` mapping into ordinary
-``Evaluator``s at ``per_sample`` scope, which the existing materializer runs once at measure time
-and banks into the row. Everything downstream — the formula namespace, the webapp's scoring-mask
-editor, the read-side mask's refusal to recompute them — already works.
-"""
-
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import Mapping
 from functools import partial
 from importlib.metadata import entry_points
@@ -23,6 +10,8 @@ from typing import TYPE_CHECKING, Any, cast
 from promptpotter.judges.grounding import ANSWER_GROUNDING, EVIDENCE_RETRIEVAL
 from promptpotter.judges.protocol import Judge, JudgeSpec
 from promptpotter.judges.simpleqa import SEALQA, SIMPLEQA
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from promptpotter.application.scoring.evaluators import Evaluator
@@ -54,8 +43,6 @@ _BUILTIN: dict[str, Judge] = {
 
 
 def _validate(key: str, j: Any, origin: str) -> Judge:
-    """Every invariant, applied to built-ins and plugins alike — that equivalence IS the contract.
-    Raises at import, so a half-wired judge can never fail mid-campaign instead."""
     where = f"judge {key!r} ({origin})"
     if not isinstance(j, Judge):
         raise TypeError(f"{where}: expected a Judge, got {type(j).__name__}.")
@@ -141,31 +128,23 @@ async def _compute(
     schema: PipelineSchema | None = None,
     **_: Any,
 ) -> float | None:
-    """The ``Evaluator.compute`` a judge becomes. ``None`` on a failed or unreadable grading, which
-    OMITS the term rather than banking a zero — the difference between "this answer was wrong" and
-    "we did not find out".
+    """The ``Evaluator.compute`` a judge becomes. ``measure_sample`` banks ``pipeline_data`` after
+    this returns, so the label and the reason written here reach the archive and the round file."""
+    from promptpotter.judges.call import absent, bind_cache
 
-    The score is the return value because that is all an ``Evaluator`` yields. The LABEL and the
-    EXPLANATION are written onto the row here instead, and that is deliberate rather than a
-    shortcut: they are the half of a verdict a human and L1 actually read ("wrong entity" vs
-    "right but hedged"), and a judge that produced them with nowhere to put them would be the
-    writer-with-no-reader this whole arc exists to stop repeating. ``measure_sample`` banks
-    ``pipeline_data`` after this returns, so a write here reaches the archive and the round file.
-
-    **Everything banked is keyed by TERM, never by judge name.** Two terms may run the same
-    registered judge — the same rubric on two models, or one step's grader reused — and under a
-    judge-named key the second verdict would land on top of the first, leaving one label to
-    describe two gradings. The term is unique by construction: it is a mapping key.
-
-    The reuse cache is bound HERE and read at ``call.py::ask``, so it never appears in ``GradeFn``
-    — see :func:`~promptpotter.judges.call.bind_cache` for why an infrastructure handle stays out
-    of the judge protocol. This is also the scope that makes it matter: the stale-data ladder
-    re-enters ``measure_sample`` twice more per degraded sample, and each re-entry lands here.
-    """
-    from promptpotter.judges.call import bind_cache
-
-    with bind_cache(cache):
-        verdict = await judge.grade(spec, result)
+    try:
+        with bind_cache(cache):
+            verdict = await judge.grade(spec, result)
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        raise
+    except Exception as exc:
+        # A judge that RAISES must not cost the cell it was grading. Uncaught, this reaches
+        # `measure_sample`'s catch-all, which banks `pipeline_data=None` and throws away a backend
+        # answer already paid for — exactly what `ask` never raising exists to prevent, undone one
+        # frame above it by any OTHER failure inside `grade`: a rubric placeholder the caller does
+        # not fill, a label outside `to_score`, a third-party judge's own bug.
+        logger.warning("judge %s failed to grade term %s: %s", judge.name, term, exc)
+        verdict = absent(judge.name, f"{type(exc).__name__}: {exc}")
     banked = result.get("pipeline_data")
     if isinstance(banked, dict):
         # Cast because the keys are TERM-named, so `PipelineData` cannot declare them — the same
@@ -181,31 +160,8 @@ async def _compute(
 def build_evaluators(
     specs: Mapping[str, JudgeSpec], *, cache: LLMReuseCache | None = None
 ) -> tuple[Evaluator, ...]:
-    """A campaign's judges, as ordinary ``per_sample`` evaluators — one per TERM.
-
-    **The mapping is keyed by the term the scoring formula reads, never by the judge's name**, and
-    that is what makes a multi-STEP schema expressible at all: `retrieve → ground → answer` is
-    three entries whose graders are three different rubrics, and one keyed by judge would collapse
-    any two sharing a rubric into a single term. It also keeps the operator's vocabulary in one
-    place — the formula names `answer_correct`, so the config declares `answer_correct`, rather
-    than naming a registry key here and a derived term there.
-
-    Declaration ORDER is the step order and is preserved (a YAML mapping loads ordered, and so does
-    the dict it becomes). Nothing reads it yet; a later per-step difficulty model does, off the
-    banked terms rather than off a re-measure — [`docs/methods/verdict-resolution.md`] § Phase 3.
-
-    Every term is validated against the same rules a package evaluator obeys, which is what
-    :func:`~promptpotter.application.scoring.evaluators.validate_campaign_evaluator` exists for:
-    the name an OPERATOR picks is the one that can collide with something, and both collisions —
-    a term `cell_namespace` binds itself, a term a package evaluator already owns — are silent.
-
-    ``cache`` is ``Stores.judge_reuse``, shared by every term: it is keyed on the rendered prompt,
-    so two judges cannot read each other's replies and a repeated grading of one comparison is
-    bought once. It defaults to ``None`` so a test or a one-off construction re-samples rather than
-    reaching a store it was never given; every real caller passes one, and there is exactly one —
-    ``initialization/loop_start.py::populate_session_scoring``, which the runner and the four
-    diagnostic verbs both arm through.
-    """
+    """A campaign's judges, as ordinary ``per_sample`` evaluators. ``specs`` is keyed by the term
+    the scoring formula reads, never by the judge's name."""
     from promptpotter.application.scoring.evaluators import (
         Evaluator,
         validate_campaign_evaluator,
@@ -220,6 +176,13 @@ def build_evaluators(
                 f"identifier materializes a value no formula can address."
             )
         judge = get(spec.name)
+        if judge.max_stages is not None and len(spec.stages) > judge.max_stages:
+            raise ValueError(
+                f"judge term {term!r}: {spec.name!r} asks {judge.max_stages} of the "
+                f"{len(spec.stages)} stages declared. `fingerprint` hashes the whole chain, so a "
+                f"stage nothing reads re-cuts every archive key and re-pays for every row while "
+                f"changing no verdict. Drop it, or declare a judge that asks it."
+            )
         ev = Evaluator(
             name=term,
             description=judge.description,

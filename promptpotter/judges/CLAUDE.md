@@ -64,11 +64,16 @@ search its own grader (a candidate free to move its ruler would optimize the rul
 
 ## A judge is a COMPOSITION, not a call
 
-`JudgeSpec.stages` is a LIST. Two models in a row (grade, then tie-break) or several in parallel
-(a panel, voted) are the same type — one stage is the common case, never the assumed one.
-`Judge.grade` returns one `JudgeVerdict`; how many calls it made is its own business and no part
-of the scoring seam knows. Token accounting is per underlying call via `call.py::ask`, so a
-two-model chain prices correctly with no special case.
+`JudgeSpec.stages` is a LIST, so two models in a row (grade, then tie-break) or several in
+parallel (a panel, voted) are the same type. `Judge.grade` returns one `JudgeVerdict`; how many
+calls it made is its own business, and token accounting is per underlying call via `call.py::ask`,
+so a chain prices correctly with no special case.
+
+**Every judge shipped today asks exactly ONE stage, and says so in `Judge.max_stages`.**
+`build_evaluators` refuses a spec declaring more than the judge reads, at init, before a cell is
+bought. Without that the extra stage is silent and expensive in the worst way: `fingerprint` hashes
+the whole chain, so a stage nothing asks still re-cuts every archive key and re-pays for every row
+while changing no verdict. A judge that genuinely composes raises its own `max_stages`.
 
 `call.py::graded` is the other half of that: `ask` plus the verdict shaping every judge repeats,
 in one place because its absence arms are not formatting. **A grader that FAILED must never be
@@ -167,6 +172,13 @@ author who edits a rubric and forgets to bump `version` still moves the fingerpr
 is the difference between *this answer was wrong* and *we did not find out*, and it is why
 `call.py::ask` never raises — a provider hiccup must not be bankable as a wrong answer, nor kill
 the measurement of a cell the backend already paid for.
+
+**`ask` not raising is only half of it, and the other half is one frame up.** Anything else that
+throws inside `grade` — a rubric placeholder the caller does not fill, a label outside `to_score`,
+a third-party judge's own bug — reaches `measure_sample`'s catch-all, which banks
+`pipeline_data=None` and throws the backend answer away. `__init__.py::_compute` catches it and
+returns `absent` instead, so **no failure in a grader can cost the measurement it grades**. The
+rule belongs to the seam, not to any one judge: a grading is cheap and the cell it reads is not.
 
 The shipped SimpleQA judge **deliberately diverges from upstream here**: `simple-evals` defaults an
 unparseable grading reply to `"C"` / `NOT_ATTEMPTED`, a category that does not count against

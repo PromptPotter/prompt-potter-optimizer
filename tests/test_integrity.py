@@ -386,6 +386,65 @@ def test_a_judge_graded_row_rescores_without_calling_a_model() -> None:
     assert calls == [], f"rescoring an archived row reached a model: {calls}"
 
 
+def test_a_conversation_reaches_the_formula_only_as_projected_scalars() -> None:
+    """The turn channel must stay unreachable from a formula; its projection must not be.
+
+    ``turns`` is compacted out of cold rows, so a formula that walked it would raise on cells it
+    had already scored."""
+    from factories import measurement
+
+    from promptpotter.application.scoring.formula import compile_scorer, rescore_results
+    from promptpotter.application.scoring.formula.compiler import (
+        CELL_INTRINSIC_NAMES,
+        ScoringTermMissingError,
+    )
+    from promptpotter.domain.scoring import TURN_SCALAR_KEYS, turn_scalars
+
+    assert not (TURN_SCALAR_KEYS & CELL_INTRINSIC_NAMES), (
+        "a projected term colliding with an intrinsic is dropped by cell_namespace's splat, "
+        "silently, leaving a key no formula can reach"
+    )
+
+    turns = [
+        {"index": 1, "source": "agent", "step": "retrieve", "tools": ["bash", "bash"]},
+        {"index": 2, "source": "agent", "step": "retrieve", "tools": []},
+        {"index": 3, "source": "agent", "step": "answer", "tools": ["bash"]},
+    ]
+    scalars = turn_scalars(turns)  # type: ignore[arg-type]
+    assert scalars == {
+        "n_turns": 3.0,
+        "n_tool_calls": 3.0,
+        "retrieve_turns": 2.0,
+        "answer_turns": 1.0,
+    }
+    assert turn_scalars([]) == {}, "no conversation is absence, never a zeroed count"
+
+    # The point of the whole projection: a formula can NAME these. Scored off a row shaped the way
+    # `measure_sample` banks one.
+    row = measurement(
+        sample_id=0, fitness=0.0, pipeline_data={"env_reward": 1.0, "turns": turns, **scalars}
+    )
+    scorer = compile_scorer(
+        "env_reward * (1.0 if n_turns <= 4 else 0.5) * min(1.0, retrieve_turns / 2.0)",
+        None,
+        verifier_graded=True,
+    )
+    rescore_results([row], scorer)
+    assert row["fitness"] == 1.0
+
+    # Indexing and attribute access are refused at compile; `len` is a bare Call, so it compiles
+    # and fails at eval. Both are stops — pinned here so adding `len` to SAFE_BUILTINS is caught.
+    for formula in ("turns[0]", "turns.index"):
+        with pytest.raises(ValueError, match="disallowed syntax"):
+            compile_scorer(formula, None, verifier_graded=True)
+
+    with pytest.raises(ScoringTermMissingError):
+        rescore_results(
+            [measurement(sample_id=0, fitness=0.0, pipeline_data={"turns": turns})],
+            compile_scorer("len(turns)", None, verifier_graded=True),
+        )
+
+
 def test_a_judge_never_grades_a_cell_that_has_no_answer() -> None:
     """A cell with no answer must cost nothing and bank nothing.
 
@@ -2024,6 +2083,67 @@ def test_a_judge_term_cannot_take_a_name_that_already_measures_something() -> No
     for term in taken:
         with pytest.raises(ValueError):
             build_evaluators({term: JudgeSpec(name="sealqa", stages=[stage])})
+
+
+def test_a_grader_that_raises_never_costs_the_cell_it_graded() -> None:
+    """A grading is cheap; the cell it reads is not. No failure in a judge may spend the second.
+
+    ``ask`` never raising covers the provider. It does not cover anything else thrown inside
+    ``grade`` — a rubric placeholder the caller does not fill, a label outside ``to_score``, a
+    third-party judge's own bug — and any of those reaches ``measure_sample``'s catch-all, which
+    banks ``pipeline_data=None``. The backend answer is then gone: paid for, never archived, and
+    indistinguishable on the round file from a backend that was down.
+    """
+    import asyncio
+
+    from factories import measurement
+
+    from promptpotter.judges import JUDGES, build_evaluators
+    from promptpotter.judges.protocol import Judge, JudgeSpec, JudgeStage
+
+    async def _explode(_spec: Any, _result: Any) -> Any:
+        raise RuntimeError("this judge is broken")
+
+    row = measurement(
+        sample_id=0,
+        fitness=0.0,
+        predicted="Paris",
+        pipeline_data={"reasoning_trace": "read the source"},
+    )
+    JUDGES["_raises"] = Judge(
+        name="_raises",
+        version="1",
+        description="d",
+        rubric="r",
+        grade=_explode,
+        labels=("X",),
+        to_score={"X": 1.0},
+        needs_gold=False,
+    )
+    try:
+        (ev,) = build_evaluators(
+            {"answer_ok": JudgeSpec(name="_raises", stages=[JudgeStage(model="m", provider="p")])}
+        )
+        score = asyncio.run(ev.compute(result=row, schema=None))
+    finally:
+        del JUDGES["_raises"]
+
+    assert score is None, "a judge's own bug was banked as a graded score"
+    assert row["pipeline_data"], "the paid backend measurement was discarded with the grading"
+    assert "RuntimeError" in row["pipeline_data"]["answer_ok_why"]
+
+
+def test_a_stage_no_judge_asks_is_refused_before_a_cell_is_bought() -> None:
+    """``fingerprint`` hashes the whole stage chain, so a stage nothing reads is not free.
+
+    It re-cuts every archive key and re-pays for the whole panel while changing no verdict — the
+    expensive direction of silent, since both the old rows and the new ones look right."""
+    from promptpotter.judges import build_evaluators
+    from promptpotter.judges.protocol import JudgeSpec, JudgeStage
+
+    chain = [JudgeStage(model="grade-1", provider="p"), JudgeStage(model="tie-break", provider="p")]
+    with pytest.raises(ValueError):
+        build_evaluators({"answer_correct": JudgeSpec(name="sealqa", stages=chain)})
 
 
 # 8. Where the package reads and writes
