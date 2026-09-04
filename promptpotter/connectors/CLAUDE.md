@@ -276,12 +276,14 @@ no wire, so declaring a token on one fails the registry guard at import.
   No I/O, no logging beyond debug-level drops.
 - `extract_experiment` returns `(queries, index_terms)` — the index_terms
   list may be empty for connectors with no retrieval index.
-- **A dataset read through `experiment_file` must have NO loader registered under its name.**
-  `wiring.py::_load_dataset_into_session` asks the loader registry FIRST and falls through to the
-  experiment file only when it returns nothing — so a registered loader does not merely go unused,
-  it WINS: the connector's panel is never published, every cell raises, and the loader quietly
-  supplies rows shaped for a backend the campaign is not running on. This is the one place a
-  dataset NAME is load-bearing across two subsystems, and neither of them says so on its own.
+- **A declared `experiment_file` OWNS its dataset's panel, and `wiring.py::
+  _load_dataset_into_session` reads it FIRST for that reason.** It used to ask the row ladder first
+  and fall through, which made anything cached under the same dataset name WIN: the panel was never
+  published, `_PANEL` stayed unset, every cell raised, and the run still reported a healthy sample
+  count. That was carried here as a rule the dataset author had to remember — register no loader
+  under the name — and the rule did not cover the rows a loader leaves BEHIND, which is exactly how
+  it fired (a deleted `_load_longseal`'s 12 MB of termnorm-shaped rows broke the first harbor launch
+  of `sealqa-longseal-12`). An invariant that can be ordered is not a rule to remember.
 - **`query` is whatever addresses one unit of work, and on an episodic backend that is an ID.**
   A judge falling back to it then grades against an identifier, so a task carrying a real question
   declares it and it rides `Sample.question` (`domain/sample.py`) — the only channel that reaches

@@ -143,6 +143,51 @@ precondition (bank each step's term separately, which the shipped schema now doe
 rubrics are unscreened; read them on `seed-screen` / `noise-floor` before a campaign is funded on
 them.
 
+**The conversation now reaches a formula, and only as scalars — SHIPPED.**
+`domain/scoring.py::turn_scalars` projects `n_turns`, `n_tool_calls` and `{step}_turns` at measure
+time, beside the `{step}_{reward}` terms the harbor connector already banked. The raw `turns` list
+stays unreachable from a formula on purpose and must remain so: the compiler's AST allowlist has no
+subscript, no attribute access and no `len`, and `turns` is the first key `compact-archive` moves
+out of a cold row — a formula that walked it would raise on every cell it had already scored. Two
+routes reach scoring from a conversation, and there is no third: this projection, or a judge that
+reads the turns and banks a term.
+
+**Step-selective work splits in three, at very different distances.**
+
+*Scoring* one step is already config and already step-agnostic — a dataset names `retrieve_reward`
+/ `retrieve_turns` and optimizes against that step alone, no code.
+
+*Optimizing* one step is near. The candidate prompt is trial-scoped (one `SKILL.md` per episode),
+so an arm mutates the whole episode however narrowly it is scored. The design needing a decision is
+whether a declared step becomes a NODE — one per step, each with its own `prompt_info` and
+`param_keys` — because that makes the existing `campaign_config.exclude_nodes` the step selector
+and adds no new channel. It costs generalizing `connectors/harbor.py`'s singular `AGENT_NODE`;
+Harbor's `AgentConfig.skills` takes a list, so one skill per step is injectable with the step's
+`instruction.md` naming which to read. Separately: not RUNNING the later steps, where the cost
+saving lives — Harbor runs every declared step and `_unscoreable_step` raises on a truncated one.
+
+**PARTIAL PIPELINE GENERATION — far, and deliberately so.** Today L1 always proposes a COMPLETE
+pipeline. The feature is that it may instead propose a partial one — a single step, or some subset
+— with *which* subset being **L2's** decision, not the dataset's and not a config's. That makes it
+the first place the escalation layer chooses a search SHAPE rather than a search direction, which
+is why it is not a slice to pick up when convenient:
+
+- **Do not open it until a real pipeline is blocked without it.** Most pipelines gain nothing: with
+  few steps, a whole-pipeline proposal is both cheaper to reason about and strictly more expressive
+  than a partial one. The gain appears only where a pipeline is complicated enough that a whole
+  proposal cannot be attributed — many steps, and no way to tell which one moved the number.
+- **Its trigger is a FORK, not a stall.** The signal is L2 reaching a two-way split it cannot
+  choose between: two strategies, no evidence favouring either, and a whole-pipeline arm that would
+  confound them. Partial generation is the instrument that separates them. A plain stall is not
+  this — the existing escalation ladder owns that, and reaching for step-selection there would be
+  answering a question nobody asked.
+- **It is a human-in-the-loop design cycle, not an implementation ticket.** Deciding what a partial
+  proposal may touch, how a partial arm is compared against a whole one, and what a δ ruler does
+  with arms of different shapes are all open and none is answerable from code. Plan it in the open,
+  with the operator, before anything is built.
+
+Its precondition is the step-as-node decision above; per-step terms already bank.
+
 One thing the cache deliberately does NOT fix: a grading that fails past its retry omits the term,
 so `rescore_results` raises inside `measure_sample` and the catch-all there banks the cell as an
 ERROR — discarding a backend answer already paid for. The root is one `except Exception` that

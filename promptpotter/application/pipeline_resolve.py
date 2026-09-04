@@ -31,11 +31,9 @@ logger = logging.getLogger(__name__)
 
 JUDGE_INSTRUMENT_KEY = "judge_instrument"
 """The node-config key the judges' fingerprint rides into measurement identity — ONE key over the
-whole term → judge mapping, not one per term.
-
-Twin of `connectors/harbor.py::INSTRUMENT_KEY`, and named apart from it because they answer
-different questions: that one says which task bytes were run, this one says which grader read the
-answer. Both are identity, neither is a tunable — nothing may put either in `param_keys`."""
+whole term → judge mapping. Twin of `connectors/harbor.py::INSTRUMENT_KEY`, named apart because
+that one says which task bytes ran and this one which grader read the answer. Both are identity,
+neither a tunable — nothing may put either in `param_keys`."""
 
 
 __all__ = [
@@ -130,23 +128,13 @@ def resolve_pipeline_config_params(
 def _identity_contributions(
     dataset_dir: Path | None, judges: Mapping[str, JudgeSpec] | None, active: list[str]
 ) -> dict[str, dict[str, Any]]:
-    """What this measurement was taken UNDER, beyond the node configs themselves.
+    """What this measurement was taken UNDER, beyond the node configs themselves — the CONNECTOR's
+    contribution and the JUDGES', which answer the same question and so share one channel.
 
-    Both contributors answer the same question and so share one channel. The CONNECTOR's is
-    resolved from the dataset dir's own ``backend_type`` (e.g. harbor's resolved task pins); the
-    JUDGES' is a fingerprint per declared term, because an archive row is keyed on config and a
-    judge swapped without moving the key would have every prior verdict replayed under the new
-    grader.
-
-    **The TERM is inside the fingerprint, not just the judge.** Re-keying a grader — the same
-    rubric on the same models, read by the formula under a different name — produces a different
-    set of banked observations, so it is a different measurement and must not replay the old rows.
-    Sorted by term: the mapping's declaration ORDER is the step order for a reader, but two
-    campaigns declaring the same graders in a different order measured the same thing.
-
-    Pure over its inputs, which is what keeps the live setup and the prospective-origin id
-    (`GET /origins`) agreeing by construction rather than by both remembering to.
-    """
+    Sorted by term rather than kept in declaration order: two campaigns declaring the same graders
+    in a different order measured the same thing (``judges/CLAUDE.md`` § Identity). Pure over its
+    inputs, which is what keeps the live setup and the prospective-origin id (`GET /origins`)
+    agreeing by construction rather than by both remembering to."""
     out: dict[str, dict[str, Any]] = {}
     if dataset_dir is not None:
         raw = read_yaml_optional(dataset_pipeline_path(dataset_dir))

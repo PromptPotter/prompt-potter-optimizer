@@ -6,12 +6,9 @@ Provenance is the reason this is the first built-in: OpenAI published the grader
 with two human annotators over 100 answers. So the rubric below is not ours, and neither is the
 taxonomy — which is exactly what a first built-in should be.
 
-**One deliberate divergence from upstream, and it goes the other way.** SimpleQA parses the reply
-with ``re.search(r"(A|B|C)", …)`` and returns ``"C"`` when nothing matches — so an unparseable
-judge response silently becomes ``NOT_ATTEMPTED``, a category that does not count against
-accuracy-given-attempted. Here that is an ERROR, not a category: :func:`_parse` returns ``None``,
-the verdict carries the failure, the term is omitted, and the formula halts loud. A grader that
-fails must never be bankable as a graded answer.
+**One deliberate divergence, and it goes the other way.** Upstream returns ``"C"`` when nothing
+matches, so an unparseable reply silently becomes ``NOT_ATTEMPTED`` — a category that does not
+count against accuracy-given-attempted. Here that is an error and the term is omitted.
 """
 
 from __future__ import annotations
@@ -143,11 +140,8 @@ _LETTER_RE = re.compile(r"\b([ABC])\b")
 
 
 def _parse(reply: str) -> str | None:
-    """The graded LABEL, or ``None`` when the reply carries no letter.
-
-    Upstream defaults to ``"C"`` here. We do not: an unreadable grading reply is a failed
-    measurement, and banking it as ``NOT_ATTEMPTED`` would let provider flakiness masquerade as a
-    model that declined to answer — in the direction that flatters the arm under test."""
+    """The graded LABEL, or ``None`` when the reply carries no letter. First-match, unlike
+    ``grounding.py``'s: this parse is upstream's, and its numbers sit beside published ones."""
     match = _LETTER_RE.search(reply.strip().upper())
     return _LETTER_TO_LABEL[match.group(1)] if match else None
 

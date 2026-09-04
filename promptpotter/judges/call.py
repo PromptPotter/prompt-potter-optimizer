@@ -1,11 +1,8 @@
 """The one place a judge reaches a model.
 
-Every judge asks through :func:`ask`, so caching, rate-limit retry, liveness and metering are
-decided ONCE rather than per judge. That is the same argument ``dispatch/llm_call/call.py`` makes
-for the optimizer's own chokepoint — and this is deliberately a SECOND one rather than a reuse of
-it: that module is the optimizer's, it meters ``kind="optimizer"``, and routing grading spend
-through it would put judge cost in the loop's bucket, which is precisely the boundary a judge must
-not cross.
+Deliberately a SECOND chokepoint rather than a reuse of ``dispatch/llm_call/call.py``: that one is
+the optimizer's and meters ``kind="optimizer"``, so routing grading spend through it would put
+judge cost in the loop's bucket — the one boundary a judge may not cross.
 """
 
 from __future__ import annotations
@@ -45,14 +42,8 @@ _CACHE: ContextVar[LLMReuseCache | None] = ContextVar("judge_reuse_cache", defau
 
 @contextmanager
 def bind_cache(cache: LLMReuseCache | None) -> Iterator[None]:
-    """Scope the reuse cache :func:`ask` reads, for the duration of one grading.
-
-    **A ContextVar rather than an argument on ``GradeFn``.** The cache is infrastructure; threading
-    it through ``grade`` would put a store handle in the judge protocol, so every judge author —
-    ours and a third party's — would carry something they have nothing to do with. It is set per
-    grading rather than per process, and ContextVars are per-task, so concurrent ``measure_sample``
-    tasks cannot read each other's binding. ``None`` disables the cache and re-samples every time.
-    """
+    """Scope the reuse cache :func:`ask` reads, for the duration of one grading. ``None`` disables
+    it and re-samples every time."""
     token = _CACHE.set(cache)
     try:
         yield
@@ -63,24 +54,8 @@ def bind_cache(cache: LLMReuseCache | None) -> Iterator[None]:
 async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
     """Run one judge stage. Returns ``(reply, error)`` — exactly one is non-empty.
 
-    **Never raises.** A judge that blew up must produce an absent verdict, not an exception that
-    kills the measurement of a cell the backend already paid for: the answer was measured, only
-    the grading failed, and the two are different facts. The caller turns the error into a
-    ``JudgeVerdict`` with ``score=None``, which omits the term and makes the formula halt loud.
-
-    **What is cached is the REPLY, not the verdict**, and that is what makes one cache enough. The
-    rendered prompt already carries the rubric, the question, the gold and the prediction, so any
-    edit to those moves the key on its own — while a judge whose ``_parse`` or ``to_score`` changed
-    re-derives correctly from the stored reply, because it is still what that model said. A second
-    stage's prompt is a deterministic function of the first's reply (``JudgeStage.temperature``
-    defaults to ``0.0`` for exactly this reason), so a chain hits end to end under one key space.
-    The economically large hit is two candidates whose mutation did not change the answer.
-
-    Meters through ``emit_token_usage(kind="judge", …)`` — the third spend arm — carrying BOTH
-    ``provider`` and ``model``, since a rate belongs to the pair and a model alone cannot be
-    priced (``shared/pricing.py::lookup_rate``). Filed under the stage's ``role`` so a multi-stage
-    judge's rows stay tellable apart.
-    """
+    **Never raises**, which every caller relies on: a grading failure must stay a failed grading,
+    not kill the measurement of a cell the backend already paid for."""
     started = time.monotonic()
     cache = _CACHE.get()
     key: str | None = None
@@ -106,10 +81,9 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
             return "", f"{type(exc).__name__}: {exc}"
 
     usage = response.usage or {}
-    # THE metering point: both branches converge here, so a grading is metered by ARRIVING rather
-    # than by each branch remembering to. A cache hit is metered too, flagged — it spends nothing,
-    # but the cell still had to be graded, so incurred grading cost stays invariant to our cache
-    # history instead of making a re-read of an old comparison read as free.
+    # Both branches converge here, so a grading is metered by ARRIVING rather than by each branch
+    # remembering to. A hit is metered too, flagged, so grading cost stays invariant to our cache
+    # history rather than making a re-read of an old comparison read as free.
     emit_token_usage(
         node=f"{judge}:{stage.role}",
         kind="judge",
@@ -124,13 +98,10 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
         cached=cached is not None,
     )
 
-    # Meter FIRST, then store: the provider has already billed this call, so nothing that can fail
-    # belongs between the response and its record — `cache.save` writes a file, and a disk error
-    # above the emit loses the row silently.
-    # Never cache an empty reply. Emptiness is a TRANSIENT provider failure and storing it makes it
-    # PERMANENT: the key is the prompt hash, so every later grading of that comparison replays the
-    # emptiness and the cell is ungradeable forever. The cache is tenant-global, so it would outlive
-    # the run that hit it.
+    # Meter FIRST, then store — `cache.save` writes a file, and a disk error above the emit loses a
+    # row the provider already billed. And never store an EMPTY reply: emptiness is transient, the
+    # key is the prompt hash, and this tree is tenant-global, so caching one makes that comparison
+    # ungradeable forever.
     if cached is None and cache is not None and key is not None and response.content.strip():
         cache.save(key, response.model_dump())
 
@@ -138,50 +109,21 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
 
 
 def absent(judge: str, reason: str) -> JudgeVerdict:
-    """The verdict for a grading that COULD NOT RUN — the one shape, named once.
-
-    Every arm that declines to grade returns this: a failed model call, an unparseable reply, an
-    input the judge needs and this cell does not carry. They are one fact — *this term has no
-    reading* — and the term is omitted, which makes the formula raise ``ScoringTermMissingError``
-    and the operator find out on the first cell.
-
-    **Never a zero, and that is the whole reason this has a name.** A zero says the candidate did
-    the thing badly; absence says we did not measure. Written per site, the two collapse the first
-    time someone reaches for a "sensible default" — which is exactly the upstream behaviour
-    ``simpleqa.py`` documents diverging from, and it defaults in the direction that flatters the
-    arm under test."""
+    """The verdict for a grading that COULD NOT RUN — never a zero, which would say the candidate
+    did the thing badly rather than that we did not measure."""
     return JudgeVerdict(name=judge, score=None, error=reason)
 
 
 def judge_answer(result: Mapping[str, Any]) -> str | None:
-    """The cell's ANSWER as text, or ``None`` where it has none — the ONE reader, for the reason
-    :func:`judge_question` is one.
-
-    ``None`` covers both spellings of "no answer": empty, and the ``NO_RESULT`` sentinel
-    ``measure_sample`` writes when the pipeline ran and emitted nothing nameable. A judge reading
-    ``predicted`` raw grades the literal string ``NO_RESULT`` against the rubric and banks a
-    category for it — a real number, from a real model call, measuring nothing. That was live on
-    every ``harbor`` cell, where no ranking exists and the sentinel is therefore the norm rather
-    than the exception (``Connector.answer_key`` is the channel that fixed it).
-
-    Callers turn ``None`` into :func:`absent` BEFORE rendering a prompt, so nothing is billed for a
-    grading that cannot run."""
+    """The cell's ANSWER as text, ``None`` where it has none. Callers turn that into :func:`absent`
+    BEFORE rendering a prompt, so nothing is billed for a grading that cannot run."""
     predicted = str(result.get("predicted") or "").strip()
     return None if not predicted or predicted == NO_RESULT else predicted
 
 
 def judge_question(result: Mapping[str, Any]) -> str:
-    """What a judge should read as "the question" — the bare one where the dataset declared it,
-    else ``query``.
-
-    ONE reader, because the fallback is the whole point and a judge writing its own copy gets it
-    right until the day it does not. On an ordinary bank the two are identical and this is
-    ``query``. On a long-context bank ``query`` is the question PLUS the material the model had to
-    read, and a grader re-sent that material once per judge — four long-context calls per cell for
-    evidence no rubric here consults (``domain/sample.py::Sample.question``).
-
-    Reads ``pipeline_data``, because that is where ``measure_sample`` banks it and the only channel
-    that reaches a judge: ``GradeFn`` is handed the measured row, never the ``Sample``."""
+    """What a judge reads as "the question" — the bare one where the dataset declared one, else
+    ``query``, which on a long-context bank is the question PLUS its whole haystack."""
     pd = result.get("pipeline_data")
     if isinstance(pd, dict) and (q := pd.get("question")):
         return str(q)
@@ -198,15 +140,7 @@ async def graded(
 ) -> JudgeVerdict:
     """One asked-and-labelled grading: :func:`ask`, then the verdict shaping every judge repeats.
 
-    Here rather than copied per judge for the same reason :func:`ask` is here — the two absence
-    arms are not formatting, they are the rule that **a grader which FAILED must never be bankable
-    as a graded answer**. Both go through :func:`absent`, which owns what that verdict IS.
-
-    ``parse`` maps a raw reply to one of ``to_score``'s labels, or ``None`` when it carries none.
-    A judge whose taxonomy needs no model call at all — an input this cell does not carry, say —
-    returns :func:`absent` itself and never reaches here, so nothing is billed for a grading that
-    cannot run.
-    """
+    ``parse`` maps a raw reply to one of ``to_score``'s labels, or ``None`` when it carries none."""
     reply, error = await ask(stage, prompt, judge=judge)
     if error:
         return absent(judge, error)
@@ -222,14 +156,9 @@ async def graded(
 
 
 def _replay(cache: LLMReuseCache, key: str, *, judge: str, role: str) -> LLMResponse | None:
-    """The stored reply for *key*, or ``None`` for anything that is not one.
-
-    A miss, an unreadable file and an entry an older build wrote are ONE answer here, because the
-    caller acts identically on all three: sample it again. This is also what keeps :func:`ask`'s
-    never-raises promise honest — the read and the validate both raise, and they sit on the path
-    that exists to make grading cheaper, so letting either kill a cell would trade the whole
-    measurement for the cache it was meant to save.
-    """
+    """The stored reply for *key*, or ``None`` for anything that is not one — a miss, an unreadable
+    file and an entry an older build wrote are ONE answer, because the caller re-samples on all
+    three. A cache exists to make grading cheaper; nothing in it may ever cost a measurement."""
     try:
         payload = cache.load(key)
         if payload is None:
@@ -244,12 +173,7 @@ def _replay(cache: LLMReuseCache, key: str, *, judge: str, role: str) -> LLMResp
 
 async def _sample(stage: JudgeStage, prompt: str, *, judge: str, started: float) -> LLMResponse:
     """One provider round-trip — heartbeated, and retried on a 429. RAISES; :func:`ask` is the half
-    that never does.
-
-    The retry is not optional politeness. A judge failure omits the term, which makes the formula
-    halt on that cell, which discards a backend answer already paid for — so one unretried 429
-    throws away the expensive half of the measurement to save the cheap half.
-    """
+    that never does."""
     # Local: `judges/` is a leaf package and this reaches back into `application/`.
     from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
 

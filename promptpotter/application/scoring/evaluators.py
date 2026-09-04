@@ -184,10 +184,8 @@ class Evaluator:
     # loud (``round_scorer``) instead of scoring on a number nobody computed. An
     # empty-collection default reads as PERFECT here — inverted for every health term.
     compute: Callable[..., float | None | Awaitable[float | None]]
-    # The awaitable arm is `per_sample` ONLY — an LLM-as-judge reaches a model, and that is what a
-    # judge IS. `_validate_evaluator` refuses it at `per_round`, whose materializers are sync READ
-    # paths over already-archived rows: awaiting from one would re-bill the whole measurement
-    # history every time an index warms.
+    # The awaitable arm is `per_sample` ONLY, refused elsewhere by `_validate_evaluator` —
+    # `judges/CLAUDE.md` § The seam says why a round materializer may never await.
     # `high` = larger is better; `low` = larger is worse (the webapp's mask editor direction-corrects).
     direction: Literal["high", "low"] = "high"
     node_type: NodeType | None = None
@@ -205,13 +203,9 @@ class Evaluator:
             return False
         return self.requires(schema)
 
-    # True ⇒ this evaluator's number is a comparison AGAINST A LABEL, so it is undefined on a
-    # verifier-graded backend rather than 0.0. Declared here for the same reason ``from_rows``
-    # is: ``applies`` sees the schema alone and structurally cannot ask, since the fact lives in
-    # the ROWS. Left to fall through, ``candidate_recall`` reports "the ranker never retrieved
-    # the ground truth on any sample" — for a backend that has none — and the materializers
-    # bank that 0.0 into ``rounds/round_NNNN.json`` and ``index.jsonl::scores``, where any
-    # ``score:`` lens re-reads it.
+    # True ⇒ this number is a comparison AGAINST A LABEL, so it is undefined on a verifier-graded
+    # backend rather than 0.0. Declared rather than derived because ``applies`` sees the schema
+    # alone and the fact lives in the ROWS (`connectors/CLAUDE.md` § The answer shape).
     needs_labels: bool = False
     # True ⇒ a pure function of the persisted per-sample rows alone (``compute`` needs
     # only ``results`` — no ``schema`` / ``node``). The read-side mask recomputes exactly
@@ -291,16 +285,11 @@ _REGISTRY: list[Evaluator] = [
 
 
 def _validate_evaluator(ev: Evaluator, origin: str) -> None:
-    """Every invariant an ``Evaluator`` must satisfy, applied to built-ins and to anything a judge
-    constructor produces alike — that equivalence IS the contract, and
-    :func:`validate_campaign_evaluator` is how the judge half of it reaches this code. Raises at
-    import for a built-in, and at run init for a campaign's judge — both before a cell is bought.
+    """Every invariant an ``Evaluator`` must satisfy, built-in and campaign-declared alike.
 
-    The load-bearing one is the ``per_round`` × awaitable refusal. ``materialize_round_values`` and
-    ``materialize_row_derivable`` are called from SYNC read paths that re-derive over already-archived
-    rows (``metrics.py``, ``mask/load.py``, ``l1/population.py``); an evaluator that reaches an LLM
-    from one of those would re-bill the entire measurement history every time an index warms. Only
-    ``per_sample`` is materialized at measure time, once, into a banked row."""
+    The load-bearing clause is the ``per_round`` × awaitable refusal — the sync read paths
+    (``metrics.py``, ``mask/load.py``, ``l1/population.py``) re-derive over archived rows, so an
+    awaiting compute there re-bills the whole measurement history on every index warm."""
     where = f"evaluator {ev.name!r} ({origin})"
     if not ev.name:
         raise ValueError(f"{where}: name must be non-empty.")
@@ -332,15 +321,10 @@ def _validate_evaluator(ev: Evaluator, origin: str) -> None:
 def validate_campaign_evaluator(ev: Evaluator, origin: str) -> None:
     """Every invariant an evaluator a CAMPAIGN declares must satisfy — a judge's, today.
 
-    Exists because the equivalence :func:`_validate_evaluator` claims was only ever half true: it
-    ran over ``_REGISTRY`` at import and over nothing else, so the one evaluator whose name an
-    OPERATOR picks — a judge's term — was the one nothing checked. A term colliding with
-    ``CELL_INTRINSIC_NAMES`` materialized a value the ``pipeline_data`` splat drops on the floor.
-
-    The extra clause here is the roster collision, and it is this function's alone because it is a
-    property of the PAIR rather than of either evaluator: ``materialize_sample_values`` iterates
+    The extra clause over :func:`_validate_evaluator` is the roster collision, and it belongs here
+    because it is a property of the PAIR: ``materialize_sample_values`` iterates
     ``(*_REGISTRY, *extra)`` writing ``values[ev.name]``, so a campaign term repeating a package
-    evaluator's name overwrites it — silently, and with a number measuring something else."""
+    evaluator's name overwrites it — silently, with a number measuring something else."""
     _validate_evaluator(ev, origin)
     if ev.name in {e.name for e in _REGISTRY}:
         raise ValueError(
@@ -385,12 +369,9 @@ def evaluators_meta() -> list[dict[str, Any]]:
 
 
 def _round_value(ev: Evaluator, value: float | None | Awaitable[float | None]) -> float | None:
-    """Narrow a ``per_round`` compute's result to the sync arm.
-
-    ``_validate_evaluator`` refuses an awaitable at that scope, so this cannot fire in a loaded
-    registry. It exists because the two callers below are SYNC read paths and the type checker
-    cannot see the registry's guarantee from here — stated as a raise rather than a cast, so a
-    judge that somehow reached a round materializer stops instead of re-billing the archive."""
+    """Narrow a ``per_round`` compute's result to the sync arm. Unreachable in a loaded registry,
+    and a raise rather than a cast so an evaluator that somehow got there stops instead of
+    re-billing the archive."""
     if isinstance(value, Awaitable):
         raise TypeError(
             f"evaluator {ev.name!r}: per_round compute returned an awaitable. Only per_sample "

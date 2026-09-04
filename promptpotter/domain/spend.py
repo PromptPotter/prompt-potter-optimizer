@@ -17,13 +17,10 @@ __all__ = ["TOKEN_KIND_BUCKET", "SpendBucket", "SpendRollup", "TokenUsageKind"]
 
 
 TokenUsageKind = Literal["optimizer", "backend", "judge"]
-"""Who spent it, and therefore which bucket it lands in.
-
-``judge`` is its own arm rather than a flavour of the other two, and that is a BOUNDARY rather
-than a label: a judge is scoring infrastructure, not part of the optimizer loop and not the
-backend under test. Folded into ``loop`` an operator reads grading cost as optimizer cost;
-folded into ``backend`` they read it as the measured system's. The third arm is what makes the
-separation visible in the rollup instead of only in prose."""
+"""Who spent it, and therefore which bucket it lands in. ``judge`` is a third arm rather than a
+flavour of either: folded into ``loop`` an operator reads grading cost as optimizer cost, folded
+into ``backend`` as the measured system's (``judges/CLAUDE.md`` § Scoring, never the optimizer
+loop)."""
 
 
 class SpendBucket(StrictModel):
@@ -59,9 +56,7 @@ class SpendRollup(StrictModel):
 
     backend: SpendBucket = Field(default_factory=SpendBucket)
     loop: SpendBucket = Field(default_factory=SpendBucket)
-    # Scoring's own LLM spend — an LLM-as-judge evaluator. Kept apart from `loop` on purpose:
-    # see `TokenUsageKind`. Absent on every rollup written before judges existed, which the
-    # default covers; a campaign declaring no judge simply leaves it at zero.
+    # Scoring's own LLM spend, kept apart from `loop` — see `TokenUsageKind`.
     judge: SpendBucket = Field(default_factory=SpendBucket)
     total_used_usd: float = 0.0
     total_incurred_usd: float = 0.0

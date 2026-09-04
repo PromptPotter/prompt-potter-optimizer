@@ -128,30 +128,18 @@ class Connector:
     """What one measured row of this backend is CALLED — see :data:`MeasuredUnit`."""
 
     required_observation_keys: tuple[str, ...] = ()
-    """Observation keys this backend ALWAYS emits. ``init_services`` verifies the resolved
-    ``PipelineSchema`` declares an ``observation_mapping`` for each: an undeclared key is dropped
-    by ``sample_measurement`` and never reaches ``pipeline_data``, so the scoring formula grades a
-    measurement it never received — silently, since a dropped key raises nothing. Declared on the
-    connector because only it knows what its own payload carries. Empty = nothing guaranteed."""
+    """Observation keys this backend ALWAYS emits; ``wiring.py::_verify_required_observation_keys``
+    raises at init unless the schema maps each. Empty = the backend guarantees none.
+
+    **Why an undeclared key is a wrong number rather than drift — owned by**
+    ``connectors/CLAUDE.md`` § Conventions."""
 
     answer_key: str | None = None
-    """The ``data`` key carrying this cell's ANSWER TEXT, where the backend produces one outside a
-    ranking. ``None`` (default) = ``predicted`` comes from the terminal ranker, as it does on every
-    ranked-label backend.
+    """The ``data`` key carrying this cell's ANSWER TEXT. ``None`` (default) = ``predicted`` comes
+    from the terminal ranker, as on every ranked-label backend.
 
-    Declared because ``measure_sample`` otherwise has exactly one source for ``predicted`` — the
-    terminal ranking — and a backend that emits no ranking gets the ``NO_RESULT`` sentinel. That
-    is correct for a cell whose whole verdict is a number, and WRONG the moment anything reads the
-    answer as text: an agent episode graded by its own verifier still has an answer, and a judge
-    handed the sentinel grades the string ``NO_RESULT`` and returns a number for it.
-
-    **Not a ranking, and not a second answer-shape flag.** Emitting a one-element ``final_ranking``
-    to look ranked-label shaped was tried and reverted (``connectors/harbor.py``): nothing read it
-    and three readers had to un-believe it. Declaring the node a ``ranker`` is worse — that switches
-    on ``candidate_recall``, which walks a ranking for a ground truth the backend does not have.
-    Whether a cell HAS a label stays where it is, on what ``extract_experiment`` yields
-    (``connectors/CLAUDE.md`` § The answer shape); this says only where the text lives when there
-    is one, so the two facts cannot disagree."""
+    **Why this is not the answer-shape flag, and the four things that follow from the split —
+    owned by** ``connectors/CLAUDE.md`` § The answer shape."""
 
     in_process_run: InProcessRun | None = None
 

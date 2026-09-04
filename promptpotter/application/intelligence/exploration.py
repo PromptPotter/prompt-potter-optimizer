@@ -702,21 +702,13 @@ def dedup_observations(*groups: Sequence[Observation]) -> list[Observation]:
     """A cell measured twice is one piece of evidence, not two — the second is almost always a cache
     replay, so LAST wins and callers pass groups oldest-first.
 
-    **This is also where the step/item line is held, and it is the same rule seen from the other
-    side.** Rasch assumes conditional independence: given θ, responses are independent. Two grades
-    of ONE cell are not independent whatever produced them — a replay, or a cell graded in steps —
-    so the cell stays the atom, and per-step terms reach θ only through the composite the scoring
-    formula builds. Promoting steps to items to buy resolution is a **precision leak, not a fitting
-    error**: k per cell claims kN observations where there are N, every SE shrinks by ~√k, and PoBB
-    eliminates on confidence it never earned. Nothing raises and the error flatters. Legitimate
-    per-step parameters need a testlet or bi-factor model — a person×testlet random effect
-    absorbing the within-cell dependence — which is a different posterior and a new ``ruler_id``.
-    Owned by ``docs/methods/verdict-resolution.md`` § Phase 3.
+    **This is also where the step/item line is held — owned by**
+    ``docs/methods/verdict-resolution.md`` § Phase 3: the cell stays the atom, and per-step terms
+    reach θ only through the composite.
 
     Collapsing rather than raising is deliberate: at this seam a replay and a step-split are
     indistinguishable, so the fit cannot tell them apart and must not try. What keeps the invariant
-    real is that every path into a fit passes through here — which was NOT true of
-    :func:`candidate_abilities` until it was made so, and that was the θ the election reads."""
+    real is that EVERY path into a fit passes through here."""
     cells: dict[tuple[str, int], Observation] = {}
     for group in groups:
         for o in group:
@@ -735,10 +727,10 @@ def candidate_abilities(
     ``parent_results`` is the parent RE-SCORED on this round's panel, never C0's banked rows —
     an arm is crowned on a lift over what it must actually beat.
 
-    DEDUPED, and this is the fit that most needed it: ``observations_from_results`` emits one
+    DEDUPED, and this is the fit that most needs it: ``observations_from_results`` emits one
     observation per ROW, so a cell re-measured within a round (the stale-data ladder re-enters
-    ``measure_sample``) reached the θ that decides the election as two independent draws. The
-    ruler-fit sites already deduped; this one did not, and it is the one whose SEs PoBB cuts on."""
+    ``measure_sample``) would otherwise reach the θ that decides the election as two independent
+    draws — and these are the SEs PoBB cuts on."""
     obs = dedup_observations(
         observations_from_results({**results_by_id, PARENT_ABILITY_ID: parent_results})
     )
