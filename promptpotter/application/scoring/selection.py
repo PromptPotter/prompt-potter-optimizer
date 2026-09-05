@@ -295,6 +295,15 @@ def elimination_p_best(
         # sit FROM 0.5, and the docstring says why only a threshold takes that cap.
         p = p_exceeds(theta_c, se_c, theta_p, se_p)
         bound = sign_posterior(*discordant_counts(candidate_grades, grades))
-        reach = min(abs(p - 0.5), abs(bound - 0.5))
+        # The paired posterior's mass on the SIDE θ read — not its DISTANCE from 0.5, which is what
+        # made this bound direction-blind. `sign_posterior` is symmetric about the split, so
+        # `|bound - 0.5|` answered the same for 3 wins as for 3 losses: lost-3-of-3 licensed 0.9375
+        # and lost-1-of-1 licensed 0.75, i.e. adverse cells bought WIDTH. `p_best` is the number
+        # `lock_in` tests (`pobb/checks.py`), so that let an arm every discordant cell went against
+        # stop the round on the strength of θ alone — the panel-vs-shared-cell gap, made actionable.
+        # Agreeing pairs and no pairs at all read exactly as before; only a CONTRADICTING one moves,
+        # and it moves to 0.5 — no claim, and still no crossing of the side the rank owns.
+        support = bound if p > 0.5 else 1.0 - bound
+        reach = min(abs(p - 0.5), max(0.0, support - 0.5))
         per_prior[pid] = 0.5 + reach if p > 0.5 else 0.5 - reach
     return min(per_prior.values()), per_prior

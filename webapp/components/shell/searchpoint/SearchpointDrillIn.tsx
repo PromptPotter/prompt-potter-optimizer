@@ -17,8 +17,9 @@
 
 import type { ElectedRow, SampleRow } from "@/lib/types";
 import type { DraftPatch, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
-import type { ObserveConfig } from "@/lib/derivations";
-import { fmtPct1, fmtSigned } from "@/lib/format";
+import { cacheShare, prefixReading, type ObserveConfig } from "@/lib/derivations";
+import { TERMS } from "@/lib/terms";
+import { fmtPct1, fmtSigned, fmtTokens } from "@/lib/format";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 import { SampleRowItem, SAMPLE_RENDER_CAP } from "@/components/shell/samples/SampleRowItem";
 
@@ -147,6 +148,30 @@ export function SearchpointDrillIn({
               k="winner"
               v={!row.is_winner ? "no" : arms === 1 ? "yes — uncontested" : "yes"}
             />
+            {/* What measuring THIS searchpoint consumed, and how much of it the provider served
+                off its own prefix cache. Named "measured on" rather than "cost": it is the
+                BACKEND bucket alone — the judge's spend carries no candidate and the optimizer's
+                is per round — and a row labelled plain "cost" would silently mean one of three.
+                Absent where nothing served an account (the Compare host's scoreboard source). */}
+            {typeof row.input_tokens === "number" && (
+              <Fact
+                k="measured on"
+                v={`${fmtTokens(row.input_tokens)} in · ${fmtTokens(row.output_tokens ?? 0)} out${
+                  row.cached_samples ? ` · ${row.cached_samples} replayed` : ""
+                }`}
+                title={TERMS.cache_replayed}
+              />
+            )}
+            {typeof row.input_tokens === "number" && (
+              <Fact
+                k="prefix"
+                v={prefixReading(
+                  cacheShare(row.cache_read_tokens, row.input_tokens, false),
+                  false,
+                ).label}
+                title={TERMS.cache_prefix}
+              />
+            )}
           </>
         )}
       </div>

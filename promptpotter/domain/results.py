@@ -237,6 +237,12 @@ class ScoredCandidate(StrictModel):
     # Of ``scored_samples``, how many were replayed from the MeasurementArchive rather than
     # measured. Non-zero off the origin means the searchpoint already existed — a duplicate.
     cached_samples: int = 0
+    # What measuring this searchpoint CONSUMED (``TokenAccount.from_measured_rows``). BACKEND
+    # tokens only, and the label rendering them says so: judge spend rides a ``TokenUsageRecord``
+    # carrying no candidate, and optimizer spend is per round, not per candidate.
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cache_read_tokens: int | None = None
     # Why ``scored_samples < expected_samples``: "" (not partial) | "skip" (operator
     # early-abort, which marks the cycle ``human_intervened``).
     partial_reason: str = ""

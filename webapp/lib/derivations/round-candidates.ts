@@ -118,6 +118,9 @@ function rowOf(
     n_samples: c.scored_samples,
     n_expected: c.expected_samples,
     cached_samples: c.cached_samples,
+    input_tokens: c.input_tokens,
+    output_tokens: c.output_tokens,
+    cache_read_tokens: c.cache_read_tokens,
     source,
   };
 }
@@ -165,6 +168,9 @@ export function scoreboardRow(
     n_samples: c.total,
     n_expected: null,
     cached_samples: null,
+    input_tokens: null,
+    output_tokens: null,
+    cache_read_tokens: null,
     source: "history",
   };
 }

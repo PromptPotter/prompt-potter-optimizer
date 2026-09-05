@@ -71,6 +71,17 @@ export interface CandidateRow {
 // `RoundSummaryCandidate`); `/tree` serves the lift verdict without the floors it was taken
 // over, so a row assembled from the tree is not an elected row.
 export interface ElectedRow extends CandidateRow {
+  // What MEASURING this searchpoint consumed — the BACKEND bucket only, folded over its own
+  // measured cells with replays excluded (`domain/spend.py::TokenAccount.from_measured_rows`).
+  // Judge spend carries no candidate and optimizer spend is per round, so a row labelled plain
+  // "cost" here would silently mean one of three things. On `ElectedRow` rather than the base:
+  // the tree serves no account, so a bar row could not answer for it.
+  input_tokens: number | null;
+  output_tokens: number | null;
+  // Of `input_tokens`, how many the PROVIDER served off its own prompt-prefix cache. `null` is
+  // "no provider reported a breakdown", which is NOT 0 — and null for the Compare host too, whose
+  // source is a round document's scoreboard.
+  cache_read_tokens: number | null;
   // Under elimination a candidate may have run 8 of 20, so its `accuracy` is NOT comparable
   // to the origin's full-set rate; this is the number the promotion gate used. `null` for
   // candidates outside the election fit — nothing matched them.

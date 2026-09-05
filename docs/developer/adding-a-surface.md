@@ -161,6 +161,15 @@ Reach for the round-level route only when the fact genuinely isn't a candidate's
 nothing — the engine reads them (escalation's `compared`), but no panel does, so the served copy
 is dead surface. That is this page's own warning pointed the other way.
 
+**A display field is not done until you have SEEN it render.** Every step above wires a
+declaration and a reader; none of them writes the value, and a field that nothing writes is
+invisible to every check that could exist — it is declared, so no schema refuses it; it is read,
+so no compaction moves it; the panel renders blank and each reader honestly reports "this backend
+does not say". `domain/scoring.py` names this as the third direction and states outright that no
+assert can catch it, so the enforcement is procedural and costs one glance: run it, look at the
+surface, confirm a number appeared. The judge's prefix-cache capture read a hard `0` across the
+entire archive that way — four surfaces faithfully reading a field the judge path never emitted.
+
 **Guard:** the two-factories-onto-one-View correctness invariant — the live
 builder and the disk builder must produce an equal `RoundCompleteView`. No
 standing test (a broken round-trip surfaces as a wrong/empty dashboard; the

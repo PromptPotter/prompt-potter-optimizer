@@ -75,7 +75,13 @@ LEDGER_BASELINE = {
     # the round's own subset. Not derivable from anything banked: round N-1's winner is the same
     # SEARCHPOINT but was read on cells this round never bought, and reconstructing it that way
     # is what left a sample-set mask re-scoring the arms and not the bar.
-    "cycle_result_fields": 161,
+    # +3: `input_tokens` / `output_tokens` / `cache_read_tokens` on `ScoredCandidate` — what
+    # MEASURING one searchpoint consumed, folded once beside the `cached_samples` it is the peer
+    # of. Not derivable from what the model already carries: the counts live in each row's
+    # `pipeline_data.step_tokens`, and those rows are exactly the per-sample arrays the candidate
+    # row exists to avoid shipping. The same three names `DashboardSample` carries one level down,
+    # so this is the existing vocabulary at a second arity rather than a fourth spelling.
+    "cycle_result_fields": 164,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
