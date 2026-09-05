@@ -261,7 +261,7 @@ def _write_two_step(task_dir: Path, question: str, docs: list[dict[str, Any]]) -
     _write(task_dir / "steps" / "answer" / "tests" / "test.sh", _TEST_SH)
 
 
-def _panel_yaml(two_step: bool, tasks: list[dict[str, str]]) -> str:
+def _panel_yaml(tasks: list[dict[str, str]]) -> str:
     """`harbor_tasks.yaml` — the panel, inline, one absolute path per task.
 
     Absolute because Harbor resolves `TaskConfig.path` against the process CWD and this file is
@@ -279,11 +279,12 @@ def _panel_yaml(two_step: bool, tasks: list[dict[str, str]]) -> str:
         "agent:",
         "  name: terminus-2",
         "  environment: docker",
-        "  kwargs:",
-        # A cost rail: the budget gate cannot trip INSIDE a cell, and an agent that never stops
-        # is the one way a single cell outspends a round.
-        f"    max_turns: {20 if two_step else 10}",
-        "    temperature: 0.0",
+        # NO `kwargs:`, and the absence is the declaration. `harbor.py` resolves the two sources as
+        # `dict(agent_cfg["kwargs"]).update(payload["agent_kwargs"])`, so the overlay in
+        # `pipeline.yaml::nodes.agent.config` ALWAYS wins and anything written here is dead the
+        # moment it is read — while reading as authoritative, and regenerating itself under every
+        # dataset, this file being gitignored. Name and environment are its to declare; tunables
+        # are not.
         "",
         "tasks:",
     ]
@@ -333,7 +334,7 @@ def build(name: str) -> None:
             }
         )
 
-    _write(dataset_dir / "harbor_tasks.yaml", _panel_yaml(two_step, tasks))
+    _write(dataset_dir / "harbor_tasks.yaml", _panel_yaml(tasks))
     print(
         f"{name}: {len(tasks)} tasks ({'two-step' if two_step else 'single-step'}, "
         f"{size}-doc haystack) -> {tasks_root}"

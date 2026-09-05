@@ -25,7 +25,10 @@ _REUSABLE_FIELDS: frozenset[str] = frozenset(
 )
 
 # A run whose distinct ground truths exceed the enumerable cap has an open answer space
-# (free-text / ranking); its blocks fit only other open-space runs, never a closed-label task.
+# (free-text / ranking). **That is the ABSENCE of a shape, not a shape** — so it is keyed by the
+# dataset that produced it and transfers nowhere else; shared, it makes every free-text task in
+# the workspace one bucket and serves one dataset's blocks to another as material to reuse. A
+# closed label set IS a shape and still transfers, which is the whole value of the mechanism.
 OPEN_ANSWER_SPACE = "OPEN"
 
 
@@ -39,20 +42,25 @@ class EarnedBlock:
         self.n = n
 
 
-def answer_space_signature(labels: Iterable[Any]) -> str:
-    """The task-fit key for a set of ground-truth labels: sorted distinct labels, or ``OPEN`` above the cap. The one place
-    a run's fit key is derived, so a block earned under a signature and a cycle looking one up draw the same line."""
+def answer_space_signature(labels: Iterable[Any], *, dataset: str) -> str:
+    """The task-fit key for a set of ground-truth labels: sorted distinct labels, or ``OPEN`` scoped
+    to *dataset* above the cap. The one place a run's fit key is derived, so a block earned under a
+    signature and a cycle looking one up draw the same line — and the one place the open case is
+    prevented from becoming a shape it is not."""
     distinct = {label for label in labels if isinstance(label, str) and label}
     if not distinct or len(distinct) > ANSWER_SPACE_CAP:
-        return OPEN_ANSWER_SPACE
+        return f"{OPEN_ANSWER_SPACE}:{dataset}"
     return "|".join(sorted(distinct))
 
 
-def _answer_space_signature(round_doc: dict[str, Any]) -> str:
+def _answer_space_signature(round_doc: dict[str, Any], dataset: str) -> str:
     return answer_space_signature(
-        row.get("ground_truth")
-        for rows in (round_doc.get("all_candidate_results") or {}).values()
-        for row in rows or []
+        (
+            row.get("ground_truth")
+            for rows in (round_doc.get("all_candidate_results") or {}).values()
+            for row in rows or []
+        ),
+        dataset=dataset,
     )
 
 
@@ -69,8 +77,10 @@ def _credible_lift(cand: dict[str, Any]) -> float | None:
     return float(comp) - float(parent)
 
 
-def _accumulate(round_doc: dict[str, Any], acc: dict[tuple[str, str, str], list[float]]) -> None:
-    fit = _answer_space_signature(round_doc)
+def _accumulate(
+    round_doc: dict[str, Any], dataset: str, acc: dict[tuple[str, str, str], list[float]]
+) -> None:
+    fit = _answer_space_signature(round_doc, dataset)
     # The round's own ``prompt_fields`` IS the parent every candidate in it was mutated from —
     # the same anchor ``mutation_memory`` diffs against. A ``ScoredCandidate`` persists its
     # RESOLVED ``prompt_fields`` (never the L1 ``prompt_fields_override`` delta, which lives only
@@ -105,6 +115,10 @@ def mine_earned_blocks(stores: Stores) -> dict[str, list[EarnedBlock]]:
         cycles_dir = campaign_cycles_dir(campaign_dir)
         if not cycles_dir.is_dir():
             continue
+        # The manifest, never the directory name: `<dataset>__<hash>` is a rendering of the id, and
+        # a dataset whose own name carries `__` would split at the wrong place.
+        manifest = read_json_optional(campaign_dir / "campaign.json")
+        dataset = str((manifest or {}).get("dataset_name") or campaign_dir.name)
         for cycle_dir in sorted(cycles_dir.iterdir()):
             rounds_dir = CycleLayout(cycle_dir).rounds
             if not rounds_dir.is_dir():
@@ -112,7 +126,7 @@ def mine_earned_blocks(stores: Stores) -> dict[str, list[EarnedBlock]]:
             for round_file in sorted(rounds_dir.glob(ROUND_GLOB)):
                 doc = read_json_optional(round_file)
                 if isinstance(doc, dict):
-                    _accumulate(doc, acc)
+                    _accumulate(doc, dataset, acc)
 
     by_fit: dict[str, list[EarnedBlock]] = defaultdict(list)
     for (fit, field, block), lifts in acc.items():

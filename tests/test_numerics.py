@@ -1384,7 +1384,10 @@ def test_pobb_epsilon_is_graded_by_depth_not_scalar():
     The ramp itself is what this pins. The DEPTHS below are a consequence of the dispersion rule
     and moved by one sample when φ stopped being floored at a constant (`fit_theta_given_delta`):
     an honest posterior is wider, so the near-tie dies at 9 rather than 8. Re-derive them, do not
-    restore them, if that rule changes again."""
+    restore them, if that rule changes again — and they were, when the ~0.2 the first paragraph
+    names stopped being something the bar rides out and became something `elimination_p_best`
+    refuses to claim. A one-cell verdict is now uncuttable at every depth, so the arm carrying the
+    ramp has to be one the pairs can actually speak about."""
     cfg = PoBBConfig(n_min=6, epsilon=0.30, epsilon_floor=0.15)
     graded = PoBBCheck(cfg, n_samples=28, ruler=None)
     assert graded.epsilon_at(6) == pytest.approx(0.15)
@@ -1416,15 +1419,17 @@ def test_pobb_epsilon_is_graded_by_depth_not_scalar():
             n_total_candidates=2,
         )
 
-    # One discordant loss survives the floor that used to cut it, and dies a few samples later.
+    # One discordant loss is uncuttable at EVERY depth, not merely reprieved at the floor: a single
+    # adverse cell caps p_best at 0.25, above every bar this ramp reaches.
     assert arm_behind_perfect_prior(6, 1) is None
-    assert arm_behind_perfect_prior(8, 1) is None
-    cut = arm_behind_perfect_prior(9, 1)
+    assert arm_behind_perfect_prior(9, 1) is None
+    assert arm_behind_perfect_prior(22, 1) is None
+    cut = arm_behind_perfect_prior(9, 2)
     assert cut is not None
     # The bar that FIRED is what the decision archives — a reader must see the ramped 0.225 at
     # n=9, never the configured 0.30, or the record cannot explain its own cut.
     assert cut.check_result["epsilon"] == pytest.approx(0.225)
-    # Two behind is still cut at the floor: the reprieve is for a near-tie, not for a loser.
+    # Two behind is still cut at the floor: the reprieve is for a width, not for a loser.
     assert arm_behind_perfect_prior(6, 2) is not None
 
 
@@ -1661,6 +1666,45 @@ def test_elimination_p_best_discriminates_on_graded_backend() -> None:
     )
     assert p_best_bin == p_best_bool  # bit-identical for binary datasets
     assert p_best_bin > 0.5
+
+
+def test_a_cut_needs_more_than_one_cell_that_told_the_arms_apart() -> None:
+    """The ε bar is absolute, so the θ posterior must not spend confidence the pairs never bought.
+
+    Silent harm: concordant cells move θ but say nothing about which arm is better, and
+    ``build_round_order`` lands one parent-hit probe in the first six slots. Where the base rate is
+    low enough that the candidate answers none of them, the prefix holds exactly ONE discordant
+    cell — and the unbounded fit reads that as decisive, cutting every arm of every round at a
+    p_best identical to six decimals. The bar must not be reachable on one cell, and must stay
+    reachable on three, or the guard has bought calibration with a gate that never fires.
+    """
+    from promptpotter.application.scoring.selection import elimination_p_best
+    from promptpotter.config.settings import POBB_DEFAULT_EPSILON
+    from promptpotter.domain.ruler import DeltaRuler
+
+    sids = list(range(6))
+    # `sealqa-longseal-12`'s own geometry: the probe the ordering lands at slot 4 is also the
+    # EASIEST cell in the prefix, which is what let the fit read one cell as decisive.
+    ruler = DeltaRuler(
+        delta={0: 2.90, 1: 3.01, 2: 2.66, 3: 1.39, 4: 2.85, 5: 2.95},
+        delta_se=dict.fromkeys(sids, 0.4),
+        mu_delta=2.6,
+        sigma_delta=0.6,
+        sigma_theta=1.0,
+        calibration_model="1PL",
+        anchor_id="test-anchor",
+    )
+    candidate = [0.0] * 6  # the low-base-rate arm: nothing solved anywhere in the prefix
+
+    thin_prior = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]  # that probe, and nothing else
+    p_thin, _ = elimination_p_best(candidate, {"prior": thin_prior}, sids, ruler)
+    assert p_thin == pytest.approx(0.25), f"one adverse cell may not reach past 0.25: {p_thin}"
+    assert p_thin > POBB_DEFAULT_EPSILON, "a one-cell verdict must not be cuttable (unbounded: .11)"
+
+    wide_prior = [1.0, 0.0, 1.0, 1.0, 0.0, 0.0]  # a prior that genuinely outscored it
+    p_wide, _ = elimination_p_best(candidate, {"prior": wide_prior}, sids, ruler)
+    assert p_wide == pytest.approx(0.0625), f"three adverse cells support a cut: {p_wide}"
+    assert p_wide < POBB_DEFAULT_EPSILON, "the width is there — ε decides, as it always did"
 
 
 def test_a_fatal_row_ends_a_candidate_on_one_sighting_and_an_advisory_never_does() -> None:

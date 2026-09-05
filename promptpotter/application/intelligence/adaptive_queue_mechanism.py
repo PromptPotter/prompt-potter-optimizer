@@ -182,7 +182,14 @@ def decision_order(
 
     Both maps are TOTAL over ``sample_ids`` — the caller substitutes the ruler's own centre and
     population SE for an unabsorbed cell, and a default here would be a second, wronger answer to
-    that. Ties break on sid: arbitrary, but reproducible for the resume replayer."""
+    that. Ties break on sid: arbitrary, but reproducible for the resume replayer.
+
+    **δ is fit ACROSS arms and this reads it as if it predicted THIS one**, so the gain overstates
+    what a draw buys: at δ ≈ θ a cell is a coin flip for the ruler's population and very nearly
+    deterministic for one model at ``temperature 0`` under two wordings. Most cells come back
+    unanimous whatever is bought — the width a round can read is set by how far apart the ARMS
+    are, not by which cells are drawn. Weighting the gain by a cell's own separation history is
+    the obvious repair and ranks at chance on banked rounds; do not re-derive it here."""
     return sorted(
         sample_ids,
         key=lambda sid: (

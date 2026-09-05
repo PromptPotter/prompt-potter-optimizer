@@ -16,7 +16,7 @@ description: >-
 backend_name: Harbor
 backend_type: harbor
 available_models:
-  - qwen/qwen3.7-flash
+  - qwen/qwen3.7-flash:nitro
 nodes:
   agent:
     type: generation
@@ -32,9 +32,15 @@ nodes:
       provider: openrouter
       # The arm's model, and deliberately NOT the graders' — `campaign.yaml::judges` names its own,
       # so the ruler does not move when this does.
-      model: qwen/qwen3.7-flash
+      #
+      # `:nitro` pins the routing to ONE provider instead of OpenRouter's pool. On a panel whose
+      # cell is a multi-turn agent episode that is a measurement decision, not a speed one: pooled
+      # routing lets two cells of the same arm run on different serving stacks, and the arm's θ
+      # then carries that spread. It moves the PRICE too, so read `served_by` and the spend line
+      # back off the first round rather than assuming this cell still costs what the last cut did.
+      model: qwen/qwen3.7-flash:nitro
       temperature: 0.0
-      max_turns: 10
+      max_turns: 4
     # DECLARED here rather than inherited, and it is load-bearing: a `remote_http` backend serves
     # its own schema over `GET /pipeline`, so a termnorm dataset can leave this out. There is no
     # server here to ask. Without `prompt_info` this node is not prompt-bearing, the candidate's
@@ -60,6 +66,15 @@ nodes:
       # axis here that moves a cell's cost by an order of magnitude, so it wants a bounded range —
       # and `param_allowed_values` is a string enum, which cannot express one for an integer. An
       # unbounded integer axis would be a cost rail removed rather than a search axis added.
+      #
+      # 4, not 10, and the bound is where the WORK stops rather than where the agent gives up: on
+      # 455 archived cells 89% finished at 3 turns and the 4-turn bucket scored best (0.538 on 26).
+      # Past 4 was 5.3% of cells but 16.4% of spend and 9.8% of wall clock, scoring 2/24 against a
+      # 27% baseline — a long cell here is a LOST cell, not a working one. Capping moved headline
+      # accuracy 0.273 -> 0.268. The number belongs to this dataset alone: its siblings run 20 and
+      # 30 and no equivalent distribution has been pulled for either, so do not cap them by analogy.
+      # This value is inside `node_configs`, so changing it re-keys the archive — which is correct,
+      # a 4-turn cell is not the same measurement as a 10-turn one.
       observation_name: agent
       observation_mappings:
         # The verifier's number, and the only observation this node emits. The connector declares

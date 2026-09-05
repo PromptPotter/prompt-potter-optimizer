@@ -31,5 +31,10 @@ rather than collapsing all three into one number.
 
 The answer is graded strictly against a short gold: the name, the date, the number. A response that
 finds the right document and then buries the answer in a paragraph of reasoning scores as a miss.
-And where the documents genuinely do not settle the question, no prompt makes them — recognising
-that and saying so is the correct behaviour, not a failure to try harder.
+
+And where the documents genuinely do not settle the question, saying so still scores nothing. The
+written answer is compared against the gold whether or not the twelve support it, and no task in
+this bank carries a refusal for a gold — so "the documents do not contain the answer" earns the
+same zero as a wrong answer while giving up the chance of being right. Recognising an unsettleable
+question is a real skill and this benchmark does not reward it. Commit to the best-supported answer;
+the evidence rubrics are what record how thin the case was.

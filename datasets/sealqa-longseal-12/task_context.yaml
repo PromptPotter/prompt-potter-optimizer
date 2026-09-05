@@ -1,0 +1,36 @@
+# Ships with the dataset rather than being decomposed from `task_description.md` at first run.
+# The decomposition produced five empty fields and left only `raw_description`, so the panel L1
+# reads carried nothing a candidate could cite — and an origin that replays from cache never
+# re-runs it, so the emptiness is sticky. Declared, it cannot fall through.
+#
+# `upstream_context` / `downstream_context` are deliberately absent: those two are L1's own
+# (`task_context_override`), and the other five are frozen operator evidence.
+#
+# BUDGETED — 600 chars a field, 1500 across the five (`TaskDecomposition.check_budget`), because
+# every one of them renders VERBATIM into every optimizer prompt. So each field says one thing
+# once: `key_challenges` carries the two failures actually measured and takes most of the budget;
+# the others set up the situation without restating them. Detail belongs in `task_description.md`,
+# which has no budget and is not rendered.
+domain: >-
+  Open-domain factual question answering over a fixed twelve-document haystack, run as one
+  containerized episode that writes its answer to a file.
+pipeline_purpose: >-
+  Question and twelve auto-retrieved documents arrive together in context; the agent writes a
+  short answer. No search tool and no network: retrieval already happened, badly, and what is
+  measured is what the agent does with it.
+data_characteristics: >-
+  SealQA selects questions whose search returns conflicting sources — disagreeing, with nothing
+  marking which is right — or unhelpful ones that look on-topic and never address the question.
+  Golds are short: a name, date or number, six characters at the median.
+optimization_goals: >-
+  Raise exact match against that short gold. One repair beyond the two below: the decisive
+  document is located and then overridden — by a more confident-sounding source, or by what the
+  model believed before reading.
+key_challenges: >-
+  Two measured failures dominate. The agent answers with the SALIENT entity rather than the one
+  meeting the criterion — the famous artist where the gold is the credited engineer, three
+  well-known players where the criterion admits two. And it declines on questions that have
+  answers: "the documents do not contain the answer" is graded against the gold like any answer
+  and earns the same zero, giving up the chance of being right. Recognising an unsettleable
+  question is a real skill this bank does not reward — commit to the best-supported answer.
+  Burying it inside reasoning also misses.

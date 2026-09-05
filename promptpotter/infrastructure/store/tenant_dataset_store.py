@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.pipeline_schema import CANDIDATE_LIBRARY_FILE
+from promptpotter.domain.search_point import has_framing
 from promptpotter.infrastructure.store.io import (
     read_json_optional,
     read_yaml_optional,
@@ -133,9 +134,15 @@ class TenantDatasetStore:
     def load_task_context(self, name: str) -> dict[str, Any] | None:
         return read_yaml_optional(self.task_context_path(name))
 
-    def save_task_context(self, name: str, data: dict[str, Any]) -> Path:
+    def save_task_context(self, name: str, data: dict[str, Any]) -> Path | None:
         """Persist a first-sight decomposition. The one writer of derived framing
-        outside a committed dataset's own dir."""
+        outside a committed dataset's own dir.
+
+        ``None`` when the record says nothing: this tier SHADOWS the dataset's own
+        ``task_context.yaml``, so writing an empty decomposition here buries the shipped file for
+        good, and every later run reads framing that is blank in all eight fields."""
+        if not has_framing(data):
+            return None
         path = self.task_context_path(name)
         write_yaml(path, data)
         return path
@@ -217,7 +224,10 @@ class TenantDatasetStore:
         write_yaml(dst / "pipeline.yaml", pipeline_json)
         write_yaml(dst / "campaign.yaml", campaign_json)
         write_text(dst / "task_description.md", task_description)
-        write_yaml(dst / "task_context.yaml", task_context)
+        # Same rule as `save_task_context`: an empty record is not framing, and committing one
+        # into the dataset makes the emptiness permanent and invisible.
+        if has_framing(task_context):
+            write_yaml(dst / "task_context.yaml", task_context)
         write_yaml(dst / "prompts" / "default.yaml", prompt_default)
         return dst
 

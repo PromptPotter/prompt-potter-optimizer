@@ -17,8 +17,8 @@ import type { ThetaCaveat as Caveat } from "@/lib/types";
 // `model` is null while the ruler is cold — a flat ruler is neither 1PL nor 2PL, so the
 // third string is a real state, not a placeholder. Never collapse it into "1PL".
 
-// The four states in which θ is NOT ability. SERVED, never derived here — the backend decides
-// (`domain/ruler.py::theta_caveat` for the three scale states, `results.py::is_floor_pinned` for
+// The five states in which θ is NOT ability. SERVED, never derived here — the backend decides
+// (`domain/ruler.py::theta_caveat` for the four scale states, `results.py::is_floor_pinned` for
 // the per-arm one) and this only puts it into words, so the screen and the optimizer's own
 // `confounds` panel cannot disagree about whether a number means anything. `Record<Caveat, …>` is
 // total, so adding a member to the Python enum fails the build here rather than rendering blank.
@@ -36,6 +36,10 @@ const CAVEAT_COPY: Record<Caveat, { head: string; body: string }> = {
     head: "θ is not ability this round",
     body: "This round bought a thin slice of a wide ruler. Inside a band that narrow every cell is equally hard, so ranking on θ ranks on accuracy. That is the draw, not the instrument.",
   },
+  unmeasured_delta: {
+    head: "θ is not ability this round",
+    body: "Most of this round's cells share a difficulty the ruler handed to several cells at once — that is its prior, not a reading of any of them: every candidate that ever saw them answered the same way. θ still counts them, and the value they are pinned to moves as the ruler grows, so a θ higher than last round's can be the scale shifting rather than the prompt improving. Compare candidates within this round; don't read the level across rounds.",
+  },
   floor_pinned: {
     head: "θ is not ability for this candidate",
     body: "It scored zero on every cell it answered, so the fit had no response to separate ability from the prior and θ settled on the floor the cells imply. Read the lift with the same suspicion: any difference measured against a floor constant reads 0.000 whatever the candidate did.",
@@ -47,7 +51,7 @@ const fmtSpan = (v: number | null) => (v == null ? null : `${v.toFixed(2)} logit
 // Silent unless a caveat is live — a warning that renders every round is read as boilerplate by
 // the third one, which is the same rule the `confounds` panel keeps on the optimizer's side.
 //
-// Takes the CAVEAT, not the reading, because the four arrive on two different carriers: three are
+// Takes the CAVEAT, not the reading, because the five arrive on two different carriers: four are
 // facts about the round's scale and ride `RoundResult.ability`, while `floor_pinned` is a fact
 // about one arm and rides that candidate's row. One component either way — the reader's question
 // is the same, so a second notice would be the same warning under a second name. The spans are

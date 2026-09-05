@@ -1,20 +1,17 @@
 campaign_config:
   dataset_name: sealqa-longseal-12
   exclude_nodes: []
+  # θ decides every round, and `per_round_resubset` is ON, so accuracy is subset-relative while the
+  # gate is not. Headline the number the gate actually used rather than the one that moves when the
+  # subset does — preflight raises `headline_subset_relative_under_resubset` for as long as this
+  # reads `accuracy`. DISPLAY scope: it changes what the operator READS, never what is decided.
+  headline_metric: ability
   scoring:
-    # The ANSWER step alone decides the round, and the two evidence terms ride beside it rather
-    # than inside it. Three reasons, in the order they bind. A grading that fails past its retry
-    # omits its term, `rescore_results` raises inside `measure_sample`, and the catch-all there
-    # banks the whole cell as an ERROR — so a formula naming a judge term can discard a paid
-    # answer. The two evidence rubrics are ours and unscreened. And this campaign exists to find
-    # out whether they SAY anything; a term that decides the election cannot also be the term
-    # under test.
-    #
-    # `materialize_sample_values` banks every applicable per-sample evaluator whether or not the
-    # formula names it, so all three readings reach the archive and the round file either way.
-    # Fold `evidence_settled` in once the screen has shown it separates arms — and when you do,
-    # weight it: the composite is what reaches theta, and per-step terms are only ever allowed to
-    # reach theta through it (`docs/methods/verdict-resolution.md` § Phase 3).
+    # The ANSWER step alone decides the round, and now it is the only step graded at all — the
+    # screen the two evidence rubrics were declared for has run and is written up beside `judges`
+    # below. One reason to keep this shape even so: a grading that fails past its retry omits its
+    # term, `rescore_results` raises inside `measure_sample`, and the catch-all there banks the
+    # whole cell as an ERROR, so a formula naming a judge term can discard a paid answer.
     #
     # `env_reward` is deliberately NOT here even though the connector always emits it. On this
     # dataset it reports whether the episode left an answer file at all — the gold is held outside
@@ -38,16 +35,17 @@ campaign_config:
   # from `nodes.agent.config`. A ruler that moved with whatever the search was last steered to
   # would not be one.
   judges:
-    evidence_settled:
-      name: evidence_retrieval
-      stages:
-        - model: openai/gpt-oss-120b
-          provider: openrouter
-    answer_grounded:
-      name: answer_grounding
-      stages:
-        - model: openai/gpt-oss-120b
-          provider: openrouter
+    # `evidence_settled` and `answer_grounded` are GONE, and the screen they were added for is why:
+    # this campaign existed to find out whether they say anything, and `def880` answered no. They
+    # saturate — 17/20 SETTLED and 18/20 GROUNDED in round 3 — and both grade a property of the
+    # CELL rather than of the arm: `evidence_settled` asks whether the twelve documents settle the
+    # question, and returned SETTLED on #83, #101 and #10, which every arm got wrong. A per-cell
+    # constant cannot separate arms however many arms pay for it, and they were re-graded per arm:
+    # 240 grader calls over the campaign, for a reading that is the same number every time.
+    #
+    # What they DID establish is worth keeping in words rather than in spend: the haystack usually
+    # contains the answer, so the failure is the agent's reading, not the retrieval. Re-add either
+    # one only to re-test that, and grade it once per cell rather than once per arm.
     answer_correct:
       name: sealqa
       stages:

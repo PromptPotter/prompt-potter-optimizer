@@ -7,6 +7,7 @@ the one it was read on. `intelligence/exploration.py` keeps the estimators that 
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from enum import StrEnum
 from typing import Literal
@@ -33,6 +34,10 @@ _FLAT_PREFIX = "flat"
 # into "1PL".
 CalibrationModel = Literal["1PL", "2PL"]
 
+# A round this fraction of whose cells sit on a δ the ruler shares with another cell is reading θ
+# mostly against the PRIOR: a continuous MLE produces no ties, so a run of identical δ marks cells
+# whose observations carried no variance. Unvalidated against banked rounds.
+PRIOR_PINNED_RATIO = 0.5
 # A round whose cells span less than this FRACTION of the ruler's own δ range is a collapsed band.
 # Deliberately loose: it must catch the case `verdict-resolution.md` records without firing on an
 # ordinary acquisition draw. A first estimate, to refine against banked rounds.
@@ -46,12 +51,13 @@ BAND_COLLAPSE_LOGITS = 1.0
 class ThetaCaveat(StrEnum):
     """A state in which θ is NOT ability — decided beside the ruler, never in a view.
 
-    All four render every number and raise nothing, so the reading looks identical to a sound one.
+    All five render every number and raise nothing, so the reading looks identical to a sound one.
     WHICH one fired is the whole value, because the fix differs: one is an instrument, one is an
-    acquisition, one is the absence of a scale, one is the arm itself. The ABSENCE of a caveat is
-    the fifth state, and the only one where θ is ability.
+    acquisition, one is the absence of a scale, one is the ruler's prior standing in for a
+    measurement, one is the arm itself. The ABSENCE of a caveat is the sixth state, and the only
+    one where θ is ability.
 
-    **Two SCOPES, one vocabulary.** The first three are facts about the ROUND's scale, decided by
+    **Two SCOPES, one vocabulary.** The first four are facts about the ROUND's scale, decided by
     :func:`theta_caveat` and stamped on its ``AbilityReading``; ``FLOOR_PINNED`` is a fact about
     ONE ARM, decided by ``results.py::is_floor_pinned`` where that arm is scored. One enum because
     the question a reader asks is identical — *may I read this θ as ability?* — and a second
@@ -67,6 +73,13 @@ class ThetaCaveat(StrEnum):
     # The ACQUISITION: a warm, wide ruler, and this round bought a thin slice of it. The silent
     # one — the ruler id matches, the cell count is healthy, and every number renders.
     COLLAPSED_BAND = "collapsed_band"
+    # The PRIOR standing in for a measurement: most of this round's cells sit on a δ the ruler
+    # shares with other cells, which a continuous fit does not produce — it is the prior pinning
+    # every cell whose observations carried no variance. θ then reads those cells against a
+    # difficulty nobody measured, and the pin MOVES as the ruler grows — so an unchanged prompt
+    # drifts upward round on round. Silent like COLLAPSED_BAND: the ruler id matches, the cell
+    # count is healthy, every number renders.
+    UNMEASURED_DELTA = "unmeasured_delta"
     # The ARM: it scored 0.0 on every cell it answered, so the fit has no response to separate
     # ability from the prior and θ settles on the floor the δ vector and n imply. Per-CANDIDATE,
     # so it rides the candidate row rather than the round's reading — and it is the one caveat
@@ -80,14 +93,18 @@ def theta_caveat(
     calibration_model: CalibrationModel | None,
     round_span: float | None,
     ruler_span: float | None,
+    pinned_share: float | None = None,
 ) -> ThetaCaveat | None:
-    """Which of the three SCALE states this reading is in, or ``None`` where θ is genuinely
+    """Which of the four SCALE states this reading is in, or ``None`` where θ is genuinely
     ability on the evidence this function can see.
 
-    The SOLE decision for those three: the served reading and the optimizer's ``confounds`` panel
+    The SOLE decision for those four: the served reading and the optimizer's ``confounds`` panel
     both call here, or the screen and the generator disagree about whether a number means anything.
     Spans below two cells arrive as ``None`` and are not a verdict — an unmeasurable band is not a
-    narrow one.
+    narrow one, and an absent *pinned_share* is likewise no verdict rather than a clean one.
+
+    **Order is severity, and the band wins.** Inside a collapsed band θ is logit-accuracy plus a
+    constant whatever the δ were fit from, so naming the pin there would name the smaller fault.
 
     Never returns ``FLOOR_PINNED``: that one is a property of ONE ARM's responses, which are not an
     input here. A round can be sound by this function and still carry a floor-pinned arm.
@@ -100,6 +117,8 @@ def theta_caveat(
         return ThetaCaveat.FLAT_RULER
     if round_span <= max(BAND_COLLAPSE_LOGITS, BAND_COLLAPSE_RATIO * ruler_span):
         return ThetaCaveat.COLLAPSED_BAND
+    if pinned_share is not None and pinned_share >= PRIOR_PINNED_RATIO:
+        return ThetaCaveat.UNMEASURED_DELTA
     return None
 
 
@@ -210,6 +229,21 @@ class DeltaRuler(StrictModel):
         if len(on) < 2 or len(self.delta) < 2:
             return None
         return (max(on) - min(on), self.delta_span)
+
+    def pinned_share(self, sample_ids: Iterable[int]) -> float | None:
+        """What fraction of these cells carry a δ this ruler gives to more than one cell — ``None``
+        where the round holds no cell on the ruler at all, which is an absence, not a clean read.
+
+        A continuous fit does not produce ties, so a run of identical δ is the PRIOR standing in
+        for cells whose observations carried no variance — common, because nothing solves the
+        hardest cells. They still enter the θ fit and the point they sit on MOVES as the ruler
+        grows, which is how an unchanged prompt walks up the scale with nothing flagged.
+        """
+        shared = {d for d, n in Counter(self.delta.values()).items() if n > 1}
+        on = [self.delta[sid] for sid in sample_ids if sid in self.delta]
+        if not on:
+            return None
+        return sum(1 for d in on if d in shared) / len(on)
 
     def entries_covering(self, sample_ids: Iterable[int]) -> dict[int, RulerEntry]:
         """This ruler completed with a PROVISIONAL entry at its own centre (``mu_delta``, a=1) for

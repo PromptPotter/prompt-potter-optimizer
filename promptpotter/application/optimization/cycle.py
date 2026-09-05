@@ -66,10 +66,12 @@ def _reading(
     on; their cells decide the round's own δ span, which is half of the collapsed-band reading."""
     if theta is None:
         return None
-    band = ruler.band_span(measured_cells(results)) if ruler is not None else None
+    cells = list(measured_cells(results))
+    band = ruler.band_span(cells) if ruler is not None else None
     round_span = band[0] if band is not None else None
     ruler_span = ruler.delta_span if ruler is not None else None
     calibration = ruler.calibration_model if ruler is not None else None
+    pinned = ruler.pinned_share(cells) if ruler is not None else None
     return AbilityReading(
         theta=theta[0],
         se=theta[1],
@@ -79,7 +81,10 @@ def _reading(
         round_span=round_span,
         calibration_model=calibration,
         caveat=theta_caveat(
-            calibration_model=calibration, round_span=round_span, ruler_span=ruler_span
+            calibration_model=calibration,
+            round_span=round_span,
+            ruler_span=ruler_span,
+            pinned_share=pinned,
         ),
     )
 
@@ -460,7 +465,10 @@ class Cycle:
         # "signal or silence" rule.
         earned_blocks = earned_library_for(
             session.store,
-            answer_space_signature(r.get("ground_truth") for r in (origin_results or [])),
+            answer_space_signature(
+                (r.get("ground_truth") for r in (origin_results or [])),
+                dataset=config.dataset_name,
+            ),
         )
         return cls(
             session=session,

@@ -190,10 +190,10 @@ class CycleSlice:
     """Frozen cycle-state snapshot for renderers — keeps them ``Cycle``-free + unit-testable.
     ``pipeline_params`` snapshotted so wound renderers filter ACCUMULATED rows by current backend config."""
 
+    # No accuracy here, deliberately: cycle tracking's `current`/`best` are subset-relative and lag
+    # the round being rendered, so a panel carrying them holds a second, staler copy of the
+    # EVOLUTION column. The series is `RoundDiagnostics.evolution_rows`, which carries `elected`.
     round_num: int
-    current_accuracy: float
-    best_accuracy: float
-    best_round: int
     l1_stall_count: int
     l2_round: int
     l2_stall_count: int

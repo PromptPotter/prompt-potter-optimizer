@@ -9,6 +9,8 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import content_hash
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
@@ -209,11 +211,23 @@ class TaskDecomposition:
         return any(getattr(self, f.name) for f in fields(self))
 
 
+def has_framing(data: Mapping[str, object] | None) -> bool:
+    """Whether a SERIALIZED framing record says anything — :meth:`TaskDecomposition.__bool__` for
+    the dict form, which is what every store, resolver and preflight actually holds.
+
+    ``to_dict`` is ``asdict``, so a decomposition that produced nothing still serializes eight keys
+    and is truthy as a container. Testing the dict instead of its values lets that stand in for
+    real framing — and an empty record at a higher store tier shadows the dataset's own
+    ``task_context.yaml`` for good."""
+    return data is not None and any(str(v).strip() for v in data.values())
+
+
 __all__ = [
     "PARAM_FORBIDDEN_KEYS",
     "PARAM_SCOPE_KEYS",
     "JobSearchPoint",
     "SearchPoint",
     "TaskDecomposition",
+    "has_framing",
     "strip_rendered_prompt",
 ]

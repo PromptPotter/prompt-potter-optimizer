@@ -252,12 +252,20 @@ def elimination_p_best(
     ruler: DeltaRuler | None,
 ) -> tuple[float, dict[str, float]]:
     """Scores on the SAME θ the round-winner election ranks by, so elimination and election cannot
-    disagree on what better means. Closed-form, so the resume replayer re-derives the cut exactly."""
+    disagree on what better means. Closed-form, so the resume replayer re-derives the cut exactly.
+
+    Then BOUNDED by what the discordant pairs can support, which the rank deliberately is not. A
+    threshold asks an ABSOLUTE question, so it banks every logit the normal-θ posterior drew from
+    concordant cells and from the θ prior — and a prefix holding one discordant cell then reads as
+    decisive, which is a fact about the round ORDER rather than about any arm. A rank asks a
+    relative question, where the bound is common to the round and cancels except where the
+    discordant counts differ; there it reorders rather than corrects. So it stops here, at the one
+    caller that compares against a bar (`docs/methods/candidate-elimination.md` § The θ rule)."""
     if not paired_prior_grades:
         return 1.0, {}
 
     from promptpotter.application.intelligence.exploration import Observation, fit_theta_given_delta
-    from promptpotter.shared.statistics import p_exceeds
+    from promptpotter.shared.statistics import discordant_counts, p_exceeds, sign_posterior
 
     sids = [int(s) for s in candidate_sample_ids]
     # The ONE sanctioned provisional read: this runs DURING the round, on cells `calibrate_ruler`
@@ -281,7 +289,12 @@ def elimination_p_best(
         theta_p, se_p = fit_theta_given_delta(prior_obs, entries, anchor_id=anchor).get(
             pid, (0.0, 0.0)
         )
-        # The SAME comparison `elect_round_winner` ranks on — one function, so a cut and a crown
-        # cannot be computed on two different readings of "better".
-        per_prior[pid] = p_exceeds(theta_c, se_c, theta_p, se_p)
+        # The SAME comparison `elect_round_winner` ranks on — one reading of "better". What follows
+        # is not a second one: the bound never changes the SIDE of 0.5, so an arm this function cuts
+        # is still an arm that function would refuse to crown. It caps only how far the reading may
+        # sit FROM 0.5, and the docstring says why only a threshold takes that cap.
+        p = p_exceeds(theta_c, se_c, theta_p, se_p)
+        bound = sign_posterior(*discordant_counts(candidate_grades, grades))
+        reach = min(abs(p - 0.5), abs(bound - 0.5))
+        per_prior[pid] = 0.5 + reach if p > 0.5 else 0.5 - reach
     return min(per_prior.values()), per_prior

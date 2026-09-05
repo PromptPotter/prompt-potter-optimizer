@@ -122,10 +122,9 @@ def _r_diagnostics(b: InjectionBundle) -> list[Item]:
     dataset text are untrusted; they sit contiguously, so the composition fences them once."""
     sections: list[Item] = []
     cs = b.cycle_slice
-    status: list[str] = [
-        f"STATUS: round {cs.round_num} | current {cs.current_accuracy:.1%} | "
-        f"best {cs.best_accuracy:.1%} @ round {cs.best_round}"
-    ]
+    # Round and stalls only. An accuracy pair here reads cycle tracking rather than this round, so
+    # it is a second copy of the EVOLUTION column and drifts from it inside one prompt.
+    status: list[str] = [f"STATUS: round {cs.round_num}"]
     if cs.l1_stall_count > 0:
         status.append(f"  L1 stall: {cs.l1_stall_count} rounds")
     if cs.l2_round > 0:
@@ -220,10 +219,18 @@ def _r_diagnostics(b: InjectionBundle) -> list[Item]:
         if d.trend_description:
             line += f" — {d.trend_description}"
         sections.append(Item(line))
-        tbl = ["EVOLUTION (last rounds):", "  round  acc      Δ       degraded"]
+        # `elected` first, and the accuracy pair labelled for what it is: each round bought its
+        # own subset, so the acc column is four readings on four exams and the Δ between two of
+        # them is not a change in anything. Election is the column that compares.
+        tbl = [
+            "EVOLUTION (last rounds — acc is on THAT round's own cells, so its Δ is not a change;",
+            "elected is the column that compares):",
+            "  round  elected  acc      Δ       degraded",
+        ]
         for row in d.evolution_rows[-5:]:
             tbl.append(
-                f"  {row.round:>5}  {row.accuracy:>6.1%}  {row.delta:>+6.1%}  {row.degraded:>5}"
+                f"  {row.round:>5}  {'yes' if row.elected else 'no':>7}  "
+                f"{row.accuracy:>6.1%}  {row.delta:>+6.1%}  {row.degraded:>5}"
             )
         sections.append(Item("\n".join(tbl)))
 
@@ -686,6 +693,10 @@ def _r_failing_samples(b: InjectionBundle) -> list[Item]:
     graded = [(d, r) for d, r in scored if d is not None]
     ungraded = [r for d, r in scored if d is None]
     graded.sort(key=lambda dr: dr[0])
+    # A δ shared by a RUN of cells is the ruler's prior pulling every never-solved cell to one
+    # point, not a reading of any. Rank inside a tie is not an ordering, so the header may not
+    # promise one over cells the ruler cannot tell apart.
+    tied = {d for d, n in Counter(d for d, _ in graded).items() if n > 1}
     ordered: list[tuple[float | None, dict[str, Any]]] = [
         *graded,
         *((None, r) for r in ungraded),
@@ -698,7 +709,7 @@ def _r_failing_samples(b: InjectionBundle) -> list[Item]:
     rows_out = [
         Item(
             f"  [#{r.get('sample_id')}] "
-            + (f"δ={delta:+.2f}" if delta is not None else "δ=?")
+            + ("δ=?" if delta is None else ("δ=tied" if delta in tied else f"δ={delta:+.2f}"))
             + f" | {_query_stem(r, MISS_QUERY_CAP)}"
             + f" | said: {str(r.get('predicted') or '')[:MISS_PREDICTED_CAP]}"
             + f" | true: {str(r.get('ground_truth') or '')[:MISS_GT_CAP]}",
@@ -712,6 +723,12 @@ def _r_failing_samples(b: InjectionBundle) -> list[Item]:
         f"FAILING SAMPLES ({len(rows)} still unsolved — latest outcome per {b.measured_unit} "
         "across the configurations tried so far, not one round's score; "
         + (f"{ruled}winnable ones" if graded else cold)
+        + (
+            ". `δ=tied` is the ruler's prior, not a reading of that cell — those rows carry no "
+            "order among themselves and no claim that any is winnable"
+            if tied
+            else ""
+        )
         + "):"
     )
     out = [Item(header), *rows_out]
@@ -1036,18 +1053,21 @@ def _r_confounds(b: InjectionBundle) -> list[Item]:
             "COLD RULER — θ is logit-accuracy on each arm's OWN subset, not a shared scale. Two θ "
             "here are comparable to each other and to nothing else."
         )
-    elif (
-        span := b.ruler.band_span(s for s in d.latest_sample_ids if isinstance(s, int))
-    ) is not None:
-        round_span, ruler_span = span
+    else:
+        cells = [s for s in d.latest_sample_ids if isinstance(s, int)]
+        span = b.ruler.band_span(cells)
+        pinned = b.ruler.pinned_share(cells)
+        round_span, ruler_span = span if span is not None else (None, None)
         # The verdict is the SERVED one (`domain/ruler.py::theta_caveat`), never a second reading
-        # of the same spans: the operator's screen and this panel must not be able to disagree
+        # of the same inputs: the operator's screen and this panel must not be able to disagree
         # about whether a number means anything. Naming WHICH arm fired is the value — the
-        # instrument and the acquisition need different fixes and the round looks identical.
+        # instrument, the acquisition and the prior need different fixes and the round looks
+        # identical under all three.
         caveat = theta_caveat(
             calibration_model=b.ruler.calibration_model,
             round_span=round_span,
             ruler_span=ruler_span,
+            pinned_share=pinned,
         )
         if caveat in (ThetaCaveat.FLAT_RULER, ThetaCaveat.COLLAPSED_BAND):
             cause = (
@@ -1060,6 +1080,16 @@ def _r_confounds(b: InjectionBundle) -> list[Item]:
                 f"{round_span:.2f} logits on a ruler spanning {ruler_span:.2f}; {cause}. Inside a "
                 f"band that narrow every {b.measured_unit} is equally hard, "
                 "so θ is logit-accuracy plus a constant and ranking on it ranks on accuracy."
+            )
+        elif caveat is ThetaCaveat.UNMEASURED_DELTA and pinned is not None:
+            rows.append(
+                f"UNMEASURED DIFFICULTY — {pinned:.0%} of this round's "
+                f"{unit_plural(b.measured_unit)} sit on a δ the ruler hands to several cells at "
+                "once. That is the prior, not a reading: every arm that ever saw them answered "
+                "the same way, so nothing measured how hard they are. θ still counts them, and "
+                "the value they are pinned to moves as the ruler grows — so a θ that rose since "
+                "last round may be the scale shifting under an unchanged prompt rather than an "
+                "arm improving. Read the lift, never the level."
             )
     if d.prev_sample_ids and not (d.latest_sample_ids & d.prev_sample_ids):
         rows.append(

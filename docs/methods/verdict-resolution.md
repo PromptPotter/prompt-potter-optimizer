@@ -130,6 +130,21 @@ responses. A sound round can carry a pinned arm, and a pinned arm can sit on a s
   θ column there is logit-accuracy wearing a ruler's name. The ratio is measured against the ruler,
   so a flat ruler makes the yardstick the thing under test — which is why `flat_ruler` above is
   checked FIRST and has an absolute floor rather than a ratio.
+- **Unmeasured difficulty** (`unmeasured_delta`). At least `PRIOR_PINNED_RATIO` of the round's cells
+  sit on a δ the ruler hands to more than one cell. A continuous fit does not produce ties: a run of
+  identical δ is the PRIOR determining the value for cells whose observations carried no variance —
+  every arm that ever saw them answered the same way, which on a hard bank is most of them. Those
+  cells still enter the θ fit and still move it, against a difficulty nobody measured.
+  The damage is that the pin MOVES. It is a function of the ruler's current composition, so each
+  batch of never-solved cells shifts it, and an unchanged prompt walks up the scale: on
+  `sealqa-longseal-12__def880` the origin — never promoted, never re-run, replayed from cache in
+  every round — read `+0.120`, `+0.543`, `+0.769` and `+0.839` over four rounds, `caveat: null`
+  throughout, while its accuracy on those same draws went 7.5% → 35% → 50% → 55%. Silent for the
+  same reason `collapsed_band` is: warm ruler, matching id, every number renders.
+  **Read the LIFT, never the level, and never a level across rounds.** Within one round the pin is
+  shared by every arm, so it cancels out of a lift; between rounds it does not cancel at all.
+  Checked after the band, because inside a collapsed band θ is logit-accuracy plus a constant
+  whatever the δ were fit from, and naming the pin there would name the smaller fault.
 
   **The question this state makes unanswerable — "is the round-N winner better than C0?" — has its
   own answer, and it is not θ.** `RoundResult.overlap` (`domain/results.py::OverlapReading`) reads
@@ -167,12 +182,15 @@ provisional, and say so rather than passing it on.
   varying with the arm at all — `p_exceeds` reduced to a monotone map of the raw gap, so
   rank-by-posterior WAS rank-by-gap. φ is now shrunk toward the nominal dispersion on its own
   degrees of freedom (the inverse-gamma the two σ already use), so the same 9 arms carry 7
-  distinct dispersions instead of 2. Posteriors are WIDER — the near-tie in
-  `test_pobb_epsilon_is_graded_by_depth_not_scalar` now dies one sample later — so expect PoBB to
-  eliminate slightly more slowly and a round to cost a little more.
-- **The right toolkit exists and is not on this path.** `holm_adjusted`, `exact_paired_reading`,
-  `exact_p_floor`, `cells_for_exact_verdict`, `min_detectable_effect`, `panel_precision` are wired
-  to `application/evidence.py`, the offline read verb, and to nothing the election calls.
+  distinct dispersions instead of 2. Posteriors are WIDER, so expect PoBB to eliminate slightly
+  more slowly and a round to cost a little more.
+- **The right toolkit exists and is only PARTLY on this path.** `holm_adjusted`,
+  `exact_paired_reading`, `exact_p_floor`, `cells_for_exact_verdict`, `min_detectable_effect`,
+  `panel_precision` are wired to `application/evidence.py`, the offline read verb, and to nothing
+  the election calls. One member crossed over: `sign_posterior` bounds the ELIMINATION threshold
+  (`candidate-elimination.md` § The θ rule, step 4), because a bar is absolute and a rank is not.
+  The election still ranks on the unbounded posterior, and deliberately — bounding it moved a
+  banked crown across a 0.0007 gap.
 - **At the current width it could not pass anyway.** `cells_for_exact_verdict(3) = 7` against a
   6-cell panel, so no Holm-corrected exact verdict is reachable at α=0.05 at ANY effect size.
 
@@ -320,10 +338,18 @@ identical order with no recorded sidecar. The hard-samples artifact's `pick_scor
 this same order seeded by the best candidate — the order the engine will actually execute next round.
 
 **Why static beats adaptive here:** an ability re-fit after every measurement empirically front-loads
-the seed's hit set — the zero-information region, where every early paired comparison ties, `p_best`
+the seed's hit set — the zero-information region, where every early paired comparison TIES, `p_best`
 pins at 0.5, and the elimination gates go blind until the tail. The round's actual decision is "can
 this candidate NET the adoption margin against the seed", and that evidence lives only in
 discordance-potential samples.
+
+**The static order reaches that same region by the other door, and there the symptom INVERTS — which
+is what hides it.** Where the seed's base rate is low enough that the candidate misses its
+MISS stratum too, miss-first also buys cells that cannot discriminate; but they near-tie rather than
+tie, and the k=4 probe above is then the entire discordant width — one cell. Ties narrow both SEs, so
+`p_best` reads DECISIVE rather than undecided and the gate fires on every arm (`sealqa-longseal-12`:
+four cut at `elimination_n_min`, identical to six decimals). Expect a confident cut, never a blind
+one, and read `n_discordant` on the p_best stream to tell the two doors apart.
 
 ---
 

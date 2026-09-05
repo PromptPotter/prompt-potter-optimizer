@@ -167,6 +167,7 @@ def _evolution(rounds: list[RoundResult]) -> tuple[list[EvolutionRow], list[str]
                 delta=delta,
                 degraded=r.degraded_samples,
                 n_candidates=len(r.candidate_scores),
+                elected=bool(r.improved),
             )
         )
         plateau_run = plateau_run + 1 if abs(delta) < _PLATEAU_DELTA else 0
@@ -183,52 +184,31 @@ def _evolution(rounds: list[RoundResult]) -> tuple[list[EvolutionRow], list[str]
 
 
 def _trend(rounds: list[RoundResult]) -> tuple[TrendClass, str]:
-    """Classify the cycle's accuracy series — the SOLE owner of that decision. Returns the typed class
-    plus a one-line description suitable for direct prompt inclusion."""
-    if len(rounds) < 2:
-        return "healthy", "Too few rounds to classify"
-    accuracies = [r.accuracy for r in rounds]
-    best_acc = max(accuracies)
-    best_round = accuracies.index(best_acc)
-    rounds_since_best = len(accuracies) - 1 - best_round
+    """Classify the cycle by what its rounds ELECTED — the SOLE owner of that decision.
 
-    deltas = [accuracies[i] - accuracies[i - 1] for i in range(1, len(accuracies))]
-    recent = deltas[-5:]
-    improvements = sum(1 for d in recent if d > 0.005)
-    regressions = sum(1 for d in recent if d < -0.005)
-    flat = len(recent) - improvements - regressions
-
-    stall = 0
-    for d in reversed(deltas):
-        if abs(d) < _PLATEAU_DELTA:
-            stall += 1
-        else:
-            break
-
+    **Never the accuracy series.** Accuracy is relative to the subset a round bought and the
+    acquisition re-picks that subset at the leader's own θ, so an unchanged prompt climbs on its
+    own — and this verdict reaches L1's critique panel, where "improving" is the one thing that
+    stops it changing strategy. Election means the same in every round, so a series of it is one."""
     if len(rounds) < 3:
         return "healthy", "Too few rounds to classify"
-
-    if improvements >= len(recent) * 0.5 and regressions <= 1:
-        return "healthy", f"Improving — {improvements}/{len(recent)} recent rounds improved"
-    if rounds_since_best >= 5 and stall >= 3:
-        return (
-            "ceiling",
-            f"Hard ceiling at {best_acc:.1%} (round {best_round}) — "
-            f"{rounds_since_best} rounds without new best",
-        )
-    if improvements > 0 and regressions > 0 and abs(improvements - regressions) <= 1:
-        return (
-            "oscillating",
-            f"Oscillating — {improvements} improvements, {regressions} regressions "
-            f"in last {len(recent)} rounds",
-        )
-    if flat >= len(recent) * 0.6 or stall >= 3:
+    elected = [bool(r.improved) for r in rounds]
+    total = sum(elected)
+    recent = elected[-5:]
+    if not total:
         return (
             "plateau",
-            f"Plateau — {stall} consecutive rounds with <{_PLATEAU_DELTA:.0%} change, "
-            f"gap to best: {best_acc - accuracies[-1]:.1%}",
+            f"No round has elected — 0 of {len(rounds)} cleared the parent",
         )
-    return "healthy", "Mixed progress — no clear pattern"
+    since = len(elected) - 1 - max(i for i, won in enumerate(elected) if won)
+    if sum(recent) >= len(recent) * 0.5:
+        return (
+            "healthy",
+            f"Electing — {sum(recent)}/{len(recent)} recent rounds cleared the parent",
+        )
+    if since >= 5:
+        return "ceiling", f"{since} rounds since the last election ({total} in total)"
+    return "plateau", f"{since} rounds since the last election ({total} in total)"
 
 
 def _cross_candidate_diff(round_result: RoundResult) -> list[str]:

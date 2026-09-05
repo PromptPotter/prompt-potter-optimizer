@@ -120,6 +120,9 @@ async def l1_generate(
         build_l1_response_schema(
             pipeline_schema,
             citable_fields=citable,
+            # The write half of the same derivation `citable` is the read half of: a slot whose
+            # panel produced nothing is not offered, so L1 cannot edit an axis it was never shown.
+            silent_panels=injection_silent_panels(coverage),
             schema_field_rename=schema_field_rename,
             n_variants=n_variants,
         )

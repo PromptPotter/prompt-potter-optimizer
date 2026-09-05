@@ -12,7 +12,7 @@ honour the schema it was handed, is ``validators/l1_strict.py::validate_override
 from __future__ import annotations
 
 import copy
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Any, cast
 
 from promptpotter.application.optimization.dispatch.bundle import (
@@ -116,10 +116,20 @@ def _nested_param_property(node: PipelineNode, param: str) -> dict[str, Any] | N
     return None
 
 
+# Which panel shows the CURRENT value of each writable slot; a slot whose panel produced nothing is
+# withdrawn. Why that rule and what it cost before it existed: `optimization/CLAUDE.md` § L1-layer.
+_SLOT_PANEL: dict[str, str] = {
+    "prompt_fields_override": "rendered_prompt",
+    "task_context_override": "task_context",
+    "pipeline_params_override": "pipeline_param_catalogue",
+}
+
+
 def build_l1_response_schema(
     pipeline_schema: PipelineSchema,
     *,
     citable_fields: Sequence[str],
+    silent_panels: Collection[str] = (),
     schema_field_rename: bool = False,
     n_variants: int | None = None,
 ) -> dict[str, Any]:
@@ -201,6 +211,8 @@ def build_l1_response_schema(
     # 2 + 3. The two OptSearchPoint slots — emitted only where the evolved prompt has a
     # node to land on. `to_job_search_point` gates its whole render on the same
     # `prompt_node_names()`, so with none the slots would be write-only.
+    # The same rule, second condition (below, off `_SLOT_PANEL`): never offer a slot L1 cannot
+    # OBSERVE.
     if pipeline_schema.prompt_node_names():
         pf_override = variant_props["prompt_fields_override"]
         pf_override["properties"] = {field: {"type": "string"} for field in PROMPT_STRING_FIELDS}
@@ -214,6 +226,10 @@ def build_l1_response_schema(
     else:
         del variant_props["prompt_fields_override"]
         del variant_props["task_context_override"]
+
+    for slot, panel in _SLOT_PANEL.items():
+        if panel in silent_panels:
+            variant_props.pop(slot, None)
 
     # 4. evidence_grounding — the panels THIS round's prompt renders, and the one field this
     # schema makes STRICTER than its parse twin. The model stays optional on purpose (a provider

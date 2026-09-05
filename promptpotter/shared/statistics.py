@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import math
 import threading
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Literal
 
 
@@ -185,6 +185,27 @@ def cells_for_exact_verdict(n_tests: int, alpha: float = 0.05) -> int:
     return n
 
 
+def discordant_counts(candidate: Sequence[float], prior: Sequence[float]) -> tuple[int, int]:
+    """``(wins, losses)`` over the pairs the two arms were graded APART on. A concordant cell says
+    they met it the same way, so it carries nothing about which is better — the discordant count is
+    the width :func:`exact_p_floor` reads, and the one :func:`exact_paired_reading` refuses below."""
+    wins = sum(1 for c, p in zip(candidate, prior, strict=True) if c > p)
+    losses = sum(1 for c, p in zip(candidate, prior, strict=True) if c < p)
+    return wins, losses
+
+
+def sign_posterior(wins: int, losses: int) -> float:
+    """``P(the candidate wins more of the discordant pairs than it loses)`` on those pairs ALONE,
+    under a uniform prior — the most any paired reading may claim at this width, and 0.5 at no
+    pairs at all. One adverse cell and no wins caps it at 0.25, two at 0.125."""
+    if wins + losses == 0:
+        return 0.5
+
+    from scipy.stats import beta
+
+    return float(beta.sf(0.5, wins + 1, losses + 1))
+
+
 def _signed_rank_counts(n: int) -> list[int]:
     """``out[w]`` = how many of the ``2**n`` sign draws put ``W+`` at *w*. Built by DP, so the null
     costs O(n**3) rather than the ``2**n`` an enumeration would spend."""
@@ -326,6 +347,7 @@ def rank_correlation(xs: list[float], ys: list[float]) -> float | None:
 
 __all__ = [
     "cells_for_exact_verdict",
+    "discordant_counts",
     "exact_p_floor",
     "exact_paired_reading",
     "holm_adjusted",
@@ -336,6 +358,7 @@ __all__ = [
     "paired_reading",
     "rank_correlation",
     "sample_sd",
+    "sign_posterior",
     "t_critical",
     "two_way_effect_sds",
     "warm_stats_backend",

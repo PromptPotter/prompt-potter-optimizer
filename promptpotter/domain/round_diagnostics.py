@@ -10,14 +10,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-# No "regressing": `round_analysis._trend` is the sole producer and never returns it
-# (it computes a `regressions` counter, but only as an input to the OSCILLATING test).
+# No "regressing" and no "oscillating": `round_analysis._trend` is the sole producer and returns
+# neither. It classifies the ELECTION series — did this round clear the parent — and on that
+# series "oscillating" is "elected before, not lately", which `plateau` already names.
 #
-# **Not "trajectory".** This is the accuracy series CLASSIFIED — the same axis the webapp's
-# TrendChart plots — while a trajectory in this repo is a walk of points that each carry their
-# own reading (`evidence.py::TrajectoryPoint`, `p_best_trajectory`, the Sample-trajectory grid).
-# Two meanings under one word, and the reader could tell them apart from neither name.
-TrendClass = Literal["healthy", "oscillating", "plateau", "ceiling"]
+# **Not "trajectory".** This is the election series CLASSIFIED — while a trajectory in this repo
+# is a walk of points that each carry their own reading (`evidence.py::TrajectoryPoint`,
+# `p_best_trajectory`, the Sample-trajectory grid). Two meanings under one word, and the reader
+# could tell them apart from neither name.
+TrendClass = Literal["healthy", "plateau", "ceiling"]
 
 
 @dataclass(frozen=True)
@@ -32,11 +33,17 @@ class NearMiss:
 
 @dataclass(frozen=True)
 class EvolutionRow:
+    """``elected`` is the only field here comparable ACROSS rows. ``accuracy`` and its ``delta``
+    are relative to the subset that round bought, and the acquisition re-picks that subset at the
+    leader's own θ, so an unchanged prompt climbs on its own. Render the pair, never accuracy
+    alone."""
+
     round: int = 0
     accuracy: float = 0.0
     delta: float = 0.0
     degraded: int = 0
     n_candidates: int = 0
+    elected: bool = False
 
 
 @dataclass(frozen=True)

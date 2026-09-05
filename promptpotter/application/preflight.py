@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.knobs import check_couplings
 from promptpotter.application.optimization.dispatch.llm_call.prompts import optimizer_model
+from promptpotter.domain.search_point import has_framing
 from promptpotter.infrastructure.llm.registry import model_profile
 
 if TYPE_CHECKING:
@@ -102,10 +103,32 @@ def _check_config_couplings(config: CampaignConfig) -> list[PreflightWarning]:
     ]
 
 
+def _check_task_context_present(framing: Mapping[str, Any] | None) -> PreflightWarning | None:
+    """The operator's frozen framing is the SOLE source of l1_generate's ``task_intent`` slot, and
+    an empty one renders as nothing at all — no header, no placeholder — so the slot falls back to
+    the static template and the wire schema drops ``task_context_override`` with it. Decidable
+    before a cell is bought, and afterwards visible only as ``review.md``'s ``_(empty)_``."""
+    if has_framing(framing):
+        return None
+    return PreflightWarning(
+        code="task_context_empty",
+        title="no task framing — L1 will not be told what this dataset is",
+        detail=(
+            "`task_context` carries every field the operator wrote about the task, and it is the "
+            "only panel feeding l1_generate's task_intent slot. Empty, that slot renders as the "
+            "static template alone: the generator proposes edits knowing the failing samples and "
+            "nothing about what the pipeline is for. Ship a `task_context.yaml` beside the "
+            "dataset, or pass `--task-file` / `--task-text` so the decomposition runs — `new "
+            "<name>` with neither never calls it."
+        ),
+    )
+
+
 def run_preflight_checks(
     config: CampaignConfig,
     dataset: list[Sample],
     target_models: tuple[str, ...] = (),
+    task_context: Mapping[str, Any] | None = None,
 ) -> list[PreflightWarning]:
     """``target_models`` are the resolved per-node target/scoring model ids, empty when the backend
     owns the model. Pure — no mutation, no I/O."""
@@ -115,6 +138,8 @@ def run_preflight_checks(
     if (w := _check_optimizer_below_target(target_models)) is not None:
         warnings.append(w)
     if (w := _check_lives_have_headroom(config)) is not None:
+        warnings.append(w)
+    if (w := _check_task_context_present(task_context)) is not None:
         warnings.append(w)
     warnings.extend(_check_config_couplings(config))
     return warnings

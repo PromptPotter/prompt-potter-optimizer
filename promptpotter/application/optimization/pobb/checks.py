@@ -20,6 +20,7 @@ from promptpotter.domain.results import EliminationGate
 from promptpotter.domain.scoring import is_answer_collapsed
 from promptpotter.domain.validators import StopRule
 from promptpotter.shared.errors import is_error_result
+from promptpotter.shared.statistics import discordant_counts
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -322,7 +323,22 @@ class PoBBCheck:
         hardest_prior_id = min(p_better, key=lambda k: p_better[k])
 
         paired_breakdown: dict[str, dict[str, float]] = {
-            pid: {"p_better": float(p_better[pid]), "n_paired": float(n)} for pid in paired_priors
+            pid: {
+                "p_better": float(p_better[pid]),
+                # `len(fit_results)`, NOT `n`: the pair is the width `p_better` was measured over,
+                # and `p_better` is fit on `candidate_grades`, which excludes error/deprecated
+                # rows. `n` is `queries_scored` and counts them — it rides the snapshot as
+                # `n_samples`, one field down, which is where "how far did this candidate get"
+                # belongs. Two denominators under one name made `n_paired - n_discordant` — the
+                # concordant count the comment below invites a reader to take — wrong by the
+                # errored rows on exactly the candidates least worth trusting.
+                "n_paired": float(len(fit_results)),
+                # The width `p_better` was actually entitled to, beside the width it was measured
+                # over. Concordant cells cannot say which arm is better, so a round read on
+                # `n_paired` alone cannot show why one cut was licensed and another was not.
+                "n_discordant": float(sum(discordant_counts(candidate_grades, paired_priors[pid]))),
+            }
+            for pid in paired_priors
         }
 
         snap = PoBBSnapshot(

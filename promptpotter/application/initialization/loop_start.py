@@ -157,6 +157,7 @@ async def _emit_preflight_and_init_session(
     dataset: list[Sample],
     cb: RunCallbacks,
     session: Session,
+    origin: CampaignOrigin,
 ) -> None:
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         get_optimizer_schema,
@@ -183,7 +184,13 @@ async def _emit_preflight_and_init_session(
             "floor and would emit zero content:\n  - " + "\n  - ".join(floor_violations)
         )
 
-    preflight_warnings = run_preflight_checks(config, dataset, target_models)
+    resolved = origin.resolved_origin
+    preflight_warnings = run_preflight_checks(
+        config,
+        dataset,
+        target_models,
+        task_context=resolved.memory.task_context.to_dict() if resolved else None,
+    )
     for w in preflight_warnings:
         logger.warning("preflight[%s]: %s — %s", w.code, w.title, w.detail)
     emit_phase(
@@ -406,7 +413,7 @@ async def init_optimization_loop(
 
     warm_stats_backend()
 
-    await _emit_preflight_and_init_session(config, dataset, cb, session)
+    await _emit_preflight_and_init_session(config, dataset, cb, session, origin)
 
     cycle, resolved_cycle_id, resumed_from_round = _build_and_start_cycle(
         origin,

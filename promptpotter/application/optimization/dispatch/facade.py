@@ -327,9 +327,6 @@ def build_bundle(
     spend_used = cycle.session.spend_used
     cs = CycleSlice(
         round_num=round_num,
-        current_accuracy=cycle.tracking.current_accuracy,
-        best_accuracy=cycle.tracking.best_accuracy,
-        best_round=cycle.tracking.best_round,
         l1_stall_count=cycle.escalation.l1_stall_count,
         l2_round=cycle.escalation.l2_round,
         l2_stall_count=cycle.escalation.l2_stall_count,

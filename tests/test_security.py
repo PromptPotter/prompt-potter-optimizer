@@ -92,9 +92,6 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
 
     cycle_slice = CycleSlice(
         round_num=1,
-        current_accuracy=0.5,
-        best_accuracy=0.5,
-        best_round=0,
         l1_stall_count=0,
         l2_round=0,
         l2_stall_count=0,
