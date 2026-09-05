@@ -9,12 +9,14 @@ import { useObserveSearchPoint } from "@/lib/hooks/useObserveSearchPoint";
 import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
 import {
+  cacheShare,
   interiorNodes,
   nodeOriginPrompt,
   observeOptions,
+  prefixReading,
   type ObserveState,
 } from "@/lib/derivations";
-import { fmtSecs, fmtValue } from "@/lib/format";
+import { fmtPct0, fmtSecs, fmtValue } from "@/lib/format";
 import { nodeKind } from "@/components/workflow";
 import { CopyButton, SegmentedControl } from "@/components/ui";
 import { NodeSurface } from "./NodeSurface";
@@ -387,6 +389,10 @@ function CallRun({
   const reasoning = typeof block?.output?.reasoning === "string" ? block.output.reasoning : null;
   const usage = block?.usage;
   const variants = variantsOf(response);
+  const prefix = prefixReading(
+    cacheShare(usage?.cache_read, usage?.input, !!block?.cached),
+    !!block?.cached,
+  );
 
   // What we ASKED FOR carries the routing suffix; `block.model` is the provider's echo, which
   // OpenRouter returns bare — so it names a `:nitro` call identically to a normally-routed one.
@@ -402,8 +408,20 @@ function CallRun({
     {
       label: "tokens",
       value: usage
-        ? `${usage.prompt_tokens ?? "—"}p / ${usage.completion_tokens ?? "—"}c / ${usage.total_tokens ?? "—"}t`
+        ? `${usage.input ?? "—"}in / ${usage.output ?? "—"}out / ${(usage.input ?? 0) + (usage.output ?? 0)}t`
         : "",
+    },
+    // The prefix discount belongs on the prompt pane: it is the number the prompt's FIELD ORDER
+    // moves. Labelled "prefix cached", never "cached" — across this app `cached` is the boolean
+    // "OUR archive answered", the opposite fact and the one `block.cached` excludes this on.
+    {
+      label: "prefix cached",
+      value:
+        prefix.state === "unreported"
+          ? "not reported"
+          : prefix.share != null
+            ? `${fmtPct0(prefix.share)} of prompt`
+            : "",
     },
     { label: "template", value: (block?.input?.template_name as string | undefined) ?? "" },
     { label: "ts", value: block?.timestamp ?? "" },

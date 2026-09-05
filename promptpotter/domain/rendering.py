@@ -4,7 +4,7 @@ import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from promptpotter.config.settings import NO_RESULT, PROMPT_STRING_FIELDS
 from promptpotter.domain.results import CritiqueReadout
@@ -24,6 +24,31 @@ def display_fitness(composite_fitness: float | None, accuracy: float) -> float:
     """THE composite-or-accuracy rule, one implementation: an honest ``0.0`` is a real score, so
     only genuine absence degrades to ``accuracy``. Every display and ranking site routes here."""
     return composite_fitness if composite_fitness is not None else accuracy
+
+
+PrefixState = Literal["discounted", "cold", "unreported", "replayed"]
+
+
+class PrefixReading(NamedTuple):
+    state: PrefixState
+    #: ``None`` on ``unreported`` and ``replayed``.
+    share: float | None
+    #: ``c39%`` / ``c0%`` / ``c?``, and ``""`` on a replay, whose line already carries 📖.
+    #: Byte-identical to the browser's (`derivations/token-account.ts::prefixReading`).
+    badge: str
+
+
+def prefix_reading(share: float | None, *, replayed: bool) -> PrefixReading:
+    """THE reading of a provider's prefix-cache discount, one implementation — so *unreported*
+    ("never asked") and a cold *0%* cannot collapse into one blank.
+
+    *replayed* is passed rather than inferred: ``cache_share`` folds it into ``None``, and every
+    call site already holds it beside the share."""
+    if replayed:
+        return PrefixReading("replayed", None, "")
+    if share is None:
+        return PrefixReading("unreported", None, "c?")
+    return PrefixReading("discounted" if share > 0 else "cold", share, f"c{share:.0%}")
 
 
 # The ordering key every display site sorts on. Named once because it was restated as a bare
@@ -346,10 +371,13 @@ def extract_display_answer(predicted: str, formula: str | None) -> str:
 
 __all__ = [
     "DisplayRankKey",
+    "PrefixReading",
+    "PrefixState",
     "classify_result",
     "display_fitness",
     "display_rank_key",
     "extract_display_answer",
     "format_l1_critique_for_prompt",
+    "prefix_reading",
     "terminal_node",
 ]

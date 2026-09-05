@@ -11,7 +11,7 @@ from promptpotter.application.views.view_models import AnyView
 from promptpotter.connectors.protocol import MeasuredUnit
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
-from promptpotter.domain.rendering import DisplayRankKey, display_rank_key
+from promptpotter.domain.rendering import DisplayRankKey, display_rank_key, prefix_reading
 from promptpotter.domain.results import candidate_label, overlap_series
 from promptpotter.domain.run_records import (
     ElectionRecord,
@@ -22,6 +22,7 @@ from promptpotter.domain.run_records import (
     RoundWarningRecord,
     SnapshotRecord,
 )
+from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.projections.base import DerivedView
 from promptpotter.infrastructure.projections.live_state import (
     LiveStateCore,
@@ -236,30 +237,32 @@ class LiveDisplay(DerivedView):
         duration_s = payload.get("duration_s")
         if duration_s is None and started is not None:
             duration_s = max(0.0, (time.time() * 1000 - started) / 1000.0)
-        usage = payload.get("usage") or {}
-        total_tokens = usage.get("total_tokens")
+        usage = TokenAccount.from_payload(payload.get("usage"))
         round_tag = f"r{record.round}" if record.round is not None else ""
         node_label = f"{record.node}_{round_tag}" if round_tag else record.node
         bits: list[str] = [node_label]
         if isinstance(duration_s, (int, float)):
             bits.append(f"{duration_s:.1f}s")
-        if isinstance(total_tokens, int) and total_tokens > 0:
-            bits.append(f"{total_tokens} tok")
+        if usage.total > 0:
+            bits.append(f"{usage.total} tok")
         # What the seconds beside it actually bought. A reasoning model can spend nearly its whole
         # output budget thinking against a schema-capped answer, and the duration alone then reads
         # as a slow provider rather than a node asked to think about something small. Silent at 0
         # so a non-reasoning model's line stays clean.
-        completion = usage.get("completion_tokens")
-        reasoning = usage.get("reasoning_tokens")
-        if (
-            isinstance(reasoning, int)
-            and reasoning > 0
-            and isinstance(completion, int)
-            and completion > 0
-        ):
-            bits.append(f"{reasoning / completion:.0%} reasoning")
+        if usage.reasoning > 0 and usage.output > 0:
+            bits.append(f"{usage.reasoning / usage.output:.0%} reasoning")
+        # What the PROVIDER served off its own prefix cache — the number the prompt's field ORDER
+        # moves, since an implicit cache hits only on an identical leading prefix and a volatile
+        # block early in the prompt voids everything behind it.
+        prefix = prefix_reading(usage.cache_share(replayed=cached), replayed=cached)
+        if prefix.state == "unreported":
+            bits.append("prefix not reported")
+        elif prefix.share is not None:
+            bits.append(f"{prefix.share:.0%} prefix cached")
+        # "replayed", not "cached": OUR archive served this call and no provider saw it. The word
+        # `cached` now names the provider-side discount one line up, and one word cannot mean both.
         if cached:
-            bits.append("cached")
+            bits.append("replayed")
         self._write(f"  {DIM}✓ {' · '.join(bits)}{RESET}")
 
     def _handle_election(self, record: ElectionRecord) -> None:

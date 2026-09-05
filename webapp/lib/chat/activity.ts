@@ -32,6 +32,7 @@
 // `p_best_update` is not). Those two questions were one before, split across two languages.
 
 import { candidateLabel } from "@/lib/candidate-label";
+import { cacheShare, prefixReading } from "@/lib/derivations";
 import { fmtDuration, fmtPct0 } from "@/lib/format";
 import type { NonActivityKind, ProjectionEnvelope } from "@/lib/api/types";
 
@@ -213,11 +214,25 @@ export function projectionToActivity(env: ActivitySource): ActivityItem | null {
       const inner = asRec(p.payload);
       const usage = asRec(inner.usage);
       const dur = num(inner.duration_s);
-      const tok = num(usage.total_tokens);
+      // Derived, never read: the account carries the two halves and stores no sum.
+      const tok = (num(usage.input) ?? 0) + (num(usage.output) ?? 0);
       const bits: string[] = [];
       if (dur != null) bits.push(`${dur.toFixed(1)}s`);
-      if (tok != null && tok > 0) bits.push(`${tok} tok`);
-      if (inner.cached) bits.push("cached");
+      if (tok > 0) bits.push(`${tok} tok`);
+      // What the PROVIDER served off its own prefix cache, as a share of input — and null on a
+      // replay, whose `usage` is the banked call's and reached no provider this time. `cacheShare`
+      // takes `replayed` as a required argument so this line cannot drift from the terminal's, and
+      // `prefixReading` is the one place a cold 0% is told apart from a provider that said nothing.
+      const prefix = prefixReading(
+        cacheShare(num(usage.cache_read), num(usage.input), !!inner.cached),
+        !!inner.cached,
+      );
+      if (prefix.state === "unreported") bits.push("prefix not reported");
+      else if (prefix.share != null) bits.push(`${Math.round(prefix.share * 100)}% prefix cached`);
+      // "replayed", not "cached": OUR archive served this call and no provider saw it. The word
+      // `cached` names the provider-side discount one line up, and the terminal renders the same
+      // record with the same two words (`presentation/views/live/display.py`).
+      if (inner.cached) bits.push("replayed");
       return { id, kind: "done", icon: "✓", label: nodeLabel(p), detail: bits.join(" · ") || undefined, tone: "muted" };
     }
     case "snapshot": {

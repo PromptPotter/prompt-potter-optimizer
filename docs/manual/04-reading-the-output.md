@@ -29,15 +29,18 @@ When patience runs out, an **outer loop** steps in to redirect (see [chapter 1 �
 ## Per-sample lines
 
 ```
-0.0s #042 MISS [ai]📖 -> 'unknown' gt:'disproved' q:'was the hypothesis disproved?'
+69.9s #042 MISS [ai] io=86279/5670 c41% -> 'unknown' gt:'disproved' q:'was the hypothesis disproved?'
 ```
 
 | Token | Meaning |
 |-------|---------|
-| `0.0s` | Backend latency |
+| `69.9s` | Backend latency |
 | `#042` | Sample ID (positional; not all datasets assign one) |
 | `HIT` / `MISS` | Match against ground truth under active scorer |
-| `[ai]📖` | Source tag — cached, fresh LLM call, etc. |
+| `[ai]` | Pipeline node the row terminated at |
+| `📖` | **We** replayed this from the measurement archive — no backend call, no money |
+| `io=86279/5670` | Input / output tokens (`~` prefix = a chars/4 estimate) |
+| `c41%` | **The provider** served 41% of the input off its own prompt-prefix cache, at a discount. Never shown beside `📖`: a replay reached no provider, so it has no discount to report |
 | `-> 'unknown'` | Pipeline output |
 | `gt:'disproved'` | Ground truth |
 | `q:'...'` | Query (truncated in long runs) |

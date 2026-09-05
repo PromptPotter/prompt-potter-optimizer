@@ -3,8 +3,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
-from promptpotter.domain.rendering import classify_result, extract_display_answer
+from promptpotter.domain.rendering import (
+    classify_result,
+    extract_display_answer,
+    prefix_reading,
+)
 from promptpotter.domain.scoring import is_hit, is_verifier_graded, recorded_elapsed_s
+from promptpotter.domain.spend import TokenAccount
 from promptpotter.presentation.views.display import (
     DIM,
     DISPLAY_TAGS,
@@ -88,6 +93,11 @@ def fmt_query_result(
         for node_name, entry in step_tokens.items():
             mark = "~" if entry.get("estimated") else ""
             io_seg = f"io={mark}{entry.get('input', 0)}/{mark}{entry.get('output', 0)}"
+            # The prefix discount as a share of THIS node's input — what makes a resent haystack
+            # cheap. `prefix_reading` owns which of the four it is; only a 📖 replay is silent.
+            share = TokenAccount.from_step_entry(entry).cache_share(replayed=cached)
+            if badge := prefix_reading(share, replayed=cached).badge:
+                io_seg += f" {badge}"
             if single_node:
                 groups.append(io_seg)
             else:

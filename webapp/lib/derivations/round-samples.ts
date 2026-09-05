@@ -21,6 +21,11 @@ import type { ValidationFailure } from "@/lib/api/types";
 import type { CandidateRow, NodeBlock, SampleRow } from "@/lib/types";
 import type { RoundResult } from "@/lib/types";
 import { isHit } from "@/lib/fitness";
+// Relative, like every other sibling here: `index.ts` re-exports THIS module, so importing the
+// barrel from inside it is a cycle. It resolved only because both names are hoisted `function`
+// declarations — turning either into a `const` arrow would have left them in the TDZ at module
+// evaluation, which is a blank cache column with no error anywhere.
+import { cacheShare, foldStepTokens } from "./token-account";
 
 // Live-mode samples for one candidate in the in-flight round. Reads
 // `dashboard.json::current_round.nodes.l1_score.output.candidates[].samples[]`, which the
@@ -49,6 +54,7 @@ function liveSamplesFor(
       ground_truth: s.ground_truth,
       terminal_node: s.terminal_node,
       elapsed_s: s.time_s,
+      cache_share: cacheShare(s.cache_read_tokens, s.input_tokens, s.cached),
     });
   });
   return out;
@@ -61,7 +67,10 @@ interface RawHistoricalSample {
   ground_truth?: string;
   fitness?: number;
   cached?: boolean;
-  pipeline_data?: { terminal_node?: unknown };
+  // No `input_tokens` twin here, and that is the point: `step_tokens` is per-NODE and its entries
+  // are the ONLY place a row's counts live. This type declared one for a while and read `undefined`
+  // on every row, which is what silently disabled the cache column on the historical half.
+  pipeline_data?: { terminal_node?: unknown; step_tokens?: unknown };
   elapsed_s?: number;
   time_s?: number;
   error?: unknown;
@@ -143,6 +152,13 @@ export function historicalSamplesFor(
       terminal_node:
         typeof s.pipeline_data?.terminal_node === "string" ? s.pipeline_data.terminal_node : "",
       elapsed_s: elapsed,
+      // Both sides of the ratio out of ONE fold. Taking the numerator from `step_tokens` and the
+      // denominator from a top-level twin is what produced a served cache count with no input to
+      // divide it by, on every historical row.
+      cache_share: (() => {
+        const account = foldStepTokens(s.pipeline_data?.step_tokens);
+        return cacheShare(account?.cacheRead, account?.input, s.cached === true);
+      })(),
     };
   });
 }

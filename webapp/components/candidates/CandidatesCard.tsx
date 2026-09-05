@@ -61,6 +61,7 @@ import { SampleSetControl } from "./SampleSetControl";
 import { measuredUniverse } from "@/lib/sample-set";
 import { useViewedLineage, divergenceRoundsFor } from "@/lib/lineage";
 import { cx } from "@/lib/cx";
+import { TERMS } from "@/lib/terms";
 import type { CandidateView } from "@/lib/types";
 
 // The candidates card — this cycle's population and its ancestry, in one surface.
@@ -589,9 +590,12 @@ export function CandidatesCard() {
                 <MenuCheck
                   on={showCache}
                   onClick={() => setCandidatesState({ showCache: !showCache })}
-                  title="Show how much of each candidate's samples were replayed from the archive instead of measured."
+                  title={TERMS.cache_replayed}
                 >
-                  Loaded from cache{cacheHitCount > 0 ? ` · ${cacheHitCount}` : ""}
+                  {/* "Replayed", never "cache": the word `cache` names the PROVIDER's prefix
+                      discount everywhere else in this app (the `c39%` badge), and one word cannot
+                      mean both. The count is CANDIDATES carrying a replayed sample, not samples. */}
+                  Replayed{cacheHitCount > 0 ? ` · ${cacheHitCount} of ${views.length}` : ""}
                 </MenuCheck>
                 <MenuSep />
                 {/* A searchpoint is picked where it is being LOOKED AT — the lit bar, the

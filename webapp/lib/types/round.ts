@@ -57,10 +57,21 @@ export interface NodeBlock {
   duration_s?: number;
   timestamp?: string;
   round?: number;
+  // Our own reuse cache answered and no provider was reached — so `usage` below is the BANKED
+  // call's, re-served. Present only when true (`dispatch/llm_call/call.py` omits it otherwise).
+  cached?: boolean;
+  // Straight off `LLMResponse.usage` as the ledger payload carries it — one `TokenAccount`
+  // (`domain/spend.py`), the same vocabulary a row's `step_tokens` entry uses, so the browser
+  // reads one shape wherever tokens come from. `cache_read` is the PROVIDER's prefix-cache
+  // discount and a SUBSET of `input` — not the sibling `cached` flag above, which is the
+  // opposite fact and excludes this one; `null` there means no breakdown was reported at all.
+  // There is no total: it is `input + output`, and storing it let one producer omit it.
   usage?: {
-    prompt_tokens?: number;
-    completion_tokens?: number;
-    total_tokens?: number;
+    input?: number;
+    output?: number;
+    reasoning?: number;
+    cache_read?: number | null;
+    cache_write?: number;
   };
 }
 

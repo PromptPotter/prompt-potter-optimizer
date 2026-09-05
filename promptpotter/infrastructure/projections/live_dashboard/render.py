@@ -65,6 +65,7 @@ def sample_row(s: dict[str, Any]) -> DashboardSample:
         query=_trim(s.get("query") or "", 42),
         input_tokens=s.get("input_tokens"),
         output_tokens=s.get("output_tokens"),
+        cache_read_tokens=s.get("cache_read_tokens"),
     )
 
 
@@ -83,6 +84,12 @@ def fmt_sample_line(row: DashboardSample) -> str:
         tok_seg = (
             f" io={in_tok if in_tok is not None else '-'}/{out_tok if out_tok is not None else '-'}"
         )
+    # The provider's prefix-cache share of the input, same column the CLI tape carries
+    # (`views/live/sample.py`) so the two renderings of one row stay one reading. The row DECIDES
+    # (`DashboardSample.cache_share` — null on a replay, on a missing breakdown, on no input);
+    # this only chooses to stay silent at a real 0.
+    if share := row.cache_share:
+        tok_seg += f" c{share:.0%}"
     # Blank rather than `0.0s` where the row recorded no time — a cached replay's real 0.0
     # must stay distinguishable from a row that never reached the pipeline.
     time_col = f"{row.time_s:4.1f}s" if row.time_s is not None else "     "
@@ -126,6 +133,14 @@ def build_candidate_rows(buffer: RoundBuffer) -> list[DashboardCandidate]:
                     cached if cached is not None else sum(1 for s in samples if s.get("cached"))
                 ),
                 expected_samples=cand.get("expected_samples"),
+                # What measuring this candidate consumed, folded once at `l1/population.py` off
+                # the rows themselves. Lands with the score report, like θ and the matched floor
+                # below: the buffered samples here carry the flat per-row counts rather than the
+                # `pipeline_data` the fold reads, and a second fold over those would be a second
+                # spelling of one number.
+                input_tokens=served.get("input_tokens"),
+                output_tokens=served.get("output_tokens"),
+                cache_read_tokens=served.get("cache_read_tokens"),
                 evaluators=dict(served.get("evaluators") or {}),
                 changes_description=(
                     cand.get("changes_description") or served.get("changes_description") or ""

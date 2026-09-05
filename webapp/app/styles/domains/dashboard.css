@@ -176,6 +176,10 @@
 .rsv-row .elapsed{color:var(--color-text-tertiary);flex:0 0 auto;min-width:42px;text-align:right}
 .rsv-row .scorer{color:var(--color-text-secondary);flex:0 0 auto;min-width:80px}
 .rsv-row .rsv-cached{color:var(--color-text-tertiary);flex:0 0 auto;font-size:var(--text-xs);white-space:nowrap}
+/* The PROVIDER's prefix-cache discount — same weight as the 📖 beside it because they are
+   peer facts about one row, and deliberately not the `elapsed` class it first borrowed: that one
+   is time, and a share reading as a duration is the collision this whole arc is about. */
+.rsv-row .rsv-prefix-cache{color:var(--color-text-tertiary);flex:0 0 auto;font-size:var(--text-xs);white-space:nowrap}
 .rsv-row .body{color:var(--color-text-primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rsv-detail{padding:var(--space-6) var(--space-8) var(--space-4) var(--space-72);display:grid;grid-template-columns:minmax(0,max-content) 1fr;gap:var(--space-4) var(--space-12);font-size:var(--text-sm)}
 .rsv-detail .kv-label{color:var(--color-text-tertiary)}

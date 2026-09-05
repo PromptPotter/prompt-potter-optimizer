@@ -21,6 +21,17 @@ One of the downstream consequences is the system keeps **two costs**, and they a
 
 On a cold cache the two are equal — which is exactly why this could sit undetected until the archive got deep enough for an arm to start free-riding on it.
 
+### Two caches, and the word only belongs to one
+
+The costs above turn on OUR cache. A provider keeps its own, and **conflating the two has now cost real money three separate times**, so they are named apart everywhere:
+
+- **A replay** — our content-addressed archive answered, so the call never reached a provider and nothing was billed. It is a **boolean**: `TokenUsageRecord.cached`, the `📖` on a sample line, `replayed` on an optimizer line. This is the one the two costs above are about.
+- **A prefix-cache read** — a provider *did* serve the call and billed part of its input at a discount, because our prompt's leading bytes matched one it had already processed. It is a **token count**, a SUBSET of the input: `TokenUsageRecord.cache_read_tokens` / `cache_write_tokens`, `SpendBucket.cache_read_tokens`. Every surface renders it through one reading — `domain/spend.py::TokenAccount.cache_share`, whose required `replayed` kwarg is what stops a replay being shown a discount it never bought.
+
+The rule is that **one word cannot mean both**: `cached` is the replay, never the count. Filing a provider's count under the `cached` name is what kept the Harbor backend — the majority of spend — reporting `0` on every row while it was in fact capturing, and `account_spend` drops a record from the spend roll-up whenever `cached` is truthy, so a count there would have hidden paid calls from the budget ceiling.
+
+Two consequences worth knowing before reading any capture number. The provider cache is **per-replica and warms by repetition** — a prefix sent once warms one machine in a fleet, so capture climbs over a run rather than appearing on the second call; measured, a repeated prompt missed, then held 92–99% from roughly the fourth call on. And it is **why the optimizer prompt orders its fields the way it does** ([`opt_search_point.py::PromptTemplate.RENDER_ORDER`](../../promptpotter/domain/opt_search_point.py)): everything volatile renders last, because a single per-round value early in the prompt voids the discount on every byte behind it.
+
 
 ## Deprecated samples
 

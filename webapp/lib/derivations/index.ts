@@ -30,3 +30,4 @@ export * from "./searchPoint";
 export * from "./searchpoint-diff";
 export * from "./spend";
 export * from "./time-ray";
+export * from "./token-account";

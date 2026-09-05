@@ -34,6 +34,11 @@ export const TERMS: Record<string, string> = {
   badge_top:          "Page-anchor card — primary signal for round health.",
   brand_live_preview: "This page polls dashboard.json every 2s.",
 
+  // The TWO caches, which share no mechanism and must not share a word. Every surface saying
+  // either one reads these, so the distinction is stated once instead of in a tooltip per site.
+  cache_replayed: "Replayed — OUR content-addressed archive answered, so no provider was reached and the cell cost nothing. Counted per CANDIDATE: how many carry at least one replayed sample.",
+  cache_prefix:   "Prefix cache — the PROVIDER served part of a call's input off its own prompt-prefix cache, billed at a discount. The call did happen; part of it was cheaper.",
+
   // Remote control — the Lift chip's readouts, served on the strip and its panel
   remote_best:   "Lift over origin — the running winner's gain (best − origin). '+12% · best 62%' reads as '+12 points over origin, now at 62%' — the gain is the spend's return.",
   remote_eta:    "Estimated time until spend hits the budget at the current burn rate. Renders '—' when the budget is uncapped or spend is unknown.",

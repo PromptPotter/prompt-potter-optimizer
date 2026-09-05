@@ -18,6 +18,7 @@ from pydantic import ConfigDict, Field
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.results import DegradationHealth, OverlapReading
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
+from promptpotter.domain.spend import TokenAccount
 from promptpotter.domain.strict_model import StrictModel
 
 __all__ = [
@@ -85,6 +86,25 @@ class DashboardSample(StrictModel):
     query: str = Field(default="", description="Query, trimmed for display.")
     input_tokens: int | None = Field(default=None)
     output_tokens: int | None = Field(default=None)
+    cache_read_tokens: int | None = Field(
+        default=None,
+        description="How many of `input_tokens` the PROVIDER served off its own prefix cache — a "
+        "SUBSET, never an addition, and distinct from `cached`, which says OUR archive answered. "
+        "Null where no breakdown was reported; 0 where one was and there was no hit. Read it as a "
+        "share through `cache_share`.",
+    )
+
+    @property
+    def cache_share(self) -> float | None:
+        """A plain property, not a `computed_field`: this model is `extra="forbid"`, so a derived
+        key would serialize into `dashboard.json` and then refuse to read back. The browser holds
+        the peer spelling (`lib/derivations/token-account.ts`) — one per runtime, not per
+        renderer."""
+        return TokenAccount(
+            input=self.input_tokens or 0,
+            output=self.output_tokens or 0,
+            cache_read=self.cache_read_tokens,
+        ).cache_share(replayed=self.cached)
 
 
 class DashboardCandidate(StrictModel):
@@ -110,6 +130,11 @@ class DashboardCandidate(StrictModel):
     invalid: bool = False
     scored_samples: int = 0
     cached_samples: int = 0
+    # What measuring this searchpoint CONSUMED — the served twin of ``ScoredCandidate``'s three,
+    # which own the prose. Same fold, same exclusions, same ``None``-is-not-0 reading.
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cache_read_tokens: int | None = None
     # Unknown until the first sample announces the walk's length.
     expected_samples: int | None = None
     evaluators: dict[str, float] = Field(default_factory=dict)

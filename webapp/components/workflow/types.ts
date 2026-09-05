@@ -76,7 +76,7 @@ export interface NodeDataLike {
   duration_s?: number;
   round?: number;
   timestamp?: string;
-  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+  usage?: { input?: number; output?: number; reasoning?: number };
   input?: { template_name?: string };
   output?: { candidates?: { idx?: number; stats?: Record<string, unknown> }[] };
 }

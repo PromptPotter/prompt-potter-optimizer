@@ -35,4 +35,9 @@ export interface SampleRow {
   terminal_node: string;
   // Wall-clock duration in seconds; null when the source omits it.
   elapsed_s: number | null;
+  // Share of this row's INPUT tokens the provider served off its own prompt-prefix cache. A
+  // different fact from `cached` above: that one says no provider was reached at all, this one
+  // says one was and discounted part of the call. Null where the backend reports no breakdown —
+  // never 0, which would claim it reported one and there was no hit.
+  cache_share: number | null;
 }

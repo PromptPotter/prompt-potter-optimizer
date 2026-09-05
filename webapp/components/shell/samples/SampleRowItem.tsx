@@ -1,4 +1,5 @@
 "use client";
+import { prefixReading } from "@/lib/derivations";
 import type { SampleRow } from "@/lib/types";
 
 // How many of a candidate's rows are put in the DOM before the rest become a count. A rendering
@@ -22,6 +23,7 @@ export function SampleRowItem({ row }: { row: SampleRow }) {
   const tag =
     row.status === "HIT" ? "tag-hit" : row.status === "ERR" ? "tag-err" : "tag-miss";
   const pred = row.predicted ? row.predicted : "∅";
+  const prefix = prefixReading(row.cache_share, row.cached);
   return (
     <details className="rsv-row">
       <summary>
@@ -39,6 +41,16 @@ export function SampleRowItem({ row }: { row: SampleRow }) {
             title="Reused from a prior identical searchpoint — no fresh backend call"
           >
             📖 cached
+          </span>
+        )}
+        {/* The opposite fact from 📖 above, so it never renders as a second "cached" badge: a
+            provider DID serve this row and billed part of its input at a discount. Every non-replay
+            row shows one, including `c0%` and `c?` — suppressing those collapsed three different
+            facts into one blank on ~91% of rows, which read as "no cache" when it mostly meant
+            "never asked". `prefixReading` is the single decision. */}
+        {prefix.label && (
+          <span className="rsv-prefix-cache" title={prefix.title}>
+            {prefix.label}
           </span>
         )}
         <span className="body">

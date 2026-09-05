@@ -10,6 +10,7 @@ from typing import Any, cast
 from promptpotter.domain.results import OverlapReading
 from promptpotter.domain.run_records import LedgerFit
 from promptpotter.domain.scoring import QueryMeasurement, recorded_elapsed_s
+from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.projections.live_state import top_n_p_best
 
 
@@ -77,9 +78,12 @@ class RoundBuffer:
     ) -> None:
         pd = result.get("pipeline_data") or {}
         query_time = recorded_elapsed_s(cast("QueryMeasurement", result))
-        # Tokens may live on result or pd; prefer result, preserve 0 vs None.
-        in_tok = result.get("input_tokens")
-        out_tok = result.get("output_tokens")
+        # The row's whole token account, from the one place that carries it. This read used to
+        # prefer a top-level `input_tokens` twin and fall back to a `pipeline_data` one — neither
+        # of which any writer in this tree ever set, so every served row carried `null` and the
+        # tape's `io=` column, and then the cache share beside it, could not render at all.
+        # Measured before the fix: 385 served sample rows across 21 dashboards, none with a count.
+        account = TokenAccount.from_step_tokens(pd)
         # The scorer rides the candidate's running fitness (composite/accuracy/
         # hits/total over samples-so-far) out on the sample. Store it on the slot
         # so the live l1_score block serves a moving fitness before the final
@@ -113,8 +117,9 @@ class RoundBuffer:
                 "error": result.get("error"),
                 "error_category": result.get("error_category"),
                 "terminal_node": pd.get("terminal_node") or "",
-                "input_tokens": pd.get("input_tokens") if in_tok is None else in_tok,
-                "output_tokens": pd.get("output_tokens") if out_tok is None else out_tok,
+                "input_tokens": account.input if account else None,
+                "output_tokens": account.output if account else None,
+                "cache_read_tokens": account.cache_read if account else None,
             }
         )
 
