@@ -248,12 +248,16 @@ def compute_usd(
     rate = lookup_rate(model, provider)
     if rate is None:
         return None
-    cached_read = max(0, int(cache_read_tokens))
-    cached_write = max(0, int(cache_write_tokens))
-    uncached = max(0, input_tokens - cached_read - cached_write)
+    # `cache_read` / `cache_write`, never `cached_*`: across this package `cached` is the boolean
+    # "we replayed our own archive and no provider was reached", and these are the opposite fact —
+    # a provider DID serve the call and discounted part of its input. Same collision that kept the
+    # harbor count out of the ledger; this was the last spelling of it left.
+    cache_read = max(0, int(cache_read_tokens))
+    cache_write = max(0, int(cache_write_tokens))
+    full_rate_input = max(0, input_tokens - cache_read - cache_write)
     return (
-        uncached * rate.input
-        + cached_read * (rate.cache_read if rate.cache_read is not None else rate.input)
-        + cached_write * (rate.cache_write if rate.cache_write is not None else rate.input)
+        full_rate_input * rate.input
+        + cache_read * (rate.cache_read if rate.cache_read is not None else rate.input)
+        + cache_write * (rate.cache_write if rate.cache_write is not None else rate.input)
         + output_tokens * rate.output
     )

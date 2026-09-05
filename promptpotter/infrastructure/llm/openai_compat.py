@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import logging
 import sys
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, ValidationError
 
+from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.llm.base import LLMClientBase
 from promptpotter.infrastructure.llm.json_parse import (
     MIN_CONTENT_CHARS,
@@ -46,38 +46,20 @@ def _strip_titles(node: object) -> object:
     return node
 
 
-@dataclass(frozen=True)
-class AttemptUsage:
-    """What ONE round-trip consumed. ``reasoning`` is a subset of ``completion``; ``cache_read`` and
-    ``cache_write`` are subsets of ``prompt``. Summed, never averaged — a repaired call is two of these."""
-
-    prompt: int = 0
-    completion: int = 0
-    reasoning: int = 0
-    cache_read: int = 0
-    cache_write: int = 0
-
-    def __add__(self, other: AttemptUsage) -> AttemptUsage:
-        return AttemptUsage(
-            prompt=self.prompt + other.prompt,
-            completion=self.completion + other.completion,
-            reasoning=self.reasoning + other.reasoning,
-            cache_read=self.cache_read + other.cache_read,
-            cache_write=self.cache_write + other.cache_write,
-        )
-
-
-def _attempt_usage(response: ChatCompletion) -> AttemptUsage:
+def _attempt_usage(response: ChatCompletion) -> TokenAccount:
     """Usage for ONE round-trip, per-attempt on purpose. ``reasoning`` is the tell — a reasoning model can spend its
-    whole budget thinking and emit nothing — but only if read off the attempt that actually failed."""
+    whole budget thinking and emit nothing — but only if read off the attempt that actually failed.
+
+    Where the OpenAI wire's spelling ENDS: ``prompt_tokens`` / ``cached_tokens`` become ``input`` /
+    ``cache_read`` here and travel as that account everywhere after."""
     usage = getattr(response, "usage", None)
     if usage is None:
-        return AttemptUsage()
+        return TokenAccount()
     out_details = getattr(usage, "completion_tokens_details", None)
     in_details = getattr(usage, "prompt_tokens_details", None)
-    return AttemptUsage(
-        prompt=usage.prompt_tokens,
-        completion=usage.completion_tokens,
+    return TokenAccount(
+        input=usage.prompt_tokens,
+        output=usage.completion_tokens,
         reasoning=int(getattr(out_details, "reasoning_tokens", 0) or 0),
         cache_read=int(getattr(in_details, "cached_tokens", 0) or 0),
         cache_write=int(getattr(in_details, "cache_write_tokens", 0) or 0),
@@ -113,19 +95,15 @@ def _finish_reason(response: ChatCompletion) -> str | None:
     return response.choices[0].finish_reason if getattr(response, "choices", None) else None
 
 
-def _failure_diagnostics(
-    response: ChatCompletion, first_prompt: int, first_completion: int
-) -> dict[str, Any]:
-    """The SECOND attempt's account plus the BILLED totals. The token counts are deliberately sums across both round-trips —
-    that is the billing contract, and a failed call is billed the same as a good one."""
-    attempt = _attempt_usage(response)
+def _failure_diagnostics(response: ChatCompletion, first: TokenAccount) -> dict[str, Any]:
+    """The failed call's BILLED account. ``usage`` sums both round-trips — that is the billing
+    contract, and a failed call is billed like a good one; only ``model`` and ``finish_reason``
+    describe the second attempt alone, being quantities that do not add."""
     message = response.choices[0].message if getattr(response, "choices", None) else None
     return {
         "model": getattr(response, "model", None),
         "finish_reason": _finish_reason(response),
-        "prompt_tokens": attempt.prompt + first_prompt,
-        "completion_tokens": attempt.completion + first_completion,
-        "reasoning_tokens": attempt.reasoning,
+        "usage": _attempt_usage(response) + first,
         "reasoning_chars": len(getattr(message, "reasoning", None) or "" if message else ""),
     }
 
@@ -182,6 +160,7 @@ class OpenAICompatibleClient(LLMClientBase):
         response_schema: dict[str, Any] | None = None,
         reasoning_effort: str | None = None,
         seed: int | None = None,
+        route_order: list[str] | None = None,
         **kwargs: Any,
     ) -> LLMResponse:
         client = self._ensure_client()
@@ -205,8 +184,24 @@ class OpenAICompatibleClient(LLMClientBase):
         # Ask for the cost + cache breakdown rather than hoping it rides along. Via `extra_body`
         # because `create()` takes named params only: a bare `usage=` is a TypeError in the SDK,
         # never a request the provider gets to answer.
+        extra_body: dict[str, Any] = {}
         if self._usage_accounting:
-            request_params["extra_body"] = {"usage": {"include": True}}
+            extra_body["usage"] = {"include": True}
+        # A provider's implicit prefix cache is per-REPLICA, so it pays only where ONE route is hit
+        # repeatedly. A throughput sort (`:nitro`) re-ranks per call, which on `deepseek-v4-flash`
+        # put three of four live optimizer calls on Baidu — an endpoint that never caches, measured
+        # at 0% over four consecutive identical prompts. Naming the hosts IN ORDER is the only
+        # deterministic lever; `allow_fallbacks` keeps a dead endpoint degrading the route rather
+        # than failing the run. Measured on the real l1_generate prompt: a pinned Alibaba held
+        # 77.4% capture across 31.7 min — wider than the gap the loop leaves between optimizer
+        # calls — against 0% scattered. Names are OpenRouter's own `provider_name`; read them off
+        # `served_by` in the ledger, never from the catalogue, and never gate on
+        # `supports_implicit_caching`, which reads False on 14 of 15 deepseek endpoints including
+        # the one measured at 96.7%.
+        if route_order:
+            extra_body["provider"] = {"order": list(route_order), "allow_fallbacks": True}
+        if extra_body:
+            request_params["extra_body"] = extra_body
 
         wire_schema = response_schema or (
             response_model.model_json_schema() if response_model else None
@@ -240,14 +235,14 @@ class OpenAICompatibleClient(LLMClientBase):
             # reservation with the salvage's real token count (mirrors the repair +
             # normal exits) so the TPM window doesn't keep the cheap chars//4 estimate.
             if reservation is not None:
-                reservation.close(result.usage["total_tokens"])
+                reservation.close(result.usage.total)
             return result
         response, content, validation_err, parsed = result
         schema_repair_attempts = 0
         # The failed first attempt still burned tokens; carry them so the returned usage
         # meters BOTH round-trips (emit_token_usage otherwise under-reports a repaired call
         # by one full call). Zero unless a repair fires below.
-        first = AttemptUsage()
+        first = TokenAccount()
         first_cost: float | None = None
         if validation_err is not None:
             # The FAILING attempt's own account. Captured here because `response` is about
@@ -343,27 +338,15 @@ class OpenAICompatibleClient(LLMClientBase):
                 schema_repair_attempts = attempt_no
                 if isinstance(result, LLMResponse):
                     result.schema_repair_attempts = schema_repair_attempts
-                    # Fold every failed attempt's tokens onto the salvaged response.
-                    result.usage["prompt_tokens"] += first.prompt
-                    result.usage["completion_tokens"] += first.completion
-                    result.usage["reasoning_tokens"] = (
-                        result.usage.get("reasoning_tokens", 0) + first.reasoning
-                    )
-                    result.usage["cache_read_tokens"] = (
-                        result.usage.get("cache_read_tokens", 0) + first.cache_read
-                    )
-                    result.usage["cache_write_tokens"] = (
-                        result.usage.get("cache_write_tokens", 0) + first.cache_write
-                    )
-                    result.usage["total_tokens"] = (
-                        result.usage["prompt_tokens"] + result.usage["completion_tokens"]
-                    )
+                    # Fold every failed attempt's tokens onto the salvaged response; the account
+                    # owns the summing rule, so no field can be forgotten here.
+                    result.usage = result.usage + first
                     result.cost_usd = _billed_cost(first_cost, result.cost_usd)
                     # Reconcile the rolling-window reservation with the ACTUAL multi-round-trip
                     # total, not the cheap chars//4 estimate — else the TPM self-throttle
                     # under-counts on exactly the heaviest (repaired) calls. Mirrors line ~204.
                     if reservation is not None:
-                        reservation.close(result.usage["total_tokens"])
+                        reservation.close(result.usage.total)
                     return result
                 response, content, validation_err, parsed = result
                 if validation_err is None:
@@ -375,10 +358,9 @@ class OpenAICompatibleClient(LLMClientBase):
                         attempts=attempt_no + 1,
                         first_finish_reason=first_finish_reason,
                         first_content_chars=content_len,
-                        first_completion_tokens=first.completion,
-                        first_reasoning_tokens=first.reasoning,
+                        first=first,
                         retry_kind=retry_kind,
-                        **_failure_diagnostics(response, first.prompt, first.completion),
+                        **_failure_diagnostics(response, first),
                     )
                     # The cause names the FIRST attempt's failure — a later rung's own emptiness
                     # is downstream of it and is already in `diagnosis()`.
@@ -422,14 +404,7 @@ class OpenAICompatibleClient(LLMClientBase):
                 else ""
             ),
             model=response.model,
-            usage={
-                "prompt_tokens": billed.prompt,
-                "completion_tokens": billed.completion,
-                "total_tokens": billed.prompt + billed.completion,
-                "reasoning_tokens": billed.reasoning,
-                "cache_read_tokens": billed.cache_read,
-                "cache_write_tokens": billed.cache_write,
-            },
+            usage=billed,
             cost_usd=_billed_cost(first_cost, _attempt_cost(response)),
             served_by=_served_by(response),
             parsed=parsed,

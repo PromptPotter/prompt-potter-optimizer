@@ -45,12 +45,21 @@ whole sanctioned set; they name a sample's state, never a back-compat shim
   nothing. Read the round document's `prompt_fields`, never `CycleResult.winner_prompt_fields`:
   that one is the wire-side projection and has already flattened `few_shot_examples` into a
   rendered block that `from_prompt_fields` cannot restore.
-- `spend.py` — `SpendBucket` / `SpendRollup`: a cycle's money, and the only concern in this layer
-  that is not about rounds, candidates or verdicts. Apart from `results.py` so a program reusing
-  the engine can take money-counting as a file rather than carve it out of a section; `results.py`
-  imports `SpendRollup` for `CycleResult.spend` and deliberately does not re-export it. What the
-  buckets MEAN — bill vs incurred, why `reasoning_tokens` is a subset added into no total, why an
-  unpriced count makes `total_used_usd` a floor — is stated on the fields themselves.
+- `spend.py` — tokens and money, at both arities: `TokenAccount` is ONE call's (or one row's)
+  consumption, `SpendBucket` / `SpendRollup` the same account summed over a cycle. The only concern
+  in this layer that is not about rounds, candidates or verdicts. Apart from `results.py` so a
+  program reusing the engine can take money-counting as a file rather than carve it out of a
+  section; `results.py` imports `SpendRollup` for `CycleResult.spend` and deliberately does not
+  re-export it. What the buckets MEAN — bill vs incurred, why `reasoning_tokens` is a subset added
+  into no total, why an unpriced count makes `total_used_usd` a floor — is stated on the fields.
+  **`TokenAccount` IS the carrier, not a converter** — every client returns one on
+  `LLMResponse.usage`, `StepTokenUsage` beside it is its wire spelling, and the emit seam is the
+  one place it flattens onto `TokenUsageRecord`. Hand-converted at nine sites it was three folds
+  that disagreed, one reading a field nothing wrote, one `KeyError` on an absent total.
+  Its `cache_share(*, replayed)` is likewise the only reading of a provider's prefix-cache
+  discount — the kwarg is required so no renderer can omit the arm on which the number is a lie —
+  and `rendering.py::prefix_reading` the only rendering of it: the reading is TOTAL over four
+  states, and every surface that suppressed on `> 0` instead merged three of them into one blank.
 - `campaign.py` — `Campaign` frozen manifest (`campaign.json`); the
   first-class optimization-effort entity, single owner of the frozen
   `CampaignConfig` snapshot.

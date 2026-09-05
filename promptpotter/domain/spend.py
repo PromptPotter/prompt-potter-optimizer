@@ -7,13 +7,161 @@ want on its own terms, so the seam is a file rather than a section to carve out.
 
 from __future__ import annotations
 
-from typing import Literal, get_args
+import operator
+from collections.abc import Iterable, Mapping
+from functools import reduce
+from typing import Literal, NotRequired, TypedDict, get_args
 
-from pydantic import Field
+from pydantic import ConfigDict, Field, ValidationError
 
 from promptpotter.domain.strict_model import StrictModel
 
-__all__ = ["TOKEN_KIND_BUCKET", "SpendBucket", "SpendRollup", "TokenUsageKind"]
+__all__ = [
+    "TOKEN_KIND_BUCKET",
+    "SpendBucket",
+    "SpendRollup",
+    "StepTokenUsage",
+    "TokenAccount",
+    "TokenUsageKind",
+]
+
+
+def _count(value: object) -> int:
+    # `bool` first: it is an `int` subclass, so a backend answering `true` meters as one token.
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    return int(value)
+
+
+def _as_mapping(value: object) -> Mapping[str, object] | None:
+    return value if isinstance(value, Mapping) else None
+
+
+def _optional_count(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return int(value)
+
+
+class StepTokenUsage(TypedDict):
+    """Per-LLM-node ``step_tokens`` entry — the WIRE spelling of :class:`TokenAccount`, which
+    deserializes one. A ``NotRequired`` key is absent where the provider surfaced nothing."""
+
+    input: int
+    output: int
+    estimated: bool
+    cost_usd: NotRequired[float]
+    model: NotRequired[str]
+    provider: NotRequired[str]
+    # WHICH upstream host answered, where `provider` names a gateway that routes onward; absent
+    # for a provider that is its own host.
+    served_by: NotRequired[str]
+    finish_reason: NotRequired[str]
+    reasoning: NotRequired[int]
+    # Distinct from the `cached` flag beside it: that one says WE replayed the call, this one that
+    # THEY discounted it. No `cache_write` peer — a field no producer sets is not a state.
+    cache_read: NotRequired[int]
+
+
+class TokenAccount(StrictModel):
+    """What ONE metered thing consumed — a provider round-trip, a measured row, a searchpoint.
+
+    Every subset stays a subset, never a further total: ``reasoning`` of ``output`` (the provider
+    bills thinking as output), both cache counts of ``input`` — Anthropic included, whose client
+    normalizes. ``cache_read=None`` means no breakdown was reported; ``0`` means one was and there
+    was no hit."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    input: int = 0
+    output: int = 0
+    reasoning: int = 0
+    cache_read: int | None = None
+    #: No ``None`` arm: no backend reports one, so absence is not expressible here.
+    cache_write: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.input + self.output
+
+    def __add__(self, other: TokenAccount) -> TokenAccount:
+        # Summed, never averaged. Reads sum too; only both-absent stays absent.
+        reads = [r for r in (self.cache_read, other.cache_read) if r is not None]
+        return TokenAccount(
+            input=self.input + other.input,
+            output=self.output + other.output,
+            reasoning=self.reasoning + other.reasoning,
+            cache_read=sum(reads) if reads else None,
+            cache_write=self.cache_write + other.cache_write,
+        )
+
+    @classmethod
+    def from_step_entry(cls, entry: Mapping[str, object]) -> TokenAccount:
+        return cls(
+            input=_count(entry.get("input")),
+            output=_count(entry.get("output")),
+            reasoning=_count(entry.get("reasoning")),
+            cache_read=_optional_count(entry.get("cache_read")),
+        )
+
+    @classmethod
+    def from_step_tokens(cls, pipeline_data: Mapping[str, object] | None) -> TokenAccount | None:
+        """A measured row's account, folded over its per-node entries — the only answer to what a
+        cell cost in tokens, since nothing upstream of the entries carries a sum.
+
+        A MIXED row folds to the pessimistic share: reads sum but the denominator stays every
+        node's input, which is what the surfaces rendering it claim. ``None`` where the row carries
+        no entries, so "reported nothing" stays distinct from "reported zero"."""
+        raw = (pipeline_data or {}).get("step_tokens")
+        if not isinstance(raw, Mapping):
+            return None
+        entries = [e for e in raw.values() if isinstance(e, Mapping)]
+        if not entries:
+            return None
+        return reduce(operator.add, (cls.from_step_entry(e) for e in entries))
+
+    @classmethod
+    def from_measured_rows(cls, rows: Iterable[Mapping[str, object]]) -> TokenAccount | None:
+        """A whole SEARCHPOINT's account — every cell it was measured on, folded.
+
+        REPLAYED rows are excluded: their counts are the banked call's, so folding them in reports
+        a prefix discount this run never bought. Same exclusion the spend buckets fold under
+        (``live_dashboard/view.py::_bank_call``). ``None`` where no measured row carried one."""
+        accounts = [
+            a
+            for r in rows
+            if not r.get("cached")
+            and (a := cls.from_step_tokens(_as_mapping(r.get("pipeline_data")))) is not None
+        ]
+        if not accounts:
+            return None
+        return reduce(operator.add, accounts)
+
+    @classmethod
+    def from_payload(cls, usage: object) -> TokenAccount:
+        """One account off a ledger ``llm_call`` payload — this model's own dump, read back.
+
+        Anything else degrades to an EMPTY account. Not a compatibility shim: the ledger is a
+        chronology a resume REPLAYS, so a record any build wrote is data this one has to render
+        rather than die on. The live path holds the typed account and never comes through here."""
+        if not isinstance(usage, Mapping):
+            return cls()
+        try:
+            return cls.model_validate(usage)
+        except ValidationError:
+            return cls()
+
+    def cache_share(self, *, replayed: bool) -> float | None:
+        """Fraction of ``input`` the PROVIDER served off its own prefix cache — the ONE reading,
+        so no surface decides for itself when the number means nothing.
+
+        ``None`` wherever it is unanswerable, *replayed* included: OUR archive served that call, so
+        the counts are the banked row's and a discount printed beside them claims one this run
+        never got. ``0.0`` is a MEASUREMENT — a renderer wanting silence there tests truthiness,
+        not ``is not None``."""
+        if replayed or self.cache_read is None or self.input <= 0:
+            return None
+        return self.cache_read / self.input
 
 
 TokenUsageKind = Literal["optimizer", "backend", "judge"]
@@ -51,7 +199,7 @@ class SpendBucket(StrictModel):
 
 
 class SpendRollup(StrictModel):
-    """A cycle's spend: the two buckets, and the totals every consumer reads off them.
+    """A cycle's spend: the three buckets, and the totals every consumer reads off them.
     ``total_used_usd`` is the BILL a budget caps; ``total_incurred_usd`` prices cache hits too."""
 
     backend: SpendBucket = Field(default_factory=SpendBucket)
@@ -60,7 +208,7 @@ class SpendRollup(StrictModel):
     judge: SpendBucket = Field(default_factory=SpendBucket)
     total_used_usd: float = 0.0
     total_incurred_usd: float = 0.0
-    # Cumulative BILLED tokens across both buckets — the token halt probe's source. Cache hits are
+    # Cumulative BILLED tokens across every bucket — the token halt probe's source. Cache hits are
     # excluded: a cap bounds what the run spends, not what it would have spent.
     total_tokens_used: int = 0
     # Billed tokens with no resolvable USD rate. >0 means ``total_used_usd`` UNDERSTATES real spend

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.spend import StepTokenUsage
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -186,7 +187,7 @@ async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]
     }
 
 
-def _step_tokens(prediction: Any) -> dict[str, dict[str, Any]]:
+def _step_tokens(prediction: Any) -> dict[str, StepTokenUsage]:
     """The student's usage on the SAME channel a remote backend's rides — one ``step_tokens``
     entry, metered by ``emit_step_token_usage`` on both the fresh and the cache-replay path. No
     ``cost_usd``: pricing is our rate table's job, and an unpriced model is already a named

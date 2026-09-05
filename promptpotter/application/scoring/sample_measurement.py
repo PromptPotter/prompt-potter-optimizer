@@ -7,7 +7,7 @@ import logging
 import re
 import time
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
@@ -18,6 +18,7 @@ from promptpotter.domain.l4.proxies import INNER_FACT_KEYS, PARENT_LEVEL_SE_KEY
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import QueryMeasurement, is_hit, turn_scalars
+from promptpotter.domain.spend import StepTokenUsage, TokenAccount
 from promptpotter.infrastructure.llm.telemetry import emit_token_usage
 from promptpotter.shared.errors import ErrorCategory, has_pipeline_warnings
 
@@ -133,21 +134,32 @@ _INFRA_KEYS: frozenset[str] = frozenset(
 )
 
 
-class StepTokenUsage(TypedDict):
-    """Per-LLM-node ``step_tokens`` entry; the ``NotRequired`` keys arrive only when the provider
-    surfaced them. ``finish_reason`` + ``reasoning`` are what ``classify_result`` reads."""
+# Which wire keys `_compute_step_tokens` copies onto the entry it re-seeds, and the type each must
+# arrive as. DECLARED, and asserted TOTAL over `StepTokenUsage`, so a key added to that type and
+# not to this table fails at import rather than vanishing from every row it was reported on.
+_WIRE_SEEDED: dict[str, type] = {
+    "cost_usd": float,
+    "model": str,
+    "served_by": str,
+    "finish_reason": str,
+    "reasoning": int,
+    "cache_read": int,
+}
 
-    input: int
-    output: int
-    estimated: bool
-    cost_usd: NotRequired[float]
-    model: NotRequired[str]
-    provider: NotRequired[str]
-    # WHICH upstream host answered, where `provider` names a gateway that routes onward; the
-    # backend forwards it, and it is absent for a provider that is its own host.
-    served_by: NotRequired[str]
-    finish_reason: NotRequired[str]
-    reasoning: NotRequired[int]
+# The keys this function answers for ITSELF: the two counts, its own `estimated` verdict, and
+# `provider` — the overlay routed the call, so whoever we configured is whoever billed us.
+_SEAM_OWNED: frozenset[str] = frozenset({"input", "output", "estimated", "provider"})
+
+assert set(_WIRE_SEEDED) | _SEAM_OWNED == set(StepTokenUsage.__annotations__), (
+    "every StepTokenUsage key is either copied from the wire (_WIRE_SEEDED) or answered by "
+    "_compute_step_tokens itself (_SEAM_OWNED) — one that is neither is dropped in silence"
+)
+# The union above is satisfied by a key listed in BOTH, which would read as copied and be
+# overwritten. So: disjoint too.
+assert _SEAM_OWNED.isdisjoint(_WIRE_SEEDED), (
+    f"{sorted(_SEAM_OWNED & set(_WIRE_SEEDED))} is listed as both copied and answered here — "
+    f"a key has one source, and the seam's would silently win"
+)
 
 
 def emit_step_token_usage(
@@ -170,9 +182,7 @@ def emit_step_token_usage(
         emit_token_usage(
             node=str(node_name),
             kind="backend",
-            input_tokens=in_tok,
-            output_tokens=out_tok,
-            reasoning_tokens=entry.get("reasoning", 0),
+            usage=TokenAccount.from_step_entry(entry),
             duration_s=float(raw_dur) if isinstance(raw_dur, (int, float)) else 0.0,
             model=entry.get("model"),
             provider=entry.get("provider"),
@@ -202,38 +212,32 @@ def _compute_step_tokens(
     if isinstance(raw, dict):
         for node_name, entry in raw.items():
             if isinstance(entry, dict):
-                seeded: StepTokenUsage = {
+                # The connector's own entry is REBUILT here rather than carried, so a key absent
+                # from `_WIRE_SEEDED` is dropped however faithfully the connector reported it.
+                seeded: dict[str, Any] = {
                     "input": int(entry.get("input", 0)),
                     "output": int(entry.get("output", 0)),
                     "estimated": False,
                 }
-                # The dashboard prefers a backend-surfaced cost/model over its bundled rate
-                # table.
-                cost = entry.get("cost_usd")
-                if isinstance(cost, (int, float)):
-                    seeded["cost_usd"] = float(cost)
-                wire_model = entry.get("model")
-                model = (
-                    wire_model if isinstance(wire_model, str) else _configured(node_name, "model")
-                )
-                if model is not None:
+                # What each key buys, and what omitting one costs: `backend-integration.md`
+                # § Optional `step_tokens` fields.
+                for key, kind in _WIRE_SEEDED.items():
+                    value = entry.get(key)
+                    if isinstance(value, bool) or value is None:
+                        continue
+                    if kind is str:
+                        if isinstance(value, str):
+                            seeded[key] = value
+                    elif isinstance(value, (int, float)):
+                        seeded[key] = kind(value)
+                if "model" not in seeded and (model := _configured(node_name, "model")):
                     seeded["model"] = model
-                # NOT taken from the wire even when the backend reports one: the overlay is
-                # what actually routed the call, and whoever we configured is whoever billed
-                # us. TermNorm's `spend.backend.model` answers a provider slug here.
+                # `_SEAM_OWNED`, so never the wire's — TermNorm's `spend.backend.model` answers a
+                # provider slug here.
                 provider = _configured(node_name, "provider")
                 if provider is not None:
                     seeded["provider"] = provider
-                # ``classify_result`` needs the raw shape to tell a truncation
-                # (``finish_reason=length``) from a genuinely empty response; dropping these
-                # collapses every empty terminal onto the fatal ``empty_response`` arm.
-                fr = entry.get("finish_reason")
-                if isinstance(fr, str):
-                    seeded["finish_reason"] = fr
-                reasoning = entry.get("reasoning")
-                if isinstance(reasoning, (int, float)) and not isinstance(reasoning, bool):
-                    seeded["reasoning"] = int(reasoning)
-                out[node_name] = seeded
+                out[node_name] = cast("StepTokenUsage", seeded)
 
     for node in pipeline_schema.nodes:
         if not node.is_llm or node.name in out:

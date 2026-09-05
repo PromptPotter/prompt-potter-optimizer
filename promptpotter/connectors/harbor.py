@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.connectors.protocol import BackendUnreachableError, Connector
 from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.spend import StepTokenUsage
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -755,21 +756,27 @@ def _digest(
     return "\n".join(lines)
 
 
-def _step_tokens(result: TrialResult, model_name: str | None) -> dict[str, dict[str, Any]]:
+def _step_tokens(result: TrialResult, model_name: str | None) -> dict[str, StepTokenUsage]:
     """The agent's spend on the SAME channel a remote backend's rides. Harbor totals it for us
     (``TrialResult.compute_token_cost_totals``), so this is a projection rather than a count.
     ``n_input_tokens`` is total input INCLUDING cache on their side, which is the convention
-    ``step_tokens`` already uses."""
+    ``step_tokens`` already uses.
+
+    TYPED as :class:`StepTokenUsage` rather than a bare dict, so a count filed under a key nothing
+    reads is a type error here rather than a silent drop downstream."""
     n_input, n_cache, n_output, cost = result.compute_token_cost_totals()
     if n_input is None and n_output is None and cost is None:
         return {}
-    entry: dict[str, Any] = {
+    entry: StepTokenUsage = {
         "input": int(n_input or 0),
         "output": int(n_output or 0),
         "estimated": False,
     }
     if n_cache is not None:
-        entry["cached"] = int(n_cache)
+        # `cache_read`, NOT `cached`: everywhere else in this package `cached` is the boolean
+        # "replayed from our archive, so it cost nothing", and `record_cost_usd` prices a truthy
+        # one at 0.0 — a paid call filed under that name goes missing from the bill.
+        entry["cache_read"] = int(n_cache)
     if cost is not None:
         # Harbor prices the call through litellm. Ours is the authority for models it knows, but
         # an agent CLI's spend never passes through our client at all, so without this the

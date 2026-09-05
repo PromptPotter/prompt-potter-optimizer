@@ -16,7 +16,7 @@ from promptpotter.domain.run_records import (
     RoundWarningRecord,
     TokenUsageRecord,
 )
-from promptpotter.domain.spend import TokenUsageKind
+from promptpotter.domain.spend import TokenAccount, TokenUsageKind
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -62,20 +62,20 @@ def emit_token_usage(
     *,
     node: str,
     kind: TokenUsageKind,
-    input_tokens: int,
-    output_tokens: int,
+    usage: TokenAccount,
     duration_s: float,
     model: str | None = None,
     provider: str | None = None,
     served_by: str | None = None,
     cost_usd: float | None = None,
     cached: bool = False,
-    reasoning_tokens: int = 0,
-    cache_read_tokens: int = 0,
-    cache_write_tokens: int = 0,
 ) -> None:
     """Build ``TokenUsageRecord`` and append it. ``cached`` marks a call served from the content-addressed
-    cache: it consumed the recorded tokens but spent no money, and the rollup keeps the two apart."""
+    cache: it consumed the recorded tokens but spent no money, and the rollup keeps the two apart.
+
+    **The one place the account is flattened**, and it stays flat: the record is the persisted
+    chronology every lifetime-spend read sums off raw JSON, so nesting the counts under a key
+    would zero every account's history. ``cache_read=None`` lands as ``0`` here."""
     _append_record(
         TokenUsageRecord(
             kind=kind,
@@ -83,11 +83,11 @@ def emit_token_usage(
             model=model,
             provider=provider,
             served_by=served_by,
-            input_tokens=int(input_tokens),
-            output_tokens=int(output_tokens),
-            reasoning_tokens=int(reasoning_tokens),
-            cache_read_tokens=int(cache_read_tokens),
-            cache_write_tokens=int(cache_write_tokens),
+            input_tokens=usage.input,
+            output_tokens=usage.output,
+            reasoning_tokens=usage.reasoning,
+            cache_read_tokens=usage.cache_read or 0,
+            cache_write_tokens=usage.cache_write,
             duration_s=float(duration_s),
             cost_usd=cost_usd,
             cached=cached,

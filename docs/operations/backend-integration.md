@@ -18,13 +18,18 @@ Wire shapes: [`../developer/node-standard.md`](../developer/node-standard.md).
 
 ### Optional `step_tokens` fields — read, never required
 
-Every key below is ABSENT when the backend reported nothing, and PromptPotter reads absence as "not reported" rather than as a value. **The coupling is soft by construction: an older backend that sends none of them degrades what can be asked afterwards and breaks nothing**, so these need no version gate between the two repos and no release may claim one.
+Every key is ABSENT when the backend reported nothing, and PromptPotter reads absence as "not reported" rather than as a value. **The coupling is soft by construction: an older backend that sends none of them degrades what can be asked afterwards and breaks nothing**, so these need no version gate between the two repos and no release may claim one.
 
-| Key | What it is | Missing ⇒ |
-|---|---|---|
-| `cost_usd` | what the provider billed for that call | falls back to the bundled rate table |
-| `model` | the upstream model id | spend buckets by the provider slug instead |
-| `served_by` | the upstream HOST, where `provider` names a gateway that routes onward | host attribution unavailable; nothing else changes |
+**The roster is `scoring/sample_measurement.py::_WIRE_SEEDED`**, asserted total over `domain/spend.py::StepTokenUsage` at import — read it there. It is named rather than re-listed because the hand-kept copy that used to sit here fell three keys behind, and the table below is only what a backend author cannot derive from the type: what it COSTS to omit one. An **in-tree** connector annotates its producer with that type and lets the checker enforce the roster; the type sits in `domain/` so it can.
+
+| Key | Missing ⇒ |
+|---|---|
+| `cost_usd` | falls back to the bundled rate table |
+| `model` | spend buckets by the provider slug instead |
+| `served_by` | host attribution unavailable; nothing else changes. **This is the one key no in-repo connector writes** — the read side is now pinned by a test, but whether a `backend` row names its upstream host is entirely the remote backend's to answer |
+| `finish_reason` | a truncation cannot be told from an empty response, and every empty terminal grades as the fatal `empty_response` |
+| `reasoning` | the share of output spent thinking is unreadable, so a slow node reads as a slow provider |
+| `cache_read` | the prefix-cache reading is `unreported` — every surface renders `c?`, distinct from a reported `c0%` (`domain/rendering.py::prefix_reading`) |
 
 **Deploying the pair.** The Linux box co-hosts both — `deploy.config::BACKEND_DIR` / `BACKEND_SERVICE` — and `deploy-linux/update.sh` already syncs the backend checkout, reinstalls its requirements and restarts its unit alongside the optimizer. A backend-side change therefore reaches production through the ordinary update, provided it is pushed first; there is no separate download step to add.
 

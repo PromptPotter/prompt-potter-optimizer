@@ -79,22 +79,21 @@ class LedgerPipelineData(TypedDict, total=False):
     # depth ("this outcome depends on config only up to here"), which is what the L4 connector
     # stamps outright. Read it as "where did it get to", never as "where did it die".
     terminal_node: str
+    # Per-LLM-node tokens, and the ONLY place a row's token counts live. The key set is
+    # ``StepTokenUsage`` (domain/spend.py, beside the account that reads one), whose ``_WIRE_SEEDED``
+    # is asserted total over it — so this comment names the type and never re-lists its members,
+    # which is what let the list here fall two fields behind. ``estimated=True`` ⇒ the counts came
+    # from the chars/4 fallback rather than provider usage.
+    #
+    # **Read it through ``TokenAccount.from_step_tokens``, never by hand.** Four surfaces read a
+    # top-level ``input_tokens`` twin here instead; it was declared, read by all four and written
+    # by nothing, so each of them rendered blank for the life of the field.
     step_timings: dict[str, Any]
-    # Per-LLM-node tokens — mirror of ``StepTokenUsage`` (application/scoring/
-    # sample_measurement.py): ``{node: {input, output, estimated,
-    # [cost_usd, model, finish_reason, reasoning]}}``; ``estimated=True`` ⇒ counts
-    # came from chars/4 fallback, not provider usage; the bracketed keys are present
-    # only when the provider surfaced them.
     step_tokens: dict[str, dict[str, Any]]
     diagnostics: dict[str, Any]
     # L4: one outer sample IS a whole inner campaign, so its "answer" is a lift.
     mean_round_delta: float
-    # Read defensively beside the top-level twins (``_absorb_sample_scored``, ``RoundBuffer``):
-    # no writer in this repo sets them here, but a backend that did must not be silently
-    # dropped by ``ledger_sample_view``.
     error: str | None
-    input_tokens: int
-    output_tokens: int
 
 
 class PipelineData(LedgerPipelineData, total=False):
@@ -167,8 +166,6 @@ class QueryMeasurement(TypedDict):
     # the pair and must never re-derive it.
     ground_truth_rank: NotRequired[int | None]
     n_candidates: NotRequired[int]
-    input_tokens: NotRequired[int]
-    output_tokens: NotRequired[int]
     # The candidate's composite over samples-so-far, attached for the ledger path only
     # (``query_loop._with_running``) so a file-tree or chat reader watches it converge.
     _running: NotRequired[dict[str, Any]]
@@ -212,6 +209,13 @@ _PIPELINE_KEYS: frozenset[str] = frozenset(
 #
 # Two sets rather than one, because the asserts below run in OPPOSITE directions and a flat set
 # could not carry either.
+#
+# A THIRD direction has no set, because it must have no members: a key DECLARED and READ but
+# written by nothing. Nothing can catch one — it is not unread, so no compaction moves it, and it
+# is declared, so no assert refuses it. It simply renders blank forever, and every reader reports
+# "this backend does not say" about a fact the row is carrying one level down. `input_tokens` /
+# `output_tokens` sat here exactly that way, read by four surfaces. A row's counts come from
+# `domain/spend.py::TokenAccount.from_step_tokens`; declare no twin beside `step_tokens`.
 
 UNREAD_ROW_KEYS: frozenset[str] = frozenset({"objective"})
 """Declared, written, and read by nothing.

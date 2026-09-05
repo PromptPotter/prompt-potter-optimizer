@@ -104,10 +104,8 @@ def _materialize_cached(item: QueryMeasurement, scorer: CellScorer) -> QueryMeas
 def _emit_cached_step_tokens(row: QueryMeasurement) -> None:
     """Meter a measurement-cache hit off the tokens the archived row already carries. Replaying them costs nothing, but the
     search still made the call, so the ledger has to say so."""
-    from promptpotter.application.scoring.sample_measurement import (
-        StepTokenUsage,
-        emit_step_token_usage,
-    )
+    from promptpotter.application.scoring.sample_measurement import emit_step_token_usage
+    from promptpotter.domain.spend import StepTokenUsage
 
     pd = row.get("pipeline_data")
     if not isinstance(pd, dict):

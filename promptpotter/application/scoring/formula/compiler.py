@@ -19,6 +19,7 @@ from promptpotter.domain.scoring import (
     ScoringSpec,
     recorded_cost_s,
 )
+from promptpotter.domain.spend import TokenAccount
 from promptpotter.shared.errors import PayloadInvalidError, has_pipeline_warnings, is_error_result
 
 # The L4 recursion's measurand, in logits: one inner campaign's mean-over-rounds lift over its OWN
@@ -286,10 +287,13 @@ def cell_namespace(result: dict[str, Any]) -> dict[str, Any]:
     }
     if "n_candidates" in result:
         ns["n_candidates"] = result["n_candidates"]
-    if step_tokens := (pd.get("step_tokens") or {}):
-        entries = [e for e in step_tokens.values() if isinstance(e, dict)]
-        ns["input_tokens"] = sum(int(e.get("input", 0)) for e in entries)
-        ns["output_tokens"] = sum(int(e.get("output", 0)) for e in entries)
+    # Bound only where the row HAS entries: a formula naming `input_tokens` on a row that carries
+    # none must raise `ScoringTermMissingError` rather than score it at zero. The fold itself is
+    # `TokenAccount`'s — this was one of three hand-written copies of it, and the only one that
+    # summed the counts as well as the cache reads.
+    if account := TokenAccount.from_step_tokens(pd):
+        ns["input_tokens"] = account.input
+        ns["output_tokens"] = account.output
 
     for key, val in pd.items():
         if isinstance(val, dict):

@@ -126,6 +126,24 @@ async def _chat_under_deadline(
     raise AssertionError("unreachable — the loop returns or raises on every path")
 
 
+def _replay(cache: LLMReuseCache, key: str, *, label: str) -> LLMResponse | None:
+    """The stored response for *key*, or ``None`` for anything that is not one — a miss, an
+    unreadable file and an entry an older build wrote are ONE answer, because the caller re-samples
+    on all three.
+
+    The same rule the grader's replay follows (``judges/call.py::_replay``). This sits inside the
+    chokepoint every optimizer call passes mid-round, and a cache exists to make a call cheaper —
+    nothing in it may ever cost a run."""
+    try:
+        payload = cache.load(key)
+        if payload is None:
+            return None
+        return LLMResponse.model_validate(payload)
+    except Exception as exc:
+        logger.warning("optimizer_reuse entry for %s unusable, re-sampling — %s", label, exc)
+        return None
+
+
 def _ledger_response_payload(response: LLMResponse) -> Any:
     """Materialize ``response.parsed`` into a JSON-safe shape for the ledger — typed instances dump,
     raw dicts pass through, and a text-mode call falls back to the raw content string."""
@@ -177,9 +195,13 @@ async def llm_call(
     if config_overrides := get_optimizer_config_overrides():
         merged = {**merged, **config_overrides}
     llm_client = get_llm_client(merged["provider"])
+    # Passed ONLY when set. A client with no routing concept (Anthropic) takes an unknown named
+    # arg into `**kwargs`, and a key it cannot use is a key it may forward to its own SDK — so the
+    # absence has to be an absent argument, not a `None` one.
+    route_kwargs: dict[str, Any] = {"route_order": ro} if (ro := merged.get("route_order")) else {}
 
     cache_key: str | None = None
-    cached_payload: dict[str, Any] | None = None
+    replayed: LLMResponse | None = None
     if context.cache is not None:
         cache_key = hash_call(
             messages=messages,
@@ -191,8 +213,9 @@ async def llm_call(
             seed=merged.get("seed"),
             max_tokens=merged.get("max_tokens"),
             reasoning_effort=merged.get("reasoning_effort"),
+            route_order=merged.get("route_order"),
         )
-        cached_payload = context.cache.load(cache_key)
+        replayed = _replay(context.cache, cache_key, label=label)
 
     _t0 = time.monotonic()
 
@@ -200,8 +223,8 @@ async def llm_call(
     # mid-call — with the eventual LLMCallRecord. Empty when no ledger is bound.
     call_id = uuid.uuid4().hex if context.ledger is not None else ""
 
-    if cached_payload is not None:
-        response = LLMResponse.model_validate(cached_payload)
+    if replayed is not None:
+        response = replayed
         # ``parsed`` is typed ``Any``, so `model_validate` leaves the saved dict a dict.
         # Re-validate against the known model so consumers keep attribute access.
         if response_model is not None and isinstance(response.parsed, dict):
@@ -298,6 +321,7 @@ async def llm_call(
                         response_schema=response_schema,
                         reasoning_effort=merged.get("reasoning_effort"),
                         seed=merged.get("seed"),
+                        **route_kwargs,
                     )
                     break
                 except Exception as exc:
@@ -333,9 +357,7 @@ async def llm_call(
             emit_token_usage(
                 node=label,
                 kind="optimizer",
-                input_tokens=parse_err.prompt_tokens,
-                output_tokens=parse_err.completion_tokens,
-                reasoning_tokens=parse_err.reasoning_tokens,
+                usage=parse_err.usage,
                 duration_s=round(time.monotonic() - _t0, 2),
                 model=parse_err.model or merged.get("model"),
                 provider=merged["provider"],
@@ -369,17 +391,13 @@ async def llm_call(
     emit_token_usage(
         node=label,
         kind="optimizer",
-        input_tokens=response.usage.get("prompt_tokens", 0),
-        output_tokens=response.usage.get("completion_tokens", 0),
-        reasoning_tokens=response.usage.get("reasoning_tokens", 0),
-        cache_read_tokens=response.usage.get("cache_read_tokens", 0),
-        cache_write_tokens=response.usage.get("cache_write_tokens", 0),
+        usage=response.usage,
         provider=merged["provider"],
         served_by=response.served_by,
         duration_s=duration_s,
         model=response.model,
         cost_usd=response.cost_usd,
-        cached=cached_payload is not None,
+        cached=replayed is not None,
     )
 
     # Meter FIRST, then store: the provider has already billed this call, so nothing that can
@@ -391,7 +409,7 @@ async def llm_call(
     # call replays the emptiness and the caller sees a zero-candidate round forever. The cache
     # is tenant-global, so this outlives the run that hit it.
     usable = bool(response.content.strip()) or response.parsed is not None
-    if cached_payload is None and context.cache is not None and cache_key is not None and usable:
+    if replayed is None and context.cache is not None and cache_key is not None and usable:
         context.cache.save(cache_key, response.model_dump())
 
     if context.ledger is not None:
@@ -403,7 +421,7 @@ async def llm_call(
                 "max_tokens": merged.get("max_tokens"),
             },
             "response": _ledger_response_payload(response),
-            "usage": response.usage,
+            "usage": response.usage.model_dump(),
             "model": response.model,
             "duration_s": duration_s,
             # Non-zero ⇒ the JSON only landed after an extra round-trip — the audit trail's
@@ -414,7 +432,7 @@ async def llm_call(
         # and nothing may start. Omitted when empty so a non-reasoning model's block stays clean.
         if response.reasoning:
             payload["reasoning"] = response.reasoning[:_REASONING_LEDGER_CAP]
-        if cached_payload is not None:
+        if replayed is not None:
             payload["cached"] = True
         if trace_meta:
             payload.update(trace_meta)

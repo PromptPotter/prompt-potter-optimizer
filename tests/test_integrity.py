@@ -2024,13 +2024,18 @@ class _CountingClient:
         self.calls = 0
 
     async def chat(self, **_kw: Any) -> Any:
+        from promptpotter.domain.spend import TokenAccount
         from promptpotter.infrastructure.llm.response import LLMResponse
 
         self.calls += 1
         return LLMResponse(
             content=self.reply,
             model="grader-1",
-            usage={"prompt_tokens": 11, "completion_tokens": 1},
+            # The provider's own prefix-cache discount rides `cache_read`. A judge prompt is the
+            # most cacheable shape we send — the rubric is a module constant, so most of it is
+            # byte-identical on every cell — so a stub reporting none cannot catch the metering
+            # dropping it.
+            usage=TokenAccount(input=11, output=1, cache_read=8),
         )
 
 
@@ -2079,6 +2084,157 @@ async def test_a_second_grading_of_one_comparison_is_not_re_billed(
     assert client.calls == 1, f"an identical comparison re-billed the provider: {client.calls}x"
     assert [m["cached"] for m in metered] == [False, True], "a served grading went unmetered"
     assert {m["kind"] for m in metered} == {"judge"}, "grading spend landed outside its own bucket"
+
+
+async def test_a_grading_reports_the_providers_prefix_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``cached`` and ``cache_read_tokens`` are OPPOSITE facts and the judge reported only the
+    first, so its whole bucket read 0% forever — which is not "no cache" but "never asked".
+
+    This is the third site to drop it the same way (`connectors/harbor.py` filed the count under
+    the `cached` NAME; `_compute_step_tokens` omitted it from a re-seed whitelist), and the judge is
+    the one that matters most: its rubric is a module constant, so ~1.2k of a ~1.6k-token prompt is
+    byte-identical on every cell of every campaign, and a live probe on the shipped grader model
+    read 92.8% of its input off the provider's cache. Asserted on the WIRE call — a replay reached
+    no provider, and the rollup already excludes it (`live_dashboard/view.py::_handle_token_usage`).
+    """
+    _client, metered, _score = await _grade_twice(tmp_path, monkeypatch, reply="A")
+
+    wire = metered[0]["usage"]
+    assert wire.cache_read == 8, (
+        "the judge dropped the provider's cache-read count, so grading capture cannot be read"
+    )
+    assert wire.input == 11, "cache_read is a SUBSET of input, never a deduction from it"
+
+
+def test_a_wire_step_entry_reaches_the_ledger_whole() -> None:
+    """The re-seed whitelist in `_compute_step_tokens` REBUILDS the connector's entry, so a key it
+    omits is dropped however faithfully the connector reported it — silently, on every row.
+
+    It has done that to three declared fields. `cache_read` was the one this arc found; `served_by`
+    is the one it did not, and the cost was 3,074 of 3,074 banked `backend` rows naming no upstream
+    route while every judge and optimizer row named one, which was filed as an upstream Harbor gap.
+    The table is asserted total over `StepTokenUsage` at import, so this pins the READ side: every
+    key a backend can report survives the rebuild."""
+    from promptpotter.application.scoring.sample_measurement import (
+        _WIRE_SEEDED,
+        _compute_step_tokens,
+    )
+    from promptpotter.domain.pipeline_schema import PipelineSchema
+
+    wire = {
+        "step_tokens": {
+            "agent": {
+                "input": 4000,
+                "output": 100,
+                "cost_usd": 0.5,
+                "model": "m",
+                "served_by": "DigitalOcean",
+                "finish_reason": "stop",
+                "reasoning": 40,
+                "cache_read": 3000,
+            }
+        }
+    }
+    entry = _compute_step_tokens(wire, PipelineSchema(name="t", nodes=[]), {})["agent"]
+
+    missing = sorted(k for k in _WIRE_SEEDED if k not in entry)
+    assert not missing, f"the re-seed dropped wire keys the connector reported: {missing}"
+    assert entry["input"] == 4000, "the counts are the seam's own and must survive too"
+
+
+def test_a_replayed_row_reports_no_provider_discount() -> None:
+    """`cached` (our archive answered) and `cache_read` (a provider discounted a call it served)
+    are OPPOSITE facts, and a replay carries the BANKED row's counts — so rendering a share beside
+    the 📖 claims this run bought a discount it did not.
+
+    Pinned on `TokenAccount.cache_share` rather than on each renderer: five surfaces render this
+    number and three of them got the arm right by hand, which is the same as saying nobody owned
+    it. `replayed` is keyword-only and required so the next surface cannot omit it."""
+    from promptpotter.domain.spend import TokenAccount
+
+    row = {"step_tokens": {"agent": {"input": 1000, "output": 10, "cache_read": 550}}}
+    account = TokenAccount.from_step_tokens(row)
+    assert account is not None
+    assert account.cache_share(replayed=False) == 0.55
+    assert account.cache_share(replayed=True) is None, "a replay reached no provider to discount it"
+
+    # No breakdown is not a zero hit: one says the backend cannot tell us, the other that it did.
+    blind = TokenAccount.from_step_tokens({"step_tokens": {"agent": {"input": 10, "output": 1}}})
+    assert blind is not None and blind.cache_share(replayed=False) is None
+    assert TokenAccount.from_step_tokens({"step_tokens": {}}) is None
+
+
+def test_a_rounds_cost_reaches_the_markdown_digest_too() -> None:
+    """A round fact that reaches only the browser is half-built (root ``CLAUDE.md``
+    ``<entry-point-parity>``). The per-round spend split is served on ``dashboard.json::rounds[]``
+    for the webapp and the API; this is the terminal-and-``log.md`` half of the same number, read
+    off the same served map rather than re-folded.
+
+    It also pins the prefix vocabulary across the boundary: the line prints ``prefix_reading``'s
+    badge, so a bucket the provider reported nothing for says ``c?`` here exactly as it does on the
+    sample tape — which is what the whole caching arc could not see."""
+    from promptpotter.application.views.render.markdown import _render_round_cost
+    from promptpotter.application.views.view_models import RoundDigestView
+    from promptpotter.domain.spend import SpendBucket, SpendRollup
+
+    def digest(spend: SpendRollup | None) -> RoundDigestView:
+        return RoundDigestView(
+            round=3,
+            label="r3",
+            accuracy=0.5,
+            improved=True,
+            total=20,
+            composite_fitness=0.5,
+            changes_description="",
+            l1_critique_text="",
+            l1_yield=1.0,
+            l1_n_no_op=0,
+            l1_n_duplicate=0,
+            l1_n_repeat=0,
+            candidates_scored=2,
+            evaluators={},
+            spend=spend,
+        )
+
+    # A cycle with no dashboard on disk — a foreign fork sibling — says nothing rather than $0.
+    assert _render_round_cost(digest(None)) == ""
+
+    rollup = SpendRollup(
+        backend=SpendBucket(used_usd=0.054, input_tokens=600_000, cache_read_tokens=132_000),
+        # The optimizer's real shape on the campaign that drove this arc: it billed, and no
+        # provider ever reported a cache breakdown for it.
+        loop=SpendBucket(used_usd=0.0021, input_tokens=40_000, cache_write_tokens=8_000),
+        total_used_usd=0.0561,
+    )
+    line = _render_round_cost(digest(rollup))
+    assert "$0.0561" in line
+    assert "backend $0.0540 c22%" in line, "a discount reads as one"
+    assert "optimizer $0.0021 c?" in line, "'no breakdown reported' must not read as 'no hit'"
+    assert "·w8000" in line, "writes with no reads is paying to fill a prefix nothing collects"
+    # A bucket that neither billed nor consumed is absent, not a row of zeroes.
+    assert "judge" not in line
+
+
+def test_every_prefix_state_says_which_one_it_is() -> None:
+    """The reading above is TOTAL over four states, and every renderer used to suppress on
+    truthiness — which merges three of them into one blank. On a live campaign that blank was ~91%
+    of sample rows and read as "no cache", when the dominant arm is "the provider reported nothing".
+
+    Pinned here, and its browser peer in `derivations/__tests__/token-account.test.ts`, because the
+    badge strings must match byte for byte: an operator reads the terminal tape and the sample row
+    as one vocabulary."""
+    from promptpotter.domain.rendering import prefix_reading
+
+    assert prefix_reading(0.39, replayed=False) == ("discounted", 0.39, "c39%")
+    # A reported zero is a MEASUREMENT — it is what proves a provider has no prefix cache at all.
+    assert prefix_reading(0.0, replayed=False) == ("cold", 0.0, "c0%")
+    assert prefix_reading(None, replayed=False) == ("unreported", None, "c?")
+    # Silent only here: that row already carries the 📖, and two badges for one fact is what made
+    # the two caches look like one.
+    assert prefix_reading(None, replayed=True) == ("replayed", None, "")
+    assert prefix_reading(0.5, replayed=True).state == "replayed"
 
 
 async def test_an_empty_grading_reply_is_never_made_permanent(

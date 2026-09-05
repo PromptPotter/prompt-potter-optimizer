@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 from promptpotter.config.settings import settings
+from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.llm.base import LLMClientBase
 from promptpotter.infrastructure.llm.json_parse import parse_response_content
 from promptpotter.infrastructure.llm.rate_limit import (
@@ -104,15 +105,19 @@ class AnthropicClient(LLMClientBase):
         raw = await client.messages.with_raw_response.create(**request_params)
         response = raw.parse()
 
-        # Anthropic reports its cache counts BESIDE ``input_tokens``; the OpenAI-compat wire
-        # reports its own INSIDE ``prompt_tokens``. Normalize to the latter, so no reader
-        # downstream has to know which provider answered.
+        # Anthropic reports its cache counts BESIDE its input count; the OpenAI-compat wire
+        # reports its own INSIDE it. Normalize to the latter — the convention `TokenAccount`
+        # declares — so no reader downstream has to know which provider answered.
         cache_read = int(getattr(response.usage, "cache_read_input_tokens", 0) or 0)
         cache_write = int(getattr(response.usage, "cache_creation_input_tokens", 0) or 0)
-        prompt_tokens = response.usage.input_tokens + cache_read + cache_write
-        total = prompt_tokens + response.usage.output_tokens
+        usage = TokenAccount(
+            input=response.usage.input_tokens + cache_read + cache_write,
+            output=response.usage.output_tokens,
+            cache_read=cache_read,
+            cache_write=cache_write,
+        )
         if reservation is not None:
-            reservation.close(total)
+            reservation.close(usage.total)
         apply_discovered_caps(
             self._rate_limiter,
             raw.headers,
@@ -123,18 +128,7 @@ class AnthropicClient(LLMClientBase):
         content = "".join(block.text for block in response.content if hasattr(block, "text"))
         parsed = parse_response_content(content, response_model, response_schema, "Anthropic")
 
-        return LLMResponse(
-            content=content,
-            model=response.model,
-            usage={
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": response.usage.output_tokens,
-                "total_tokens": total,
-                "cache_read_tokens": cache_read,
-                "cache_write_tokens": cache_write,
-            },
-            parsed=parsed,
-        )
+        return LLMResponse(content=content, model=response.model, usage=usage, parsed=parsed)
 
 
 __all__ = ["AnthropicClient"]

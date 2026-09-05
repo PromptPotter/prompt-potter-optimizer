@@ -9,6 +9,7 @@ from typing import Any
 from json_repair import repair_json
 from pydantic import BaseModel, ValidationError
 
+from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.llm.response import LLMResponse
 
 logger = logging.getLogger(__name__)
@@ -36,14 +37,11 @@ class OptimizerPromptParseError(RuntimeError):
         attempts: int = 2,
         model: str | None = None,
         finish_reason: str | None = None,
-        prompt_tokens: int = 0,
-        completion_tokens: int = 0,
-        reasoning_tokens: int = 0,
+        usage: TokenAccount | None = None,
         reasoning_chars: int = 0,
         first_finish_reason: str | None = None,
         first_content_chars: int | None = None,
-        first_completion_tokens: int = 0,
-        first_reasoning_tokens: int = 0,
+        first: TokenAccount | None = None,
         retry_kind: str = "",
     ):
         super().__init__(
@@ -55,19 +53,15 @@ class OptimizerPromptParseError(RuntimeError):
         self.attempts = attempts
         self.model = model
         self.finish_reason = finish_reason
-        # TOTALS across both round-trips — the billing contract. `dispatch/llm_call/call.py`
-        # is the sole `emit_token_usage` site and meters the burned spend off these two, and
-        # a failed call is billed exactly like a good one. Per-attempt figures live in the
-        # `first_*` fields below; do not narrow these to one attempt to make a log read
-        # nicer, or the ledger under-reports every repaired call by a full round-trip.
-        self.prompt_tokens = prompt_tokens
-        self.completion_tokens = completion_tokens
-        self.reasoning_tokens = reasoning_tokens
+        # The BILLED account, summed across both round-trips, and `dispatch/llm_call/call.py`
+        # meters the burned spend off it. Narrowing it to one attempt to make a log read nicer
+        # under-reports every repaired call by a full round-trip.
+        self.usage = usage or TokenAccount()
         self.reasoning_chars = reasoning_chars
         self.first_finish_reason = first_finish_reason
         self.first_content_chars = first_content_chars
-        self.first_completion_tokens = first_completion_tokens
-        self.first_reasoning_tokens = first_reasoning_tokens
+        # The attempt that FAILED, on its own — the retry cannot answer why this one was rejected.
+        self.first = first or TokenAccount()
         self.retry_kind = retry_kind
 
     @property
@@ -108,13 +102,13 @@ class OptimizerPromptParseError(RuntimeError):
             "reproduced": self.reproduced if self.retry_kind == RETRY_CLEAN_REASK else None,
             "first_finish_reason": self.first_finish_reason,
             "first_content_chars": self.first_content_chars,
-            "first_completion_tokens": self.first_completion_tokens,
-            "first_reasoning_tokens": self.first_reasoning_tokens,
+            "first_completion_tokens": self.first.output,
+            "first_reasoning_tokens": self.first.reasoning,
             "finish_reason": self.finish_reason,
-            "reasoning_tokens": self.reasoning_tokens,
             "reasoning_chars": self.reasoning_chars,
             "raw_chars": self.raw_chars,
-            "billed_completion_tokens": self.completion_tokens,
+            "billed_reasoning_tokens": self.usage.reasoning,
+            "billed_completion_tokens": self.usage.output,
         }
 
     def diagnosis(self) -> str:
@@ -122,13 +116,14 @@ class OptimizerPromptParseError(RuntimeError):
         different causes, and the fix differs by which one you are reading."""
         return (
             f"attempt1(finish={self.first_finish_reason} chars={self.first_content_chars} "
-            f"completion_tokens={self.first_completion_tokens} "
-            f"reasoning_tokens={self.first_reasoning_tokens}) "
+            f"completion_tokens={self.first.output} "
+            f"reasoning_tokens={self.first.reasoning}) "
             f"retry={self.retry_kind or 'none'} "
             f"attempt2(finish={self.finish_reason} chars={self.raw_chars} "
-            f"reasoning_tokens={self.reasoning_tokens} reasoning_chars={self.reasoning_chars}) "
+            f"reasoning_chars={self.reasoning_chars}) "
             f"reproduced={self.reproduced if self.retry_kind == RETRY_CLEAN_REASK else 'n/a'} "
-            f"billed_completion_tokens={self.completion_tokens} model={self.model}"
+            f"billed_completion_tokens={self.usage.output} "
+            f"billed_reasoning_tokens={self.usage.reasoning} model={self.model}"
         )
 
 
@@ -231,10 +226,10 @@ def try_groq_json_validate_repair(
         parsed = _unwrap_single_element_list(parsed)
         parsed = response_model.model_validate(parsed)
     logger.info("%s: salvaged failed_generation via JSON repair", provider_name)
+    # No `usage`: the 400 body carries none, so the default empty account is the honest answer.
     return LLMResponse(
         content=fg_text,
         model=request_params.get("model", ""),
-        usage={"prompt_tokens": 0, "completion_tokens": 0},
         parsed=parsed,
     )
 

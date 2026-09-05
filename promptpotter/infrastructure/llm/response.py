@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import Field
 
+from promptpotter.domain.spend import TokenAccount
 from promptpotter.domain.strict_model import StrictModel
 
 
@@ -28,16 +29,11 @@ class LLMResponse(StrictModel):
         ),
     )
     model: str = Field(..., description="Model used")
-    usage: dict[str, int] = Field(
-        default_factory=dict,
+    usage: TokenAccount = Field(
+        default_factory=TokenAccount,
         description=(
-            "Token usage: prompt_tokens, completion_tokens, total_tokens, "
-            "reasoning_tokens, cache_read_tokens and cache_write_tokens. The last three "
-            "are SUBSETS, never further totals — reasoning of completion_tokens (the "
-            "provider bills thinking as output), the two cache counts of prompt_tokens "
-            "(every client normalizes to that, Anthropic included, which reports them "
-            "beside its input count rather than inside it). A subset reads 0 when the "
-            "provider reports no breakdown, which is not the same as none having happened."
+            "What this call consumed. A provider's own spelling stops at the client that "
+            "parses it: every client normalizes to this account, and no consumer converts."
         ),
     )
     cost_usd: float | None = Field(

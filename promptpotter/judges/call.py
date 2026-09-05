@@ -80,19 +80,20 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
             logger.warning("judge %s stage %s failed: %s", judge, stage.role, exc)
             return "", f"{type(exc).__name__}: {exc}"
 
-    usage = response.usage or {}
     # Both branches converge here, so a grading is metered by ARRIVING rather than by each branch
     # remembering to. A hit is metered too, flagged, so grading cost stays invariant to our cache
     # history rather than making a re-read of an old comparison read as free.
+    #
+    # `cached` below is the OTHER fact: we replayed, so no provider was reached. A grading is the
+    # one call shape with a naturally cacheable prefix — the rubric is a module constant, so most
+    # of the prompt is byte-identical on every cell of every campaign.
     emit_token_usage(
         node=f"{judge}:{stage.role}",
         kind="judge",
         model=response.model or stage.model,
         provider=stage.provider,
         served_by=response.served_by,
-        input_tokens=int(usage.get("prompt_tokens", 0)),
-        output_tokens=int(usage.get("completion_tokens", 0)),
-        reasoning_tokens=int(usage.get("reasoning_tokens", 0)),
+        usage=response.usage,
         cost_usd=response.cost_usd,
         duration_s=time.monotonic() - started,
         cached=cached is not None,

@@ -39,6 +39,20 @@ collects everything else.
   **Past tense is a smell** — "used to", "its predecessor", a date, a
   percentage, a run id, an `A -> B` tally: how the code got that way is git's
   job (commit body, `CHANGELOG.md`).
+- **A cut fact has a DESTINATION, and the ladder is priced by who pays.** A line
+  in a hot module is billed to every future session that opens it, needed or
+  not, so a fact goes to the cheapest rung that still reaches the reader who
+  would get it wrong. (1) **The type or signature** — free, and enforced: a
+  required keyword-only arg, an `X | None`, a `Literal` over the whole state
+  set, a derived property nobody can omit. **Prose defending against a bug the
+  type now prevents is pure cost**, and it is the bulk of what gets written.
+  (2) **≤2 lines at the site**, for a trap no type can hold. (3) **The layer's
+  `CLAUDE.md`**, for a rule binding a *set* of symbols. (4) **`docs/`**, for
+  what a reader goes looking for. (5) **§ Paid corrections**, for a failure
+  *shape* that will recur — generalized past the incident, one line. (6) **The
+  commit body**, for the incident. The test is one question: *delete this — what
+  does a reader now get wrong?* "Nothing, the type stops them" is rung 1, and
+  rung 1 means delete.
 - **Three carve-outs are product surfaces**, not documentation, because a
   generator reads them: `EXPORTED_MODELS` docstrings
   (→ generated TS JSDoc — regenerate via `scripts/build_ts_types.py`; only a
@@ -158,6 +172,7 @@ Bought by getting it wrong. Tells, not theory.
 - **A rename done twice leaves the MIDDLE name.** `anti-rot` checks that a claim resolves, not that a name exists.
 - **A synonym reads fine from inside its own file.** Nothing is locally wrong about a second word for a concept the repo already names; grep the WORD across subsystems, because that is the only place the collision shows.
 - **`.get()` on a `total=False` TypedDict cannot raise.** Delete the key and every guard reading it goes quietly falsy — the opposite decision, no error, green suite.
+- **Suppressing a display on truthiness collapses every silence into one.** `if (share)` hides a real measured 0, an unanswerable `None` and a not-applicable arm identically, and the dominant arm is usually the one you did not mean. Render the state, not the number's truthiness.
 - **A glob skips `.inner/`** — dot-directories are absent, not empty. `os.walk`.
 - **Ask what CHOSE the rows.** Pairing does not rescue an outcome-selected subset.
 - **Ledger first, mtimes last.** From outside, a deliberate pause looks exactly like a crash.
