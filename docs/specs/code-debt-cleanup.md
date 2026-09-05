@@ -48,6 +48,67 @@ it.
   `shell/RemoteControl.tsx` mints `abilityDelta / usedUsd` as a headline `θ/$` KPI chip. All three
   need **serving**, not deleting, so each wants a backend field first.
 
+- **The cycle-path codec agrees with Python only in prose.** `lib/ids.ts` re-implements
+  `encode_cycle_path`'s separators and charset, and `cyclepath.test.ts` locks the TS side against itself.
+  Action: generate the codec from `openapi.generated.json`, or accept the duplication and say so.
+  Blocker: none; low priority — the browser only reads and the server re-validates every hop. **Do not
+  re-file "fold the hop into the generated `CycleHop`"** — refused on inspection: the generated type is
+  the wire element, `ids.ts`'s `PathHop` is the BROWSER's address (it encodes into `?path=` URLs and
+  view-memory keys), so binding them lets a server-side rename invalidate persisted addresses.
+
+- **Three diagnostics mint no cycle, so nothing they measure has a browser home.** `seed-screen`,
+  `noise-floor` and `verify` write no cycle for the dashboard to address, and an inner L4 campaign
+  lists only under `descend=`. Through an L4 run the outer campaign therefore reads idle while the
+  work is one hop down — not wrong, and it reads as broken, which is the worse failure because
+  nothing on screen says so. Action: name the surface each one writes to *before* adding a surface;
+  `descend=` may already answer the L4 half. Blocker: none.
+
+- **"trajectory" still names two things it should not, and the candidates card has stopped being
+  one of them.** The winner chain read on ONE shared set is `overlap` from disk to screen now, but
+  two uses remain and each is its own PR. (1) `evidence.py::TrajectoryPoint` / `?trajectory=` /
+  `--trajectory` is the SAME winner chain read on each point's OWN cells — the opposite basis, with
+  no qualifier on either name, which is exactly the pair a reader cannot tell apart. Action: qualify
+  it; blocker: it is a wire type, a CLI flag and a generated OpenAPI schema at once. (2)
+  `round_diagnostics.py::TrajectoryClass` is a health enum (`healthy|oscillating|plateau|ceiling`)
+  and the ONLY on-disk `trajectory` key — 384 round documents, and `RoundResult` reads back with
+  `extra="ignore"`, so a rename degrades to the field's default rather than raising. `trend` or
+  `shape` fits it; the migration is the work. `p_best_trajectory`, `parent_level_trajectory` and
+  the Sample-trajectory grid keep the word — they are genuine trajectories, which is the point of
+  giving it up on the card.
+
+- **Absent-vs-zero is a rule, and only its named instances have been fixed.** Every number reaches
+  the screen as measured / not-measured / not-applicable and may not lose which one on the way; the
+  tell is a null branch in the browser that no Python writer can emit. The five sites filed as
+  "Step 5" are closed (`git log`). Action: sweep for the *rule* — writers whose `0.0` default is
+  indistinguishable from a measurement — rather than re-checking those five. Blocker: none.
+
+- **`/ray` serves whole records where its readers want fields.** The by-KIND half of this entry
+  shipped: `domain/projection_envelope.py::RENDERS_AS_ACTIVITY` is the one declaration of the feed's
+  vocabulary and the ray's drop set derives from it, so `election` / `ruler` / `spend_tombstone` no
+  longer ride at all. What remains is by FIELD — `family_ray_views.py::RayItem.payload` is still
+  declared to BE the record's `model_dump`, so there is no server-side shape to project onto.
+  **Measured over the banked corpus, so the
+  entry that stood here is corrected, not merely sharpened:** the "multi-MB window" claim is refuted as
+  stated (real windows are a few hundred KB), but the window is bounded by ITEM COUNT and one existing
+  family already exceeds a megabyte at `MAX_RAY_LIMIT`. Three named targets were wrong —
+  `llm_call.payload.messages` does not exist (it is `template_fields`), `.reasoning` is not capped where
+  claimed, and `cycle_seed.origin_prompt_fields` has zero records — while the two largest went unnamed:
+  `snapshot.payload.result`, near half the corpus and now the whole target, and `ruler.ruler`, which
+  left with its kind. Applying the readers' true field set would keep a small fraction of the bytes.
+  **Do NOT derive the projection from the TypeScript readers** — a server filter whose correctness is
+  defined by a client file is the seam defect itself; `call_id` and `detail` are the two whose loss is
+  silent, not visible.
+- **Five `export *` barrels re-export symbols that look file-local to a naive grep** — `lib/api`, `lib/types`, `lib/derivations`, `components/ui`, `components/workflow`. Stripping an `export` there silently narrows the barrel's public surface. Action: decide per barrel whether the symbol is meant to be public, then strip or keep — don't script it blind. **Recount before acting and never re-cite a headcount as current**; two traps in the recount itself are that relative-path importers (`from "./api"`, `"../api"`) miss an `@/…` grep, and that `lib/api/reads.ts` / `components/ingest/*` importing `"./types"` resolve to LEAF files, not the barrel.
+- **`RoundResult.results` drops the parent's panel on every round that promotes** — verified across the
+  banked corpus: every round with a winner is byte-identical to that candidate's rows and every held
+  round matches no candidate, so the parent's per-sample panel on the round's own subset is never
+  persisted once a winner is elected. **Action is ADDITIVE and a subject swap is refused:** key the
+  parent's rows under a reserved id in `all_candidate_results`, leaving `results` as the subject its
+  readers depend on. Swapping would lag the θ frontier permanently (`optimization/cycle.py` +
+  `mask/load.py` feed `cumulative_theta`), re-break two writers in `resume_and_fork/repair.py`, and
+  silently reinterpret every existing document (`extra="ignore"`, no version marker). Wants its own
+  PR — it changes a persisted shape.
+
 - **Holistic reframes — larger chunks, noted so they aren't mistaken for done; don't slip one into a
   release.** (1) **Tooltip/overlay consolidation:** ~86 of the webapp's ~170 DOM `title=` attributes
   are teaching prose the browser renders as an unstyled, unselectable blob that dies on touch.
@@ -298,3 +359,21 @@ it.
   the branch.
 
 Closed items are not tracked here — `git log` is the history layer.
+
+## verified 2026-09-02
+
+- `` `datasets/bbeh/sweep/*.yaml` `` — 12 arms — STALE — directory absent from working tree; `git log --all --full-history -- "datasets/bbeh/sweep/*.yaml"` returns empty. The "delete the dir" action is already done.
+- An origin-relative cost term — WRONG — `OUTPUT_TOKEN_BUDGET = 12_000` named in the entry is absent from the entire tree (grep across `promptpotter/` and `datasets/` returns nothing); `mean_out` likewise. `domain/scoring.py::CellScorer` (`.objective`) is real. The inert-absolute-form claim is contradicted; whether origin-relative work remains is a separate question for the operator.
+- The cycle-path codec agrees — VALID — `webapp/lib/ids.ts::encodeCyclePath` and `promptpotter/domain/cycle_paths.py::encode_cycle_path` both encode with `~`/`::` as stated; `webapp/lib/__tests__/cyclepath.test.ts` locks the TS side against itself. Python docstring acknowledges the shared grammar in prose only.
+
+## verified 2026-09-03
+
+- `sp_budget_ttest` names a t-test — VALID — `application/campaign_config.py::sp_budget_ttest` still declares the knob; `application/optimization/l1/score/overlap.py` still passes it as `size=`. Count is 65 occurrences across 34 files (entry cited 81; code has evolved but the misleading name and its on-disk presence in `datasets/*/campaign.yaml` are unchanged). Blocker stands.
+- `SCORING_FUNCTIONS["relu"]`, `["smoothstep"]` and `["sigmoid"]` — VALID — all three remain in `promptpotter/application/scoring/formula/matchers.py::SCORING_FUNCTIONS`; no `campaign.yaml`, no test body exercises any of them; `hockeystick` is exercised by `tests/test_numerics.py`. Blocker unchanged.
+- `dashboard.json::in_flight` — VALID — `infrastructure/projections/live_dashboard/state.py::InFlightCall` is served on every poll; `view.py::_handle_llm_call_progress` discards its record and only reschedules persist. Webapp references are `types.generated.ts` and `test-fixtures.ts` only; no active component reads the field. `max_cells_in_flight` is a different field and IS read by `webapp/components/shell/RemoteControl.tsx`. Blocker unchanged.
+
+## verified 2026-09-05
+
+- Three mechanisms key on ground-truth LABELS — VALID — `domain/scoring.py::is_answer_collapsed` (line 467; imported into `pobb/checks.py`) calls `enumerable_truth_labels` (line 446), which returns `None` when no `ground_truth` labels exist; `is_answer_collapsed` returns `False` on that `None`, so the COLLAPSED gate is permanently `False` for verifier-graded backends (L4 inner cycles). `intelligence/earned_blocks.py::answer_space_signature` (line 42) still returns `OPEN_ANSWER_SPACE` on an empty or label-absent set. Both code paths match the filed claim exactly. Re-test not runnable (requires a live cycle).
+- `InProcessRun` has no arming context — VALID — `connectors/dspy_module.py:57` declares `_PROGRAM: ContextVar[DspyProgram | None]`; `connectors/harbor.py:117` declares `_PANEL: ContextVar[dict[str, Any] | None]`; `harbor.py:220` sets `_PANEL` as a side effect inside `_extract_experiment`. Both ContextVars exist independently with no shared seam. Entry's correctness note ("both are correct, so this is cost-of-authoring") still holds.
+- Two harbor `pipeline.yaml`s duplicate 23 shared lines — WRONG — `comm -12 <(awk 'length>30' harbor-tbench-regex-log/pipeline.yaml | sort) <(awk 'length>30' sealqa-longseal-12/pipeline.yaml | sort) | wc -l` returns **14**, not 23. The entry's own re-test says "under 23 means someone already split them," but the deduplication mechanism the entry expected (datasets relying on `Connector.default_pipeline` / `default_node_config`) was not applied to the dataset YAMLs; instead `harbor.py:875` now declares `default_pipeline=(AGENT_NODE,)` on the Connector binding while both datasets still carry explicit `pipelines: default: - agent` blocks. The 14 shared lines are structural comment and `prompt_info`/`observation_mappings` content still duplicated verbatim. Leave for operator to decide whether the re-test threshold governs or whether explicit deduplication is still owed.
