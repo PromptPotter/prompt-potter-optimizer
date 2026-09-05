@@ -9,6 +9,7 @@
 // `bannerStatus`/`bannerText`/`bannerHint`, plus `dash`) — no new state, no
 // new poll. Reader-side and pure, so it sits in the Vitest derivation scope.
 
+import { STOP_REASON_LABELS } from "@/lib/api/types.generated";
 import type { RoundSummary } from "@/lib/api/types";
 import type { DashboardSnapshot, StatusKind } from "@/lib/poll";
 
@@ -93,9 +94,18 @@ export function criticalAlert({
   // dashboard-tab RunErrorBanner; here we show only the can't-miss headline.
   const err = dash?.error;
   if (err) {
+    // The stop reason NAMES itself. `STOP_REASON_LABELS` is the generated mirror of
+    // domain/phases.py::STOP_REASON_INFO, which already separates a crash from a DESIGNED
+    // refusal — diverged, origin_gate, spend_budget and backend_unreachable are all
+    // deliberate halts with a documented recovery. Hardcoding "Run crashed" reported every
+    // one of them as the run falling over, which sends an operator hunting a bug that is not
+    // there: a resume divergence rendered as `Run crashed — ResumeDivergenceError` when the
+    // engine had refused, correctly, to mix two optimizers in one cycle. `run-phase.ts`
+    // already reads this table; this surface restating the word was the drift.
+    const label = (err.stop_reason && STOP_REASON_LABELS[err.stop_reason]) || "Run stopped";
     return {
       severity: "critical",
-      title: `Run crashed — ${err.kind}`,
+      title: `${label} — ${err.kind}`,
       detail: `stop: ${err.stop_reason}`,
     };
   }

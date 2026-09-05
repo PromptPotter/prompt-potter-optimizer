@@ -229,8 +229,17 @@ export function HardSamplesTable({ perSample }: Props) {
                     const wrapped = persisted.wrapped.includes(col.id) && wrappable(col);
                     const isRank = col.id === "rank";
                     const isMeas = col.id === "measurements";
+                    // The SERVED rank, never this row's position on screen. An ordering IS a
+                    // score (`webapp/CLAUDE.md` § Scoring authority) and `hard_sample_rank` is the
+                    // one the server computed; a display index silently stopped agreeing with it
+                    // the moment Hide-unmeasured filtered a row out or a header click re-sorted,
+                    // so "#3" read as "third hardest" while meaning "third row shown".
                     const cell = isRank
-                      ? ({ text: String(idx + 1), raw: idx + 1 } as CellValue)
+                      ? ({
+                          // 1-based already (`leaderboard.py::DatasetItem.hard_sample_rank`).
+                          text: String(item.hard_sample_rank),
+                          raw: item.hard_sample_rank,
+                        } as CellValue)
                       : cellFor(col.id, item, meas, servedSeries?.get(item.sample_id) ?? null);
                     const isExpandable =
                       !isRank &&

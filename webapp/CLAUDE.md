@@ -176,7 +176,7 @@ Reach for a component-render test only for a regression class that compile + smo
 
 **For visual work, run `npm run dev` — not a rebuild per change.** It serves :3000 with Turbopack HMR (the default in Next 16, no flag) and proxies `/api/*` to the API at :8001 via `next.config.ts::rewrites`, which exists for this and nothing else. `output: "export"` means every `npm run build` prerenders every route instead, so the rebuild→hard-reload loop pays that per change. **The port is what picks your harness:** :3000 covers the anon and `PROMPTPOTTER_AUTH=off` surfaces — most visual work — while the OIDC redirect is bound to :8001, so a real login round-trip needs the built app. Production has no proxy (same FastAPI origin).
 
-`out/` is the route mounted by FastAPI (`StaticFiles(html=True)` at `/`), so that is what a built change reaches — rebuild and hard-reload for anything the dev server cannot answer.
+`out/` is the route mounted by FastAPI (`StaticFiles(html=True)` at `/`), so that is what a built change reaches — rebuild and hard-reload for anything the dev server cannot answer. **A rebuild swaps every chunk hash under every tab already open on `:8001`**, which surfaces only when one asks for a lazy route and 404s; `ui/ErrorBoundary` matches that and reloads once, so `gate.py` during a demo costs a flicker rather than a dead screen. The "once" is a `sessionStorage` stamp, and where storage is blocked the boundary reloads **nothing** and asks instead — an unbounded auto-reload is a reload LOOP, since the chunk is still missing on the next pass.
 
 ## Stack-drift warning
 

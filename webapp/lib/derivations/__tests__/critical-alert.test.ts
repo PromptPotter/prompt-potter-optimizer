@@ -21,9 +21,38 @@ describe("criticalAlert", () => {
     } as DashboardSnapshot;
     expect(criticalAlert({ ...base, dash })).toEqual({
       severity: "critical",
-      title: "Run crashed — CRASHED",
+      title: "Crashed — CRASHED",
       detail: "stop: crashed",
     });
+  });
+
+  // A DESIGNED refusal must not be announced as the run falling over. The engine halted on
+  // purpose and named a recovery; calling it a crash sends the operator hunting a bug that
+  // does not exist. The label comes from the generated STOP_REASON_LABELS, never from here.
+  it("names a designed halt by its own stop reason rather than calling it a crash", () => {
+    const dash = {
+      run_phase: "terminal",
+      error: {
+        kind: "ResumeDivergenceError",
+        message: "optimizer_identity:l1_generate",
+        stop_reason: "diverged",
+      },
+    } as DashboardSnapshot;
+    expect(criticalAlert({ ...base, dash })).toEqual({
+      severity: "critical",
+      title: "Diverged — ResumeDivergenceError",
+      detail: "stop: diverged",
+    });
+  });
+
+  // An unknown reason must still not read as a crash — the fallback names nothing it cannot
+  // verify. A reason the generated table does not carry is newer than this build, not a crash.
+  it("falls back to a neutral title for a stop reason the label table does not carry", () => {
+    const dash = {
+      run_phase: "terminal",
+      error: { kind: "SomethingNew", message: "x", stop_reason: "not_in_table" },
+    } as DashboardSnapshot;
+    expect(criticalAlert({ ...base, dash })?.title).toBe("Run stopped — SomethingNew");
   });
 
   it("flags server-unreachable (offline) as critical with the hint as detail", () => {
@@ -96,13 +125,13 @@ describe("criticalAlert", () => {
     expect(out).toBeNull();
   });
 
-  it("crash takes precedence over offline", () => {
+  it("a terminal error takes precedence over offline", () => {
     const dash = {
       run_phase: "terminal",
       error: { kind: "DIVERGED", message: "x", stop_reason: "diverged" },
     } as DashboardSnapshot;
     const out = criticalAlert({ ...base, bannerStatus: "offline", dash });
-    expect(out?.title).toBe("Run crashed — DIVERGED");
+    expect(out?.title).toBe("Diverged — DIVERGED");
   });
 
   it("flags an unreachable backend as critical (the LED's twin)", () => {

@@ -15,6 +15,7 @@ function row(sample_id: number | null, status: SampleStatus | null, predicted = 
     ground_truth: "",
     terminal_node: "",
     elapsed_s: null,
+    cache_share: null,
   };
 }
 

@@ -157,7 +157,7 @@ export function HardSamplesPreview({ sampleOrder = null }: Props) {
                   {rate.text}
                 </span>
                 <span className="hsp-tag" title={item?.query}>
-                  {labelAt(at, cursor)}
+                  {labelAt(at, cursor, item?.hard_sample_rank)}
                 </span>
               </li>
             );
@@ -258,12 +258,12 @@ function toneAt(at: number, cursor: number): Tone {
 // carrier. Scrolled away from the cursor the wording widens ("measured" / "queued"),
 // because three rows all claiming to be "just measured" would be a lie about two.
 //
-// Idle, the word is the row's POSITION in a roster `/preview` already served in rank
-// order — reading the order it sent, not re-deriving one. The server states that number
-// outright as `hard_sample_rank`; reading it instead is the better line and lands with
-// the arc that serves the field, not ahead of it.
-function labelAt(at: number, cursor: number): string {
-  if (cursor < 0) return `rank ${at + 1}`;
+// Idle, the word is the row's SERVED rank — `hard_sample_rank`, the number the server states
+// outright — and falls back to its position only where the roster carries no item for the id.
+// The position is not the rank: the roster is paged and filtered, so the two part company as soon
+// as anything is hidden.
+function labelAt(at: number, cursor: number, servedRank?: number): string {
+  if (cursor < 0) return `rank ${servedRank ?? at + 1}`;
   if (at === cursor) return "scoring now";
   if (at === cursor - 1) return "just measured";
   if (at < cursor) return "measured";

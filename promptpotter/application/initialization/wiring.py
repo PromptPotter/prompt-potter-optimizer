@@ -232,9 +232,18 @@ def _load_dataset_into_session(
     if connector is not None and connector.experiment_file:
         panel = dataset_panel_rows(session.store, dataset_name)
         if panel is None:
+            # `dataset_panel_rows` answers None for THREE causes and the commonest is the panel
+            # file simply not being on this machine — `dataset_access.py`'s own docstring calls a
+            # missing `harbor_tasks.yaml` "the ordinary state of a fresh clone", since it is
+            # gitignored and rebuilt per box. Naming only the backend_type cause sent the operator
+            # to inspect a `pipeline.yaml` that was correct. Name the file and the directory, as
+            # the loader this replaced did.
             raise ValueError(
-                f"Connector {connector.name!r} owns {dataset_name!r}'s panel, but its "
-                f"pipeline.yaml no longer names that backend_type."
+                f"Connector {connector.name!r} owns {dataset_name!r}'s panel, but "
+                f"{connector.experiment_file!r} was not readable in "
+                f"{readable_dataset_dir(session.store, dataset_name)}. Either the panel has not "
+                f"been generated on this machine (it is gitignored — rebuild it), or that "
+                f"dataset's pipeline.yaml no longer names the {connector.name!r} backend_type."
             )
         queries, session.index_terms = panel
         session.samples = samples_from_dicts(queries)
