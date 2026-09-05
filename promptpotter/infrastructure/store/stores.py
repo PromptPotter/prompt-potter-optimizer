@@ -51,6 +51,7 @@ def hash_call(
     seed: int | None = None,
     max_tokens: int | None = None,
     reasoning_effort: str | None = None,
+    route_order: list[str] | None = None,
 ) -> str:
     """The key covers EVERY input that can change the answer, and nothing else.
 
@@ -58,21 +59,33 @@ def hash_call(
     ``reasoning_effort`` are decoding inputs exactly as ``temperature`` is — omitting any one of
     them serves one configuration's answer to another. ``max_tokens`` is the one with a reachable
     caller: ``JudgeStage.max_tokens`` is a declared field, so two graders differing only in their
-    cap would otherwise share a cached reply, one of them truncated."""
-    blob = json.dumps(
-        {
-            "messages": messages,
-            "model": model,
-            "provider": provider,
-            "temperature": temperature,
-            "json_schema": json_schema,
-            "response_model": response_model,
-            "seed": seed,
-            "max_tokens": max_tokens,
-            "reasoning_effort": reasoning_effort,
-        },
-        sort_keys=True,
-    )
+    cap would otherwise share a cached reply, one of them truncated.
+
+    ``route_order`` belongs here for a reason the others do not share: it does not change the
+    request, it changes WHICH HOST answers it — and hosts of one model disagree SYSTEMATICALLY, not
+    randomly (measured: on a `justlogic-d234` query Groq answered FALSE 28/28 while every other
+    provider answered Uncertain). So two configurations differing only in their pin are two
+    different measurements, and sharing a reply between them would serve one route's answer under
+    the other's name. ``provider`` above is the GATEWAY (``openrouter``) and never the host, so it
+    cannot stand in for this. It is also the one key added CONDITIONALLY, and that is not a
+    compatibility shim: an unpinned call is the same call it always was, so writing ``null`` beside
+    it would re-key every reply ever banked — 1,079 of them on the box this landed on, most of them
+    graded — to record that a lever nobody pulled was not pulled. A key is in the blob when it
+    describes the call, not when the signature happens to accept it."""
+    payload: dict[str, Any] = {
+        "messages": messages,
+        "model": model,
+        "provider": provider,
+        "temperature": temperature,
+        "json_schema": json_schema,
+        "response_model": response_model,
+        "seed": seed,
+        "max_tokens": max_tokens,
+        "reasoning_effort": reasoning_effort,
+    }
+    if route_order:
+        payload["route_order"] = route_order
+    blob = json.dumps(payload, sort_keys=True)
     return hashlib.sha256(blob.encode()).hexdigest()[:HASH_TRUNCATE]
 
 

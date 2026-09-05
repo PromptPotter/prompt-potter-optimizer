@@ -28,6 +28,8 @@ Optional:
 
 `load_dataset_node_overlay` → `configure_and_apply_pipeline()` (`promptpotter/application/pipeline_resolve.py`) merges the overlay onto each wire payload. **The dataset owns its task model** in `nodes.{node}.config.model` — every LLM node must declare one, or `configure_and_apply_pipeline` raises a loud setup error (no silent fall-through to the backend's own default).
 
+**`route_order` is the third key on that lock, and it is the same overlay.** `model` names WHAT answers, `provider` the GATEWAY it is asked through, and `route_order: [<host>, …]` which of that gateway's upstream HOSTS to try, in order (`nodes.{name}.config.route_order`; `current_config` carries it to `llm_call` untouched). It exists because an implicit prefix cache is per-replica, so it pays only where one route is hit repeatedly — a throughput sort re-ranks per call and scatters. All three sit in `PARAM_FORBIDDEN_KEYS`, so `node_param_keys()` strips them and L1 can never emit one: they are **operator cost levers set against a measured capture, never search axes**. Names are the gateway's own `provider_name` — read them off `served_by` in the ledger, never from a catalogue. Mechanism and the measured numbers: [`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md) § `provider` is the GATEWAY.
+
 ## Registered datasets
 
 The roster is the directory listing; each dataset's connector is read off its own `pipeline.yaml::nodes` — don't mirror either here. The special cases worth knowing:

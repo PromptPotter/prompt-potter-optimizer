@@ -16,7 +16,12 @@ from pydantic import ConfigDict, Field, field_validator
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
-from promptpotter.domain.l1_layout import L1Layout, default_l1_layout
+from promptpotter.domain.l1_layout import (
+    L1_LAYOUT_SLOTS,
+    VOLATILE_SLOT,
+    L1Layout,
+    default_l1_layout,
+)
 from promptpotter.domain.pipeline_overlay import fold_schema_descriptions
 from promptpotter.domain.search_point import SearchPoint, TaskDecomposition
 from promptpotter.domain.strict_model import StrictModel
@@ -52,14 +57,60 @@ class FewShotExample(StrictModel):
     explanation: str | None = None
 
 
+def _check_render_order(cls: type[PromptTemplate]) -> None:
+    """A field the order omits renders nowhere — silently, in a prompt.
+
+    Fired from ``__init_subclass__`` rather than against a hand-listed pair of classes at import:
+    the pair only ever named the classes in THIS module, so a fourth rendering class defined
+    anywhere else would have shipped its own order unchecked. Class creation is the one event every
+    subclass has, wherever it lives."""
+    if sorted(cls.RENDER_ORDER) != sorted(PROMPT_STRING_FIELDS):
+        raise RuntimeError(
+            f"{cls.__name__}.RENDER_ORDER must be a permutation of "
+            f"PROMPT_STRING_FIELDS: an order chooses SEQUENCE, never membership."
+        )
+
+
 class PromptTemplate(SearchPoint):
     """The scheme shared by job + optimizer prompts: the six ``render()`` decomposition fields
     (``PROMPT_STRING_FIELDS``), plus ``few_shot_examples`` and ``plan``, which render separately."""
 
-    RENDER_ORDER: ClassVar[tuple[str, ...]] = tuple(PROMPT_STRING_FIELDS)
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        _check_render_order(cls)
+
+    RENDER_ORDER: ClassVar[tuple[str, ...]] = (
+        "persona",
+        "task_intent",
+        "instruction",
+        "thinking_style",
+        "answer_format",
+        "problem_description",
+    )
     """Order ``render()`` concatenates the decomposition fields in, for the OPTIMIZER prompt
     (`dispatch/llm_call`). Apart from the SET, so shaping a cache prefix here cannot re-cut the
-    target prompt below."""
+    target prompt below.
+
+    ``problem_description`` renders LAST because it is where the evidence goes: it is
+    `l1_layout.py::VOLATILE_SLOT`, the slot every `NODE_LAYOUTS` floor fills, so anything rendered
+    after it would sit behind panels that change every round and could never be served off a
+    provider's prefix cache. Measured before this order: `l1_generate` read 32,512 of 200,554
+    prompt tokens from cache (16%), `l1_critique` 1,024 of 144,961 (0.7%) — same client, model and
+    provider.
+
+    **The corollary binds the prompts, not just this tuple: a value that CHANGES between rounds
+    belongs in ``problem_description``, never in a field ahead of it.** `l1_generate`'s citable
+    menu was substituted into `answer_format`, one slot early, and a menu that moves with the
+    layout truncated the stable prefix at 5,406 of 7,197 chars on a real round pair — a static
+    template voiding itself from the inside. Ordering the fields is half the contract; keeping the
+    moving values behind the boundary is the other half, and the half nothing can assert: the
+    layout axis addresses the earlier slots too, so `validate_l1_layout` REPORTS a panel placed
+    ahead of the boundary (`l1_layout_voids_prefix`) rather than the order alone guaranteeing it.
+
+    A constant ahead of the boundary is free, and the exemption is declared rather than assumed —
+    `PREFIX_STABLE_PANELS`. `task_context` is the only member: its five rendered fields are
+    `FRAMING_FIELDS`, which `TaskDecomposition.merge` refuses to overwrite, so the shared prefix
+    measurably survives all of `task_intent`."""
 
     persona: str = ""
     task_intent: str = ""
@@ -315,10 +366,24 @@ class OptSearchPoint(PromptTemplate):
         return OptSearchPoint(**data)
 
 
-for _rendering_cls in (PromptTemplate, OptSearchPoint):
-    # A field the order omits renders nowhere — silently, in a prompt.
-    if sorted(_rendering_cls.RENDER_ORDER) != sorted(PROMPT_STRING_FIELDS):
-        raise RuntimeError(
-            f"{_rendering_cls.__name__}.RENDER_ORDER must be a permutation of "
-            f"PROMPT_STRING_FIELDS: an order chooses SEQUENCE, never membership."
-        )
+_check_render_order(PromptTemplate)
+
+# The prefix-cache half of the same contract, and asserted HERE rather than in
+# `_check_render_order` because it is true of the optimizer prompt alone: `OptSearchPoint` below
+# restates `PROMPT_STRING_FIELDS` order for the target prompt, where `problem_description` is
+# third and the archive key — not a cache — is what the order answers to.
+#
+# `l1_layout.py` cannot assert this itself (domain import direction: it is imported BY this
+# module), so the reading lives on the importer. Two claims, both load-bearing and neither
+# previously checked: the volatile slot renders last, and the layout's slot sequence is the
+# render sequence — without the second, `L1_LAYOUT_SLOTS[:-1]` is not "the slots ahead of the
+# boundary" and `validate_l1_layout`'s prefix check reads the wrong ones.
+assert PromptTemplate.RENDER_ORDER[-1] == VOLATILE_SLOT, (
+    f"the optimizer prompt must render {VOLATILE_SLOT!r} last — it is where every NODE_LAYOUTS "
+    f"floor puts its evidence, so a field behind it can never sit in a provider's stable prefix."
+)
+assert [f for f in PromptTemplate.RENDER_ORDER if f in L1_LAYOUT_SLOTS] == list(L1_LAYOUT_SLOTS), (
+    f"L1_LAYOUT_SLOTS {L1_LAYOUT_SLOTS} must be a subsequence of RENDER_ORDER "
+    f"{PromptTemplate.RENDER_ORDER} — the layout is declared in render order so that "
+    f"'ahead of the boundary' means the same thing in both modules."
+)

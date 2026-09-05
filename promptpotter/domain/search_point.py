@@ -14,8 +14,13 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
-PARAM_FORBIDDEN_KEYS: frozenset[str] = frozenset({"model", "provider"})
-"""Optimizer-forbidden ``pipeline_params[node]`` keys (operator-fixed via dataset overlay)."""
+PARAM_FORBIDDEN_KEYS: frozenset[str] = frozenset({"model", "provider", "route_order"})
+"""Optimizer-forbidden ``pipeline_params[node]`` keys (operator-fixed via dataset overlay).
+
+``route_order`` is here for the same reason as the other two and not a weaker one: it pins WHICH
+HOST of a model answers, and hosts of one model disagree systematically — an arm that moved the pin
+would be measuring the provider while reporting a prompt. It is a cost lever the operator sets
+against a measured capture, never a search axis."""
 
 
 PARAM_SCOPE_KEYS: frozenset[str] = frozenset(

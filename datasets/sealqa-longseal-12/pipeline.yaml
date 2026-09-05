@@ -67,14 +67,19 @@ nodes:
       # and `param_allowed_values` is a string enum, which cannot express one for an integer. An
       # unbounded integer axis would be a cost rail removed rather than a search axis added.
       #
-      # 4, not 10, and the bound is where the WORK stops rather than where the agent gives up: on
-      # 455 archived cells 89% finished at 3 turns and the 4-turn bucket scored best (0.538 on 26).
-      # Past 4 was 5.3% of cells but 16.4% of spend and 9.8% of wall clock, scoring 2/24 against a
-      # 27% baseline — a long cell here is a LOST cell, not a working one. Capping moved headline
-      # accuracy 0.273 -> 0.268. The number belongs to this dataset alone: its siblings run 20 and
-      # 30 and no equivalent distribution has been pulled for either, so do not cap them by analogy.
-      # This value is inside `node_configs`, so changing it re-keys the archive — which is correct,
-      # a 4-turn cell is not the same measurement as a 10-turn one.
+      # 4, not 10, and the bound is where the WORK stops rather than where the agent gives up.
+      # UNITS: `max_turns` counts AGENT turns; `pipeline_data.turns` also carries the user message
+      # we handed the agent, so counting its length reads one high — the 11-entry episodes banked
+      # under the old cap of 10 are what pin the two scales together. Recounted in agent turns over
+      # 789 cells: 84.8% finish in 2, 91.1% by 3, and the 3-turn bucket scores best (0.480 on 50).
+      # Past that it collapses — 0.019 on the 54 four-turn cells, a flat 0.000 on every deeper
+      # bucket — so a long cell here is a LOST cell, not a working one. Capping moved headline
+      # accuracy 0.273 -> 0.268. OPEN: that same table argues for 3, which would drop the 4-turn
+      # bucket's spend for ~nothing. The number belongs to this dataset alone: its siblings run 20
+      # and 30 and no equivalent distribution has been pulled for either, so do not cap them by
+      # analogy. This value is inside `node_configs`, so changing it re-keys the archive — which is
+      # correct, a 4-turn cell is not the same measurement as a 10-turn one, and it is why the 3
+      # above is the operator's call rather than a comment's.
       observation_name: agent
       observation_mappings:
         # The verifier's number, and the only observation this node emits. The connector declares

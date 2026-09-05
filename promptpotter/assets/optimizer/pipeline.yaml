@@ -177,52 +177,49 @@ resolved_prompts:
       Propose up to {{n_variants}} candidates that beat the parent searchpoint. Read the context blocks
       below for the pipeline, domain, critique, and failures; let these define the fix rather than a presumed
       task type. A critique's priority_fix is your primary steer.
-    problem_description: ''
-    instruction: >-
-      THINK FIRST — diverge, then converge. Before writing any variant, name {{n_variants}} genuinely
-      distinct hypotheses for WHY the parent fails, then develop each one you can ground in a panel.
-      Reach the full count: a round's chance of finding a lift climbs steeply with the number of
-      DISTINCT hypotheses it tests, so stopping at one or two forfeits most of the round. The critique
-      usually names FEWER clusters than you have slots — when it runs short, take the remaining
-      hypotheses from another panel and cite that panel. Never invent a cluster to fill a slot: a
-      target no panel shows is a guess wearing a citation. Spend your reasoning on each hypothesis's
-      MECHANISM, not on making the set look varied. Spread across the
-      two prose surfaces — the prompt-template fields and each node's `output_schema_descriptions` (its
-      output-schema `description` strings, which steer harder per token than the instruction; see answer_format).
-      An undescribed field is the cheapest win on the board. Scalar params (temperature, tokens, effort)
-      are a last resort: at most one, and only when a panel or runtime failure points there.
+    problem_description: >-
+      CITABLE FIELDS — "evidence_grounding.field" must be EXACTLY one of: {{citable_fields}}. Nothing
+      else is admissible.
+    instruction: |-
+      THINK FIRST — diverge, then converge. Before writing any variant, name {{n_variants}} distinct
+      MECHANISMS for why the parent fails, then develop each one a panel supports. A round's chance of a
+      lift climbs steeply with the number of distinct mechanisms tested, so stopping at one or two
+      forfeits most of the round. Where the critique names fewer clusters than you have slots, take the
+      rest from another panel and cite that panel — never invent a cluster to fill a slot.
 
+      SPREAD ACROSS MECHANISM AXES, NOT ACROSS FIELDS. Two edits to different fields that make the same
+      cognitive change are ONE hypothesis, and are scored as one. The axes:
+        - STANCE — the mental move the solver makes: verify before answering, eliminate, decompose,
+          commit under uncertainty.
+        - EVIDENCE — what it does with input that is missing, contradictory, or irrelevant.
+        - SCOPE — what it is told to ignore, refuse, or stop doing.
+        - OUTPUT SHAPE — the `output_schema_descriptions` strings, which steer harder per token than the
+          instruction. An undescribed field is the cheapest win on the board.
+        - RECOMBINATION — take a mechanism that MEASURABLY worked, on another cluster or in an earlier
+          round, and apply it where it has not been tried. Cite the panel that measured it.
+      Scalar params (temperature, tokens, effort) are a last resort: at most one, and only where a panel
+      or a runtime failure points there.
 
-      TEMPERAMENT — read escalation_panel.exploration_budget AND mutation_memory. At tight/normal, REFINE
-      — and refinement cuts BOTH ways: add a missing instruction, OR distill an overloaded one. Edit only
-      the field that owns the change; beside your edit you may reframe, repair garbled tokens,
-      OR cut instruction not paying its way. More words is not more skill — a small model drowns in rigor
-      it cannot execute, and a prompt already refined once is the case where the next addition regresses.
-      If mutation_memory shows a recent addition scored at or BELOW its parent, the prompt is over-saturated:
-      cut the weakest addition or rewrite leaner — do NOT pile on more. At wide (a measured stall, OR
-      any round whose candidates regressed below the parent), abandon the attractor for a bold, categorically-different
-      AND leaner cognitive stance. Lean means the RESPONSE too: the prompt becomes next round's parent
-      and rides every call, so text it makes the solver EMIT is paid on every sample from here on —
-      accuracy bought by longer deliberation is usually the worse trade.
+      TEMPERAMENT — read escalation_panel.exploration_budget and mutation_memory. At tight/normal REFINE,
+      and refinement cuts BOTH ways: add a missing instruction, OR distill an overloaded one. If
+      mutation_memory shows a recent addition scored at or BELOW its parent, the prompt is over-saturated
+      — cut the weakest addition rather than piling on. At wide (a measured stall, or a round whose
+      candidates regressed below the parent), abandon the attractor for a categorically different and
+      LEANER stance. Lean means the RESPONSE too: this prompt becomes next round's parent and rides every
+      call, so text that makes the solver EMIT more is paid on every sample from here on.
 
+      GROUND EVERY CHOICE — each evidence_grounding cites a real panel entry; no data, no gamble. An axis
+      tagged PEAKED sits at its measured peak: leave it unless your citation names a real rebut.
 
-      GROUND EVERY CHOICE. Each evidence_grounding cites a real panel entry — no data justifying a mutation,
-      no gamble. An axis_memory axis tagged PEAKED sits at its measured peak: leave it unless your citation
-      names a real rebut (the critique naming it, or exploration_budget = wide).
-
-
-      AUTO-REJECTED (wastes a slot), before any backend call: clones (a substring, paraphrase, or case-fold
-      of the parent, or all-empty); params outside the catalogue; configs already in runtime_failures;
-      fill-in-the-blank slots; unknown node or field names; any edit that drops or contradicts answer_format's
-      output directives (the scorer parses those — break them and the candidate scores near 0 however
-      good its reasoning); and any variant re-proposing an idea the ALREADY TRIED panel shows was
-      measured and lost — moving that idea into a different field does not make it a new hypothesis, and
-      the check reads your wording, not the field you put it in. If the panel marks an idea ↺, that direction
-      is spent: propose a DIFFERENT hypothesis about why the failures happen.
+      THE ONE UNPOLICED TRAP — an edit that drops or contradicts answer_format's output directives scores
+      near 0 however good its reasoning, because the scorer parses those. Everything else you might get
+      wrong (a clone of the parent, an off-catalogue param, an unknown node or field name, or a repeat of
+      an idea the ALREADY TRIED panel marks ↺) is rejected mechanically before it costs a backend call —
+      so spend no reasoning avoiding it.
     thinking_style: ''
     answer_format: |-
       Return JSON: {"variants": [...]}. Each variant, IN THIS ORDER:
-        - "evidence_grounding": {field, citation}. field one of {{citable_fields}} — nothing else is admissible; citation quotes the cited entry verbatim, <=320c.
+        - "evidence_grounding": {field, citation}. field one of the CITABLE FIELDS listed below — nothing else is admissible; citation quotes the cited entry verbatim, <=320c.
         - "targets_cluster": the ONE failure this variant attacks — the critique's cluster label verbatim where one fits, else your own short name for a failure the panel you cite actually shows. Two variants may NOT name the same target.
         - Three override slots; AT LEAST ONE NON-EMPTY. A variant that overrides nothing mutates nothing and is rejected — describing a change is not making one. Never conflate the slots.
           * "pipeline_params_override": nested {node: {param: value}} — scalar backend tunables, and "output_schema_descriptions": {field: prose}, which rewrites that node's output-schema `description` strings. output_schema_descriptions is a param NESTED UNDER ITS NODE (shape {node: {"output_schema_descriptions": {field: prose}}}), NEVER a top-level key beside the nodes. Field names are FIXED: you describe a field, never rename or invent one. A prompt-template field (persona, instruction, …) goes in prompt_fields_override and NEVER here, even where the catalogue lists it under a node: the same edit sent both ways is scored once and remembered twice, and the duplicate row makes an idea already tried read as untried.
@@ -235,7 +232,7 @@ resolved_prompts:
       Analyze the measurements below and produce a structured critique for the next optimization round.
     problem_description: ''
     instruction: >-
-      Read the measurements above. Extract the DISTINCT failure clusters — different root causes, not
+      Read the measurements below. Extract the DISTINCT failure clusters — different root causes, not
       different examples of one — name the L1 axis that targets the largest, and write the concrete
       change.
 
@@ -322,7 +319,7 @@ resolved_prompts:
     problem_description: ''
     instruction: >-
       Propose a categorically different strategy, not a refinement of this one. Runtime-failure
-      patterns above are discovered constraints — steer around them. L2 OUTPUT FAILURES mean
+      patterns below are discovered constraints — steer around them. L2 OUTPUT FAILURES mean
       validators caught L2 emitting broken output: coach L2 out of that mode in the plan text.
     thinking_style: >-
       Before replanning, ask which pipeline dimensions the data shows as under-explored — the plan's

@@ -210,8 +210,8 @@
               "enum": [
                 "persona",
                 "task_intent",
-                "problem_description",
-                "thinking_style"
+                "thinking_style",
+                "problem_description"
               ],
               "type": "string"
             },

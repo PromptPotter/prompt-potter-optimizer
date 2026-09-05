@@ -28,6 +28,7 @@ from promptpotter.domain.results import (
     is_floor_pinned,
 )
 from promptpotter.domain.ruler import ThetaCaveat
+from promptpotter.domain.spend import TokenAccount
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +201,13 @@ def build_score_report(
         scored_samples=len(query_results),
         expected_samples=len(dataset),
         cached_samples=sum(1 for r in query_results if r.get("cached")),
+        # Folded HERE, beside the replay count it is the peer of, so the two readings of "what did
+        # this searchpoint cost to measure" come off one walk of one list.
+        input_tokens=measured.input
+        if (measured := TokenAccount.from_measured_rows(query_results))
+        else None,
+        output_tokens=measured.output if measured else None,
+        cache_read_tokens=measured.cache_read if measured else None,
         partial_reason=str(score_summary.get("partial_reason", "")),
         invalid=invalid,
         validation_failures=list(opt_sp.memory.wounds.validation_failures),

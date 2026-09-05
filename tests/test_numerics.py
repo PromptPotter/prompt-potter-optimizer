@@ -2696,12 +2696,16 @@ def test_a_reproposed_idea_is_rejected_even_when_rewritten_into_another_field():
 
 def test_parse_population_flags_dropped_optimizer_prompt_port():
     """An L4 candidate whose merged `l1_generate` prose drops an INLINE port
-    (`{{citable_fields}}` in `answer_format`, `{{n_variants}}` in `task_intent`+`instruction`)
+    (`{{citable_fields}}` in `problem_description`, `{{n_variants}}` in `task_intent`+`instruction`)
     is invalid (synthetic-0) — a severed channel once ran 4 inner campaigns as normal
     measurements, silently. The capability directives now ride the layout (guarded by
     `validate_l1_layout`'s mandatory set); the inline format ports guarded here can never
     move there, so this is the guard's permanent scope. Checked on MERGED params, so a
-    child inheriting the broken prose from its parent (no override of its own) flags too."""
+    child inheriting the broken prose from its parent (no override of its own) flags too.
+
+    The citable menu sits in `problem_description` rather than `answer_format` because it is the
+    one per-ROUND value in an otherwise static template, and `problem_description` renders last —
+    holding it ahead of that voided the provider prefix cache for everything behind it."""
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         base_optimizer_template,
     )
@@ -2709,18 +2713,18 @@ def test_parse_population_flags_dropped_optimizer_prompt_port():
 
     schema = PipelineSchema(
         name="promptpotter-self",
-        nodes=[PipelineNode(name="l1_generate", param_keys={"answer_format"})],
+        nodes=[PipelineNode(name="l1_generate", param_keys={"problem_description"})],
     )
     parent = _parent()
-    base_answer_format = base_optimizer_template("l1_generate").answer_format
+    base_problem_description = base_optimizer_template("l1_generate").problem_description
     dropped = CandidateProposal(
         opt_sp=parent.mutate(),
-        pipeline_params_override={"l1_generate": {"answer_format": "Return JSON variants."}},
+        pipeline_params_override={"l1_generate": {"problem_description": "Read the panels."}},
     )
     intact = CandidateProposal(
         opt_sp=parent.mutate(),
         pipeline_params_override={
-            "l1_generate": {"answer_format": base_answer_format + " Be terse."}
+            "l1_generate": {"problem_description": base_problem_description + " Be terse."}
         },
     )
     inherits_broken = CandidateProposal(opt_sp=parent.mutate(persona="Strict"))
@@ -2732,13 +2736,13 @@ def test_parse_population_flags_dropped_optimizer_prompt_port():
     )
     inherited_list, _ = parse_population(
         [inherits_broken],
-        pipeline_params={"l1_generate": {"answer_format": "Answer without ports."}},
+        pipeline_params={"l1_generate": {"problem_description": "Panels without ports."}},
         schema=schema,
     )
 
     dropped_failures = opt_sp_list[0].memory.wounds.validation_failures
-    # A 21-char replacement for a 1.5k field is ALSO a gutting, so this candidate now carries two
-    # reasons. Selected rather than asserted whole: the subject here is the severed port.
+    # Selected rather than asserted whole: the subject here is the severed port, and a short
+    # replacement can carry a gutting reason alongside it.
     (port,) = [vf for vf in dropped_failures if vf.reason == "dropped_mandatory_placeholder"]
     assert port.axis == "l1_generate.prompt"
     assert "citable_fields" in port.value
@@ -2962,6 +2966,37 @@ def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
     # The budget gate reads the bill, so a replay can never halt a run it cost nothing to make.
     assert view.spend_total_used_usd == pytest.approx(0.02)
     assert spend.loop.input_tokens == 1000  # billed tokens: the wire call only
+
+    # The per-round map is the SAME fold under a second key, so it must reconcile against the
+    # cycle total — a split that quietly disagrees with the number the budget gate reads is worse
+    # than no split at all, and nothing on any surface would say so.
+    by_round = view.state.spend_by_round
+    assert sum(r.total_used_usd for r in by_round.values()) == pytest.approx(spend.total_used_usd)
+    assert sum(r.total_incurred_usd for r in by_round.values()) == pytest.approx(
+        spend.total_incurred_usd
+    )
+    # Both calls carry no `round` — they ran before any round closed — and bank at 0 rather than
+    # being dropped, which is what would under-report every campaign's opening prefix.
+    assert list(by_round) == ["0"]
+
+    view._handle_token_usage(
+        TokenUsageRecord(
+            kind="backend",
+            node="agent",
+            model="openai/gpt-oss-120b",
+            input_tokens=800,
+            output_tokens=100,
+            cache_read_tokens=600,
+            cost_usd=0.01,
+            round=3,
+        )
+    )
+    # A round's own bucket, which is the whole point: "what did round 3 cost, and how much of its
+    # input did the provider serve off its own prefix cache" is answerable nowhere else.
+    assert by_round["3"].backend.used_usd == pytest.approx(0.01)
+    assert by_round["3"].backend.cache_read_tokens == 600
+    assert by_round["0"].backend.used_usd == 0.0, "round 3's spend must not leak into round 0"
+    assert sum(r.total_used_usd for r in by_round.values()) == pytest.approx(spend.total_used_usd)
 
 
 def test_rerun_short_circuits_when_max_tokens_le_cached_completion() -> None:

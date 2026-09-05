@@ -19,7 +19,7 @@ l1_generate:
     levers: the inner nodes and their editable fields.
   instruction: >-
     Emit every change in `pipeline_params_override` as {inner_node: {field: text}}, keyed by a node +
-    field from the catalogue above. One candidate per critique failure cluster — the spread is carried
+    field from the catalogue below. One candidate per critique failure cluster — the spread is carried
     by targets_cluster, so spend your reasoning on each cluster's mechanism, not on varying the wording.
 
 
@@ -79,7 +79,7 @@ l1_generate:
     edits prose OR layout for a node, not both.
   answer_format: |-
     Return JSON: {"variants": [...]}. Each variant, IN THIS ORDER:
-      - "evidence_grounding": {field, citation} — field is EXACTLY one of {{citable_fields}} (any other value, e.g. 'failure', is invalid); citation quotes the panel entry.
+      - "evidence_grounding": {field, citation} — field is EXACTLY one of the CITABLE FIELDS listed below (any other value, e.g. 'failure', is invalid); citation quotes the panel entry.
       - "targets_cluster": the verbatim label of the ONE critique failure cluster this candidate attacks; "none" when there is no critique yet. Two candidates may NOT name the same cluster.
       - "pipeline_params_override": {inner_node: {field: "complete replacement text"}} — inner_node one of l1_generate/l1_critique/l2_context/l3_plan; field one of persona/task_intent/instruction/thinking_style. MUST be non-empty: a variant that overrides nothing mutates nothing and is rejected.
       - Instead of a prose field, a variant may edit information flow: "pipeline_params_override": {inner_node: {"layout": {"problem_description": ["signal", ...]}}} — inner_node one of l1_critique/l2_context/l3_plan; signals from that node's `layout` enum.

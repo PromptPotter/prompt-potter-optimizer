@@ -343,6 +343,15 @@ Retry-After.
 auto-detection and no env-var fallback: either would make a finished run's provider
 unrecoverable from the config that declared it.
 
+**`provider` is the GATEWAY; `route_order` is the HOST behind it, and they are two decisions.**
+A gateway fans one model out over many upstream hosts and picks per call, so a prefix cache — which
+is per-replica — pays only where one route is hit repeatedly, and a host that does not cache at all
+is indistinguishable from a cold one until you read `served_by`. `chat(route_order=[...])` names the
+hosts to try in order (`extra_body.provider`, `allow_fallbacks` on, so a dead endpoint degrades the
+route rather than failing the run). It is in `hash_call` because it changes WHO answers, not what is
+asked, and hosts of one model disagree systematically; and in `PARAM_FORBIDDEN_KEYS` because that
+makes it an operator cost lever and never a search axis.
+
 **`LLMResponse.reasoning` is a core field with no code reader — by design.** It captures
 the model's own thinking channel; a model with nowhere to put its internal process
 answers without one, so the slot is part of the ask. It rides the ledger payload to

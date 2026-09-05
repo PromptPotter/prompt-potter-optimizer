@@ -61,37 +61,75 @@ L1_POSSIBLE: frozenset[str] = frozenset(
     }
 )
 
-# PromptTemplate slots a layout addresses. ``answer_format`` is omitted —
-# it carries the output JSON schema and is owned by the template, not L2.
+# PromptTemplate slots a layout addresses, IN RENDER ORDER (`PromptTemplate.RENDER_ORDER`, which
+# asserts this sequence is a subsequence of its own). ``answer_format`` is omitted — it carries the
+# output JSON schema and is owned by the template, not L2.
+#
+# The order is what makes `VOLATILE_SLOT` readable below: the slots ahead of it are the ones a
+# panel voids the provider's prefix cache from.
 L1_LAYOUT_SLOTS: tuple[str, ...] = (
     "persona",
     "task_intent",
-    "problem_description",
     "thinking_style",
+    "problem_description",
 )
+
+VOLATILE_SLOT: str = L1_LAYOUT_SLOTS[-1]
+"""The slot behind the provider's prefix-cache boundary — the LAST thing an optimizer prompt
+renders (`PromptTemplate.RENDER_ORDER`), which is why every floor below puts its evidence there.
+
+An implicit prefix cache hits on an identical LEADING byte range, so a panel whose text CHANGES
+between rounds voids the discount on every byte after it. Ahead of this slot that means the static
+template itself — instruction, thinking_style, answer_format — is re-billed at full rate every
+round, for a panel that had to be re-sent anyway."""
+
+PREFIX_STABLE_PANELS: frozenset[str] = frozenset({"task_context"})
+"""Panels that may sit ahead of :data:`VOLATILE_SLOT` for free, because their text cannot change
+within a run — so the shared prefix survives them.
+
+**Membership is a claim about a WRITER, not about a renderer**, and there is exactly one today:
+`_r_task_context` renders only `FRAMING_FIELDS`, and `TaskDecomposition.merge` raises rather than
+overwrite any of the five ("frozen for the run"). Every other panel is derived from measurement
+and moves whenever the measurement does.
+
+This list is what keeps :func:`validate_l1_layout`'s prefix check silent on the floors while still
+catching an EDIT that walks a live panel forward — L2 addresses any of the four slots
+(`layout_json_schema`), so without it the placement axis can spend the discount with nothing
+reporting that it did. Adding a name here means re-reading its renderer and its writer; a panel
+that is merely stable TODAY is not stable, it is untested."""
 
 
 class L1Layout(StrictModel):
     """Per-slot list of placeholder names that the dispatch hub resolves
     when filling L1's PromptTemplate. Empty lists ⇒ the slot's static text only."""
 
+    # Declared in ``L1_LAYOUT_SLOTS`` order, and the assert below is why it stays that way: this is
+    # the THIRD hand-written sequence of the same four names, and ``model_dump()`` puts it on disk,
+    # so a stale one shows the operator a slot order the engine no longer renders in.
     persona: list[str] = Field(default_factory=list)
     task_intent: list[str] = Field(default_factory=list)
-    problem_description: list[str] = Field(default_factory=list)
     thinking_style: list[str] = Field(default_factory=list)
+    problem_description: list[str] = Field(default_factory=list)
 
     def all_placeholders(self) -> list[str]:
-        return [
-            *self.persona,
-            *self.task_intent,
-            *self.problem_description,
-            *self.thinking_style,
-        ]
+        """Every placed panel, in RENDER order — off ``L1_LAYOUT_SLOTS`` rather than a second
+        hand-written sequence of the same four names, which is how the two came to disagree about
+        where ``problem_description`` sits."""
+        return [name for slot in L1_LAYOUT_SLOTS for name in self.slot(slot)]
 
     def slot(self, name: str) -> list[str]:
         if name not in L1_LAYOUT_SLOTS:
             raise KeyError(f"Unknown L1 layout slot: {name}")
         return cast("list[str]", getattr(self, name))
+
+
+# Membership `slot()` already refuses; ORDER nothing did, and the two are declared apart because
+# Pydantic owns one and this module owns the other. `model_dump()` serializes in field order, so a
+# drift here is a round file and a dashboard showing a sequence the renderer does not use.
+assert tuple(L1Layout.model_fields) == L1_LAYOUT_SLOTS, (
+    f"L1Layout declares {tuple(L1Layout.model_fields)} but L1_LAYOUT_SLOTS is {L1_LAYOUT_SLOTS} — "
+    f"the fields ARE the slots and are declared in render order; reorder the fields, not this."
+)
 
 
 class NodeLayoutSpec(StrictModel):
@@ -143,6 +181,11 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
         possible=L1_POSSIBLE,
         mandatory=L1_MANDATORY,
         floor=L1Layout(
+            # The one floor placement ahead of `VOLATILE_SLOT`, and it is free: `task_context` is
+            # in `PREFIX_STABLE_PANELS` because its five rendered fields are `FRAMING_FIELDS`,
+            # which `TaskDecomposition.merge` refuses to overwrite. Measured on a live round pair,
+            # the shared prefix survives all 1,788 chars of this slot and breaks inside
+            # `problem_description`. Anything NOT on that list belongs behind the boundary.
             task_intent=["task_context"],
             problem_description=[
                 "rendered_prompt",
@@ -357,7 +400,16 @@ for _node, _spec in NODE_LAYOUTS.items():
     assert _floor_ph >= _spec.mandatory, (
         f"{_node}: floor must reference every mandatory placeholder"
     )
-del _node, _spec, _floor_ph
+    # No floor may cost the prefix. `PREFIX_STABLE_PANELS` is the exemption and it is short on
+    # purpose, so this is what stops the list growing to fit a floor rather than the other way
+    # round — and it is why `validate_l1_layout`'s prefix check is silent on an unedited run.
+    _early = {n for s in L1_LAYOUT_SLOTS[:-1] for n in _spec.floor.slot(s)} - PREFIX_STABLE_PANELS
+    assert not _early, (
+        f"{_node}: floor places {sorted(_early)} ahead of {VOLATILE_SLOT!r}, voiding the prefix "
+        f"cache for every field behind it. Move it there, or — only if its text cannot change "
+        f"within a run — add it to PREFIX_STABLE_PANELS with the writer that freezes it."
+    )
+del _node, _spec, _floor_ph, _early
 
 
 def layout_json_schema(spec: NodeLayoutSpec, *, description: str) -> dict[str, Any]:
@@ -461,6 +513,24 @@ def validate_l1_layout(
         )
         is_valid = False
 
+    # SOFT: a panel whose text moves between rounds, placed ahead of the prefix boundary. Costs
+    # money, not correctness — placement is a real axis and an edit may be worth its discount — so
+    # this reports rather than rolls back, and the report is the whole point: the discount is
+    # otherwise spent with nothing able to say it was.
+    early = [
+        name
+        for slot in L1_LAYOUT_SLOTS[:-1]
+        for name in layout.slot(slot)
+        if name not in PREFIX_STABLE_PANELS
+    ]
+    if early:
+        outcomes.append(
+            ValidatorOutcome(
+                validator_id="l1_layout_voids_prefix",
+                evidence={"panels": early, "stable_slot": VOLATILE_SLOT},
+            )
+        )
+
     # SOFT: unchanged from prior — L2 spent a fire on nothing. Flag, don't block.
     if prior_layout is not None and layout == prior_layout:
         outcomes.append(
@@ -478,6 +548,8 @@ __all__ = [
     "L1_MANDATORY",
     "L1_POSSIBLE",
     "NODE_LAYOUTS",
+    "PREFIX_STABLE_PANELS",
+    "VOLATILE_SLOT",
     "L1Layout",
     "NodeLayoutSpec",
     "coerce_l1_layout",
