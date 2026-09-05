@@ -122,19 +122,16 @@ export function liveObserveConfig(
   return rowConfig(latest, `live — ${label}`, nodeId);
 }
 
-// Live, by id: the SELECTED in-flight candidate out of the live l1_score input
+// Live, by LABEL: the SELECTED in-flight candidate out of the live l1_score input
 // (not the latest-seeded one `liveObserveConfig` shows). Null until that
 // candidate has been seeded (`candidate_started`). The scoring inspector reads
 // this when the operator drills into a candidate of the still-running round.
 export function liveCandidateObserveConfig(
   dash: DashboardSnapshot | null,
-  candidateId: string,
   label: string,
   nodeId?: string | null,
 ): ObserveConfig | null {
-  const liveRound = roundOf(dash);
-  if (liveRound == null || !candidateId) return null;
-  return rowConfig(liveInputCandidate(dash, liveRound, candidateId), `live — ${label}`, nodeId);
+  return rowConfig(liveInputCandidate(dash, label), `live — ${label}`, nodeId);
 }
 
 // Historical: a past candidate out of its lazily-loaded round file, located by its POSITIONAL

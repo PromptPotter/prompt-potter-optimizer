@@ -167,7 +167,7 @@ async def _rescore_and_reemit(
     from promptpotter.application.origin import rescore_parent
 
     scoring_set = sample_dataset(dataset, config.origin_budget())
-    origin = await rescore_parent(cycle, scoring_set, 0, callbacks=cb, force_fresh=True)
+    origin = await rescore_parent(cycle, scoring_set, callbacks=cb, force_fresh=True)
     # A fresh round replaces round 0 outright, so it is re-graded as a fresh floor
     # (no prior track record) exactly as the first origin emit was.
     cycle.restamp_origin_round(origin)

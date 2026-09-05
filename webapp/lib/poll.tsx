@@ -169,55 +169,41 @@ export function liveL1InputCandidates(
   return l1?.input?.candidates ?? NO_INPUT_CANDIDATES;
 }
 
-// Match a selection's `candidate_id` back to a live candidate slot. Read peer of
-// `liveCandidateId` (which mints the id): construction and match ride one rule —
-// the same idx guard on both sides — so a selection can't resolve on the output
-// half and miss on the input half. null when no in-flight candidate carries the
-// id (a malformed idx is skipped, never stringified to `r{round}_undefined`).
-function matchLiveCandidate<T extends { idx?: number }>(
+// Match a candidate back to its live slot BY LABEL — the one key both id spaces carry.
+//
+// A live row has no lineage id until `candidate_scored` stamps one, while every SELECTION is
+// minted off the served tree and carries that id — so neither id space spans both halves, and a
+// key from either resolves in one only. `label` is canonical (`candidate_label(round, idx)`,
+// composed at mint), unique within a round, and already what the HISTORICAL join uses
+// (`searchPoint.ts`, `RoundBuffer.stamp_fit`) — so it is the join, not a third id.
+function matchLiveCandidate<T extends { label?: string }>(
   candidates: readonly T[],
-  round: number | null,
-  candidateId: string,
+  label: string,
 ): T | null {
-  for (const c of candidates) {
-    const i = Number(c.idx);
-    if (!Number.isFinite(i) || i < 0) continue;
-    if (liveCandidateId(round, i) === candidateId) return c;
-  }
-  return null;
+  if (!label) return null;
+  return candidates.find((c) => c.label === label) ?? null;
 }
 
 // Output-candidate slot — the sample tape. For a candidate's numbers, `liveCandidateRow`.
 export const liveCandidate = (
   dash: DashboardSnapshot | null,
-  round: number | null,
-  candidateId: string,
-): LiveCandidate | null =>
-  matchLiveCandidate(liveL1Candidates(dash), round, candidateId);
+  label: string,
+): LiveCandidate | null => matchLiveCandidate(liveL1Candidates(dash), label);
 
-// The in-flight row's NUMBERS, by the id the selection carries. Positional, matching
-// `matchLiveCandidate` above and the id `roundCandidates` stamps on an in-flight row — one
-// rule for construction and match, or a finished candidate resolves in neither.
+// The in-flight row's NUMBERS, by the same label its tape and its seed resolve on.
 export function liveCandidateRow(
   dash: DashboardSnapshot | null,
-  round: number | null,
-  candidateId: string,
+  label: string,
 ): DashboardCandidate | null {
-  const rows = liveCandidates(dash);
-  for (let i = 0; i < rows.length; i++) {
-    if (liveCandidateId(round, i) === candidateId) return rows[i] ?? null;
-  }
-  return null;
+  return matchLiveCandidate(liveCandidates(dash), label);
 }
 
 // Input-candidate slot — the seed-able prompt_fields / resolved_pipeline_params
 // half, for steer-fork seeding from a still-in-flight candidate.
 export const liveInputCandidate = (
   dash: DashboardSnapshot | null,
-  round: number | null,
-  candidateId: string,
-): LiveInputCandidate | null =>
-  matchLiveCandidate(liveL1InputCandidates(dash), round, candidateId);
+  label: string,
+): LiveInputCandidate | null => matchLiveCandidate(liveL1InputCandidates(dash), label);
 
 export interface CycleStreamState {
   dash: DashboardSnapshot | null;

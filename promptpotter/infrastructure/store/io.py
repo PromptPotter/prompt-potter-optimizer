@@ -227,11 +227,25 @@ def write_yaml(path: Path, data: Any) -> None:
 
 
 def read_yaml(path: Path) -> Any:
-    with open(_long_path(path), encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    """A parse failure surfaces as ``ValueError`` NAMING THE FILE, which is what `json.loads`
+    already does (`JSONDecodeError` is a `ValueError`) and what every guard in this tree was
+    written against — `except (ValueError, OSError)`, over and over. A bare `yaml.YAMLError`
+    inherits from `Exception` alone, so it walked straight through all of them: one corrupt
+    `pipeline.yaml` under `datasets/` took down the whole readable-dataset listing, where the
+    guard it passed through was written to degrade that dataset to "unknown size" and move on.
+
+    Wrapped HERE rather than at the guards, because there are eleven call sites and this is the
+    one place that knows which path failed."""
+    try:
+        with open(_long_path(path), encoding="utf-8") as f:
+            return yaml.safe_load(f)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"{path} is not valid YAML — {exc}") from exc
 
 
 def read_yaml_optional(path: Path) -> Any | None:
+    """``None`` for a file that is not THERE. A file that is there and unreadable still raises —
+    absence is a state a caller can act on, corruption is one it must not paper over."""
     try:
         return read_yaml(path)
     except FileNotFoundError:

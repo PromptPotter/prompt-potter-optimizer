@@ -49,10 +49,14 @@ def sample_row(s: dict[str, Any]) -> DashboardSample:
     # tell the two apart: `NO_RESULT` beside a real truth is an extraction that broke.
     ground_truth = _trim(s.get("ground_truth") or "", 20)
     graded_by_verifier = is_verifier_graded(ground_truth)
+    fitness = s.get("fitness")
     return DashboardSample(
         qi=int(s.get("qi", 0)),
         sample_id=None if sid is None else int(sid),
         status=status,
+        # Off the same row `status` was decided from — an errored row carries none, which is
+        # what `status == "ERR"` already says.
+        fitness=float(fitness) if isinstance(fitness, int | float) else None,
         terminal_node=str(s.get("terminal_node") or ""),
         cached=bool(s.get("cached", False)),
         time_s=float(time_s) if isinstance(time_s, int | float) else None,

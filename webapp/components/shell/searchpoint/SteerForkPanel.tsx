@@ -90,7 +90,7 @@ export function SteerForkPanel({
   const { isLive: roundIsLive, doc } = useRoundSource(path, candidate.round, dash);
   const { me } = useAuth();
   const seed = roundIsLive
-    ? liveCandidateSearchPoint(dash, candidate.candidate_id)
+    ? liveCandidateSearchPoint(dash, candidate.label)
     : candidateSearchPoint(doc, candidate.candidate_id);
   const seedPrompt = seed?.origin_prompt_fields ?? {};
   const overlay = seed?.pipeline_overlay ?? {};

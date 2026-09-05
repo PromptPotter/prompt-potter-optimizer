@@ -149,9 +149,9 @@ class Session:
     # one searchpoint is cut, not the whole round.
     skip_check: Callable[[], bool] | None = None
     skip_consume: Callable[[], None] | None = None
-    # `sample_lookahead_check`: how many samples the operator armed the walk to hold in flight, 1
-    # when nothing is armed. Same read-and-consume pair as skip, spent a phase later — by the ROUND
-    # that scored under it or the GROUP the press released, per `Connector.concurrency_arming`.
+    # `sample_lookahead_check`: the depth in force — how many samples the walk holds in flight, 1
+    # when unset. Same read-and-consume pair as skip, spent a phase later — by the ROUND that
+    # scored under it, which is the one control loop every armable walk sits inside.
     sample_lookahead_check: Callable[[], int] | None = None
     sample_lookahead_consume: Callable[[], None] | None = None
     # `budget_tripped` returns the `StopReason` once a spend/token ceiling is met, else None.

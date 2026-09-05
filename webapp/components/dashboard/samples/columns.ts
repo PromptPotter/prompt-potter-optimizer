@@ -268,6 +268,12 @@ export function cellFor(
     case "query":
       return { text: item.query, raw: item.query, title: item.query };
     case "ground_truth":
+      // `null` is the bank DECLARING itself verifier-graded (a harbor episode, an L4 inner
+      // cycle) — say that, rather than leaving a blank cell that reads as a row we failed to
+      // load. Same dash the other absent-value cells use.
+      if (item.ground_truth === null) {
+        return { text: "—", raw: null, title: "Verifier-graded — this bank carries no label." };
+      }
       return { text: item.ground_truth, raw: item.ground_truth, title: item.ground_truth };
   }
 }

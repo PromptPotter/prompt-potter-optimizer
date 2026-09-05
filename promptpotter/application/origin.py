@@ -16,7 +16,11 @@ from promptpotter.domain.results import RoundParent, ScoredCandidate, candidate_
 from promptpotter.domain.run_records import CandidateMintedRecord, CycleSeed
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.shared.instrument import MeasuredCandidate, MeasurementRole
+from promptpotter.shared.instrument import (
+    NO_ROUND_SLOT,
+    MeasuredCandidate,
+    MeasurementRole,
+)
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
@@ -40,7 +44,6 @@ __all__ = [
 async def rescore_parent(
     cycle: Cycle,
     scoring_set: list[Sample],
-    round_num: int,
     *,
     callbacks: RunCallbacks,
     force_fresh: bool = False,
@@ -65,8 +68,12 @@ async def rescore_parent(
         degradation_checks=None,
         n_total_candidates=0,
         axes=cycle.axes,
-        on_sample_scored=None,
-        on_sample_starting=None,
+        # Ticked, not silenced. This is the LONGEST phase of a held round — the parent walks the
+        # whole panel while the candidates stopped wherever PoBB cut them — so a silenced one
+        # serves `between_samples` throughout, which on a `measured_unit="cell"` connector is tens
+        # of minutes of a live run reading as hung.
+        on_sample_scored=partial(callbacks.on_sample_scored, NO_ROUND_SLOT, 0),
+        on_sample_starting=partial(callbacks.on_sample_started, NO_ROUND_SLOT, 0),
         measured=MeasuredCandidate(
             idx=0,
             candidate_id=cycle.opt_sp.lineage.id,
@@ -402,6 +409,20 @@ async def prepare_scoring_context(
                 changes_description=resolved_origin.lineage.changes_description,
                 source=resolved_origin.lineage.source or "origin",
             )
+        )
+
+    # C0 announces itself exactly as an L1 candidate does — same call, same two emissions, so
+    # round 0 carries a walk axis and a readable searchpoint like any other round. `n_priors=0`
+    # is a fact rather than a default: C0 is the first arm, so nothing has been measured for
+    # PoBB to catch up on, and there is no `pp_override` because nothing proposed a delta.
+    if listener is not None:
+        listener.announce_candidate(
+            0,
+            0,
+            1,
+            opt_sp=resolved_origin,
+            resolved_pipeline_params=sp.config_params,
+            sample_order=[s.id for s in scoring_set],
         )
 
     from promptpotter.application.optimization.l1.score.signal_effect import (

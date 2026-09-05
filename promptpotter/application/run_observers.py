@@ -3,6 +3,7 @@ wires audit + dashboard + PoBB stream + optional ``LiveDisplay`` to one ledger, 
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from contextvars import Token
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimization.pobb.checks import PoBBSnapshot
+    from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.phases import PhaseEvent
     from promptpotter.domain.sample import Sample
     from promptpotter.presentation.views.live.display import LiveDisplay
@@ -88,7 +90,6 @@ def build_campaign_emitter(
         # The connector's own declarations, read at wiring — origin scoring runs before any
         # phase event, so anything that waits for one is absent exactly when round 0 needs it.
         max_cells_in_flight=session.backend_client.max_cells_in_flight,
-        concurrency_arming=session.backend_client.concurrency_arming,
         measured_unit=session.backend_client.measured_unit,
     )
 
@@ -329,6 +330,39 @@ class RunCallbacks:
                 "prompt_fields": prompt_fields,
                 "resolved_pipeline_params": resolved_pipeline_params,
             },
+        )
+
+    def announce_candidate(
+        self,
+        round_num: int,
+        idx: int,
+        total: int,
+        *,
+        opt_sp: OptSearchPoint,
+        resolved_pipeline_params: dict[str, Any] | None,
+        sample_order: Sequence[int],
+        n_priors: int = 0,
+        pp_override: dict[str, Any] | None = None,
+    ) -> None:
+        """Everything a reader needs BEFORE an arm walks: WHAT it is, and WHICH cells it will walk.
+
+        **The origin is a candidate of round 0 like any other**, so ONE call carries the pair.
+        Composed by hand per site, a caller emits one of the two and its round silently loses its
+        walk axis or its searchpoint; a third site that scores an arm calls this or goes dark the
+        same way.
+
+        `rescore_parent` is deliberately NOT one: the parent occupies no slot in the round's
+        population (`NO_ROUND_SLOT`), so it announces no candidate while still ticking samples."""
+        self.on_candidate_started(
+            idx,
+            total,
+            opt_sp.lineage.changes_description or "",
+            pp_override,
+            opt_sp.prompt_field_dict(),
+            resolved_pipeline_params,
+        )
+        self.on_sample_order_preview(
+            round_num, idx, total, n_priors=n_priors, sample_order=list(sample_order)
         )
 
     def on_candidate_scored(self, idx: int, total: int, scores: dict[str, Any]) -> None:

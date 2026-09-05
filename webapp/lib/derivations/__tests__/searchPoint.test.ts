@@ -61,21 +61,21 @@ describe("liveCandidateObserveConfig", () => {
     { idx: 1, label: "C1.2", prompt_fields: { instruction: "b" }, resolved_pipeline_params: { llm: { model: "y" } } },
   ]);
 
-  it("locates the in-flight candidate by id (not the latest-seeded one)", () => {
-    const r = liveCandidateObserveConfig(snap, "r1_0", "C1.1");
+  it("locates the in-flight candidate by label (not the latest-seeded one)", () => {
+    const r = liveCandidateObserveConfig(snap, "C1.1");
     expect(r?.label).toBe("live — C1.1");
     expect(r?.promptFields).toEqual({ instruction: "a" });
     expect(r?.config).toEqual({ llm: { model: "x" } });
   });
 
-  it("returns null for an unknown / not-yet-seeded id", () => {
-    expect(liveCandidateObserveConfig(snap, "r1_9", "C1.10")).toBeNull();
-    expect(liveCandidateObserveConfig(snap, "", "x")).toBeNull();
+  it("returns null for an unknown / not-yet-seeded label", () => {
+    expect(liveCandidateObserveConfig(snap, "C1.10")).toBeNull();
+    expect(liveCandidateObserveConfig(snap, "")).toBeNull();
   });
 
   it("returns null without a live round", () => {
-    expect(liveCandidateObserveConfig(null, "r1_0", "C1.1")).toBeNull();
-    expect(liveCandidateObserveConfig(dash({}), "r1_0", "C1.1")).toBeNull();
+    expect(liveCandidateObserveConfig(null, "C1.1")).toBeNull();
+    expect(liveCandidateObserveConfig(dash({}), "C1.1")).toBeNull();
   });
 });
 

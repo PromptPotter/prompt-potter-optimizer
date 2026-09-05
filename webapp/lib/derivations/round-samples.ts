@@ -31,9 +31,10 @@ function liveSamplesFor(
   dash: DashboardSnapshot | null,
   round: number,
   candidate_id: string,
+  label: string,
 ): SampleRow[] {
   const out: SampleRow[] = [];
-  const c = liveCandidate(dash, round, candidate_id);
+  const c = liveCandidate(dash, label);
   if (!c) return out;
   (c.samples ?? []).forEach((s, ord) => {
     out.push({
@@ -156,7 +157,7 @@ export function samplesForRow(
   doc: RoundResult | null,
 ): SampleRow[] {
   return row.source === "inflight"
-    ? liveSamplesFor(dash, row.round, row.candidate_id)
+    ? liveSamplesFor(dash, row.round, row.candidate_id, row.label)
     : historicalSamplesFor(doc, row.round, row.candidate_id);
 }
 

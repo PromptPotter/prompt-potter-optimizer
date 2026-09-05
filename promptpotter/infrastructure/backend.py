@@ -21,7 +21,6 @@ QUERY_TIMEOUT: float = 120.0  # HTTP timeout for /matches endpoint
 
 if TYPE_CHECKING:
     from promptpotter.connectors.protocol import (
-        ConcurrencyArming,
         Connector,
         ConnectorExecution,
         InProcessRun,
@@ -47,7 +46,6 @@ def build_backend_client(connector: Connector, base_url: str) -> BackendClient:
         execution=connector.execution,
         in_process_run=connector.in_process_run,
         max_cells_in_flight=connector.max_cells_in_flight,
-        concurrency_arming=connector.concurrency_arming,
         measured_unit=connector.measured_unit,
         answer_key=connector.answer_key,
         auth_token=connector.auth_token() if connector.auth_token else None,
@@ -83,7 +81,6 @@ class BackendClient:
         execution: ConnectorExecution = "remote_http",
         in_process_run: InProcessRun | None = None,
         max_cells_in_flight: int = 2,
-        concurrency_arming: ConcurrencyArming = "round",
         measured_unit: MeasuredUnit = "sample",
         answer_key: str | None = None,
         timeout: float = 30.0,
@@ -102,7 +99,6 @@ class BackendClient:
         # What one sample COSTS, which the transport above does not answer — two `in_process`
         # connectors want opposite depths.
         self._max_cells_in_flight = max_cells_in_flight
-        self._concurrency_arming: ConcurrencyArming = concurrency_arming
         self._measured_unit: MeasuredUnit = measured_unit
         # Where this backend's answer TEXT lives, when it emits one outside a ranking.
         self._answer_key: str | None = answer_key
@@ -130,10 +126,6 @@ class BackendClient:
     @property
     def max_cells_in_flight(self) -> int:
         return self._max_cells_in_flight
-
-    @property
-    def concurrency_arming(self) -> ConcurrencyArming:
-        return self._concurrency_arming
 
     @property
     def measured_unit(self) -> MeasuredUnit:

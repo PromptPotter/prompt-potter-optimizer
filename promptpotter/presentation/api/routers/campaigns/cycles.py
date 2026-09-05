@@ -3,8 +3,7 @@ is per-cycle, so a fork's chart shows the fork's trajectory; the tree is rooted 
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 from fastapi import Query, Request, Response
 from fastapi.responses import JSONResponse
@@ -25,7 +24,7 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
 from promptpotter.infrastructure.projections.live_dashboard.view import fold_at
 from promptpotter.infrastructure.runtime_flags import (
     derive_run_phase,
-    read_spend_caps,
+    overlay_armed_controls,
     run_phase_validator_epoch,
 )
 from promptpotter.infrastructure.store.io import read_json_tolerant
@@ -116,12 +115,9 @@ def serve_dashboard_response(
     # orphan reap left it claiming "running" forever while `/cycles` and `/tree` —
     # which have always re-derived — said terminal. One authority, every surface.
     #
-    # ``run_limits``' two spend arms are re-read for the SAME reason. The writer that
-    # projects them into the file (`live_dashboard/view.py::_persist`) lives in the
-    # runner's process, so on a HALTED cycle — precisely the one an operator raises a
-    # cap on to continue — nothing re-persists and the raise would never reach the
-    # browser. The `.runtime` dir mtime is already in the 304 validator, and
-    # `spend_cap.json` is its child, so a change expires the cached answer on its own.
+    # The ARMED run-control values are re-read for the SAME reason, and it is one reason rather
+    # than a per-field judgement — `runtime_flags.py::overlay_armed_controls` states it and owns
+    # the set.
     body = read_json_tolerant(path) if present else None
     declared = str(body.get("declared_phase", "")) if isinstance(body, dict) else None
     run_phase = str(derive_run_phase(cycle_path, declared=declared))
@@ -129,8 +125,8 @@ def serve_dashboard_response(
         # A replay. Two overlays, for the same reason and neither optional: `run_phase` answers
         # what the producer is doing NOW, a clock fact rather than a property of the moment; the
         # wiring constants ride no record, so the fold returns them at their defaults and only
-        # this file has the live ones. The armed ceilings deliberately get NEITHER — they are the
-        # cap in force now, and restating one as a past moment's cap would be a fabrication.
+        # this file has the live ones. The armed controls deliberately get NEITHER — they are what
+        # is in force now, and restating one as a past moment's value would be a fabrication.
         replay = fold_at(Cut(cycle=CycleDir(cycle_path), hop=hop, offset=at)).model_dump(
             mode="json"
         )
@@ -149,21 +145,8 @@ def serve_dashboard_response(
             body["reason"] = "dashboard_unreadable"
     else:
         body["run_phase"] = run_phase
-        _overlay_armed_ceilings(body, cycle_path)
+        overlay_armed_controls(body, cycle_path)
     return JSONResponse(body, headers=headers)
-
-
-def _overlay_armed_ceilings(body: dict[str, Any], cycle_path: Path) -> None:
-    """Serve ``run_limits``' spend arms as what ``BudgetGate`` will actually enforce. Mutates in
-    place; a body carrying no ``run_limits`` (warming) is left alone."""
-    limits = body.get("run_limits")
-    if not isinstance(limits, dict):
-        return
-    armed_usd, armed_tokens = read_spend_caps(cycle_path)
-    if armed_usd is not None:
-        limits["spend_budget_usd"] = armed_usd
-    if armed_tokens is not None:
-        limits["token_budget"] = armed_tokens
 
 
 @campaigns_router.get("/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard")

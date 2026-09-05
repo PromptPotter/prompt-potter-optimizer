@@ -14,8 +14,14 @@
 // A unit switch shows the prior unit's slice marked `isStale` until the new fetch
 // lands (never blanks); a failed read surfaces honestly via `error` rather than
 // silently reading as an empty roster.
+//
+// **Once is not enough while the unit is LIVE.** Fetched once and kept, a run measuring
+// cells right now decorates its roster with whatever was banked at mount — nothing at all
+// through round 0 — until a remount. A live unit re-reads on the same poll shape the tree
+// uses; a stopped one still reads once, because nothing under it can change.
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { usePoll } from "./usePoll";
 import {
   failureKind,
   fetchDatasetPreview,
@@ -141,6 +147,11 @@ function keepUnit(
   return out;
 }
 
+// How often a LIVE unit's slice is re-read. Neither route carries a validator, so every
+// tick is a full body (a 1000-row roster + its series) — and neither is worth reading more
+// often than a cell lands, which is tens of seconds on every connector we ship.
+const LIVE_REFRESH_MS = 8000;
+
 export function useDatasetPreview(
   path: CyclePath | null,
   datasetName: string | null,
@@ -149,6 +160,8 @@ export function useDatasetPreview(
   // The resolved value comes back on `order`, so the caller never has to know the
   // default to label what it is showing.
   order: HardSampleOrder | null,
+  // Whether the unit in view is still measuring. Only then is a re-read news.
+  live: boolean,
 ): DatasetPreviewState {
   // The scope artifact follows the VIEWED LEAF: the request addresses the ROOT
   // hop + a `descend` tail (like the dashboard), so an L4 inner drill-in reads
@@ -167,36 +180,37 @@ export function useDatasetPreview(
   // point of keeping them.
   const started = useRef<Set<SliceKey>>(new Set());
 
-  useEffect(() => {
-    if (!sliceKey || !unitKey || !rootCampaignId || !rootCycleId || !datasetName) return;
-    // Forget attempts for units no longer in view, so navigating back re-fetches
-    // rather than waiting on a "done" mark for data that has since been pruned.
-    const prefix = `${unitKey}\x1f`;
-    for (const k of [...started.current]) if (!k.startsWith(prefix)) started.current.delete(k);
-    if (started.current.has(sliceKey)) return;
-    started.current.add(sliceKey);
-    const name = datasetName;
-    const cmp = rootCampaignId;
-    const cyc = rootCycleId;
-    const key = sliceKey;
-    // Captured with the rest of the request identity; the fetchers take `undefined`.
-    const ord = order ?? undefined;
-    let cancelled = false;
-    const ac = new AbortController();
-    (async () => {
+  // The one read, shared by the first fetch and the live re-read. `seeding` is the only
+  // difference and it is about FAILURE: a slice with nothing in it yet must report why,
+  // while a refresh that fails leaves the rows already on screen alone — they were
+  // measured, and a failed poll is not news about them.
+  const load = useCallback(
+    async (signal: AbortSignal, seeding: boolean) => {
+      if (!sliceKey || !unitKey || !rootCampaignId || !rootCycleId || !datasetName) return;
+      const key = sliceKey;
+      const unit = unitKey;
+      // Captured with the rest of the request identity; the fetchers take `undefined`.
+      const ord = order ?? undefined;
       try {
         // The roster is the spine — its failure IS this scope's failure. The series
         // is best-effort: it decorates a roster rather than being one, so a roster
         // that arrived still renders with an honest "no measurements" column.
         const [preview, series] = await Promise.all([
-          fetchDatasetPreview(name, 1000, ac.signal, scope, cmp, cyc, descend, ord),
-          fetchMeasurementSeries(name, 1000, ac.signal, scope, cmp, cyc, descend, ord).catch(
-            () => null,
-          ),
+          fetchDatasetPreview(datasetName, 1000, signal, scope, rootCampaignId, rootCycleId, descend, ord),
+          fetchMeasurementSeries(
+            datasetName,
+            1000,
+            signal,
+            scope,
+            rootCampaignId,
+            rootCycleId,
+            descend,
+            ord,
+          ).catch(() => null),
         ]);
-        if (cancelled) return;
+        if (signal.aborted) return;
         setSlices((prev) => ({
-          ...keepUnit(prev, unitKey),
+          ...keepUnit(prev, unit),
           [key]: {
             slice: sliceFrom(preview.items, series),
             error: null,
@@ -205,18 +219,19 @@ export function useDatasetPreview(
           },
         }));
       } catch (e) {
-        if (cancelled || ac.signal.aborted) {
+        if (signal.aborted) {
           // Never leave an aborted attempt marked as done — the next mount of this
           // same slice must be free to try again.
-          started.current.delete(key);
+          if (seeding) started.current.delete(key);
           return;
         }
+        if (!seeding) return;
         // A scope whose artifact does not exist yet answers 404, and that is an
         // honest EMPTY, not a failure: a campaign legitimately has no pooled slice
         // before its first round closes. Every other failure is recorded.
         const gone = failureKind(e) === "gone";
         setSlices((prev) => ({
-          ...keepUnit(prev, unitKey),
+          ...keepUnit(prev, unit),
           [key]: {
             slice: gone ? EMPTY_SLICE : null,
             error: gone ? null : e instanceof Error ? e.message : String(e),
@@ -225,12 +240,29 @@ export function useDatasetPreview(
           },
         }));
       }
-    })();
-    return () => {
-      cancelled = true;
-      ac.abort();
-    };
-  }, [sliceKey, unitKey, rootCampaignId, rootCycleId, descend, datasetName, scope, order]);
+    },
+    [sliceKey, unitKey, rootCampaignId, rootCycleId, descend, datasetName, scope, order],
+  );
+
+  useEffect(() => {
+    if (!sliceKey || !unitKey) return;
+    // Forget attempts for units no longer in view, so navigating back re-fetches
+    // rather than waiting on a "done" mark for data that has since been pruned.
+    const prefix = `${unitKey}\x1f`;
+    for (const k of [...started.current]) if (!k.startsWith(prefix)) started.current.delete(k);
+    if (started.current.has(sliceKey)) return;
+    started.current.add(sliceKey);
+    const ac = new AbortController();
+    void load(ac.signal, true);
+    return () => ac.abort();
+  }, [sliceKey, unitKey, load]);
+
+  // The live re-read. Only the slice in view, and only while the unit is measuring —
+  // `keepUnit` already holds nothing else, and a stopped cycle's rows cannot change.
+  usePoll((signal) => load(signal, false), {
+    intervalMs: LIVE_REFRESH_MS,
+    enabled: live && sliceKey !== null,
+  });
 
   if (!sliceKey) return EMPTY;
   const state = slices[sliceKey];

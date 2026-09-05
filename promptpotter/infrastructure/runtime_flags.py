@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import Any
 
 from promptpotter.domain.phases import RunPhase
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
@@ -23,9 +24,10 @@ def is_checkin(cycle_dir: Path) -> bool:
     return CycleLayout(cycle_dir).checkin_flag.is_file()
 
 
-def write_armed_cells(cycle_dir: Path, cells: int) -> None:
-    """The operator's REQUEST — how many samples the walk may hold in flight. ``cells <= 1``
-    removes it, so disarmed and never-armed are one on-disk state rather than two that read alike."""
+def write_sample_lookahead(cycle_dir: Path, cells: int) -> None:
+    """How many samples the walk holds in flight, from now until the round that scores under it
+    ends. ``cells <= 1`` removes the file, so "back to sequential" and "never set" are one on-disk
+    state rather than two that read alike."""
     path = CycleLayout(cycle_dir).sample_lookahead
     if cells <= 1:
         path.unlink(missing_ok=True)
@@ -34,9 +36,30 @@ def write_armed_cells(cycle_dir: Path, cells: int) -> None:
     write_json(path, {"cells": int(cells), "requested_at": time.time()})
 
 
-def read_armed_cells(cycle_dir: Path) -> int:
-    """``1`` when absent, unreadable or malformed — the failure direction is "run as normal",
-    never "stall". The REQUEST; what the loop ran at is ``dashboard.json::sample_lookahead``."""
+def effective_lookahead(requested: int, ceiling: int) -> int:
+    """What the walk will ACTUALLY hold in flight — the request bounded by the connector's
+    declared ``max_cells_in_flight``.
+
+    **The one clamp.** It lives here rather than inside the walk because two readers need the same
+    answer and only one of them has a `Session`: `query_loop._lookahead` runs it, and
+    `overlay_armed_controls` serves it. The write side stores the request UNCLAMPED on purpose —
+    a ceiling is a property of the backend a cycle is running against, not of the press — so
+    every reader that means "the depth in force" has to end up here, and the one that did not was
+    serving a number the walk had never agreed to."""
+    return max(1, min(requested, ceiling))
+
+
+def read_sample_lookahead(cycle_dir: Path) -> int:
+    """The depth REQUESTED, unclamped — read by the walk at every launch boundary and, through
+    :func:`effective_lookahead`, served as ``dashboard.json::sample_lookahead``. So a press applies
+    to a walk already running, waits harmlessly for the next one if none is, and is gone once the
+    round clears the file.
+
+    Not the depth in force on its own: `POST /commands/set-sample-lookahead` takes any int ≥ 1,
+    and the connector's ceiling is what decides how much of it the walk honours.
+
+    ``1`` when absent, unreadable or malformed: the failure direction is "run as normal", never
+    "stall"."""
     data = read_json_tolerant(CycleLayout(cycle_dir).sample_lookahead)
     if not isinstance(data, dict):
         return 1
@@ -92,6 +115,38 @@ def read_spend_caps(cycle_dir: Path) -> tuple[float | None, int | None]:
     return (
         float(usd) if isinstance(usd, int | float) and not isinstance(usd, bool) else None,
         int(tokens) if isinstance(tokens, int) and not isinstance(tokens, bool) else None,
+    )
+
+
+def overlay_armed_controls(body: dict[str, Any], cycle_dir: Path) -> None:
+    """Re-read every ARMED run-control value into a served ``dashboard.json`` body, so a surface
+    shows what the loop will read rather than what the runner last flushed. Mutates in place; a
+    body with no ``run_limits`` block simply has no ceilings to correct.
+
+    **The reason is the one ``run_phase`` is derived rather than served, and it is a property of
+    the WRITER, not of any one field**: the API process applies the command while
+    :class:`LiveDashboardView` projects it from the RUNNER's, so the file answers for the last
+    record rather than for the press — forever on a halted cycle. ``.runtime/`` is in the
+    conditional-GET validator, so a press expires the cached answer on its own.
+
+    **A REPLAY must not call this.** These are the values in force now, and restating one as a past
+    moment's is a fabrication."""
+    limits = body.get("run_limits")
+    if isinstance(limits, dict):
+        armed_usd, armed_tokens = read_spend_caps(cycle_dir)
+        if armed_usd is not None:
+            limits["spend_budget_usd"] = armed_usd
+        if armed_tokens is not None:
+            limits["token_budget"] = armed_tokens
+    # Clamped against the SERVED ceiling, so this is the depth the walk will hold rather than the
+    # depth someone asked for. `max_cells_in_flight` is a WIRING_FIELD stamped at INIT:exit, so it
+    # is already in the body being corrected. Unclamped, an out-of-range request rendered as fact:
+    # the browser's segmented control offers 1..maxCells, so a served 8 against a ceiling of 2 lit
+    # no segment at all, and the panel claimed a depth nothing was running.
+    ceiling = body.get("max_cells_in_flight")
+    body["sample_lookahead"] = effective_lookahead(
+        read_sample_lookahead(cycle_dir),
+        ceiling if isinstance(ceiling, int) and not isinstance(ceiling, bool) else 1,
     )
 
 
@@ -208,9 +263,9 @@ __all__ = [
     "derive_run_phase",
     "is_checkin",
     "is_paused",
-    "read_armed_cells",
+    "read_sample_lookahead",
     "read_spend_caps",
     "run_phase_validator_epoch",
-    "write_armed_cells",
+    "write_sample_lookahead",
     "write_spend_caps",
 ]

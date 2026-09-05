@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from promptpotter import connectors
+from promptpotter.domain.search_point import has_framing
 from promptpotter.infrastructure.store.io import read_json_tolerant, read_yaml_optional
 from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.infrastructure.store.stores import Stores
@@ -64,9 +66,67 @@ def readable_dataset_dir(stores: Stores, name: str) -> Path:
     raise DatasetAccessError(name)
 
 
+def backend_type_of_dataset(stores: Stores, dataset_name: str) -> str:
+    """THE predicate for "which connector does this dataset use?", so no reader hand-maintains a
+    list of dataset NAMES. Tolerant, unlike its strict init twin (``initialization/wiring.py``):
+    a campaign outlives its dataset dir."""
+    try:
+        raw = read_yaml_optional(dataset_pipeline_path(readable_dataset_dir(stores, dataset_name)))
+    except (OSError, ValueError, DatasetAccessError):
+        return ""
+    bt = (raw or {}).get("backend_type")
+    return bt.lower() if isinstance(bt, str) else ""
+
+
+def dataset_panel_rows(
+    stores: Stores, dataset_name: str
+) -> tuple[list[dict[str, Any]], list[str]] | None:
+    """The panel a CONNECTOR owns — ``(rows, index_terms)`` — or ``None`` where this box has no
+    connector-owned panel to read.
+
+    THE reader of an ``experiment_file`` (harbor's task panel, L4's inner benchmark), and it sits
+    beside :func:`readable_dataset_rows` because the two ARE the one ladder this module promises:
+    a resolver that knows only materialized banks answers EMPTY for a connector-owned one, which
+    is not a fact about the dataset. Panel ORDER is the ``sample_id`` (``samples_from_dicts``
+    numbers positionally), so a second ordering would misfile every row against ``measurements/``.
+
+    **``None`` and the raise are the two halves of one distinction, and it is NOT
+    present-vs-absent.** ``None`` says "nothing here to read" — no connector, no declared panel,
+    or a declared panel this machine has not generated; every caller answers all three the same
+    way, by falling through to the materialized reader. The raise says "there is a panel and it is
+    WRONG", which no caller may render as an empty roster. `harbor_tasks.yaml` is gitignored and
+    rebuilt per machine, so a missing one is the ordinary state of a fresh clone: raising on it
+    turned a not-yet-generated panel into a 4xx on the dataset preview."""
+    connector = connectors.CONNECTORS.get(backend_type_of_dataset(stores, dataset_name))
+    if connector is None or not connector.experiment_file:
+        return None
+    config_dir = readable_dataset_dir(stores, dataset_name)
+    panel_path = config_dir / connector.experiment_file
+    if not panel_path.is_file():
+        return None
+    data = read_yaml_optional(panel_path)
+    if not data:
+        raise ValueError(
+            f"Connector {connector.name!r} expects {connector.experiment_file!r} in the "
+            f"dataset config dir ({config_dir}), but the file is empty."
+        )
+    try:
+        return connector.extract_experiment(data)
+    except (KeyError, TypeError, AttributeError, IndexError) as exc:
+        # A shape the connector did not expect. Re-raised as `ValueError` for the same reason
+        # `read_yaml` is: every guard above this seam is `except (ValueError, OSError, ImportError)`,
+        # and a raw `KeyError` from a connector walks through all of them into a 500.
+        raise ValueError(
+            f"Connector {connector.name!r} could not read {connector.experiment_file!r} in "
+            f"{config_dir}: {type(exc).__name__}: {exc}"
+        ) from exc
+
+
 def readable_dataset_rows(stores: Stores, name: str) -> dict[str, Any] | None:
     """The materialized rows for *name*, or ``None`` — the row half of the resolver, on the same
-    tenant-first ladder: the committed dataset's own ``cache.json``, this tenant's fetch, ours."""
+    tenant-first ladder: the committed dataset's own ``cache.json``, this tenant's fetch, ours.
+    A connector-owned panel materializes nothing and answers here as ``None``; ask
+    :func:`dataset_panel_rows` first wherever the question is "what is this dataset's bank"."""
     try:
         tenant = stores.tenant_datasets.load_dataset(name)
     except ValueError as exc:
@@ -92,7 +152,9 @@ def readable_task_context(stores: Stores, name: str) -> dict[str, Any] | None:
         stores.tenant_datasets.load_task_context(name),
         read_yaml_optional(dataset_task_context_path(stores.benchmarks_root / name)),
     ):
-        if isinstance(candidate, dict) and candidate:
+        # The VALUES, never the dict: an all-empty record at a higher tier shadows the shipped
+        # file under it permanently. One predicate for that, shared with both writers.
+        if isinstance(candidate, dict) and has_framing(candidate):
             return candidate
     return None
 
@@ -140,8 +202,14 @@ def _read_title(dataset_dir: Path) -> str | None:
 
 def _read_n_samples(stores: Stores, name: str) -> int | None:
     """``row_count`` off the resolved rows (falls back to ``items`` length); ``None`` when
-    unmaterialized — a benchmark nobody has fetched yet, or a pipeline-only L4 dataset. NOT ``0``,
-    which is the one state that should stop an operator from minting an origin on it."""
+    unmaterialized — a benchmark nobody has fetched yet. NOT ``0``, which is the one state that
+    should stop an operator from minting an origin on it. Connector-owned panels answer off their
+    own declaration, so a harbor dataset counts here rather than reading as unmaterialized."""
+    try:
+        if (panel := dataset_panel_rows(stores, name)) is not None:
+            return len(panel[0])
+    except (ValueError, OSError, ImportError):
+        return None
     raw = readable_dataset_rows(stores, name)
     if raw is None:
         return None
@@ -154,6 +222,8 @@ def _read_n_samples(stores: Stores, name: str) -> int | None:
 
 __all__ = [
     "DatasetAccessError",
+    "backend_type_of_dataset",
+    "dataset_panel_rows",
     "dataset_pipeline_path",
     "is_dataset_dir",
     "list_readable_datasets",

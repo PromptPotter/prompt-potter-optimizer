@@ -11,7 +11,7 @@ from typing import Any, cast, get_args
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.projection_envelope import ProjectionEnvelope, ProjectionKind
 from promptpotter.infrastructure.projections.live_dashboard.state import warming_payload
-from promptpotter.infrastructure.runtime_flags import derive_run_phase
+from promptpotter.infrastructure.runtime_flags import derive_run_phase, overlay_armed_controls
 from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.layout import CycleLayout
 
@@ -83,9 +83,10 @@ class CycleLedgerTail:
     # ---- internals ----
 
     def _read_dashboard(self) -> dict[str, Any]:
-        """The snapshot body, with ``run_phase`` DERIVED rather than served as stored — the same
-        single authority the dashboard route serves, so the first chat frame and the first poll
-        cannot disagree about whether the run is alive."""
+        """The snapshot body, with ``run_phase`` DERIVED and the armed controls RE-READ rather than
+        served as stored — the same single authority the dashboard route serves, so the first chat
+        frame and the first poll cannot disagree about whether the run is alive or about which
+        ceiling and look-ahead depth are in force."""
         dashboard = self._layout.dashboard
         body: Any = None
         reason = ""
@@ -98,6 +99,7 @@ class CycleLedgerTail:
         run_phase = str(derive_run_phase(self._layout.cycle_dir, declared=declared))
         if isinstance(body, dict):
             body["run_phase"] = run_phase
+            overlay_armed_controls(body, self._layout.cycle_dir)
             return body
         warming = warming_payload(self._hop, run_phase=run_phase)
         if reason:

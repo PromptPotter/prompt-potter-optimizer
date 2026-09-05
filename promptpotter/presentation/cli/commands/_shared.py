@@ -14,6 +14,7 @@ from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
 )
+from promptpotter.connectors.protocol import BackendUnreachableError
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir
 from promptpotter.shared.identity import IdentityContext
 
@@ -138,17 +139,25 @@ def backend_reach_line(backend_type: str, backend_url: str) -> str:
     return f"reachable at {backend_url}"
 
 
-def backend_unreachable_result(backend_url: str) -> CommandResult:
+def backend_unreachable_result(exc: BackendUnreachableError) -> CommandResult:
     """The shared preflight failure every loop verb (``new`` / ``resume`` / sweep) returns when the
-    connector's own probe reports the backend down (``launcher.admission::probe_backend``)."""
+    connector's own probe reports the backend down (``launcher.admission::probe_backend``).
+
+    **The connector's own ``detail`` IS the message.** A cure hardcoded here is a cure for whichever
+    backend happened to be the only one — harbor alone refuses for three reasons (no extra, a
+    non-UTF-8 interpreter, a stopped Docker daemon) and its probe names which. An ingress renders
+    what the probe said; knowing the remedy is the connector's job."""
     return CommandResult(
-        data={"error": "backend_unreachable", "backend_url": backend_url},
+        data={
+            "error": "backend_unreachable",
+            "backend_url": exc.backend_url,
+            "backend_type": exc.backend_type,
+            "detail": exc.detail,
+        },
         human=(
-            f"Backend unreachable at {backend_url}.\n\n"
-            "The TermNorm backend ships in a sibling repo. Clone it beside "
-            "this checkout, then start it:\n"
-            "  TermNorm-excel\\backend-api\\start-server-py-LLMs.bat\n\n"
-            "Install guide: docs/manual/02-install.md"
+            f"Backend '{exc.backend_type}' is not ready.\n\n{exc.detail}"
+            if exc.detail
+            else f"Backend '{exc.backend_type}' at {exc.backend_url} is not reachable."
         ),
     )
 
@@ -187,7 +196,6 @@ async def _hold_machine_slot(
     happens inside it. Being in the shared QUEUE is what makes the wait fair: a terminal that
     merely retried in a loop would take the next free slot ahead of a browser launch that has
     waited longer. ``--no-wait`` leaves the line and refuses instead, naming the holder."""
-    from promptpotter.application.initialization.wiring import backend_type_of_dataset
     from promptpotter.application.jobs.capacity import resolve_run_capacity
     from promptpotter.application.jobs.launcher.admission import (
         admit_and_hold,
@@ -195,6 +203,7 @@ async def _hold_machine_slot(
         request_launch,
     )
     from promptpotter.application.jobs.registry import JobRegistry, default_jobs_dir
+    from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 
     # No `on_reap`: this process ATTACHES to the machine-global jobs dir, it does not own it, so it
     # counts and releases slots but stamps nobody's cycle. Releasing needs no ownership — a job's

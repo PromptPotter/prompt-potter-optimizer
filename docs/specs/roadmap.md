@@ -36,7 +36,7 @@ Sequenced into lanes by dependency, not milestone number. **Front priority = Lan
 |---|---|---|
 | C1 | **Chat-first front door** — one thread: ingest/check-in → curated activity stream → inline decision buttons (existing verbs). | Arc 2 (conversation endpoint) deferred — [`chat-foundation.md`](chat-foundation.md) |
 | C2 | Composite fitness P2–P4 (P1 = spend, done) — data rollup anytime; **scatter panel after P3** | pending (see § Connectors + L4) |
-| C2b | **Judged + turn-structured scoring** — an LLM-as-judge as a measured observation, and the per-step ruler it opens | judge + grading call path SHIPPED (`promptpotter/judges/`); open: plural judges, the per-step ruler (see § Judged and turn-structured scoring) |
+| C2b | **Judged + turn-structured scoring** — an LLM-as-judge as a measured observation, and the per-step ruler it opens | judges, the grading call path and the `retrieve → ground → answer` schema all SHIPPED (`promptpotter/judges/`); open: the per-step ruler (see § Judged and turn-structured scoring) |
 | C3 | L4 closure — the recursion + the L4 campaign + `proxy_lift_corr ≥ 0.6` re-validation | Open: the bounded cheap default config, and the `proxy_lift_corr` gate — itself gated on the panel being able to resolve one optimizer prompt from another — [`l4-outer-loop.md`](l4-outer-loop.md) § Open |
 | C4 | Cross-user measurement panel (after P3) | pending (see § Ingest + chat-first web) |
 | C5 | MCP server mode (= **agent-tool parity**, see § Agent-tool parity) · user-editable `pipeline.yaml` in UI | pending |
@@ -124,9 +124,10 @@ Sibling to § Agent-tool parity: that one widens how PromptPotter is *invoked*, 
 **Tracked as C2b. The judge half has SHIPPED** — `promptpotter/judges/`, whose `CLAUDE.md` owns the
 contract and every reason behind it; read it there. What this lane owes is the rest.
 
-It unblocks datasets no matcher can grade — SealQA, and the two already recording that they are
-stuck on it (`email-tagging`'s free-text CRM fields, `screen-taste-v0`'s rating) — and revises
-selection criterion 5, which rejected them
+It unblocks datasets no matcher can grade, and the first is already wired and running:
+`datasets/sealqa-longseal-12/`. Two more still record being stuck on it — `email-tagging`'s
+free-text CRM fields and `screen-taste-v0`'s rating — and criterion 5, which rejected all three,
+is revised
 ([`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md)).
 
 **The grading call path has SHIPPED** — reuse cache, 429 retry, heartbeat and metering all decided

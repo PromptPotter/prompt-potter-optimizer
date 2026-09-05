@@ -1374,8 +1374,16 @@
             "title": "Delta Se"
           },
           "ground_truth": {
-            "title": "Ground Truth",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The row's label, or `null` where the cell is VERIFIER-GRADED — a harbor episode graded by its own task verifier, an L4 inner cycle graded by its proxies. Same declaration `Sample.ground_truth` makes; a placeholder string would read as a miss on every row of such a bank.",
+            "title": "Ground Truth"
           },
           "hard_sample_rank": {
             "description": "1-based position in the served hard-sample ranking under this response's `order`. THE ordering — a client renders rows in it and never re-derives one, since an ordering is a score and a locally-sorted one silently answers a different question in the same slot. Rows measured in this scope rank first; the rest trail.",
@@ -1441,7 +1449,6 @@
         "required": [
           "sample_id",
           "query",
-          "ground_truth",
           "hard_sample_rank"
         ],
         "title": "DatasetItem",
@@ -4388,11 +4395,12 @@
         "type": "object"
       },
       "ThetaCaveat": {
-        "description": "A state in which θ is NOT ability — decided beside the ruler, never in a view.\n\nAll four render every number and raise nothing, so the reading looks identical to a sound one.\nWHICH one fired is the whole value, because the fix differs: one is an instrument, one is an\nacquisition, one is the absence of a scale, one is the arm itself. The ABSENCE of a caveat is\nthe fifth state, and the only one where θ is ability.\n\n**Two SCOPES, one vocabulary.** The first three are facts about the ROUND's scale, decided by\n:func:`theta_caveat` and stamped on its ``AbilityReading``; ``FLOOR_PINNED`` is a fact about\nONE ARM, decided by ``results.py::is_floor_pinned`` where that arm is scored. One enum because\nthe question a reader asks is identical — *may I read this θ as ability?* — and a second\nvocabulary for it would be a synonym, not a channel.\n\n`docs/methods/verdict-resolution.md` § Reading a round.",
+        "description": "A state in which θ is NOT ability — decided beside the ruler, never in a view.\n\nAll five render every number and raise nothing, so the reading looks identical to a sound one.\nWHICH one fired is the whole value, because the fix differs: one is an instrument, one is an\nacquisition, one is the absence of a scale, one is the ruler's prior standing in for a\nmeasurement, one is the arm itself. The ABSENCE of a caveat is the sixth state, and the only\none where θ is ability.\n\n**Two SCOPES, one vocabulary.** The first four are facts about the ROUND's scale, decided by\n:func:`theta_caveat` and stamped on its ``AbilityReading``; ``FLOOR_PINNED`` is a fact about\nONE ARM, decided by ``results.py::is_floor_pinned`` where that arm is scored. One enum because\nthe question a reader asks is identical — *may I read this θ as ability?* — and a second\nvocabulary for it would be a synonym, not a channel.\n\n`docs/methods/verdict-resolution.md` § Reading a round.",
         "enum": [
           "cold_ruler",
           "flat_ruler",
           "collapsed_band",
+          "unmeasured_delta",
           "floor_pinned"
         ],
         "title": "ThetaCaveat",

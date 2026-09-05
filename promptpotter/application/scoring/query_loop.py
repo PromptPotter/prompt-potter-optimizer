@@ -24,6 +24,7 @@ from promptpotter.domain.escalation_signals import EscalationSignal
 from promptpotter.domain.phases import RunPhase, StopLoop
 from promptpotter.domain.scoring import CellScorer, QueryMeasurement, is_hit
 from promptpotter.domain.validators import StopRule
+from promptpotter.infrastructure.runtime_flags import effective_lookahead
 from promptpotter.shared.errors import (
     ErrorCategory,
     error_category,
@@ -182,7 +183,7 @@ def _armed_cells(session: Session) -> int:
     browser-only with no CLI verb: ``docs/operations/access-model.md`` § host-admin ↔ user."""
     check = session.sample_lookahead_check
     requested = check() if check is not None else 1
-    return max(1, min(requested, session.backend_client.max_cells_in_flight))
+    return effective_lookahead(requested, session.backend_client.max_cells_in_flight)
 
 
 async def _maybe_recover_degraded(
@@ -382,11 +383,6 @@ async def run_query_loop(
         )
         submitted += 1
 
-    # Both armings fill the window identically and differ only in WHERE the press is spent:
-    # `batch` on the group it released, just below; `round` at `l1/score/winner.py`. Read once —
-    # a connector cannot change mid-walk.
-    batch = session.backend_client.concurrency_arming == "batch"
-
     def _operator_stop() -> QueryLoopResult | None:
         """The three run-control checkpoints, polled at the SAMPLE boundary rather than at a
         launch: under group arming the loop blocks in `await slot.task` for a whole group, so a
@@ -427,21 +423,13 @@ async def run_query_loop(
         while True:
             if (stopped := _operator_stop()) is not None:
                 return stopped
-            # Binds on the NEXT LAUNCH, never on the next empty window: a press lands to shorten
-            # the wait, so a running sample is JOINED rather than waited out. Which samples a
-            # press paid for stays answerable — `sample_started` records its launch depth.
+            # Re-read every iteration, so a press landing mid-walk TOPS THE WINDOW UP rather than
+            # waiting for it to drain — a running sample is JOINED, not waited out, and
+            # `sample_started` still records each launch depth. Nothing is spent here: the round
+            # that scored under the depth spends it (`l1/score/winner.py`).
             depth = _armed_cells(session)
-            launched = 0
             while submitted < n and len(window) < depth:
                 _launch(depth)
-                launched += 1
-
-            # Spent by the group it released, not at the round close — hours away for this shape.
-            # `launched` guards both halves: a press that launched nothing survives to the next
-            # boundary, and consuming here is what stops the top-up repeating every iteration.
-            if batch and depth > 1 and launched and session.sample_lookahead_consume is not None:
-                logger.info("Released a group of %d sample(s); the arming is spent.", depth)
-                session.sample_lookahead_consume()
 
             if not window:
                 break

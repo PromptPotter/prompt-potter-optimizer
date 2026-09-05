@@ -90,7 +90,7 @@ async def probe_backend(backend_type: str, backend_url: str) -> None:
     connector has no wire, so a bare probe refuses a campaign over a backend it never touches —
     `promptpotter-self` is the one that cannot survive it.
 
-    An empty ``backend_type`` is the tolerant answer ``wiring.backend_type_of_dataset`` gives when
+    An empty ``backend_type`` is the tolerant answer ``dataset_access.backend_type_of_dataset`` gives when
     a campaign has outlived its dataset dir. There is no declared connector to ask, so there is no
     probe — and ``connectors.get`` is strict, so resolving it would raise past every caller's
     ``BackendUnreachableError`` handler."""

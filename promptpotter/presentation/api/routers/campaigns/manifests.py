@@ -14,7 +14,6 @@ from promptpotter.application.campaign_config import (
     estimand_doc,
     knob_label,
 )
-from promptpotter.application.initialization.wiring import backend_type_of_dataset
 from promptpotter.application.jobs.launcher.checkin import load_checkin_draft
 from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_locks
 from promptpotter.application.knobs import (
@@ -24,6 +23,7 @@ from promptpotter.application.knobs import (
 )
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router

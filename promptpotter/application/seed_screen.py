@@ -1,5 +1,11 @@
-"""Seed-screen use-case — which candidate inner-bank draws are fit to sit on the L4 panel.
-A fenced debug diagnostic like ``verify`` / ``noise_floor``; the loop never learns it exists."""
+"""Seed-screen use-case — which of a dataset's seeded bank draws are fit to sit on a panel.
+A fenced debug diagnostic like ``verify`` / ``noise_floor``; the loop never learns it exists.
+
+**Not an L4 verb.** It resolves ANY dataset's own ``campaign.yaml`` and origin, so screening seeds
+needs no inner loop and no self-optimizing campaign. It is also the one SCREEN in the package — N
+independent draws with no round-to-round dependence — which is why its concurrency is a launch
+parameter (``parallel``) rather than the browser control ``new`` / ``resume`` carry: a look-ahead
+depth is spent by the round that scored under it, and a screen has no round to spend one."""
 
 from __future__ import annotations
 
@@ -195,6 +201,7 @@ async def screen_inner_seeds(
     seeds: list[int],
     n_samples: int,
     repeat: int = 3,
+    parallel: int = 1,
     log: Callable[[str], None] | None = None,
 ) -> SeedScreenOutcome:
     """Each reading REPORTS its own wall-clock and wire cost, so price a wide sweep off the last
@@ -212,6 +219,11 @@ async def screen_inner_seeds(
     from promptpotter.infrastructure.store.io import write_json
 
     log_fn = log or (lambda *_a, **_k: None)
+    # Argument checks BEFORE anything is built: `parallel` is knowable at call time, and asking it
+    # after `init_services` + `arm_diagnostic_scoring` spends a backend handshake to reject a
+    # number the caller could have been told about immediately.
+    if parallel < 1:
+        raise SeedScreenError(f"--parallel must be at least 1, got {parallel}.")
     session = await init_services(dataset_name=dataset_name, identity=identity, stores=stores)
     all_samples = session.samples
     if not all_samples:
@@ -226,6 +238,26 @@ async def screen_inner_seeds(
     pipeline_params = arm_diagnostic_scoring(
         session, campaign_config, source=f"seed_screen:{dataset_name}", log=log_fn
     )
+    # The screen's whole concurrency story, and it reuses the shipped window rather than adding a
+    # second way to run things at once: `run_query_loop` re-reads this at every launch boundary and
+    # clamps it to the backend's ceiling, so a constant holds the depth for the entire screen.
+    # `sample_lookahead_consume` stays `None` DELIBERATELY — a depth is spent by the round that
+    # scored under it, and a screen has no round.
+    session.sample_lookahead_check = lambda: parallel
+    ceiling = session.backend_client.max_cells_in_flight
+    if parallel > ceiling:
+        # `logger.warning`, not `log_fn`: this says the screen is NOT running at the depth it was
+        # asked for, and `log_fn` is a no-op unless the caller passed `--verbose` — so the operator
+        # who most needs it (one who wrote `--parallel 8` and is timing the result) is exactly the
+        # one who could not see it. The verbose channel stays for progress; a request the run
+        # declined to honour is not progress.
+        logger.warning(
+            "seed-screen: --parallel %d exceeds this backend's declared ceiling of %d "
+            "(Connector.max_cells_in_flight); running at %d.",
+            parallel,
+            ceiling,
+            ceiling,
+        )
     # Same framing the run's C0 carries — a screen measures the BANK, so its origin must be the
     # prompt the campaign will actually score. Without it the screen's `reasoning_margin` grades a
     # prompt no run ever sends, and stops predicting the origin it exists to choose seats for.

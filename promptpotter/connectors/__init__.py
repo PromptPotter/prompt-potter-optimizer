@@ -8,7 +8,6 @@ from promptpotter.connectors.harbor import CONNECTOR as _HARBOR
 from promptpotter.connectors.promptpotter import CONNECTOR as _PROMPTPOTTER
 from promptpotter.connectors.protocol import (
     BackendUnreachableError,
-    ConcurrencyArming,
     Connector,
     ConnectorExecution,
 )
@@ -65,11 +64,6 @@ def _validate(key: str, c: Connector, origin: str) -> None:
     # none, so a token declared on it is dead config that reads as protection.
     if c.execution == "in_process" and c.auth_token is not None:
         raise RuntimeError(f"{where}: execution='in_process' has no wire — drop auth_token.")
-    valid_arming = set(typing.get_args(ConcurrencyArming))
-    if c.concurrency_arming not in valid_arming:
-        raise RuntimeError(
-            f"{where}: concurrency_arming {c.concurrency_arming!r} not in {valid_arming}."
-        )
 
 
 def _load() -> tuple[dict[str, Connector], dict[str, str]]:

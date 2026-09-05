@@ -21,7 +21,6 @@ class Connector:
     experiment_file: str = ""                                       # on-disk experiment doc read from the dataset dir in place of a sample table
     identity_config: Callable[[Path], dict] | None = None           # per-node config folded into MEASUREMENT IDENTITY, not the wire
     measured_unit: MeasuredUnit = "sample"                          # what ONE row is CALLED — "sample" | "cell"
-    concurrency_arming: ConcurrencyArming = "round"                 # what one press of the concurrency control buys
     expected_revision: str | None = None                            # backend rev this PP rev expects (paired w/ version_check)
     version_check: VersionCheck | None = None                       # async (http, base_url) -> str | None; init WARNs on drift
     preflight: PreflightFn | None = None                            # async (backend_url) -> None reachability probe; None opts out

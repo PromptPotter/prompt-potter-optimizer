@@ -202,29 +202,29 @@ paths:
       operationId: setSampleLookahead
       summary: Set how many samples the scoring walk holds in flight — host-admin only.
       description: |
-        Writes `.runtime/sample_lookahead.json` (`cells: 1` removes it). While armed, the walk
+        Writes `.runtime/sample_lookahead.json` (`cells: 1` removes it). While set, the walk
         holds that many of one candidate's samples at once instead of one, cutting the wall
         clock of its sample walk roughly in proportion.
 
         **The request is recorded unclamped; the walk clamps it** to the backend's declared
         `Connector.max_cells_in_flight`, which is where the connector being walked is known.
-        Both halves are served on `dashboard.json` — `max_cells_in_flight` (the ceiling, `1`
-        meaning the control does not apply to this backend) and `sample_lookahead` (what the
-        loop actually held, which is not the request: it lags a press by up to one group and
-        reflects the clamp).
+        Two fields are served on `dashboard.json`: `max_cells_in_flight` (the ceiling, `1`
+        meaning the control does not apply to this backend) and `sample_lookahead` — **the
+        depth in force, and the only reading of it there is.** It is the flag re-read on the
+        way out of the dashboard route and the SSE snapshot, never served as the runner last
+        flushed it, so a press is visible on the next poll rather than at the next launch.
+        There is deliberately no second field for "what the loop last held": that is a log
+        with no round-boundary writer, and a control reconciling the two reported a spent
+        depth as the depth still in force.
 
-        **What SPENDS the press is the backend's to declare** (`Connector.concurrency_arming`):
+        **The depth lasts ONE ROUND of scoring** and is cleared when that round's scoring
+        completes, so one set outside a scoring phase waits for the next round rather than
+        expiring unused. This is the same on every backend: a connector declares the ceiling
+        and cannot declare how long a depth lasts, because it cannot see whether the walk in
+        front of it is inside a round. The walk re-reads the flag at every launch boundary, so
+        a press mid-walk tops the window up rather than waiting for it to drain.
 
-        - `round` — the wire shape. Armed for ONE round of scoring, consumed when that round's
-          scoring completes, so a press landing outside a scoring phase waits for the next one
-          rather than expiring unused.
-        - `batch` — for a backend whose sample is an entire nested campaign. A round there runs
-          hours across dozens of samples and is too coarse to bound the press, so the operator
-          names the number instead: that many samples are released together, the walk waits for
-          all of them before releasing the next group, and the arming is spent when the group
-          launches.
-
-        **The measurement is unchanged, at any depth and under either arming.** Samples are
+        **The measurement is unchanged, at any depth.** Samples are
         acquired in parallel but absorbed in walk order, and an acquisition still in flight when
         the walk stops is discarded rather than recorded — so the rows a candidate persists and
         the sample it is cut at do not depend on how many were in flight. Because nothing
@@ -233,11 +233,11 @@ paths:
         nested-campaign backend even that is recovered, since a cancelled cell resumes from the
         rounds it had already banked.
 
-        **Either LAYER is armed by naming it.** An L4 inner cycle is addressed by the optional
-        `descend` tail rather than by the outer campaign, because the outer's arming is
+        **Either LAYER is set by naming it.** An L4 inner cycle is addressed by the optional
+        `descend` tail rather than by the outer campaign, because the outer's depth is
         deliberately not inherited downward — one press would otherwise multiply concurrency at
-        every nested level at once. So arming the outer releases N inner campaigns together,
-        and arming one of those inner runs holds N of its own rows in flight.
+        every nested level at once. So setting the outer runs N inner campaigns together, and
+        setting one of those inner runs holds N of its own rows in flight.
 
         Requires `campaign.lookahead` — its own rung rather than a share of babysit, because it
         spends the box's shared provider rate bucket and is therefore the one power a host may
@@ -2886,13 +2886,12 @@ components:
               type: integer
               minimum: 1
               description: >
-                How many of one candidate's samples the walk may hold in flight. `1` disarms —
-                one on-disk state for "never armed" and "cancelled", so the two cannot read
+                How many of one candidate's samples the walk may hold in flight. `1` clears it —
+                one on-disk state for "never set" and "cancelled", so the two cannot read
                 alike. Recorded as sent and clamped by the walk to the backend's declared
-                ceiling (`dashboard.json::max_cells_in_flight`), so a value above it arms the
-                ceiling rather than being rejected. An arming also ends on its own — after the
-                round that scores under it, or the group it released — so `1` is a cancel, not
-                the normal way it ends.
+                ceiling (`dashboard.json::max_cells_in_flight`), so a value above it runs at the
+                ceiling rather than being rejected. The depth also ends on its own — after the
+                round that scores under it — so `1` is a cancel, not the normal way it ends.
             descend:
               type: string
               maxLength: 512

@@ -52,7 +52,7 @@ from promptpotter.infrastructure.llm.telemetry import (
     reset_cycle_ledger,
     set_cycle_ledger,
 )
-from promptpotter.infrastructure.runtime_flags import write_armed_cells
+from promptpotter.infrastructure.runtime_flags import write_sample_lookahead
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     inner_sandboxes_dir,
@@ -1013,7 +1013,7 @@ class CommandDispatcher:
         the walk clamps to the connector's ceiling, and clamping twice lets the two disagree.
         Pointedly does NOT ``mark_human_intervened`` as its neighbour above does — skip changes what
         was measured, this cannot, and a babysat stamp would assert a steer that did not happen."""
-        write_armed_cells(self._stores.campaigns.cycle_dir(hop), cells)
+        write_sample_lookahead(self._stores.campaigns.cycle_dir(hop), cells)
 
     def _apply_origin_gate_decision(self, hop: CycleHop, decision: GateDecision) -> None:
         """The browser's half of the gate. The write itself is

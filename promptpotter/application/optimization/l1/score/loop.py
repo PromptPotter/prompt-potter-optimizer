@@ -18,7 +18,11 @@ from promptpotter.domain.results import CandidateProposal, ScoredCandidate
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
 from promptpotter.shared.errors import is_error_result
-from promptpotter.shared.instrument import MeasuredCandidate, MeasurementRole
+from promptpotter.shared.instrument import (
+    NO_ROUND_SLOT,
+    MeasuredCandidate,
+    MeasurementRole,
+)
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
@@ -72,11 +76,10 @@ async def score_population(
             on_sample_starting=None,
             # The PRIOR being caught up — never the foreground candidate whose sample set
             # triggered this. Inheriting that binding is what filed C1.1's backfills under
-            # C1.2. ``idx`` is -1 because a backfill occupies no slot in the round's
-            # population; ``role`` is what tells a reader this row was measured for a
-            # paired comparison, outside the round's shared order.
+            # C1.2. ``role`` is what tells a reader this row was measured for a paired
+            # comparison, outside the round's shared order.
             measured=MeasuredCandidate(
-                idx=-1,
+                idx=NO_ROUND_SLOT,
                 candidate_id=prior_id,
                 label=f"prior:{prior_id[:8]}",
                 role=MeasurementRole.BACKFILL,
@@ -134,29 +137,26 @@ async def score_population(
             base_pipeline_params=effective_pipeline_params[idx],
             schema=cycle.session.pipeline_schema,
         )
-        callbacks.on_candidate_started(
-            idx,
-            n,
-            opt_sp_c.lineage.changes_description or "",
-            pipeline_params_override,
-            opt_sp_c.prompt_field_dict(),
-            candidate_sp.config_params,
-        )
         # Bind PoBBCheck so this candidate's per-sample snapshot rides the telemetry stream tagged.
+        # Before the announcement, which quotes the prior count it holds.
         elim_check.set_current(
             opt_sp_c.lineage.id,
             on_snapshot=partial(callbacks.on_p_best_update, round_num, idx, n),
         )
-        # The shared order at candidate start. Read off the ledger by the console, over SSE
-        # by the chat's run card for "next in line", and absorbed into the dashboard
-        # projection as `declared_sample_order` — which is what lets a reader that missed
-        # this event still see forward.
-        callbacks.on_sample_order_preview(
+        # What this arm IS and which cells it will walk — one obligation, one call, shared with
+        # the origin pass (`run_observers.py::announce_candidate`). The order is read off the
+        # ledger by the console, over SSE by the chat's run card for "next in line", and absorbed
+        # into the dashboard projection as `declared_sample_order`, which is what lets a reader
+        # that missed the event still see forward.
+        callbacks.announce_candidate(
             round_num,
             idx,
             n,
-            n_priors=len(elim_check.priors_by_sample),
+            opt_sp=opt_sp_c,
+            resolved_pipeline_params=candidate_sp.config_params,
             sample_order=order,
+            n_priors=len(elim_check.priors_by_sample),
+            pp_override=pipeline_params_override,
         )
 
         cr_result = await score_one_candidate(

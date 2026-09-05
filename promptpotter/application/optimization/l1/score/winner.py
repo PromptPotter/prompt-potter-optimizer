@@ -237,16 +237,15 @@ async def l1_score(
     # what the narrow set corrupted is the round's published HEADLINE, which on a held round IS
     # this re-score, so it inherited the denominator of whatever PoBB cut. A round's headline
     # denominates over the round's panel or it is not a series.
-    parent = await rescore_parent(cycle, dataset, round_num, callbacks=callbacks)
+    parent = await rescore_parent(cycle, dataset, callbacks=callbacks)
     # The round's scoring ends here, so an armed look-ahead is spent HERE rather than at the
     # round boundary — a press landing during critique waits for the next round instead of being
     # consumed having sped up nothing. Not in a `finally`: an unwound round did not score.
-    # ONLY under `round` arming: a `batch` backend spends the press by the group it released, and
-    # a second spender here would silently swallow one pressed after this round's last group.
-    if (
-        session.sample_lookahead_consume is not None
-        and session.backend_client.concurrency_arming == "round"
-    ):
+    # The same on every backend: a connector declares the CEILING and nothing about how long an
+    # arming lasts, because only the loop knows it is inside a round. Round 0 elects through its
+    # own seam and spends it there (`runner/round.py::emit_origin_round`) — two election sites,
+    # one rule, and they cannot both fire for one round.
+    if session.sample_lookahead_consume is not None:
         session.sample_lookahead_consume()
     # The shared comparison anchor for the θ election + paired diff. Its single-draw noise is
     # correlated across arms, so it floods every comparison equally rather than favouring one.

@@ -70,6 +70,12 @@ async def emit_origin_round(
     # 0 reaches TWICE — the second time carrying the warm ruler's θ — where a crown that never
     # moves would simply be rewritten with itself.
     cb.on_election(round_result)
+    # And a round-0 election spends the look-ahead arming, exactly as round N's does
+    # (`l1/score/winner.py`) — one rule, at the two places a round elects. Origin scoring is the
+    # LONGEST stretch an operator watches and so the likeliest place to press; unspent here, that
+    # press outlives the round it paid for and silently widens round 1 too.
+    if session.sample_lookahead_consume is not None:
+        session.sample_lookahead_consume()
     await close_round(cycle, round_result, 0, session, cb)
 
 

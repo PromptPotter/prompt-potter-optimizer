@@ -187,11 +187,9 @@ export function roundCandidates(dash: DashboardSnapshot | null): ElectedRow[] {
 
   const liveRound = roundOf(dash);
   if (liveRound != null && !closedRoundNumbers(dash).has(liveRound)) {
-    // A live row keys POSITIONALLY, even once scoring stamps a real id on it. The two live
-    // readers — the sample tape (`liveCandidate`) and the inspector (`liveCandidateRow`) — join
-    // back through `liveCandidateId`, so a row wearing its lineage id resolves in neither and
-    // the tape and the inspector go blank for every candidate that finished before its round
-    // closed. Construction and match ride one rule or they ride none.
+    // A live row's `candidate_id` is POSITIONAL — a row KEY, never a join key. The two live
+    // readers (the sample tape, the inspector) join on `label`, which the served row carries
+    // from mint and a lineage id cannot answer for until the candidate has been scored.
     liveCandidates(dash).forEach((c, i) =>
       out.push(rowOf(c, liveRound, i, liveCandidateId(liveRound, i), "inflight")),
     );

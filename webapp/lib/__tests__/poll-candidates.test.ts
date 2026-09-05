@@ -24,24 +24,25 @@ describe("liveL1Candidates", () => {
   });
 });
 
-// Regression: `liveInputCandidate` applies the same idx guard as `liveCandidate`
-// — a malformed idx must not stringify to `r{round}_undefined` and false-match.
-describe("liveInputCandidate idx guard", () => {
+// Regression: the live half joins on LABEL, the one key a tree-minted selection and a
+// not-yet-scored live row both carry. A row missing its label must not answer for one.
+describe("liveInputCandidate label join", () => {
   const dash = {
     current_round: {
       nodes: {
         l1_score: {
-          input: { candidates: [{ idx: undefined }, { idx: 1, prompt_fields: {} }] },
+          input: { candidates: [{ idx: 0 }, { idx: 1, label: "C2.2", prompt_fields: {} }] },
         },
       },
     },
   } as unknown as DashboardSnapshot;
 
-  it("does not match a malformed idx via the r{round}_undefined string", () => {
-    expect(liveInputCandidate(dash, 2, "r2_undefined")).toBeNull();
+  it("resolves the in-flight candidate by its label", () => {
+    expect(liveInputCandidate(dash, "C2.2")?.idx).toBe(1);
   });
 
-  it("still resolves a well-formed input candidate by id", () => {
-    expect(liveInputCandidate(dash, 2, "r2_1")?.idx).toBe(1);
+  it("matches no row on an absent label", () => {
+    expect(liveInputCandidate(dash, "")).toBeNull();
+    expect(liveInputCandidate(dash, "C2.1")).toBeNull();
   });
 });

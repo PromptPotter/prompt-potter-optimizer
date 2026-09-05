@@ -25,11 +25,6 @@ if TYPE_CHECKING:
 # execution mode extends this enum without touching the loop.
 ConnectorExecution = Literal["remote_http", "in_process"]
 
-# What one press of the concurrency control buys. ``round`` is the wire shape, spent by the
-# round that scored under it. ``batch`` is for a backend whose sample is a whole run, where a
-# round is hours: the operator names how many launch together and the press is spent by them.
-ConcurrencyArming = Literal["round", "batch"]
-
 # What ONE MEASURED ROW is called on this backend: ``sample`` everywhere; ``cell`` on the
 # recursion, where one row is an entire inner campaign. DECLARED, never sniffed off a row.
 MeasuredUnit = Literal["sample", "cell"]
@@ -119,10 +114,13 @@ class Connector:
     max_cells_in_flight: int = 2
     """Most samples of one candidate the scoring walk may hold in flight once armed. Declared
     here rather than read off ``execution``, a transport fact: ``dspy`` and ``promptpotter`` are
-    both ``in_process`` and want opposite answers. ``1`` opts out."""
+    both ``in_process`` and want opposite answers. ``1`` opts out.
 
-    concurrency_arming: ConcurrencyArming = "round"
-    """What one press of the concurrency control buys — see :data:`ConcurrencyArming`."""
+    **This is the whole of what a connector may say about concurrency — never how long an operator
+    arming lasts.** A connector cannot see whether the walk in front of it sits inside a round;
+    ``_bind_run_controls`` binds an arming only under ``run_optimization``, so the round spends
+    every press, and a screen declares its depth at launch instead
+    (``application/seed_screen.py``)."""
 
     measured_unit: MeasuredUnit = "sample"
     """What one measured row of this backend is CALLED — see :data:`MeasuredUnit`."""
@@ -217,7 +215,6 @@ class Connector:
 __all__ = [
     "AuthTokenFn",
     "BackendUnreachableError",
-    "ConcurrencyArming",
     "Connector",
     "ConnectorExecution",
     "InProcessRun",

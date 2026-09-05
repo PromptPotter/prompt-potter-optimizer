@@ -220,8 +220,9 @@ row **costs** in seconds and dollars, and which request fields are **safe to var
 
 The hard half, and the one that has no default. Five questions, each with a consequence:
 
-- **What is ONE measured row — one request, or a whole run?** It decides `measured_unit`,
-  `max_cells_in_flight` and `concurrency_arming` —
+- **What is ONE measured row — one request, or a whole run?** It decides `measured_unit` and
+  `max_cells_in_flight` — and NOT how long an operator's concurrency press lasts, which is the
+  round's to spend and no connector's to declare;
   [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § The measured unit.
 - **What decides whether that row was good — a label, or a number something else produced?**
   That is the ANSWER SHAPE, declared in `extract_experiment` and nowhere else; § The answer shape

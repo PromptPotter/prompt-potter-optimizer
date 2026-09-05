@@ -167,7 +167,7 @@ export function MeasurementRun({
       // `samplesForRow`: never a merge.
       const spec =
         c.source === "inflight"
-          ? liveCandidateSearchPoint(dash, c.candidate_id)
+          ? liveCandidateSearchPoint(dash, c.label)
           : candidateSearchPoint(roundDoc, c.candidate_id);
       out.push({ candidate: c, samples: filtered, spec });
     }

@@ -184,16 +184,16 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
       ? String(dash?.candidate || "").split("/")[0]
       : "";
 
-  // SERVER state, never a local toggle (I6): the arming expires on its own, so a client-held
-  // boolean would stay lit after the round spent it.
+  // SERVER state, never a local toggle (I6): the depth clears itself at the round boundary, so a
+  // client-held value would stay lit after the round that spent it. ONE served number — the depth
+  // in force — because the walk re-reads it at every launch: a press applies to a walk already
+  // running, and waits harmlessly for the next one if none is.
   const lookahead = dash?.sample_lookahead ?? 1;
-  const sampleLookaheadArmed = lookahead > 1;
   const discards = dash?.sample_lookahead_discards ?? 0;
   // SERVED, because the browser cannot answer either: what one sample costs is the connector's
   // declaration, not "is this self-optimization?". `1` disables the control WITH ITS REASON —
-  // it used to accept presses the engine silently pinned to depth 1.
+  // unserved, it takes presses the engine then silently pins to depth 1.
   const maxCells = dash?.max_cells_in_flight ?? 1;
-  const perGroup = dash?.concurrency_arming === "batch";
   // Unlike Skip, this one follows the VIEWED path: the ceiling on screen and the cycle the press
   // arms are the same run at either depth. The outer's arming is deliberately not inherited
   // (`runner/entry.py`), so each layer is armed by looking at it.
@@ -202,25 +202,9 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
       ? "This backend runs one sample at a time — a single call has no latency to overlap."
       : undefined;
   const armDisabled = Boolean(concurrencyReason) || runPhase !== "running" || pending !== null;
-  // SERVED: what the operator asked for and the walk has not spent yet. Between a press and the
-  // next launch boundary this is the only thing that says the press landed — `lookahead` is what
-  // the loop HELD and still reads 1.
-  const armedCells = dash?.sample_lookahead_armed ?? 1;
-  const armPending = armedCells > 1 && armedCells !== lookahead;
-  // The operator's effective choice across both phases: their pending request while it waits,
-  // then what the loop actually held once the group is released.
-  const shownCells = Math.max(armedCells, lookahead);
   const concurrencyTitle =
     concurrencyReason ??
-    `${
-      armPending
-        ? `${armedCells} armed — releasing together at the next sample boundary. `
-        : ""
-    }${
-      perGroup
-        ? "Releases this many samples together and waits for all of them; one press buys one group."
-        : `Runs the next round's scoring this many samples in flight, then disarms.`
-    } Ceiling ${maxCells}. The measurement is unchanged and the cycle is NOT marked babysat${
+    `Runs scoring with this many samples in flight, and resets to 1 when the round finishes scoring. Ceiling ${maxCells}. The measurement is unchanged and the cycle is NOT marked babysat${
       discards > 0 ? ` (${discards} discarded)` : ""
     }.`;
   // Clamped here as well as in the walk: the server records the request UNCLAMPED, so a value
@@ -229,7 +213,7 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
     const n = Number(raw);
     if (!Number.isInteger(n) || n < 1) return;
     const cells = Math.min(n, maxCells);
-    if (cells === shownCells) return;
+    if (cells === lookahead) return;
     void act("sample-lookahead", () =>
       postSetSampleLookahead(viewedPath ?? [{ campaignId, cycleId }], cells),
     );
@@ -300,47 +284,30 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
               </div>
             ) : null}
           </div>
-          {/* An ARM control, not a switch: it spends itself. `batch` is a FIELD rather than a
-              button, because only there does the operator pick the number — and an input nested
-              inside a button is neither valid nor operable. */}
+          {/* An ARM control, not a switch: it spends itself at the round's scoring boundary.
+              ONE form at every ceiling — an exclusive choice over 1..maxCells, so the shared
+              segmented control, one click per press. No second form selected by the backend:
+              a connector declares the ceiling and never how long an arming lasts, and an
+              off/max toggle could only say two things where this says any depth under it. */}
           <div className="remote-panel-section">
             <div className="section-title">Samples in flight</div>
-            {perGroup ? (
-              // An EXCLUSIVE choice over a range the connector caps at 4, so: the shared
-              // segmented control. One click is one press, which removes the commit question.
-              <span className="remote-cells-group" title={concurrencyTitle}>
-                <span aria-hidden="true" className="remote-cells-icon">
-                  ⇉
-                </span>
-                <SegmentedControl
-                  ariaLabel={`Samples to release together, up to ${maxCells}`}
-                  className={cx("remote-cells", armPending && "pending")}
-                  value={String(shownCells)}
-                  onChange={(v) => armCells(v)}
-                  options={Array.from({ length: maxCells }, (_, i) => ({
-                    value: String(i + 1),
-                    label: String(i + 1),
-                    disabled: armDisabled,
-                    title: i === 0 ? "One at a time" : `Release ${i + 1} together`,
-                  }))}
-                />
+            <span className="remote-cells-group" title={concurrencyTitle}>
+              <span aria-hidden="true" className="remote-cells-icon">
+                ⇉
               </span>
-            ) : (
-              <button
-                type="button"
-                className={cx("remote-btn", "remote-sample-lookahead", sampleLookaheadArmed && "armed")}
-                onClick={() => armCells(sampleLookaheadArmed ? 1 : maxCells)}
-                disabled={armDisabled}
-                aria-pressed={sampleLookaheadArmed}
-                aria-label={`Samples in flight, up to ${maxCells}`}
-                title={concurrencyTitle}
-              >
-                <span aria-hidden="true">⇉</span>
-                <span className="remote-btn-label">
-                  {sampleLookaheadArmed ? `${lookahead}×` : "Look-ahead"}
-                </span>
-              </button>
-            )}
+              <SegmentedControl
+                ariaLabel={`Samples to hold in flight, up to ${maxCells}`}
+                className="remote-cells"
+                value={String(lookahead)}
+                onChange={(v) => armCells(v)}
+                options={Array.from({ length: maxCells }, (_, i) => ({
+                  value: String(i + 1),
+                  label: String(i + 1),
+                  disabled: armDisabled,
+                  title: i === 0 ? "One at a time" : `Hold ${i + 1} in flight`,
+                }))}
+              />
+            </span>
           </div>
           <div className="remote-panel-section">
             <div className="section-title">Finishing criteria</div>

@@ -43,11 +43,10 @@ export function ScoringInspector({ selected, onClose }: Props) {
   const arms = selected ? (byRound.get(selected.round) ?? []).length : 0;
   const row = useMemo<ElectedRow | null>(() => {
     if (!selected) return null;
-    return (
-      (byRound.get(selected.round) ?? []).find(
-        (c) => c.candidate_id === selected.candidate_id,
-      ) ?? null
-    );
+    // On LABEL: a selection is minted off the served tree and carries the lineage id, while an
+    // in-flight row has none until it is scored — so an id match resolved every CLOSED round and
+    // no live one, which is the whole round the operator is watching.
+    return (byRound.get(selected.round) ?? []).find((c) => c.label === selected.label) ?? null;
   }, [selected, byRound]);
   const samples = useMemo(() => (row ? samplesForRow(row, dash, doc) : []), [row, dash, doc]);
 
@@ -56,7 +55,7 @@ export function ScoringInspector({ selected, onClose }: Props) {
   const cfg = !selected
     ? null
     : isLive
-      ? liveCandidateObserveConfig(dash, selected.candidate_id, selected.label)
+      ? liveCandidateObserveConfig(dash, selected.label)
       : candidateObserveConfig(doc, selected.label, selected.label);
 
   if (!selected) return null;

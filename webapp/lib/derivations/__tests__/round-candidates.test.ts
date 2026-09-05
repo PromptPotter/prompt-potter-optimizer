@@ -139,12 +139,13 @@ describe("roundCandidates — the in-flight round", () => {
     expect(row?.meanFitnessCiHi).toBe(0.69);
   });
 
-  // The id both live readers join back on. A served lineage id here resolves in NEITHER
-  // `liveCandidate` (the sample tape) nor `liveCandidateRow` (the inspector), so both go blank
-  // for any candidate that finished scoring before its round closed.
-  it("keys positionally even once scoring stamps a lineage id on the row", () => {
+  // The LABEL is what both live readers join back on — `liveCandidate` (the sample tape) and
+  // `liveCandidateRow` (the inspector). It is the only key a selection minted off the tree and
+  // a row that has not been scored yet both carry; keyed on the lineage id instead, every
+  // in-flight bar click resolves in neither and the panel reads as "still scoring".
+  it("resolves both live readers on the row's label", () => {
     expect(row?.candidate_id).toBe(liveCandidateId(2, 0));
-    expect(liveCandidateRow(live, 2, row!.candidate_id)).not.toBeNull();
+    expect(liveCandidateRow(live, row!.label)).not.toBeNull();
   });
 
   it("holds no crown — the election is a round-scoped fit that has not run", () => {

@@ -180,7 +180,15 @@ async def _termnorm_preflight(backend_url: str) -> None:
             raise BackendUnreachableError(
                 backend_type="termnorm",
                 backend_url=backend_url,
-                detail=str(exc).strip() or "connection refused",
+                # Where to GET this backend is TermNorm's fact, not the launcher's: stated at the
+                # ingress it prints for every connector, over a probe that named its own cause.
+                detail=(
+                    f"{str(exc).strip() or 'connection refused'} at {backend_url}.\n\n"
+                    "The TermNorm backend ships in a sibling repo. Clone it beside "
+                    "this checkout, then start it:\n"
+                    "  TermNorm-excel\\backend-api\\start-server-py-LLMs.bat\n\n"
+                    "Install guide: docs/manual/02-install.md"
+                ),
             ) from exc
         except httpx.ConnectTimeout as exc:
             raise BackendUnreachableError(

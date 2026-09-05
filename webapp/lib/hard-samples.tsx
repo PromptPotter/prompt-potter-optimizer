@@ -17,6 +17,7 @@
 
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import type { DatasetItem, HardSampleOrder, HardSamplesScope, SampleSeries } from "@/lib/api";
+import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useDatasetPreview, type SeriesTotals } from "@/lib/hooks/useDatasetPreview";
 import type { CyclePath } from "@/lib/ids";
 
@@ -65,7 +66,11 @@ export function HardSamplesProvider({
   // `hard_sample_order`. The browser must never restate that default; what the
   // control DISPLAYS is the served echo, never this.
   const [rankedByPick, setRankedBy] = useState<HardSampleOrder | null>(null);
-  const p = useDatasetPreview(path, datasetName, scope, rankedByPick);
+  // The roster and its series follow a run that is still measuring: `isLive` is the same
+  // verdict every other live surface reads, so the panel cannot disagree with the tape
+  // above it about whether this cycle is moving.
+  const { isLive } = useDashboard();
+  const p = useDatasetPreview(path, datasetName, scope, rankedByPick, isLive);
   // Keyed on the FIELDS, never on `p`: the hook returns a fresh object every render,
   // so a dep on it would hand every consumer a new value on every poll tick.
   const value = useMemo<HardSamples>(

@@ -258,7 +258,9 @@ def _add_verify_args(p_verify: argparse.ArgumentParser) -> None:
 def _add_seed_screen_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "dataset",
-        help="Inner benchmark whose bank draws are being screened (e.g. 'justlogic-d234').",
+        help="ANY dataset whose seeded bank draws are being screened (e.g. 'justlogic-d234'). "
+        "Not an L4-only verb: it resolves that dataset's own campaign.yaml and origin, so a "
+        "screen needs no inner loop and no self-optimizing campaign.",
     )
     p.add_argument(
         "--seeds",
@@ -286,6 +288,16 @@ def _add_seed_screen_args(p: argparse.ArgumentParser) -> None:
         "NOT 1: the verdict compares an exact floor against an origin carrying ~0.08 SE at 40 "
         "rows, so one pass cannot settle a bank near its line. Costs repeat x --n-samples "
         "calls; raise it further for any bank reported UNSETTLED.",
+    )
+    p.add_argument(
+        "--parallel",
+        dest="parallel",
+        type=int,
+        default=1,
+        help="Rows to hold in flight within each pass (default 1, sequential). A screen has no "
+        "round and no cycle, so this is a LAUNCH parameter held for the whole run rather than a "
+        "press the browser arms and a round spends — that control belongs to `new`/`resume`, "
+        "which have a round to spend it at. Clamped to the backend's own ceiling.",
     )
 
 

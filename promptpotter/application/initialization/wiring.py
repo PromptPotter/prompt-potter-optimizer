@@ -27,7 +27,7 @@ from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.backend import BackendClient, build_backend_client
 from promptpotter.infrastructure.store.archive_views import maintain_measurement_index
 from promptpotter.infrastructure.store.dataset_access import (
-    DatasetAccessError,
+    dataset_panel_rows,
     dataset_pipeline_path,
     readable_dataset_dir,
 )
@@ -218,17 +218,6 @@ def _read_backend_type(dataset_config_dir: Path | None, dataset_name: str | None
     return bt.lower()
 
 
-def backend_type_of_dataset(stores: Stores, dataset_name: str) -> str:
-    """THE predicate for "which connector does this dataset use?", so no reader hand-maintains a list
-    of dataset NAMES. Tolerant, unlike its strict init twin: a campaign outlives its dataset dir."""
-    try:
-        raw = read_yaml_optional(dataset_pipeline_path(readable_dataset_dir(stores, dataset_name)))
-    except (OSError, ValueError, DatasetAccessError):
-        return ""
-    bt = (raw or {}).get("backend_type")
-    return bt.lower() if isinstance(bt, str) else ""
-
-
 def _load_dataset_into_session(
     session: Session,
     dataset_name: str,
@@ -241,7 +230,15 @@ def _load_dataset_into_session(
     # First, never a fallback: a connector declaring an `experiment_file` OWNS its panel, and rows
     # cached under the same dataset name describe a different instrument.
     if connector is not None and connector.experiment_file:
-        _load_experiment_file_into_session(session, connector, status)
+        panel = dataset_panel_rows(session.store, dataset_name)
+        if panel is None:
+            raise ValueError(
+                f"Connector {connector.name!r} owns {dataset_name!r}'s panel, but its "
+                f"pipeline.yaml no longer names that backend_type."
+            )
+        queries, session.index_terms = panel
+        session.samples = samples_from_dicts(queries)
+        status(f"Experiment: {connector.experiment_file} ({len(queries)} tasks)")
         return
     items = resolve_dataset_items(session.store, dataset_name, status=status)
     if not items:
@@ -278,28 +275,6 @@ def _load_dataset_into_session(
             f"(term index now {len(session.index_terms)})"
         )
     status(f"Dataset: {dataset_name} ({len(items)} samples)")
-
-
-def _load_experiment_file_into_session(
-    session: Session,
-    connector: connectors.Connector,
-    status: Callable[[str], None],
-) -> None:
-    """Load samples from the connector's on-disk experiment doc — the same ``extract_experiment``
-    seam the sync path uses, reading the dataset dir instead of a backend."""
-    config_dir = session.dataset_config_dir
-    exp_path = (config_dir / connector.experiment_file) if config_dir else None
-    data = read_yaml_optional(exp_path) if exp_path else None
-    if not data:
-        status(f"Experiment file '{connector.experiment_file}' missing or empty")
-        raise ValueError(
-            f"Connector {connector.name!r} expects {connector.experiment_file!r} in the "
-            f"dataset config dir ({config_dir}), but it is missing or empty."
-        )
-    queries, index_terms = connector.extract_experiment(data)
-    session.samples = samples_from_dicts(queries)
-    session.index_terms = index_terms
-    status(f"Experiment: {connector.experiment_file} ({len(queries)} tasks)")
 
 
 async def init_services(
@@ -395,4 +370,4 @@ async def init_services(
     return session
 
 
-__all__ = ["backend_type_of_dataset", "init_services"]
+__all__ = ["init_services"]

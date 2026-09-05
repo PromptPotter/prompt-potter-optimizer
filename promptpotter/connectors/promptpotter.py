@@ -257,9 +257,8 @@ CONNECTOR = Connector(
     extract_experiment=_extract_experiment,
     in_process_run=_in_process_run,
     # One sample is a whole inner campaign — tens of minutes, almost all of it waiting on the
-    # provider — and a round is hours, so the group is the only unit that can bound a press.
+    # provider — so the ceiling here is what bounds a press, and it is the only thing that does.
     max_cells_in_flight=MAX_CELLS_IN_FLIGHT,
-    concurrency_arming="batch",
     measured_unit="cell",
     # Every key `run_inner_cycle` puts on the wire that the outer formula reads. Verified against
     # the dataset's declared observation_mappings at init.

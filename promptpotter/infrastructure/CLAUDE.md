@@ -62,7 +62,9 @@ counted apart, because only the first one clears on its own.
 
 **`dashboard.json` is an operator surface, not a cache, and three guarantees hold at the writer.**
 Someone alt-tabbing to the file tree mid-run has to see the truth, so before deferring or skipping
-any write, answer whether they still can. It is **always on disk and always swapped atomically**
+any write, answer whether they still can — and a SERVED read now rests on the same guarantees:
+`archive_views::cycle_measurement_series` reads the round in flight off this file, because a round
+file lands only at the close and the round being measured has none. It is **always on disk and always swapped atomically**
 (tmp + rename — never a partial write or a torn read), present after any ledger event in the cycle.
 It **settles within `_DASHBOARD_DEBOUNCE_S` of the last event**: the writer coalesces high-frequency
 bursts (sample-scored, token-usage, LLM-call progress) but converges behind real-time by no more
@@ -87,6 +89,9 @@ a convention:
 - **`current_round.nodes` holds only THIS round's blocks.** `_sticky_llm_calls` is
   most-recent-fire-per-slot and survives round transitions, so it is filtered by each block's own
   `round`: presence in the served map is the client's whole definition of "this node has fired".
+- **A measurement at `NO_ROUND_SLOT` moves the RUN's scalars and not the ROUND's population** —
+  it counts as queries scored and drives the in-flight markers, but skips `_buffer.append_sample`.
+  Why that split, and which measurements are slotless: `shared/instrument.py::NO_ROUND_SLOT`.
 - **A live row is the same shape as a closed one** — candidates (`DashboardCandidate`) and
   samples (`DashboardSample`), both `domain/dashboard_rows.py`. Two shapes for one entity force
   the client to merge them field by field, which put a bar and its error whisker on two

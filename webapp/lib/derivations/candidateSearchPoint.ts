@@ -79,16 +79,14 @@ export function candidateSearchPoint(
 // the round file, which isn't written until round close). Seeded at
 // `candidate_started` (`_RoundBuffer.seed_candidate`), so it's available the
 // moment a candidate begins scoring — lets the steer panel fork from a
-// still-running candidate. Matches by the live candidate id `r{round}_{idx}`.
+// still-running candidate. Matches by LABEL, the key a selection minted off the
+// tree and a live row that has no lineage id yet both carry.
 // Reads the same complete `resolved_pipeline_params` as the round-file path.
 export function liveCandidateSearchPoint(
   dash: DashboardSnapshot | null,
-  candidateId: string,
+  label: string,
 ): CandidateSearchPoint | null {
-  if (!candidateId) return null;
-  const liveRound = roundOf(dash);
-  if (liveRound == null) return null;
-  const entry = liveInputCandidate(dash, liveRound, candidateId);
+  const entry = liveInputCandidate(dash, label);
   if (!entry) return null;
   return searchPoint(entry.prompt_fields, nodeConfigs(entry.resolved_pipeline_params));
 }

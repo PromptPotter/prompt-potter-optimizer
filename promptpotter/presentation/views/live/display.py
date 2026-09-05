@@ -303,12 +303,10 @@ class LiveDisplay(DerivedView):
                     )
                 elif opening:
                     tail = f" — up to {depth} of {qt} in flight (armed)" if qt else " (armed)"
+                elif depth > 1:
+                    tail = " (armed — expires when this round finishes scoring)"
                 else:
-                    tail = (
-                        " (armed — expires when this round finishes scoring)"
-                        if depth > 1
-                        else " (back to sequential)"
-                    )
+                    tail = " (back to sequential)"
                 self._write(f"  {DIM}⇉ sample look-ahead depth {depth}{tail}{RESET}")
             return
         if ev == "sample_scored":

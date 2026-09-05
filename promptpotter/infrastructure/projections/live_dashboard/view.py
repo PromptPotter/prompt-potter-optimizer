@@ -69,7 +69,7 @@ from promptpotter.infrastructure.projections.live_state import (
     apply_phase,
     roll_p_best_at_round_complete,
 )
-from promptpotter.infrastructure.runtime_flags import read_armed_cells, read_spend_caps
+from promptpotter.infrastructure.runtime_flags import read_sample_lookahead, read_spend_caps
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import (
     ROUND_GLOB,
@@ -79,10 +79,11 @@ from promptpotter.infrastructure.store.layout import (
 )
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
+from promptpotter.shared.instrument import NO_ROUND_SLOT
 from promptpotter.shared.pricing import compute_usd
 
 if TYPE_CHECKING:
-    from promptpotter.connectors.protocol import ConcurrencyArming, MeasuredUnit
+    from promptpotter.connectors.protocol import MeasuredUnit
     from promptpotter.infrastructure.projections.audit_trail import AuditTrailView
 
 logger = logging.getLogger(__name__)
@@ -235,7 +236,6 @@ class LiveDashboardView(DerivedView):
         recorder: AuditTrailView | None = None,
         seed_from_cycle_id: str | None = None,
         max_cells_in_flight: int | None = None,
-        concurrency_arming: ConcurrencyArming | None = None,
         measured_unit: MeasuredUnit | None = None,
     ) -> LiveDashboardView | None:
         """``seed_from_cycle_id`` names the cycle to read the prior dashboard from — a fork inherits
@@ -277,8 +277,6 @@ class LiveDashboardView(DerivedView):
         # control. After `resume_from` — the live connector outranks a pair an older build wrote.
         if max_cells_in_flight is not None:
             view.state.max_cells_in_flight = max_cells_in_flight
-        if concurrency_arming is not None:
-            view.state.concurrency_arming = concurrency_arming
         if measured_unit is not None:
             view.state.measured_unit = measured_unit
         return view
@@ -558,13 +556,15 @@ class LiveDashboardView(DerivedView):
         qt = int(record.sample_total or 0)
         if ev == "sample_started":
             sid = payload.get("sample_id")
-            self.state.sample_lookahead = int(payload.get("sample_lookahead") or 1)
+            # The launch depth is this SAMPLE's, kept on its open-marker rather than on the state:
+            # `sample_lookahead` is the depth in force and is read from the flag at `_persist`.
+            launched_at = int(payload.get("sample_lookahead") or 1)
             if sid is not None:
                 self._open_samples[int(sid)] = (
                     str(payload.get("query_preview") or ""),
                     ci,
                     ct,
-                    self.state.sample_lookahead,
+                    launched_at,
                 )
             self._refresh_open_sample_markers()
             self._set_state(DashboardState.SCORING)
@@ -576,7 +576,10 @@ class LiveDashboardView(DerivedView):
             if scored_sid is not None:
                 self._open_samples.pop(int(scored_sid), None)
             self._absorb_sample_scored(result, last_in_candidate=(qi + 1 >= qt))
-            self._buffer.append_sample(ci, ct, qi, qt, result)
+            # The scalars above are the RUN's and a slotless measurement is paid work like any
+            # other; the buffer below is the ROUND's population, which it is not a member of.
+            if ci != NO_ROUND_SLOT:
+                self._buffer.append_sample(ci, ct, qi, qt, result)
         elif ev == "candidate_started":
             # Seed it empty so the lineage draws the round's path the instant a candidate is
             # known, rendering as a pending node until `sample_scored` fills it in.
@@ -676,7 +679,7 @@ class LiveDashboardView(DerivedView):
         s.current_query_payload = query_text
         s.current_sample_id = sid
         s.open_sample_ids = list(self._open_samples)
-        s.candidate = f"{candidate_label(s.round, ci)}/{ct}"
+        s.candidate = "parent" if ci == NO_ROUND_SLOT else f"{candidate_label(s.round, ci)}/{ct}"
 
     def _absorb_sample_scored(self, result: dict[str, Any], *, last_in_candidate: bool) -> None:
         s = self.state
@@ -962,9 +965,11 @@ class LiveDashboardView(DerivedView):
                 armed["token_budget"] = armed_tokens
             if armed:
                 s.run_limits = s.run_limits.model_copy(update=armed)
-        # Same shape as the spend caps above: the flag is the REQUEST and the loop reads it at
-        # its own cadence, so the browser learns a press landed here or not at all.
-        s.sample_lookahead_armed = read_armed_cells(self.cycle_dir)
+        # Same shape as the spend caps above, and for the same narrow purpose: keeping the FILE
+        # self-consistent for whoever opens it. No SERVED read depends on it — this writer cannot
+        # answer for a press landing between its own records, so
+        # `runtime_flags.py::overlay_armed_controls` re-reads both on the way out.
+        s.sample_lookahead = read_sample_lookahead(self.cycle_dir)
         s.wallclock_serialized_at = utcnow_iso()
         # The typed model IS the on-disk shape, and `extra="forbid"` rejects an undeclared
         # attribute at the mutation site — so a field can neither silently vanish nor appear

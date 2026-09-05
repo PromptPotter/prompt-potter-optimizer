@@ -7,11 +7,11 @@ import argparse
 import logging
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.initialization.wiring import backend_type_of_dataset
 from promptpotter.application.jobs.launcher.admission import probe_backend
 from promptpotter.application.jobs.mint import resolve_cycle_plan
 from promptpotter.connectors.protocol import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.presentation.cli.commands._shared import (
     _DIVERGENCE_HINT,
     CommandResult,
@@ -453,8 +453,8 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
             backend_type_of_dataset(session.store, ctx.init_params.get("dataset_name") or ""),
             ctx.backend_url,
         )
-    except BackendUnreachableError:
-        return backend_unreachable_result(ctx.backend_url)
+    except BackendUnreachableError as exc:
+        return backend_unreachable_result(exc)
 
     train_data = session.samples
     steering = bool(getattr(args, "steer_model", None))

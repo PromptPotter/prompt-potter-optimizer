@@ -99,22 +99,10 @@
 /* Inner/outer drill — navigation, not a run command: hop into the live inner
    run from the outer view, or back out while an inner is viewed. */
 .remote-drill{color:var(--color-accent)}
-/* Look-ahead arm — fills when armed, because the state is transient (one round) and has to
-   read at a glance. The label carries the depth ("2×"), so it is never colour alone. */
-.remote-sample-lookahead.armed{
-  border-color:var(--color-accent);
-  background:var(--color-accent);
-  color:var(--color-background);
-}
-.remote-sample-lookahead.armed:hover:not(:disabled){filter:brightness(1.08)}
-/* The `batch` form: the ⇉ mark beside the shared segmented control, never a button wrapper —
+/* The look-ahead arm: the ⇉ mark beside the shared segmented control, never a button wrapper —
    the segments ARE the buttons, so `.remote-btn` here would nest one control inside another. */
 .remote-cells-group{display:inline-flex;align-items:center;gap:var(--space-4)}
 .remote-cells-icon{color:var(--color-text-tertiary)}
-/* Armed, not yet released. Outlined rather than filled, so it reads as pending against the
-   solid `armed` fill the round form uses for what the loop is actually holding. */
-.remote-cells.pending{box-shadow:0 0 0 1px var(--color-accent)}
-.remote-cells.pending::after{content:"armed";margin-left:var(--space-4);color:var(--color-accent);font-size:var(--text-xs);font-weight:600}
 .remote-btn-label{font-weight:600}
 
 /* Concise status — round + spend, tabular so it doesn't jitter as it ticks. */

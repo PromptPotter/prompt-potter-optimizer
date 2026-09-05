@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "MAX_INSTRUMENT_DEPTH",
+    "NO_ROUND_SLOT",
     "MeasuredCandidate",
     "MeasurementRole",
     "enter_instrument_mode",
@@ -99,6 +100,14 @@ class MeasurementRole(enum.StrEnum):
     # parent floor, no lift and no acquisition, so the pass may measure one arm without making
     # it better-identified than the arms it was judged against.
     OVERLAP = "overlap"
+
+
+# The ``idx`` of a measurement that occupies no slot in the round's population — a prior's PoBB
+# catch-up, the parent's re-score. Every reader keyed by slot BRANCHES on it: ``candidate_label``
+# renders it ``C{round}.0``, naming a candidate that does not exist, and the round buffer would
+# mint that phantom a row. What such a measurement may still drive is the per-sample tick, which
+# is why the sentinel is declared rather than written ``-1`` at each site.
+NO_ROUND_SLOT = -1
 
 
 @dataclass(frozen=True)

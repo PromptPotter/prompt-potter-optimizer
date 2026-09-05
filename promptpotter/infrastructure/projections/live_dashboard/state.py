@@ -7,7 +7,7 @@ from typing import Any, ClassVar
 
 from pydantic import ConfigDict, Field
 
-from promptpotter.connectors.protocol import ConcurrencyArming, MeasuredUnit
+from promptpotter.connectors.protocol import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import DashboardCandidate, RoundSummary
 from promptpotter.domain.phases import DashboardState, RunPhase
@@ -255,20 +255,16 @@ class LiveDashboardState(StrictModel):
     # reached, so no reader may word it as "will".
     declared_sample_order: list[int] = Field(default_factory=list)
 
-    # What the LOOP held in flight, never what the operator asked for (that is
-    # `.runtime/sample_lookahead.json`); the two differ for up to one sample.
+    # The depth IN FORCE — how many samples the walk holds in flight, read straight off
+    # `.runtime/sample_lookahead.json`. ONE number: a second field for "what the loop last held"
+    # is a log with no round-boundary writer, and no surface may reconcile the two.
     sample_lookahead: int = 1
-    # Samples launched then discarded unabsorbed — the arming's whole running cost, cumulative.
+    # Samples launched then discarded unabsorbed — the depth's whole running cost, cumulative.
     sample_lookahead_discards: int = 0
-    # The REQUEST — what the operator armed and the walk has not spent, read off
-    # `.runtime/sample_lookahead.json` exactly as the armed spend cap is. `sample_lookahead` above
-    # is what the loop HELD; between a press and the next launch boundary the two disagree.
-    sample_lookahead_armed: int = 1
     # The connector's own declarations, stamped at INIT:exit. SERVED rather than inferred: the
     # browser's only available guess — "is this self-optimization?" — is not the question. `1`
     # says the control does not apply, and went unserved before, so the button took dead presses.
     max_cells_in_flight: int = 1
-    concurrency_arming: ConcurrencyArming = "round"
     # The backend's own noun for a measured row, so the browser never picks one off a local flag.
     measured_unit: MeasuredUnit = "sample"
 
@@ -304,7 +300,6 @@ class LiveDashboardState(StrictModel):
         "headline_metric",
         "langfuse_trace_url",
         "max_cells_in_flight",
-        "concurrency_arming",
         "measured_unit",
         "run_limits",
     )

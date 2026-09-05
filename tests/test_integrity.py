@@ -29,18 +29,23 @@ from promptpotter.application.scoring import query_loop
 from promptpotter.application.scoring.search_point_scorer import (
     _assert_measured_content_matches,
 )
+from promptpotter.connectors import harbor
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
 from promptpotter.domain.measurement_provenance import grade_run
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.run_records import SnapshotRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.search_point import JobSearchPoint
+from promptpotter.infrastructure.projections.live_dashboard.view import LiveDashboardView
 from promptpotter.infrastructure.store.io import read_yaml, write_yaml
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 from promptpotter.shared.errors import DatasetIdentityError
 from promptpotter.shared.hashing import content_hash
+from promptpotter.shared.instrument import NO_ROUND_SLOT
 
 
 def _boolean_paths(node: Any, prefix: str) -> list[str]:
@@ -885,11 +890,24 @@ def test_earned_blocks_gate_on_credible_lift_and_task_fit() -> None:
         ],
     }
     acc: dict[tuple[str, str, str], list[float]] = defaultdict(list)
-    _accumulate(logic_run, acc)
+    _accumulate(logic_run, "justlogic-d234", acc)
     fit = "FALSE|TRUE|Uncertain"
     assert (fit, "persona", "Be a careful logician.") in acc
     assert (fit, "persona", "Guess fast.") not in acc
     assert not any(field == "instruction" for _, field, _ in acc)
+
+    # A closed label set IS a task shape and transfers across datasets; an OPEN one is the absence
+    # of a shape, so it is keyed by the dataset and transfers nowhere. Sharing one `OPEN` bucket
+    # served a `swiss-invoices-eval` block to a SealQA campaign as material to reuse.
+    open_run = {
+        **logic_run,
+        "all_candidate_results": {"c1": [{"ground_truth": f"g{i}"} for i in range(400)]},
+    }
+    other: dict[tuple[str, str, str], list[float]] = defaultdict(list)
+    _accumulate(open_run, "swiss-invoices-eval", other)
+    _accumulate(open_run, "sealqa-longseal-12", other)
+    fits = {f for f, _, _ in other}
+    assert fits == {"OPEN:swiss-invoices-eval", "OPEN:sealqa-longseal-12"}
 
 
 def test_earned_block_mining_is_blind_inside_an_instrument() -> None:
@@ -1029,6 +1047,49 @@ def test_emittable_params_are_declared_and_an_invented_one_is_rejected() -> None
     assert validate_overrides({"l1_critique": {"layout": {"instruction": ["plan"]}}}, schema) == []
 
 
+def test_l1_is_offered_no_slot_whose_panel_it_never_saw() -> None:
+    """A writable slot with no rendered current value is where a blind edit lands.
+
+    The schema already refuses a WRITE-ONLY slot — no prompt node to land on, so nothing would
+    read it back. Its sibling is write-BLIND: the slot lands somewhere real, but L1 was shown no
+    current value for it. That failure is the quieter of the two, because a blind write still
+    yields a plausible variant carrying a confident `changes_description`. Under repair pressure
+    it is the slot the model REACHES for, being the one with no rendered value to contradict.
+
+    Live on `sealqa-longseal-12` r1, launched unframed so the `task_context` panel produced
+    nothing: both variants named `answer_format` and `instruction` in their descriptions, emitted
+    `prompt_fields_override: {}`, and wrote `task_context_override` — whose two keys splice around
+    `problem_description`, neither field they named. The round scored two arms and every artifact
+    that outlives it — the ledger, the SP diff table, `round_0001.json` — records the field the
+    model named rather than the one it changed, so no later reader can attribute the result.
+    """
+    from promptpotter.application.optimization.dispatch.l1_wire_schema import (
+        _SLOT_PANEL,
+        build_l1_response_schema,
+    )
+
+    # The dataset the defect fired on, and the one committed pipeline carrying a prompt node —
+    # without one the two OptSearchPoint slots are already withdrawn as WRITE-ONLY and this test
+    # would pass vacuously, so the precondition is asserted rather than assumed.
+    schema = _pipeline_schema("sealqa-longseal-12")
+    assert schema.prompt_node_names(), "fixture no longer has a prompt node to land an edit on"
+
+    def slots(silent: tuple[str, ...]) -> set[str]:
+        built = build_l1_response_schema(schema, citable_fields=(), silent_panels=silent)
+        return set(built["properties"]["variants"]["items"]["properties"])
+
+    # Nothing silent: every slot is on offer, so the drop below is a real subtraction.
+    assert set(_SLOT_PANEL) <= slots(())
+
+    # Each slot goes when — and only when — the panel carrying ITS current value goes quiet.
+    for slot, panel in _SLOT_PANEL.items():
+        remaining = slots((panel,))
+        assert slot not in remaining, f"{slot} stayed writable with {panel!r} silent"
+        assert set(_SLOT_PANEL) - {slot} <= remaining, (
+            f"silencing {panel!r} withdrew a slot it does not carry the value for"
+        )
+
+
 def test_nested_param_override_accumulates_instead_of_reverting_its_parent() -> None:
     """A `param_types: object` param merges one level; siblings the child did not name survive.
 
@@ -1157,9 +1218,6 @@ def test_evidence_channel_clips_are_visible_and_tail_preserving(
         pipeline_schema=None,
         cycle_slice=CycleSlice(
             round_num=1,
-            current_accuracy=0.5,
-            best_accuracy=0.5,
-            best_round=0,
             l1_stall_count=0,
             l2_round=0,
             l2_stall_count=0,
@@ -1318,9 +1376,6 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
         pipeline_schema=schema,
         cycle_slice=CycleSlice(
             round_num=1,
-            current_accuracy=0.5,
-            best_accuracy=0.5,
-            best_round=0,
             l1_stall_count=0,
             l2_round=0,
             l2_stall_count=0,
@@ -1498,6 +1553,41 @@ def test_a_round_missing_its_critique_is_re_sent_before_the_generator_reads() ->
     cycle.session.store.campaigns.save_round_file.assert_not_called()
 
 
+def test_the_transcript_panel_shows_what_the_agent_decided_not_only_its_terminal() -> None:
+    """`MODEL REASONING` has to be reasoning, or L1 repairs a step the task does not have.
+
+    `_digest` built that panel from the terminal pane alone. Where commands ARE the work that is
+    the record; where the evidence is inlined in the instruction the agent reads in context and
+    the whole terminal is one `echo` of the answer. L1 read those panels literally and both rounds
+    of `sealqa-longseal-12` spent every candidate on "make it retrieve the documents" — against a
+    machine the instruction tells it is offline with no search tool. The tell was measurable: all
+    four candidates lost `#010`, the parent-HIT probe, answering a NEWER Android than the one the
+    question's "no longer maintained" clause asks for.
+
+    The user turn is the other half. It carries the task we handed the agent, which on that panel
+    is a 40k-character haystack — quoting it back would spend the whole budget on our own prompt.
+    """
+    haystack = "Documents:\n[1] " + ("distractor " * 4000)
+    turns = [
+        {"index": 1, "source": "user", "message": haystack},
+        {"index": 2, "source": "agent", "message": "From Document [5]: Brandstrom directed two."},
+        {"index": 3, "source": "agent", "message": "Confirmed. Writing 6."},
+    ]
+
+    said = harbor._agent_decisions(turns)
+
+    assert "Document [5]" in said and "Writing 6" in said, "the agent's own analysis was dropped"
+    assert "distractor" not in said, (
+        "the user turn reached the panel — that is our own instruction, quoted back at the "
+        "optimizer as if the agent had produced it"
+    )
+    assert len(said) <= harbor._AGENT_DECISION_CAP
+
+    # No agent turns ⇒ the block is absent rather than empty, so a trial whose trajectory did not
+    # parse degrades to exactly the terminal-only digest instead of an empty header.
+    assert harbor._agent_decisions([turns[0]]) == ""
+
+
 # 6. L4 steering — an edit that reaches outside its own level
 
 
@@ -1664,12 +1754,12 @@ async def _walk(
     armed: int,
     cut_at: int | None,
     max_cells: int = 2,
-    arming: str = "round",
-    hold: bool = False,
+    rearm_after: int | None = None,
     slowest_last: bool = False,
 ) -> dict[str, Any]:
     backend = _OrderedFakeBackend(len(dataset), slowest_last=slowest_last)
     request = {"cells": armed}
+    depths: list[int] = []
     # The one seam stubbed; the window, cursors, checkpoints and discard are shipping code.
     with mock.patch.object(query_loop, "measure_sample", backend.measure):
         session = types.SimpleNamespace(
@@ -1678,19 +1768,17 @@ async def _walk(
             skip_check=None,
             skip_consume=None,
             budget_tripped=None,
-            # The flag's real behaviour: consuming it removes the file, so the next read is 1.
-            # A constant would let a `batch` walk re-arm itself group after group and hide the
-            # one thing that arming promises — that a press buys exactly the group it released.
-            sample_lookahead_check=(lambda: request["cells"]),
-            # `hold` is the operator pressing again while a group runs — the arming is back the
-            # instant it is spent, which is the only condition under which the group BARRIER is
-            # observable at all (spent-and-left-alone drains identically either way).
-            sample_lookahead_consume=(lambda: request.update(cells=armed if hold else 1)),
-            backend_client=types.SimpleNamespace(
-                max_cells_in_flight=max_cells, concurrency_arming=arming
+            # The flag's real behaviour: the round that scored under the arming consumes it, so
+            # nothing inside one walk ever spends it. `rearm_after` is the OPERATOR pressing
+            # mid-walk — the flag reads 1 until that many samples have been launched, then the
+            # armed depth, which is the only way to observe a press binding at the next launch
+            # rather than waiting for the window to drain.
+            sample_lookahead_check=(
+                lambda: request["cells"] if rearm_after is None or len(depths) >= rearm_after else 1
             ),
+            sample_lookahead_consume=(lambda: request.update(cells=1)),
+            backend_client=types.SimpleNamespace(max_cells_in_flight=max_cells),
         )
-        depths: list[int] = []
         result = await query_loop.run_query_loop(
             JobSearchPoint(),
             dataset,
@@ -1906,36 +1994,26 @@ async def test_sample_lookahead_changes_the_bill_and_never_the_record() -> None:
     assert (await _walk(dataset, armed=4, cut_at=None, max_cells=1))["max_depth"] == 1
     assert (await _walk(dataset, armed=4, cut_at=None, max_cells=2))["max_depth"] == 2
 
-    # 6. `batch` arming buys exactly the group it released — the operator's whole reason for
-    #    picking a number where a round runs hours and cannot bound the press. Three launch
-    #    together, the walk drains them before releasing anything, and the arming is spent, so
-    #    the remaining five run alone. A sliding window would keep re-filling behind each
-    #    absorption and leave "which samples did my press pay for" unanswerable.
-    b = await _walk(dataset, armed=3, cut_at=None, max_cells=4, arming="batch")
-    assert b["depths"] == [3, 3, 3, 1, 1, 1, 1, 1]
-    assert b["rows"] == d1["rows"]
-
-    # 7. A press landing while samples are in flight TOPS THE WINDOW UP rather than waiting for
-    #    them to drain — the press exists to shorten the wait. `hold` re-arms the instant the
-    #    arming is spent, i.e. an operator pressing again at every boundary. Read against clause
-    #    6's identical walk: same arming, same ceiling, and the ONLY difference is the press, so
-    #    the two depth series bracket exactly what it buys — held tops up where unheld collapses.
-    #    Asserted on `depths` (the window the walk OPENED) rather than on backend-observed
-    #    overlap, which is a wall-clock race: an in-flight peer that retires early lowers the
-    #    reading without the window having closed, so a loaded box reported a press that never
-    #    landed. `entries` still carries the launch burst below — the half it can answer exactly.
-    held = await _walk(
-        dataset, armed=3, cut_at=None, max_cells=4, arming="batch", hold=True, slowest_last=True
-    )
-    assert max(held["entries"]) == 3, "the group never physically overlapped"
-    assert held["depths"] == [3] * len(dataset)
-    assert b["depths"] != held["depths"]
-    assert held["rows"] == d1["rows"]
-
-    # 8. …and `round` arming does NOT self-consume here: it is spent by the round that scored
-    #    under it (`l1/score/winner.py`), so the walk holds the depth to its own end.
-    r = await _walk(dataset, armed=2, cut_at=None, max_cells=4, arming="round")
+    # 6. An arming is NOT spent inside the walk — the round that scored under it spends it
+    #    (`l1/score/winner.py`), the one control loop every armable walk sits inside. So the
+    #    depth holds to the walk's own end. There is no second arming shape to test: a
+    #    connector declares the CEILING and nothing about how long a press lasts, because it
+    #    cannot know whether the walk in front of it is inside a round.
+    r = await _walk(dataset, armed=2, cut_at=None, max_cells=4)
     assert r["depths"] == [2] * len(dataset)
+    assert r["rows"] == d1["rows"]
+
+    # 7. A press landing while a sample is in flight TOPS THE WINDOW UP at the next launch
+    #    rather than waiting for the window to drain — the press exists to shorten the wait, so
+    #    a running sample is JOINED. Asserted on `depths` (the window the walk OPENED) rather
+    #    than on backend-observed overlap, which is a wall-clock race: an in-flight peer that
+    #    retires early lowers the reading without the window having closed, so a loaded box
+    #    reported a press that never landed. `entries` carries the launch burst exactly.
+    late = await _walk(dataset, armed=3, cut_at=None, max_cells=4, rearm_after=2, slowest_last=True)
+    assert late["depths"][:2] == [1, 1], "the walk ran sequentially before the press"
+    assert late["depths"][2:] == [3] * (len(dataset) - 2), "the press bound at the next launch"
+    assert max(late["entries"]) == 3, "the window never physically overlapped"
+    assert late["rows"] == d1["rows"]
 
 
 class _CountingClient:
@@ -2275,3 +2353,54 @@ def test_yaml_emitter_never_reinterprets_a_string_it_wrote(tmp_path: Path) -> No
     payload = {k: k for k in _YAML_1_1_HAZARDS} | {"nested": {"labels": list(_YAML_1_1_HAZARDS)}}
     write_yaml(path, payload)
     assert read_yaml(path) == payload
+
+
+def test_the_parent_rescore_ticks_the_run_without_minting_a_candidate(tmp_path: Path) -> None:
+    """The parent's re-score is paid measurement that belongs to no round slot.
+
+    It is the LONGEST phase of a held round — the parent walks the whole panel while the
+    candidates stopped wherever PoBB cut them — so a run that reports nothing while it
+    happens reads as hung, which on a ``measured_unit="cell"`` connector is tens of minutes.
+    Silencing the per-sample callbacks was how that phase went dark. Wiring them back is only
+    half of it: the events carry a candidate index, and ``candidate_label`` renders
+    ``NO_ROUND_SLOT`` as ``C{round}.0`` — a row naming a candidate nobody proposed. The run's
+    own scalars must move; the round's population must not grow.
+    """
+    view = LiveDashboardView(
+        CycleDir(tmp_path),
+        state_path=None,
+        hop=CycleHop(campaign_id="c", cycle_id="cy"),
+        session_id="s",
+        l1_patience=3,
+        n_variants=2,
+        sp_budget_ttest=20,
+        headline_metric="composite",
+    )
+
+    def scored(ci: int, sid: int, offset: int) -> None:
+        view.on_record(
+            SnapshotRecord(
+                event="sample_scored",
+                round=1,
+                candidate_idx=ci,
+                candidate_total=0 if ci == NO_ROUND_SLOT else 2,
+                sample_idx=0,
+                sample_total=20,
+                payload={"result": {"sample_id": sid, "fitness": 1.0, "cached": False}},
+            ),
+            offset,
+        )
+
+    scored(NO_ROUND_SLOT, 25, 0)
+    assert view.state.total_queries_scored == 1, "the parent's cell is paid work and must count"
+    assert view.state.total_backend_calls == 1
+    assert NO_ROUND_SLOT not in view._buffer.candidates, (
+        "the parent re-score minted a slot in the round's population — it renders as C1.0, "
+        "a candidate no L1 proposed"
+    )
+
+    # The control: a real candidate's cell moves both, so the guard above is discriminating
+    # rather than a projection that stopped recording.
+    scored(0, 26, 1)
+    assert view.state.total_queries_scored == 2
+    assert len(view._buffer.candidates[0]["samples"]) == 1

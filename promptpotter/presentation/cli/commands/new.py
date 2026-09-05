@@ -13,10 +13,10 @@ from pydantic import ValidationError
 
 from promptpotter.application.datasets.draft_campaign import OptimizationOverrides
 from promptpotter.application.datasets.draft_patch import SETTABLE_SCALARS, EditDraftPatch
-from promptpotter.application.initialization.wiring import backend_type_of_dataset
 from promptpotter.application.jobs.launcher.admission import probe_backend
 from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
 from promptpotter.connectors.protocol import BackendUnreachableError
+from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.presentation.api.middleware.command_dispatcher import (
     dispatch_draft_patch,
     dispatch_origin_resolution,
@@ -482,8 +482,8 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
     backend_type = backend_type_of_dataset(session.store, dataset_name)
     try:
         await probe_backend(backend_type, args.backend_url)
-    except BackendUnreachableError:
-        return backend_unreachable_result(args.backend_url)
+    except BackendUnreachableError as exc:
+        return backend_unreachable_result(exc)
     checkin_line("backend", backend_reach_line(backend_type, args.backend_url))
 
     train_data = session.samples

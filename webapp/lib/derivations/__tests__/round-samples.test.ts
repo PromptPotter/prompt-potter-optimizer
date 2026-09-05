@@ -49,6 +49,8 @@ const liveDash = {
           candidates: [
             {
               idx: 0,
+              // The join key both halves carry — served on every live row (`candidate_label`).
+              label: "C1.1",
               samples: [
                 sampleRow({ qi: 0, sample_id: 2, status: "MISS", terminal_node: "token_matching" }),
               ],

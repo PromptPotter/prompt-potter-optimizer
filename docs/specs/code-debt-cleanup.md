@@ -97,14 +97,15 @@ it.
   cannot clobber each other. **Re-test:** author a throwaway connector needing per-run state
   without reading `harbor.py`; if it reaches for a ContextVar, the entry stands.
 
-- **The two harbor `pipeline.yaml`s duplicate 23 shared lines over 30 chars** — node type,
-  `prompt_info`, `param_keys`, the `env_reward` mapping and every comment explaining why; they
-  differ only in model, description and `max_turns`. `Connector.default_pipeline` /
-  `default_node_config` exist for exactly this and neither harbor dataset uses them. Not urgent at
-  two; at three it is a drift surface, and the third is the one that gets copied with a stale
-  comment. **Re-test:** `comm -12` the two files' sorted unique lines
-  (`awk 'length>30' | wc -l`) — under 23 means someone already split them; add a third harbor
-  dataset and if its node block is a copy-paste, the entry stands.
+- **`harbor-tbench-regex-log` and `spreadsheetbench-s10` duplicate 23 `pipeline.yaml` lines over
+  30 chars** — node type, `prompt_info`, `param_keys`, the `env_reward` mapping and every comment
+  explaining why; they differ only in model, description and `max_turns`.
+  `Connector.default_pipeline` / `default_node_config` exist for exactly this and none of the
+  three harbor datasets uses them. The predicted trigger has now half-fired: the third
+  (`sealqa-longseal-12`) is NOT the copy-paste this entry expected — it shares 10 lines with the
+  first and 11 with the second, 29 of its 39 being its own — so the drift surface is the original
+  PAIR, not the count. **Re-test:** intersect those two files' lines over 30 chars; under 23 means
+  someone split them. A fourth dataset says nothing this one did not already answer.
 
 ## Blocked — named blocker
 

@@ -196,9 +196,9 @@ export async function postSkipSearchpoint(
 // Set how many of a candidate's samples the scoring walk holds in flight; `cells: 1` disarms,
 // so it is a cancel rather than a second verb. The request is sent unclamped and the walk
 // clamps it to the backend's ceiling (`dashboard.json::max_cells_in_flight`). It also ends on
-// its own — after the round that scored under it, or the group it released, per that backend's
-// `concurrency_arming`. Unlike skip it does NOT mark the cycle babysat: the in-flight
-// acquisition is discarded, so the measurement is identical at any depth. Host-admin only.
+// its own — spent by the round that scored under it, the same on every backend. Unlike skip it
+// does NOT mark the cycle babysat: the in-flight acquisition is discarded, so the measurement is
+// identical at any depth. Host-admin only.
 //
 // The one command addressed by PATH rather than by the root hop: throughput is what an inner
 // run answers for itself, so an L4 inner cycle is armed by descending to it — the same

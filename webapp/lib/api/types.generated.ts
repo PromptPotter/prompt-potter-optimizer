@@ -30,7 +30,7 @@ export interface AbilityReading {
   ruler_span: number | null;
   round_span: number | null;
   calibration_model: '1PL' | '2PL' | null;
-  caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'floor_pinned' | null;
+  caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
 }
 
 /** One candidate as `dashboard.json` serves it, in ANY round state — the live rows under */
@@ -48,7 +48,7 @@ export interface DashboardCandidate {
   partial_reason: string;
   theta: number | null;
   theta_se: number | null;
-  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'floor_pinned' | null;
+  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
   matched_parent_accuracy: number | null;
@@ -68,6 +68,11 @@ export interface DashboardSample {
   sample_id: number | null;
   /** The grading verdict. */
   status: 'HIT' | 'MISS' | 'ERR';
+  /** The graded per-cell score `status` is the verdict OF — the same number
+   * `MeasurementDot.fitness` carries, so the live round's cells join the
+   * served series and a heat cell can shade a partial grade `status` rounds
+   * to HIT or MISS. Null on an errored row, which was never graded. */
+  fitness: number | null;
   /** Pipeline node the row terminated at; the tape badges it. */
   terminal_node: string;
   /** Measurement reused from a prior identical searchpoint, not a fresh call. */
@@ -107,7 +112,7 @@ export interface RoundSummaryCandidate {
   partial_reason: string;
   theta: number | null;
   theta_se: number | null;
-  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'floor_pinned' | null;
+  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
   matched_parent_accuracy: number | null;
@@ -299,7 +304,7 @@ export interface ScoredCandidate {
   matched_parent_lift_ci_hi: number | null;
   theta: number | null;
   theta_se: number | null;
-  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'floor_pinned' | null;
+  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
 }
@@ -320,7 +325,7 @@ export interface ScoreboardRow {
   mean_fitness_ci_hi: number | null;
   theta: number | null;
   theta_se: number | null;
-  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'floor_pinned' | null;
+  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
   matched_parent_lift: number | null;
   matched_parent_lift_ci_lo: number | null;
   matched_parent_lift_ci_hi: number | null;
@@ -605,9 +610,7 @@ export interface LiveDashboardState {
   declared_sample_order: number[];
   sample_lookahead: number;
   sample_lookahead_discards: number;
-  sample_lookahead_armed: number;
   max_cells_in_flight: number;
-  concurrency_arming: 'round' | 'batch';
   measured_unit: 'sample' | 'cell';
   last_query_elapsed_s: number | null;
   wallclock_serialized_at: string | null;
@@ -624,7 +627,11 @@ export interface LiveDashboardState {
 export interface DatasetItem {
   sample_id: number;
   query: string;
-  ground_truth: string;
+  /** The row's label, or `null` where the cell is VERIFIER-GRADED — a harbor
+   * episode graded by its own task verifier, an L4 inner cycle graded by its
+   * proxies. Same declaration `Sample.ground_truth` makes; a placeholder
+   * string would read as a miss on every row of such a bank. */
+  ground_truth: string | null;
   task: string | null;
   /** 1-based position in the served hard-sample ranking under this response's
    * `order`. THE ordering — a client renders rows in it and never re-derives
@@ -1218,7 +1225,7 @@ export interface LineageNode {
    * separate ability from the prior and every lift against it reads 0.000.
    * The other three caveats are properties of the round's scale and ride the
    * round's own reading. */
-  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'floor_pinned' | null;
+  theta_caveat: 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'unmeasured_delta' | 'floor_pinned' | null;
   /** The candidate's stored evaluator namespace — the measurement a `score:` lens
    * re-scores against. */
   evaluators: Record<string, number>;

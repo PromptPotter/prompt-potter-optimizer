@@ -50,6 +50,13 @@ class DashboardSample(StrictModel):
         "drives the order. Null where the row carries none.",
     )
     status: SampleStatus = Field(description="The grading verdict.")
+    fitness: float | None = Field(
+        default=None,
+        description="The graded per-cell score `status` is the verdict OF — the same number "
+        "`MeasurementDot.fitness` carries, so the live round's cells join the served series and "
+        "a heat cell can shade a partial grade `status` rounds to HIT or MISS. Null on an "
+        "errored row, which was never graded.",
+    )
     terminal_node: str = Field(
         default="", description="Pipeline node the row terminated at; the tape badges it."
     )

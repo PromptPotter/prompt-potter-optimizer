@@ -83,9 +83,9 @@ the same shape the scorer parses from an HTTP `/matches` body. The registry guar
 (`__init__.py`) enforces the pairing: an `in_process` connector MUST supply
 `in_process_run`, a `remote_http` one MUST NOT. Three connectors ride the seam today, and
 `harbor` is the one that shows the mode is not a synonym for "cheap and local": its cell holds a
-container, spends real money and takes minutes, so it declares `measured_unit="cell"` and
-`concurrency_arming="batch"` exactly as the recursion does. **`in_process` is a statement about
-TRANSPORT — there is no HTTP — and about nothing else.**
+container, spends real money and takes minutes, so it declares `measured_unit="cell"` exactly as
+the recursion does. **`in_process` is a statement about TRANSPORT — there is no HTTP — and about
+nothing else.**
 
 - **`promptpotter` (Feature B, SHIPPED)** — `in_process_run` is a thin delegate to
   `application/runner/inner/spawn.py::run_inner_cycle` (running a whole inner
@@ -198,6 +198,14 @@ belong here, because they are what a connector author gets wrong:
   Treating either as an item claims kN observations where there are N.
 - **Absent is not empty.** No `turns` key means "this backend has no turn concept"; `[]` would mean
   "it had none". Only one of those is ever true, and a reader has to be able to tell them apart.
+- **What the optimizer is shown is what the agent DECIDED — the environment is where a decision is
+  carried out, which is a different question.** `reasoning_trace` renders to L1 under the header
+  `MODEL REASONING`, so a digest built from the environment's log alone puts that header over
+  something that is not reasoning. A terminal pane is the record where commands are the work, and
+  one `echo` of the answer where the evidence is inlined in the instruction — and L1 reads such a
+  panel literally, proposing repairs to a step the task does not have. Drop the `user` turns when
+  you build it — those are the task WE handed the agent, and on such a panel they are the whole
+  haystack, quoted back at the optimizer as if the agent had produced it.
 
 **A per-step aggregate can flatter, and Harbor's does.** `_aggregate_step_rewards` drops a step
 with no verifier result from the denominator, so a cell whose first step scored 1.0 and whose
@@ -225,6 +233,13 @@ Two places keep their own word on purpose: the **evidence** surface calls every 
 selection there spans campaigns, datasets and backends, so no single connector's noun applies; and
 `ruler_n` / `DeltaRuler` count **ruler cells**, a δ-scale membership that is the same on every
 backend ([`../../docs/methods/verdict-resolution.md`](../../docs/methods/verdict-resolution.md)).
+
+**And `cell` implies NOTHING about the run's CONTROL LOOP — a flag reasoning "a cell is expensive,
+therefore…" is the one to refuse.** A connector declares what a row costs (`max_cells_in_flight`,
+the ceiling it may be run at); how long an operator's look-ahead arming lasts is the round's to
+spend, and no connector can see the round it is inside. The shape to watch for is a second flag
+that ships beside `measured_unit` and is set by RESEMBLING the recursion rather than by any fact
+about the run — which is how a declaration reaches every backend whose cells merely look alike.
 
 ## Registering a connector
 
@@ -276,14 +291,13 @@ no wire, so declaring a token on one fails the registry guard at import.
   No I/O, no logging beyond debug-level drops.
 - `extract_experiment` returns `(queries, index_terms)` — the index_terms
   list may be empty for connectors with no retrieval index.
-- **A declared `experiment_file` OWNS its dataset's panel, and `wiring.py::
-  _load_dataset_into_session` reads it FIRST for that reason.** It used to ask the row ladder first
-  and fall through, which made anything cached under the same dataset name WIN: the panel was never
-  published, `_PANEL` stayed unset, every cell raised, and the run still reported a healthy sample
-  count. That was carried here as a rule the dataset author had to remember — register no loader
-  under the name — and the rule did not cover the rows a loader leaves BEHIND, which is exactly how
-  it fired (a deleted `_load_longseal`'s 12 MB of termnorm-shaped rows broke the first harbor launch
-  of `sealqa-longseal-12`). An invariant that can be ordered is not a rule to remember.
+- **A declared `experiment_file` OWNS its dataset's panel, and `dataset_access.py::dataset_panel_rows` is
+  its ONE reader — init and every roster read (`/preview`, `/measurement-series`) resolve the bank
+  through it.** Ordered before the row ladder, never a fallback: rows cached under the same name
+  used to win, publishing no panel and leaving `_PANEL` unset while the run reported a healthy
+  sample count. A resolver that knows only MATERIALIZED banks answers a connector-owned one
+  EMPTY, which is not a fact about the dataset — hence one reader rather than a rule per surface.
+  Panel ORDER is the `sample_id` (`samples_from_dicts` numbers positionally).
 - **`query` is whatever addresses one unit of work, and on an episodic backend that is an ID.**
   A judge falling back to it then grades against an identifier, so a task carrying a real question
   declares it and it rides `Sample.question` (`domain/sample.py`) — the only channel that reaches

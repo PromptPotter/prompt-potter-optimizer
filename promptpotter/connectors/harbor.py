@@ -16,6 +16,7 @@ import json
 import locale
 import logging
 import re
+import sys
 import tempfile
 import time
 from contextvars import ContextVar
@@ -370,10 +371,17 @@ async def _preflight(backend_url: str) -> None:
     try:
         from harbor.trial.trial import Trial  # noqa: F401
     except ImportError as exc:
+        # Name the interpreter, because the likeliest cause is that this is the WRONG one. A bare
+        # `python` on Windows resolves to the system install, which imports promptpotter fine and
+        # none of its extras -- and "pip install the extra" is then a cure that pollutes that
+        # interpreter instead of using the venv that already has it.
         raise BackendUnreachableError(
             "harbor",
             backend_url,
-            "the 'harbor' extra is not installed — `pip install -e \".[harbor]\"`",
+            f"the 'harbor' extra is not importable from {sys.executable}.\n"
+            f"  If that is not this repo's .venv, re-run with the venv's interpreter:\n"
+            f"    .venv\\Scripts\\python.exe -m promptpotter ...\n"
+            f'  If it IS the venv, install the extra: pip install -e ".[harbor]"',
         ) from exc
 
     # Harbor reads `task.toml`, `instruction.md` and the ATIF trajectory with a bare `read_text()`,
@@ -384,12 +392,16 @@ async def _preflight(backend_url: str) -> None:
             "harbor",
             backend_url,
             f"this interpreter decodes files as {locale.getpreferredencoding(False)!r}, not UTF-8, "
-            # ASCII only in this string, deliberately: it is printed to the very console whose
-            # encoding it is complaining about, and an em dash there renders as a replacement char.
-            f"and Harbor reads its task files without naming an encoding. Every task whose "
-            f"instruction is not pure Latin-1 would raise before its container is built. Launch "
-            f"with UTF-8 mode on: `PYTHONUTF8=1` in the environment, or `python -X utf8 -m "
-            f"promptpotter …`",
+            # ASCII only in this string, deliberately -- an em dash or an ellipsis included. It is
+            # printed to the very console whose encoding it is complaining about, so a non-ASCII
+            # character here renders as a replacement char, in the one message that cannot afford
+            # to look broken.
+            "and Harbor reads its task files without naming an encoding. Every task whose "
+            "instruction is not pure Latin-1 would raise before its container is built. Launch "
+            "with UTF-8 mode on:\n"
+            "  PowerShell:  $env:PYTHONUTF8 = '1'\n"
+            "  bash:        export PYTHONUTF8=1\n"
+            "  or per-run:  python -X utf8 -m promptpotter ...",
         )
 
     import asyncio
@@ -437,10 +449,13 @@ _TERMINAL_ESC = re.compile(
     r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b[]()#][0-9A-Za-z]|\x1b.|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]"
 )
 
-# The digest's budget, split by what each part answers. Sized against
-# ``dispatch/bundle.py::TRANSCRIPT_REASONING_CAP`` (2200), which is where the panel trims it
-# again: storing much beyond that fills archive rows with bytes no prompt will ever show.
-_TERMINAL_TAIL_CAP = 1200
+# The digest's budget, split by what each part answers, and ORDERED by what must survive: the
+# panel trims with a head+tail (``dispatch/bundle.py::TRANSCRIPT_REASONING_CAP``, 2200), so the
+# agent's decisions lead and the verifier closes, leaving the terminal — the part a reader can
+# most often infer from the other two — as what a long episode loses first. Storing much beyond
+# that cap fills archive rows with bytes no prompt will ever show.
+_AGENT_DECISION_CAP = 1200
+_TERMINAL_TAIL_CAP = 600
 _VERIFIER_TAIL_CAP = 600
 
 
@@ -672,13 +687,29 @@ def _warn_layout_drift(what: str) -> None:
     )
 
 
-def _digest(result: TrialResult, task_id: str, reward: float | int | None) -> str:
+def _agent_decisions(turns: list[dict[str, Any]]) -> str:
+    """What the agent SAID it was doing, turn by turn. ``source == "user"`` is dropped: those turns
+    are the task we handed it — on a panel that inlines its evidence they are tens of thousands of
+    characters of documents, quoted back at the optimizer as if the agent had produced them."""
+    said = [
+        f"turn {t.get('index')}: {msg}"
+        for t in turns
+        if str(t.get("source") or "") != "user"
+        and (msg := str(t.get("reasoning") or t.get("message") or "").strip())
+    ]
+    return "\n".join(said)[:_AGENT_DECISION_CAP]
+
+
+def _digest(
+    result: TrialResult, task_id: str, reward: float | int | None, turns: list[dict[str, Any]]
+) -> str:
     """What the optimizer reads about the episode — prose on ``reasoning_trace``, which reaches
-    ``pipeline_data`` as an infra key with no mapping and renders through ``sample_transcripts``.
+    ``pipeline_data`` as an infra key with no mapping and renders through ``sample_transcripts``,
+    under the header ``MODEL REASONING``.
 
     A DIGEST, never the transcript: a 40-turn terminal log is a wall, not a prompt. What earns its
-    place is what the next candidate could act on — the COMMANDS the agent ran and the verifier's
-    last words. A reward and a turn count name the outcome and nothing about how it was reached."""
+    place is what the agent decided, then the environment's answer to it — the ordering rule and
+    why the pane is not the whole record are `CLAUDE.md` § A multi-turn cell."""
     lines = [f"task={task_id} reward={reward}"]
     exc = getattr(result, "exception_info", None)
     if exc is not None:
@@ -703,6 +734,11 @@ def _digest(result: TrialResult, task_id: str, reward: float | int | None) -> st
         for key in ("n_episodes", "finish_reason", "termination_reason", "summarization_count"):
             if (val := meta.get(key)) is not None:
                 lines.append(f"{key}={val}")
+
+    # First, and off the turns the caller already read: no second walk of the trial directory for
+    # a record `pipeline_data.turns` is about to carry anyway.
+    if said := _agent_decisions(turns):
+        lines.append(f"\nAGENT DECISIONS:\n{said}")
 
     # The artifacts Harbor wrote for this trial. `trials_dir` is ours and it lays them out as
     # `<trial_name>/<role>/…`, so the directory is addressable without parsing `trial_uri`.
@@ -825,18 +861,19 @@ async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]
             f"(rewards={rewards}); the episode is unscoreable, not a zero."
         )
 
+    turns = _turns(result)
     data: dict[str, Any] = {
         REWARD_KEY: float(reward),
         "terminal_node": AGENT_NODE,
         "total_time": elapsed,
         "step_timings": {AGENT_NODE: elapsed},
         "step_tokens": _step_tokens(result, model_name),
-        "reasoning_trace": _digest(result, query, reward),
+        "reasoning_trace": _digest(result, query, reward, turns),
         ANSWER_KEY: _answer(result),
     }
     # Absent, never empty: `[]` would claim this episode had no turns and `{}` that its steps
     # scored nothing. A single-step task has neither concept.
-    if turns := _turns(result):
+    if turns:
         data["turns"] = turns
     data.update(_step_rewards(result))
     return {"data": data}
@@ -856,10 +893,8 @@ CONNECTOR = Connector(
     version_check=_version_check,
     identity_config=_identity_config,
     # An episode is a whole agent run — minutes, with its own container build and its own spend —
-    # so it is a cell, and a round of them is long enough that the group is the only unit that
-    # can bound a press.
+    # so it is a cell.
     measured_unit="cell",
-    concurrency_arming="batch",
     # Each cell holds a container. Two is the shipped default elsewhere and is the right floor
     # here too: the ceiling is the operator's machine, not the provider.
     max_cells_in_flight=2,

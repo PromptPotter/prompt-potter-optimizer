@@ -1,4 +1,4 @@
-"""Measure candidate inner-bank draws before putting one on a panel. A fenced debug diagnostic — no config field, no L1
+"""Measure a dataset's seeded bank draws before putting one on a panel. A fenced debug diagnostic — no config field, no L1
 injection, no ledger event; the loop never learns this verb exists."""
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ async def cmd_seed_screen(args: argparse.Namespace) -> CommandResult:
             seeds=list(args.seeds),
             n_samples=args.n_samples,
             repeat=args.repeat,
+            parallel=args.parallel,
             log=logger.info if get_verbose() else None,
         )
     except SeedScreenError as exc:

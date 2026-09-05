@@ -16,6 +16,7 @@ from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     load_dataset_campaign_config,
 )
+from promptpotter.application.datasets.loaders import samples_from_dicts
 from promptpotter.application.intelligence.adaptive_queue_mechanism import marginal_hit_probability
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import HardSampleOrder
@@ -27,6 +28,7 @@ from promptpotter.infrastructure.store.archive_views import (
     measurement_series_for_samples,
 )
 from promptpotter.infrastructure.store.dataset_access import (
+    dataset_panel_rows,
     readable_dataset_dir,
     readable_dataset_rows,
 )
@@ -42,6 +44,7 @@ from promptpotter.presentation.api.routers.datasets._router import datasets_rout
 from promptpotter.shared.errors import (
     BadRequestError,
     NotFoundError,
+    PayloadInvalidError,
 )
 
 # `cycle` (one cycle's Rasch fit) / `campaign` (pooled) / `dataset` (cross-campaign archive).
@@ -53,8 +56,26 @@ def _load_dataset_rows(
     stores: Stores, name: str
 ) -> tuple[dict[str, Any], dict[int, dict[str, Any]]]:
     """Resolve *name*'s rows, normalising the sample-id key at the read boundary. Missing rows are
-    not an unknown dataset but a bank-less one, so this answers an honest empty 200, not a 404."""
-    raw = readable_dataset_rows(stores, name)
+    not an unknown dataset but a bank-less one, so this answers an honest empty 200, not a 404.
+
+    Connector-owned panels FIRST, through the gateway's own pair: a harbor dataset or an L4 inner
+    benchmark declares its bank in an ``experiment_file`` and materializes no rows, so the
+    materialized half alone answers an empty roster for exactly those campaigns."""
+    raw: dict[str, Any] | None
+    try:
+        panel = dataset_panel_rows(stores, name)
+    except (ValueError, OSError, ImportError) as exc:
+        # Never an empty roster: "this panel could not be read" and "this dataset has no bank" are
+        # different facts, and the browser already spells them differently.
+        raise PayloadInvalidError(
+            f"Dataset {name!r} declares a connector-owned panel that could not be read: {exc}",
+            code="dataset_panel_invalid",
+            details={"dataset_name": name},
+        ) from exc
+    if panel is not None:
+        raw = {"name": name, "items": [s.model_dump() for s in samples_from_dicts(panel[0])]}
+    else:
+        raw = readable_dataset_rows(stores, name)
     if raw is None:
         return {"name": name, "items": []}, {}
     sample_lookup: dict[int, dict[str, Any]] = {}
@@ -282,7 +303,13 @@ def _dataset_hard_sample_order(stores: Stores, name: str) -> HardSampleOrder:
 class DatasetItem(StrictModel):
     sample_id: int
     query: str
-    ground_truth: str
+    ground_truth: str | None = Field(
+        default=None,
+        description="The row's label, or `null` where the cell is VERIFIER-GRADED — a harbor "
+        "episode graded by its own task verifier, an L4 inner cycle graded by its proxies. Same "
+        "declaration `Sample.ground_truth` makes; a placeholder string would read as a miss on "
+        "every row of such a bank.",
+    )
     task: str | None = None
     hard_sample_rank: int = Field(
         description="1-based position in the served hard-sample ranking under this response's "
@@ -426,7 +453,7 @@ def get_dataset_preview(
         DatasetItem(
             sample_id=sid,
             query=sample_lookup[sid]["query"],
-            ground_truth=sample_lookup[sid]["ground_truth"],
+            ground_truth=sample_lookup[sid].get("ground_truth"),
             task=sample_lookup[sid].get("task"),
             hard_sample_rank=rank,
             n_obs=page.n_obs_map.get(sid),
