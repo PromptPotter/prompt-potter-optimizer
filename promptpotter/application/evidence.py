@@ -60,11 +60,9 @@ from promptpotter.domain.cycle_paths import (
 )
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.account_spend import record_cost_usd
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_elections
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import ROUND_GLOB, CycleLayout, campaign_cycles_dir
-from promptpotter.infrastructure.store.read_model import iter_jsonl
 from promptpotter.infrastructure.store.stores import descend_store
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import BadRequestError, NotFoundError
@@ -1124,38 +1122,34 @@ def _pairwise(rows: list[SubjectReading]) -> list[PairwiseComparison]:
     return out
 
 
-def _spend_to_round(layout: CycleLayout) -> dict[str, float]:
+def _spend_to_round(dash: dict[str, Any]) -> dict[str, float]:
     """``round -> USD this cycle had spent by the END of it``, cumulative and filled forward.
 
-    **The only per-round split of cost there is.** ``dashboard.json::spend`` is one running total
-    for the whole cycle and its ``rounds[]`` carry no cost at all, so "what had this branch spent
-    by round 3" is answerable nowhere else — every call bills through a ``TokenUsageRecord`` that
-    stamps its ``round``, and this folds them.
+    Folded FORWARD off the served per-round atom (``dashboard.json::spend_by_round``), never off
+    the ledger a second time: the projection banks every ``TokenUsageRecord`` into its own round as
+    it banks it into the cycle total, so a walk here would be a second arithmetic for one number —
+    and the one that disagrees is always the one nobody is watching.
 
-    CUMULATIVE, not per-round, because cumulative is the number a surface shows and a browser may
-    not sum one for itself. Filled forward so every round from 0 to the last that billed has an
-    entry: a round that spent nothing still HAS a cost-to-here, and leaving it out would make a
-    lookup miss where the honest answer is "the same as the round before".
+    CUMULATIVE, where the served atom is PER ROUND, because cumulative is the number this reading
+    shows and the atom is what it is summed from; the reverse does not hold. Filled forward so
+    every round from 0 to the last that billed has an entry: a round that spent nothing still HAS a
+    cost-to-here, and leaving it out would make a lookup miss where the honest answer is "the same
+    as the round before".
 
-    A call carrying no ``round`` is banked at 0 — it ran before any round closed (init, the origin
-    score), and dropping it would under-report every prefix. Pricing follows the account ledger's
-    own rule (``record_cost_usd``): a cached call cost nothing, an unpriced one is re-priced from
-    the rate table, and one with no rate on file is left out rather than counted as free.
-
-    THIS CYCLE'S OWN ledger, so on a fork it answers what the BRANCH has spent since it cut, not
+    THIS CYCLE'S OWN spend, so on a fork it answers what the BRANCH has spent since it cut, not
     what the line cost from the origin — the inherited prefix lives in the parent's file and the
     read side cannot follow that link. ``cycle_spend_usd`` beside it is the roll-up that does
     include it, which is why both are served.
     """
     per_round: dict[int, float] = {}
-    for rec in iter_jsonl(layout.ledger, record_types=frozenset({"token_usage"})):
-        usd = record_cost_usd(rec)
-        if usd is None:
+    for key, rollup in (dash.get("spend_by_round") or {}).items():
+        try:
+            rnd = int(key)
+        except (TypeError, ValueError):
             continue
-        rnd = rec.get("round")
-        per_round[rnd if isinstance(rnd, int) else 0] = (
-            per_round.get(rnd if isinstance(rnd, int) else 0, 0.0) + usd
-        )
+        usd = (rollup or {}).get("total_used_usd")
+        if isinstance(usd, int | float):
+            per_round[rnd] = per_round.get(rnd, 0.0) + float(usd)
     if not per_round:
         return {}
     running = 0.0
@@ -1230,7 +1224,7 @@ def _reading_row(
         round=head.point.round,
         cycle_spend_usd=(spend or {}).get("total_used_usd") if isinstance(spend, dict) else None,
         cycle_rounds_scored=max(len(list(layout.rounds.glob(ROUND_GLOB))) - 1, 0),
-        spend_to_round=_spend_to_round(layout),
+        spend_to_round=_spend_to_round(dash),
         values=values,
         value=value,
         ci_lo=ci_lo,

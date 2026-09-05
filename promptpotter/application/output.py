@@ -26,6 +26,7 @@ from promptpotter.application.views.view_models import (
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.rendering import format_l1_critique_for_prompt
 from promptpotter.domain.results import HardSampleOrder, RoundResult
+from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
 from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json, write_text
@@ -155,6 +156,7 @@ def from_disk_log(
     streams_dir: Path | None = None,
     fork_indices: list[dict[str, Any]] | None = None,
     hard_sample_order: HardSampleOrder = "info_gain",
+    spend_by_round: dict[str, SpendRollup] | None = None,
 ) -> LogMdView:
     """``fork_indices`` is the sibling-cycle ``index.json`` blobs, rendered as ``## Cycles`` on the
     campaign digest; the per-cycle log.md passes ``None``.
@@ -203,6 +205,7 @@ def from_disk_log(
                 overlap=t.overlap,
                 p_best_trajectory=traj,
                 winner_id=t.winner_id or "",
+                spend=(spend_by_round or {}).get(str(t.round)),
             )
         )
 
@@ -278,6 +281,24 @@ def write_log_md(session: Session, *, hard_samples_artifact: dict[str, Any] | No
         _render_campaign_log_md(store, session.campaign_id)
 
 
+def _spend_by_round(layout: CycleLayout) -> dict[str, SpendRollup]:
+    """The projection's per-round spend split, read back off ``dashboard.json``.
+
+    READ, never re-folded: the browser's cost strip and the ``log.md`` round line are the same
+    number or one of them is wrong, and the ledger walk that used to live in ``evidence.py`` was
+    already a second arithmetic for it. Empty for a cycle with no dashboard on disk — a foreign
+    fork sibling, or one that has not yet billed anything. A malformed entry is SKIPPED rather
+    than defaulted: an unreadable rollup is not a free round."""
+    raw = (read_json_tolerant(layout.dashboard, {}) or {}).get("spend_by_round")
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, SpendRollup] = {}
+    for key, body in raw.items():
+        with graceful(f"unreadable spend_by_round[{key}]"):
+            out[str(key)] = SpendRollup.model_validate(body)
+    return out
+
+
 def _render_cycle_log_md(
     store: CampaignStore,
     hop: CycleHop,
@@ -304,6 +325,7 @@ def _render_cycle_log_md(
                 if campaign is not None
                 else "info_gain"
             ),
+            spend_by_round=_spend_by_round(layout),
         )
     )
     write_text(layout.log_md, content)
@@ -321,14 +343,15 @@ def _render_campaign_log_md(store: CampaignStore, campaign_id: str) -> None:
         return
     n_rounds = int(index.get("n_rounds", 0) or 0)
     rounds = store.load_rounds_range(root, 0, n_rounds - 1) if n_rounds else []
-    streams_dir = CycleLayout(store.cycle_dir(root)).streams
+    root_layout = CycleLayout(store.cycle_dir(root))
     fork_indices = _load_sibling_indices(store, campaign_id, exclude=root.cycle_id)
     content = to_markdown(
         from_disk_log(
             index,
             rounds,
-            streams_dir=streams_dir,
+            streams_dir=root_layout.streams,
             fork_indices=fork_indices,
+            spend_by_round=_spend_by_round(root_layout),
         )
     )
     write_text(store.campaign_root_dir(campaign_id) / "log.md", content)

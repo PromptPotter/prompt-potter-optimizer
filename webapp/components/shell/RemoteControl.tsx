@@ -1,12 +1,12 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { postSkipSearchpoint, postSetSampleLookahead, IngestApiError } from "@/lib/api";
 import { SegmentedControl } from "@/components/ui";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { cx } from "@/lib/cx";
 import { TERMS } from "@/lib/terms";
-import { headlineStats, pathOf, readSpend, runningInnerRun } from "@/lib/derivations";
+import { headlineStats, pathOf, prefixReading, readSpend, runningInnerRun } from "@/lib/derivations";
 import { fmtText, fmtDuration, fmtUsd, fmtTokens, fmtPct0 } from "@/lib/format";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useLineageTree } from "@/lib/lineage";
@@ -62,6 +62,21 @@ function etaToBudget(
   const burn = usedUsd / ageSec; // $/sec
   const remainingSec = (budgetUsd - usedUsd) / burn;
   return fmtDuration(remainingSec);
+}
+
+// One bucket's prefix-cache discount, appended to that bucket's own spend figure. A bucket holds
+// billed calls only (`readSpend`), so `replayed` is false by construction — and the row states
+// which of the three it is, since a cold prefix and an unreporting provider cost differently.
+function cacheTag(share: number | null, write: number): ReactNode {
+  const prefix = prefixReading(share, false);
+  // The WRITE beside the read is the economics: a write makes the next read cheap, so writes with
+  // no reads is paying a premium to fill a prefix nothing collects.
+  const wrote = write > 0 ? ` ·w${fmtTokens(write)}` : "";
+  return (
+    <span className="remote-spend-cache" title={prefix.title}>
+      {` · ${prefix.label}${wrote}`}
+    </span>
+  );
 }
 
 interface Props {
@@ -155,14 +170,22 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
   const {
     backendUsd,
     loopUsd,
+    judgeUsd,
     usedUsd,
     budgetUsd,
     budgetTokens,
     rateKnown,
     backendTokens,
     loopTokens,
+    judgeTokens,
     totalTokens,
     unpricedTokens,
+    backendCacheShare,
+    loopCacheShare,
+    judgeCacheShare,
+    backendCacheWrite,
+    loopCacheWrite,
+    judgeCacheWrite,
   } = readSpend(dash);
 
   // Headline KPIs. `abilityDelta` is SERVED and is in LOGITS, so it renders as θ and never as
@@ -254,8 +277,14 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
             <div className="row"><span className="lbl">Project</span><span className="val">{fmtText(leafEntry?.dataset_name)}</span></div>
             <div className="row"><span className="lbl">Updated</span><span className="val">{fmtText(dash?.wallclock_serialized_at)}</span></div>
             <div className="section-title">Spend</div>
-            <div className="row"><span className="lbl">Backend</span><span className="val">{rateKnown ? fmtUsd(backendUsd) : `${backendTokens} tok`}</span></div>
-            <div className="row"><span className="lbl">Loop</span><span className="val">{rateKnown ? fmtUsd(loopUsd) : `${loopTokens} tok`}</span></div>
+            {/* The prefix-cache discount rides its OWN bucket's row rather than a headline of its
+                own: the three buckets prompt different models through different providers, so
+                there is no one share to state — and pooling them hands the backend's ratio to
+                everybody, drowning the judge, whose rubric is a module constant and whose prefix
+                pays best. Silent at a real 0, like every other share on this panel. */}
+            <div className="row"><span className="lbl">Backend</span><span className="val">{rateKnown ? fmtUsd(backendUsd) : `${backendTokens} tok`}{cacheTag(backendCacheShare, backendCacheWrite)}</span></div>
+            <div className="row"><span className="lbl">Loop</span><span className="val">{rateKnown ? fmtUsd(loopUsd) : `${loopTokens} tok`}{cacheTag(loopCacheShare, loopCacheWrite)}</span></div>
+            <div className="row"><span className="lbl">Judge</span><span className="val">{rateKnown ? fmtUsd(judgeUsd) : `${judgeTokens} tok`}{cacheTag(judgeCacheShare, judgeCacheWrite)}</span></div>
             <div className="row"><span className="lbl">Total</span><span className="val">{usedUsd != null ? fmtUsd(usedUsd) : "—"}</span></div>
             <div className="row"><span className="lbl">Tokens</span><span className="val">{fmtTokens(totalTokens)}</span></div>
             {unpricedTokens > 0 ? (

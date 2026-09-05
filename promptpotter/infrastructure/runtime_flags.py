@@ -40,12 +40,11 @@ def effective_lookahead(requested: int, ceiling: int) -> int:
     """What the walk will ACTUALLY hold in flight — the request bounded by the connector's
     declared ``max_cells_in_flight``.
 
-    **The one clamp.** It lives here rather than inside the walk because two readers need the same
-    answer and only one of them has a `Session`: `query_loop._lookahead` runs it, and
-    `overlay_armed_controls` serves it. The write side stores the request UNCLAMPED on purpose —
-    a ceiling is a property of the backend a cycle is running against, not of the press — so
-    every reader that means "the depth in force" has to end up here, and the one that did not was
-    serving a number the walk had never agreed to."""
+    **The one clamp**, and every reader meaning "the depth in force" ends here: the walk
+    (`query_loop._lookahead`), the served overlay (`overlay_armed_controls`), and the dashboard
+    file (`live_dashboard/view.py::_persist`) — which was the one that did not, and wrote a depth
+    nothing was running beside the ceiling refusing it. The write side stores the request UNCLAMPED
+    on purpose: a ceiling is a property of the backend a cycle runs against, not of the press."""
     return max(1, min(requested, ceiling))
 
 

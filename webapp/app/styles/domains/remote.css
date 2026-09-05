@@ -122,6 +122,11 @@
    Icon + word, never colour alone. */
 .remote-spend-warn{display:inline-flex;align-items:center;gap:var(--space-4);padding:2px var(--space-8);border-radius:999px;background:var(--color-background-tertiary);color:var(--color-warn);font-weight:600}
 
+/* The provider's prefix-cache discount, riding its own bucket's spend figure. Secondary ink
+   deliberately: it qualifies the number beside it rather than being one of its own, and it is
+   the only thing on a spend row that is not money. */
+.remote-spend-cache{color:var(--color-text-secondary);font-weight:400}
+
 .remote-err{color:var(--color-danger);max-width:200px}
 
 /* ── The outcome readout + its panel ──────────────────────────────────────────

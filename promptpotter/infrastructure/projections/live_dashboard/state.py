@@ -281,6 +281,22 @@ class LiveDashboardState(StrictModel):
 
     spend: SpendRollup = Field(default_factory=SpendRollup)
 
+    # The SAME fold, keyed by the round each call stamped itself with — so "what did round 3 cost,
+    # and how much of its input did providers serve off their own prefix cache" is answerable at
+    # all. `spend` above is one running total for the whole cycle, and `rounds[]` carried no cost,
+    # which left every round-axis surface showing a round with no price on it.
+    #
+    # PER ROUND, not cumulative: the atom is what a bar needs and what a cumulative series is
+    # summed FROM, and the reverse does not hold. `evidence.py::_spend_to_round` folds these
+    # forward for its own cumulative reading rather than walking the ledger a second time.
+    #
+    # A call carrying no `round` banks at "0" — it ran before any round closed (init, the origin
+    # score), and dropping it would under-report every prefix. Keys are `str` because JSON has no
+    # integer keys and a round-trip must not change the shape. NOT clamped by a rewind, unlike
+    # `rounds[]`: a re-measured round cost money both times, and the sum over this map is what
+    # reconciles against `spend`.
+    spend_by_round: dict[str, SpendRollup] = Field(default_factory=dict)
+
     in_flight: InFlightCall | None = None
 
     backfill_log: list[BackfillLogEntry] = Field(default_factory=list)

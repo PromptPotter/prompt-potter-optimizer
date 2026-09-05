@@ -14,7 +14,9 @@ from promptpotter.application.views.view_models import (
     RoundDigestView,
     SweepSummaryView,
 )
+from promptpotter.domain.rendering import prefix_reading
 from promptpotter.domain.results import overlap_series
+from promptpotter.domain.spend import TOKEN_KIND_BUCKET, TokenAccount
 from promptpotter.shared.composite import render_composite_fitness_block
 
 
@@ -78,6 +80,36 @@ def _render_p_best_trajectory(rd: RoundDigestView) -> list[str]:
     return lines
 
 
+def _render_round_cost(rd: RoundDigestView) -> str:
+    """What this round cost, per bucket, with each bucket's prefix-cache reading beside it.
+
+    PER BUCKET and never pooled: the three run different prompts against different providers, and
+    a backend row carries ~86k input against a judge's ~1.6k, so one ratio over the pooled counts
+    is the backend's share wearing everyone's name.
+
+    The prefix reading is `prefix_reading`'s, so this line says the same thing the terminal tape
+    and the browser's sample badge do. A bucket holds billed calls only — the fold excludes a
+    replay — so `replayed=False` here is a statement about the bucket, not a shortcut."""
+    if rd.spend is None or rd.spend.total_used_usd <= 0:
+        return ""
+    bits: list[str] = []
+    for kind, attr in TOKEN_KIND_BUCKET.items():
+        bucket = getattr(rd.spend, attr)
+        if bucket.used_usd <= 0 and bucket.input_tokens <= 0:
+            continue
+        share = TokenAccount(
+            input=bucket.input_tokens, output=0, cache_read=bucket.cache_read_tokens or None
+        ).cache_share(replayed=False)
+        badge = prefix_reading(share, replayed=False).badge
+        # Writes with no reads is the one shape worth calling out inline: it is paying a premium
+        # to fill a prefix nothing ever collects (`run_records.py::cache_write_tokens`).
+        wrote = f" ·w{bucket.cache_write_tokens}" if bucket.cache_write_tokens else ""
+        bits.append(f"{kind} ${bucket.used_usd:.4f} {badge}{wrote}")
+    if not bits:
+        return ""
+    return f"- cost: **${rd.spend.total_used_usd:.4f}** ({' · '.join(bits)})"
+
+
 def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
     parts: list[str] = [
         f"### Round {rd.round} — {rd.label} ({_fmt_pct(rd.accuracy)})",
@@ -96,6 +128,8 @@ def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
         parts.append(f"- overlap: {series}")
     if rd.verdict_reason:
         parts.append(f"- verdict: {rd.verdict_reason}")
+    if cost := _render_round_cost(rd):
+        parts.append(cost)
     if rd.changes_description:
         parts.append(f"- changes: {rd.changes_description}")
     if rd.l1_yield < 1.0:

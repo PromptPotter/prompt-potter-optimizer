@@ -42,6 +42,9 @@ export interface DashboardCandidate {
   invalid: boolean;
   scored_samples: number;
   cached_samples: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_read_tokens: number | null;
   expected_samples: number | null;
   evaluators: Record<string, number>;
   changes_description: string;
@@ -95,6 +98,11 @@ export interface DashboardSample {
   query: string;
   input_tokens: number | null;
   output_tokens: number | null;
+  /** How many of `input_tokens` the PROVIDER served off its own prefix cache — a
+   * SUBSET, never an addition, and distinct from `cached`, which says OUR
+   * archive answered. Null where no breakdown was reported; 0 where one was
+   * and there was no hit. Read it as a share through `cache_share`. */
+  cache_read_tokens: number | null;
 }
 
 /** A `DashboardCandidate` on a CLOSED round — `dashboard.json::rounds[].candidates`. */
@@ -106,6 +114,9 @@ export interface RoundSummaryCandidate {
   invalid: boolean;
   scored_samples: number;
   cached_samples: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_read_tokens: number | null;
   expected_samples: number;
   evaluators: Record<string, number>;
   changes_description: string;
@@ -291,6 +302,9 @@ export interface ScoredCandidate {
   scored_samples: number;
   expected_samples: number;
   cached_samples: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_read_tokens: number | null;
   partial_reason: string;
   invalid: boolean;
   validation_failures: ValidationFailure[];
@@ -371,8 +385,8 @@ export interface WoundChannels {
 export interface L1Layout {
   persona: string[];
   task_intent: string[];
-  problem_description: string[];
   thinking_style: string[];
+  problem_description: string[];
 }
 
 /** L2/L3-authored state that travels with the candidate. */
@@ -483,7 +497,7 @@ export interface SpendBucket {
   incurred_unpriced_tokens: number;
 }
 
-/** A cycle's spend: the two buckets, and the totals every consumer reads off them. */
+/** A cycle's spend: the three buckets, and the totals every consumer reads off them. */
 export interface SpendRollup {
   backend: SpendBucket;
   loop: SpendBucket;
@@ -618,6 +632,7 @@ export interface LiveDashboardState {
   sp_budget_ttest: number;
   run_limits: RunLimits | null;
   spend: SpendRollup;
+  spend_by_round: Record<string, SpendRollup>;
   in_flight: InFlightCall | null;
   backfill_log: BackfillLogEntry[];
   current_round: CurrentRound;

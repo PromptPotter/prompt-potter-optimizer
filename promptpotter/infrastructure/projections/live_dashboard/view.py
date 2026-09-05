@@ -34,7 +34,7 @@ from promptpotter.domain.scoring import (
     recorded_elapsed_s,
     weighted_sum_weights,
 )
-from promptpotter.domain.spend import TOKEN_KIND_BUCKET, SpendBucket
+from promptpotter.domain.spend import TOKEN_KIND_BUCKET, SpendBucket, SpendRollup
 from promptpotter.infrastructure.ledger import open_with_history
 from promptpotter.infrastructure.projections.audit_trail import (
     audit_rounds_dir,
@@ -69,7 +69,11 @@ from promptpotter.infrastructure.projections.live_state import (
     apply_phase,
     roll_p_best_at_round_complete,
 )
-from promptpotter.infrastructure.runtime_flags import read_sample_lookahead, read_spend_caps
+from promptpotter.infrastructure.runtime_flags import (
+    effective_lookahead,
+    read_sample_lookahead,
+    read_spend_caps,
+)
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import (
     ROUND_GLOB,
@@ -131,6 +135,46 @@ if set(_STATE_TO_NODE) != set(DashboardState):
         "_STATE_TO_NODE must cover every DashboardState — a missing member reads as "
         f"'nothing running': {set(DashboardState) - set(_STATE_TO_NODE)}"
     )
+
+
+def _bank_call(spend: SpendRollup, record: TokenUsageRecord, usd: float | None) -> None:
+    """One priced call into one rollup — the cycle total and the per-round map are this same
+    arithmetic, called twice, so the split cannot disagree with the total the budget gate reads."""
+    # Through the declared mapping, never a branch here: a two-way `if kind == "optimizer"`
+    # does not fail when a third kind appears, it files it under `backend` in silence.
+    bucket: SpendBucket = getattr(spend, TOKEN_KIND_BUCKET[record.kind])
+    in_tok = int(record.input_tokens)
+    out_tok = int(record.output_tokens)
+    if record.model and not bucket.model:
+        bucket.model = record.model
+
+    if usd is not None:
+        bucket.incurred_usd = round(bucket.incurred_usd + usd, 6)
+    elif in_tok or out_tok:
+        bucket.incurred_unpriced_tokens += in_tok + out_tok
+
+    if not record.cached:
+        bucket.input_tokens += in_tok
+        bucket.output_tokens += out_tok
+        bucket.reasoning_tokens += int(record.reasoning_tokens)
+        # Only the billed side: a reuse-cache hit reached no provider, so counting its
+        # replayed cache tokens would report a prefix holding on calls never made.
+        bucket.cache_read_tokens += int(record.cache_read_tokens)
+        bucket.cache_write_tokens += int(record.cache_write_tokens)
+        if usd is not None:
+            bucket.used_usd = round(bucket.used_usd + usd, 6)
+            bucket.rate_known = True
+        elif in_tok or out_tok:
+            # Billed but with no resolvable cost, so the USD cap cannot see this spend.
+            # Tracked so the dashboard flags the cap as inactive.
+            bucket.unpriced_tokens += in_tok + out_tok
+
+    # Over `spend.buckets`, never a hand-named pair: the budget gate reads `total_used_usd`,
+    # so a bucket left out of this fold is spend the cap cannot see.
+    spend.total_used_usd = round(sum(b.used_usd for b in spend.buckets), 6)
+    spend.total_incurred_usd = round(sum(b.incurred_usd for b in spend.buckets), 6)
+    spend.total_tokens_used = sum(b.input_tokens + b.output_tokens for b in spend.buckets)
+    spend.unpriced_tokens = sum(b.unpriced_tokens for b in spend.buckets)
 
 
 def _ability_delta(rounds: list[RoundSummary]) -> float | None:
@@ -713,54 +757,24 @@ class LiveDashboardView(DerivedView):
 
     def _handle_token_usage(self, record: TokenUsageRecord) -> None:
         """EVERY call lands in ``incurred``; only one that reached the wire lands in the bill. A
-        cached call spent nothing, so billing it would halt a run over money it never cost."""
-        spend = self.state.spend
-        # Through the declared mapping, never a branch here: a two-way `if kind == "optimizer"`
-        # does not fail when a third kind appears, it files it under `backend` in silence.
-        bucket: SpendBucket = getattr(spend, TOKEN_KIND_BUCKET[record.kind])
-        in_tok = int(record.input_tokens)
-        out_tok = int(record.output_tokens)
-        if record.model and not bucket.model:
-            bucket.model = record.model
-        cache_read = int(record.cache_read_tokens)
-        cache_write = int(record.cache_write_tokens)
+        cached call spent nothing, so billing it would halt a run over money it never cost.
+
+        Banked TWICE from ONE pricing — into the cycle's running total and into the round the call
+        stamped itself with — so the two sides stay reconcilable."""
         usd = compute_usd(
             record.model,
-            in_tok,
-            out_tok,
+            int(record.input_tokens),
+            int(record.output_tokens),
             override_usd=record.cost_usd,
             provider=record.provider,
-            cache_read_tokens=cache_read,
-            cache_write_tokens=cache_write,
+            cache_read_tokens=int(record.cache_read_tokens),
+            cache_write_tokens=int(record.cache_write_tokens),
         )
-
-        if usd is not None:
-            bucket.incurred_usd = round(bucket.incurred_usd + usd, 6)
-        elif in_tok or out_tok:
-            bucket.incurred_unpriced_tokens += in_tok + out_tok
-
-        if not record.cached:
-            bucket.input_tokens += in_tok
-            bucket.output_tokens += out_tok
-            bucket.reasoning_tokens += int(record.reasoning_tokens)
-            # Only the billed side: a reuse-cache hit reached no provider, so counting its
-            # replayed cache tokens would report a prefix holding on calls never made.
-            bucket.cache_read_tokens += cache_read
-            bucket.cache_write_tokens += cache_write
-            if usd is not None:
-                bucket.used_usd = round(bucket.used_usd + usd, 6)
-                bucket.rate_known = True
-            elif in_tok or out_tok:
-                # Billed but with no resolvable cost, so the USD cap cannot see this spend.
-                # Tracked so the dashboard flags the cap as inactive.
-                bucket.unpriced_tokens += in_tok + out_tok
-
-        # Over `spend.buckets`, never a hand-named pair: the budget gate reads `total_used_usd`,
-        # so a bucket left out of this fold is spend the cap cannot see.
-        spend.total_used_usd = round(sum(b.used_usd for b in spend.buckets), 6)
-        spend.total_incurred_usd = round(sum(b.incurred_usd for b in spend.buckets), 6)
-        spend.total_tokens_used = sum(b.input_tokens + b.output_tokens for b in spend.buckets)
-        spend.unpriced_tokens = sum(b.unpriced_tokens for b in spend.buckets)
+        _bank_call(self.state.spend, record, usd)
+        # A call carrying no round ran before any round closed (init, the origin score); banking it
+        # at 0 rather than dropping it is what keeps the two sides reconcilable.
+        key = str(record.round if record.round is not None else 0)
+        _bank_call(self.state.spend_by_round.setdefault(key, SpendRollup()), record, usd)
         self._schedule_persist()
 
     @property
@@ -969,7 +983,12 @@ class LiveDashboardView(DerivedView):
         # self-consistent for whoever opens it. No SERVED read depends on it — this writer cannot
         # answer for a press landing between its own records, so
         # `runtime_flags.py::overlay_armed_controls` re-reads both on the way out.
-        s.sample_lookahead = read_sample_lookahead(self.cycle_dir)
+        #
+        # CLAMPED here too: an unclamped 8 beside `max_cells_in_flight: 2` writes a depth nothing
+        # is running. Both readings end at `effective_lookahead` — the one "depth in force".
+        s.sample_lookahead = effective_lookahead(
+            read_sample_lookahead(self.cycle_dir), s.max_cells_in_flight
+        )
         s.wallclock_serialized_at = utcnow_iso()
         # The typed model IS the on-disk shape, and `extra="forbid"` rejects an undeclared
         # attribute at the mutation site — so a field can neither silently vanish nor appear

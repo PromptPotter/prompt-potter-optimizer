@@ -5,6 +5,7 @@ import { fmtNum, fmtClock } from "@/lib/format";
 import { CardFrame } from "@/components/ui";
 import { FreqChart } from "@/components/eval/FreqChart";
 import { TrendChart } from "@/components/eval/TrendChart";
+import { CostStrip } from "@/components/eval/CostStrip";
 
 // Fields surfaced elsewhere (header, payload block, dedicated cards, workflow
 // toolbar) — or withheld from the UI entirely. `patience` is withheld pending
@@ -137,6 +138,9 @@ export function LiveStateCard() {
           the old side-by-side .dash-charts grid. */}
       <div className="lsc-charts">
         <TrendChart />
+        {/* Same x = round as the trend above, its own y = USD. Cost is a different unit from
+            fitness, so it gets its own strip rather than a channel on a fitness chart. */}
+        <CostStrip />
         <FreqChart />
       </div>
     </CardFrame>

@@ -8,6 +8,7 @@ from typing import Any
 
 from promptpotter.domain.results import HardSampleOrder, HeadlineMetric, OverlapReading
 from promptpotter.domain.ruler import AbilityReading
+from promptpotter.domain.spend import SpendRollup
 
 __all__ = [
     "AnyView",
@@ -358,6 +359,12 @@ class RoundDigestView:
     # Who the round ELECTED. The trajectory above is a STOPPING posterior and cannot answer it —
     # its argmax is regularly not the elected arm, and can name two of them or none.
     winner_id: str = ""
+    # What THIS round cost, and how much of its input providers served off their own prefix cache.
+    # Served per round by the projection (`dashboard.json::spend_by_round`) and read here, never
+    # re-folded: the browser's cost strip and this line are the same number or one of them is
+    # wrong. ``None`` for a cycle with no dashboard on disk — a foreign fork sibling, or a round
+    # banked before the split was served.
+    spend: SpendRollup | None = None
 
 
 @dataclass(frozen=True)

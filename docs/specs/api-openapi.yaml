@@ -3518,8 +3518,10 @@ components:
           type: array
           items: { type: string }
           description: |
-            Params the optimizer may never permute on any node
-            (`["model","provider"]`) — always locked. Mirrors `PARAM_FORBIDDEN_KEYS`.
+            Params the optimizer may never permute on any node — always locked, because each
+            of them decides WHO ANSWERS rather than what is asked, and hosts of one model
+            disagree systematically. Mirrors `PARAM_FORBIDDEN_KEYS`; read the members off this
+            array rather than a copy of the set.
         nodes:
           type: object
           additionalProperties:
