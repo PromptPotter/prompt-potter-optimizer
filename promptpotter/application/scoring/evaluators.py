@@ -11,13 +11,19 @@ that depends on δ."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import inspect
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
+from promptpotter.application.scoring.formula.compiler import CELL_INTRINSIC_NAMES
 from promptpotter.domain.pipeline_schema import NodeType
-from promptpotter.domain.scoring import extract_item_label
+from promptpotter.domain.scoring import (
+    all_verifier_graded,
+    extract_item_label,
+    is_verifier_graded,
+)
 from promptpotter.shared.composite import to_short_formula
 from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 
@@ -38,6 +44,7 @@ __all__ = [
     "materialize_row_derivable",
     "materialize_sample_values",
     "resolve_cell_formula",
+    "validate_campaign_evaluator",
 ]
 
 
@@ -176,7 +183,9 @@ class Evaluator:
     # the key rather than substituting a default, so a formula naming an unmeasured term halts
     # loud (``round_scorer``) instead of scoring on a number nobody computed. An
     # empty-collection default reads as PERFECT here — inverted for every health term.
-    compute: Callable[..., float | None]
+    compute: Callable[..., float | None | Awaitable[float | None]]
+    # The awaitable arm is `per_sample` ONLY, refused elsewhere by `_validate_evaluator` —
+    # `judges/CLAUDE.md` § The seam says why a round materializer may never await.
     # `high` = larger is better; `low` = larger is worse (the webapp's mask editor direction-corrects).
     direction: Literal["high", "low"] = "high"
     node_type: NodeType | None = None
@@ -194,6 +203,10 @@ class Evaluator:
             return False
         return self.requires(schema)
 
+    # True ⇒ this number is a comparison AGAINST A LABEL, so it is undefined on a verifier-graded
+    # backend rather than 0.0. Declared rather than derived because ``applies`` sees the schema
+    # alone and the fact lives in the ROWS (`connectors/CLAUDE.md` § The answer shape).
+    needs_labels: bool = False
     # True ⇒ a pure function of the persisted per-sample rows alone (``compute`` needs
     # only ``results`` — no ``schema`` / ``node``). The read-side mask recomputes exactly
     # this subset from ``all_candidate_results`` at read time (``materialize_row_derivable``),
@@ -234,6 +247,7 @@ _REGISTRY: list[Evaluator] = [
         scope="per_round",
         compute=partial(_compute_recall, candidate_key="candidate_ranking"),
         node_type=NodeType.CANDIDATE_SOURCE,
+        needs_labels=True,
     ),
     Evaluator(
         name="candidate_recall",
@@ -241,6 +255,7 @@ _REGISTRY: list[Evaluator] = [
         scope="per_round",
         compute=partial(_compute_recall, candidate_key="final_ranking"),
         node_type=NodeType.RANKER,
+        needs_labels=True,
     ),
     Evaluator(
         name="cache_hit_rate",
@@ -269,6 +284,68 @@ _REGISTRY: list[Evaluator] = [
 ]
 
 
+def _validate_evaluator(ev: Evaluator, origin: str) -> None:
+    """Every invariant an ``Evaluator`` must satisfy, built-in and campaign-declared alike.
+
+    The load-bearing clause is the ``per_round`` × awaitable refusal — the sync read paths
+    (``metrics.py``, ``mask/load.py``, ``l1/population.py``) re-derive over archived rows, so an
+    awaiting compute there re-bills the whole measurement history on every index warm."""
+    where = f"evaluator {ev.name!r} ({origin})"
+    if not ev.name:
+        raise ValueError(f"{where}: name must be non-empty.")
+    if ev.scope not in ("per_sample", "per_round"):
+        raise ValueError(f"{where}: scope {ev.scope!r} is not 'per_sample' or 'per_round'.")
+    if not callable(ev.compute):
+        raise ValueError(f"{where}: compute is not callable.")
+    if ev.scope == "per_round" and inspect.iscoroutinefunction(ev.compute):
+        raise ValueError(
+            f"{where}: a per_round evaluator may not be async. Its materializers are sync READ "
+            f"paths that re-derive over archived rows, so an awaiting compute re-bills the whole "
+            f"measurement history on every refresh. Measure once at per_sample scope instead."
+        )
+    if ev.scope == "per_sample":
+        if ev.name in CELL_INTRINSIC_NAMES:
+            raise ValueError(
+                f"{where}: the name collides with a term `cell_namespace` binds itself, so the "
+                f"value would be silently dropped by the pipeline_data splat and no formula could "
+                f"reach it. Pick another name."
+            )
+        if ev.from_rows:
+            raise ValueError(
+                f"{where}: `from_rows` is a per_round declaration — `materialize_row_derivable` "
+                f"skips every per_sample entry — so setting it here is dead config that reads as "
+                f"protection."
+            )
+
+
+def validate_campaign_evaluator(ev: Evaluator, origin: str) -> None:
+    """Every invariant an evaluator a CAMPAIGN declares must satisfy — a judge's, today.
+
+    The extra clause over :func:`_validate_evaluator` is the roster collision, and it belongs here
+    because it is a property of the PAIR: ``materialize_sample_values`` iterates
+    ``(*_REGISTRY, *extra)`` writing ``values[ev.name]``, so a campaign term repeating a package
+    evaluator's name overwrites it — silently, with a number measuring something else."""
+    _validate_evaluator(ev, origin)
+    if ev.name in {e.name for e in _REGISTRY}:
+        raise ValueError(
+            f"evaluator {ev.name!r} ({origin}): the name is a package evaluator's. A campaign term "
+            f"is materialized after the registry and would overwrite it, so the formula would read "
+            f"this value under a name that promises the other one. Pick another term."
+        )
+
+
+def _validate_registry() -> None:
+    seen: set[str] = set()
+    for ev in _REGISTRY:
+        if ev.name in seen:
+            raise ValueError(f"evaluator {ev.name!r}: declared twice in the registry.")
+        seen.add(ev.name)
+        _validate_evaluator(ev, "built-in")
+
+
+_validate_registry()
+
+
 def all_evaluators() -> list[Evaluator]:
     return list(_REGISTRY)
 
@@ -289,6 +366,18 @@ def evaluators_meta() -> list[dict[str, Any]]:
         }
         for ev in _REGISTRY
     ]
+
+
+def _round_value(ev: Evaluator, value: float | None | Awaitable[float | None]) -> float | None:
+    """Narrow a ``per_round`` compute's result to the sync arm. Unreachable in a loaded registry,
+    and a raise rather than a cast so an evaluator that somehow got there stops instead of
+    re-billing the archive."""
+    if isinstance(value, Awaitable):
+        raise TypeError(
+            f"evaluator {ev.name!r}: per_round compute returned an awaitable. Only per_sample "
+            f"evaluators may reach a model; a round materializer re-derives over archived rows."
+        )
+    return value
 
 
 def _concrete_round_entries(
@@ -318,11 +407,14 @@ def materialize_round_values(
     """No ``opt_sp``: every evaluator that read one was a candidate constant, and those are gone.
     What a round REPORTS is now a pure function of its rows and the schema they ran on."""
     values: dict[str, float] = {}
+    labelless = all_verifier_graded(r.get("ground_truth") for r in results)
     for display_name, ev, node in _concrete_round_entries(schema):
+        if ev.needs_labels and labelless:
+            continue
         kwargs: dict[str, Any] = {"results": results, "schema": schema}
         if node is not None:
             kwargs["node"] = node
-        value = ev.compute(**kwargs)
+        value = _round_value(ev, ev.compute(**kwargs))
         if value is not None:
             values[display_name] = float(value)
     return values
@@ -335,23 +427,48 @@ def materialize_row_derivable(results: list[QueryMeasurement]) -> dict[str, floa
     for ev in _REGISTRY:
         if ev.scope != "per_round" or not ev.from_rows:
             continue
-        value = ev.compute(results=results)
+        value = _round_value(ev, ev.compute(results=results))
         if value is not None:
             out[ev.name] = float(value)
     return out
 
 
-def materialize_sample_values(
+async def materialize_sample_values(
     schema: PipelineSchema,
     result: QueryMeasurement,
+    extra: Sequence[Evaluator] = (),
 ) -> dict[str, float]:
+    """The per-sample evaluators' values, keyed by name, for the ONE caller that measures a cell
+    (``sample_measurement.py::measure_sample``).
+
+    **Async, and only at this scope.** A ``per_sample`` evaluator may reach an LLM — that is what
+    an LLM-as-judge IS — so its ``compute`` may return an awaitable, which is awaited here. The
+    ``per_round`` materializers below stay strictly synchronous because their callers are sync
+    READ paths (``metrics.py``, ``mask/load.py``, ``l1/population.py``) that re-derive over
+    already-archived rows; an awaitable reaching one of those would re-bill the whole measurement
+    history on every index refresh. :func:`_validate_evaluator` refuses the combination outright,
+    so the asymmetry is a declared invariant rather than a convention.
+
+    ``extra`` carries the evaluators a CAMPAIGN declares rather than the package — today, its
+    judges, one per term. They are not appended to ``_REGISTRY``: that dict is process-global and a
+    campaign's graders are not, so registering them would leak into every other run in the process,
+    inner L4 cells included. It is also why the roster collision is checked once at init
+    (:func:`validate_campaign_evaluator`) rather than here — ``extra`` is written last and would
+    otherwise overwrite a package name silently, per cell.
+
+    The caller writes these TOP-LEVEL into ``pipeline_data``, which is what makes them addressable
+    from a scoring formula — see :func:`materialize_row_derivable` for the complement."""
     values: dict[str, float] = {}
-    for ev in _REGISTRY:
+    for ev in (*_REGISTRY, *extra):
         if ev.scope != "per_sample":
+            continue
+        if ev.needs_labels and is_verifier_graded(result.get("ground_truth")):
             continue
         if not ev.applies(schema):
             continue
         value = ev.compute(result=result, schema=schema)
+        if inspect.isawaitable(value):
+            value = await value
         if value is not None:
             values[ev.name] = float(value)
     return values

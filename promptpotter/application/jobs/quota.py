@@ -66,22 +66,29 @@ def check_launch_quotas(
     job_registry: JobRegistry,
     rate_limited: bool = True,
 ) -> None:
-    """Per-USER limits only: rate, concurrent cycles, campaigns per day. The global one-campaign-at-a-time
-    admission rides ``JobRegistry.reserve``; this runs BEFORE it, so it counts prior runs, not this one."""
+    """Per-USER limits only: rate, concurrent cycles, campaigns per day. The MACHINE's own ceiling
+    rides ``JobRegistry.request_slot``; this runs BEFORE it, under the same gate, so it counts the
+    caller's prior launches and not this one."""
     if rate_limited and not _consume_rate_token(user.user_id):
         raise QuotaExceededError(
             code="rate_limited",
             message="Too many campaign launches; slow down and retry shortly.",
         )
 
-    running = job_registry.list_running(user_id=user.user_id)
-    if len(running) >= user.max_concurrent_cycles:
+    # A queued launch counts. The ceiling means "cycles this account has in flight", and one
+    # waiting for a slot is in flight to the person who pressed — so counting only the running ones
+    # lets an account queue without bound. It also buys the starvation bound the drain order rests
+    # on: the whole queue can never exceed `max_concurrent_cycles × users`.
+    in_flight = len(job_registry.list_running(user_id=user.user_id)) + len(
+        job_registry.list_queued(user_id=user.user_id)
+    )
+    if in_flight >= user.max_concurrent_cycles:
         raise QuotaExceededError(
             code="quota_exceeded",
             message=(
                 f"Concurrent-cycles ceiling reached "
-                f"({len(running)}/{user.max_concurrent_cycles}); "
-                f"stop a running cycle before starting another."
+                f"({in_flight}/{user.max_concurrent_cycles}); "
+                f"stop or cancel one before starting another."
             ),
         )
 
@@ -122,6 +129,10 @@ class AccountWallet(NamedTuple):
     spent: UserSpend
     ceilings: SpendCeilings
     headroom: SpendCeilings
+    # Another live run on this account was admitted but has not yet stamped what it holds, so the
+    # headroom above is quoted at zero rather than quoted twice. It names WHY it is zero: a
+    # contended account has money and needs a retry, an exhausted one has neither.
+    contended: bool = False
 
 
 def read_account_wallet(
@@ -129,7 +140,7 @@ def read_account_wallet(
     user: User,
     stores: Stores,
     job_registry: JobRegistry,
-    excluding_hop: CycleHop | None = None,
+    excluding_job_id: str | None = None,
 ) -> AccountWallet:
     """A running cycle holds its whole declared ceiling until it finishes: counting only what is on
     the ledger admits two concurrent launches against one remainder and lets the pair spend double
@@ -139,9 +150,20 @@ def read_account_wallet(
     spent = sum_user_spend(ledgers=account_ledgers(stores.campaigns), since=0.0, until=time.time())
     if ceilings.usd is None and ceilings.tokens is None:
         return AccountWallet(spent, ceilings, ceilings)
-    held_usd, held_tokens = _outstanding_reservations(
-        job_registry, user_id=user.user_id, excluding_hop=excluding_hop
+    held = _outstanding_reservations(
+        job_registry, user_id=user.user_id, excluding_job_id=excluding_job_id
     )
+    if held is None:
+        return AccountWallet(
+            spent,
+            ceilings,
+            SpendCeilings(
+                None if ceilings.usd is None else 0.0,
+                None if ceilings.tokens is None else 0,
+            ),
+            contended=True,
+        )
+    held_usd, held_tokens = held
     headroom = SpendCeilings(
         None
         if ceilings.usd is None
@@ -160,14 +182,21 @@ def admit_launch(
     user: User,
     stores: Stores,
     job_registry: JobRegistry,
+    job_id: str,
 ) -> SpendCeilings:
     """**One host-wallet gate in two units** — owned by
     [`0003-spend-and-tenancy.md`](../../../docs/adr/0003-spend-and-tenancy.md) § D1; every launch
     admits through here. A declaration the account cannot cover is refused WHOLE rather than clamped
     down, because a clamped launch starts, spends and halts mid-campaign — the outcome the ceiling
     exists to prevent, not to cause. Declaring nothing declares the headroom under whatever bounds
-    the DECLARATION — for a metered account, one step of it (:func:`_launch_step`)."""
-    wallet = read_account_wallet(user=user, stores=stores, job_registry=job_registry)
+    the DECLARATION — for a metered account, one step of it (:func:`_launch_step`).
+
+    ``job_id`` is this launch's own reservation, which the wallet must not count against it."""
+    wallet = read_account_wallet(
+        user=user, stores=stores, job_registry=job_registry, excluding_job_id=job_id
+    )
+    if wallet.contended:
+        raise _contended("what this account has left")
     if wallet.spent.unpriced_tokens and wallet.headroom.usd is not None:
         logger.warning(
             "spend: account %s has %d unpriced tokens, so its USD total is a floor; admitting "
@@ -259,9 +288,17 @@ def clamp_budget_change(
 
     Only a SUPPLIED arm composes: folded into an absent one, a delegate's grant becomes a ceiling
     the caller asked to leave alone, and the file merge downstream makes it stick."""
+    held = job_registry.running_job_for(hop)
     wallet = read_account_wallet(
-        user=user, stores=stores, job_registry=job_registry, excluding_hop=hop
+        user=user,
+        stores=stores,
+        job_registry=job_registry,
+        excluding_job_id=None if held is None else held.job_id,
     )
+    # Refuse rather than clamp: a contended wallet quotes zero headroom, and clamping to it would
+    # write a $0 ceiling that halts the very run the operator was funding.
+    if wallet.contended:
+        raise _contended("this cycle's ceiling")
     delegated = _delegated_spend_ceiling(stores)
     usd = (
         None
@@ -307,6 +344,19 @@ def hold_ceiling(
     return moved
 
 
+def _contended(subject: str) -> QuotaExceededError:
+    """Another launch on this account holds a reservation nothing can yet quote — the
+    ``reserve``→``set_caps`` window. Retryable within seconds, so it says so: an exhausted ceiling
+    is the other reason a wallet answers zero and it is not retryable at all."""
+    return QuotaExceededError(
+        code="launch_contended",
+        message=(
+            f"Another launch on this account is still being admitted, so {subject} cannot be "
+            f"quoted yet. Retry in a moment."
+        ),
+    )
+
+
 def _refused(wallet: AccountWallet, reason: str) -> QuotaExceededError:
     """Every refusal names the overrun, which is where the operator reads that a ceiling was
     CROSSED rather than merely reached."""
@@ -323,15 +373,32 @@ def _refused(wallet: AccountWallet, reason: str) -> QuotaExceededError:
 
 
 def _outstanding_reservations(
-    job_registry: JobRegistry, *, user_id: str, excluding_hop: CycleHop | None
-) -> tuple[float, int]:
-    """What this account's in-flight runs may still spend. A job admitted but not yet stamped holds
-    nothing, a window the capacity-1 machine slot covers — raising ``MACHINE_RUN_CAPACITY`` is what
-    would make it matter."""
+    job_registry: JobRegistry, *, user_id: str, excluding_job_id: str | None
+) -> tuple[float, int] | None:
+    """What this account's OTHER in-flight runs may still spend, or ``None`` when one of them was
+    admitted and has not yet stamped what it holds.
+
+    Counting that window — ``request_slot`` to ``set_caps`` — as holding nothing quotes two
+    launches on one account the same remainder, and the pair spends twice the ceiling, silently and
+    irreversibly. ``None`` is the fail-closed answer, and it costs the second launch a retry a few
+    seconds later. **Exclusion is by job, never by hop**: a launch reserves its slot before the mint
+    resolves its ids, so every concurrent mint shares :data:`UNRESOLVED_HOP` and a hop cannot tell
+    the caller's own reservation from the one it must refuse."""
+    running = job_registry.list_running(user_id=user_id)
+    own = next((j for j in running if j.job_id == excluding_job_id), None)
+    mine = None if own is None else (own.created_at, own.job_id)
     usd = 0.0
     tokens = 0
-    for job in job_registry.list_running(user_id=user_id):
-        if excluding_hop is not None and job.hop == excluding_hop:
+    for job in running:
+        if job.job_id == excluding_job_id:
+            continue
+        if job.cap_usd is None and job.cap_tokens is None:
+            # Only an EARLIER unstamped sibling blocks. Refusing on any of them would have two
+            # simultaneous launches refuse each other and neither run; yielding to the older one
+            # leaves exactly one winner, and the younger is safe to ignore because it reads this
+            # same rule and yields back. Ties break on the job id, which both readers see alike.
+            if mine is None or (job.created_at, job.job_id) < mine:
+                return None
             continue
         usd += job.cap_usd or 0.0
         tokens += job.cap_tokens or 0

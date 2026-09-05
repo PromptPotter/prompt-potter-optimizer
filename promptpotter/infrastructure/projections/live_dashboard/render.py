@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.dashboard_rows import DashboardCandidate, DashboardSample, SampleStatus
 from promptpotter.domain.results import candidate_label
-from promptpotter.domain.scoring import is_hit
+from promptpotter.domain.scoring import is_hit, is_verifier_graded
 from promptpotter.infrastructure.projections.live_dashboard.state import PobbBlock
 from promptpotter.shared.composite import inline_short_formula_values
 
@@ -43,6 +43,12 @@ def sample_row(s: dict[str, Any]) -> DashboardSample:
     status: SampleStatus = (
         "ERR" if s.get("error") else ("HIT" if is_hit(s.get("fitness")) else "MISS")
     )
+    # A verifier-graded row has no label, so the answer/truth pair is both halves of a comparison
+    # nobody made — and `prediction` there is the `NO_RESULT` sentinel a ranking mechanism that is
+    # not in play left behind. Served EMPTY rather than sentinel-and-blank, so a client can still
+    # tell the two apart: `NO_RESULT` beside a real truth is an extraction that broke.
+    ground_truth = _trim(s.get("ground_truth") or "", 20)
+    graded_by_verifier = is_verifier_graded(ground_truth)
     return DashboardSample(
         qi=int(s.get("qi", 0)),
         sample_id=None if sid is None else int(sid),
@@ -50,8 +56,8 @@ def sample_row(s: dict[str, Any]) -> DashboardSample:
         terminal_node=str(s.get("terminal_node") or ""),
         cached=bool(s.get("cached", False)),
         time_s=float(time_s) if isinstance(time_s, int | float) else None,
-        predicted=_trim(s.get("prediction") or "", 28),
-        ground_truth=_trim(s.get("ground_truth") or "", 20),
+        predicted="" if graded_by_verifier else _trim(s.get("prediction") or "", 28),
+        ground_truth=ground_truth,
         query=_trim(s.get("query") or "", 42),
         input_tokens=s.get("input_tokens"),
         output_tokens=s.get("output_tokens"),
@@ -76,10 +82,11 @@ def fmt_sample_line(row: DashboardSample) -> str:
     # Blank rather than `0.0s` where the row recorded no time — a cached replay's real 0.0
     # must stay distinguishable from a row that never reached the pipeline.
     time_col = f"{row.time_s:4.1f}s" if row.time_s is not None else "     "
-    return (
-        f"  {time_col} #{row.qi:03d}{sid_seg} {row.status:<4} [{badge}]{cache_icon}"
-        f"{tok_seg} -> '{row.predicted}' gt:'{row.ground_truth}' q:'{row.query}'"
-    )
+    head = f"  {time_col} #{row.qi:03d}{sid_seg} {row.status:<4} [{badge}]{cache_icon}{tok_seg}"
+    # Nothing to contrast on a verifier-graded row — the status IS the verdict there.
+    if is_verifier_graded(row.ground_truth):
+        return f"{head} q:'{row.query}'"
+    return f"{head} -> '{row.predicted}' gt:'{row.ground_truth}' q:'{row.query}'"
 
 
 def _served(cand: dict[str, Any]) -> dict[str, Any]:

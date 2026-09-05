@@ -21,6 +21,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.scoring import QueryMeasurement, ledger_sample_view
 from promptpotter.infrastructure.ledger import CycleEventLog, branch_offset
+from promptpotter.infrastructure.llm.rate_limit import set_rate_tenant
 from promptpotter.infrastructure.llm.telemetry import (
     reset_current_round,
     reset_cycle_ledger,
@@ -569,6 +570,11 @@ def build_run_observers(
     # finds it without a process-global sink. Token rides on RunObservers so
     # drain_all can restore the prior context on teardown.
     ledger_token = set_cycle_ledger(ledger)
+    # ...and whose share of the shared provider window this run draws on. Same context, same
+    # reason: the limiter is one object per provider serving every concurrent campaign. No token
+    # to reset — the run's task owns its context and dies with it, and an L4 inner cell rebinds
+    # the same account rather than earning a second share.
+    set_rate_tenant(str(session.store.identity.tenant_id))
 
     return RunObservers(
         callbacks=callbacks,

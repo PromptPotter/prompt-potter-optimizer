@@ -1,0 +1,82 @@
+name: SealQA LongSeal (12-document haystack)
+version: v0.0
+description: >-
+  SealQA's LongSeal at the 12-document haystack, run through Harbor. One cell is ONE containerized
+  episode carrying the whole haystack in its instruction: the question arrives with twelve
+  automatically-retrieved documents whose results are conflicting or unhelpful, and the answer has
+  to be found among them. No search tool and no network — the documents are given, which is what
+  makes LongSeal the tractable SealQA variant.
+
+  SINGLE-STEP ON PURPOSE, and that is what this dataset is for. The published LongSeal numbers are
+  for a single-turn long-context setting, so imposing a protocol on the episode would make the
+  number ours rather than the paper's. `sealqa-longseal-12-2step` is where a declared
+  `retrieve -> answer` protocol and its per-step measurement live; this one is the anchor that
+  says our instrument did not move the task, and without it that config's per-step result has
+  nothing to be read against.
+backend_name: Harbor
+backend_type: harbor
+available_models:
+  - qwen/qwen3.7-flash
+nodes:
+  agent:
+    type: generation
+    runtime: backend
+    description: >-
+      One Harbor episode. The rendered prompt becomes `SKILL.md` in the container and `terminus-2`
+      discovers it before acting; the question, the haystack and the answer path arrive from the
+      task's own instruction. So what evolves is HOW to read conflicting documents, never which
+      documents are shown.
+    config:
+      # `provider` is separate from `model` by this repo's convention, and the connector composes
+      # the two into the single slug Harbor wants (its prefix IS the provider).
+      provider: openrouter
+      # The arm's model, and deliberately NOT the graders' — `campaign.yaml::judges` names its own,
+      # so the ruler does not move when this does.
+      model: qwen/qwen3.7-flash
+      temperature: 0.0
+      max_turns: 10
+    # DECLARED here rather than inherited, and it is load-bearing: a `remote_http` backend serves
+    # its own schema over `GET /pipeline`, so a termnorm dataset can leave this out. There is no
+    # server here to ask. Without `prompt_info` this node is not prompt-bearing, the candidate's
+    # rendered prompt is never written into its config, no SKILL.md is produced, and every variant
+    # scores identically as no-skill — a flat ruler that looks like "the prompt does not matter"
+    # and raises nothing.
+    prompt_info:
+      family: harbor_agent_skill
+      # None. The skill is standalone prose the agent reads; the question and its documents arrive
+      # from the task instruction, so there is no placeholder for us to substitute into.
+      template_variables: []
+      description: The Agent Skill injected into the trial container as SKILL.md
+    optimizer:
+      param_keys:
+        - persona
+        - task_intent
+        - problem_description
+        - instruction
+        - thinking_style
+        - answer_format
+        - temperature
+      # `max_turns` is deliberately NOT tunable and stays pinned in `config` above. It is the one
+      # axis here that moves a cell's cost by an order of magnitude, so it wants a bounded range —
+      # and `param_allowed_values` is a string enum, which cannot express one for an integer. An
+      # unbounded integer axis would be a cost rail removed rather than a search axis added.
+      observation_name: agent
+      observation_mappings:
+        # The verifier's number, and the only observation this node emits. The connector declares
+        # this key in `required_observation_keys`, so init RAISES if the mapping is missing rather
+        # than dropping the reward in silence and grading a measurement it never received.
+        #
+        # It reports whether the episode left an answer to grade, NEVER whether the answer is
+        # right: the gold is held outside the container so the agent's environment cannot contain
+        # what it is asked for. `campaign.yaml` grades correctness against that gold.
+        #
+        # `is_llm` marks the mapping the node's LLM spend is attributed through — it is what makes
+        # `nodes.agent.config.model` REQUIRED (`pipeline_resolve.py`), so a measurement can never
+        # be attributed to whichever model happened to be configured.
+        - pipeline_key: env_reward
+          output_field: env_reward
+          is_llm: true
+      langfuse_type: generation
+pipelines:
+  default:
+    - agent

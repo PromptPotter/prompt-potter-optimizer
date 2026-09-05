@@ -12,12 +12,14 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable
 
+from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.registry import JobRegistry, default_jobs_dir
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.command_kinds import CycleScopedKind, LifecycleKind
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.presentation.api.middleware.command_dispatcher import (
+    CancelQueuedRunPayload,
     ChangeSpendBudgetPayload,
     CleanupEmptyCyclesPayload,
     CommandDispatcher,
@@ -42,6 +44,7 @@ logger = logging.getLogger("promptpotter.presentation.cli.lifecycle")
 
 __all__ = [
     "cmd_archive",
+    "cmd_cancel_queued",
     "cmd_cleanup_empty_cycles",
     "cmd_delete",
     "cmd_delete_cycle",
@@ -230,9 +233,11 @@ async def cmd_set_budget(args: argparse.Namespace) -> CommandResult:
     # the account, and `hold_ceiling` asks whether a live job carries the ceiling too. It is
     # disk-backed over `default_jobs_dir()`, so this reads the server's jobs rather than an empty
     # set — the dispatcher refuses outright without one, which is what left this verb unrunnable.
-    # No `on_reap`: this process exits in a second and must never reap the server's live cycle.
+    # No `on_reap`: this process exits in a second and may not touch the server's live cycle.
     refused = await _refused(
-        CommandDispatcher(store, JobRegistry(default_jobs_dir())).dispatch_cycle_command(
+        CommandDispatcher(
+            store, JobRegistry(default_jobs_dir(), capacity=resolve_run_capacity)
+        ).dispatch_cycle_command(
             kind="change-spend-budget",
             payload=payload,
             idempotency_key=uuid.uuid4().hex,
@@ -423,6 +428,33 @@ async def cmd_replace_dataset(args: argparse.Namespace) -> CommandResult:
     return CommandResult(
         data={"slug": slug, "status": "replaced"},
         human=f"{slug} -> replaced; the prior cut is versioned and references repointed.",
+    )
+
+
+async def cmd_cancel_queued(args: argparse.Namespace) -> CommandResult:
+    """Withdraw a launch that is waiting for a machine slot.
+
+    A terminal run leaves the queue by Ctrl+C, because the wait happens in this process. This verb
+    is for the ones that do not: a browser launch queued behind a full box, which nothing else in
+    the terminal can reach. `python -m promptpotter machine` lists the job ids."""
+    job_id: str = str(getattr(args, "job_id", "") or "").strip()
+    stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
+    refused = await _refused(
+        CommandDispatcher(
+            stores, JobRegistry(default_jobs_dir(), capacity=resolve_run_capacity)
+        ).dispatch_workspace_command(
+            kind="cancel-queued-run",
+            payload=CancelQueuedRunPayload(job_id=job_id),
+            idempotency_key=uuid.uuid4().hex,
+        ),
+        {"job_id": job_id},
+    )
+    if refused is not None:
+        return refused
+    logger.info("queued launch %s -> cancelled", job_id)
+    return CommandResult(
+        data={"job_id": job_id, "status": "cancelled"},
+        human=f"{job_id} -> left the queue; nothing ran and nothing was spent.",
     )
 
 

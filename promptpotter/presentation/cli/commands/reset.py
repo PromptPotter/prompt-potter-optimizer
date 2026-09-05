@@ -1,5 +1,6 @@
-"""Drop campaigns + sessions; PRESERVE the two paid caches and every config tier. Anything unnamed at the tenant top
-level defaults to preserve — a reset never reaches a path it cannot explain.
+"""Drop campaigns + sessions; PRESERVE every paid cache (``layout.py::SHARED_CACHE_DIRS``) and every
+config tier. Anything unnamed at the tenant top level defaults to preserve — a reset never reaches a
+path it cannot explain.
 
 The L4 inner sandboxes are the one drop target OUTSIDE the tenant dir: ``layout.py`` roots them
 as a SIBLING of ``projects/``, so no per-tenant walk reaches them and leaving them behind lets a
@@ -23,6 +24,7 @@ from promptpotter.infrastructure.store.io import (
     validate_path_component,
 )
 from promptpotter.infrastructure.store.layout import (
+    SHARED_CACHE_DIRS,
     inner_sandboxes_dir,
     sandbox_owner_path,
     tenant_workspace,
@@ -45,10 +47,11 @@ _DROP_NAMES = ("campaigns", "sessions")
 
 # Preserved names — listed separately so the confirm prompt can name what survives, and named
 # EXHAUSTIVELY so anything left over surfaces as "unrecognized" instead of hiding among the
-# expected. The first two are real LLM spend; the rest is regenerable or operator config.
+# expected. `SHARED_CACHE_DIRS` is real LLM spend and is SPLICED rather than re-listed: a cache
+# added there and forgotten here would be destroyed by `reset`, silently, with no way back. The
+# rest is regenerable or operator config.
 _PRESERVE_NAMES = (
-    "measurements",
-    "optimizer_reuse",
+    *SHARED_CACHE_DIRS,
     "diagnostics",
     "traces",
     "backends",
@@ -303,7 +306,9 @@ async def cmd_reset(args: argparse.Namespace) -> CommandResult:
         human=(
             f"reset: dropped {len(dropped)} path(s), including {len(sandboxes)} inner sandbox(es).\n"
             f"{kept_note}"
-            "preserved: measurements/ (DB core) + optimizer_reuse/ — the two paid caches.\n"
+            # Derived, never counted in prose: "the two paid caches" was already a number that
+            # drifts the moment a third one lands.
+            f"preserved: {', '.join(d + '/' for d in SHARED_CACHE_DIRS)} — the paid caches.\n"
             "banked: each campaign's spend plus every sandbox's unforwarded residue, onto the "
             "workspace ledger — a reset drops the data, never the money.\n"
             "next: `python -m promptpotter new <name>` (from datasets/<name>/)."

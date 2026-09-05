@@ -1,0 +1,76 @@
+name: Terminal-Bench regex-log (single task)
+version: v0.0
+description: >-
+  ONE Terminal-Bench 2.0 task — `regex-log`, the id `harbor_tasks.yaml::tasks_include` names —
+  run as a containerized agent episode through Harbor. One cell is one whole episode: the agent
+  works in a container until it finishes or hits its turn cap, and the task's own verifier writes
+  the reward. What PromptPotter mutates is the Agent Skill injected into that container — the
+  same artifact class the skill-evolution literature evolves.
+
+  A one-cell panel is a PATH PROOF, not an instrument: nothing can be ranked against one cell and
+  no spread is readable from it. Widening the cut means a new dataset name, never an edit here —
+  `sample_id` is scoped by dataset name (`datasets/CLAUDE.md` § Re-cutting a dataset needs a NEW
+  name).
+backend_name: Harbor
+backend_type: harbor
+available_models:
+  - openai/gpt-oss-120b
+nodes:
+  agent:
+    type: generation
+    runtime: backend
+    description: >-
+      One Harbor trial. The rendered prompt becomes `SKILL.md` in the container; `terminus-2`
+      discovers it and reads it before acting. Everything else about the episode — instruction,
+      environment, verifier — belongs to the upstream task and is not ours to tune.
+    config:
+      # `provider` is separate from `model` by this repo's convention, and the connector composes
+      # the two into the single slug Harbor wants (its prefix IS the provider).
+      provider: openrouter
+      model: openai/gpt-oss-120b
+      temperature: 0.0
+      max_turns: 30
+    # DECLARED here rather than inherited, and it is load-bearing: a `remote_http` backend serves
+    # its own schema over `GET /pipeline`, so a termnorm dataset can leave this out. There is no
+    # server here to ask. Without `prompt_info` this node is not prompt-bearing, the candidate's
+    # rendered prompt is never written into its config, no SKILL.md is produced, and every
+    # variant scores identically as no-skill — a flat ruler that looks like "the prompt does not
+    # matter" and raises nothing.
+    prompt_info:
+      family: harbor_agent_skill
+      # None. The skill is standalone prose the agent reads; the task's own instruction arrives
+      # from Harbor, so there is no placeholder for us to substitute into.
+      template_variables: []
+      description: The Agent Skill injected into the trial container as SKILL.md
+    optimizer:
+      param_keys:
+        - persona
+        - task_intent
+        - problem_description
+        - instruction
+        - thinking_style
+        - answer_format
+        - temperature
+      # `max_turns` is deliberately NOT tunable, and stays pinned in `config` above. It is the one
+      # axis here that moves a cell's cost by an order of magnitude, so it wants a bounded range —
+      # and `param_allowed_values` is a string enum, which cannot express one for an integer. An
+      # unbounded integer axis would be a cost rail removed rather than a search axis added, and
+      # this campaign exists to prove the path, not to search turn budgets.
+      observation_name: agent
+      observation_mappings:
+        # The verifier's number, and the ONLY observation this node emits. The connector declares
+        # this key in `required_observation_keys`, so init RAISES if this mapping is missing
+        # rather than dropping the reward in silence and grading a measurement it never received.
+        #
+        # `is_llm` marks the mapping the node's LLM spend is attributed through — it is what makes
+        # `nodes.agent.config.model` REQUIRED (`pipeline_resolve.py`), so a measurement can never
+        # be attributed to whichever model happened to be configured. It rides the observation the
+        # backend actually emits — there is no ranking here to hang it on, and inventing one to
+        # carry it is the fabrication `connectors/CLAUDE.md` § The answer shape forbids.
+        - pipeline_key: env_reward
+          output_field: env_reward
+          is_llm: true
+      langfuse_type: generation
+pipelines:
+  default:
+    - agent

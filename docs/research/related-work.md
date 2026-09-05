@@ -32,12 +32,14 @@ The published numbers in the table above are not on equal footing. **OpenEvolve*
 
 Three systems in four months evolve a **harness** for a frozen model: SkillOpt (May), DarwinX (Jul), AutoDesign (Aug). Freeze the weights and evolve what wraps them is therefore an occupied thesis, not a differentiator — and DarwinX states the *single-lineage search is path-dependent* critique in its abstract — the argument this repo had been using as its own differentiator, retired from [`../../README.md`](../../README.md) for exactly that reason. Two consequences, opposite in sign:
 
-- **None is a runnable opponent here.** All three score on agent/tool environments — ALFWorld, SpreadsheetBench, Terminal-Bench, WebArena, PosterBench — which sit outside the connector boundary and PoBB's cost model, the rejection class [`benchmarks.md`](benchmarks.md) already applies. A head-to-head means building an agent harness first, not wiring a dataset. They contest the narrative, not the measurement.
+- **They score where we measure too.** All three run on agent/tool environments — ALFWorld, SpreadsheetBench, Terminal-Bench, WebArena, PosterBench — and so does PromptPotter: the `harbor` connector runs one containerized episode as a measured cell, and `datasets/harbor-tbench-regex-log/` is a Terminal-Bench 2.0 task riding it. What sits outside the model is PoBB's **cost** side, not its boundary ([`benchmarks.md`](benchmarks.md) rejects on that half alone): the budget gate polls at the sample edge, so a single episode is unbounded spend between polls. A head-to-head is a wiring job plus that ceiling — not a harness to build.
 - **The statistical layer is what none of them occupy.** DarwinX's preserve-and-extend contract is a deterministic admission gate; no system in this group runs sequential elimination, a cost-per-fitness model, or a subset-invariant ability scale. That, plus joint prompt + pipeline-parameter search, is where the distinguishing claim now has to sit.
 
-One capability they have and PromptPotter does not: DarwinX takes fitness from each benchmark's own verifier, so it needs no labelled rows — where a labelled dataset is a stated hard limitation of ours.
+DarwinX takes fitness from each benchmark's own verifier rather than labelled rows. So do `dspy`, L4's `compute_outer_proxies` and now `harbor` here — `Sample.ground_truth` is `None` where a verifier grades.
 
-Evolving an agent harness is a post-v1 target here → [`../specs/roadmap.md`](../specs/roadmap.md) § Evolving agent harnesses.
+**[Harbor](https://github.com/harbor-framework/harbor) (Laude Institute / Stanford, Apache-2.0) is infrastructure, not a rival.** It is the Terminal-Bench team's containerized agent-evaluation framework — `pytest`'s category, not DSPy's — supplying the sandbox, the per-task verifier, the reward channel and ~30 pluggable inference agents (`terminus-2`, `claude-code`, `codex`, `openclaw`, `hermes`, `goose`, …) behind one `BaseAgent` interface. Adopting it as a connector is why the row above changed sign, and it is the reason the harness is not a lock-in: swapping which agent is under test is a line in a dataset's `harbor_tasks.yaml`. Held in its own extra, out of `all` — it needs Python ≥3.12 and a container runtime.
+
+Evolving an agent harness → [`../specs/roadmap.md`](../specs/roadmap.md) § Evolving agent harnesses (connector SHIPPED; the per-cell spend ceiling is what remains).
 
 ### The umbrella ships as product
 

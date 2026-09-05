@@ -120,8 +120,8 @@ exposed to.
   at once, so a mid-chain stamp lets prefix-trust replay serve the ORIGIN's rows to a candidate that edits a
   later node. It is not a health signal and nothing may tally it — one panel counted it and the critique spent
   an arm fixing a stall that never happened.
-- **A HIT/MISS panel stays silent at L4** (`panels._miss_is_placeholder`). The outer `predicted` carries a
-  proxy suffix its `ground_truth` lacks, so no cell can ever be a hit; rendered as misses, the critique
+- **A HIT/MISS panel stays silent at L4** (`panels._no_labels`). The cell is verifier-graded, so
+  `Sample.ground_truth` is `None` and no cell can ever be a hit; rendered as misses, the critique
   diagnosed the artifact and steered the inner loop off its only objective. A prompt clause telling the model
   to ignore the panel is NOT the fix — one was already there, and round 1 ignored it.
 - **`L1Variant` is `extra="forbid"`.** A field a prompt set declares but the model lacks fails *every* outer

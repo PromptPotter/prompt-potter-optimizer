@@ -123,6 +123,14 @@ datasets/*/cache.json
 datasets/justlogic-d23/cache.json
 datasets/justlogic-d234/cache.json
 
+# The same split for a HARBOR cut, whose drawn rows are directories rather than a cache.json:
+# `scripts/build_sealqa_tasks.py` writes both from a pinned HF revision, so the script and the pin
+# are what travel. Here it is also a contamination guard — SealQA ships a per-row `canary` GUID so
+# leakage is detectable, and this repo is public, so committing 254 questions with their golds
+# would put the benchmark into whatever crawls us next.
+datasets/sealqa-longseal-*/tasks/
+datasets/sealqa-longseal-*/harbor_tasks.yaml
+
 # Recon-script raw data downloads (NaturalPlan GitHub JSON, etc.) — regenerable
 .cache/
 

@@ -14,6 +14,7 @@ A thin index over the per-layer `CLAUDE.md` tree for the `promptpotter/` Python 
 | `infrastructure/` | I/O contracts: persistence (`CycleEventLog`), projections (`LiveDashboardView` / `AuditTrailView` / `PoBBStreamView`), stores, LLM clients, backend wire, tracing. | [`infrastructure/CLAUDE.md`](infrastructure/CLAUDE.md) |
 | `presentation/` | Entry-point adapters: CLI, FastAPI, view formatters. Read-only over `application/`. | [`presentation/CLAUDE.md`](presentation/CLAUDE.md) |
 | `connectors/` | Backend-specific hook bundles: `termnorm`, `promptpotter` (self-recursion / L4). Adding a connector = one new file under this package. | [`connectors/CLAUDE.md`](connectors/CLAUDE.md) |
+| `judges/` | LLM-as-judge graders for SCORING — where no deterministic matcher can grade a cell. A judge is a measurement banked into the row, never a formula term, and is declared apart from every model the loop uses. | [`judges/CLAUDE.md`](judges/CLAUDE.md) |
 
 ## Where L4 lives
 

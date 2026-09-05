@@ -1,0 +1,25 @@
+campaign_config:
+  dataset_name: harbor-tbench-regex-log
+  exclude_nodes: []
+  scoring:
+    # The task's own verifier IS the score. Clamped because the formula's range is a contract the
+    # δ ruler and PoBB both read, and a reward is upstream's number — these ten write 0 or 1, but
+    # Harbor's channel permits any float and a task that returned 3.0 would silently widen it.
+    per_sample: max(0.0, min(1.0, env_reward))
+    # NO `per_cell` cost term, deliberately. Its siblings price a cell against a MEASURED anchor
+    # (justlogic's 1546.0 tokens, pp-self's 500.0s), and no episode of this panel has been
+    # measured yet — an invented anchor would grade every arm against a number nobody read, and
+    # would be indistinguishable from a measured one on the round file. Add it once a cost
+    # distribution exists, with the figures and their source written here.
+  optimization:
+    # Deliberately the smallest geometry that can produce a round at all: this campaign's job is
+    # to show the Harbor path carries a real measurement end to end, not to find a better prompt.
+    # Widen it after a first run has priced a cell.
+    max_rounds: 2
+    n_variants: 2
+    l1_patience: 3
+    degradation_threshold: 0.4
+    # A RAIL, not an estimate. Nothing here predicts what an episode costs — the point of the
+    # first run is to find that out — and this ceiling exists so finding out cannot cost more
+    # than the operator agreed to. Raise it with `set-budget` once the ledger says what a cell is.
+    spend_budget_usd: 3.00

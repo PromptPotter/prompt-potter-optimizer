@@ -44,7 +44,13 @@ from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS, PARENT_LEVEL_SE_KEY
 from promptpotter.domain.results import CritiqueReadout, EliminationGate, ScoredCandidate
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.ruler import ThetaCaveat, theta_caveat
-from promptpotter.domain.scoring import QueryMeasurement, enumerable_truth_labels, is_hit
+from promptpotter.domain.scoring import (
+    QueryMeasurement,
+    all_verifier_graded,
+    enumerable_truth_labels,
+    is_hit,
+    is_verifier_graded,
+)
 from promptpotter.shared.composite import render_composite_fitness_block
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.statistics import min_detectable_effect
@@ -138,13 +144,8 @@ def _r_diagnostics(b: InjectionBundle) -> list[Item]:
     # covers them and the numeric parts after them need none.
     parts: list[str] = []
 
-    # Same recursion split `_misses` applies, on the typed per-sample view: one level up a MISS
-    # is an artifact of scoring a graded proxy against a placeholder label, and rank /
-    # gt_in_source are empty there too, so every row is noise wearing a diagnosis.
     miss_samples = (
-        []
-        if _miss_is_placeholder(b)
-        else [s for s in d.samples if not is_hit(s.fitness)][:SAMPLE_RENDER_CAP]
+        [] if _no_labels(b) else [s for s in d.samples if not is_hit(s.fitness)][:SAMPLE_RENDER_CAP]
     )
     if miss_samples:
         s_lines = [f"SAMPLE DIAGNOSTICS ({len(miss_samples)}/{len(d.samples)} misses shown):"]
@@ -347,8 +348,12 @@ def _edges_at_line(text: str, cap: int, head_frac: float = 0.55) -> str:
     citable=True,
 )
 def _r_sample_transcripts(b: InjectionBundle) -> list[Item]:
-    """Silent on the recursion — the mirror of ``inner_narratives``, which is silent off it."""
-    if _miss_is_placeholder(b):
+    """Silent where ``inner_narratives`` OWNS these rows — the mirror of that panel, which is
+    silent where this one has them. The guard asks who owns the row, never whether it carries a
+    label: those two questions agreed only while L4 was the sole labelless backend, and a
+    verifier-graded cell one level DOWN answers them differently — no label, no narrative, and so
+    silence on both, which is a distiller node handed nothing but two scalars."""
+    if _inner_narrated(b):
         return []
     rows = _misses(b)
     if not rows:
@@ -387,11 +392,39 @@ def _r_sample_transcripts(b: InjectionBundle) -> list[Item]:
             parts.append(
                 f"MODEL REASONING:\n{_edges_at_line(str(trace), TRANSCRIPT_REASONING_CAP)}"
             )
-        predicted = _head_at_line(str(r.get("predicted") or ""), TRANSCRIPT_PREDICTED_CAP)
-        gt = str(r.get("ground_truth") or "")[:60]
-        parts.append(f"PREDICTED: {predicted}\nGROUND TRUTH: {gt}")
+        if is_verifier_graded(r.get("ground_truth")):
+            # No label to contrast against, so a PREDICTED/GROUND TRUTH pair would print both
+            # halves of a comparison nobody made. The verifier's number IS the outcome.
+            parts.append(f"VERIFIER SCORE: {r.get('fitness')}")
+        else:
+            predicted = _head_at_line(str(r.get("predicted") or ""), TRANSCRIPT_PREDICTED_CAP)
+            gt = str(r.get("ground_truth") or "")[:60]
+            parts.append(f"PREDICTED: {predicted}\nGROUND TRUTH: {gt}")
+        if verdict := _judge_verdict(r):
+            # WHY the grader said no, where a judge graded this cell. The score alone says a
+            # miss happened; "wrong entity" and "right but hedged" are different repairs, and
+            # this is the only channel carrying that distinction to the node that must fix it.
+            parts.append(verdict)
         sections.append(Item("\n".join(parts), trusted=False))
     return sections
+
+
+def _judge_verdict(row: dict[str, Any]) -> str:
+    """The judge's own reading of this cell, or ``""`` where none graded it.
+
+    Derived from the banked keys rather than from a campaign's judge config: this renderer reads
+    rows off a bundle and has no session, and a row measured before the judge was declared
+    legitimately carries none. Self-suppressing, like every panel here."""
+    pd = row.get("pipeline_data") or {}
+    # Keyed off `_why`, not `_label`: a grading that FAILED carries a reason and no verdict, and
+    # that is the case a reader most needs to see — a cell with no judge term is otherwise
+    # indistinguishable from one the judge was never asked about.
+    names = [k.removesuffix("_why") for k in pd if k.endswith("_why") and pd[k]]
+    if not names:
+        return ""
+    name = names[0]
+    label = str(pd.get(f"{name}_label") or "NOT GRADED")
+    return f"JUDGE ({name}): {label} — {str(pd[f'{name}_why'])[:200]}"
 
 
 # A cell is called WORSE only when its paired difference clears this many of its own SEs. Two —
@@ -532,12 +565,14 @@ def _misses(b: InjectionBundle) -> list[dict[str, Any]]:
     ]
 
 
-def _miss_is_placeholder(b: InjectionBundle) -> bool:
-    """Whether a MISS here means anything. One level up the outer "answer" is the seed's own identity
-    token plus a proxy suffix, so ``predicted`` can never equal ``ground_truth`` and EVERY sample reads
-    as a miss — a split that partitions nothing. Panels contrasting misses against hits ask this and
-    stay silent; ``inner_narratives`` renders the same rows as paired lifts, which is what they are."""
-    return bool(_inner_narrated(b))
+def _no_labels(b: InjectionBundle) -> bool:
+    """Whether a MISS on THIS bundle's rows means anything — ``all_verifier_graded`` asked of them.
+    Defined in ``domain/scoring.py``, which owns why; named here because two panels ask it and a
+    contrast panel that stayed loud on one while the other went silent is how they came apart.
+
+    Panels contrasting misses against hits go silent; ``inner_narratives`` renders the same rows
+    as paired lifts, which is what they are."""
+    return all_verifier_graded(r.get("ground_truth") for r in b.trajectory_results)
 
 
 def _errored(b: InjectionBundle) -> list[dict[str, Any]]:
@@ -628,7 +663,7 @@ def _miss_difficulty(b: InjectionBundle, row: dict[str, Any]) -> float | None:
 def _r_failing_samples(b: InjectionBundle) -> list[Item]:
     """Ordered easiest-first — the one thing here L1 cannot compute for itself. A cold ruler renders
     the misses unordered rather than quoting a difficulty that would move next round."""
-    if _miss_is_placeholder(b):
+    if _no_labels(b):
         return []
     rows = _misses(b)
     errored = _errored(b)

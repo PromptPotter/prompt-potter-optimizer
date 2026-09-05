@@ -92,7 +92,7 @@ export function hasLiveProducer(runPhase: string | null | undefined): boolean {
 // What the play/pause control may DO from here. Total, and `none` is a real
 // answer twice over: at the gate the decision lives in the chat, and in check-in
 // the ingest panel owns Start. An absent phase is also `none` — a warming cycle
-// has no phase yet, and offering "Start run" there fired a 409 machine_busy.
+// has no phase yet, so a Start there duplicates the launch already in flight.
 export type RunAction = "pause" | "resume" | "start" | "none";
 
 const PHASE_ACTION: Record<RunPhase, RunAction> = {

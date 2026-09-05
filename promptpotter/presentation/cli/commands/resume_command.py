@@ -8,7 +8,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.initialization.wiring import backend_type_of_dataset
-from promptpotter.application.jobs.launcher.mint_and_start import run_preflight
+from promptpotter.application.jobs.launcher.admission import probe_backend
 from promptpotter.application.jobs.mint import resolve_cycle_plan
 from promptpotter.connectors.protocol import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
@@ -425,13 +425,17 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
     # rounds) isn't resumable: there's nothing to run until it's Started. Guard
     # cheaply before init_services so the operator gets a clear next step instead of
     # a confusing dataset-not-found deep in the loop.
+    from promptpotter.application.datasets.dataset_replace import recover_pending_replacements
     from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
     from promptpotter.infrastructure.runtime_flags import is_checkin
     from promptpotter.infrastructure.store.stores import build_stores
 
-    _campaigns = build_stores(
-        identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT
-    ).campaigns
+    _stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
+    # The same guard both web launchers open with: a crashed version-and-repoint leaves the
+    # campaign pointing at a name whose data has moved to `-vN`, so heal before resolving the pin.
+    # Cheap no-op when nothing is pending — and the terminal was the one door that skipped it.
+    recover_pending_replacements(stores=_stores)
+    _campaigns = _stores.campaigns
     _campaign = _campaigns.load_campaign(ctx.campaign_id)
     if _campaign is not None and is_checkin(_campaigns.cycle_dir(_campaign.root_hop)):
         raise SystemExit(
@@ -445,7 +449,7 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
     session = await init_services_cli(**ctx.init_params, identity=identity_from_args(args))
 
     try:
-        await run_preflight(
+        await probe_backend(
             backend_type_of_dataset(session.store, ctx.init_params.get("dataset_name") or ""),
             ctx.backend_url,
         )

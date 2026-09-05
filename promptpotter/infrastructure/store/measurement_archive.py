@@ -24,6 +24,7 @@ from promptpotter.infrastructure.store.io import (
     write_jsonl,
     write_text,
 )
+from promptpotter.infrastructure.store.layout import MEASUREMENTS_DIR
 from promptpotter.infrastructure.store.read_model import (
     append_row,
     compact,
@@ -141,7 +142,7 @@ class MeasurementArchive:
         return self._base_dir
 
     def _store_dir(self) -> Path:
-        return self._base_dir / "measurements"
+        return self._base_dir / MEASUREMENTS_DIR
 
     def _index_path(self) -> Path:
         return self._store_dir() / "index.jsonl"

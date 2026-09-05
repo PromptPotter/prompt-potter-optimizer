@@ -9,9 +9,9 @@ and pytest all stay green while the real read path breaks. That is exactly the c
 Worse than drift, a fake can assert a shape the model cannot produce. The pair these
 replace stamped ``l1_n_no_op`` / ``l1_n_duplicate`` directly onto the round — but those
 are ``@computed_field`` properties DERIVED from ``candidate_scores`` (a collapsed variant
-rides that list with ``invalid=True`` and an ``INVARIANT_REASONS`` failure), which
-``test_integrity.py::test_collapse_counts_derive_from_candidate_scores_and_cannot_be_stamped``
-pins in the other direction. Building the real model is what keeps the two files agreeing.
+rides that list with ``invalid=True`` and an ``INVARIANT_REASONS`` failure), so a stamped
+value cannot win no matter what a fake asserts — ``@computed_field`` plus ``extra="ignore"``
+already refuse it. Building the real model is what carries that refusal into every test.
 
 Only what a test actually bends is a parameter; everything else is a plausible default.
 """

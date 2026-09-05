@@ -154,10 +154,16 @@ async def periodic_sweep(
     projects_root: Path,
     *,
     interval_s: float = DEAD_AFTER_S,
+    dead_after_s: float = DEAD_AFTER_S,
     initial_delay_s: float = 120.0,
 ) -> None:
     """Background sweep for the server's lifetime, so a CLI-launched death is reaped mid-uptime.
-    Two guards against a false reap across a MACHINE sleep: the boot delay, and a skipped tick."""
+    Two guards against a false reap across a MACHINE sleep: the boot delay, and a skipped tick.
+
+    **How OFTEN it looks and how STALE counts as dead are two facts.** They share a default and
+    used to share the parameter, so shortening the interval to notice a death sooner would also
+    have declared any cycle quiet for that long dead — a false reap of a live run, bought by an
+    edit that looks like pure scheduling."""
     sleep_for = initial_delay_s
     while True:
         overshoot = await sleep_measuring_suspend(sleep_for)
@@ -171,7 +177,7 @@ async def periodic_sweep(
             sleep_for = initial_delay_s
             continue
         try:
-            await asyncio.to_thread(sweep_dead_cycles, projects_root, dead_after_s=interval_s)
+            await asyncio.to_thread(sweep_dead_cycles, projects_root, dead_after_s=dead_after_s)
             # Reclamation rides the same tick but stays a separate call: one judges LIVENESS
             # (is this cycle's producer gone?), the other judges REACHABILITY (does this
             # sandbox's owner still exist?). Same schedule, different question — folding them
@@ -186,4 +192,9 @@ async def periodic_sweep(
         sleep_for = interval_s
 
 
-__all__ = ["periodic_sweep", "reap_cycle_by_id", "reclaim_orphan_sandboxes", "sweep_dead_cycles"]
+__all__ = [
+    "periodic_sweep",
+    "reap_cycle_by_id",
+    "reclaim_orphan_sandboxes",
+    "sweep_dead_cycles",
+]

@@ -19,7 +19,21 @@ class Sample(StrictModel):
     # Primary identity + inputs — owned directly.
     id: int
     query: str
-    ground_truth: str
+    # ``None`` DECLARES a verifier-graded cell: this backend answers with a reward, not a label,
+    # so there is nothing for ``predicted`` to match. A placeholder string instead of this reads
+    # as a MISS on every row, and three sites downstream then have to un-believe it.
+    ground_truth: str | None
+
+    # The bare question, where ``query`` also carries CONTEXT the model must read and a grader
+    # must not. ``None`` on every ordinary dataset, where the two are the same string.
+    #
+    # It exists because a judge is handed the measured row, not the sample, and reads ``query`` as
+    # "the question". On a long-context bank that is the question plus its whole document
+    # haystack, so each of N judges re-sends the haystack — LongSeal's median cell is ~40k
+    # characters and its arm plus three graders paid that four times over for evidence none of
+    # them reads. It is NOT a second copy of the question: ``query`` stays the model's input
+    # verbatim, and this is the strictly smaller thing a grader is entitled to see.
+    question: str | None = None
 
     # Cross-campaign metadata — accumulates via SampleIndex.ingest_run.
     run_ids: list[str] = Field(default_factory=list)

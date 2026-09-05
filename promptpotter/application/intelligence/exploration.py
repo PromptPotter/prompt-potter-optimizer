@@ -48,15 +48,21 @@ __all__ = [
     "graduate_ruler_model",
     "observations_from_results",
     "parent_level_trajectory",
-    "ruler_expected_accuracy",
     "select_round_subset",
     "theta_lift_over_parent",
 ]
 
 
 class Observation(NamedTuple):
-    """``response`` is the sample's GRADED per-sample fitness ∈ [0,1], never a binarized ``hit`` — the
-    cross-entropy MAP is valid for any y ∈ [0,1], so a graded backend keeps its gradient."""
+    """One (candidate, CELL) response — the atom of every fit below.
+
+    ``response`` is the sample's GRADED per-sample fitness ∈ [0,1], never a binarized ``hit`` — the
+    cross-entropy MAP is valid for any y ∈ [0,1], so a graded backend keeps its gradient. A cell
+    graded in STEPS composes those steps into that one number through the scoring formula; the
+    steps never arrive here as separate rows (:func:`dedup_observations`).
+
+    ``sample_id`` is an ``int`` and that is load-bearing rather than incidental: it is a CELL id,
+    so a step index cannot be spelled into it without changing this type."""
 
     candidate_id: str
     sample_id: int
@@ -80,17 +86,6 @@ def graded_response(result: Mapping[str, Any]) -> float:
             "campaign's CellScorer."
         )
     return min(max(float(result["objective"] or 0.0), 0.0), 1.0)
-
-
-def ruler_expected_accuracy(theta: float | None, ruler: DeltaRuler | None) -> float | None:
-    """Ability re-projected onto the FIXED ruler — the subset-invariant peer of a round's raw accuracy.
-    ``None`` at cold start (no ability or ruler), where callers fall back to raw accuracy."""
-    if theta is None or ruler is None or not ruler.delta:
-        return None
-    etas = np.array(
-        [a * (theta - d) for d, a in (ruler_entry(v) for v in ruler.entries().values())]
-    )
-    return float(np.mean(1.0 / (1.0 + np.exp(-np.clip(etas, -50, 50)))))
 
 
 def parent_level_trajectory(
@@ -705,7 +700,15 @@ def build_observations(rounds: list[RoundResult]) -> list[Observation]:
 
 def dedup_observations(*groups: Sequence[Observation]) -> list[Observation]:
     """A cell measured twice is one piece of evidence, not two — the second is almost always a cache
-    replay, so LAST wins and callers pass groups oldest-first."""
+    replay, so LAST wins and callers pass groups oldest-first.
+
+    **This is also where the step/item line is held — owned by**
+    ``docs/methods/verdict-resolution.md`` § Phase 3: the cell stays the atom, and per-step terms
+    reach θ only through the composite.
+
+    Collapsing rather than raising is deliberate: at this seam a replay and a step-split are
+    indistinguishable, so the fit cannot tell them apart and must not try. What keeps the invariant
+    real is that EVERY path into a fit passes through here."""
     cells: dict[tuple[str, int], Observation] = {}
     for group in groups:
         for o in group:
@@ -722,8 +725,15 @@ def candidate_abilities(
     scale; holding δ at the bank is what makes θ cross-round and cross-subset comparable.
 
     ``parent_results`` is the parent RE-SCORED on this round's panel, never C0's banked rows —
-    an arm is crowned on a lift over what it must actually beat."""
-    obs = observations_from_results({**results_by_id, PARENT_ABILITY_ID: parent_results})
+    an arm is crowned on a lift over what it must actually beat.
+
+    DEDUPED, and this is the fit that most needs it: ``observations_from_results`` emits one
+    observation per ROW, so a cell re-measured within a round (the stale-data ladder re-enters
+    ``measure_sample``) would otherwise reach the θ that decides the election as two independent
+    draws — and these are the SEs PoBB cuts on."""
+    obs = dedup_observations(
+        observations_from_results({**results_by_id, PARENT_ABILITY_ID: parent_results})
+    )
     fit = fit_theta_given_delta(
         obs,
         ruler.entries() if ruler is not None else None,

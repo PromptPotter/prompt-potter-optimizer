@@ -92,6 +92,24 @@ def session_dir_for(tenant_root: WorkspaceDir, session_id: str) -> Path:
     return tenant_root / "sessions" / session_id
 
 
+# -- the PAID content-addressed caches ----------------------------------------
+#
+# Keyed by CONTENT, so they outlive the campaigns that filled them and an L4 inner sandbox shares
+# them rather than isolating them (``stores.py::build_stores`` roots all three on ``shared_root``).
+# The names live here for the same reason every other workspace directory literal does — but the
+# TUPLE is what earns its place: three surfaces have to agree on this set and each authored its
+# own copy of it, so a cache added to one and not the others is destroyed by ``reset`` or misfiled
+# as ``other`` in the storage report. Both failures are silent, and one of them costs money.
+MEASUREMENTS_DIR = "measurements"
+OPTIMIZER_REUSE_DIR = "optimizer_reuse"
+JUDGE_REUSE_DIR = "judge_reuse"
+
+SHARED_CACHE_DIRS: tuple[str, ...] = (MEASUREMENTS_DIR, OPTIMIZER_REUSE_DIR, JUDGE_REUSE_DIR)
+"""Every cache holding real LLM spend, in one place. Consumers: ``cli/commands/reset.py``
+(preserves them), ``api/routers/campaigns/storage.py`` (counts them as shared, and skips them when
+summing the residual)."""
+
+
 # -- L4 inner sandboxes -------------------------------------------------------
 #
 # The natural home for a cycle's inner campaigns is inside that cycle's own directory,
@@ -339,6 +357,10 @@ def course_validator_ns(cycle_dir: Path) -> int | None:
 
 
 __all__ = [
+    "JUDGE_REUSE_DIR",
+    "MEASUREMENTS_DIR",
+    "OPTIMIZER_REUSE_DIR",
+    "SHARED_CACHE_DIRS",
     "CycleLayout",
     "FileKind",
     "campaign_root_dir_for",

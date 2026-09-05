@@ -1,0 +1,52 @@
+# The panel: ONE task from Terminal-Bench 2.0's published sample.
+#
+# THE TASK LIST IS NOT COMMITTED HERE, deliberately. Harbor's registry already publishes it and
+# pins every task to a commit; copying those rows into this repo would make us a second owner of
+# a list that has one, and our copy would drift the moment upstream repinned — silently, since
+# nothing compares them. What this file commits is the NAME, the VERSION and which tasks we take;
+# the connector resolves the rest (`connectors/harbor.py::_registry_tasks`) and Harbor fetches
+# and caches the task bytes, the same way a benchmark bank is fetched rather than shipped
+# (`datasets/CLAUDE.md` § cache.json is the item bank).
+#
+# The version is REQUIRED and is the pin that matters: resolving "latest" would put a moving
+# roster behind a fixed dataset name. Upstream moving a commit under this version is not silent
+# either — the resolved pins are folded into the instrument fingerprint, so it lands as a new
+# measurement identity instead of stale rows re-served against bytes nobody read.
+harbor_dataset: terminal-bench-sample
+harbor_dataset_version: "2.0"
+
+# ONE task, and one of the two in the sample that is pure text work — the rest build Cython
+# extensions, boot qemu or compile SQLite with coverage, which is minutes of container build
+# before a single token is spent. This is the walking skeleton: it answers whether PromptPotter
+# can optimize an agent through Harbor at all, on the cheapest episode that is still a real
+# Terminal-Bench task.
+#
+# WIDENING THIS LIST IS A NEW DATASET, never an edit here. A `sample_id` is scoped by dataset
+# name and the row text is not in the key, so adding tasks under this name would serve the old
+# measurements for the new panel (`datasets/CLAUDE.md` § Re-cutting a dataset needs a NEW name).
+tasks_include:
+  - regex-log
+
+# Which key of `VerifierResult.rewards` the campaign formula grades. Harbor parses a task's bare
+# `reward.txt` into `{"reward": x}`, which is what these write.
+reward_key: reward
+
+# The inference agent under test. `terminus-2` is Harbor's own reference terminal agent: it
+# reaches the model through litellm (no vendored CLI to install), reports ATIF trajectories,
+# and — the reason it is the pick — it DISCOVERS injected Agent Skills, which is the channel the
+# candidate prompt rides. Swapping this to `claude-code`, `openclaw`, `hermes` or `codex` is a
+# one-line change here; that portability is why the harness sits behind Harbor rather than being
+# wired to one vendor. The names are HYPHENATED — `AgentFactory` registers `terminus-2`, and the
+# underscored spelling is the enum member, which raises only once a trial is built.
+#
+# NOTE: no model here. `pipeline.yaml::nodes.agent.config` owns what this dataset measures on
+# (`datasets/CLAUDE.md`), and a second spelling would be a second owner of the same fact.
+agent:
+  name: terminus-2
+  environment: docker
+  kwargs:
+    # A cost rail first and a search axis second. An agent that never stops is the one way a
+    # single cell can outspend a whole round, and the campaign budget gate cannot trip INSIDE a
+    # cell today (see `docs/specs/roadmap.md`, the per-cell ceiling item).
+    max_turns: 30
+    temperature: 0.0

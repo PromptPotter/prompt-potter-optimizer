@@ -6,8 +6,9 @@
 ``api-openapi.yaml`` is hand-written and **schema-first**: a command kind is
 declared there *before* its handler lands, so it legitimately describes operations
 that do not exist yet (``x-status: declared-not-wired``). It is the design contract
-for the inbound command surface, and its declared/wired partition is pinned against
-the code by ``tests/test_integrity.py::test_declared_command_kinds_match_the_wired_set``.
+for the inbound command surface, and its declared/wired partition is read against
+``commands.py::_WIRED_KINDS`` at commit time — a kind declared live whose POST 404s
+fails on its first call.
 
 This file is its opposite number: a pure **description of what the running app
 actually serves**, generated, never hand-edited. It exists because the hand-written

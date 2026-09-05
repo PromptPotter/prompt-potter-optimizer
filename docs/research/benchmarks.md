@@ -84,8 +84,12 @@ upward before trusting it.
 **Rejected without trial**, so they are not re-investigated: GPQA · MMLU-Pro · MATH-500 · HLE ·
 ZebraLogic · ARC-AGI-2 · FrontierMath · SimpleBench · LiveBench · AGIEval-EN · DROP · ReClor ·
 StrategyQA · ANLI R3 · LogiQA 2.0 · HumanEval/CRUX · IFEval · τ-bench · AA-LCR · GDPval-AA. The
-recurring reasons are *above the bar*, *below the floor*, *unstable test set*, and *outside the
-connector boundary or PoBB's cost model* (LLM-judge or tool-call dependent).
+recurring reasons are *above the bar*, *below the floor*, *unstable test set*, and *outside PoBB's
+cost model* (tool-call dependent — the budget gate polls at the sample edge, so one
+agent episode is unbounded spend between polls). Neither *boundary* is a reason any more: a
+containerized agent episode is a measured cell through `connectors/harbor.py`, and an LLM-judge
+grade is a banked per-sample observation through `promptpotter/judges/` — so a row rejected for
+either reads on the revised criterion 5, not on this list.
 
 ## Protocol
 

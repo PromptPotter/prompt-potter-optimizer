@@ -131,7 +131,7 @@ describe("criticalAlert", () => {
     expect(out?.title).toBe("Server unreachable — retrying");
   });
 
-  it("flags machine-busy (another user running) as critical", () => {
+  it("flags a full machine (no free slot) as a wait, not a refusal", () => {
     expect(
       criticalAlert({
         ...base,
@@ -140,9 +140,24 @@ describe("criticalAlert", () => {
         machineBusySince: "2026-06-08T10:00:00+00:00",
       }),
     ).toEqual({
-      severity: "critical",
-      title: "Machine busy — u_bob is running a campaign",
-      detail: "the machine processes one at a time · since 2026-06-08T10:00:00+00:00",
+      severity: "warn",
+      title: "Machine full — u_bob is running",
+      detail: "a launch will queue · oldest run since 2026-06-08T10:00:00+00:00",
+    });
+  });
+
+  it("a launch of the caller's own in the queue outranks the full machine", () => {
+    expect(
+      criticalAlert({
+        ...base,
+        machineBusy: true,
+        machineBusyHolder: "u_bob",
+        queuePosition: 2,
+      }),
+    ).toEqual({
+      severity: "warn",
+      title: "Queued — position 2",
+      detail: "it starts by itself when a slot frees",
     });
   });
 

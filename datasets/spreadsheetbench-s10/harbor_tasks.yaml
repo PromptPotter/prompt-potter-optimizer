@@ -1,0 +1,57 @@
+# The panel: ten SpreadsheetBench tasks, run as containerized agent episodes through Harbor.
+#
+# THE TASK LIST IS NOT COMMITTED HERE, deliberately — same argument as every harbor dataset.
+# Harbor's registry publishes the roster and pins every task to a commit; a copy here would be a
+# second owner of a list that has one, drifting silently the moment upstream repinned. What this
+# file commits is the NAME, the VERSION and which tasks we take. The version is the pin that
+# matters: "latest" would put a moving roster behind a fixed dataset name, and upstream moving a
+# commit under this version lands as a NEW measurement identity rather than as stale rows
+# re-served, because the resolved pins are folded into the instrument fingerprint
+# (`connectors/harbor.py::_identity_config`).
+harbor_dataset: spreadsheetbench-verified
+harbor_dataset_version: "1.0"
+
+# TEN of the published four hundred, and the count is in the DATASET NAME because it is part of
+# what was measured: a `sample_id` is scoped by dataset name and the row text is not in the key,
+# so scoring a wider panel under this name would serve these ten rows for tasks they never ran
+# (`datasets/CLAUDE.md` § Re-cutting a dataset needs a NEW name). Widening is `spreadsheetbench-s50`,
+# never an edit here.
+#
+# The first ten of the roster in published order. Arbitrary, and said out loud rather than
+# dressed up as a sample: the order is upstream's, we did not draw it, and ten cells put ~0.16 SE
+# on a proportion — enough to see whether this model lands mid-range on the benchmark, nowhere
+# near enough to report a score. This cut exists to answer whether the instrument can separate
+# arms at all before a campaign is spent finding out.
+tasks_include:
+  - "10452"
+  - "105-24"
+  - "10747"
+  - "108-24"
+  - "109-21"
+  - "11276"
+  - "118-50"
+  - "11842"
+  - "120-24"
+  - "12307"
+
+# Which key of `VerifierResult.rewards` the campaign formula grades. Harbor parses a task's bare
+# `reward.txt` into `{"reward": x}`, which is what these write.
+reward_key: reward
+
+# The inference agent under test. `terminus-2` is Harbor's own reference terminal agent: it
+# reaches the model through litellm, and — the reason it is the pick — it DISCOVERS injected
+# Agent Skills, which is the channel the candidate prompt rides. The names are HYPHENATED;
+# the underscored spelling is the enum member and raises only once a trial is built.
+#
+# NOTE: no model here. `pipeline.yaml::nodes.agent.config` owns what this dataset measures on
+# (`datasets/CLAUDE.md`), and a second spelling would be a second owner of the same fact.
+agent:
+  name: terminus-2
+  environment: docker
+  kwargs:
+    # A cost rail first and a search axis second — an agent that never stops is the one way a
+    # single cell can outspend a whole round, and the budget gate cannot trip INSIDE a cell.
+    # Measured: the first cell of this panel finished on its own at 9 turns, so 20 is headroom
+    # rather than a target.
+    max_turns: 20
+    temperature: 0.0

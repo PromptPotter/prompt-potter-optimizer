@@ -14,6 +14,10 @@ from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.results import HardSampleOrder, HeadlineMetric
 from promptpotter.domain.strict_model import StrictModel
 
+# From the LEAF, never `promptpotter.judges`: importing the package would pull the registry (and
+# every built-in rubric with it) into a module whose whole point is to import nothing heavy.
+from promptpotter.judges.protocol import JudgeSpec
+
 if TYPE_CHECKING:
     from promptpotter.domain.run_records import CycleSeed
 
@@ -495,6 +499,23 @@ class CampaignConfig(StrictModel):
         "non-empty set is the operator explicitly sanctioning those models.",
     )
     scoring: Annotated[str | dict[str, str] | None, Knob(Scope.DATA, Estimand.GATE)] = Field(None)
+    judges: Annotated[dict[str, JudgeSpec], Knob(Scope.DATA, Estimand.GATE)] = Field(
+        default_factory=dict,
+        description="LLM-as-judge graders for datasets whose answer is free text, where no "
+        "deterministic matcher can grade a cell. Each value names a registered judge "
+        "(`promptpotter.judges`) and the models to run it on; its verdict is banked as a "
+        "per-sample observation the `scoring` formula reads. "
+        "**The KEY is the term that formula reads, not the judge's name** — so one cell can "
+        "carry several graded terms, which is what a multi-step schema (retrieve -> ground -> "
+        "answer) is, and two terms may run the same rubric on different models without one "
+        "verdict landing on top of the other. Declaration order is the step order. "
+        "`Scope.DATA` because swapping a judge invalidates every verdict taken under the "
+        "old one, so a resume must run divergence detection rather than carry them forward. "
+        "**Their models are declared here and inherited from nowhere** — not from "
+        "`allowed_models`, not from the pipeline's node config, not from the optimizer's own "
+        "LLMs. A judge is a ruler, and a ruler that moved with whatever the search was last "
+        "steered to would not be one.",
+    )
     headline_metric: Annotated[HeadlineMetric, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
         "accuracy",
         description="Which fitness number headlines the operator's text surfaces "

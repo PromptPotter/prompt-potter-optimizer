@@ -49,8 +49,9 @@ def fingerprinted_modules() -> tuple[ModuleType, ...]:
     prompt receives live there rather than in the renderer that spends them, ``compose`` because
     it decides which of those panels a prompt receives AT ALL, and ``facade`` because it picks the
     allowance and derives the mandatory/exempt sets those two are handed. A module that shapes the
-    prompt and is not hashed here pools corpora the fingerprint exists to keep apart, which is what
-    ``tests/test_integrity.py`` pins this roster against.
+    prompt and is not hashed here pools corpora the fingerprint exists to keep apart — which is why
+    the renderer half is WALKED rather than listed, and why what a move costs is counted at the mint
+    (``jobs/mint.py::_warn_on_novel_instrument``) rather than pinned as a name census.
 
     ``domain.ruler`` because ``theta_caveat`` and the two collapse thresholds decide whether the
     ``confounds`` panel says a round's θ is ability at all — a verdict the served reading and the

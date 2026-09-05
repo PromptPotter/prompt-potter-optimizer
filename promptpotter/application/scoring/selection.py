@@ -123,8 +123,16 @@ def matched_parent_lift(
 
 
 def parent_cells(parent_results: list[QueryMeasurement]) -> list[dict[str, Any]]:
-    """The parent panel an election ranked against, projected to the THREE fields
-    ``elect_round_winner`` reads off it: the cell, its grade, and whether it errored.
+    """The parent panel an election ranked against, projected to the fields
+    ``elect_round_winner`` reads off it: the cell, whether it errored, and its grade — which is
+    ``objective``, not ``fitness``.
+
+    **Both grades, and the pair is not redundancy.** A round is won on θ, which
+    ``candidate_abilities`` fits through ``exploration.py::graded_response`` — that reader takes
+    ``objective``, RAISES on its absence, and is the one place a cost or latency term reaches the
+    election at all; ``fitness`` is what the paired lift beside it reads. ``objective`` is carried
+    only where the row has it, so a genuinely ungraded cell still raises rather than reading as a
+    miss.
 
     Recorded beside the decision because nothing else on the round document carries it — on a WON
     round ``RoundResult.results`` holds the winner's rows, not the parent's — so a replayer had to
@@ -134,6 +142,7 @@ def parent_cells(parent_results: list[QueryMeasurement]) -> list[dict[str, Any]]
             "sample_id": sid,
             "fitness": r.get("fitness"),
             "error_category": r.get("error_category"),
+            **({"objective": r["objective"]} if "objective" in r else {}),
         }
         for r in parent_results
         if (sid := r.get("sample_id")) is not None

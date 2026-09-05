@@ -4,7 +4,7 @@
 >
 > **Live now:** deployed at `https://app.promptpotter.com` (Cloudflare Tunnel + systemd, OIDC — see [`deploy-linux/`](../../deploy-linux/README.md)). **Open signup**: completing OIDC grants access, bounded by a per-account lifetime spend ceiling rather than an approval queue, on **one shared LLM key** from `.env` — so the sequence below is "harden a thing already serving users," not "prep before launch."
 >
-> **Three ways to run it (who operates it).** **(1) We run it** — the hosted beta above, allowlist-gated on one shared key; limited free (10 campaigns · 20 rounds each), then BYO key (the per-user coupon → BYO path is Lane A2 below, spec-only today). **(2) You run it** — local, Claude-operated via `/potter-run` on your own keys, unlimited, full source ([`docs/manual/02-install.md`](../manual/02-install.md)). **(3) Your team runs it** — the *same* self-hosted stack as the beta ([`deploy-linux/`](../../deploy-linux/README.md): Cloudflare Tunnel + OIDC allowlist), multi-user + whitelabel, yours to own (renaming it: [`whitelabel.md`](../developer/whitelabel.md)). **The developers and operator run tier 3** (self-hosted team-online); tiers 1 and 3 are one codebase + `deploy-linux/` stack, differentiated by who owns the box and whitelabel, not a fork. (Concurrent multi-user serving is `capacity=1`/sequential today — gated below.)
+> **Three ways to run it (who operates it).** **(1) We run it** — the hosted beta above, allowlist-gated on one shared key; limited free (10 campaigns · 20 rounds each), then BYO key (the per-user coupon → BYO path is Lane A2 below, spec-only today). **(2) You run it** — local, Claude-operated via `/potter-run` on your own keys, unlimited, full source ([`docs/manual/02-install.md`](../manual/02-install.md)). **(3) Your team runs it** — the *same* self-hosted stack as the beta ([`deploy-linux/`](../../deploy-linux/README.md): Cloudflare Tunnel + OIDC allowlist), multi-user + whitelabel, yours to own (renaming it: [`whitelabel.md`](../developer/whitelabel.md)). **The developers and operator run tier 3** (self-hosted team-online); tiers 1 and 3 are one codebase + `deploy-linux/` stack, differentiated by who owns the box and whitelabel, not a fork. 
 
 ## Hard ordering (violate → rebuild)
 
@@ -36,6 +36,7 @@ Sequenced into lanes by dependency, not milestone number. **Front priority = Lan
 |---|---|---|
 | C1 | **Chat-first front door** — one thread: ingest/check-in → curated activity stream → inline decision buttons (existing verbs). | Arc 2 (conversation endpoint) deferred — [`chat-foundation.md`](chat-foundation.md) |
 | C2 | Composite fitness P2–P4 (P1 = spend, done) — data rollup anytime; **scatter panel after P3** | pending (see § Connectors + L4) |
+| C2b | **Judged + turn-structured scoring** — an LLM-as-judge as a measured observation, and the per-step ruler it opens | judge + grading call path SHIPPED (`promptpotter/judges/`); open: plural judges, the per-step ruler (see § Judged and turn-structured scoring) |
 | C3 | L4 closure — the recursion + the L4 campaign + `proxy_lift_corr ≥ 0.6` re-validation | Open: the bounded cheap default config, and the `proxy_lift_corr` gate — itself gated on the panel being able to resolve one optimizer prompt from another — [`l4-outer-loop.md`](l4-outer-loop.md) § Open |
 | C4 | Cross-user measurement panel (after P3) | pending (see § Ingest + chat-first web) |
 | C5 | MCP server mode (= **agent-tool parity**, see § Agent-tool parity) · user-editable `pipeline.yaml` in UI | pending |
@@ -118,15 +119,94 @@ Sibling to § Agent-tool parity: that one widens how PromptPotter is *invoked*, 
 
 **Open — two of the three consumers.** (a) our own runtime is built. (b) `to_dspy` lives in the `promptpotteropt` repo, never here (the dependency arrow is one-way — [`ADR-0006`](../adr/0006-embeddable-core-and-extras.md)), and waits on Phase C; it applies the winner to a *live* program and never emits DSPy state, sidestepping the positional-zip corruption rather than inheriting it. (c) MLflow is unwritten, and targets the **Prompt Registry** (`register_prompt` / `load_prompt` / `search_prompts`), **not a model flavor**, because we produce prompts, not programs. So is § Captured "Export / copy from dashboard" — the same artifact behind a button.
 
+### Judged and turn-structured scoring
+
+**Tracked as C2b. The judge half has SHIPPED** — `promptpotter/judges/`, whose `CLAUDE.md` owns the
+contract and every reason behind it; read it there. What this lane owes is the rest.
+
+It unblocks datasets no matcher can grade — SealQA, and the two already recording that they are
+stuck on it (`email-tagging`'s free-text CRM fields, `screen-taste-v0`'s rating) — and revises
+selection criterion 5, which rejected them
+([`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md)).
+
+**The grading call path has SHIPPED** — reuse cache, 429 retry, heartbeat and metering all decided
+once at `judges/call.py::ask`. **Plural judges and the `retrieve → ground → answer` step schema
+have SHIPPED too**: `campaign_config.judges` is keyed by the term the formula reads, so one cell
+carries several graded observations, and `promptpotter/judges/CLAUDE.md` owns both contracts. It
+deliberately does NOT live in `pipeline.yaml::nodes` — `node_config_items` is the walk a bulk model
+steer follows, and that is exactly the boundary a judge may not sit behind.
+
+What remains in this lane is *per-step difficulty* — the larger prize, and the only part that
+needs a run rather than a decision, since it fits on cells. Its blockers and its one non-skippable
+precondition (bank each step's term separately, which the shipped schema now does) are at
+[`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § Phase 3. The two authored
+rubrics are unscreened; read them on `seed-screen` / `noise-floor` before a campaign is funded on
+them.
+
+**The conversation now reaches a formula, and only as scalars — SHIPPED.**
+`domain/scoring.py::turn_scalars` projects `n_turns`, `n_tool_calls` and `{step}_turns` at measure
+time, beside the `{step}_{reward}` terms the harbor connector already banked. The raw `turns` list
+stays unreachable from a formula on purpose and must remain so: the compiler's AST allowlist has no
+subscript, no attribute access and no `len`, and `turns` is the first key `compact-archive` moves
+out of a cold row — a formula that walked it would raise on every cell it had already scored. Two
+routes reach scoring from a conversation, and there is no third: this projection, or a judge that
+reads the turns and banks a term.
+
+**Step-selective work splits in three, at very different distances.**
+
+*Scoring* one step is already config and already step-agnostic — a dataset names `retrieve_reward`
+/ `retrieve_turns` and optimizes against that step alone, no code.
+
+*Optimizing* one step is near. The candidate prompt is trial-scoped (one `SKILL.md` per episode),
+so an arm mutates the whole episode however narrowly it is scored. The design needing a decision is
+whether a declared step becomes a NODE — one per step, each with its own `prompt_info` and
+`param_keys` — because that makes the existing `campaign_config.exclude_nodes` the step selector
+and adds no new channel. It costs generalizing `connectors/harbor.py`'s singular `AGENT_NODE`;
+Harbor's `AgentConfig.skills` takes a list, so one skill per step is injectable with the step's
+`instruction.md` naming which to read. Separately: not RUNNING the later steps, where the cost
+saving lives — Harbor runs every declared step and `_unscoreable_step` raises on a truncated one.
+
+**PARTIAL PIPELINE GENERATION — far, and deliberately so.** Today L1 always proposes a COMPLETE
+pipeline. The feature is that it may instead propose a partial one — a single step, or some subset
+— with *which* subset being **L2's** decision, not the dataset's and not a config's. That makes it
+the first place the escalation layer chooses a search SHAPE rather than a search direction, which
+is why it is not a slice to pick up when convenient:
+
+- **Do not open it until a real pipeline is blocked without it.** Most pipelines gain nothing: with
+  few steps, a whole-pipeline proposal is both cheaper to reason about and strictly more expressive
+  than a partial one. The gain appears only where a pipeline is complicated enough that a whole
+  proposal cannot be attributed — many steps, and no way to tell which one moved the number.
+- **Its trigger is a FORK, not a stall.** The signal is L2 reaching a two-way split it cannot
+  choose between: two strategies, no evidence favouring either, and a whole-pipeline arm that would
+  confound them. Partial generation is the instrument that separates them. A plain stall is not
+  this — the existing escalation ladder owns that, and reaching for step-selection there would be
+  answering a question nobody asked.
+- **It is a human-in-the-loop design cycle, not an implementation ticket.** Deciding what a partial
+  proposal may touch, how a partial arm is compared against a whole one, and what a δ ruler does
+  with arms of different shapes are all open and none is answerable from code. Plan it in the open,
+  with the operator, before anything is built.
+
+Its precondition is the step-as-node decision above; per-step terms already bank.
+
+One thing the cache deliberately does NOT fix: a grading that fails past its retry omits the term,
+so `rescore_results` raises inside `measure_sample` and the catch-all there banks the cell as an
+ERROR — discarding a backend answer already paid for. The root is one `except Exception` that
+cannot tell a measurement failure from a scoring failure. Measure the residual rate before
+splitting it, and do not compensate downstream.
+
 ### Selection-clean reporting
 **Why, and the statistical statement, are owned by [`../research/metrics.md`](../research/metrics.md) § The winner's own number is biased upward.** What this lane owes: a reserved per-dataset partition the loop never scores on, and two readers pointed at it — `verify` (which already re-scores a frozen candidate without touching the cycle, so it is the closest existing shape) and the reported fitness in `export.json`, whose provenance block advertises a deployment estimate it cannot currently claim. The published BBEH comparison is not what this fixes — its split already satisfies the requirement ([`../research/bbeh-comparison/README.md`](../research/bbeh-comparison/README.md) § The protocol).
 
 Sequenced with the publication lane, not before it: an in-sample headline is wrong in a direction that flatters us, so it costs credibility at publication rather than correctness in the loop.
 
 ### Evolving agent harnesses
-**Tracked as C7, deliberately after v1.** The artifact to evolve becomes an **agent harness** — an agent's prompts, tools and control flow — rather than only a single LLM call or a declared pipeline. **Ask the operator WHOSE harness — dsh or LangChain — before designing the connector**: it is their call and it fixes the mutation surface, since LangChain exposes system-prompt blocks, tool descriptions and middleware ([related-work.md](../research/related-work.md) § Adjacent work has that loop run by hand) where dsh exposes plugin manifests and a tool registry. The gap is small by design: a harness is a configuration space like any other, and `Connector` already abstracts what a backend *is*, so this is a new connector + a new mutation surface, not a new loop. The priority is low; it does not compete with Lane A or the publication lane.
+**Tracked as C7. Pulled forward ahead of v1 on an explicit operator call, and the connector half has SHIPPED** — `connectors/harbor.py` plus `datasets/harbor-tbench-regex-log/`. The artifact to evolve becomes an **agent harness** — an agent's prompts, tools and control flow — rather than only a single LLM call or a declared pipeline.
 
-Read the neighbours before designing — SkillOpt, DarwinX and AutoDesign already evolve harnesses for a frozen model, and DarwinX states our own one-armed-search argument back at us: [related-work.md](../research/related-work.md) § Agent-harness evolution. What that comparison leaves standing is what a PromptPotter version must keep rather than re-derive — sequential elimination, cost-per-fitness, subset-invariant ability. Their benchmarks are agent environments outside the connector boundary and PoBB's cost model, so adopting the target does **not** mean adopting their evaluation suite.
+**Do not re-open "whose harness — dsh or LangChain".** That question binds the design to one vendor's harness and inherits its mutation surface. [Harbor](https://github.com/harbor-framework/harbor) sits a layer below it — evaluation infrastructure, in the category of `pytest` — and drives `terminus-2`, `claude-code`, `codex`, `openclaw`, `hermes`, `goose` and ~20 more behind one `BaseAgent` interface, so which harness is under test is one line in a dataset's `harbor_tasks.yaml` rather than a design commitment.
+
+The gap is small by design, and two things in it are real rather than cosmetic: a **labelless cell** (`Sample.ground_truth is None`, since a verifier grades where no label exists) and an **arm-time observation-key contract** (`Connector.required_observation_keys`) — both shipped, both generic, neither specific to agents. What is still open is a **per-cell spend ceiling**: the budget gate polls at the sample boundary (`scoring/query_loop.py`), so one episode is unbounded spend between polls; Harbor's `task.toml` bounds wall clock and not dollars. L4 solved this privately with `OUTER_SAMPLE_WALL_S_PER_ROUND`; nobody generalized it.
+
+Read the neighbours before designing — SkillOpt, DarwinX and AutoDesign already evolve harnesses for a frozen model, and DarwinX states our own one-armed-search argument back at us: [related-work.md](../research/related-work.md) § Agent-harness evolution. What that comparison leaves standing is what a PromptPotter version must keep rather than re-derive — sequential elimination, cost-per-fitness, subset-invariant ability. Their benchmarks are agent environments the `harbor` connector can now measure but PoBB's cost model still cannot bound, so adopting the target does **not** mean adopting their evaluation suite.
 
 ### Schema-description axis — the one open step
 Why the schema steers at all is [`../concepts/structured-output.md`](../concepts/structured-output.md). **Open: `new --sweep-batch` it on `justlogic-d234`** — promote at `proxy_lift_corr ≥ 0.6`, and a negative result closes the axis by reverting it.
@@ -146,7 +226,7 @@ What belongs here is status and the two sequencing decisions. **None of the coup
 Spec only — **do not build it before the chat backend exists** (`presentation/api/routers/chat.py` is absent), because an anonymous meter with no conversation to meter is a writer with no reader. The reachability it plans for is the public site's chat answering a visitor who has not signed in.
 
 - **Its own issuer sentinel, and `is_anonymous` asked BEFORE the operator arm.** This is the trap, not a detail: `quota.py::spends_the_hosts_own_key` reads a missing issuer as "came through the terminal, which only the operator reaches", so an anonymous identity built by simply leaving the issuer unset resolves as the box operator and is metered by nothing at all. The sentinel is what makes the two distinguishable; the ordering is what makes the distinction bind.
-- **Empty capability set — anonymous does absolutely nothing.** No command verb, no launch, no ingest, no dataset write. It converses and it reads; every action surface is a sign-in prompt. Nothing is added to `CAMPAIGN_CAP_BY_TIER` for it, so `_require_capability_for` refuses each verb without a per-verb exception to keep in step.
+- **Empty capability set — anonymous does absolutely nothing.** No command verb, no launch, no ingest, no dataset write. It converses and it reads; every action surface is a sign-in prompt. Nothing is added to `CAMPAIGN_CAP_BY_NAME` for it, so `_require_capability_for` refuses each verb without a per-verb exception to keep in step.
 - **One shared tenant.** `UserStore.get_or_create` writes a `user.json` per tenant, so a tenant per visitor is an unbounded directory-creation surface reachable without authentication. One tenant, one account row, one ledger — which also gives the spend a reader for free: it is a single row in `jobs/install_spend.py::read_install_spend`.
 - **A global daily pool is the ceiling; the per-visitor allowance is UX.** A per-visitor cap is defeated by discarding the visitor — new address, cleared cookie — so the only figure that binds is one install-wide daily pool (its own `Settings` field, alongside `FREE_TIER_SPEND_CAP_USD`). What the widget shows a visitor before asking them to sign in is a courtesy, never the boundary. `admit_launch`'s reservation does not apply: an anonymous turn is one call, not a campaign, and anonymous cannot launch a campaign at all.
 - **No trustworthy origin signal ⇒ refuse the request.** Serving something that presents nothing linkable is what turns the pool into a scrape budget assembled from millions of small turns.
@@ -160,10 +240,9 @@ Two rules survive the build. `config_overrides` carries the fork's whole `Optimi
 **Teardown-only design was rejected — do not re-propose** (it reverses the folder-UI §0 commitment). The two state surfaces it concerns are owned by [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md).
 
 ### Run admission + concurrent serving
-Campaigns run in sequence behind the atomic `JobRegistry.reserve` slot (`capacity = settings.MACHINE_RUN_CAPACITY`, 1 today).
-- **Open / gated — `capacity > 1`:** hard predecessors are **Lane A2 (BYO per-user keys)** + a **per-tenant `RateLimiter`** (today process-global) + backend throughput. Raising capacity before these cross-bills the shared key and throttles everyone.
-- **Open — durable cross-process lock:** the in-process lock only guards one process; `--workers > 1` or web↔CLI mutual exclusion needs a disk CAS slot file (`O_EXCL` create + heartbeat + stale-reclaim). Same `capacity` knob; durable substrate.
-- **Distinct axis — sample look-ahead *within* one run.** `capacity` is how many CAMPAIGNS the box admits; look-ahead is how many SAMPLES one candidate's walk holds in flight, so it does not cross-bill and is gated separately on `campaign.lookahead`. **Open:** the ceiling is a hand-set constant per connector rather than measured peak-RSS headroom (there is an OOM post-mortem in `runner/inner/spawn.py`), and inner and outer still share the process-global `RateLimiter` with no per-tenant slice. Boundary: [`../operations/access-model.md`](../operations/access-model.md) § Tier 1a.
+Nothing is open here. Campaigns run concurrently up to a resolved capacity, a full box QUEUES rather than refuses, and the queue drains least-served-first; every entry point takes the same slot from the same line, the terminal included. The substrate is an OS file lock, so admission is atomic across processes and a dead producer's slot returns at once — which is also C6's predecessor: `--workers > 1` and a containerised worker need no second mechanism. Owned by [`../operations/access-model.md`](../operations/access-model.md) § What bounds resource use.
+- **Open — full-speed-each needs more provider quota, not a better divider.** Two busy users on one key each get roughly half the throughput however the window is shared; only **Lane A2 (BYO per-user keys)** buys more. It is also cheap once reached: adding an `api_key` dimension to `get_llm_client`'s cache key gives every tenant its own limiter for free.
+- **Distinct axis — sample look-ahead *within* one run.** `capacity` is how many CAMPAIGNS the box admits; look-ahead is how many SAMPLES one candidate's walk holds in flight, so it does not cross-bill and is gated separately on `campaign.lookahead`. **Open:** the ceiling is a hand-set constant per connector rather than measured peak-RSS headroom (there is an OOM post-mortem in `runner/inner/spawn.py`), and inner and outer still share the process-global `RateLimiter` with no per-tenant slice. Boundary: [`../operations/access-model.md`](../operations/access-model.md) § host-admin ↔ user.
 
 ### Lineage mask
 The read side is [`../operations/mask-projection.md`](../operations/mask-projection.md); code SoT `application/mask/`. The **write side — fork-from-divergence — shipped**: `fork-cycle` carries `keep_rounds`, which swaps the offshoot trigger for `OPERATOR_REWIND` so rounds `0..N-1` are lifted, and `ConfigOverrides.scoring` carries the criterion into the fork's effective config. The alternative branch still materialises only as a real, measured fork the operator chose to run — never a stored forecast tail — which is why persisted mask identity is *still* not a thing: the criterion rides the seed the fork already writes.
@@ -180,6 +259,7 @@ Hard-Sample Sorter Phase 2/3 · Webapp Perf: SSE client cutover for the **dashbo
 
 ## Captured — pending triage
 
+- **Origin panel that drifts on the δ ruler** — the panel every green bar is read on is the first `sp_budget_ttest` cells C0 answered, fixed for the life of the cycle (`domain/results.py::origin_panel`). The far-out version lets it swap a cell once the ruler has settled into a stable δ set — drifting far SLOWER than the acquisition subset the winners are actually decided on, so the standing exam still holds still relative to the search. Zero priority: the fixed panel is what makes the bars comparable, and drift can only cost that.
 - **Export / copy from dashboard** — one-click "copy" on the optimizer box (winning prompt + state). Shape is owned by § Application radius; this is that artifact behind a button.
 - **Origin check-in plain-language recap** — folded into the origin check-in flow; pending review.
 

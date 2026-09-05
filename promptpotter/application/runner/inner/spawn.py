@@ -25,7 +25,7 @@ from promptpotter.application.runner.inner.tasks import (
 from promptpotter.application.seed_screen import class_floor, draw_bank
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.proxies import (
-    OUTER_PROXY_KEYS,
+    INNER_RESULT_KEY,
     PARENT_LEVEL_SE_KEY,
     InnerCycleUnscoreableError,
     compute_outer_proxies,
@@ -36,6 +36,7 @@ from promptpotter.domain.l4.proxies import (
 )
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_schema import stable_hash
+from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.llm.rate_limit import set_throttle_stall_sink
 from promptpotter.infrastructure.llm.telemetry import emit_token_usage
 from promptpotter.infrastructure.store.account_spend import (
@@ -71,11 +72,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# The outer pipeline's prediction key. `datasets/promptpotter-self/pipeline.yaml::
-# nodes.l1_critique.optimizer.observation_mappings` must declare it and the proxy scalars, or
-# they never reach `pipeline_data` and the outer formula scores a measurement it never got.
-INNER_RESULT_KEY = "final_ranking"
-
 # An inner cycle's budget is its ROUND budget (`max_rounds` + `lives`) and carries no spend or
 # token cap by design: those trip on MEASURED token counts, which jitter run to run, making a
 # truncated trajectory indistinguishable from "this optimizer prompt found nothing". The cost
@@ -98,8 +94,9 @@ class _UnworkedTime:
 
 @dataclass(frozen=True)
 class InnerSpawnContext:
-    """``shared_root`` stays the REAL workspace root so ``measurements`` + ``optimizer_reuse`` remain
-    tenant-global: sandboxing them re-scored every inner origin, injecting more noise than the lift."""
+    """``shared_root`` stays the REAL workspace root so every ``layout.py::SHARED_CACHE_DIRS`` tree
+    remains tenant-global: sandboxing them re-scored every inner origin, injecting more noise than
+    the lift."""
 
     inner_sandbox_root: Path
     dataset_config_dir: Path
@@ -199,21 +196,11 @@ def _spawn_provenance(ctx: InnerSpawnContext, round_num: int | None, query: str)
 def _verify_outer_panel_contract(
     session: Session, campaign_config: CampaignConfig, dataset_dir: Path
 ) -> None:
-    """An emitted-but-undeclared key is dropped by ``sample_measurement`` and never reaches
-    ``pipeline_data``, so a mask would score a term nobody measured. Fail at arm time."""
-    schema = session.pipeline_schema
+    """The panel census. The observation-key half of this check is now
+    ``Connector.required_observation_keys``, verified for every connector at ``init_services``."""
     panel_path = inner_tasks_path(dataset_dir)
     if not panel_path.is_file():
         return
-    declared = {key for node in schema.nodes for key in node.output_keys}
-    missing = [k for k in (INNER_RESULT_KEY, *OUTER_PROXY_KEYS) if k not in declared]
-    if missing:
-        raise ValueError(
-            f"{dataset_dir.name} runs inner campaigns but its pipeline.yaml declares no "
-            f"observation_mappings for {missing} — every key an inner sample emits must be "
-            "declared, or it never reaches pipeline_data and the outer formula scores a "
-            "measurement that was silently dropped."
-        )
     # The panel (`inner_tasks.yaml`) and the round budget (`campaign.yaml::sp_budget_ttest`) are
     # ONE declaration in two files. A budget BELOW the panel narrows it silently, and under
     # `per_round_resubset` rounds then draw different cells — candidates compared on bases that
@@ -575,7 +562,16 @@ async def _run_inner_campaign(
     train_data = draw_bank(all_samples, n, spec.seed)
     # Computed here because this is the first moment the drawn rows exist. `seed-screen` owns
     # the disqualifier but is hand-run, so nothing recomputes it for the seats actually seated.
-    bank_floor = class_floor(train_data)
+    #
+    # ``None`` on a verifier-graded bank, and that is a different fact from a floor of 0.0: with no
+    # labels there is no constant answer to score, so the collapse question is undefined rather
+    # than answered cheaply. `class_floor` RAISES on such a bank — correctly, since the screen owns
+    # that verdict — and this is not the screen: an inner benchmark graded by its own verifier
+    # (`pp-self` over a harbor panel, which is the point of the recursion) would otherwise die
+    # mid-spawn quoting a collapse verdict from a path that was only ever reporting one.
+    bank_floor = (
+        None if all_verifier_graded(s.ground_truth for s in train_data) else class_floor(train_data)
+    )
 
     file_config: dict[str, Any] = {}
     if session.dataset_config_dir is not None:
@@ -635,7 +631,7 @@ async def _run_inner_campaign(
     # A bank paying MORE for answering one label than for reasoning cannot measure an optimizer
     # prompt. REPORTED, never enforced: one origin pass sits inside its own error bar, so
     # rejecting a seat on it is the single-pass error the screen itself stopped making.
-    if bank_floor >= result.origin_accuracy:
+    if bank_floor is not None and bank_floor >= result.origin_accuracy:
         logger.warning(
             "inner cell %s/seed-%d MAY REWARD COLLAPSE: constant-answer floor %.3f >= this "
             "run's origin %.3f over %d rows. One pass sits inside its own error bar — re-screen "
@@ -855,13 +851,9 @@ async def _measure_inner_cell(
     facts = inner_cell_facts(result, campaign_id, unworked_s=unworked.total)
 
     data: dict[str, Any] = {
-        # The connector's `_extract_experiment` sets `ground_truth` to the same `inner:{query}`
-        # prefix — keep the two in sync. The outcome suffix means the two can never be EQUAL, so
-        # every outer sample reads as a MISS. Nothing that grades reads it that way (the outer
-        # score is `fitness`, and a hit at `>= 1.0` is unreachable under this campaign's formula)
-        # — but the failure PANELS did, and a critique then diagnosed the artifact as a real
-        # defect. They now ask `panels._miss_is_placeholder` and stay silent instead; do not
-        # reintroduce a hit/miss reader here without teaching it that predicate.
+        # A summary line for the reader, not an answer to be matched: this cell carries no label
+        # (`Sample.ground_truth is None`), which is what `domain/scoring.py::all_verifier_graded`
+        # derives from. Do not add a hit/miss reader here.
         INNER_RESULT_KEY: [f"inner:{query} D{proxies.mean_round_delta:+.3f}"],
         # The outer loop's raw evidence, rendered as MODEL REASONING in its transcripts panel.
         "reasoning_trace": _inner_narrative(result, spec),

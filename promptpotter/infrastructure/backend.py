@@ -49,6 +49,7 @@ def build_backend_client(connector: Connector, base_url: str) -> BackendClient:
         max_cells_in_flight=connector.max_cells_in_flight,
         concurrency_arming=connector.concurrency_arming,
         measured_unit=connector.measured_unit,
+        answer_key=connector.answer_key,
         auth_token=connector.auth_token() if connector.auth_token else None,
     )
 
@@ -84,6 +85,7 @@ class BackendClient:
         max_cells_in_flight: int = 2,
         concurrency_arming: ConcurrencyArming = "round",
         measured_unit: MeasuredUnit = "sample",
+        answer_key: str | None = None,
         timeout: float = 30.0,
         auth_token: str | None = None,
     ):
@@ -102,6 +104,8 @@ class BackendClient:
         self._max_cells_in_flight = max_cells_in_flight
         self._concurrency_arming: ConcurrencyArming = concurrency_arming
         self._measured_unit: MeasuredUnit = measured_unit
+        # Where this backend's answer TEXT lives, when it emits one outside a ranking.
+        self._answer_key: str | None = answer_key
         self._auth_token = auth_token or ""
         self._http: httpx.AsyncClient | None = None
 
@@ -134,6 +138,12 @@ class BackendClient:
     @property
     def measured_unit(self) -> MeasuredUnit:
         return self._measured_unit
+
+    @property
+    def answer_key(self) -> str | None:
+        """The ``data`` key holding the cell's answer text, or ``None`` where the terminal ranking
+        is the only source — see :attr:`Connector.answer_key`."""
+        return self._answer_key
 
     async def _get_json(self, path: str, **params: Any) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"params": params} if params else {}

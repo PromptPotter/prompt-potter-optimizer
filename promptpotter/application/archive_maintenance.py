@@ -133,10 +133,10 @@ def _protected_pipeline_fields(row: Mapping[str, Any]) -> frozenset[str]:
     """Per-ROW protection, derived from the row itself rather than from a list of dataset names.
 
     An L4 row carrying ``mean_round_delta`` must keep its ``reasoning_trace``: the
-    ``_inner_narrated`` gate in ``optimization/dispatch/injections/panels.py`` requires BOTH, and a
-    row holding one without the other silently drops out of ``inner_narratives`` and flips
-    ``_miss_is_placeholder``, re-enabling ``sample_transcripts`` on the recursion — where every row
-    reads as a miss by construction. Not a crash; a wrong panel."""
+    ``_inner_narrated`` gate in ``optimization/dispatch/injections/panels.py`` requires BOTH, so a
+    row holding one without the other silently drops out of ``inner_narratives`` — and
+    ``sample_transcripts``, whose whole guard is that gate, picks it up instead. Two panels then
+    each believe the other owns the row. Not a crash; a wrong panel."""
     pd = row.get("pipeline_data")
     if isinstance(pd, dict) and "mean_round_delta" in pd:
         return frozenset({"reasoning_trace"})

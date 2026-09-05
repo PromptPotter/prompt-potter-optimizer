@@ -22,6 +22,8 @@ from promptpotter.config.settings import (
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.pipeline_parsing import merge_node_blocks, parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.backend import BackendClient, build_backend_client
 from promptpotter.infrastructure.store.archive_views import maintain_measurement_index
 from promptpotter.infrastructure.store.dataset_access import (
@@ -87,19 +89,62 @@ async def _verify_connector_revision(
         )
 
 
-def _warn_if_no_terminal_ranker(schema: PipelineSchema, status: Callable[[str], None]) -> None:
-    """Without a ranker/candidate_source node emitting a ranked list, every sample silently scores
-    NO_RESULT — so it is surfaced loudly at setup, on the status line, not at score time."""
-    if not schema.nodes:
+def _warn_if_labels_have_no_ranker(
+    schema: PipelineSchema,
+    samples: list[Sample],
+    connector: connectors.Connector | None,
+    status: Callable[[str], None],
+) -> None:
+    """**Labels and a ranker travel together.** A dataset carrying ground truth and no node emitting
+    a ranked list is mis-wired — every sample silently scores ``NO_RESULT`` against a real label —
+    so it is surfaced at setup, on the status line, not at score time.
+
+    Judging it needs the schema AND the samples, which is why it is called from ``init_services``
+    after they resolve rather than from ``_resolve_pipeline_schema``, which sees neither.
+
+    **The converse is deliberately not warned.** A ranker with no labels is not a fault —
+    ``promptpotter-self`` declares ``l1_critique`` as one so its summary reaches ``predicted`` for
+    a human reading the round file — and neither is a backend that carries its answer elsewhere,
+    which a declared ``Connector.answer_key`` says."""
+    if not schema.nodes or not samples:
+        return
+    if all_verifier_graded(s.ground_truth for s in samples):
+        return
+    if connector is not None and connector.answer_key:
         return
     if any(n.emits_ranking and n.output_keys for n in schema.nodes):
         return
     msg = (
         f"Pipeline {schema.name!r} has no terminal ranker — no node emits a ranked list, "
-        "so every sample will score NO_RESULT (check node_role on the final node)"
+        "so every sample will score NO_RESULT against a real label "
+        "(check node_role on the final node)"
     )
     logger.warning(msg)
     status(f"⚠ {msg}")
+
+
+def _verify_required_observation_keys(
+    schema: PipelineSchema,
+    connector: connectors.Connector,
+    dataset_name: str | None,
+) -> None:
+    """Fails at arm time rather than letting a dropped key reach the formula as a measurement
+    nobody took. RAISES, unlike its advisory revision sibling — a silently dropped term is a wrong
+    number, not drift (``connectors/CLAUDE.md`` § Conventions)."""
+    required = connector.required_observation_keys
+    if not required:
+        return
+    declared = {key for node in schema.nodes for key in node.output_keys}
+    missing = [k for k in required if k not in declared]
+    if missing:
+        raise PayloadInvalidError(
+            f"backend {connector.name!r} always emits {missing}, but "
+            f"{dataset_name or '<dataset>'}'s pipeline.yaml declares no observation_mappings for "
+            "them — an undeclared key never reaches pipeline_data, so the scoring formula would "
+            "grade a measurement that was silently dropped.",
+            code="pipeline_config_invalid",
+            details={"dataset_name": dataset_name, "missing_observation_keys": missing},
+        )
 
 
 async def _resolve_pipeline_schema(
@@ -130,7 +175,6 @@ async def _resolve_pipeline_schema(
         merged = _apply_dataset_overlay(backend_resp, local_raw or {})
         try:
             schema = parse_pipeline_response(merged)
-            _warn_if_no_terminal_ranker(schema, status)
             status(f"Pipeline: {schema.name} ({len(schema.nodes)} nodes)")
             return schema
         except Exception as exc:
@@ -139,7 +183,6 @@ async def _resolve_pipeline_schema(
     if local_raw is not None:
         try:
             schema = parse_pipeline_response(local_raw)
-            _warn_if_no_terminal_ranker(schema, status)
             status(f"Pipeline: {schema.name} ({len(schema.nodes)} nodes, offline)")
             return schema
         except Exception as exc:
@@ -193,12 +236,14 @@ def _load_dataset_into_session(
     *,
     connector: connectors.Connector | None = None,
 ) -> None:
-    """Populate session.samples + index_terms — tenant Origin, then repo benchmark, then the
-    loader's one-shot download. A connector declaring an ``experiment_file`` loads through that."""
-    items = resolve_dataset_items(session.store, dataset_name, status=status)
-    if not items and connector is not None and connector.experiment_file:
+    """Populate session.samples + index_terms — a connector's own experiment file where it declares
+    one, else tenant Origin, then repo benchmark, then the loader's one-shot download."""
+    # First, never a fallback: a connector declaring an `experiment_file` OWNS its panel, and rows
+    # cached under the same dataset name describe a different instrument.
+    if connector is not None and connector.experiment_file:
         _load_experiment_file_into_session(session, connector, status)
         return
+    items = resolve_dataset_items(session.store, dataset_name, status=status)
     if not items:
         status(f"Dataset '{dataset_name}' not available")
         raise ValueError(
@@ -207,7 +252,16 @@ def _load_dataset_into_session(
             f"application/datasets/loaders.py."
         )
 
-    valid = [item for item in items if item.get("query") and item.get("ground_truth")]
+    # Whether a MISSING label disqualifies a row is DERIVED from the set, not declared: if any row
+    # carries one this is a labelled dataset and a row without is broken (drop it, as always); if
+    # none does, the dataset is verifier-graded and dropping on that test empties it entirely.
+    # `harbor` escaped only because it declares an `experiment_file` and returned above; a
+    # labelless dataset arriving through the loader registry or a tenant upload yielded
+    # `session.samples == []` and a run that measured nothing, with nothing raised.
+    labelled = any(item.get("ground_truth") for item in items)
+    valid = [
+        item for item in items if item.get("query") and (item.get("ground_truth") or not labelled)
+    ]
     session.samples = samples_from_dicts(valid)
     gt_terms = {r["ground_truth"] for r in items if r.get("ground_truth")}
     config_dir = readable_dataset_dir(session.store, dataset_name)
@@ -281,8 +335,12 @@ async def init_services(
     status(f"Backend: {backend_url}")
 
     pipeline_schema = await _resolve_pipeline_schema(
-        client, dataset_config_dir, status, in_process=connector.execution == "in_process"
+        client,
+        dataset_config_dir,
+        status,
+        in_process=connector.execution == "in_process",
     )
+    _verify_required_observation_keys(pipeline_schema, connector, dataset_name)
     await _verify_connector_revision(client, connector)
 
     # One physical endpoint = one BackendConnection. With no explicit
@@ -332,6 +390,8 @@ async def init_services(
     )
 
     _load_dataset_into_session(session, dataset_name, status, connector=connector)
+    # After the samples, never before: the invariant is about the schema AND the bank together.
+    _warn_if_labels_have_no_ranker(pipeline_schema, session.samples, connector, status)
     return session
 
 

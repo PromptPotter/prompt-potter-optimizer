@@ -19,6 +19,7 @@ from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.run_records import ErrorRecord
 from promptpotter.domain.scoring import is_answer_collapsed
+from promptpotter.domain.search_point import strip_rendered_prompt
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import is_error_result
@@ -49,13 +50,13 @@ __all__ = [
     "WarningDict",
     "best_round_on_shared_cells",
     "candidate_label",
-    "choose_overlap_set",
     "is_electable",
     "is_floor_pinned",
     "is_leader_eligible",
     "is_round_winner",
     "measured_cells",
     "merge_known_outcomes",
+    "origin_panel",
     "overlap_row",
     "overlap_series",
     "parent_key",
@@ -435,8 +436,8 @@ class OverlapReading(StrictModel):
     ability rather than spread, so consecutive rounds can share almost no cells at all. This is
     one exam, sat by C0 and by every winner since.
 
-    REPORT-ONLY, and that is what makes measuring the winner ALONE unbiased. These rows reach no
-    election, no parent floor, no lift, no ruler and no acquisition — fed to any of them the
+    REPORT-ONLY, and that is what makes measuring OUTSIDE the election unbiased. These rows reach
+    no election, no parent floor, no lift, no ruler and no acquisition — fed to any of them the
     parent would be better-identified than the arms it was judged against. The rows live on
     ``RoundResult.overlap_results``, outside ``results`` and
     ``all_candidate_results``, because those two are exactly where every one of those paths reads.
@@ -444,24 +445,27 @@ class OverlapReading(StrictModel):
 
     model_config = ConfigDict(frozen=True)
 
-    # Ascending, and re-chosen each round: it may swap cells as the line grows, preferring ones
-    # the new member has already answered so a swap costs nothing. Whatever it holds at a given
-    # round, every member listed below has answered all of it.
+    # Ascending, and FIXED for the life of the cycle — :func:`origin_panel`, so every round asks
+    # "is this winner better than C0?" on the same exam. Every member below has answered all of it.
     sample_ids: list[int] = Field(default_factory=list)
     # Adoption order — C0 first.
     members: list[OverlapMember] = Field(default_factory=list)
-    # What this round PAID: the new winner on the cells its line had answered and it had not.
-    # Zero on a held round, since the retained parent is already on the set. Sole count of
-    # those rows — nothing re-derives it from the row list beside it.
+    # What this round PAID to put the line back on the whole panel — usually the new winner alone,
+    # and more only where an earlier one predates the panel it is now read on. Zero on a held round
+    # whose parent already sat it. Sole count of those rows — nothing re-derives it from the rows.
     measured: int = 0
 
 
 class ParentStep(NamedTuple):
-    """One parent and every cell the cycle has measured it on.
+    """One parent, every cell the cycle has measured it on, and what it takes to measure another.
 
     ``key`` is :func:`parent_key` — the identity a caller must match a round against, since
     ``candidate_id`` is the id this configuration FIRST arrived as and a later round can carry
     the same configuration under a new one.
+
+    ``opt_sp`` + ``pipeline_params`` are the pair ``to_job_search_point`` needs: the overlap pass
+    re-measures ANY member, and one measured under another arm's prompt is that arm's reading
+    wearing this one's label.
     """
 
     key: str
@@ -469,6 +473,8 @@ class ParentStep(NamedTuple):
     candidate_id: str
     label: str
     rows: list[dict[str, Any]]
+    opt_sp: OptSearchPoint | None
+    pipeline_params: dict[str, Any]
 
 
 def overlap_series(overlap: OverlapReading | None) -> str:
@@ -509,29 +515,26 @@ def is_floor_pinned(rows: Sequence[Mapping[str, Any]]) -> bool:
 
 
 def parent_key(rr: RoundResult) -> str:
-    """What makes two rounds' parents the SAME measurable individual: the configuration they
-    are scored under — the prompt fields and the pipeline params, with ``lineage`` dropped.
+    """What makes two rounds' parents the SAME measurable individual: the TARGET PROMPT they are
+    scored under, plus the node params that are not that prompt.
+
+    **The RENDER, not the six fields.** ``OptSearchPoint._field_value`` splices
+    ``memory.task_context`` around ``problem_description`` and renders ``few_shot_examples`` as a
+    block, so two winners can carry byte-identical ``prompt_fields`` and still send different
+    prompts. ``render()`` IS the string ``to_job_search_point`` puts on the wire, so this key
+    separates exactly what the content-addressed archive separates.
 
     **NOT ``lineage.id``.** An L2/L3 transition mints a fresh ``OptSearchPoint`` from the same six
-    prompt strings — it writes ``l1_layout`` / ``l1_overrides`` / ``plan``, which steer the
-    OPTIMIZER, not the target prompt — so the parent's id changes while the thing being
-    measured does not. Keyed on the id, that put ONE configuration on the parent line twice, at
-    the same rate by construction, the second time under a label naming no candidate. Keyed here,
-    the two fold into one member, which is also what the measurement archive already believes:
-    it is content-addressed on the node configs, so the re-measure cache-hit anyway.
+    prompt strings — ``l1_layout`` / ``l1_overrides`` / ``plan`` steer the OPTIMIZER and never
+    reach ``render()`` — so the parent's id changes while the measured thing does not. Empty only
+    on a round that never closed, which ``parent_line`` has already skipped for want of a winner.
     """
-    fields = {k: v for k, v in rr.prompt_fields.items() if k != "lineage"}
-    # The node's rendered ``prompt`` is dropped, and this is not tidiness. It is the RENDER of the
-    # fields above, so it adds nothing — and on a WINNING round the round file records the render
-    # the round STARTED with rather than the elected winner's (``l1_score`` takes it from
-    # ``parse_population``, which carries param overrides; the target prompt is rendered later, at
-    # ``to_job_search_point``). Keyed on it, one configuration splits into two members a round
-    # apart. Every other param — temperature, effort — is a real axis and stays in the key.
-    params = {
-        node: {k: v for k, v in cfg.items() if k != "prompt"} if isinstance(cfg, dict) else cfg
-        for node, cfg in (rr.pipeline_params or {}).items()
-    }
-    return stable_hash([fields, params])
+    # The node's own `prompt` is dropped because it is that render one step stale: on a WINNING
+    # round the round file records the render the round STARTED with, not the elected winner's.
+    # Every other param — temperature, effort — is a real axis and stays in the key.
+    return stable_hash(
+        [rr.opt_sp.render() if rr.opt_sp else "", strip_rendered_prompt(rr.pipeline_params)]
+    )
 
 
 def parent_line(rounds: Sequence[RoundResult]) -> list[ParentStep]:
@@ -547,6 +550,7 @@ def parent_line(rounds: Sequence[RoundResult]) -> list[ParentStep]:
     # key → the round that first adopted this configuration, and the candidate it arrived as.
     first: dict[str, tuple[int, str]] = {}
     labels: dict[str, str] = {}
+    config: dict[str, tuple[OptSearchPoint | None, dict[str, Any]]] = {}
     for rr in rounds:
         for cs in rr.candidate_scores:
             labels.setdefault(cs.candidate_id, cs.label)
@@ -555,38 +559,55 @@ def parent_line(rounds: Sequence[RoundResult]) -> list[ParentStep]:
             continue
         key = parent_key(rr)
         first.setdefault(key, (rr.round, cid))
-        merged = merge_known_outcomes(rows.get(key, []), list(rr.results))
-        rows[key] = merge_known_outcomes(merged, list(rr.overlap_results))
+        config.setdefault(key, (rr.opt_sp, dict(rr.pipeline_params or {})))
+        rows[key] = merge_known_outcomes(rows.get(key, []), list(rr.results))
+    # Attributed to the individual they MEASURED, never to the round that bought them: one round
+    # tops up several members, so folding them into the round's own key publishes one arm's cells
+    # under another's label — a rate over two arms' answers.
+    by_candidate = {cid: key for key, (_rnd, cid) in first.items()}
+    for rr in rounds:
+        for cid, bought in (rr.overlap_results or {}).items():
+            if (owner := by_candidate.get(cid)) is not None:
+                rows[owner] = merge_known_outcomes(rows[owner], list(bought))
     # `R{n}` only if a configuration was never a scored candidate at all — with the key above that
     # is a genuine anomaly rather than the routine L2 case, and a truncated id in its place would
     # be a hash the operator cannot join to anything on screen.
     return [
         ParentStep(
-            key=key, round=rnd, candidate_id=cid, label=labels.get(cid) or f"R{rnd}", rows=rows[key]
+            key=key,
+            round=rnd,
+            candidate_id=cid,
+            label=labels.get(cid) or f"R{rnd}",
+            rows=rows[key],
+            opt_sp=config[key][0],
+            pipeline_params=config[key][1],
         )
         for key, (rnd, cid) in first.items()
     ]
 
 
-def choose_overlap_set(
-    common: Collection[int],
-    *,
-    already_measured: Collection[int],
-    previous: Collection[int],
-    size: int,
+def origin_panel(
+    origin_cells: Collection[int], *, poolable: Collection[int], size: int
 ) -> list[int]:
-    """Which cells the next 1-to-1 reading is taken on, in preference order: what the new member
-    has already answered (free), then what the line was last read on (so the bars stay still),
-    then the cheapest remaining id.
+    """The cells every green bar is read on: C0's own, FIXED for the life of the cycle.
 
-    *common* is the intersection over the members that are ALREADY on the set, so every cell here
-    is one they have all answered — which is what bounds the cost to the new member alone and
-    keeps C0 from ever paying again. Pure and total, so a resumed cycle re-chooses the same set
-    off the round documents.
+    The acquisition keeps its complete freedom to move the subset it decides rounds on — this is
+    the other half of that bargain, the standing exam every winner also sits. Fixing it at the
+    origin is what makes the bars comparable at all:
+
+    - **It cannot shrink.** An intersection over what the members happen to share contracts as the
+      line grows, which re-asks "is this winner better than C0?" on a different exam every round
+      and leaves a winner sharing too little with no bar at all.
+    - **Every winner can always reach it.** A member joining late is topped up onto the same
+      cells rather than narrowing the set for everyone who came before it.
+    - **C0 never pays.** The panel is drawn from cells the origin already answered, so the only
+      arm that could be asked to re-measure is one that has not sat the exam yet.
+
+    Pure and total off the origin's own rows, so a resume, a fork and a re-read all re-derive the
+    identical panel with nothing stamped on disk to drift. *poolable* excludes what this cycle can
+    no longer buy, or a member could be short a cell with no way to be topped up.
     """
-    free, prior = set(already_measured), set(previous)
-    ranked = sorted(sorted(common), key=lambda s: (s not in free, s not in prior))
-    return sorted(ranked[:size])
+    return sorted(set(origin_cells) & set(poolable))[:size]
 
 
 # The reasons `RoundResult.l1_parse_failure` can carry. Opposite kinds of evidence, so no
@@ -715,7 +736,10 @@ class RoundResult(StrictModel):
     # in `results` / `all_candidate_results` by design — see `OverlapReading`. `None` before
     # the line has a second member, since C0 alone has nothing to be compared against.
     overlap: OverlapReading | None = None
-    overlap_results: list[dict[str, Any]] = Field(default_factory=list)
+    # Keyed by the MEASURED individual's candidate id, never flat: one round tops up whichever
+    # members are short of the panel, and a flat list lands on the round's own parent — one arm's
+    # cells under another's label, at a rate neither of them scored.
+    overlap_results: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     # --- computed post-scoring ---
     diagnostics: RoundDiagnostics | None = None
     critique: CritiqueReadout | None = None

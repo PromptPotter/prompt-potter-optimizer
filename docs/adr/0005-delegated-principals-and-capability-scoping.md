@@ -24,9 +24,9 @@ tags: [security, identity, authorization, capabilities, delegation, multi-tenant
 > **§3:** `CAP_FOR_KIND` + `_require_capability_for` at the dispatcher's single
 > `_record_and_apply` chokepoint (`command_dispatcher.py`); an
 > import-time exhaustiveness assert derives the closed kind set from the `*Kind`
-> `Literal`s so the map cannot drift. Six tier capabilities
-> (`CAMPAIGN_{STEP,RUN,CREATE,BUDGET,LIFECYCLE,BABYSIT}_CAP`, enumerated once as
-> `CAMPAIGN_CAP_BY_TIER`) + `OWNER_COMMAND_CAPABILITIES` in `shared/identity.py`.
+> `Literal`s so the map cannot drift. Seven command capabilities
+> (`CAMPAIGN_{STEP,RUN,CREATE,BUDGET,LIFECYCLE,BABYSIT,LOOKAHEAD}_CAP`, enumerated once as
+> `CAMPAIGN_CAP_BY_NAME`) + `OWNER_COMMAND_CAPABILITIES` in `shared/identity.py`.
 > Every first-class principal holds the full owner set, so the gate is a no-op for
 > single-owner installs. Denial is 404 (existence-hiding). Closes gap #2.
 > **§1:** the sealed grant store (`infrastructure/identity/grants.py`,
@@ -174,9 +174,9 @@ the model; the insecure version is never offered.
 Every control-plane verb requires a capability. The check lives in **one place** — the
 command dispatcher tests `has_capability(identity, CAP_FOR_KIND[kind])` at the single
 `_record_and_apply` chokepoint every dispatch method funnels through (typed check-in
-routes reach it too). As-shipped tiers over the *real* verb set:
+routes reach it too). As-shipped capabilities over the *real* verb set:
 
-| Cap | Gates (real command kinds) | Tier |
+| Cap | Gates (real command kinds) | Kind |
 |---|---|---|
 | `campaign.step` | `skip-searchpoint`, `pause-cycle`, `origin-gate-decision`, `step-cycle` (SHIPPED — see §6) | stepwise / bounded |
 | `campaign.run` | `start-run`, `fork-cycle`, `start-checkin` | autonomous |
@@ -184,7 +184,7 @@ routes reach it too). As-shipped tiers over the *real* verb set:
 | `campaign.budget` | `change-spend-budget` (raise a ceiling) | budget |
 | `campaign.lifecycle` | `archive-/delete-/unarchive-campaign`, `delete-cycle`, `cleanup-empty-cycles`, `set-allowed-models`, `set-campaign-label`, `replace-dataset` | destructive |
 | `campaign.babysit` | a **direct edit** of an optimizer-owned / origin-locked value — wired to the `fork-cycle` axis-unlock (§4, SHIPPED) | privileged / provenance-tainting |
-| `campaign.lookahead` | `set-sample-lookahead` (SHIPPED) — **its own rung, not a share of `babysit`**: it spends the BOX's shared provider rate bucket rather than the campaign's budget, which makes it the one power a host may withhold from a delegate while still granting the run. Not `babysit`, because it taints nothing — the overshoot sample is discarded and the recorded rows are identical at either depth. See [`../operations/access-model.md`](../operations/access-model.md) § Tier 1a | `lookahead` |
+| `campaign.lookahead` | `set-sample-lookahead` (SHIPPED) — **its own rung, not a share of `babysit`**: it spends the BOX's shared provider rate bucket rather than the campaign's budget, which makes it the one power a host may withhold from a delegate while still granting the run. Not `babysit`, because it taints nothing — the overshoot sample is discarded and the recorded rows are identical at either depth. See [`../operations/access-model.md`](../operations/access-model.md) § host-admin ↔ user | `lookahead` |
 
 The ladder is the point: a delegate with `campaign.step` but **not** `campaign.run` can
 advance the search one bounded action at a time (each a small, checkable spend) but
@@ -194,7 +194,7 @@ Three deltas from the original strawman, all deliberate: `fork-cycle` sits at **
 step — an operator fork mints *and launches* an autonomous continuation (the babysit grant
 that gates *unlocking a locked axis in the fork seed* is a distinct future concern, §4);
 `register-backend` folds into `campaign.create` rather than a separate `backend.register`
-cap (one fewer tier; a delegate that may author campaigns may register the backend they
+cap (one fewer capability; a delegate that may author campaigns may register the backend they
 run against); and `replace-dataset` sits at **lifecycle**, not create, because a dataset
 slug is part of the measurement cache key — repointing one re-addresses every campaign that
 already measured against it, which is strictly stronger than authoring a new dataset.
@@ -248,7 +248,7 @@ clean measurements; fork from before the edit to keep a clean branch."
 `pipeline_overlay` steers the inner-optimizer model OUTSIDE the origin's declared allow-list
 (`CampaignConfig.allowed_models` — empty = nothing sanctioned = restrictive default;
 `overlay_sets_model_outside_allowed`) requires `campaign.babysit` (checked in the `fork-cycle`
-builder, above the RUN-tier fork itself), stamps the cycle index babysat via
+builder, above the `campaign.run` fork itself), stamps the cycle index babysat via
 `mark_human_intervened` (`kind="disallowed_model_override"`), and forces every run that cycle
 scores to grade **C** through a `human_intervened` argument to `grade_run` — so the three
 existing consumers exclude it exactly as they exclude an incidental `C` run. A steer to a

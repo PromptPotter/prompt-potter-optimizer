@@ -46,13 +46,18 @@ interface Args {
   connectorDown?: boolean;
   connectorName?: string | null;
   connectorDetail?: string | null;
-  // Another user holds the single sequential run slot (the server runs one
-  // campaign at a time). `machineBusyHolder` is their label for the detail
-  // line; both come straight from the `/machine-status` poll
-  // (`useMachineStatus`). The always-on twin of the 409 a launch returns.
+  // Every run slot on the machine is taken — the caller's own run counts, so this
+  // is "no slot free", not "someone else is running". `machineBusyHolder` labels the
+  // oldest live run for the detail line; both come straight from the `/machine-status`
+  // poll (`useMachineStatus`). The always-on twin of a launch that has to wait.
   machineBusy?: boolean;
   machineBusyHolder?: string | null;
   machineBusySince?: string | null;
+  // Where the caller's own earliest waiting launch stands in the machine-wide drain
+  // order (`/machine-status::queue[].position`), or null when they have none. It
+  // outranks `machineBusy` below, because "yours is 2nd in line" is a strictly better
+  // answer to "why can I not start" than "the box is full".
+  queuePosition?: number | null;
 }
 
 export function criticalAlert({
@@ -67,6 +72,7 @@ export function criticalAlert({
   machineBusy,
   machineBusyHolder,
   machineBusySince,
+  queuePosition,
 }: Args): CriticalAlert | null {
   // GONE outranks everything, including a crash. Any `dash` still in hand was
   // fetched before the address stopped existing, so its `error` describes a run
@@ -112,18 +118,29 @@ export function criticalAlert({
       detail: connectorDetail ?? undefined,
     };
   }
-  // Another user holds the single sequential run slot. Not a failure of this
-  // operator's run — but it blocks them from launching (the server runs one
-  // campaign at a time), so it's a can't-miss "wait your turn" headline, the
-  // always-on twin of the 409 a launch attempt returns. After connectorDown so
-  // a genuine dependency failure still wins.
+  // The caller is IN the line. Not critical: nothing is broken, nothing was refused,
+  // and the launch starts by itself — so it says where they stand rather than raising
+  // an alarm about a machine that is working exactly as intended.
+  if (queuePosition != null) {
+    return {
+      severity: "warn",
+      title:
+        queuePosition === 1
+          ? "Queued — next in line"
+          : `Queued — position ${queuePosition}`,
+      detail: "it starts by itself when a slot frees",
+    };
+  }
+  // No run slot is free and the caller has nothing waiting. It no longer BLOCKS them —
+  // pressing Start joins the queue — so this is the standing "you will wait" notice,
+  // not a refusal. After connectorDown so a genuine dependency failure still wins.
   if (machineBusy) {
     return {
-      severity: "critical",
-      title: `Machine busy — ${machineBusyHolder ?? "another user"} is running a campaign`,
+      severity: "warn",
+      title: `Machine full — ${machineBusyHolder ?? "another run"} is running`,
       detail: machineBusySince
-        ? `the machine processes one at a time · since ${machineBusySince}`
-        : "the machine processes one campaign at a time",
+        ? `a launch will queue · oldest run since ${machineBusySince}`
+        : "a launch will queue",
     };
   }
   // Producer went quiet: the server still declares `running`, but this

@@ -10,7 +10,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_overlay import node_config_items
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
+    from promptpotter.judges.protocol import JudgeSpec
 
 
 logger = logging.getLogger(__name__)
@@ -83,19 +84,36 @@ def populate_session_scoring(
     scoring_cell_formula: str | None = None,
     scorer_id: str,
     headline_metric: HeadlineMetric = "accuracy",
+    judge_specs: Mapping[str, JudgeSpec],
     source: str = "optimization_loop",
 ) -> None:
     """Attach scoring + obs to *session* in place (step 2 of run init).
     Requires ``init_services`` already ran; ``scoring_formula`` and ``scorer_id`` both resolved from
-    ``campaign.json::scoring`` by the caller, through the one ``split_scoring_block`` that pairs them."""
+    ``campaign.json::scoring`` by the caller, through the one ``split_scoring_block`` that pairs them.
+
+    That precondition is what lets the compiler refuse a label-comparing formula here: ``session.samples``
+    is populated by the end of ``init_services``, so the bank's own declaration is available before a
+    single cell is spent."""
     from promptpotter.application.scoring.formula import compile_scorer
+    from promptpotter.domain.scoring import all_verifier_graded
 
     session.state.obs = obs
     session.source = source
-    session.scoring.scorer = compile_scorer(scoring_formula, scoring_cell_formula)
+    session.scoring.scorer = compile_scorer(
+        scoring_formula,
+        scoring_cell_formula,
+        verifier_graded=all_verifier_graded(s.ground_truth for s in session.samples),
+    )
     session.scoring.scorer_id = scorer_id
     session.scoring.scorer_cell_formula = scoring_cell_formula
     session.scoring.headline_metric = headline_metric
+    # The sole judge builder, serving the runner and the four verbs that score outside it
+    # (`arm_diagnostic_scoring`) — so one line arms grading reuse on every entry point, and a
+    # bad spec fails here rather than on the first cell. Required and assigned unconditionally:
+    # `{}` declares none, and never means "keep what was armed before".
+    from promptpotter.judges import build_evaluators
+
+    session.scoring.judges = build_evaluators(judge_specs, cache=session.store.judge_reuse)
 
 
 def arm_diagnostic_scoring(
@@ -128,6 +146,7 @@ def arm_diagnostic_scoring(
         scoring_cell_formula=spec.per_cell,
         scorer_id=spec.scorer_id,
         headline_metric=campaign_config.headline_metric,
+        judge_specs=campaign_config.judges,
         source=source,
     )
     return pipeline_params
@@ -255,6 +274,7 @@ def _start_observability_and_scoring(
         scoring_cell_formula=scoring_cell_formula,
         scorer_id=scorer_id,
         headline_metric=config.headline_metric,
+        judge_specs=config.judges,
     )
     return tracing_campaign_id, obs
 

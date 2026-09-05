@@ -98,7 +98,10 @@ class Connector:
     """Fresh session instance per ``BackendClient`` — sessions hold per-client state."""
 
     extract_experiment: Callable[[dict[str, Any]], tuple[list[dict[str, Any]], list[str]]]
-    """Backend experiment data → ``(queries, index_terms)``."""
+    """Backend experiment data → ``(queries, index_terms)``, each a ``{"query", "ground_truth"}``.
+
+    **The answer shape — owned by** ``connectors/CLAUDE.md`` § The answer shape: a query yielding
+    ``ground_truth: None`` declares it here, and never a second time anywhere else."""
 
     experiment_file: str = ""
     """Filename of an on-disk experiment doc in the dataset's config dir, read +
@@ -123,6 +126,20 @@ class Connector:
 
     measured_unit: MeasuredUnit = "sample"
     """What one measured row of this backend is CALLED — see :data:`MeasuredUnit`."""
+
+    required_observation_keys: tuple[str, ...] = ()
+    """Observation keys this backend ALWAYS emits; ``wiring.py::_verify_required_observation_keys``
+    raises at init unless the schema maps each. Empty = the backend guarantees none.
+
+    **Why an undeclared key is a wrong number rather than drift — owned by**
+    ``connectors/CLAUDE.md`` § Conventions."""
+
+    answer_key: str | None = None
+    """The ``data`` key carrying this cell's ANSWER TEXT. ``None`` (default) = ``predicted`` comes
+    from the terminal ranker, as on every ranked-label backend.
+
+    **Why this is not the answer-shape flag, and the four things that follow from the split —
+    owned by** ``connectors/CLAUDE.md`` § The answer shape."""
 
     in_process_run: InProcessRun | None = None
 

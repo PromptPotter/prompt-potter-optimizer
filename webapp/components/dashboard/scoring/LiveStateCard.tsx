@@ -15,7 +15,7 @@ const SHOWN_ELSEWHERE = new Set([
   "composite_fitness_formula",
   "current_round",
   "current_query_payload",
-  "state", "round", "candidate", "query",
+  "state", "round", "candidate",
   "patience",
   // ``rounds[]`` is the per-round summary array used by the chart /
   // lineage tree — not a scalar field for this KV dump. Origin rides it

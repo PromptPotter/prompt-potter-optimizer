@@ -138,8 +138,9 @@ nodes:
       langfuse_type: generation
 # Mirrors `promptpotter/assets/optimizer/pipeline.yaml::pipelines` node for node, because this
 # dataset IS that optimizer seen as a target: an edit evolved on one layer lifts onto the other
-# only while both declare the same graph. Pinned by
-# `test_integrity.py::test_the_two_optimizer_manifests_describe_one_graph` — edit one, mirror it.
+# only while both declare the same graph — edit one, mirror it in the same commit. Not pinned by a
+# test: a node-id set comparison across two declarations reds on every rename and never on a wrong
+# number, and a graph that disagrees fails loudly at the first inner round.
 #
 # `default` is the ROUND, not the tunable set. What the outer loop may EDIT is every node under
 # `nodes:` (`PipelineSchema.config_nodes`), so `l2_context` and `l3_plan` stay tunable while

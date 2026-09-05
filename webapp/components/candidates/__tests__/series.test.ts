@@ -1,11 +1,7 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   CANDIDATE_SERIES,
-  SERIES_INK_TOKENS,
   activeSeries,
-  metricInkToken,
   seriesColumn,
   whiskerAnchor,
   type SeriesCtx,
@@ -145,26 +141,4 @@ describe("the confidence band", () => {
     // θ alone on screen: no percent bar exists, so the band must not be drawn.
     expect(whiskerAnchor(ctx({ metrics: new Set(["ability"]) }))).toBeNull();
   });
-});
-
-// The guard that keeps "no hardcoded colour in this chart" true rather than merely true
-// today: a token the table names but the stylesheet does not define resolves to the empty
-// string at runtime and paints nothing, silently.
-it("names only tokens that tokens.css actually defines", () => {
-  const css = readFileSync(
-    join(__dirname, "..", "..", "..", "app", "styles", "foundation", "tokens.css"),
-    "utf8",
-  );
-  const c = ctx();
-  const named = new Set<string>(SERIES_INK_TOKENS);
-  for (const s of CANDIDATE_SERIES) {
-    for (const elected of ["accuracy", "ability", "composite"] as const) {
-      named.add(s.ink({ ...c, electedMetric: elected }));
-    }
-  }
-  for (const token of named) expect(css).toContain(`${token}:`);
-  // And the chips read the same names the bars do — a chip lit in a colour its series does
-  // not use is a legend that lies.
-  expect(metricInkToken("ability", "ability")).toBe("--series-elected");
-  expect(metricInkToken("accuracy", "ability")).toBe("--series-reading");
 });

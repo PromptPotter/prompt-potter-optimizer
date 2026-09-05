@@ -101,6 +101,7 @@ from promptpotter.presentation.api.routers.active import (
     CycleListEntry,
     CyclesResponse,
     MachineHolder,
+    MachineQueueEntry,
     MachineStatusResponse,
     SpawnedBy,
 )
@@ -265,6 +266,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     BackendResponse,
     BackendHealthResponse,
     MachineHolder,
+    MachineQueueEntry,
     MachineStatusResponse,
     # --- dataset + origin registries (the "New campaign" pickers) ---
     DatasetIndexEntry,

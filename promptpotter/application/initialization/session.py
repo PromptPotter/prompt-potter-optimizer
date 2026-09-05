@@ -22,6 +22,7 @@ from promptpotter.shared.identity import IdentityContext, default_identity
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.jobs.mint import CyclePlan
+    from promptpotter.application.scoring.evaluators import Evaluator
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.validators import StopRule
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -46,6 +47,12 @@ class ScorerSetup:
     headline_metric: HeadlineMetric = "accuracy"
     scoring_set: list[Sample] = field(default_factory=list)
     degradation_checks: list[StopRule] = field(default_factory=list)
+    judges: tuple[Evaluator, ...] = ()
+    """The campaign's LLM-as-judge graders, already built into ``per_sample`` evaluators — one per
+    declared TERM, empty where the campaign declared none. They live beside the compiled scorer
+    because they are the same kind of fact — how this campaign grades a cell — and are built ONCE
+    per run rather than per sample, so the registry lookup, the term validation and the spec
+    validation all happen before any money is spent."""
 
     def require_scorer(self) -> CellScorer:
         """The compiled scorer, or a loud stop. ``None`` means ``populate_session_scoring`` has not

@@ -220,6 +220,11 @@ CONNECTOR = Connector(
     # One call into the caller's module — no latency to hide behind, so overlapping two
     # buys nothing and only doubles peak memory in the host's own process.
     max_cells_in_flight=1,
+    # Both keys `_in_process_run` always emits. `PromptPotterOpt` writes the pipeline.yaml that
+    # declares them, so this holds today by construction — which is the point of stating it: the
+    # guarantee stops depending on that writer staying correct. Drop a mapping there and init
+    # raises, instead of the formula grading a score that was silently dropped.
+    required_observation_keys=(RESULT_KEY, SCORE_KEY),
     default_pipeline=(PROGRAM_NODE,),
 )
 

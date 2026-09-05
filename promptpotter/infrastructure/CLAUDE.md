@@ -56,7 +56,7 @@ counted apart, because only the first one clears on its own.
 
 | Projection | Scope | Writes | Role |
 |---|---|---|---|
-| `LiveDashboardView` (`projections/live_dashboard/view.py`) | per cycle | `dashboard.json` | **Display surface** — completed-round summaries (`dash.rounds[]`; **round 0 = the origin's round-0 score**, a one-candidate round (the origin scored) emitted via the standard `close_round` path, no separate origin block) + in-flight `current_round` block + `spend` rollup (sole writer for both `backend` and `loop` buckets via `_handle_token_usage`; halt probe reads `spend_total_used_usd` accessor). Sole webapp source for the chart, lineage tree, trend sparkline. |
+| `LiveDashboardView` (`projections/live_dashboard/view.py`) | per cycle | `dashboard.json` | **Display surface** — completed-round summaries (`dash.rounds[]`; **round 0 = the origin's round-0 score**, a one-candidate round (the origin scored) emitted via the standard `close_round` path, no separate origin block) + in-flight `current_round` block + `spend` rollup (sole writer for every bucket via `_handle_token_usage`, which picks one through `domain/spend.py::TOKEN_KIND_BUCKET` and folds the totals over `SpendRollup.buckets` — never a hand-named pair, or a new spend kind is money the cap cannot see; halt probe reads `spend_total_used_usd` accessor). Sole webapp source for the chart, lineage tree, trend sparkline. |
 | `AuditTrailView` (`projections/audit_trail.py`) | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundAudit`) only when an operator drills into a specific round; `useRoundFile` is the peer hook for the PUBLIC `rounds/` tree. |
 | `PoBBStreamView` (`projections/pobb_stream.py`) | per cycle | `.runtime/streams/round_NNNN_p_best.jsonl` | Per-sample P(best) trajectory for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
 
@@ -211,16 +211,24 @@ writes, and why — [`docs/operations/persistence-and-state.md`](../../docs/oper
 
 `store/stores.py`: `Stores` frozen dataclass + `build_stores(identity,
 *, projects_root=…, benchmarks_root=…, shared_root=…)` builder.
-`shared_root` roots the two CONTENT-ADDRESSED caches (`measurements/`,
-`optimizer_reuse/`) and equals `projects_root` everywhere except an L4
-inner sandbox, which isolates campaign state but must NOT isolate a
-cache keyed by content hash. `identity` is the
+`shared_root` roots every CONTENT-ADDRESSED cache and equals
+`projects_root` everywhere except an L4 inner sandbox, which isolates
+campaign state but must NOT isolate a cache keyed by content hash.
+**`store/layout.py::SHARED_CACHE_DIRS` is the sole enumeration of that set**,
+because three surfaces have to agree on it and each had authored its own copy —
+`build_stores` roots them, `cli/commands/reset.py` preserves them, and the
+workspace storage report counts them as shared rather than residual. A cache
+named in one list and not the others is destroyed by `reset` or double-counted,
+silently, and one of those costs money. `identity` is the
 Stage-0 `IdentityContext` (`shared/identity.py`); `Stores.identity` is
 the sole source of tenant scope, with `Stores.tenant_id` a derived
 `@property` returning the `TenantId` newtype (identity-foundation
 no-drift gate #4 — never an independent field). Composite over the leaf stores
 `Stores` declares as its own fields — one attribute each, one class per
-`store/*.py`, except `optimizer_reuse`, which `stores.py` defines inline.
+`store/*.py`, except `optimizer_reuse` and `judge_reuse` — two instances of the one
+`LLMReuseCache`, which `stores.py` defines inline and which differ only in their
+namespace directory. Separate attributes rather than a shared instance: a grader
+able to read the loop's cached answers would be a ruler fed by what it measures.
 **Cite one as attribute → class → file**: the attribute is what a call site
 shows you, the file is what you have to open. Shared I/O in
 `store/io.py` — **format follows authorship**: `write_json`/`read_json*` for what
@@ -369,6 +377,6 @@ browser `session.py`, `user.py`, and `migration.py` (the first web sign-in RENAM
 `projects/default/` to `projects/{user_id}/`). It builds the Stage-0 `IdentityContext`
 that `build_stores` takes; the capability vocabulary that reads it lives one layer out
 in `shared/identity.py`. **The access model itself is a constitution, not a layer
-note** — tiers, boundaries and enforcement are owned by
+note** — boundaries, capabilities and enforcement are owned by
 [`docs/adr/0002-identity-foundation.md`](../../docs/adr/0002-identity-foundation.md) and
 [`docs/operations/access-model.md`](../../docs/operations/access-model.md).

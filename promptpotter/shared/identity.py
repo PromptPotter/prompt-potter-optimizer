@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # `datasets.benchmarks.read` MUST NOT come back — it gated repo `datasets/`, already
 # on the disk of anyone holding the install (`infrastructure/store/dataset_access.py`).
 
-# Control-plane command capabilities — one per privilege tier of the closed
+# Control-plane command capabilities — one per privilege level of the closed
 # `/commands/{kind}` set (the dispatcher's `CAP_FOR_KIND` maps each kind to one).
 # A tenant owner holds all of them over their own workspace; a delegated
 # sub-principal an attenuated subset from the sealed grant store. Ladder and
@@ -35,10 +35,10 @@ CAMPAIGN_LIFECYCLE_CAP = "campaign.lifecycle"
 CAMPAIGN_BABYSIT_CAP = "campaign.babysit"
 CAMPAIGN_LOOKAHEAD_CAP = "campaign.lookahead"
 
-# Short tier name → capability. The ONE place the ladder is enumerated: the owner
+# Short capability name → capability. The ONE place the ladder is enumerated: the owner
 # set derives from it and the admin channel parses `/grant sub step,create`
-# against it. Adding a tier = one line here, flowing to every consumer.
-CAMPAIGN_CAP_BY_TIER: dict[str, str] = {
+# against it. Adding a capability = one line here, flowing to every consumer.
+CAMPAIGN_CAP_BY_NAME: dict[str, str] = {
     "step": CAMPAIGN_STEP_CAP,
     "run": CAMPAIGN_RUN_CAP,
     "create": CAMPAIGN_CREATE_CAP,
@@ -50,25 +50,25 @@ CAMPAIGN_CAP_BY_TIER: dict[str, str] = {
     "lookahead": CAMPAIGN_LOOKAHEAD_CAP,
 }
 
-# The full command-verb set a tenant owner holds — derived from the tier map so it
+# The full command-verb set a tenant owner holds — derived from the capability map so it
 # can never drift from it. Sub-principals are carved as a subset; the dispatcher
 # gate enforces the carve.
-OWNER_COMMAND_CAPABILITIES = frozenset(CAMPAIGN_CAP_BY_TIER.values())
+OWNER_COMMAND_CAPABILITIES = frozenset(CAMPAIGN_CAP_BY_NAME.values())
 
 
-def capabilities_from_tiers(tiers: Iterable[str]) -> frozenset[str]:
-    """Map short tier names to capabilities. An unknown name is a typo, rejected loudly — a silently
-    dropped tier is an UNDER-grant nobody notices."""
+def capabilities_from_names(names: Iterable[str]) -> frozenset[str]:
+    """Map short capability names to capabilities. An unknown name is a typo, rejected loudly — a
+    silently dropped name is an UNDER-grant nobody notices."""
     caps: set[str] = set()
-    for tier in tiers:
-        name = tier.strip().lower()
+    for raw in names:
+        name = raw.strip().lower()
         if not name:
             continue
-        if name not in CAMPAIGN_CAP_BY_TIER:
+        if name not in CAMPAIGN_CAP_BY_NAME:
             raise ValueError(
-                f"unknown capability tier {name!r}; choose from {sorted(CAMPAIGN_CAP_BY_TIER)}"
+                f"unknown capability {name!r}; choose from {sorted(CAMPAIGN_CAP_BY_NAME)}"
             )
-        caps.add(CAMPAIGN_CAP_BY_TIER[name])
+        caps.add(CAMPAIGN_CAP_BY_NAME[name])
     return frozenset(caps)
 
 
@@ -158,7 +158,7 @@ __all__ = [
     "ACCESS_BLOCKED",
     "CAMPAIGN_BABYSIT_CAP",
     "CAMPAIGN_BUDGET_CAP",
-    "CAMPAIGN_CAP_BY_TIER",
+    "CAMPAIGN_CAP_BY_NAME",
     "CAMPAIGN_CREATE_CAP",
     "CAMPAIGN_LIFECYCLE_CAP",
     "CAMPAIGN_LOOKAHEAD_CAP",
@@ -168,7 +168,7 @@ __all__ = [
     "TERMINAL_IDENTITY_ID",
     "IdentityContext",
     "acting_principal_id",
-    "capabilities_from_tiers",
+    "capabilities_from_names",
     "claim_access_state",
     "claim_email",
     "default_identity",

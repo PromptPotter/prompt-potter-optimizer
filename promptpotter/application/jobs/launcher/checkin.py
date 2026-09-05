@@ -16,38 +16,35 @@ from promptpotter.application.initialization.session import (
     mint_checkin_skeleton,
 )
 from promptpotter.application.initialization.wiring import init_services
+from promptpotter.application.jobs.launcher.admission import (
+    admit_and_hold,
+    launch,
+    release_slot,
+)
 from promptpotter.application.jobs.launcher.mint_and_start import (
     LaunchError,
-    _admit,
     _assert_origin_ready,
     _record_launch_stop,
-    _release_slot,
     _run_in_background,
     build_cycle_config,
     materialize_and_write_origin,
     persist_origin_candidate_library,
-    run_preflight,
 )
 from promptpotter.application.jobs.mint import resolve_cycle_plan
-from promptpotter.application.jobs.quota import admit_launch, check_launch_quotas
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.infrastructure.runtime_flags import is_checkin
 from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.identity import (
-    CAMPAIGN_CREATE_CAP,
-    claim_email,
-    require_capability,
-)
+from promptpotter.shared.identity import CAMPAIGN_CREATE_CAP, require_capability
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.jobs.registry import JobRegistry
+    from promptpotter.application.jobs.registry import Job, JobRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -204,40 +201,60 @@ async def start_checkin_campaign(
     token_budget: int | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
 ) -> Any:
-    """Transition (b), web tail — reserve the machine slot, then spawn the runner as a detached task.
-    The CLI ``new <file>`` shares :func:`prepare_checkin_run` but runs the loop inline."""
+    """Transition (b), web tail — take the machine slot (or a place in line), then spawn the runner
+    as a detached task. The CLI ``new <file>`` shares :func:`prepare_checkin_run` but runs the loop
+    inline.
+
+    It calls :func:`launch` itself rather than being handed a job, because the gate that decides
+    whether this check-in may start AT ALL is :func:`load_checkin_for_start`, and that is also
+    where its dataset name comes from. Requesting a slot before it would put an incomplete origin
+    in the queue."""
     hop, draft = load_checkin_for_start(stores, campaign_id)
-
-    user = stores.users.get_or_create(
-        user_id=str(stores.identity.user_id),
-        tenant_id=str(stores.identity.tenant_id),
-        email=claim_email(stores.identity),
-    )
-    check_launch_quotas(user=user, job_registry=job_registry, rate_limited=True)
-    job = _admit(
-        job_registry.reserve(
-            user_id=str(stores.identity.user_id),
-            dataset_name=draft.slug,
-            hop=hop,
-        )
-    )
-
-    # ADMISSION — nothing here touches the check-in cycle, so a refusal answers for the machine
-    # slot alone and leaves the campaign re-startable once the account has room again.
-    try:
-        await run_preflight(draft.connector, backend_url)
-        spend_budget_usd, token_budget = await asyncio.to_thread(
-            admit_launch,
-            requested_cap_usd=spend_budget_usd,
-            requested_cap_tokens=token_budget,
-            user=user,
+    return await launch(
+        stores=stores,
+        job_registry=job_registry,
+        dataset_name=draft.slug,
+        hop=hop,
+        run=lambda job: _start_checkin_run(
             stores=stores,
             job_registry=job_registry,
-        )
-        job_registry.set_caps(job.job_id, cap_usd=spend_budget_usd, cap_tokens=token_budget)
-    except BaseException as exc:
-        _release_slot(job_registry, job.job_id, exc, admitted=False)
-        raise
+            job=job,
+            hop=hop,
+            draft=draft,
+            halt_at_accuracy=halt_at_accuracy,
+            spend_budget_usd=spend_budget_usd,
+            token_budget=token_budget,
+            backend_url=backend_url,
+        ),
+    )
+
+
+async def _start_checkin_run(
+    *,
+    stores: Stores,
+    job_registry: JobRegistry,
+    job: Job,
+    hop: CycleHop,
+    draft: DraftCampaign,
+    halt_at_accuracy: float | None,
+    spend_budget_usd: float | None,
+    token_budget: int | None,
+    backend_url: str,
+) -> None:
+    """Everything a check-in Start does once its slot is HELD — which, for a queued launch, is
+    after the wait. Nothing before this point touches the campaign, so a launch sitting in the
+    queue leaves the check-in exactly as the operator left it."""
+    spend_budget_usd, token_budget = await admit_and_hold(
+        stores=stores,
+        job_registry=job_registry,
+        job=job,
+        verb="start-checkin",
+        dataset_name=draft.slug,
+        backend_type=draft.connector,
+        backend_url=backend_url,
+        requested_cap_usd=spend_budget_usd,
+        requested_cap_tokens=token_budget,
+    )
 
     async def make_session(dataset_name: str) -> Session:
         return await init_services(
@@ -255,7 +272,7 @@ async def start_checkin_campaign(
         # `prepare_checkin_run` flips checkin → active before its last await, so an interrupt
         # there leaves an `active` campaign with no producer. The CYCLE needs stamping too, or
         # it derives `detached` and `load_checkin_for_start` can no longer re-start it.
-        _release_slot(job_registry, job.job_id, exc)
+        release_slot(job_registry, job.job_id, exc)
         _record_launch_stop(
             stores=stores,
             hop=hop,
@@ -279,7 +296,6 @@ async def start_checkin_campaign(
     )
     job_registry.attach_task(job.job_id, task)
     logger.info("start-checkin: started %s/%s (job %s)", hop.campaign_id, hop.cycle_id, job.job_id)
-    return job
 
 
 __all__ = [

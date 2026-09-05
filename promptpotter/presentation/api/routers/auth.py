@@ -633,14 +633,13 @@ def activity(
         # A chart's policy for an unpriced row: contribute nothing to the money axis, still count
         # on the token and request ones. The quota gate answers the same `None` differently.
         cost = record_cost_usd(rec) or 0.0
-        # Tag backend rows so optimizer + backend never collide in the legend
-        # even when they share a provider slug (Groq-hosted openai/gpt-oss-* +
-        # OpenRouter-backed TermNorm both prefix with provider names).
-        if group_by == "model":
-            label = f"{model} (backend)" if kind == "backend" else model
-        else:
-            base = _provider_from_model(model)
-            label = f"{base} (backend)" if kind == "backend" else base
+        # Tag every non-optimizer row with its own kind so they never collide in the legend
+        # even when they share a provider slug (Groq-hosted openai/gpt-oss-* + OpenRouter-backed
+        # TermNorm both prefix with provider names). Derived from the kind rather than testing
+        # for "backend": a judge shares the optimizer's provider far more often than the backend
+        # does, so an untagged third kind would silently sum into the optimizer's series.
+        base = model if group_by == "model" else _provider_from_model(model)
+        label = base if kind == "optimizer" else f"{base} ({kind})"
         if label not in label_order:
             label_order[label] = len(label_order)
         b.series_spend[label] = b.series_spend.get(label, 0.0) + cost

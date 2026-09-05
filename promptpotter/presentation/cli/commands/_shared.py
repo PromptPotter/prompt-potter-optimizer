@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
+    from promptpotter.application.jobs.quota import SpendCeilings
+    from promptpotter.application.jobs.registry import Job, JobRegistry
     from promptpotter.application.run_observers import RunObservers
     from promptpotter.application.runner.entry import RunMode
     from promptpotter.domain.results import CycleResult
@@ -138,7 +140,7 @@ def backend_reach_line(backend_type: str, backend_url: str) -> str:
 
 def backend_unreachable_result(backend_url: str) -> CommandResult:
     """The shared preflight failure every loop verb (``new`` / ``resume`` / sweep) returns when the
-    connector's own probe reports the backend down (``launcher.mint_and_start::run_preflight``)."""
+    connector's own probe reports the backend down (``launcher.admission::probe_backend``)."""
     return CommandResult(
         data={"error": "backend_unreachable", "backend_url": backend_url},
         human=(
@@ -171,6 +173,72 @@ def build_observers(
     )
 
 
+async def _hold_machine_slot(
+    args: argparse.Namespace, ctx: SessionCtx, session: Session
+) -> tuple[JobRegistry, Job, SpendCeilings]:
+    """Take the SAME machine slot the browser takes, joining the SAME queue when the box is full.
+
+    A terminal run that holds nothing makes every statement the machine makes about itself false
+    while it runs — how full it is, who holds it, whether another launch fits — and lets the
+    browser start a second producer on the cycle the terminal is already running. A scheduler that
+    cannot see half its workload is not one.
+
+    It WAITS here rather than detaching, because a person is watching this process and the run
+    happens inside it. Being in the shared QUEUE is what makes the wait fair: a terminal that
+    merely retried in a loop would take the next free slot ahead of a browser launch that has
+    waited longer. ``--no-wait`` leaves the line and refuses instead, naming the holder."""
+    from promptpotter.application.initialization.wiring import backend_type_of_dataset
+    from promptpotter.application.jobs.capacity import resolve_run_capacity
+    from promptpotter.application.jobs.launcher.admission import (
+        admit_and_hold,
+        refuse_as_busy,
+        request_launch,
+    )
+    from promptpotter.application.jobs.registry import JobRegistry, default_jobs_dir
+
+    # No `on_reap`: this process ATTACHES to the machine-global jobs dir, it does not own it, so it
+    # counts and releases slots but stamps nobody's cycle. Releasing needs no ownership — a job's
+    # producer holds an OS lock for its own lifetime, so a crashed server's jobs cannot wedge the
+    # box until it restarts, and a genuinely live run is never touched.
+    registry = JobRegistry(default_jobs_dir(), capacity=resolve_run_capacity)
+    dataset_name = ctx.init_params.get("dataset_name") or ""
+    job = request_launch(
+        stores=session.store,
+        job_registry=registry,
+        dataset_name=dataset_name,
+        hop=ctx.hop,
+        # The launch-rate and daily-campaign arms bound a STRANGER spending the host's key, and the
+        # terminal IS the host (`jobs/quota.py::_is_host`). The CONCURRENCY arm is outside them and
+        # still applies.
+        rate_limited=False,
+    )
+    if job.status == "queued":
+        if getattr(args, "no_wait", False):
+            refuse_as_busy(registry, job)
+        position = next(
+            (i for i, q in enumerate(registry.queue_order(), 1) if q.job_id == job.job_id), 1
+        )
+        holder = registry.holder()
+        sys.stderr.write(
+            f"Machine full — queued at position {position} "
+            f"(oldest run: {holder.campaign_id if holder else '?'}). "
+            f"It starts by itself; Ctrl+C to leave the queue.\n"
+        )
+        sys.stderr.flush()
+    ceilings = await admit_and_hold(
+        stores=session.store,
+        job_registry=registry,
+        job=job,
+        verb=str(getattr(args, "command", None) or "cli"),
+        dataset_name=dataset_name,
+        backend_type=backend_type_of_dataset(session.store, dataset_name),
+        backend_url=ctx.backend_url,
+        requested_cap_usd=getattr(args, "spend_budget_usd", None),
+        requested_cap_tokens=getattr(args, "token_budget", None),
+    )
+    return registry, job, ceilings
+
+
 async def drive_cycle(
     args: argparse.Namespace,
     ctx: SessionCtx,
@@ -181,29 +249,43 @@ async def drive_cycle(
     mode: RunMode,
 ) -> tuple[CycleResult, RunObservers]:
     """One pass through the optimization loop — the single CLI driver. It owns the scaffolding every
-    loop verb shares; callers construct only the verb's :class:`RunMode`."""
+    loop verb shares; callers construct only the verb's :class:`RunMode`.
+
+    It is also where a terminal run holds its machine slot, because a slot stands for a RUN and
+    this is where one begins and ends. Later than the web path admits (which gates before its
+    mint), and deliberately so: the front of a CLI verb can sit for minutes on an interactive
+    check-in, and a slot held across operator typing is a slot nobody else can have."""
+    from promptpotter.application.jobs.launcher.admission import job_status_for, release_slot
     from promptpotter.application.runner.entry import run_optimization
 
+    registry, job, ceilings = await _hold_machine_slot(args, ctx, session)
+    registry.mark_started(job.job_id)
     pre_origin_acc = ctx.state.get("origin_accuracy", 0.0)
-    observers = build_observers(session, campaign_config, train_data, pre_origin_acc)
+    try:
+        observers = build_observers(session, campaign_config, train_data, pre_origin_acc)
 
-    # Control-local hooks (pause.flag under .runtime/) are bound centrally in
-    # run_optimization (the single runner seam) so CLI and API launches behave
-    # identically — no per-entry-point wiring here.
-    return (
-        await run_optimization(
+        # Control-local hooks (pause.flag under .runtime/) are bound centrally in
+        # run_optimization (the single runner seam) so CLI and API launches behave
+        # identically — no per-entry-point wiring here.
+        result = await run_optimization(
             train_data,
             campaign_config,
             session=session,
             observers=observers,
             mode=mode,
-            # The FLAGS only. `None` means "not given" and the runner keeps the campaign's own
-            # value; an `or` fallback here also read `--spend-budget 0` as absent.
-            spend_budget_usd=getattr(args, "spend_budget_usd", None),
-            token_budget=getattr(args, "token_budget", None),
-        ),
-        observers,
+            # What admission ADMITTED, not what the flags asked for. Identical for the operator of
+            # the box, who is metered in neither unit; a delegate reaching the terminal under
+            # `--tenant` is held to the ceiling their grant allows, exactly as in the browser.
+            spend_budget_usd=ceilings.usd,
+            token_budget=ceilings.tokens,
+        )
+    except BaseException as exc:
+        release_slot(registry, job.job_id, exc)
+        raise
+    registry.mark_finished(
+        job.job_id, status=job_status_for(result.stop_reason), stop_reason=result.stop_reason
     )
+    return result, observers
 
 
 def cycle_result_command(

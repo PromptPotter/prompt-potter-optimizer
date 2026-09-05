@@ -52,6 +52,7 @@ COMMANDS = {
         "promptpotter.presentation.cli.commands.lifecycle:cmd_set_allowed_models"
     ),
     "replace-dataset": "promptpotter.presentation.cli.commands.lifecycle:cmd_replace_dataset",
+    "cancel-queued": "promptpotter.presentation.cli.commands.lifecycle:cmd_cancel_queued",
 }
 
 # A verb is one row here plus one `sub.add_parser` in `parsers.py`, and nothing made the two
@@ -102,9 +103,10 @@ CLI_VERB_FOR_KIND: dict[str, str | None] = {
     "fork-cycle": "resume",
     "origin-gate-decision": "resume",
     "compact-archive": "compact-archive",
+    "cancel-queued-run": "cancel-queued",
     # Browser-only ON PURPOSE, and the absence IS the boundary: look-ahead spends the box's shared
     # provider rate bucket, so an assistant may recommend the control but never press it. Root
-    # `CLAUDE.md` § Conventions; `docs/operations/access-model.md` § Tier 1a.
+    # `CLAUDE.md` § Conventions; `docs/operations/access-model.md` § host-admin ↔ user.
     "set-sample-lookahead": None,
 }
 _named_verbs = {v for v in CLI_VERB_FOR_KIND.values() if v is not None}

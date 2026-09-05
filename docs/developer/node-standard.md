@@ -8,7 +8,7 @@ Built-in nodes cover fixed-config deterministic steps (lookup, fuzzy matching), 
 
 This page is both the node model and the **strict wire shape** PromptPotter parses from `GET /pipeline` (or from a local `datasets/{name}/pipeline.yaml`). Every connector publishes this shape, and the **same parser** consumes `promptpotter/assets/optimizer/pipeline.yaml` unchanged. Writing a connector or extending the optimizer manifest — this is the contract you implement against.
 
-The silent-harm parts are tested — flat-format rejection and content-hash sensitivity, by [`tests/test_integrity.py`](../../tests/test_integrity.py) (`test_pipeline_params_rejects_flat_param_map`, `test_content_hash_distinguishes_pipeline_params`). The rest fails loud: a malformed pipeline is a loud setup error, so no standing test — see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md). Operator walk-through for wiring a new node into self-healing: [`../operations/backend-integration.md`](../operations/backend-integration.md) § Self-healing a node.
+The silent-harm part is tested — content-hash sensitivity, by [`tests/test_integrity.py`](../../tests/test_integrity.py) (`test_content_hash_distinguishes_pipeline_params`). Flat-format rejection is a `JobSearchPoint` model validator, so Pydantic raises on a malformed authored config; that and the rest fail loud, so no standing test — see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md). Operator walk-through for wiring a new node into self-healing: [`../operations/backend-integration.md`](../operations/backend-integration.md) § Self-healing a node.
 
 ## Pipeline declaration format
 

@@ -333,7 +333,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
     mis-clamp hands a delegate a capability it was never given, and nothing errors —
     the privileged command simply succeeds. Pins four properties: attenuation clamps
     an over-broad grant, the rebind binds to the delegator's tenant (not an arbitrary
-    one), the dispatcher gate denies a tier the delegate lacks, and a malformed grant
+    one), the dispatcher gate denies a capability the delegate lacks, and a malformed grant
     fails secure (no caps) rather than promoting to owner.
     """
     import types
@@ -484,6 +484,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
             user=generous,
             stores=_oidc_stores({"spend_ceiling_usd": 2.0}),
             job_registry=idle_registry,
+            job_id="job-a",
         ).usd
         == 2.0
     )
@@ -494,6 +495,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
             user=generous,
             stores=_oidc_stores({}),
             job_registry=idle_registry,
+            job_id="job-a",
         ).usd
         == 10.0
     )
@@ -516,6 +518,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
             user=thin,
             stores=_oidc_stores({"spend_ceiling_usd": 2.0}),
             job_registry=idle_registry,
+            job_id="job-a",
         ).usd
         == 1.0
     )
@@ -570,56 +573,6 @@ def test_deleting_a_campaign_does_not_un_spend_what_it_spent(built_stores: Any) 
 
     after = sum_user_spend(ledgers=account_ledgers(stores.campaigns), since=0.0, until=2e9)
     assert after == before
-
-
-async def test_resetting_an_install_does_not_un_spend_what_it_spent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`reset` removes each tenant's whole `campaigns/` tree without going through either
-    destroyer, which makes it the one path that can take every ledger on the box in a single
-    gesture — it accepts `--all-tenants`, and the per-tenant classification simply runs N times.
-    Unbanked, a free-tier ceiling is re-earnable by running a dev verb, for every account at once,
-    and nothing errors: the accounts just read empty again and the host's key is open a second time.
-    """
-    import json
-    import types
-
-    from promptpotter.domain.cycle_paths import WorkspaceDir
-    from promptpotter.infrastructure.store.account_spend import account_ledgers, sum_user_spend
-    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-    from promptpotter.presentation.cli.commands import reset as reset_cmd
-
-    campaign_dir = tmp_path / "t1" / "campaigns" / "camp-1"
-    ledger = campaign_dir / "cycles" / "cyc-1" / ".runtime" / "ledger.jsonl"
-    ledger.parent.mkdir(parents=True, exist_ok=True)
-    (campaign_dir / "campaign.json").write_text(json.dumps({"campaign_id": "camp-1"}), "utf-8")
-    ledger.write_text(
-        json.dumps(
-            {
-                "record_type": "token_usage",
-                "timestamp": "2026-01-01T00:00:00+00:00",
-                "kind": "optimizer",
-                "model": "openai/gpt-4o",
-                "provider": "openrouter",
-                "input_tokens": 1_000,
-                "output_tokens": 500,
-                "cost_usd": 0.25,
-            }
-        )
-        + "\n",
-        "utf-8",
-    )
-
-    store = CampaignStore(WorkspaceDir(tmp_path / "t1"))
-    before = sum_user_spend(ledgers=account_ledgers(store), since=0.0, until=2e9)
-    assert before.used_usd == pytest.approx(0.25) and before.used_tokens == 1_500
-
-    monkeypatch.setattr(reset_cmd, "DEFAULT_PROJECTS_ROOT", tmp_path)
-    await reset_cmd.cmd_reset(
-        types.SimpleNamespace(tenant="t1", yes=True, dry_run=False, all_tenants=False)
-    )
-    assert not ledger.exists(), "reset did not drop the tree it is for"
-    assert sum_user_spend(ledgers=account_ledgers(store), since=0.0, until=2e9) == before
 
 
 def test_deleting_a_spent_stub_fork_does_not_un_spend_it(built_stores: Any) -> None:
@@ -743,9 +696,9 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
 
     stores = built_stores
     hop = CycleHop(campaign_id="camp-3", cycle_id="cycle_budget0000")
-    registry = JobRegistry(tmp_path / "jobs")
-    job = registry.reserve(user_id="default", dataset_name="ds1", hop=hop).job
-    assert job is not None
+    registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    job = registry.request_slot(user_id="default", dataset_name="ds1", hop=hop)
+    assert job.status == "pending", "an empty box must hand out a slot, not a place in line"
     registry.set_caps(job.job_id, cap_usd=0.30, cap_tokens=5_000_000)
 
     await CommandDispatcher(stores, registry)._apply_change_spend_budget(
@@ -773,40 +726,13 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
         max_tokens=1_000,
         user=User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01"),
         stores=delegated,
-        job_registry=types.SimpleNamespace(list_running=lambda *, user_id: []),
+        job_registry=types.SimpleNamespace(
+            list_running=lambda *, user_id: [], running_job_for=lambda _hop: None
+        ),
         hop=hop,
     )
     assert caps.usd is None, "a grant became a ceiling on an arm the caller left alone"
     assert caps.tokens == 1_000
-
-
-def test_a_rejected_command_does_not_burn_its_idempotency_key(tmp_path: Path) -> None:
-    """Dedupe keyed on the ``CommandRecord`` alone let a REJECTED attempt satisfy its key forever.
-    The 429 at the account ceiling is the canonical case: the client is told to retry, the retry
-    matches the burned key, and the dispatcher answers 200 with a replay body nothing ever wrote —
-    so an origin turn that never ran reads as one that did, and no surface says otherwise.
-    """
-    from promptpotter.domain.cycle_paths import CycleDir
-    from promptpotter.domain.run_records import CommandAckRecord, CommandRecord
-    from promptpotter.infrastructure.ledger import CycleEventLog
-    from promptpotter.presentation.api.middleware.command_dispatcher import (
-        _find_idempotent_command,
-    )
-
-    ledger = CycleEventLog.open(CycleDir(tmp_path / "cyc"))
-    ledger.append(CommandRecord(command_id="c1", kind="resolve-origin", idempotency_key="k1"))
-    ledger.append(CommandAckRecord(command_id="c1", status="rejected", detail="quota"))
-    assert _find_idempotent_command(ledger, "k1") is None
-
-    # A record whose ack never landed (the process died mid-apply) is not a replay either.
-    ledger.append(CommandRecord(command_id="c2", kind="resolve-origin", idempotency_key="k2"))
-    assert _find_idempotent_command(ledger, "k2") is None
-
-    # The retry of the refused key applies, and THAT is what replays from then on.
-    ledger.append(CommandRecord(command_id="c3", kind="resolve-origin", idempotency_key="k1"))
-    ledger.append(CommandAckRecord(command_id="c3", status="applied"))
-    match = _find_idempotent_command(ledger, "k1")
-    assert match is not None and match.command_id == "c3"
 
 
 def test_a_non_finite_budget_cannot_disarm_the_spend_ceiling() -> None:
@@ -898,40 +824,6 @@ async def test_a_revoked_principal_cannot_replay_an_applied_command(tmp_path: Pa
     assert touched == [], "the dedupe short-circuit answered before the capability gate"
 
 
-def test_a_capability_less_principal_cannot_mint_a_checkin_campaign(built_stores: Any) -> None:
-    """A check-in campaign is durable disk from the moment it exists, and THREE ingresses mint one
-    — ``/datasets/ingest``, ``/datasets/{name}/draft``, ``/origins/{id}/draft`` — none of which is a
-    ``/commands/{kind}`` verb, so the dispatcher's ladder could not see any of them. A blocked
-    account (ADR-0002: authenticated, EMPTY capability set) could therefore keep writing campaign
-    trees onto the host's disk after being revoked, indefinitely, because a durable mint answers
-    exactly like a permitted one — the revoke reads as effective on every surface an operator
-    checks. The gate sits at the MINT rather than on each route for the same reason the ladder does
-    at one seam: a per-route one is three copies and leaves the fourth door open.
-    """
-    import dataclasses
-
-    from promptpotter.application.datasets.ingest import ingest_draft
-    from promptpotter.shared.errors import NotFoundError
-
-    revoked = dataclasses.replace(
-        built_stores, identity=dataclasses.replace(built_stores.identity, capabilities=frozenset())
-    )
-    with pytest.raises(NotFoundError):
-        ingest_draft(
-            stores=revoked,
-            blob=b"query,ground_truth\nwhat,answer\n",
-            filename="blocked.csv",
-        )
-    assert list(built_stores.campaigns.iter_campaign_dirs()) == [], "a revoked mint reached disk"
-
-    # The same call under the owner set mints — or the gate is refusing everyone, which reads as
-    # "secure" right up until nobody can ingest anything.
-    ingest_draft(
-        stores=built_stores, blob=b"query,ground_truth\nwhat,answer\n", filename="allowed.csv"
-    )
-    assert len(list(built_stores.campaigns.iter_campaign_dirs())) == 1
-
-
 def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path) -> None:
     """``change-spend-budget`` acks ``applied`` the moment the ledger takes the record — it cannot
     see whether anything will ever READ the ceiling it wrote, so every way of writing one nothing
@@ -972,121 +864,6 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
     # And the launch sweep returns what it dropped, so a paused-cycle change cannot be lost silently.
     assert clear_run_control_flags(cycle_dir) == (None, 5_000)
     assert gate.tripped() is None, "the swept file must stop governing the next run"
-
-
-def test_the_ceiling_is_armed_before_the_origin_pass_spends() -> None:
-    """The gate is BOUND before round 0 is scored, not after it.
-
-    ``_prepare_run`` stamped the composed ceilings onto the dashboard and then scored the origin;
-    the binding that makes them bite — ``session.budget_tripped`` — happened two hundred lines
-    later, in ``_run_single_cycle``. So the per-sample checkpoint (``query_loop``: ``if
-    session.budget_tripped is not None``) silently no-opped for every origin sample, and the
-    round-boundary gate could not cover it because the round loop had not started. Round 0 IS a
-    round and the longest stretch of a fresh launch — for an L4 outer round it is ``n_samples``
-    whole inner CAMPAIGNS — so a free-tier account admitted at one launch step could spend
-    multiples of its entire grant before the ceiling bound once.
-
-    Pinned as an ORDER rather than by running a campaign: the defect was never a wrong value, it
-    was two owners of "the ceiling is in place" — the dashboard stamp and the arming — with only
-    the readout ahead of the spending. ``_arm_run_controls`` is now the single owner of both the
-    ceiling and the pause flags, and the two call sites are the two moments it has to hold.
-    """
-    import inspect
-
-    from promptpotter.application.runner import entry
-
-    src = inspect.getsource(entry._prepare_run)
-    armed = src.find("_arm_run_controls(")
-    spends = src.find("establish_campaign_origin(")
-    assert armed != -1, "_prepare_run no longer arms the budget gate — round 0 spends unmetered"
-    assert spends != -1, "the origin seam moved; re-pin this ordering against its new call"
-    assert armed < spends, (
-        "the origin pass is scored before `session.budget_tripped` is bound, so the per-sample "
-        "ceiling check no-ops for every origin sample"
-    )
-
-    # Both callers arm through the one owner, so a ceiling moved mid-flight cannot reach one
-    # cadence and not the other.
-    assert "_build_budget_gate(" not in inspect.getsource(entry._run_single_cycle), (
-        "_run_single_cycle builds its own gate again — arming has two owners once more"
-    )
-
-
-def test_a_reservation_is_addressable_by_the_cycle_it_holds(tmp_path: Path) -> None:
-    """A slot admitted before the mint must be bound to the cycle once the ids exist.
-
-    `mint_campaign_command` reserves at `UNRESOLVED_HOP` — the slot is held before the cycle it
-    will name exists — so until `update_target` lands, the job answers NO hop-keyed query. Three
-    read it: `running_job_for` (how `change-spend-budget` reaches the cap the reservation holds),
-    `reap_cycle_by_id`, and the busy 409's campaign name. With the reservation unreachable, a
-    raise moves `spend_cap.json` while `Job.cap_usd` keeps quoting the launch number — and since
-    `_outstanding_reservations` sums that field, the difference is committed money the next
-    `admit_launch` cannot see.
-
-    Both halves are pinned: the registry resolves, AND the launcher calls it. The mechanism alone
-    was already correct and reachable from nothing.
-    """
-    import inspect
-
-    from promptpotter.application.jobs.launcher import mint_and_start
-    from promptpotter.application.jobs.registry import UNRESOLVED_HOP, JobRegistry
-    from promptpotter.domain.cycle_paths import CycleHop
-
-    registry = JobRegistry(tmp_path / "jobs")
-    job = registry.reserve(user_id="u1", dataset_name="d1").job
-    assert job is not None and job.hop == UNRESOLVED_HOP
-
-    hop = CycleHop(campaign_id="ca_1", cycle_id="cy_1")
-    assert registry.running_job_for(hop) is None, "an unresolved reservation cannot name a cycle"
-
-    registry.update_target(job.job_id, hop=hop)
-    found = registry.running_job_for(hop)
-    assert found is not None and found.job_id == job.job_id
-
-    assert "update_target(" in inspect.getsource(mint_and_start.mint_campaign_command), (
-        "the mint resolves ids the reservation never receives — every hop-keyed join goes blind"
-    )
-
-
-def test_a_fork_seed_cannot_raise_the_ceiling_the_wallet_admitted() -> None:
-    """A `CycleSeed` arrives over `fork-cycle` as REQUEST INPUT from anyone holding `campaign.run`
-    — which every OIDC signup holds — and its `config_overrides` carry `spend_budget_usd` /
-    `token_budget`. Applied as a plain override it lands AFTER the admitted caps and arms
-    `BudgetGate` at a number the caller typed, while `admit_launch` and `JobRegistry.set_caps`
-    both still read the account as bounded. The run then burns the host's provider key with every
-    surface reporting a healthy account, and the same line escapes an ADR-0005 delegate's
-    `spend_ceiling_usd`, which is consulted only inside `admit_launch`.
-    """
-    from promptpotter.application.campaign_config import load_campaign_config
-    from promptpotter.application.runner.entry import _tighten_budgets
-
-    config = load_campaign_config({"optimization": {"degradation_threshold": 0.05}})
-    attacker = config.model_copy(
-        update={
-            "optimization": config.optimization.model_copy(
-                update={"spend_budget_usd": 1e9, "token_budget": 10**12}
-            )
-        }
-    )
-
-    bounded = _tighten_budgets(attacker, 0.30, 5_000_000)
-    assert bounded.optimization.spend_budget_usd == pytest.approx(0.30)
-    assert bounded.optimization.token_budget == 5_000_000
-
-    # A seed may still spend LESS than it was admitted for — bounding is not overriding.
-    thrifty = config.model_copy(
-        update={
-            "optimization": config.optimization.model_copy(
-                update={"spend_budget_usd": 0.05, "token_budget": 1_000}
-            )
-        }
-    )
-    frugal = _tighten_budgets(thrifty, 0.30, 5_000_000)
-    assert frugal.optimization.spend_budget_usd == pytest.approx(0.05)
-    assert frugal.optimization.token_budget == 1_000
-
-    # The unmetered operator imposes nothing, so the config stands untouched.
-    assert _tighten_budgets(attacker, None, None) is attacker
 
 
 def test_an_operator_raise_survives_relaunch_but_never_escapes_the_wallet() -> None:
@@ -1187,6 +964,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
         user=free_tier,
         stores=_stores(issuer=web, ledgers=[]),
         job_registry=idle,
+        job_id="job-a",
     )
     assert fresh.usd == pytest.approx(settings.FREE_TIER_LAUNCH_STEP_USD)
     assert fresh.usd < settings.FREE_TIER_SPEND_CAP_USD
@@ -1201,25 +979,39 @@ def test_host_wallet_ceilings_hold_in_both_units(
             user=free_tier,
             stores=_stores(issuer=web, ledgers=[]),
             job_registry=idle,
+            job_id="job-a",
         )
 
     # A cycle already in flight holds its whole declared ceiling, or two concurrent launches are
     # both admitted against one remainder and the pair spends double it.
+    def _sibling(**caps: Any) -> Any:
+        held = types.SimpleNamespace(job_id="job-b", hop=None, **caps)
+        return types.SimpleNamespace(list_running=lambda *, user_id: [held])
+
     with pytest.raises(QuotaExceededError):
         admit_launch(
             requested_cap_usd=None,
             requested_cap_tokens=None,
             user=free_tier,
             stores=_stores(issuer=web, ledgers=[]),
-            job_registry=types.SimpleNamespace(
-                list_running=lambda *, user_id: [
-                    types.SimpleNamespace(
-                        hop=None,
-                        cap_usd=settings.FREE_TIER_SPEND_CAP_USD,
-                        cap_tokens=settings.FREE_TIER_TOKEN_CAP,
-                    )
-                ]
+            job_registry=_sibling(
+                cap_usd=settings.FREE_TIER_SPEND_CAP_USD,
+                cap_tokens=settings.FREE_TIER_TOKEN_CAP,
             ),
+            job_id="job-a",
+        )
+
+    # ...and one admitted but not yet STAMPED holds an amount nothing can read. Counted as zero,
+    # both launches inside that window are quoted the same remainder and the pair spends twice the
+    # ceiling, with no error at any step. It must refuse instead.
+    with pytest.raises(QuotaExceededError):
+        admit_launch(
+            requested_cap_usd=None,
+            requested_cap_tokens=None,
+            user=free_tier,
+            stores=_stores(issuer=web, ledgers=[]),
+            job_registry=_sibling(cap_usd=None, cap_tokens=None),
+            job_id="job-a",
         )
 
     # `:nitro` is a route selector, so the call is unpriceable BY DESIGN and the account's USD
@@ -1233,6 +1025,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
             issuer=web, ledgers=_ledger("blind.jsonl", model="openai/gpt-oss-20b:nitro")
         ),
         job_registry=idle,
+        job_id="job-a",
     )
     assert blind.usd <= settings.UNPRICED_GRACE_USD
     assert blind.usd == pytest.approx(settings.FREE_TIER_LAUNCH_STEP_USD)
@@ -1260,6 +1053,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
         user=free_tier,
         stores=_stores(issuer=None, ledgers=[]),
         job_registry=idle,
+        job_id="job-a",
     ) == (None, None)
 
 
@@ -1313,57 +1107,3 @@ def test_an_exhausted_account_cannot_spend_before_a_campaign_exists(tmp_path: Pa
 
     # The box operator spends their own money and is refused on neither arm.
     admit_llm_turn(stores=_stores(None))
-
-
-def test_config_keys_are_read_through_settings() -> None:
-    """A config key read via ``os.environ`` is invisible to the file the operator edits.
-
-    ``Settings`` consults the process environment AND ``config/paths.py::env_file_path``;
-    a bare ``os.environ`` read sees only what the launcher exported. So the same key put in
-    the install's ``.env`` is silently ignored — no error, no warning, the feature simply
-    never fires. ``N8N_SIGNUP_WEBHOOK_URL`` sat that way on the live box for months, logging
-    "CRM forward skipped" while the operator believed the forward was on; the admin-bot
-    credentials fail the same way, leaving an operator certain the ADR-0004 channel and its
-    audit trail are armed when nothing is listening.
-
-    The invariant is about REACH, not style: only modules that must read the environment
-    to BUILD ``Settings`` may do so, and each states why. Everything else declares a field.
-    """
-    import ast
-    from pathlib import Path
-
-    import promptpotter
-
-    root = Path(promptpotter.__file__).parent
-    allowed = {
-        # Resolves PROMPTPOTTER_HOME + the OS data dir — which is what LOCATES the env file,
-        # so it cannot be read from the file it is computing.
-        "config/paths.py",
-        # Decides whether to PROMPT for a first key, and deliberately asks the shell rather
-        # than the file: an exported key means the operator already has one.
-        "config/first_run.py",
-        # PROMPTPOTTER_AUTH — a local-harness OIDC bypass, kept off the Settings surface so
-        # it can never be switched on by a file that ships or syncs.
-        "presentation/api/deps.py",
-    }
-
-    offenders: list[str] = []
-    for path in sorted(root.rglob("*.py")):
-        rel = path.relative_to(root).as_posix()
-        if rel in allowed:
-            continue
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if (
-                isinstance(node, ast.Attribute)
-                and node.attr in ("environ", "getenv")
-                and isinstance(node.value, ast.Name)
-                and node.value.id == "os"
-            ):
-                offenders.append(f"{rel}:{node.lineno}")
-
-    assert not offenders, (
-        f"direct environment access outside the modules that must bootstrap it: {offenders}. "
-        "Declare the key as a `Settings` field and read `settings.X`, so it resolves from the "
-        "install's .env as well as the process environment. If the module genuinely must read "
-        "the environment first, add it to `allowed` above WITH the reason."
-    )

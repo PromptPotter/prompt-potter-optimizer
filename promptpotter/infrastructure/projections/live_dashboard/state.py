@@ -201,7 +201,6 @@ class LiveDashboardState(StrictModel):
 
     round: int = 0
     candidate: str = ""
-    query: str = ""
     patience: str = ""
     # Banked lives in improvement-banked-budget mode; ``None`` when lives is off (the UI
     # then shows the round counter). A per-round marker, not a ceiling — hence not in

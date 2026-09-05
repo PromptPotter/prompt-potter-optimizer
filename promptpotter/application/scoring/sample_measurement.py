@@ -17,7 +17,7 @@ from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.l4.proxies import INNER_FACT_KEYS, PARENT_LEVEL_SE_KEY
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import QueryMeasurement, is_hit
+from promptpotter.domain.scoring import QueryMeasurement, is_hit, turn_scalars
 from promptpotter.infrastructure.llm.telemetry import emit_token_usage
 from promptpotter.shared.errors import ErrorCategory, has_pipeline_warnings
 
@@ -117,6 +117,10 @@ _INFRA_KEYS: frozenset[str] = frozenset(
         "total_time",
         "diagnostics",
         "reasoning_trace",
+        # The cell's conversation, where the backend has one. An infra key like the trace beside
+        # it: a dataset does not declare an `observation_mapping` for how its backend talks, and
+        # a formula must never read a turn — see `domain/scoring.py::TurnRecord`.
+        "turns",
         # L4: the arm's own half of a paired cell difference (`domain/l4/proxies.py`). It rides
         # here rather than as a declared observation because the panel reads it and the scoring
         # formula must not — see the emit site in `runner/inner/spawn.py`.
@@ -284,7 +288,7 @@ def _error_result(
     return QueryMeasurement(
         sample_id=sample.id,
         query=sample.query,
-        ground_truth=sample.ground_truth,
+        ground_truth=sample.ground_truth or "",
         predicted="ERROR",
         cached=False,
         error=error_msg or "unknown error",
@@ -340,7 +344,10 @@ async def measure_sample(
     pipeline_params: dict[str, Any] | None = None,
 ) -> QueryMeasurement:
     query = sample.query
-    ground_truth = sample.ground_truth
+    # The ONE place a labelless cell becomes a row. `QueryMeasurement.ground_truth` is `str`, and
+    # everything downstream of here — the matcher, the rank, the archive — reads it as one; a
+    # verifier-graded cell says so by carrying `""`, which no answer matches.
+    ground_truth = sample.ground_truth or ""
 
     pipeline_schema = session.pipeline_schema
 
@@ -410,7 +417,16 @@ async def measure_sample(
         from promptpotter.domain.scoring import extract_item_label
 
         ranked = terminal_ranking({"pipeline_data": data}, pipeline_schema)
-        predicted = extract_item_label(ranked[0]) if ranked else NO_RESULT
+        # Where the backend DECLARED an answer key, that is the answer — the ranking is not
+        # consulted, because two sources for one fact is how they come to disagree. A backend
+        # declaring none keeps the ranking as its only source, which is every ranked-label one.
+        # Either way an absent answer is `NO_RESULT`, and that sentinel is the honest reading:
+        # the pipeline ran and emitted nothing nameable (`domain/results.py`).
+        answer_key = session.backend_client.answer_key
+        if answer_key is not None:
+            predicted = str(data.get(answer_key) or "").strip() or NO_RESULT
+        else:
+            predicted = extract_item_label(ranked[0]) if ranked else NO_RESULT
         if predicted == "ERROR":
             return _error_result(
                 sample,
@@ -426,6 +442,8 @@ async def measure_sample(
             val = data.get(key)
             if val is not None:
                 pd[key] = val
+        # Here, not in a connector: every backend that emits `turns` earns the same terms.
+        pd.update(turn_scalars(pd.get("turns")))
         terminal_node = data.get("terminal_node")
         if terminal_node is None:
             st = pd.get("step_timings") or {}
@@ -434,6 +452,13 @@ async def measure_sample(
                     terminal_node = node.name
         if terminal_node is not None:
             pd["terminal_node"] = terminal_node
+
+        # The bare question, where the dataset declared one distinct from `query` — banked so a
+        # JUDGE can read it, since a judge is handed this row and never the `Sample`. Absent on
+        # every dataset where the two are the same string, which is what keeps the judges'
+        # fallback to `query` the normal path rather than a special case.
+        if sample.question:
+            pd["question"] = sample.question
 
         step_tokens = _compute_step_tokens(data, pipeline_schema, wire_params)
         if step_tokens:
@@ -456,13 +481,39 @@ async def measure_sample(
         }
         from promptpotter.application.scoring.evaluators import materialize_sample_values
 
-        sample_evaluators = materialize_sample_values(pipeline_schema, result)  # type: ignore[arg-type]
-        if sample_evaluators:
-            pd["evaluators"] = sample_evaluators
+        # TOP-LEVEL into `pipeline_data`, exactly where a backend's own observation lands — that
+        # is what makes a per-sample evaluator addressable from a scoring formula. Nested under an
+        # `evaluators` key it was not: `cell_namespace` turns a dict into a `SimpleNamespace`, and
+        # the AST allowlist bans attribute access, so the value was materialized into a shape no
+        # formula could name. `validate_campaign_evaluator` refuses a name that would collide here.
+        #
+        # Banked BEFORE `rescore_results`, and that ordering is the contract: the cached-replay
+        # path (`query_loop.py::_materialize_cached`) never re-enters this function, so a value
+        # not written into the row now is one the formula raises `ScoringTermMissingError` on for
+        # every later cache hit. For an LLM-backed evaluator it is also what stops a re-bill —
+        # which is per TERM, so a multi-step schema's three gradings are three banked keys.
+        pd.update(
+            await materialize_sample_values(
+                pipeline_schema,
+                result,  # type: ignore[arg-type]
+                extra=session.scoring.judges,
+            )
+        )
         from promptpotter.application.scoring.formula import rescore_results
+        from promptpotter.application.scoring.formula.compiler import ScoringFormulaError
 
         assert session.scoring.scorer is not None, "session.scoring.scorer required for measurement"
-        rescore_results([result], session.scoring.scorer)
+        try:
+            rescore_results([result], session.scoring.scorer)
+        except ScoringFormulaError as exc:
+            # The measurement succeeded and only the SCORE failed — typically a judge that could
+            # not grade, leaving its term absent from a formula that names it. Unscorable is not
+            # unmade: `pipeline_data` is kept, so the backend call stays in the archive and a
+            # re-grade recovers it. The outer catch-all would have banked `pipeline_data=None` and
+            # thrown a paid cell away.
+            logger.warning("measure_sample could not score %s: %s", query[:60], exc)
+            result["error"] = str(exc)
+            result["error_category"] = ErrorCategory.PIPELINE
         return result  # type: ignore[return-value]
     except httpx.HTTPStatusError as exc:
         category, error_msg = _classify_http_error(exc)
