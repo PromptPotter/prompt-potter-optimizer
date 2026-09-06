@@ -108,7 +108,7 @@ The first two are [PoBB](../methods/candidate-elimination.md) and mean opposite 
 
 The optimizer has already handled it — these exist for audit, not to ask for input. A bare `⚠` without `↳` is a bug; report it. Full mechanics behind these annotations: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).
 
-## Live state ([forks and the family root](../concepts/campaign-tree.md))
+## Live state ([forks and the family root](../operations/persistence-and-state.md))
 
 - **Webapp preview** — in a separate terminal, run:
   ```bash

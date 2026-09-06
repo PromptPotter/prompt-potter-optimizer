@@ -322,41 +322,18 @@ concurrency costs far more in *quota* than in RAM; size it against the provider 
 
 ## Deploy actions — the Linux box checklist
 
-Run on the box for the next test-linux update; each is idempotent.
+Each is idempotent.
 
-1. **Apply the hardened unit** — `./install-service.sh`. Then confirm it started:
-   `systemctl status $APP_NAME` and the health curl. If it fails to start, the first suspects are
-   `ProtectSystem=strict` (add the offending write path to `ReadWritePaths`) and `SystemCallFilter`
-   (`journalctl -u $APP_NAME -e | grep -i 'signal\|syscall'`). `MemoryDenyWriteExecute` was
-   deliberately **omitted** — add it only after a clean smoke test.
-2. **(Optional) cgroup bound** — set `MEMORY_MAX="2G"` (or similar) in `deploy.config`, re-run
-   `install-service.sh`. Turns the pp-self memory-starvation OS-kill into a clean cgroup OOM.
-3. **Provision the PP↔TermNorm token.** On a **first** install `bootstrap.sh` generates the shared
-   `TERMNORM_TOKEN` (and, with `BACKEND_DIR` set, writes both `.env` files). On an **already-installed
-   box `bootstrap.sh` will not re-run** — its `REPO_URL` guard exits first — so set the same token in
-   both `.env` files directly: `TERMNORM_TOKEN=<hex>` in PromptPotter's `.env`, and the same
-   `TERMNORM_TOKEN` + `TERMNORM_REQUIRE_AUTH=true` in TermNorm's `.env`.
-4. **Restart BOTH services** — TermNorm to start requiring the token, and PromptPotter because it
-   reads `TERMNORM_TOKEN` once at boot (`settings` is loaded at startup, not per call):
-   `sudo systemctl restart termnorm && sudo systemctl restart promptpotter`. Verify with a GET to
-   `127.0.0.1:8000/status`: **no** `Authorization` → **401**; `-H "Authorization: Bearer <token>"` →
-   **200**. (PP's `/status` reachability probe uses a separate unauthenticated client but only checks
-   TCP connect, so enabling auth doesn't break it.)
-5. **Confirm TermNorm's IP allowlist** (`backend-api/config/users.json`) lists PromptPotter's source
-   IP — `127.0.0.1` is already there, so co-located loopback is fine; a *remote* PP needs its IP
-   added, or remove `/matches` from `protected_paths` and rely on the bearer token alone.
-6. **Do not run TermNorm's dev launcher in prod** — `start-server-py-LLMs.sh` binds `0.0.0.0:8000`;
-   the systemd unit binds loopback. (Pinning the dev script to `127.0.0.1` is a later TermNorm-side
-   cleanup.)
-7. **Verify no surprise listener** — `ss -tlnp` shows only loopback `:8000` / `:8001` and
-   cloudflared's outbound; nothing on a routable interface.
-8. **Firewall (operator decision, not scripted)** — everything already binds loopback and ingress is
-   outbound-tunnel-only, so a host firewall is defense-in-depth with real SSH-lockout risk on a
-   remote box. If you want it, add a conservative default-deny-inbound rule that **preserves SSH** by
-   hand — do not wire it into `bootstrap.sh`.
+1. **Apply the hardened unit** — `./install-service.sh`, then `systemctl status $APP_NAME` and the health curl. If it fails to start, the first suspects are `ProtectSystem=strict` (add the offending write path to `ReadWritePaths`) and `SystemCallFilter`. `MemoryDenyWriteExecute` is deliberately **omitted** — add it only after a clean smoke test.
+2. **(Optional) cgroup bound** — `MEMORY_MAX="2G"` in `deploy.config`, re-run `install-service.sh`. Turns the pp-self memory-starvation OS-kill into a clean cgroup OOM.
+3. **Provision the PP↔TermNorm token.** A **first** install has `bootstrap.sh` generate the shared `TERMNORM_TOKEN`; on an already-installed box **it will not re-run** — its `REPO_URL` guard exits first — so set the same token by hand in both `.env` files, with `TERMNORM_REQUIRE_AUTH=true` on TermNorm's side.
+4. **Restart BOTH services.** TermNorm to start requiring the token, and PromptPotter because it reads `TERMNORM_TOKEN` once at boot rather than per call. Verify against `127.0.0.1:8000/status`: no `Authorization` → **401**, bearer → **200**. PP's reachability probe uses a separate unauthenticated client that only checks TCP connect, so enabling auth does not break it.
+5. **Confirm TermNorm's IP allowlist** (`backend-api/config/users.json`) lists PP's source IP. Co-located loopback is already there; a *remote* PP needs its IP added, or `/matches` removed from `protected_paths` to rely on the bearer token alone.
+6. **Never run TermNorm's dev launcher in prod** — `start-server-py-LLMs.sh` binds `0.0.0.0:8000` where the systemd unit binds loopback.
+7. **Verify no surprise listener** — `ss -tlnp` shows only loopback `:8000` / `:8001` and cloudflared's outbound.
+8. **Firewall is an operator decision, deliberately not scripted.** Everything binds loopback and ingress is outbound-tunnel-only, so a host firewall is defense-in-depth with real SSH-lockout risk on a remote box. Add a default-deny-inbound rule that **preserves SSH** by hand; do not wire it into `bootstrap.sh`.
 
-**Still open (design, not a box step):** OS-privilege **3b** (dedicated loop user + secret split) and
-**3c** (web-launch out-of-process) — see the OS-privilege section above for the honest gating.
+**Still open (design, not a box step):** OS-privilege **3b** (dedicated loop user + secret split) and **3c** (web-launch out-of-process) — see § loop ↔ everything for the gating.
 
 ---
 
@@ -374,7 +351,7 @@ That ceiling is spent one **step** at a time (`Settings.FREE_TIER_LAUNCH_STEP_US
 
 It is a courtesy control, not a boundary: a blocked person can sign up again from another address into a fresh account with a fresh ceiling. The ceiling is what bounds a stranger; this is what stops one you have already met.
 
-**One-time setup.** Create a bot via [@BotFather](https://t.me/BotFather) (`/newbot`) and copy the token. Message the bot, then read `message.chat.id` from `https://api.telegram.org/bot<TOKEN>/getUpdates` — that number locks the bot to you. Put the secrets in the env file (on a box, `$ENV_FILE` from `deploy.config` — default `$INSTALL_DIR/.env`, `0600`, never committed). Every key is a `Settings` field, so it resolves from the process environment *or* the install's own `.env` (`config/paths.py::env_file_path`); a laptop needs no `$ENV_FILE` at all, but on a box use it anyway — one home is what keeps the two from drifting.
+**One-time setup.** Create a bot via [@BotFather](https://t.me/BotFather), read your `message.chat.id` off `getUpdates` to lock the bot to you, put the keys in the env file, then `./install-admin-bot.sh` runs it under systemd like the app and tunnel. Every key is a `Settings` field resolving from the process environment *or* the install's own `.env` (`config/paths.py::env_file_path`).
 
 ```bash
 ADMIN_BOT_TELEGRAM_TOKEN=123456:AA...           # from BotFather
@@ -384,7 +361,11 @@ HOST_ADMIN_EMAIL=you@example.com                 # who may claim this box
 HOST_ADMIN_ISSUER=https://accounts.google.com    # ...and via which provider
 ```
 
-**`ADMIN_BOT_PASSPHRASE` belongs in the BOT's file, not the app's**, once `BOT_ENV_FILE` is set (`deploy.config`). It is the second factor on inbound `/block` and `/grant`, and only the bot daemon reads it — a copy in the API's environment makes a read of that process into command authority. Token and chat id must stay in **both**: the API announces new sign-ins (`auth.py`) and its own shutdown (`main.py`) on the same bot, and without them `notify_operator` returns False and logs — the bot keeps answering commands, so nothing reports the loss. `install-admin-bot.sh` warns when a split leaves them out. `HOST_ADMIN_EMAIL` is separate and required on a hosted box; it names the one sign-in allowed to write the claim marker granting host-admin privilege. Leave it unset and no browser identity ever claims the box, which also leaves the terminal on the `default` tenant while every browser session resolves its own — the app logs a warning saying so. Then `cd ~/deploy-linux && ./install-admin-bot.sh` runs the bot under systemd, the same way the app and tunnel run.
+Three placement rules, each of which has cost something:
+
+- **`ADMIN_BOT_PASSPHRASE` belongs in the BOT's file, not the app's**, once `BOT_ENV_FILE` is split out. It is the second factor on inbound `/block` and `/grant`, and only the bot daemon reads it — a copy in the API's environment turns a read of that process into command authority.
+- **Token and chat id must stay in BOTH files.** The API announces new sign-ins and its own shutdown on the same bot, and without them `notify_operator` returns False and logs while the bot keeps answering commands — so nothing reports the loss. `install-admin-bot.sh` warns when a split leaves them out.
+- **`HOST_ADMIN_EMAIL` is required on a hosted box.** It names the one sign-in allowed to write the claim marker granting host-admin privilege. Unset, no browser identity ever claims the box, which also leaves the terminal on the `default` tenant while every browser session resolves its own; the app logs a warning saying so.
 
 **Daily use** — message your bot:
 
@@ -401,11 +382,11 @@ With `ADMIN_BOT_PASSPHRASE` set, prefix **every** message with it — it is not 
 
 ### New accounts into your CRM (optional)
 
-Signing in *is* signing up, so a new account is a contact worth keeping the moment it arrives. Set `N8N_SIGNUP_WEBHOOK_URL=https://<your-n8n>/webhook/<path>` in the same env file and the app POSTs `{email, name, use_case, signup_source, account_count}` there the first time a new account calls `/auth/me`. Leave it unset and nothing is sent — the forward is best-effort and never fails a sign-in (`admin_bot.py::forward_new_account_to_crm`).
+Set `N8N_SIGNUP_WEBHOOK_URL` in the same env file and the app POSTs `{email, name, use_case, signup_source, account_count}` the first time a new account calls `/auth/me`. Unset, nothing is sent; the forward is best-effort and never fails a sign-in (`admin_bot.py::forward_new_account_to_crm`).
 
 **Copy the path from the workflow's webhook node, not from its file name** — the two drift, and a `POST`-only webhook answers *"not registered"* to the browser GET you would naturally test it with, so a wrong path and a live-but-unreachable one look identical. Confirm with the receiving side's own API rather than by probing the URL.
 
-This does not contradict the one rule: the traffic is outbound-only and carries contact details, never a credential. n8n cannot call back and holds no token of yours, so a breach there reaches your mailing list, not your auth gate. What stays fixed is the direction of travel — nothing external may *drive* an admin action.
+It does not contradict the one rule: the traffic is outbound-only and carries contact details, never a credential, so a breach at n8n reaches your mailing list rather than your auth gate.
 
 ### Secret hygiene
 

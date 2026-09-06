@@ -401,36 +401,15 @@ per-node capability curve) determines that schema.
 
 ## Phase 3 sketch — per-STEP difficulty for turn-structured cells (not shipped)
 
-For a task whose cell is a multi-turn conversation or a multi-step episode, fit δ and `a` **per
-step** rather than per cell. Higher resolution (which step is hard, which one separates arms) and
-more information per cell, which on a backend at minutes and dollars a cell converts directly into
-fewer cells for the same SE.
+For a task whose cell is a multi-turn conversation or a multi-step episode, fit δ and `a` **per step** rather than per cell — higher resolution about which step separates arms, and more information per cell, which on a backend at minutes and dollars a cell converts directly into fewer cells for the same SE.
 
-**The information gain is a theorem, not a hope**, and it is the same Fisher information § The
-acquisition score already spends: a single outcome's information `a²·p(1−p)` peaks where `θ ≈ δ`
-and collapses away from it, so one item resolves only a narrow band of ability. A step-structured
-item contributes at each of its `k−1` thresholds, so the information rises AND spreads over a wider
-θ range — which is the half that matters here, because a round's arms are not clustered at one
-ability.
+**The information gain is a theorem, not a hope**, and it is the same Fisher information § The acquisition score already spends: a single outcome's information `a²·p(1−p)` peaks where `θ ≈ δ` and collapses away from it, so one item resolves only a narrow band of ability, while a step-structured item contributes at each of its `k−1` thresholds and so spreads over a wider θ range. That spread is the half that matters, because a round's arms are not clustered at one ability.
 
-**A turn is not an item, and that is the whole difficulty.** Rasch assumes conditional
-independence: given θ, responses are independent. Turn 2 is conditioned on turn 1's context, so a
-model that poisoned its own context is not producing independent evidence about ability. Scoring
-turns as separate items claims `2N` observations where there are `N`, and the failure is
-**overstated precision** — SEs shrink, intervals narrow, and elimination cuts on confidence it
-never earned. Silent, and in the flattering direction. This is the classic *testlet* problem (a
-reading passage with five questions is one testlet, not five items).
+**A turn is not an item, and that is the whole difficulty.** Rasch assumes conditional independence, but turn 2 is conditioned on turn 1's context, so a model that poisoned its own context is not producing independent evidence about ability. Scoring turns as separate items claims `2N` observations where there are `N`, and the failure is **overstated precision** — SEs shrink, intervals narrow, and elimination cuts on confidence it never earned, silently and in the flattering direction. The classic *testlet* problem: a reading passage with five questions is one testlet, not five items.
 
-**So the cell stays the atom, and the fix is a testlet model** — Testlet Response Theory
-(Bradlow/Wainer/Wang) or a bi-factor equivalent: keep per-step `b_j`/`a_j`, add a person×testlet
-random effect that absorbs the within-conversation dependence. That is what makes per-step
-parameters legal rather than a precision leak.
+**So the cell stays the atom, and the fix is a testlet model** — Testlet Response Theory (Bradlow/Wainer/Wang) or a bi-factor equivalent: keep per-step `b_j`/`a_j`, add a person×testlet random effect absorbing the within-conversation dependence. That is what makes per-step parameters legal rather than a precision leak.
 
-**Half of the win is already shipped, and it is easy to over-claim the rest.** § The model already
-takes a graded `[0,1]` response, so a weighted per-step composite reaches θ *today* — a candidate
-that fixes turn 1 and still misses turn 2 does move the number, with no zero-gradient cliff. What
-per-step fitting adds is that the thresholds are **fitted rather than imposed**: a hand-set
-`0.3·turn1 + 0.7·final` is a prior we invented and banked into the gate.
+**Half the win is already shipped, and it is easy to over-claim the rest.** § The model already takes a graded `[0,1]` response, so a weighted per-step composite reaches θ *today* with no zero-gradient cliff. What per-step fitting adds is that the thresholds are **fitted rather than imposed** — a hand-set `0.3·turn1 + 0.7·final` is a prior we invented and banked into the gate.
 
 Three things gate it, none of them theory:
 

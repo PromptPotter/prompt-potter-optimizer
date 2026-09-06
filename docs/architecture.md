@@ -13,7 +13,7 @@ If a request doesn't fit a §0 bucket, that's a flag — propose an answer that 
 ## §0 — PromptPotter on one page
 
 **Before coining a domain word here:** search the repo for it, then check
-[`developer/conventions.md`](developer/conventions.md) § Code style, which names
+[`developer/conventions.md`](developer/conventions.md) § Naming, which names
 the four that are banned outright.
 
 ### Purpose
@@ -71,15 +71,18 @@ Repeat until goal hit, `max_rounds`, or escalation chooses to stop.
 
 ### Escalation (two layers, both lazy) — self-healing with a HITL escape hatch
 
-L2 (`l2_context`) fires when L1 stalls, or earlier on one of the
-preemptor rules — **the preemptor set is owned by
+**What each layer writes** — owned by
+[`concepts/the-loop.md`](concepts/the-loop.md); §0 holds only the invariants over
+those surfaces.
+**The preemptor set that fires L2 before patience runs out** — owned by
 [`developer/dispatch-hub.md`](developer/dispatch-hub.md) § Trigger; read the
-membership there, never from a copy** — and steers
-what L1 *looks at* (`l1_layout`) and how hard it explores
-(`l1_overrides`). It does **not** rewrite `task_context`: the framing is
-operator-authored and frozen for the run, so no layer edits it. L3
-(`l3_plan`) fires when L2 stalls — rewrites the strategic plan. Higher layers
-constrain lower ones, never replace them. The split is deliberate: a
+membership there, never from a copy.
+
+Escalation is **lazy** — L2 fires on an L1 stall, L3 on an L2 stall — and higher
+layers constrain lower ones, never replace them. **No layer rewrites
+`task_context`**: the framing is operator-authored and frozen for the run, and
+`TaskDecomposition.merge` raises rather than paraphrase it. The split is
+deliberate: a
 *healthy* round is L1-critique's job (analyse, mutate); a *systemic
 fault* (evidence-starvation) routes to L2, which either self-heals or —
 on a fault no prompt move can fix (a rate-limited enricher) — emits
@@ -512,6 +515,22 @@ the per-cycle ledger is the event log layered on top of it. A
 cleanup PR that simplifies persistence must respect both: ledger ≠
 archive, neither replaces the other.
 
+### Origin, parent, and check-in
+
+The start definitions the whole loop depends on. Say "origin", never "baseline".
+
+**Origin = the starting configuration = C0.** In program evolution an individual **is** a configuration, so the origin resolves to an `OptSearchPoint` (`resolve_origin_opt_search_point`, `application/origin.py`) — the same type every candidate is — and "the config the loop starts from" and "C0, the first candidate" are one statement rather than two. For a fork it is the point the fork branches *from*. Scoring it yields its **measurement** (round 0, via `establish_campaign_origin`; `origin_accuracy_of` derives it back off `rounds[0]`). The name `origin_accuracy` survives only where the fact IS C0 — `CycleResult`, the export, the campaign index; a round's own floor is `RoundResult.parent_accuracy`.
+
+**Origin is the parent at offset 0.** The general relation is *parent* — the individual a candidate was mutated from, scored over the samples that candidate touched so the diff is matched (`RoundParent`, `domain/results.py`; built by `rescore_parent`, which labels it with the parent individual's own `cycle.rounds[-1].label`). At round 0 the parent is the origin; after that it is the prior winner. **Reserve "origin" for offset 0 and the fork point; everywhere else say parent** — two names for one relation is how this word drifted before.
+
+**The origin arrives incomplete; check-in completes it and gates it.** The operator supplies what they have, and it is not a whole origin until the **required inputs** that pipeline declares are resolved: query/target column map, dataset binding, and any node-type-raised dependency such as a `candidate_source` node's candidate library. Origin is therefore **per-pipeline** — different backends require different inputs. Once it clears both gates it is the **parent of round 1's candidates**; round 0 is not something C0 parents, round 0 *is* C0, measured.
+
+**Check-in** is the process that produces a complete origin from a raw upload. One LLM resolver node (`application/datasets/origin_resolve.py`) *proposes* the column map, the decomposed Layer-1 prompt fields — including an `answer_format` satisfying the **scorer's** extraction contract, since the chosen matcher rather than the backend reads the final answer (`scoring/formula/matchers.py::EXTRACTION_NOTES`) — and the 7-field `task_context`. A deterministic, no-LLM **readiness gate** (`origin_readiness.py`) *gates*: mint is blocked until query + ground_truth + framing are CONFIRMED and every active LLM node owns a model. The check-in nudges the operator until the spec is complete, then stores it as the per-pipeline origin under `projects/{tenant}/datasets/{slug}/`. Dependencies are dropped in place here and committed alongside the origin, not chased at init.
+
+**Two gates, because completeness ≠ scoreability.** The readiness gate is *static* — it proves the required fields are present, not that the prompt actually scores. **No individual prompt field is gated:** any of the six may be blank because the optimizer evolves them, so only an entirely blank prompt falls back to the task description, and a closed label set is appended to `answer_format` deterministically whether or not the prose is blank, because the optimizer prompts forbid the LLMs from re-typing labels on the promise that the system supplies them (`DraftCampaign.committed_prompt_fields`). Extractability is empirical (prompt × model × scorer matcher), so the second gate is the **round-0 origin gate**: a floor that grades `critical` — all-`NO_RESULT`, a PP-owned health signal in `domain/results_health.py` — halts before L1 instead of being optimized. Resolver and operator collaborate across both gates until the origin passes readiness *and* runs scoreable.
+
+The line: **origin IS C0 — the first candidate, or the point a fork branches from; check-in is the resolver+gate that produces it; every later round compares against its *parent*, which is the origin only at offset 0.**
+
 That's it. **The `###` headings above are the buckets** — a PR maps onto one of
 them by name, so the list cannot drift from the page — plus two architectural
 commitments shaping them
@@ -636,79 +655,10 @@ the PR description.
   `checkin` LLM call that seeds the campaign when `new <name>`
   first sees a dataset. Don't fold into `l1_generate`.
 
-- **Origin, parent, and check-in — the start definitions the whole loop
-  depends on.** Say "origin", never "baseline":
-
-  - **Origin = the starting configuration = C0.** One word, one thing. In
-    program evolution an individual **is** a configuration: the origin
-    resolves to an `OptSearchPoint` (`resolve_origin_opt_search_point`,
-    `application/origin.py`) — the same type every candidate is — so "the
-    config the loop starts from" and "C0, the first candidate" are one
-    statement, not two. For a fork it is the point the fork branches *from*.
-    Scoring it yields its **measurement** (round 0, via
-    `establish_campaign_origin`; `origin_accuracy_of` derives it back off
-    `rounds[0]`) — what you get by measuring C0, never a rival sense of the
-    word. The name `origin_accuracy` survives only where the fact IS C0 —
-    `CycleResult`, the export, the campaign index. A round's own floor is
-    `RoundResult.parent_accuracy`.
-
-  - **The origin arrives incomplete; check-in completes it and gates it.**
-    The operator supplies what they have (a pipeline, some prompt fields);
-    it is not a whole origin until the **required inputs** that pipeline
-    declares are resolved — query/target column map, dataset
-    binding, and any node-type-raised dependency like a `candidate_source`
-    node's candidate library. Origin is therefore **per-pipeline**:
-    different backends require different inputs. Once it clears both gates
-    below, it is the **parent of round 1's candidates** — round 0 is not
-    something C0 parents; round 0 *is* C0, measured.
-
-  - **Origin is the parent at offset 0.** The general relation is *parent* —
-    the individual a candidate was mutated from, scored over the samples that
-    candidate touched so the diff is matched (`RoundParent`,
-    `domain/results.py`; built by `rescore_parent`, which labels it with the
-    parent individual's own label — `cycle.rounds[-1].label`).
-    At round 0 the parent is the origin; after that it is the prior winner.
-    **Reserve "origin" for offset 0 and the fork point; everywhere else say
-    parent.** Two names for one relation is how this word drifted before.
-
-  - **Check-in** = the **process that produces a complete origin** from a raw
-    upload. One LLM resolver node (`application/datasets/origin_resolve.py`)
-    *proposes* the column map, the decomposed Layer-1 prompt fields (incl. an
-    `answer_format` satisfying the **scorer's** extraction contract — the
-    chosen matcher, not the backend, reads the final answer:
-    `scoring/formula/matchers.py::EXTRACTION_NOTES`, e.g. `exact_match` reads
-    the last bolded span), and the 7-field `task_context`; a deterministic,
-    no-LLM **readiness gate** (`origin_readiness.py`) *gates* — mint is
-    blocked until query + ground_truth + framing are CONFIRMED and every
-    active LLM node owns a model. The check-in **nudges the operator** (the ingest UI surfaces
-    each open gap + unfulfilled pipeline dependency) until the spec is
-    complete, then it's stored as the per-pipeline origin under
-    `projects/{tenant}/datasets/{slug}/`. Dependencies (e.g. a candidate
-    library) are dropped in place here and committed alongside the origin,
-    not chased at init.
-
-  - **Two gates, because completeness ≠ scoreability.** The readiness gate is
-    *static* — it proves the required fields are present, not that the prompt
-    actually scores. **No individual prompt field is gated:** any of the six may
-    be blank because the optimizer evolves them, so only an entirely blank prompt
-    falls back to the task description — and a closed label set is appended to
-    `answer_format` deterministically whether or not the prose is blank, because
-    the optimizer prompts forbid the LLMs from re-typing labels on the promise
-    that the system supplies them (`DraftCampaign.committed_prompt_fields`).
-    Extractability is empirical
-    (prompt × model × scorer matcher), so the second gate is the **round-0
-    origin gate**: a floor that grades `critical` (e.g. all-`NO_RESULT`, a
-    PP-owned health signal in `domain/results_health.py`) halts before L1
-    instead of being optimized. **Resolver and operator collaborate across
-    both gates** — iterating the pipeline choice, the `answer_format`, and the
-    required starting values — until the origin both passes readiness *and*
-    runs scoreable. Only then does the loop proceed.
-
-  - The line: **origin IS C0 — the first candidate, or the point a fork
-    branches from; check-in is the resolver+gate that produces it; every
-    later round compares against its *parent*, which is the origin only at
-    offset 0.** Forward plan: [`specs/roadmap.md`](specs/roadmap.md)
-    § Origin-resolution check-in.
+- **Origin, parent and check-in — the start definitions** (§0 § Origin, parent,
+  and check-in). A cleanup PR cannot collapse the origin/parent distinction, drop
+  either of the two gates, or reintroduce "baseline" as a synonym. Forward plan:
+  [`specs/roadmap.md`](specs/roadmap.md) § Origin-resolution check-in.
 
 - **`MeasurementArchive` (`measurements/runs/{run_id}.jsonl` +
   `measurements/index.jsonl` index + retrieval views
@@ -740,91 +690,61 @@ the PR description.
   ingress. Sibling to `CycleEventLog.append` and `INJECTIONS`. Don't
   add a second scoring entry path "for convenience."
 
-- **Composite-fitness resolution chain** — **fitness is never one fixed
-  number; always ask "under which formula?"** It is formula-relative — the
-  **active** formula the run actually used; a **mask** — an alternative
-  criterion projected over the record, picked by a **lens** (`?lens=`,
-  `;lens=`) and shown as where the rankings diverge (`lib/lineage.tsx`); a **replay** that re-scores the whole cycle under a new
-  config — and mode-relative (`measured`, the samples that round actually ran,
-  vs `all`, the full dataset). Two values appear in the data:
-  `composite_fitness` (the score under the active formula, **served already
-  resolved** — with no active formula the default is the cell's own score, so
-  it **equals** `accuracy` and readers take it verbatim) and
-  `accuracy` (the plain correctness rate, formula-independent). Per-sample
-  difficulty is a *separate* view, not a fitness formula (the hard-sample
-  sorter bullet above). **The composite is scored per CELL and folded, not
-  computed on the round** — `rescore_results` stamps each row's `objective`
-  beside its `fitness` (`domain/scoring.py::CellScorer`), and that per-cell
-  value is BOTH what `composite_fitness` means and what θ is fit on
-  (`exploration.py::graded_response`). That identity is the whole point: a
-  round is won on θ, so a latency, cost or reliability term reaches the
-  election only by being charged to the cell. The chain is produced + resolved
-  at three single-writer choke points. `compute_composite_fitness`
-  (`application/scoring/metrics.py`) is the sole writer of
-  `composite_fitness`, meaning `objective` over the same scoreable rows
-  `accuracy` is read against, so the served field is never a sentinel — the
-  only manufactured value is a real `0.0` for a
-  validation-failed candidate. `display_fitness` (`domain/rendering.py`)
-  is the **one** canonical resolved value every display + ranking site
-  reads — `composite_fitness` when present (the honest `0.0` is kept),
-  accuracy only on genuine `None`; `display_rank_key` is its
-  argmax-over-candidates form, and **is not the election** — that is
-  `elect_round_winner`'s Rasch θ-lift, which no aggregate reproduces.
-  Alternative formulas (a `score:<formula>` mask, replay) never recompute in the consumer — they
-  re-project from the stored per-ROUND evaluator namespace via
-  `value_with_mask_applied` (`metrics.py`) and are **served** — every
-  score, active or alternative, is backend-computed and the webapp never
-  recomputes. A mask is therefore the *projection* of the active composite and
-  agrees with it only where the formula is linear in its terms
-  (`operations/mask-projection.md`). Don't
-  add a second composite-or-accuracy resolution; route through
-  `display_fitness`. **A cycle's "best" deliberately has two bases:** the
-  *winner export* (and the L2/L3 stall comparator) argmaxes cumulative
-  `composite_fitness` — the optimizer's actual objective
-  (`cycle.py::absorb_round` / `replay_priors`; `escalation/firing.py`, which
-  now compares θ alongside composite) — while the index/dashboard
-  `best_round` headline argmaxes cumulative `accuracy`, the familiar
-  formula-independent number (`campaign_store/store.py::_apply_best`).
-  Forcing them to agree would make the deployed winner stop optimizing the
-  configured composite; don't "fix" one basis to the other.
+- **Composite-fitness resolution chain** — **fitness is never one fixed number;
+  always ask "under which formula?"** Formula-relative (the **active** formula
+  the run used; a **mask** projected over the record and picked by a **lens**;
+  a **replay** re-scoring the whole cycle) and mode-relative (`measured` vs
+  `all`). The model is [`methods/verdict-resolution.md`](methods/verdict-resolution.md)'s
+  and mask projection is [`operations/mask-projection.md`](operations/mask-projection.md)'s.
+  Four rulings a cleanup PR cannot touch:
+  - **The composite is scored per CELL and folded, never computed on the round.**
+    `rescore_results` stamps each row's `objective` beside its `fitness`
+    (`domain/scoring.py::CellScorer`), and that per-cell value is BOTH what
+    `composite_fitness` means and what θ is fit on. A round is won on θ, so a
+    latency, cost or reliability term reaches the election only by being charged
+    to the cell.
+  - **One writer, one resolver.** `compute_composite_fitness`
+    (`application/scoring/metrics.py`) is the sole writer of `composite_fitness`;
+    `display_fitness` (`domain/rendering.py`) is the one canonical resolved value
+    every display and ranking site reads. Don't add a second
+    composite-or-accuracy resolution. `display_rank_key` is its argmax form and
+    **is not the election** — that is `elect_round_winner`'s Rasch θ-lift, which
+    no aggregate reproduces.
+  - **Every score is served, never recomputed in the consumer.** Alternative
+    formulas re-project from the stored per-ROUND evaluator namespace via
+    `value_with_mask_applied`; the webapp recomputes nothing.
+  - **A cycle's "best" deliberately has two bases** — the winner export and the
+    L2/L3 stall comparator argmax cumulative `composite_fitness`, the optimizer's
+    actual objective, while the index/dashboard `best_round` headline argmaxes
+    cumulative `accuracy`. Forcing them to agree would make the deployed winner
+    stop optimizing the configured composite.
 
-- **Spend-ceiling resolution chain** — **a ceiling is never one number;
-  always ask "at which tier?"** Four carry one, and they answer different
-  questions: the **campaign knob** (`optimization.spend_budget_usd` /
-  `token_budget`) is what the operator wants this run to cost; the
-  **run-scoped** pair is what the host wallet ADMITTED at launch
-  (`jobs/quota.py::admit_launch`, refuse-don't-clamp, reserved on the `Job`
-  until it ends); the **account lifetime** ceiling is what the tenant may
-  ever spend (`lifetime_ceilings`, `None`/`None` for the box operator); and
-  `.runtime/spend_cap.json` is a **mid-flight** move (`change-spend-budget`,
-  which clamps rather than refuses and dies with the run). Resolution:
-  seed > run-scoped > campaign default for every other config value, but the
-  three tiers compose in ONE call, and **the order is a security property**
-  (`runner/entry.py::_compose_run_ceilings`): config → operator override → wallet
-  bound. The *seed* may only lower, because a `CycleSeed` is request input from
-  anyone holding `campaign.run`; the **operator** ceiling SETS and **may raise as
-  well as lower**, which is the only way a budget-halted cycle is ever continued.
-  Bounding that one downward too was one guard doing two jobs and silently
-  destroyed every legitimate raise. Only the cycle tier halts a run
-  (`termination.py::BudgetGate`, both units, whichever trips first); the
-  account tier admits or refuses and never interrupts a campaign in flight.
-  **An L4 inner cycle needs no fourth source:** it forwards its spend onto the
-  OUTER cycle's ledger as a `backend` `TokenUsageRecord`
-  (`inner/spawn.py::_forward_inner_spend`), so both tiers already see it and
-  the account walk must not reach `.inner/` — a sandbox is a SIBLING of the
-  tenant tree, and summing it too counts the forwarded half twice. The forward
-  fires at cell TEARDOWN on every terminal outcome, because a cell that dies
-  has still spent its money, and it carries the DELTA past that inner cycle's
-  own high-water mark (`index.json::forwarded_spend`), because a continued
-  cell's rollup is cumulative across attempts. So a destroyer taking a sandbox
-  banks the RESIDUE rather than the whole
-  (`store/account_spend.py::bank_spend`).
-  Spend is summed one way (`store/account_spend.py::account_ledgers` — every
-  cycle ledger, archived included, plus the workspace ledger's
-  `SpendTombstone` rows) and priced one way
-  (`shared/pricing.py::compute_usd`, which returns `None` for a call it
-  cannot price rather than `0.0`). Owned by
-  [`adr/0003-spend-and-tenancy.md`](adr/0003-spend-and-tenancy.md) § D1.
+- **Spend-ceiling resolution chain** — **a ceiling is never one number; always ask
+  "at which tier?"** Four carry one, answering different questions: the **campaign
+  knob** is what the operator wants this run to cost; the **run-scoped** pair is
+  what the host wallet ADMITTED at launch (`jobs/quota.py::admit_launch`); the
+  **account lifetime** ceiling is what the tenant may ever spend; and
+  `.runtime/spend_cap.json` is a **mid-flight** move. The tiers and their law are
+  owned by [`adr/0003-spend-and-tenancy.md`](adr/0003-spend-and-tenancy.md) § D1.
+  Three rulings a cleanup PR cannot touch:
+  - **The composition order is a security property**
+    (`runner/entry.py::_compose_run_ceilings`): config → operator override →
+    wallet bound. The *seed* may only lower, because a `CycleSeed` is request
+    input from anyone holding `campaign.run`; the **operator** ceiling SETS and
+    may raise as well as lower, which is the only way a budget-halted cycle is
+    ever continued. Bounding that one downward too was one guard doing two jobs,
+    and it silently destroyed every legitimate raise.
+  - **Only the cycle tier halts a run** (`termination.py::BudgetGate`, both units,
+    whichever trips first); the account tier admits or refuses and never
+    interrupts a campaign in flight.
+  - **An L4 inner cycle needs no fourth source** — it forwards its spend onto the
+    OUTER cycle's ledger as a `backend` `TokenUsageRecord`
+    (`inner/spawn.py::_forward_inner_spend`), so the account walk must not reach
+    `.inner/`: a sandbox is a SIBLING of the tenant tree, and summing it counts
+    the forwarded half twice. Spend is summed one way
+    (`store/account_spend.py::account_ledgers`) and priced one way
+    (`shared/pricing.py::compute_usd`, which returns `None` for a call it cannot
+    price rather than `0.0`).
 
 - **`observed_node()` context manager** — the trace-emission seam
   every optimizer LLM call wraps. Cutting it removes Langfuse-shape

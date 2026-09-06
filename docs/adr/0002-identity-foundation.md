@@ -62,40 +62,12 @@ Internal `User` / `Group` records use SCIM 2.0 Core + EnterpriseUser field names
 
 The no-drift gates that protect the seam from regression — gates #3 (`build_stores` signature), #4 (`Stores.identity` sole tenant source), #6 (SCIM-named field set) — are enforced by the typed seam itself (a wrong `build_stores` signature fails to typecheck) plus review; there is no standing `test_invariants.py` (the structural/contract suite was cut to the silent-harm core, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)). The §0-first rule (CLAUDE.md Pre-flight gate Q4) blocks any new identity-bearing ingress from landing without amending `docs/architecture.md` §0; Stage 1 (OIDC ingress) and Stage 2 (B2B SSO) each require an §0 note.
 
-## Pros and Cons of the Options
+### Why the others lost
 
-### A — OIDC wire + RLS data + SCIM 2.0 internal model
-
-* **Good** — every customer's chosen IdP is a runtime config change.
-* **Good** — data-engine enforcement of tenant isolation; cross-tenant reads structurally impossible.
-* **Good** — SCIM records speak every workforce IdP's vocabulary verbatim.
-* **Good** — staging is additive (Stage 0 → 1 → 2 each adds one swap, no rewrite).
-* **Neutral** — three standards to shape against (OIDC + RLS + SCIM) instead of one.
-* **Bad** — Stage 1 requires us to own ~200 LoC of OIDC client.
-
-### B — Roll-our-own auth library
-
-* **Good** — total control.
-* **Bad** — every IdP integration becomes our work; every CVE in the field is our research; every compliance question is our certification.
-* **Bad** — passkey ceremony, MFA, federation, SCIM emission all become net-new code we maintain forever.
-
-### C — Third-party Python auth library
-
-* **Good** — fastest Stage-1 ship.
-* **Bad** — Python auth libraries are graveyards (Lucia Auth deprecated by its own author in favor of framework-agnostic patterns; `python-social-auth` largely unmaintained; `authlib` opinionated; `flask-login` framework-tied).
-* **Bad** — the OIDC client is ~200 LoC; the library adds a dependency surface 100× that for the wrapping.
-
-### D — JWT-in-cookie shortcut
-
-* **Good** — no server-side session store.
-* **Bad** — explicit OWASP anti-pattern; logout requires token revocation lists or short TTLs (re-invents server-side sessions).
-* **Bad** — claims become stale; cookie size grows with every claim addition.
-
-### E — Postgres-only, no IdP
-
-* **Good** — zero external dependencies.
-* **Bad** — we become the identity provider permanently; every customer's "log in with Google" ask becomes new code.
-* **Bad** — passkey UX, MFA, breach monitoring, compliance attestation all become our roadmap items.
+* **B — roll our own.** Every IdP integration becomes our work, every CVE in the field our research, every compliance question our certification; passkey ceremony, MFA, federation and SCIM emission all become net-new code we maintain forever.
+* **C — a third-party Python auth library.** The fastest Stage-1 ship, but Python auth libraries are graveyards — Lucia Auth was deprecated by its own author in favour of framework-agnostic patterns, `python-social-auth` is largely unmaintained, `flask-login` is framework-tied. The OIDC client is ~200 LoC; the library adds a dependency surface far larger than that to wrap it.
+* **D — JWT in a first-party cookie.** An explicit OWASP anti-pattern: logout requires revocation lists or short TTLs, which re-invents server-side sessions, and claims go stale while the cookie grows with every claim added.
+* **E — Postgres-only, no IdP.** We become the identity provider permanently, so every "log in with Google" ask becomes new code and passkey UX, MFA, breach monitoring and compliance attestation all become roadmap items.
 
 ## More Information
 
@@ -151,7 +123,7 @@ Populate SCIM fields from OIDC standard claims ([OIDC Core §5.1](https://openid
 | `timezone` | `zoneinfo` | |
 | `active` | (derived) | `true` while the OIDC session is valid + the user is not soft-deleted. |
 | `groups[]` | (provider-specific claim, e.g. `groups`) | Group memberships at the IdP. |
-| `roles[]` | (provider-specific claim, e.g. `roles`) | Application-level role assignments — see [Authorization swap-target table](#authorization-swap-target-table). |
+| `roles[]` | (provider-specific claim, e.g. `roles`) | Application-level role assignments — see [Stage-2 swap targets](#stage-2-swap-targets--pre-vetting-not-dependencies). |
 | `entitlements[]` | (provider-specific claim) | Capability grants. |
 | `meta.{created, lastModified, version}` | (local) | Standard SCIM resource metadata. |
 
@@ -209,67 +181,21 @@ Enforceable rules. A PR violating any of these is a block. The **(test)** marker
 - Reference for zero-dep patterns: [The Copenhagen Book](https://thecopenhagenbook.com/). Framework-agnostic, OWASP-aligned, by Lucia Auth's author after he deprecated his library in favor of the patterns themselves.
 - **Schema vendoring (not a Python dep).** Vendor [`bjmc/scim-jsonschema`](https://github.com/bjmc/scim-jsonschema) as a git submodule at `vendor/schemas/scim/`, tag-pinned. JSON Schema files for `User`, `Group`, `EnterpriseUser` plus RFC 7643 normative text live in our tree, version-pinned. **No `pip install`, no runtime cost** — schema vendor, not a library import. Schema.org JSON-LD context copies from [`schemaorg/schemaorg`](https://github.com/schemaorg/schemaorg) on demand for the public-facing projection only (submodule optional; copy-and-pin fine).
 
-### Future-swap-target table (Stage 2 IdPs)
+### Stage-2 swap targets — pre-vetting, not dependencies
 
-Pre-vetted swap targets when we want to delegate the **provider** role (i.e. become an OIDC provider ourselves by fronting one). The OIDC wire makes the swap trivial — middleware re-targets, application unchanged. **Not Day-1 dependencies.** Adopt one at Stage 2 if/when needed.
+Both decisions stay deferrable because the seams speak OIDC, so the swap is a middleware re-target with the application unchanged. Neither is a Day-1 dependency, and pre-vetting now costs nothing.
 
-| IdP | Lang / shape | Publicly cited users | Notes |
-|---|---|---|---|
-| **[Ory Hydra + Kratos](https://www.ory.sh/)** | Go binaries; HTTP API | T-Mobile, OVHcloud, Padelmania ([case studies](https://www.ory.sh/case-studies)) | Apache 2.0. Hydra = OAuth2/OIDC server; Kratos = identity & user management. Composable. |
-| **[Zitadel](https://zitadel.com/)** | Go, single-binary | [Public customer list](https://zitadel.com/customers) | Apache 2.0. Multi-tenant from day one — the others tack it on. |
-| **[Keycloak](https://www.keycloak.org/)** | Java / Quarkus | Red Hat ecosystem; CNCF graduated; widely deployed in enterprise (Hitachi, Cisco internal references) | Apache 2.0. Heaviest, most feature-complete. SAML + OIDC + LDAP federation. |
-| **[Authentik](https://goauthentik.io/)** | Python, single-binary | Self-hosters; growing enterprise adoption | MIT. Matches our stack but we still call it over HTTP — no Python import. |
+**IdP, when we want to delegate the provider role.** Selection criterion is the multi-tenancy story plus operational fit, and **[Zitadel](https://zitadel.com/)** is the front-runner under today's information — Apache 2.0, single Go binary, multi-tenant from day one where the others tack it on. The alternatives: [Ory](https://www.ory.sh/) Hydra + Kratos (composable, Apache 2.0), [Keycloak](https://www.keycloak.org/) (heaviest and most feature-complete, adds SAML + LDAP federation), [Authentik](https://goauthentik.io/) (MIT, matches our stack — but we still call it over HTTP rather than importing it).
 
-Selection criterion when the time comes: multi-tenancy story + operational fit. **Zitadel** is the front-runner under today's information.
+**Authorization.** Stage 0/1 is **SCIM-named RBAC columns in Postgres + RLS** — `memberships(user_id, tenant_id, role)` with values like `owner`, `editor`, `viewer`. The SCIM `User.roles` / `User.entitlements` / `Group.members` fields are the lowest common denominator IdPs speak; RFC 7643 defines them and punts semantics, so we pin the semantics. RLS already enforces the tenant edge and role checks are a `WHERE role IN (…)` away.
 
-### Authorization swap-target table
+**Graduate to Zanzibar-shape relational ReBAC only when one of three things is required**: cross-tenant sharing, group-of-groups hierarchies, or "who has access to X" reverse-lookup for compliance audits. The safest pick then is [OpenFGA](https://openfga.dev/) on breadth of adoption (CNCF sandbox; Docker, Grafana, Okta, Auth0), with [SpiceDB](https://authzed.com/spicedb) the cleaner schema language and closer to the paper (Netflix, Reddit). [Cerbos](https://cerbos.dev/) is a policy engine rather than a Zanzibar graph — pick it only if rule-based ABAC suffices.
 
-Stage 0/1 authorization is **SCIM-named RBAC columns in Postgres + RLS** — `memberships(user_id, tenant_id, role)` with role values like `owner`, `editor`, `viewer`. The SCIM `User.roles` / `User.entitlements` / `Group.members` fields are the lowest-common-denominator IdPs speak (RFC 7643 defines them but punts semantics — we pin the semantics). RLS already enforces the tenant edge; role checks are a `WHERE role IN (…)` away.
-
-**Stage-2 trigger** — graduate to Google Zanzibar-shape relational ReBAC when one of these is required:
-
-- cross-tenant sharing (a resource owned by tenant A is visible to specific users in tenant B);
-- group-of-groups / hierarchical organizational units (engineering ⊃ platform ⊃ identity);
-- "who has access to X" reverse-lookup queries (compliance audits, leak investigations).
-
-Pre-vetted swap targets, same shape as the IdP table. **Not Day-1 dependencies.** Adopt one at Stage 2 if/when the trigger fires.
-
-| Authz engine | Lang / shape | Publicly cited users | Notes |
-|---|---|---|---|
-| **[OpenFGA](https://openfga.dev/)** | Go, HTTP/gRPC | Docker, Grafana, Okta, Auth0, Canonical, Sourcegraph | CNCF sandbox, Apache 2.0. Zanzibar-shape relationship tuples. Safest pick — broad adoption, vendor-neutral. |
-| **[SpiceDB](https://authzed.com/spicedb)** | Go, gRPC | Netflix, Reddit, Turo, Headspace | Apache 2.0. Cleaner `.zed` schema language; closer to the Zanzibar paper. |
-| **[Permify](https://permify.co/)** | Go | Newer entrant | Apache 2.0. Smaller community than OpenFGA / SpiceDB. |
-| **[Cerbos](https://cerbos.dev/)** | Go, YAML policies | Various | Policy-engine, NOT Zanzibar-graph — pick only if relational ReBAC isn't needed and rule-based ABAC suffices. |
-
-Skip-list (do not adopt):
-
-- **XACML** — legacy enterprise XML-policy standard; supplanted by OPA in modern stacks.
-- **Casbin** — library-not-spec; embedded per language; weak SaaS-vendor adoption vs. the four above.
-- **AWS IAM JSON policies** — vendor-locked to AWS; unsuitable as application-internal authz.
-- **OAuth scopes** — API-gating coarse layer, not app-internal authz; orthogonal concern.
+**Do not adopt:** XACML (legacy XML policy, supplanted by OPA), Casbin (library-not-spec, weak SaaS adoption), AWS IAM JSON policies (vendor-locked), OAuth scopes (API-gating, orthogonal to app-internal authz).
 
 ### Stage 1 implementation (shipped)
 
 Stage 1 OIDC sign-up landed at `promptpotter/infrastructure/identity/` and `promptpotter/presentation/api/middleware/oidc.py`. The package splits per provider (`google.py`, `github.py`) on top of shared infrastructure (`verifier.py`, `jwks.py`, `session.py`, `bundle.py`, `provider_config.py`, `allowlist.py`, `migration.py`, `paths.py`, `user.py`); `cryptography` is the only new Python dep per the minimal-deps invariant. The middleware at `presentation/api/middleware/oidc.py` verifies the inbound ID Token against the issuer's JWKS, populates `IdentityContext`, and ensures tokens never appear past the boundary (gate #2 — review-enforced; no standing test). `presentation/api/deps.py::resolve_identity` reads the verified context from the session-cookie store; Stage 0 (auth-off) substitutes `default_identity()`. Auto-mint at first sign-in is one-tenant-per-user (`tenant_id = UserId`), encoded by `infrastructure/identity/user.py::derive_user_id`. Sign-up surface lives at `webapp/app/login/page.tsx` over `/auth/login/{provider}` → `/auth/callback/{provider}`.
-
-### Anchors
-
-Every claim in this ADR names a file. Drift is caught by review against the typed seam (no standing test — the structural/contract suite was cut, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)); a stale path here fails loud as a broken link.
-
-| Concern | File |
-|---|---|
-| `IdentityContext` (shipped, Stage 0+) | `promptpotter/shared/identity.py` |
-| `TenantId` / `UserId` / `Issuer` / `SafeName` newtypes + `safe_name` validator (shipped, Stage 0+) | `promptpotter/domain/identity.py` |
-| `Session.identity` field (shipped, Stage 0+ — replaces deleted `Session.tenant: TenantContext | None`) | `promptpotter/application/initialization/session.py` |
-| Identity resolver (shipped, Stage 0 auth-off + Stage 1 OIDC) | `promptpotter/presentation/api/deps.py` |
-| CLI seam (shipped, Stage 0+) | `promptpotter/presentation/cli/commands/_shared.py` |
-| Store construction (shipped, Stage 0+) | `promptpotter/infrastructure/store/stores.py` |
-| OIDC client package (shipped, Stage 1) | `promptpotter/infrastructure/identity/` |
-| OIDC middleware (shipped, Stage 1) | `promptpotter/presentation/api/middleware/oidc.py` |
-| Auth router — providers / login / callback / logout / me / quota / activity (shipped, Stage 1) | `promptpotter/presentation/api/routers/auth.py` |
-| Login page (shipped, Stage 1) | `webapp/app/login/page.tsx` |
-| RLS adapter (Stage 2 — not yet on disk) | `promptpotter/infrastructure/store/` |
-| §0 I/O kind amendment (shipped, Stage 1) | `docs/architecture.md` |
 
 ### §0 amendment
 
@@ -299,8 +225,6 @@ Stage-0 work (the `IdentityContext` seam — shipped) does **not** require the a
 ### Cross-refs
 
 - [`0003-spend-and-tenancy.md`](0003-spend-and-tenancy.md) — **first consumer.** Lands the `IdentityContext` reification at Stage 0; spend tracking is the payload demonstrating the seam works end-to-end.
-- [`0001-m12-control-plane.md`](0001-m12-control-plane.md) — **second consumer.** Stage 1 OIDC client lands here; `JobRegistry` scopes on `IdentityContext`; auth-off mode is the Stage-0 fallback.
-- [`../specs/roadmap.md`](../specs/roadmap.md) — **third consumer.** Install / User / Project nouns map onto OIDC claims (`Install = iss`, `User = sub`, project scoping rides `tenant_id` claim). Stage 2 considered when self-hosters demand native identity.
-- [`../specs/roadmap.md`](../specs/roadmap.md) — convergence: identity-collapse touches the same store-seam files; sequence Phase 1 before the Stage-0 `IdentityContext` reification to avoid touching `index.json` writers twice.
-- [`0004-operator-admin-channels.md`](0004-operator-admin-channels.md) — **administrative-write facet.** How privileged identity/deployment mutations (blocklist edits) are delivered in-zone, outbound-only, without exposing an inbound route.
-- [`../architecture.md`](../architecture.md) §0 — `Identity` I/O kind amendment lands here at Stage 1.
+- [`0001-m12-control-plane.md`](0001-m12-control-plane.md) — **second consumer.** Stage 1 OIDC client lands here; `JobRegistry` scopes on `IdentityContext`.
+- [`../specs/roadmap.md`](../specs/roadmap.md) — **third consumer.** Install / User / Project nouns map onto OIDC claims (`Install = iss`, `User = sub`, project scoping rides the `tenant_id` claim).
+- [`0004-operator-admin-channels.md`](0004-operator-admin-channels.md) — **administrative-write facet.** How privileged identity/deployment mutations are delivered in-zone, outbound-only, without exposing an inbound route.

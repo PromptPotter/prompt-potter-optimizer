@@ -49,4 +49,4 @@ Round-winner selection compares candidates on difficulty-adjusted ability (θ on
 
 θ is the standard IRT/CAT fix: a small statistical model that **structurally** removes the per-round sample-set drift — when the adaptive picker hands each candidate a different subset, raw accuracy is no longer comparable, but ability is. Today it's 1PL (difficulty only); a richer **2PL** variant adds per-sample signal-to-noise (discrimination), giving more power once enough data is collected, and graduates per-dataset only when it beats 1PL out-of-sample. The model itself is owned by [`../methods/verdict-resolution.md`](../methods/verdict-resolution.md).
 
-Why two forks share one archive without duplicating a measurement — content-addressing, in [`campaign-tree.md`](campaign-tree.md).
+Why two forks share one archive without duplicating a measurement — content-addressing, in [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § The primitive.

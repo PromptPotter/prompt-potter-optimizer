@@ -167,41 +167,23 @@ Pydantic models, `sets/*.yaml` is the L4 instrument — so the seam is one file,
 directory.
 
 Both derived asset trees (`assets/webapp/`, `assets/benchmarks/`) are staged by
-`scripts/build_release.py`, which is the supported way to build a wheel. A bare `uv build`
-produces one that quietly serves no dashboard and resolves no dataset. Publishing a GitHub
-Release is what runs it — `.github/workflows/publish.yml` builds the dashboard, calls that
-script with no `--no-webapp`, smoke-installs the wheel outside any checkout, and uploads to
-PyPI over Trusted Publishing.
-
-Running from a checkout (development, and `deploy-linux/`) resolves exactly the paths it
-always has. There is no `REPO_ROOT`: the parent walk that once stood for all three roots
-resolved to `site-packages/` when installed, which is both where `pip` deletes on upgrade
-and where the HuggingFace `datasets` library lives.
+`scripts/build_release.py`, the supported way to build a wheel — a bare `uv build` produces
+one that quietly serves no dashboard and resolves no dataset. There is no `REPO_ROOT`: the
+parent walk that once stood for all three roots resolved to `site-packages/` when installed,
+which is both where `pip` deletes on upgrade and where the HuggingFace `datasets` library lives.
 
 ## 5. CLI flags — `new` and `resume`
 
-`python -m promptpotter new <name>` and `python -m promptpotter resume` are the loop-mint verbs (lifecycle + diagnostic verbs also exist — see CLI reference). Stable flag set:
+`python -m promptpotter new <name>` and `python -m promptpotter resume` are the loop-mint verbs; lifecycle, run-control, diagnostic and maintenance verbs exist beside them. **The flag set is `presentation/cli/parsers.py`** and what each does to the tree is [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md)'s — a table here is one `--help` away from its source and has drifted from it before. What v1 promises is that the two verbs, and the flags that file declares for them, keep their meanings.
 
-| Verb | Flag | Meaning |
-|---|---|---|
-| `new` | `<name>` (positional) | Mint a fresh session+cycle from `datasets/<name>/`. |
-| `new` | `--config <path>` | Override the dataset's default `campaign.yaml`. |
-| `new` | `--dataset-name <name>` | Alternative to the positional `<name>`. |
-| `new` | `--sweep-batch` | Sweep mode: round 1 scored, round 2 generation-only. Mints sibling cycles flat under `cycles/`; `sweeps/{batch_id}` holds the batch index + summary. |
-| `new` | `--diag` | Diag mode: round 1 scored, force L2 on round-1 evidence, round 2 generation-only. |
-| `new` / `resume` | `--halt-at <float>` | Halt with `TARGET_HIT` once the cycle's running-max panel accuracy (`cycle.tracking.best_accuracy`) reaches X. NOT `index.json::best_accuracy`, which is the winner's score on the line's shared cells and is not a running max. |
-| `new` / `resume` | `--spend-budget <float>` | Halt with `SPEND_BUDGET` once cycle spend ≥ X — but only where X is BELOW the configured ceiling, which a launch flag may never raise. `set-budget` is the verb that raises one. |
-| `new` / `resume` | `--token-budget <int>` | The model-portable twin of `--spend-budget`; whichever trips first halts. |
-| `resume` | `--from <N>` | Resume rewind: archive rounds > N and resume from round N+1. |
-| `resume` | `--no-check` | Skip the rescore-and-replay divergence check at boot. |
-| `resume` | `--fork-on-divergence` | On divergence, mint a sibling cycle rooted at the divergence point. |
-| `resume` | `--diag` | Diag on the active cycle. |
+Four behaviours a fork may rely on, none of them readable off `--help`:
 
-**Behavior note:** every `new` invocation mints a fresh root cycle; on content-hash collision with an existing root, the `cycle_id` gets a `_r2` / `_r3` discriminator suffix so the new run lands in its own directory tree (separate dashboard, log, archive subtree). The prior campaign is preserved.
+- Every `new` mints a fresh root cycle; on content-hash collision with an existing root the `cycle_id` gains a `_r2` / `_r3` discriminator so the new run lands in its own directory tree. The prior campaign is preserved.
+- `--sweep-batch` and `--diag` are mutually exclusive on `new`.
+- There is no `sweep` verb: a sweep is `new --sweep-batch`, and `--sweep-batch` with no `sweep/*.yaml` payloads is a setup error rather than a fall-through to a single unpaired cycle.
+- A launch flag may only lower a budget. `set-budget` is the verb that raises one.
 
-**Mutual exclusions:** `--sweep-batch` and `--diag` mutually exclusive on `new`.
-
-The maintenance and diagnostic verbs have their own flag sets — see `presentation/cli/parsers.py`. Not part of v1 (M11 still touches them). There is no `sweep` verb: a sweep is `new --sweep-batch`, and `--sweep-batch` with no `sweep/*.yaml` payloads is a setup error, not a fall-through to a single unpaired cycle.
+The maintenance and diagnostic verbs are not part of v1.
 
 ## 5b. Embedded launch entry (Python)
 
@@ -291,24 +273,9 @@ Subscribers read via `DerivedView.on_record(record)` and MUST NOT write any camp
 
 ## 7. Per-cycle artifact paths
 
-Operator-visible files inside `campaigns/{campaign_id}/cycles/{cycle_id}/`. Webapp + downstream tooling read these directly — they are contract.
+**What each file holds, and who writes it** — owned by [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § File reference. What v1 promises is narrower and is only stated here: inside `campaigns/{campaign_id}/cycles/{cycle_id}/`, the contract for any tool reading per-cycle results is **`rounds/round_NNNN.json` + `index.json` + `log.md`**, and `export.json` (§5c) for the winner alone. Everything under `.runtime/` may change shape between minor versions, ledger records included — §6 promises the record family, not the file layout around it.
 
-| Path | Writer | Description |
-|---|---|---|
-| `index.json` | `CampaignStore.create` / `update` | Per-cycle summary: header (dataset, lineage), rounds[], best. |
-| `log.md` | `application/output.py::write_log_md` | Markdown digest of every closed round + forks + hard samples + final winner. |
-| `review.md` | `application/output.py::write_review_md` | Per-round behavior-check + L1Stats narrative. |
-| `rounds/round_NNNN.json` | `CampaignStore.save_round_file` | Full per-round detail: candidate scores, evaluators, prompt_fields, pipeline_params, OSP snapshot, decisions. |
-| `dashboard.json` (per cycle) | `LiveDashboardView._persist` | Live operator view; rewritten on every record. Refresh: 2 s. |
-| `langfuse/*.json` | `infrastructure/tracing/langfuse_sink.py` | Per-cycle Langfuse export snapshots. |
-| `prompts/{node}.yaml` | `infrastructure/tracing/file_sink.py` | Resolved prompt templates for this cycle's runs. |
-| `.runtime/ledger.jsonl` | `CycleEventLog.append` | The sole-ingress event log. Internal-but-stable shape (see §6). |
-| `.runtime/cache/rounds/round_NNNN.json` | `AuditTrailView.flush` | Per-round audit cache (writer-buffered until round close). |
-| `.runtime/cache/candidates/round_NNNN.json` | `CampaignStore.save_round_candidates` | Mid-round candidates checkpoint (deleted after L1 score on escalation). |
-| `.runtime/streams/round_NNNN_p_best.jsonl` | `PoBBStreamView._handle_snapshot` | Per-sample P(best) trajectory. |
-| `.runtime/pause.flag` | `api/middleware/command_dispatcher.py` (`POST /commands/{kind}`, kind=`pause-cycle`) | Single operator-interrupt signal; consumed by `session.pause_check`. Worker exits clean, cycle stays resumable (no separate `stop.flag`). |
-
-Sibling cycles (forks, diag, sweeps) live flat under `cycles/` alongside the root. Each carries its own per-cycle artifacts, including its own `dashboard.json` (a fork's is seeded from its parent at the cut). `.runtime/` shapes may change between minor versions — the public `rounds/round_NNNN.json` tree + `index.json` + `log.md` are the contract for any tool reading per-cycle results.
+Sibling cycles (forks, diag, sweeps) live flat under `cycles/` alongside the root, each carrying its own per-cycle artifacts including its own `dashboard.json`, which a fork seeds from its parent at the cut.
 
 ## 8. What is NOT stable
 

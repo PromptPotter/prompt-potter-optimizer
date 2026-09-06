@@ -57,13 +57,10 @@ which is exactly what the guard prevents.
 for every `CycleRecord` arm, and which arms are deliberately unfolded is stated there with
 each one's reason rather than here — a second list is what let the first one go wrong.
 
-This rule earned its teeth from its own failure case. The prose asked a reader to "check the
-arm exists", and `ElectionRecord` was listed as deliberately unprojected when it was not: the
-crown reached no fold, and the phase-view workaround standing in for it could not crown round
-0 — the origin is ADOPTED, runs no `l1_score` phase, and folded with `is_winner` false on its
-only arm. `CandidateMintedRecord` was the same shape and had no second channel at all, so
-`dashboard.json` never learned a candidate had been minted. **A missing arm does NOT break
-loud** — that claim was the error. It is checked now instead of asserted.
+**A missing arm does NOT break loud** — that claim was the error, and it is checked now rather
+than asserted. `ElectionRecord` was listed as deliberately unprojected when it was not, so the
+crown reached no fold; `CandidateMintedRecord` had no second channel at all, so `dashboard.json`
+never learned a candidate had been minted.
 
 **A tracing event is not a second home for the same fact.** `infrastructure/tracing/`
 carries the trace TOPOLOGY — campaign / round / node spans and their scores, the shape a
@@ -106,8 +103,7 @@ fails loud at import if a `possible` name has no registered renderer, and
 `validate_template()` (at `load_optimizer_prompt`) raises at module load on any
 `{{slot}}` not in `INJECTIONS` — typos fail loud.
 
-Contract: [`developer/dispatch-hub.md`](dispatch-hub.md) § L1 layout,
-[`developer/dispatch-hub.md`](dispatch-hub.md).
+Contract: [`dispatch-hub.md`](dispatch-hub.md) § L1 layout.
 
 ---
 
@@ -203,27 +199,22 @@ has one; `cli/commands/_shared.py` asserts the divergence hint lists every kind.
 A new backend kind — one file under `connectors/` plus a row in its `CONNECTORS` dict, owned
 step by step by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md).
 
-**The usual reader of this section is not us.** It is someone with a backend already running who
-wants it optimized, working through it in one conversation. **The wiring is the easy half** — the
-protocol is four required fields and the guard below catches a half-wired one at import. The half
-that decides whether the campaign is worth running is step 2, and nothing about their backend
-tells you the answer. Do the steps in order; each one's output is the next one's input.
+**The usual reader here is not us** — it is someone with a backend already running who wants it
+optimized, working through it in one conversation. **The wiring is the easy half**: four required
+fields, and the guard below catches a half-wired one at import. Step 2 is what decides whether the
+campaign is worth running, and nothing about their backend tells you the answer. Each step's output
+is the next one's input.
 
 ### Step 1 — Learn the shape, cheapest source first
 
-Three sources, and they are complementary rather than alternatives:
+Read what they already have (spec, handler source, a saved response, a `curl` line) — that costs
+nothing and answers most of it. Then **probe the live endpoint once**, with one real input they
+choose, which is the only way to see what it *actually* returns rather than what it documents;
+it spends against their provider, so ask first and fire once. Ask them only what neither answered.
 
-1. **Read what they already have.** An OpenAPI spec, the request handler's source, a saved
-   response, a `curl` line from their README. Costs nothing and answers most of it.
-2. **Probe the live endpoint once**, with one real input they choose. This is the only way to see
-   what the backend *actually* returns rather than what it documents — but it **spends against
-   their provider and needs the service up**, so ask before firing it, and fire it once.
-3. **Ask only what neither answered.** Every question you can answer from 1 or 2 is a question
-   the integrator should not have to field.
-
-Come out of this knowing five things, and say them back before writing any code: the **request**
-shape, the **response** shape, **where the number is** in it (or that there isn't one), what one
-row **costs** in seconds and dollars, and which request fields are **safe to vary**.
+Come out knowing five things, and say them back before writing code: the **request** shape, the
+**response** shape, **where the number is** in it (or that there isn't one), what one row **costs**
+in seconds and dollars, and which request fields are **safe to vary**.
 
 ### Step 2 — Decide what is being improved, and how it is graded
 

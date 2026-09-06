@@ -1,5 +1,7 @@
 # Code-Debt Cleanup — Backlog
 
+**Nothing smaller than a multi-arc or blocked item goes here.** A fix you could make in the pass that found it is made there, not filed, and an adjacent finding is part of the topic you are already on. An item ships by being DELETED from this file.
+
 **Only what cannot be picked up now, and only what ASKS FOR WORK.** An item earns a line by being
 **blocked** or **multi-arc**. Everything else — anything adjacent to work already in hand, anything
 one edit closes — is **fixed in the pass that found it**, never filed. Enough to pick up cold:

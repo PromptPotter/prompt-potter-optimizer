@@ -82,9 +82,12 @@ control are unaffected. `acompile()` keeps the interrupt.
 ## The loop is three layers
 
 L1 proposes candidates each round from the last winner. When L1 stops improving, **L2
-observes** — it reads the whole round history rather than the last result, and re-aims L1's
-strategy. When the branch itself is spent, L3 rewinds to a better ancestor and climbs a
-different ridge. Patience is how many flat rounds each layer tolerates before handing up:
+observes** — it reads the whole round history rather than the last result, and re-aims what
+L1 looks at. When L2's steer stops paying, **L3 replans**, rewriting the strategic framework
+L1 works within. Either upper layer may also propose a rewind to a better ancestor, but
+*where* is chosen by the search rather than by the layer. Patience is how many flat rounds
+each layer tolerates before handing up (full mechanism:
+[`../concepts/the-loop.md`](../concepts/the-loop.md)):
 
 ```python
 from promptpotter.presentation.teleprompter import Loop
@@ -95,7 +98,7 @@ loop = Loop(
     samples_per_round=20,     # rows each candidate is scored on — the cost knob
     l1_patience=0,            # L1 mutates the winner
     l2_patience=2,            # L2 observes the history, re-aims L1
-    l3_patience=1,            # L3 rewinds the lineage, climbs elsewhere
+    l3_patience=1,            # L3 replans the strategy L1 works within
     elimination_n_min=4,      # samples a candidate gets before it may be pruned
     pobb_epsilon=0.2,         # how aggressively trailing candidates are killed
     spend_budget_usd=None,    # a ceiling the run stops at; None runs uncapped

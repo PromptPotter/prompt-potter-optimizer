@@ -15,7 +15,7 @@ Each folder's entry page:
 | [`developer/`](developer/README.md) | Implementation spec — Python names, data contracts, node wiring |
 | [`operations/`](operations/persistence-and-state.md) | Running it — the `.promptpotter/` tree, resume/rewind/fork, then backends and observability beside it |
 | [`methods/`](methods/verdict-resolution.md) | The θ model and the two spend-control procedures that read it |
-| [`research/`](research/benchmarks.md) | Benchmarks, metrics, related work |
+| [`research/`](research/benchmarks.md) | Benchmarks, the admission bar, the reported metrics |
 | [`specs/`](specs/roadmap.md) | Roadmap + forward-looking specs |
 | `assets/` | Images and diagrams |
 
