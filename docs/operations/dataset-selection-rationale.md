@@ -89,6 +89,35 @@ Captured so they are not re-investigated. All are projections, and **the recon t
 
 Eight rounds of literature triage and empirical recon converged on one systemic finding: **model-strength projections taken from older proxies underpredict `gpt-oss-20b @ low` by 10–20pp.** Reasoning benchmarks designed for the GPT-3.5 / Llama-3-8B era are ceiling-prone for this model. The one measured exception was language transfer (Swahili), which bypasses the effect because reasoning strength in English does not carry across the language barrier — and which was rejected anyway.
 
+## What a cell costs — and why an agent-backed dataset is a different animal
+
+**A containerized agent episode costs 14–48× an `llm_only` call, and that gap is the reason the
+harbor datasets need their own budget arithmetic rather than the LLM-only defaults.** Folded off
+the workspace archive over every non-error row, latency via
+[`domain/scoring.py::recorded_cost_s`](../../promptpotter/domain/scoring.py) (which sums
+`step_timings` and so survives a cache replay, unlike `total_time`), tokens as `input + output`
+summed across `step_tokens` nodes. Recompute it by folding those two fields over
+`measurements/runs/*.jsonl`; the `n` column is what the claim rests on.
+
+| Dataset | Backend | n | p50 s | p90 s | max s | median $/cell | C0 median tokens |
+|---|---|---|---|---|---|---|---|
+| `harbor-tbench-regex-log` | harbor episode | **1** | 292.2 | — | — | 0.0020 | — |
+| `spreadsheetbench-s10` | harbor episode | 10 | 164.2 | 223.8 | 223.8 | 0.0013 | 29,924 |
+| `sealqa-longseal-12` | harbor episode | 861 | 48.6 | 83.1 | **710.7** | 0.0008 | 21,301 |
+| `swiss-invoices-eval` | `llm_only` | 1356 | 3.4 | 11.7 | 67.2 | 0.00003 | — |
+
+Three things the table is for, none of them the headline number:
+
+- **The tail is the operational fact, not the median.** `sealqa` reads a comfortable 48.6 s at p50
+  and 710.7 s at its worst — a 25× spread *inside one dataset at one setting*. A budget gate that
+  polls at the sample edge cannot see inside an episode, so the tail is unbounded spend between
+  polls. That is what a per-cell wall-clock and spend ceiling exists to bound.
+- **`n = 1` is not a distribution.** `harbor-tbench-regex-log` has one measured cell. It is quoted
+  here so the omission is checkable, and it is why that dataset gets no cost anchor below.
+- **Turns are the prompt's; seconds are partly the weather.** On `sealqa`, 730 of 861 episodes end
+  in exactly 3 turns and 784 within 4, with a tail to 11 — so an episode's length is bimodal
+  between "the agent knew what to do" and "it flailed", which is a property a prompt moves.
+
 ## Deferred research
 
 One candidate may still earn a slot, pending an empirical check.

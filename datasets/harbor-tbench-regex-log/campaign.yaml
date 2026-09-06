@@ -6,11 +6,14 @@ campaign_config:
     # δ ruler and PoBB both read, and a reward is upstream's number — these ten write 0 or 1, but
     # Harbor's channel permits any float and a task that returned 3.0 would silently widen it.
     per_sample: max(0.0, min(1.0, env_reward))
-    # NO `per_cell` cost term, deliberately. Its siblings price a cell against a MEASURED anchor
-    # (justlogic's 1546.0 tokens, pp-self's 500.0s), and no episode of this panel has been
-    # measured yet — an invented anchor would grade every arm against a number nobody read, and
-    # would be indistinguishable from a measured one on the round file. Add it once a cost
-    # distribution exists, with the figures and their source written here.
+    # NO `per_cell` cost term, deliberately, and this panel is the one that still earns the
+    # refusal after its siblings stopped. Exactly ONE cell of it has ever been measured — 292.2 s
+    # and $0.0020 — and one cell is not a distribution, so an anchor drawn from it would grade
+    # every arm against a single draw and would be indistinguishable from a measured one on the
+    # round file. The figure is written here so the omission is checkable rather than asserted.
+    # Add the term once a real campaign has priced the panel; `sealqa-longseal-12` and
+    # `spreadsheetbench-s10` carry the form to copy, and the census and its recompute path are
+    # `docs/operations/dataset-selection-rationale.md` § What a cell costs.
   optimization:
     # Deliberately the smallest geometry that can produce a round at all: this campaign's job is
     # to show the Harbor path carries a real measurement end to end, not to find a better prompt.

@@ -18,11 +18,22 @@ campaign_config:
     # the container, so a verifier inside it cannot decide correctness — and scoring it would grade
     # every arm that wrote a file as perfect. It is read as instrument health, not as the score.
     per_sample: exact_match(predicted, ground_truth)
-    # NO `per_cell` cost term, deliberately. Its siblings price a cell against a MEASURED anchor
-    # (justlogic's 1546.0 tokens, pp-self's 500.0s), and no episode of this panel has been measured
-    # yet — an invented anchor would grade every arm against a number nobody read, and would be
-    # indistinguishable from a measured one on the round file. Add it once a cost distribution
-    # exists, with the figures and their source written here.
+    # Cost is charged in TOKENS, not seconds — justlogic's argument holds here and harder. An
+    # episode's wall clock is `turns x per-turn latency`, and only the first factor is the
+    # prompt's: the same panel reads 48.6s at p50 and 710.7s at its worst, so charging seconds
+    # would charge the provider's weather and would punish the origin for replaying cached rows
+    # that carry an older run's `step_timings`.
+    #
+    # 21301 is C0's median `input + output` across `step_tokens` on this dataset+model, over the
+    # 185 origin-labelled rows in the workspace archive; the panel's own median is 22035 over 861
+    # rows and its p90 is 45438. So the origin sits at ~1.0x and only GROWTH past it is charged.
+    # Half-weight and no knee, so a cell one token over the line is not punished. Re-pin it on any
+    # model change — it is a typed constant standing in for an origin-relative term. Census and
+    # the recompute path: `docs/operations/dataset-selection-rationale.md` § What a cell costs.
+    #
+    # `per_cell` rather than folding it into `per_sample`: a correct-but-expensive answer must stay
+    # a HIT, or L1 is sent to repair reasoning that was right.
+    per_cell: max(0.0, min(1.0, fitness * 21301.0 / (21301.0 + 0.5 * max(0.0, tokens - 21301.0))))
   # The `retrieve -> ground -> answer` schema, keyed by the term the formula reads.
   #
   # The ANSWER step is `sealqa`, and using SealQA's own published auto-rater is the point: it is

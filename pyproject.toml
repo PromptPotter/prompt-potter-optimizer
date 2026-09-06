@@ -238,16 +238,15 @@ sqlite_cache = true
 
 # Deps we never type-check through. `follow_imports = "skip"` (not just
 # ignore_missing_imports, a no-op when the package is installed + typed) stops
-# mypy expanding their bodies — mlflow alone dragged the SQLAlchemy dialect tree
-# + alembic into the graph (5488 nodes for 291 first-party modules).
+# mypy expanding their bodies. The tree this was sized against is gone: `mlflow`
+# used to drag the SQLAlchemy dialects + alembic in (5488 nodes for 291 first-party
+# modules), and `mlflow-skinny` ships neither, so their two entries went with it.
 [[tool.mypy.overrides]]
 module = [
     "anthropic.*",
     "openai.*",
     "langfuse.*",
     "mlflow.*",
-    "sqlalchemy.*",
-    "alembic.*",
     "scalar_fastapi.*",
     "openpyxl.*",
     "datasets.*",
@@ -325,6 +324,14 @@ extend_exclude = [
     "notebooks/bbeh_potter.ipynb",
 ]
 
+# CI installs neither `observability` nor `all`, so deptry cannot read the
+# distribution's metadata and falls back to assuming the module is named after the
+# package — `mlflow_skinny`, which nothing imports. Stating the real module here is
+# what makes the check answer the same on a desk that HAS it installed and on a
+# runner that does not.
+[tool.deptry.package_module_name_map]
+mlflow-skinny = ["mlflow"]
+
 [tool.deptry.per_rule_ignores]
 # CLI/tool deps — invoked by command, not imported.
 DEP002 = [
@@ -347,4 +354,4 @@ DEP002 = [
 ]
 # Optional features — imported lazily with install-message guards.
 # Declared in extras ([excel], [benchmarks], [observability], [anthropic], [jupyter]).
-DEP001 = ["openpyxl", "datasets", "langfuse", "mlflow", "anthropic", "IPython"]
+DEP001 = ["openpyxl", "datasets", "langfuse", "anthropic", "IPython"]

@@ -221,7 +221,8 @@ it.
   `key_source: host|user` lands (declared on `TokenUsagePayload` in the asyncapi), replace the
   fake-slug derivation with the real dimension. Blocker: the coupon build adds the field.
 
-**Needs a capability the closing directive does not open:**
+**Needs a capability M13 does not open** — the no-new-features clause is retired, so the bar is no
+longer "is a feature allowed" but "does the preprint need it", and these do not:
 - **The REST API has no inbound credential, so it cannot yet be the external integration surface the
   roadmap calls it.** `presentation/api/deps.py::resolve_identity` 401s unless
   `request.state.identity_ctx` is set, and `middleware/oidc.py` sets that from a browser **session

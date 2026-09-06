@@ -646,6 +646,35 @@ def _step_rewards(result: TrialResult) -> dict[str, float]:
     return out
 
 
+_PHASES: tuple[str, ...] = ("environment_setup", "agent_setup", "agent_execution", "verifier")
+
+
+def _phase_timings(result: TrialResult, elapsed: float) -> dict[str, float]:
+    """Where the episode's wall clock went, in seconds — Harbor's own four phases plus what it
+    did not attribute.
+
+    Read from ``TrialResult``'s ``TimingInfo`` pairs rather than stopwatched here: Harbor already
+    brackets each phase, and a second set of brackets around the same work would drift from it and
+    give two answers to one question. The remainder — total minus the phases Harbor reported —
+    lands under ``overhead`` so the map SUMS to the cell's measured wall clock; without it a reader
+    would silently take the parts for the whole, which is the failure this key exists to prevent.
+
+    An absent phase is omitted rather than zeroed. ``0.0`` says the phase ran instantly, absence
+    says Harbor did not report it, and on a task with no verifier only one of those is true."""
+    out: dict[str, float] = {}
+    for phase in _PHASES:
+        info = getattr(result, phase, None)
+        started, finished = getattr(info, "started_at", None), getattr(info, "finished_at", None)
+        if started is None or finished is None:
+            continue
+        seconds = (finished - started).total_seconds()
+        if seconds >= 0.0:
+            out[phase] = seconds
+    if out:
+        out["overhead"] = max(0.0, elapsed - sum(out.values()))
+    return out
+
+
 def _unscoreable_step(result: TrialResult) -> str | None:
     """Why this trial's reward cannot be believed, or ``None``.
 
@@ -827,6 +856,10 @@ async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]
         if prompt := payload.get("prompt"):
             skills.append(str(_write_skill(Path(skill_root), prompt)))
 
+        # BEFORE `Trial.create`, not after it. Creation builds or pulls the environment image and
+        # is a real part of what a cell costs; timing only `run()` reported an agent episode as
+        # cheaper than it was, by exactly the amount the harness spent getting ready.
+        start = time.monotonic()
         trial = await Trial.create(
             harbor_config.TrialConfig(
                 task=_task_config(task, harbor_config),
@@ -842,7 +875,6 @@ async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]
                 ),
             )
         )
-        start = time.monotonic()
         result = await trial.run()
         elapsed = time.monotonic() - start
 
@@ -882,6 +914,8 @@ async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]
     # scored nothing. A single-step task has neither concept.
     if turns:
         data["turns"] = turns
+    if phases := _phase_timings(result, elapsed):
+        data["step_phases"] = phases
     data.update(_step_rewards(result))
     return {"data": data}
 

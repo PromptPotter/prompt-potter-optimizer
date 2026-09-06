@@ -7,10 +7,17 @@ campaign_config:
     # or 1, but Harbor's channel permits any float and a task returning 3.0 would silently widen
     # it.
     per_sample: max(0.0, min(1.0, env_reward))
-    # NO `per_cell` cost term, deliberately. Its siblings price a cell against a MEASURED anchor
-    # (justlogic's 1546.0 tokens, pp-self's 500.0s); one cell of this panel has been measured and
-    # one cell is not a distribution. Add it once this screen has priced the ten, with the figures
-    # and their source written here.
+    # The screen has now priced the ten, which is the condition this comment used to set. Cost is
+    # charged in TOKENS, not seconds, for the reason `justlogic-d234` states and `sealqa` repeats:
+    # an episode's wall clock is `turns x per-turn latency` and only the first factor is the
+    # prompt's, so seconds charge the provider's weather.
+    #
+    # 29924 is C0's median `input + output` across `step_tokens` on this dataset+model. **The n is
+    # 10** — a real distribution rather than the single cell this comment used to report, but a
+    # thin one, and its p90 (87809) is nearly 3x the median. Treat the anchor as provisional and
+    # re-pin it off the first campaign that measures more than a screen. Census and the recompute
+    # path: `docs/operations/dataset-selection-rationale.md` § What a cell costs.
+    per_cell: max(0.0, min(1.0, fitness * 29924.0 / (29924.0 + 0.5 * max(0.0, tokens - 29924.0))))
   optimization:
     # ORIGIN ONLY. `max_rounds: 0` is the declared "measure round 0 and stop" — this campaign is
     # an INSTRUMENT CHECK, not a search: it answers whether the model lands mid-range on these

@@ -36,7 +36,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 | How do I freeze a buggy cycle as a test fixture? | Vitest only — [`../webapp/CLAUDE.md`](../webapp/CLAUDE.md) § Testing posture. The pytest frozen manifests were deleted: [`../tests/CLAUDE.md`](../tests/CLAUDE.md) § Frozen cycle fixtures says why, and where the guarantee went instead. |
 | I changed the formula / a PoBB setting / the engine — do my measurements still carry over, or must I fork? | [`operations/mask-projection.md`](operations/mask-projection.md) |
 
-## L4 — the recursion case (project's closing focus)
+## L4 — the recursion case
 
 L4 has exactly **two owners, split doc-says-what-is-TRUE ([`specs/l4-outer-loop.md`](specs/l4-outer-loop.md)) / skill-says-what-to-DO (`.claude/skills/potter-self/`)**, and **no other file under `docs/` may hold L4 prose.** Read the spec before trusting any outer number. The dataset side is [`../datasets/CLAUDE.md`](../datasets/CLAUDE.md) § L4.
 

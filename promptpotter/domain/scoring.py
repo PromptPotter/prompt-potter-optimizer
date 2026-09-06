@@ -119,6 +119,14 @@ class PipelineData(LedgerPipelineData, total=False):
     # prose blob every backend composes, this is the record a judge segments by step. Absent means
     # "this backend has no turn concept"; `[]` would mean "it had none", and only one is ever true.
     turns: list[TurnRecord]
+    # Where a cell's WALL CLOCK went, inside the one node that produced it. ``step_timings`` keys
+    # by node and is what ``recorded_cost_s`` sums, so it cannot also carry sub-node structure
+    # without double-counting the cell against itself; this is that structure, and it is summed by
+    # nobody. An agent-backed cell is one node and four phases, and only one of them is the
+    # prompt's doing — provisioning a container is the harness's, and charging a prompt for it
+    # grades the machine. Absent means the backend reports no phases; ``{}`` would mean it
+    # reported none, and only one of those is ever true.
+    step_phases: dict[str, float]
     # The SE beside ``mean_round_delta`` is this arm's OWN half of a paired cell difference — the
     # shared origin level is excluded because it cancels in that difference (`domain/l4/proxies.py`).
     mean_parent_level_se: float
@@ -231,13 +239,19 @@ meaning "did this cell land" calls :func:`is_hit` on ``fitness`` at the point of
 is what lets a compaction move them; the assert is what stops one silently becoming a real key
 again."""
 
-UNREAD_PIPELINE_KEYS: frozenset[str] = frozenset({"reasoning_trace", "total_time", "turns"})
+UNREAD_PIPELINE_KEYS: frozenset[str] = frozenset(
+    {"reasoning_trace", "total_time", "turns", "step_phases"}
+)
 """``pipeline_data`` keys no estimator, cache, ruler or index reads.
 
 ``reasoning_trace`` reaches only the three L1 transcript panels, and only for rows live in the
 current cycle; ``total_time`` is zeroed on replay anyway. ``turns`` joins them because a judge
 grades it at MEASURE time and every judge evaluator is ``from_rows=False``, so no re-grade ever
 reaches back for the conversation — and it is the largest thing such a cell carries.
+``step_phases`` joins them for the reason it exists: it is sub-node structure beside the per-node
+attribution the cost term actually reads, so nothing in the loop consults it and moving it costs
+the loop nothing. It is banked rather than derived because a phase split cannot be recovered from
+a total after the fact, and re-measuring an agent episode to get one costs what the episode cost.
 
 **A ranking may not be moved.** The `candidate_recall` / `source_recall` evaluators walk
 `final_ranking` / `candidate_ranking` for GT membership, and a row cannot tell a MOVED key from a
