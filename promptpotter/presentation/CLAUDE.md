@@ -62,6 +62,14 @@ operator-admin channel.
 
 **A 200 body never justifies bypassing the dispatcher.** `edit-draft-campaign` / `resolve-origin` / `start-checkin` are typed routes because each answers a domain object rather than a `CommandAcceptedBody` — but they dispatch through `CommandDispatcher.dispatch_checkin_command`, whose `CommandOutcome.result` carries that object back. They once applied inline for exactly this reason, and the consequence was that **no origin edit was recorded anywhere on disk, nor who made it** — a standing violation of `architecture.md` §0 ("sole `CommandDispatcher`"). The target is the check-in cycle `cycle_chk_*`, which exists from the first ingest action and is retained across the flip to `active`; a fork inherits its records via `CycleEventLog.inherit_from`. If a future verb needs a bespoke response, give it a typed route — never its own write path.
 
+## Sample look-ahead — the one entry point that is deliberately NOT at parity
+
+**`/commands/set-sample-lookahead` is browser-only, and the ABSENCE is the boundary.** A missing CLI verb, config key or dataset knob is the gate here, never an oversight to fix — this is the one deliberate `<entry-point-parity>` inversion in the repo.
+
+It is the sole `None` in `cli/campaign_runner.py::CLI_VERB_FOR_KIND`, which is TOTAL over the dispatched command set, so the absence is **declared** rather than merely unimplemented and every other browser-only kind fails at import. That totality is the whole mechanism: delete the `None` and the map stops being total, which is the loud failure the design wants.
+
+Who may press it, what one press buys, and why the overshot sample is discarded and never recovered — owned by [`../../docs/operations/access-model.md`](../../docs/operations/access-model.md) § host-admin ↔ user.
+
 ## Everything on stdout is also on disk
 
 **Emit nothing to stdout that is not also findable as a file someone — or

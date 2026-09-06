@@ -117,7 +117,7 @@ def _nested_param_property(node: PipelineNode, param: str) -> dict[str, Any] | N
 
 
 # Which panel shows the CURRENT value of each writable slot; a slot whose panel produced nothing is
-# withdrawn. Why that rule and what it cost before it existed: `optimization/CLAUDE.md` § L1-layer.
+# withdrawn. Why that rule and what it cost before it existed: `optimization/CLAUDE.md` § L1.
 _SLOT_PANEL: dict[str, str] = {
     "prompt_fields_override": "rendered_prompt",
     "task_context_override": "task_context",

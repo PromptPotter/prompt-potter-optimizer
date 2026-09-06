@@ -210,39 +210,6 @@ trusted code. Read it there; nothing about a judge changes it.
 
 ## What is cached is the REPLY, not the verdict
 
-`call.py::ask` reads and writes `Stores.judge_reuse`, keyed by `hash_call` over the rendered
-prompt plus the stage's model / provider / temperature / max_tokens. **The stored artifact is the
-model's reply**, and that choice is what makes ONE cache enough:
+`call.py::ask` stores the model's REPLY rather than the derived verdict, which is what makes ONE cache enough — a judge whose `_parse` or `to_score` changed re-derives correctly from it, and a rubric or model edit moves the key by itself. The key shape, the composition-caches-whole property and the four metering rules are that module's own header.
 
-- **A rubric or model edit moves the key by itself** — the rendered prompt carries the rubric, the
-  question, the gold and the prediction. So no judge-version component is needed here, and a judge
-  whose `_parse` or `to_score` changed re-derives correctly from the stored reply: it is still what
-  that model said. (Identity is a different question, answered by `fingerprint` above.)
-- **A composition caches whole.** A second stage's prompt is a deterministic function of the
-  first's reply — which is what `JudgeStage.temperature`'s `0.0` default buys — so a chain hits end
-  to end under one key space with one invalidation.
-- **The economically large hit is two candidates whose mutation did not change the answer**, which
-  is the common case and is composition-independent.
-
-Three rules ride with it, all inherited from `dispatch/llm_call/call.py` and each a scar: **meter
-first, then store** (a disk error above the emit loses a row the provider already billed);
-**meter cache hits too**, flagged, so grading cost stays invariant to our cache history; and
-**never store an empty reply** — emptiness is transient, the key is the prompt hash, and the tree
-is tenant-global, so caching one makes that comparison ungradeable forever with nothing on any
-surface pointing at the cause.
-
-A fourth rule is this seam's own: **absent, unreadable and stale are ONE answer — sample it again.**
-Both the read and the validate raise, and `ask` sits under `measure_sample`'s catch-all, so a raise
-here banks the whole cell as an ERROR and discards a backend answer already paid for. A cache
-exists to make grading cheaper; nothing in it may ever cost a measurement.
-
-**The handle reaches `ask` through a ContextVar, never through `GradeFn`.** `build_evaluators` takes
-the cache, `_compute` scopes it with `call.py::bind_cache`, and `ask` reads it. Threading it
-through `grade` would put a store handle in the judge protocol, so every judge author — ours and a
-third party's — would carry infrastructure they have nothing to do with. **One cache across every
-term**, because the key is the rendered prompt: two graders cannot read each other's replies, and
-a step schema's three gradings of one comparison are each bought once.
-
-`ask` also heartbeats and retries a 429, for the same reason the cache exists: a failed grade omits
-the term, which halts the formula on that cell, which discards a backend answer already paid for.
-One unretried rate limit throws away the expensive half of a measurement to save the cheap half.
+**One judge cache, never the loop's.** `judge_reuse` is a peer tree to `optimizer_reuse`, because a grader able to read the loop's cached answers would be a ruler fed by what it measures.

@@ -1,5 +1,19 @@
 """``DerivedView`` — typed-record dispatch for ledger subscribers, owning the routing in ONE place so a
-new record subtype touches one file. Default hooks are no-ops."""
+new record subtype touches one file. Default hooks are no-ops.
+
+``on_record`` dispatches off a ``_ROUTES`` table checked against the ``CycleRecord`` union at
+import, so an arm naming no hook is a DECLARED silence carrying its reason rather than one that
+fell off the end of a chain. Subclasses override hooks; there is no second dispatch path because
+this base class is the only one.
+
+``drain()`` is the runner's teardown seam — ``_finalize_run`` calls ``RunObservers.drain_all()``
+on every stop reason, so buffered state flushes without faking a ``round:complete``.
+``AuditTrailView`` is the only projection that buffers: its ``drain()`` writes the partial
+``round_NNNN.json`` with ``"interrupted": true`` when the cycle was torn down on Ctrl+C. The
+public ``rounds/`` tree stays empty for an interrupted round by design — a partial round is not a
+complete round — while the audit cache carries the partial so a post-mortem reader sees what the
+ledger has.
+"""
 
 from __future__ import annotations
 

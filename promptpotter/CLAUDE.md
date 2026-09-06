@@ -16,6 +16,18 @@ A thin index over the per-layer `CLAUDE.md` tree for the `promptpotter/` Python 
 | `connectors/` | Backend-specific hook bundles: `termnorm`, `promptpotter` (self-recursion / L4). Adding a connector = one new file under this package. | [`connectors/CLAUDE.md`](connectors/CLAUDE.md) |
 | `judges/` | LLM-as-judge graders for SCORING — where no deterministic matcher can grade a cell. A judge is a measurement banked into the row, never a formula term, and is declared apart from every model the loop uses. | [`judges/CLAUDE.md`](judges/CLAUDE.md) |
 
+## What the chain costs
+
+Each subpackage's `CLAUDE.md` auto-loads by directory proximity and **deepest wins**, so working in `application/optimization/` pulls four files — root, this index, `application/`, and the layer's own — and every word of them is spent before you type a character. Two rules follow.
+
+**A page you add to a layer is paid by everyone who edits there**, not just the reader who wanted it. So a fact belongs in the layer's `CLAUDE.md` only if it is a RULE binding a set of symbols; mechanism belongs at its definition site, in the module's own docstring, where it costs nothing until someone opens the file.
+
+**Measure before arguing about it** — the chain is just the `CLAUDE.md` files on the path:
+
+```bash
+find . -name CLAUDE.md -not -path './node_modules/*' -not -path './.venv/*' | xargs wc -w
+```
+
 ## Where L4 lives
 
 **Keep L4's law and its machinery in separate packages — the split is the point.**

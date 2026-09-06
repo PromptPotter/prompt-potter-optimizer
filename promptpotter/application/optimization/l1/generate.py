@@ -1,3 +1,23 @@
+"""Compose and parse one L1_GENERATE call.
+
+The prompt is built by ``DispatchHub.fill`` over the ``INJECTIONS`` registry: ``fill`` takes no
+layout and resolves the node's own via ``node_layout(node, opt_sp)``, which routes to
+``opt_sp.memory.l1_layout`` for this node and to the override channel for the ``editor="l4"``
+nodes. Two homes because the two edits have different lifetimes; one reader, so no caller
+re-derives the choice.
+
+``task_context`` (frozen framing) and ``plan`` (L3 strategy) arrive on ``OptSearchPoint`` and
+surface alongside the panels — this node is fan-in, reading both layers' outputs in one round.
+
+``no_op_variant`` is checked at two boundaries on purpose and both must convict the same variants:
+``L1Variant._reject_empty_mutation`` carries the parent's text so its message rides the
+schema-repair retry back to the model, while ``l1_invariants`` re-derives the same delta once the
+call returned, where it can only drop the candidate. Both compare VALUES against the parent —
+testing the container instead lets a slot filled with "" pass one gate and empty a whole round.
+
+Contract: ``application/optimization/CLAUDE.md``.
+"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any

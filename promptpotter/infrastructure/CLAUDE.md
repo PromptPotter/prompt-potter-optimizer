@@ -6,28 +6,9 @@ or talks to a network without going through one of these seams.
 
 ## Persistence — one ingress, two projections
 
-**Sole ingress:** per-cycle `CycleEventLog` (`ledger.py`, `.runtime/ledger.jsonl`).
-Forks via `CycleEventLog.inherit_from(parent, offset)`, and the cut is STAMPED —
-`index.json::forked_at_offset`, read back by `ledger.py::branch_offset`. It wrote
-nothing until then, so where a fork's history began was known only inside the
-forking process; `forked_from_round` is a round and `forked_at` a clock, and
-neither addresses a ledger. A fork's own FILE still holds only its own appends —
-the parent's prefix is walked, not copied. Anything a fork must answer for ITSELF is appended to it: a
-repair's corrected rounds reach the branch via `repair.py::_rebank_on_branch`,
-because a round file written with no ingress behind it is invisible to every
-scan and readers silently fall back to the parent. The writer-side API
-above the ledger is `RunCallbacks` (`application/run_observers.py`) — a
-typed event constructor over `CycleEventLog.append`. Orchestration uses
-`RunCallbacks`; the ledger is the only thing that touches disk for the
-campaign event stream.
+**Sole ingress:** the per-cycle `CycleEventLog` (`ledger.py`, `.runtime/ledger.jsonl`). The ledger is the only thing that touches disk for the campaign event stream, and **there is no second ingress, ever.** The writer-side API above it is `RunCallbacks` (`application/run_observers.py`), a typed event constructor over `CycleEventLog.append`; fork mechanics and the crash-atomicity rule are that module's own header.
 
-Per-call telemetry firing from deep inside the dispatch chain uses the `emit_*`
-shape instead: a kwargs-only helper in `infrastructure/llm/telemetry.py` reads the
-active ledger off the per-cycle `_CYCLE_LEDGER` ContextVar (set by
-`build_run_observers`, reset by `drain_all`) and appends a typed `*Record` — same
-canonical ledger, no process global, no sink-installation indirection. **Which
-shape a new surface takes, and the full add-a-surface recipe** — owned by
-[`../application/CLAUDE.md`](../application/CLAUDE.md) § Conventions.
+Per-call telemetry firing from deep inside the dispatch chain uses the `emit_*` shape instead: a kwargs-only helper in `llm/telemetry.py` reads the active ledger off the per-cycle `_CYCLE_LEDGER` ContextVar and appends a typed `*Record` — same canonical ledger, no process global, no sink-installation indirection. **Which shape a new surface takes** — owned by [`../application/CLAUDE.md`](../application/CLAUDE.md) § Conventions.
 
 **The ledger is a CHRONOLOGY, and a payload earns its place only by needing one.** It answers
 which round, which candidate, in what order, against which rival — nothing else can. So the test
@@ -42,15 +23,7 @@ the election) so nothing decides per-key at the seam what serializes. Measured b
 prompt stored three times, twice in the same file, and 37 of 39 MB of `pipeline_data` was the
 archive's own bytes — 102.6 MB of ledger, 56.6% of it duplication.
 
-**A resume-critical fact must be a declared field on the persisted half.** `EscalationFSM.fold`
-read its L2/L3 counters out of `payload["data"]`, which never reached disk, so every resume
-rebuilt both layers as never-fired and re-spent budget already spent — no error, just zeros.
-They are fields on `L2RefineExitView` / `PlanExitView` now. When a shape moves like that,
-`application/restamp.py::compact_cycle_ledgers` is where already-written data is lifted across:
-it CALLS the writer's projections rather than restating them, preserves the line count (the line
-index IS `sequence`), tmp + `os.replace` (`append` is not crash-atomic), and compacts only
-`_COMPACTABLE_PHASES` — a fresh producer and a pre-loop check-in are both skipped, and
-counted apart, because only the first one clears on its own.
+**A resume-critical fact must be a declared field on the persisted half.** `EscalationFSM.fold` read its L2/L3 counters out of `payload["data"]`, which never reached disk, so every resume rebuilt both layers as never-fired and re-spent budget already spent — no error, just zeros. When a shape moves like that, `application/restamp.py::compact_cycle_ledgers` is where already-written data is lifted across, and it CALLS the writer's projections rather than restating them.
 
 **Newtype-guarded projections** under `projections/`:
 
@@ -75,35 +48,13 @@ Do not relax the swap, remove those flushes, or add a path that lets the file la
 round. The public round file carries the same atomicity, with `CampaignStore.save_round_file` its
 sole writer, persisting `RoundResult.model_dump()` — the model **is** the round document.
 
-**`LiveDashboardView` RESOLVES; it does not hand the browser scalars to join.** `current_round`
-was `dict[str, Any]` inside an otherwise strict model, and being untyped is why it never had to
-answer the two questions its only consumer asks — so the webapp inferred both, each by joining
-facts written on different ledger events. Four rules follow, each a field or a filter rather than
-a convention:
+**`LiveDashboardView` RESOLVES; it does not hand the browser scalars to join.** `current_round` was `dict[str, Any]` inside an otherwise strict model, and being untyped is why it never had to answer the two questions its only consumer asks — so the webapp inferred both by joining facts written on different ledger events. Five rules follow, each a field or a filter rather than a convention:
 
-- **`active_node` is served**, over a `_STATE_TO_NODE` map that is TOTAL over `DashboardState`
-  with an import-time exhaustiveness raise. A partial map does not fail loudly; it means "nothing
-  is running", which is a lie for every state it omits.
-- **`current_round.round` is `state.round`, always** — so a reader selects this block over the
-  audit twin by equality. There is deliberately no `live` flag beside it.
-- **`current_round.nodes` holds only THIS round's blocks.** `_sticky_llm_calls` is
-  most-recent-fire-per-slot and survives round transitions, so it is filtered by each block's own
-  `round`: presence in the served map is the client's whole definition of "this node has fired".
-- **A measurement at `NO_ROUND_SLOT` moves the RUN's scalars and not the ROUND's population** —
-  it counts as queries scored and drives the in-flight markers, but skips `_buffer.append_sample`.
-  Why that split, and which measurements are slotless: `shared/instrument.py::NO_ROUND_SLOT`.
-- **A live row is the same shape as a closed one** — candidates (`DashboardCandidate`) and
-  samples (`DashboardSample`), both `domain/dashboard_rows.py`. Two shapes for one entity force
-  the client to merge them field by field, which put a bar and its error whisker on two
-  different polls, and made it regex a rendered tape to recover the row the other branch of the
-  same key already held. **Each field lands at the moment its FACT exists, and none of them is the
-  round close:** the value and its band ride the scoring gateway's own fold
-  (`search_point_scorer::_composite`) out on every sample, so the whisker widens with the bar; the
-  crown, θ and the matched-parent lift all ride `ElectionRecord`, written where the election runs.
-  θ cannot come sooner and its nullness before the election is a fact, not a delay — `calibrate_ruler`
-  extends the δ scale onto the round's cells first, and `fit_theta_given_delta` raises on a cell it
-  does not carry. A field held back to `round:display` surfaces
-  whenever the next node happens to finish, which is not a time the operator can read anything into.
+- **`active_node` is served**, over a `_STATE_TO_NODE` map TOTAL over `DashboardState` with an import-time exhaustiveness raise. A partial map does not fail loudly; it means "nothing is running", which is a lie for every state it omits.
+- **`current_round.round` is `state.round`, always**, so a reader selects this block over the audit twin by equality. There is deliberately no `live` flag beside it.
+- **`current_round.nodes` holds only THIS round's blocks.** `_sticky_llm_calls` is most-recent-fire-per-slot and survives round transitions, so it is filtered by each block's own `round`: presence in the served map is the client's whole definition of "this node has fired".
+- **A measurement at `NO_ROUND_SLOT` moves the RUN's scalars and not the ROUND's population** — it counts as queries scored and drives the in-flight markers, but skips `_buffer.append_sample` (`shared/instrument.py::NO_ROUND_SLOT`).
+- **A live row is the same shape as a closed one** — `DashboardCandidate` and `DashboardSample`, both `domain/dashboard_rows.py`. Two shapes for one entity force the client to merge them field by field, which put a bar and its error whisker on two different polls. **Each field lands at the moment its FACT exists, and none of them is the round close:** the value and its band ride the scoring gateway's own fold (`search_point_scorer::_composite`) on every sample, so the whisker widens with the bar, while the crown, θ and the matched-parent lift ride `ElectionRecord`. θ cannot come sooner and its nullness before the election is a fact rather than a delay — `calibrate_ruler` extends the δ scale onto the round's cells first, and `fit_theta_given_delta` raises on a cell it does not carry.
 
 The **outbound SSE highway is NOT a projection/subscriber** — it *tails* the on-disk
 ledger (`projections/event_stream.py::CycleLedgerTail`), **cross-process**: any reader
@@ -137,36 +88,9 @@ partial read is a compatibility shim, the ledger is the truth, and everything th
 top of it is re-derived forward. The SSE snapshot already answers the same question the same way —
 `dashboard_unreadable` is a served reason, not an exception.
 
-`DerivedView.on_record` (`projections/base.py`) owns the dispatch, off a `_ROUTES`
-table checked against the `CycleRecord` union at import — so an arm that names no
-hook is a DECLARED silence carrying its reason, never one that fell off the end of a
-chain. Subclasses override hooks. There's no second dispatch path because the base
-class is the only one. Subscribers
-MUST NOT write campaign artifacts beyond their declared allowlist (fails
-loud — an out-of-allowlist write shows up in the file tree; see
-[`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
+`DerivedView.on_record` (`projections/base.py`) owns the dispatch, and that file's header states how. **Subscribers MUST NOT write campaign artifacts beyond their declared allowlist** — it fails loud, since an out-of-allowlist write shows up in the file tree ([`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
 
-`DerivedView.drain()` is the runner's teardown seam: `_finalize_run` calls
-`RunObservers.drain_all()` on every stop reason so buffered projection
-state is flushed to disk without faking a `round:complete`. `AuditTrailView`
-is the only projection that buffers — its `drain()` writes the partial
-`round_NNNN.json` with `"interrupted": true` at top level when the cycle
-was torn down on Ctrl+C. The public `rounds/` tree stays empty for
-interrupted rounds by design (a partial round is not a complete round);
-the audit cache under `.runtime/cache/rounds/` carries the partial so
-post-mortem readers can see what the ledger has.
-
-`CampaignStore.rewind_to_round` consults the ledger (not the public
-`rounds/` tree) for admissibility: `--from N` is valid iff the ledger
-contains a closing PhaseRecord for round N — `(phase="round", event="complete")`,
-the one closing signature. Round 0 closes through the same path as any round via
-`emit_origin_round`, so it carries `(phase="round", event="complete", round=0)` — **twice**: it
-closes again when the ruler warms at round 1 (`runner/loop.py`), since the origin's θ cannot be fit
-before a second arm exists, and only that SECOND record carries the usable θ. A max-scan is safe; a
-count, a first-match, or a reader that updates on `display` alone is not. `max()` over
-`scan_ledger_round_closes` (`store/campaign_store/ledger_scan.py`) answers it — a second scan
-asking only for the maximum was the same pass under another name. It never instantiates
-`CycleEventLog`, so no subscribers fire during admissibility checks.
+**`--from N` admissibility is a LEDGER question, not a `rounds/` tree question** — and round 0 closes twice, so the scan must take a max. Both rules, and why, are `store/campaign_store/ledger_scan.py`'s header.
 
 ## The lineage tree — one timeline per campaign
 
@@ -212,36 +136,27 @@ until the election grew a chronology to put it on.
 resume replayers) rides positional `(cycle_id, round)` and must not move onto it. What a cut
 writes, and why — [`docs/operations/persistence-and-state.md`](../../docs/operations/persistence-and-state.md).
 
-## Stores — composite over leaves
+## Stores
 
-`store/stores.py`: `Stores` frozen dataclass + `build_stores(identity,
-*, projects_root=…, benchmarks_root=…, shared_root=…)` builder.
-`shared_root` roots every CONTENT-ADDRESSED cache and equals
-`projects_root` everywhere except an L4 inner sandbox, which isolates
-campaign state but must NOT isolate a cache keyed by content hash.
-**`store/layout.py::SHARED_CACHE_DIRS` is the sole enumeration of that set**,
-because three surfaces have to agree on it and each had authored its own copy —
-`build_stores` roots them, `cli/commands/reset.py` preserves them, and the
-workspace storage report counts them as shared rather than residual. A cache
-named in one list and not the others is destroyed by `reset` or double-counted,
-silently, and one of those costs money. `identity` is the
-Stage-0 `IdentityContext` (`shared/identity.py`); `Stores.identity` is
-the sole source of tenant scope, with `Stores.tenant_id` a derived
-`@property` returning the `TenantId` newtype (identity-foundation
-no-drift gate #4 — never an independent field). Composite over the leaf stores
-`Stores` declares as its own fields — one attribute each, one class per
-`store/*.py`, except `optimizer_reuse` and `judge_reuse` — two instances of the one
-`LLMReuseCache`, which `stores.py` defines inline and which differ only in their
-namespace directory. Separate attributes rather than a shared instance: a grader
-able to read the loop's cached answers would be a ruler fed by what it measures.
-**Cite one as attribute → class → file**: the attribute is what a call site
-shows you, the file is what you have to open. Shared I/O in
-`store/io.py` — **format follows authorship**: `write_json`/`read_json*` for what
-code writes and only code reads (manifests, `dashboard.json`, `cache.json`,
-measurements), `write_yaml`/`read_yaml*` for the operator-authored config tier
-under `datasets/`, whose block-scalar emitter lives beside them. There is
-deliberately no `read_yaml_tolerant` — a corrupt config that degrades to "not
-there" attributes a measurement to the wrong fingerprint.
+`store/stores.py`: `Stores` frozen dataclass + `build_stores(identity, *, projects_root=…, benchmarks_root=…, shared_root=…)`. `shared_root` roots every CONTENT-ADDRESSED cache and equals `projects_root` everywhere except an L4 inner sandbox, which isolates campaign state but must NOT isolate a cache keyed by content hash. **`store/layout.py::SHARED_CACHE_DIRS` is the sole enumeration of that set**, because three surfaces have to agree on it and each had authored its own copy — `build_stores` roots them, `cli/commands/reset.py` preserves them, and the workspace storage report counts them as shared. A cache named in one list and not the others is destroyed by `reset` or double-counted, silently, and one of those costs money.
+
+`Stores.identity` is the sole source of tenant scope, with `Stores.tenant_id` a derived `@property` returning the `TenantId` newtype — never an independent field (identity-foundation no-drift gate #4). Composite over the leaf stores `Stores` declares as its own fields, one class per `store/*.py`, except `optimizer_reuse` and `judge_reuse` — two instances of the one `LLMReuseCache` differing only in namespace directory. Separate attributes rather than a shared instance: a grader able to read the loop's cached answers would be a ruler fed by what it measures. **Cite one as attribute → class → file.**
+
+**`store/__init__.py` re-exports nothing** — import each leaf directly. It aggregated all ten eagerly, so any leaf import dragged in `CampaignStore` and cycled back through `runtime_flags` / `ledger`.
+
+Shared I/O in `store/io.py`, and **format follows authorship**: `write_json`/`read_json*` for what code writes and only code reads, `write_yaml`/`read_yaml*` for the operator-authored config tier under `datasets/`. There is deliberately no `read_yaml_tolerant` — a corrupt config degrading to "not there" attributes a measurement to the wrong fingerprint.
+
+Path helpers live in `store/layout.py`, the per-tenant active-session pointer in `store/session_pointer.py`, and derived reads are free functions in view modules (`store/archive_views.py` is the template). `measurements/` is cross-cycle and cross-tenant; `MeasurementArchive` is the DB core and `store/archive_views.py` its single-writer facade — a write not going through that facade is the bug.
+
+The `CycleDir` / `WorkspaceDir` write-target newtypes live in `domain/cycle_paths.py` — projections and stores accept these, not raw `str`/`Path` — as does `CycleHop`, which every per-cycle `CampaignStore` method takes in place of a `(campaign_id, cycle_id)` pair (both `str`, so a swapped call read as "no data" rather than raising). Build it from the carrier that owns both, never by re-pairing.
+
+**`store/account_spend.py` banks what a subject still HOLDS, not what its rows say.** It sums an account's lifetime spend and banks it as a `SpendTombstoneRecord` before a delete takes the rows carrying it. It sits in `infrastructure/` rather than `application/` for exactly that reason: the three destroyers (`delete_campaign`, `try_delete_stub_cycle`, `delete_inner_sandbox`) call it themselves, so no caller can destroy a ledger and skip the bank. An L4 inner cycle forwards onto its outer ledger as it runs and records how far it got in `index.json::forwarded_spend`, so banking the rows whole would bill that money twice; absent mark ⇒ nothing forwarded, which is every cycle outside a sandbox.
+
+**Two read-once ledger records ride `CampaignStore`.** `write_cycle_seed`/`read_cycle_seed` append and scan the cycle seed as a `CycleSeedRecord` (a steered fork's or campaign-origin's typed `CycleSeed`, written by `_mint_fork` or the mint seam, read once at the runner seam; the pure scan is in `ledger_scan.py`, no subscribers fire). A fork inherits the parent's seed record virtually then appends its own, so a scan of the cycle's own ledger returns that cycle's seed.
+
+`write_ruler`/`read_ruler` ride the same shape for a δ ruler (`RulerRecord`, last-wins PER `dataset_name`, appended at lock and after every extension) — **WHOLE each time rather than as a delta**, because `append` is not crash-atomic and a torn line must fall back to a smaller-but-valid scale rather than lose cells silently. It lands BEFORE the round document naming it, since a ruler with unmentioned cells is harmless and a round whose θ nothing can reproduce is the state it exists to end. **One ledger carries more than one**: δ keys are sample ids, which name a sample only within one dataset, and an L4 outer cycle owns a scale over its own cells plus the shared inner one every cell it spawns reads on (`application/runner/inner/ruler.py`). So `copy_rulers` is what a fork lifts, never one of them.
+
+Both are distinct from `.runtime/{skip,pause,spend_cap}`, the **polled** per-checkpoint flags consumed at the next sample boundary rather than held to the round close: one is a durable ledger fact, the others transient.
 
 ## One deleter — `rmtree_robust`
 
@@ -251,6 +166,16 @@ bug.** It cannot remove the trees this package writes — an L4 inner sandbox ne
 observation dirs past Windows `MAX_PATH=260` (measured at 668 chars) — and with
 `ignore_errors=True` it fails *silently*, leaving a half-deleted cycle that later reads as a
 real one. That is how `.inner/` reached 343 MB with no code path able to reclaim it.
+
+## The archive is not scoped by campaign
+
+**`measurements/` is ONE content-addressed tree per workspace, and it outlives the campaigns that filled it.** Three consequences, each of which has already been read backwards:
+
+- **A row is filed under the dataset it MEASURED, never under the campaign that paid for it.** On the recursion that is the *inner* benchmark (`datasets/{name}/inner_tasks.yaml::inner_benchmark`) — an inner sandbox isolates campaign state but deliberately shares `shared_root`, so **`promptpotter-self`'s bytes are almost all filed under the inner dataset's name.** Scoping anything by `--dataset promptpotter-self` reaches the outer cells and essentially nothing L4 actually cost. Count before concluding: `compact-archive compact --dataset <name>` dry-runs and prints the split by label.
+- **Nothing on a run names a campaign.** The index entry is content, provenance and a label — no `campaign_id`, no `cycle_id`, because a cache hit is supposed to cross campaigns. So "what did this campaign cost on disk" is not a question the archive answers, and the join a surface needs is `LineageNode.sp_hash` → the row's `prompt_fields_id` (`docs/developer/README.md` § Cross-run memory).
+- **Cycle state is disposable and the rows are not**, so the rows routinely outlive every campaign that could select them: an emptied `.inner/` leaves its measurements addressable only by dataset. Selecting a family and acting on "what it produced" is therefore a claim about *surviving* state — say so, rather than reporting a smaller number as if it were the whole.
+
+Reversibility is what makes the first two survivable: `compact` keeps every field the δ ruler re-grades from and the replay cache needs, so compacting rows another campaign replays from costs it nothing. Only `purge-cold` needs the attribution, and only it is irreversible.
 
 ## Dataset content has two tiers, and only one is writable
 
@@ -277,59 +202,6 @@ and malformed are opposite security answers (`check_allowlist` allows on absent
 and denies on malformed — collapsing them would fail OPEN). Hand-rolling
 `json.loads(path.read_text())` in a `try` is the bug; picking the stricter helper
 on purpose is not.
-
-## Stores — path helpers, spend banking, the cycle seed
-
-Path helpers in
-`store/layout.py`; the per-tenant
-active-session pointer in `store/session_pointer.py`; derived reads are free
-functions in view modules (`store/archive_views.py` is the template).
-`store/account_spend.py` is the
-same shape over the ledgers: it sums an account's lifetime spend, and it
-BANKS that spend as a `SpendTombstoneRecord` before a delete takes the rows
-carrying it. It sits here rather than in `application/` for exactly that
-reason — the three destroyers (`delete_campaign`, `try_delete_stub_cycle`,
-`delete_inner_sandbox`) call it themselves, so no caller can destroy a ledger
-and skip the bank. **`bank_spend` banks what a subject still HOLDS, not what
-its rows say:** an L4 inner cycle forwards onto its outer ledger as it runs and
-records how far it got in `index.json::forwarded_spend`, so banking the rows
-whole would bill that money twice. Absent mark ⇒ nothing forwarded, which is
-every cycle outside a sandbox.
-**`store/__init__.py` re-exports
-nothing** — import each leaf directly. It aggregated all ten eagerly, so any
-leaf import dragged in `CampaignStore` and cycled back through `runtime_flags`
-/ `ledger`; three back-edges were cut to dodge that before the aggregator
-itself went. The
-`CycleDir` / `WorkspaceDir` write-target newtypes live in
-`domain/cycle_paths.py` — projections and stores accept these newtypes,
-not raw `str`/`Path` — as does `CycleHop`, which every per-cycle
-`CampaignStore` method takes in place of a `(campaign_id, cycle_id)`
-pair (both `str`, so a swapped call read as "no data" rather than
-raising). Build it from the carrier that owns both, never by re-pairing. `measurements/` is cross-cycle/cross-tenant;
-`MeasurementArchive` (`store/measurement_archive.py`) is the DB core, and
-`store/archive_views.py` is its single-writer facade — a write that does not
-go through that facade is the bug.
-
-`CampaignStore` (`store/campaign_store/store.py`) exposes
-`write_cycle_seed`/`read_cycle_seed`, which append/scan the **read-once** cycle
-seed as a `CycleSeedRecord` on the cycle's ledger (a steered fork's or
-campaign-origin's typed `CycleSeed`, written by `_mint_fork` / the mint seam,
-read once at the runner seam; the pure scan lives in `ledger_scan.py`, no
-subscribers fire). The seed rides the replayable spine — a fork inherits the
-parent's seed record virtually then appends its own, so a scan of the cycle's
-own ledger returns that cycle's seed. `write_ruler`/`read_ruler` ride the same shape for a δ
-ruler (`RulerRecord`, last-wins PER `dataset_name`, appended at lock and after every extension) —
-WHOLE each time rather than as a delta, because `append` is not crash-atomic and a torn line must
-fall back to a smaller-but-valid scale rather than lose cells silently; it lands BEFORE the round
-document naming it, since a ruler with unmentioned cells is harmless and a round whose θ nothing
-can reproduce is the state it exists to end. **One ledger carries more than one** — δ keys are
-sample ids, which name a sample only within one dataset, and an L4 outer cycle owns a scale over
-its own cells plus the shared inner one every cell it spawns reads on
-(`application/runner/inner/ruler.py`). So `copy_rulers` is what a fork lifts, never one of them.
-Distinct from `.runtime/{skip,pause,spend_cap}`
-(the **polled** per-checkpoint flags — consumed at the next sample boundary, NOT
-held to the round close; a `pause.flag` written mid-candidate pauses within seconds,
-`runtime_flags.py`): one is a durable ledger fact, the others are transient flags.
 
 ## LLM client
 
@@ -369,19 +241,9 @@ adapters live in `promptpotter/connectors/`.
 `tracing/` exposes no read API. State reaches the optimizer via the
 ledger; tracing is fan-out only.
 
-**It has no in-repo reader by design, and that is not evidence it is dead — do not propose deleting
-it.** The Langfuse and MLflow sinks are held for a live integration the operator is bringing up;
-`LANGFUSE_*` defaulting to `""` and `MLFLOW_ENABLED=False` are an integration not yet switched on,
-not a feature nobody wanted. `file_sink.py` says `events.jsonl` is never read back for state
-reconstruction, which is true and is what a trace sink IS — resume and fork are driven by the round
-files, and that separation is the design.
+**It has no in-repo reader by design, and that is not evidence it is dead — do not propose deleting it.** The Langfuse and MLflow sinks are held for a live integration the operator is bringing up; `LANGFUSE_*` defaulting to `""` and `MLFLOW_ENABLED=False` are an integration not switched on, not a feature nobody wanted. That `events.jsonl` is never read back for state reconstruction is what a trace sink IS — resume and fork are driven by the round files.
 
-This note exists because the subtree reads as ~2,300 lines of dead code to every sweep that measures
-deadness by counting readers, and has been proposed for deletion repeatedly. The intent was already
-written down in `mlflow_sink.py`'s module docstring ("Kept on purpose even when off") — inside a
-63-line file no sweep opens. Progressive disclosure only works where the reader actually lands.
-`docs/specs/code-debt-cleanup.md` carries the matching scar ("a 'dead' field that mlflow reads").
-If it is *badly written*, refactor it; absence of a reader is not the reason.
+This note sits here rather than only in `mlflow_sink.py`'s docstring because the subtree reads as ~2,300 lines of dead code to every sweep that measures deadness by counting readers, and has been proposed for deletion repeatedly. If it is *badly written*, refactor it; absence of a reader is not the reason.
 
 ## Identity — the OIDC foundation
 

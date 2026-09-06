@@ -1,4 +1,18 @@
 "use client";
+// The served genealogy: ONE keyed store, ONE client seam. `/tree` returns one recursive shape,
+// `course -> candidate -> course`, alternating at any depth and rooted at a COURSE -- so an L4
+// inner run is a course hanging off the candidate it measured, and L5+ needs no new tier.
+//
+// Reach a node through `lineage-candidates.ts::indexLineage` (the once-per-tree address index
+// every surface reads) or `::candidatesAtPath`. Never a bare cycle_id -- inner ids collide across
+// sandboxes -- and never a label.
+//
+// The RUNS are served on the live node only, so an id-keyed lookup must skip `superseded_by`
+// rather than rely on iteration order. The bars a surface plots are the children of the viewed
+// node, straight off this tree; `dash` keeps exactly one job beside it, the candidate being
+// scored right now.
+//
+// Address, key and axis rules: `webapp/CLAUDE.md` § Display-data sources.
 
 import {
   createContext,

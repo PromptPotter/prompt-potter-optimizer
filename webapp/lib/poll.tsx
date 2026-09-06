@@ -5,6 +5,38 @@
 // The dashboard's `rounds[]` summary block is the sole "completed rounds" surface —
 // round_NNNN.json is deep-audit only and fetched lazily via `useRoundFile`.
 //
+// CONDITIONAL REQUESTS. The dashboard route supports `If-Modified-Since` -> 304; we track the
+// latest `Last-Modified` per `unitKey` (the encoded CyclePath) in `lastModifiedRef` and skip
+// setState on a 304. One fetch (`fetchDashboardByPath`) serves any depth: an inner descendant
+// rides `?descend=<hops>` and the server walks each hop's `.inner/` sandbox, so at depth 1 the
+// URL is byte-identical to a plain per-cycle read and 304 semantics are unchanged.
+//
+// A `unitKey` change (ANY hop of the path) resets `lastModifiedRef` in the render-phase guard.
+// Required: without it, switching campaigns or drilling into an inner loop leaves a stale
+// `If-Modified-Since` on the wire.
+//
+// Before `dashboard.json` exists (fresh campaign, pre-origin) the route answers 200 with
+// `{ warming_up: true, ... }` and a `Last-Modified` off the session dir. Recognise that flag and
+// render the placeholder rather than reading the cycle as offline.
+//
+// `/tree` is conditional on a weak ETAG whose validator covers the lens/samples mask as well as
+// subtree mtime — that is what lets a MASKED read 304, which `Last-Modified` cannot express.
+// `/ray`'s HEAD window is polled; an older one is fetched once and revalidated like anything
+// else, since the server does not claim deep windows immutable.
+//
+// `llm_call_progress` rides the ray on purpose. A BARE tick proves only that the process was
+// alive across a silent stretch, so the client counts it and drops it from the rendered steps
+// (`projectionToActivity` returns null); a tick carrying `detail` names what the wait IS -- the
+// provider, or an inner campaign's round -- and becomes the progress chip. Stop sending them and
+// every heartbeated backend query grows a spurious gap marker. Coupled at `format.ts::fmtGap`,
+// `derivations/time-ray.ts` and `store/family_ray_views.py`.
+//
+// THE LIVE HALF JOINS ON `label` -- `candidate_label(round, idx)`, composed at mint, unique
+// within a round, carried by the served row AND by the tree node a selection is minted off, so
+// C0 and C3.2 resolve identically whether or not the round has closed. A live row's
+// `candidate_id` is POSITIONAL (`liveCandidateId`) and stays a row KEY: joining on one resolved
+// every closed round and no live one, so every in-flight bar click read as "still scoring".
+//
 // They share a timer because they share a FILE: on unrelated cadences they drift, and any
 // surface reading one against the other reports a disagreement that is not on disk.
 //

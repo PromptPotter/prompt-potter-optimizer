@@ -3,6 +3,28 @@
 Deliberately a SECOND chokepoint rather than a reuse of ``dispatch/llm_call/call.py``: that one is
 the optimizer's and meters ``kind="optimizer"``, so routing grading spend through it would put
 judge cost in the loop's bucket — the one boundary a judge may not cross.
+
+WHAT IS CACHED IS THE REPLY, NOT THE VERDICT. ``ask`` reads and writes ``Stores.judge_reuse``,
+keyed by ``hash_call`` over the rendered prompt plus the stage's model / provider / temperature /
+max_tokens. Storing the model's reply is what makes ONE cache enough:
+
+* A rubric or model edit moves the key BY ITSELF, because the rendered prompt carries the rubric,
+  the question, the gold and the prediction. So no judge-version component is needed here, and a
+  judge whose ``_parse`` or ``to_score`` changed re-derives correctly from the stored reply — it
+  is still what that model said. Identity is the separate question ``fingerprint`` answers.
+* A composition caches WHOLE. A second stage's prompt is a deterministic function of the first's
+  reply — which is what ``JudgeStage.temperature``'s ``0.0`` default buys — so a chain hits end to
+  end under one key space with one invalidation.
+* The economically large hit is two candidates whose mutation did not change the answer, which is
+  the common case and is composition-independent.
+
+Four rules ride with it, three inherited from the optimizer's call path and each a scar. **Meter
+first, then store** — a disk error above the emit loses a row the provider already billed.
+**Meter cache hits too**, flagged, so grading cost stays invariant to our cache history. **Never
+store an empty reply** — emptiness is transient, the key is the prompt hash, and the tree is
+tenant-global, so caching one makes that comparison ungradeable forever with nothing on any
+surface pointing at the cause. And this seam's own: **absent, unreadable and stale are ONE answer
+— sample it again.**
 """
 
 from __future__ import annotations

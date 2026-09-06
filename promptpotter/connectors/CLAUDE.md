@@ -88,33 +88,26 @@ the recursion does. **`in_process` is a statement about TRANSPORT — there is n
 nothing else.**
 
 - **`promptpotter` (Feature B, SHIPPED)** — `in_process_run` is a thin delegate to
-  `application/runner/inner/spawn.py::run_inner_cycle` (running a whole inner
-  campaign is heavy orchestration — it belongs in `application/runner`, not the
-  connector). That runner calls `run_optimization` in its **own `asyncio.Task`**
-  (the three per-task ContextVars — `_CYCLE_LEDGER` + `_CURRENT_ROUND`
-  (`infrastructure/llm/telemetry.py`) and `_ABORT_CHECK`
-  (`infrastructure/llm/rate_limit.py` — two files, not one) — isolate per task,
-  not per call; the child gets a COPY, which is
-  how `_ABORT_CHECK` carries the outer's pause into the inner run) under **sandboxed stores in a
-  flat per-cycle registry `<workspace>/.inner/<key>/`**
-  (`init_services(store=…)`; no active-pointer collision, and it holds no machine slot). It is
-  named by (owned by) the spawning cycle but kept **flat, not physically nested** —
-  physical nesting (`…/.runtime/inner/…/.runtime/inner/…`) blows past Windows'
-  260-char `MAX_PATH` at depth 1; a flat registry stays shallow at every depth, so
-  the **re-entrant** invariant holds (task spawns at every level → L5+ nests). The
-  spawning cycle publishes its context via `publish_inner_spawn_context` (runner
-  seam, every cycle) so this context-free hook can find where to sandbox + which
-  inner benchmark to run. **Owner and asker are two facts, and a fork splits them:**
-  once the cycle id is final `retarget_inner_spawn` moves only the *asker* an inner run
-  stamps as `spawned_by.outer_cycle_id`, while the sandbox owner never follows a fork —
-  a repaired cell CONTINUING the campaign the parent banked is the whole point, and one
-  field meaning both filed every measurement a fork paid for under the cycle it
-  superseded. The outer L1's optimizer prompt mutations apply to the inner
-  `assets/optimizer/pipeline.yaml` prompts through a per-run override ContextVar
-  (`set_optimizer_prompt_overrides`, set inside the inner task). One process, no
-  networking. The localhost-endpoint option is retained only as the future
-  hosted/multi-tenant worker mode: a new `execution` value, dispatched on
-  uniformly, with no core-loop edit.
+  `application/runner/inner/spawn.py::run_inner_cycle`, because running a whole inner campaign is
+  heavy orchestration and belongs in `application/runner`. Five facts about the arrangement:
+  - **Its own `asyncio.Task`.** The three per-task ContextVars — `_CYCLE_LEDGER` + `_CURRENT_ROUND`
+    (`infrastructure/llm/telemetry.py`) and `_ABORT_CHECK` (`infrastructure/llm/rate_limit.py`) —
+    isolate per task rather than per call, and the child gets a COPY, which is how `_ABORT_CHECK`
+    carries the outer's pause into the inner run.
+  - **Sandboxed stores in a FLAT per-cycle registry** `<workspace>/.inner/<key>/` — no
+    active-pointer collision, and it holds no machine slot. Flat rather than physically nested
+    because nesting blows past Windows' 260-char `MAX_PATH` at depth 1; flat stays shallow at every
+    depth, so the **re-entrant** invariant holds and L5+ nests.
+  - **The spawning cycle publishes its context** via `publish_inner_spawn_context` at the runner
+    seam, so this context-free hook can find where to sandbox and which inner benchmark to run.
+  - **Owner and asker are two facts, and a fork splits them.** `retarget_inner_spawn` moves only
+    the *asker* (`spawned_by.outer_cycle_id`); the sandbox owner never follows a fork, because a
+    repaired cell CONTINUING the campaign the parent banked is the whole point. One field meaning
+    both filed every measurement a fork paid for under the cycle it superseded.
+  - **The outer L1's prompt mutations reach the inner optimizer** through a per-run override
+    ContextVar (`set_optimizer_prompt_overrides`), set inside the inner task. One process, no
+    networking; a localhost-endpoint worker mode would be a new `execution` value with no core-loop
+    edit.
 - **`harbor` (SHIPPED)** — `in_process_run` builds a `TrialConfig` and awaits Harbor's own
   `Trial.create(...).run()`; the container, the verifier and the reward file are all theirs, so
   this connector shapes payloads and reads a number rather than orchestrating anything. Three

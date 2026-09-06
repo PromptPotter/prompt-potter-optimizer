@@ -104,7 +104,7 @@ class JobSearchPoint(SearchPoint):
 
 # The FRAMING half: operator-authored, never measured (no candidate carries them), FROZEN for
 # the run — `merge` refuses them and L2's schema has no field for them. Why, with the numbers:
-# `application/optimization/CLAUDE.md` § The framing is frozen.
+# `application/optimization/CLAUDE.md` § L2.
 FRAMING_FIELDS: frozenset[str] = frozenset(
     {
         "domain",

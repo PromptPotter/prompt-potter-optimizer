@@ -1,5 +1,18 @@
 """CycleEventLog — the append-only spine of facts about one cycle, at ``.runtime/ledger.jsonl``.
-Forks are first-class: ``inherit_from(parent, offset)``, cut recorded as a ``FORK_CUT``."""
+
+Forks are first-class: ``inherit_from(parent, offset)``, cut recorded as a ``FORK_CUT`` and
+STAMPED at ``index.json::forked_at_offset``, read back by ``branch_offset``. Nothing wrote that
+until it existed, so where a fork's history began was known only inside the forking process —
+``forked_from_round`` is a round and ``forked_at`` a clock, and neither addresses a ledger.
+
+A fork's own FILE holds only its own appends; the parent's prefix is WALKED, not copied. So
+anything a fork must answer for ITSELF is appended to it: a repair's corrected rounds reach the
+branch via ``repair.py::_rebank_on_branch``, because a round file written with no ingress behind
+it is invisible to every scan and readers silently fall back to the parent.
+
+``append`` is not crash-atomic. Any rewrite of an existing ledger goes tmp + ``os.replace`` and
+must preserve the line count, because the line index IS ``sequence``.
+"""
 
 from __future__ import annotations
 

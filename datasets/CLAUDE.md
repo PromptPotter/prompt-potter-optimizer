@@ -28,7 +28,7 @@ Optional:
 
 `load_dataset_node_overlay` → `configure_and_apply_pipeline()` (`promptpotter/application/pipeline_resolve.py`) merges the overlay onto each wire payload. **The dataset owns its task model** in `nodes.{node}.config.model` — every LLM node must declare one, or `configure_and_apply_pipeline` raises a loud setup error (no silent fall-through to the backend's own default).
 
-**`route_order` is the third key on that lock, and it is the same overlay.** `model` names WHAT answers, `provider` the GATEWAY it is asked through, and `route_order: [<host>, …]` which of that gateway's upstream HOSTS to try, in order (`nodes.{name}.config.route_order`; `current_config` carries it to `llm_call` untouched). It exists because an implicit prefix cache is per-replica, so it pays only where one route is hit repeatedly — a throughput sort re-ranks per call and scatters. All three sit in `PARAM_FORBIDDEN_KEYS`, so `node_param_keys()` strips them and L1 can never emit one: they are **operator cost levers set against a measured capture, never search axes**. Names are the gateway's own `provider_name` — read them off `served_by` in the ledger, never from a catalogue. Mechanism and the measured numbers: [`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md) § `provider` is the GATEWAY.
+**`route_order` is the third key on that lock, and it is the same overlay.** `model` names WHAT answers, `provider` the GATEWAY it is asked through, and `route_order: [<host>, …]` which of that gateway's upstream HOSTS to try, in order (`nodes.{name}.config.route_order`; `current_config` carries it to `llm_call` untouched). All three sit in `PARAM_FORBIDDEN_KEYS`, so `node_param_keys()` strips them and L1 can never emit one: they are **operator cost levers set against a measured capture, never search axes**. Names are the gateway's own `provider_name` — read them off `served_by` in the ledger, never from a catalogue. Why an order pays at all, and the measured numbers: [`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md) § `provider` is the GATEWAY.
 
 ## Registered datasets
 
@@ -36,7 +36,7 @@ The roster is the directory listing; each dataset's connector is read off its ow
 
 - **`lca-termnorm`** (`termnorm`) — the multi-node retrieval pipeline. Every other benchmark declares a single `llm_only` **node**: all of them are `backend_type: "termnorm"` and route over HTTP to the server exactly as `lca-termnorm` does. `llm_only` is a node name only, never a connector.
 - **`aime_2025`** — its overlay routes to OpenRouter+Mistral, off the Groq default.
-- **`email-tagging`** — the built-in try-and-learn demo, surfaced while `User.demo_mode_enabled`.
+- **`email-tagging`** — the built-in try-and-learn demo. `User.demo_mode_enabled` is a stored preference with **no reader**: nothing surfaces this dataset from it yet ([`../docs/specs/roadmap.md`](../docs/specs/roadmap.md) lane A1).
 - **`justlogic-d234`** — the L4 inner benchmark, an iid mix of depths 2-4 ([§ L4 below](#l4--promptpotter-self)); **`promptpotter-self`** (`promptpotter` connector) — the one L4 dataset.
 - **The optimizer's own prompt homes are not in this directory.** They are package install content, shipped in the wheel: `promptpotter/assets/optimizer/pipeline.yaml` + `sets/*.yaml`. Still **operator-owned files** — nothing writes them. `evidence.py` ranks the measured edits; graduating a winner into `assets/optimizer/pipeline.yaml` is a deliberate hand-edit, and an installed operator shadows that one file via `config/paths.py::optimizer_pipeline_path`.
 
@@ -56,10 +56,7 @@ The remaining work lives in ONE place — [`../docs/specs/l4-outer-loop.md`](../
 
 ## Reference points — consult on every dataset question
 
-Source of truth for wire / reject rationale, projection-bias findings, per-dataset model defaults:
-
-- **Adding a dataset + canonical splits** → [`../docs/operations/dataset-selection-rationale.md`](../docs/operations/dataset-selection-rationale.md) § Adding a dataset — the wiring process. Research the canonical split; never invent one.
-- **Why X is / isn't wired, trialed-and-rejected list** → [`../docs/operations/dataset-selection-rationale.md`](../docs/operations/dataset-selection-rationale.md). Check first when asked "why didn't we use Y?" or "have we trialed Z?".
+- **Adding a dataset, canonical splits, and why X is or isn't wired** → [`../docs/operations/dataset-selection-rationale.md`](../docs/operations/dataset-selection-rationale.md) § Adding a dataset. Research the canonical split; never invent one; check here first for "why didn't we use Y?" and "have we trialed Z?".
 - **Per-dataset model + `reasoning_effort` + `max_tokens`, BBEH output-ceiling traps, Groq daily-volume swap protocol** → [`../docs/operations/dataset-reasoning-matrix.md`](../docs/operations/dataset-reasoning-matrix.md). This — not self-optimizing campaign NOTES.md — is the canonical source for model recommendations.
 
 ## `cache.json` is the item bank, not a score cache

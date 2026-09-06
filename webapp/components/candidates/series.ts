@@ -2,6 +2,17 @@
 // THE bar-chart channels, declared once each. The legend, the datasets, the columns, the
 // tooltip and the plugin joins all read this table; adding a channel is one entry.
 //
+// A row carries legend, ink token, axis, null-handling, sign, tooltip and applies-predicate,
+// and every join reads it from here -- never a bare string literal reintroduced in a plugin.
+//
+// BANDS: one per CHANNEL, no scale field. Each hangs off its own bar and is drawn against that
+// bar's own declared `axis` -- the mean interval on whichever percent-axis bar `whiskerAnchor`
+// names, theta's on the logit axis, and neither when its bar is not showing. `whiskerBands` is
+// the one declaration. A per-BAR scale must not come back: a band rescaled onto a bar that did
+// not produce it is how the confidence band twice went silently undrawn. Both bands are 95%,
+// because two whiskers drawn alike have to mean alike -- theta's SE is widened at that one site,
+// never at a render.
+//
 // Two fields carry facts nothing else states:
 //   • `gap` and `signed` are separate. `verify` is sparse and still wants a minimum bar
 //     length; θ is sparse AND signed, so it must not have one — chart.js applies

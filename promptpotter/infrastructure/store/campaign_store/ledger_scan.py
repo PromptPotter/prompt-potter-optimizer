@@ -1,5 +1,18 @@
 """Physical-file ledger scans, deliberately physical: ``CycleEventLog.iter`` would replay a fork's
-inherited prefix. Never swallow an ``OSError`` — "unreadable" would answer as "nothing on it"."""
+inherited prefix. Never swallow an ``OSError`` — "unreadable" would answer as "nothing on it".
+
+``rewind_to_round`` consults THIS, not the public ``rounds/`` tree, for admissibility: ``--from N``
+is valid iff the ledger carries a closing ``PhaseRecord`` for round N — ``(phase="round",
+event="complete")``, the one closing signature.
+
+Round 0 closes through that same path via ``emit_origin_round``, and it closes **twice**: again
+when the ruler warms at round 1, since the origin's theta cannot be fit before a second arm
+exists, and only that SECOND record carries the usable theta. So a max-scan is safe while a count,
+a first-match, or a reader updating on ``display`` alone is not — ``max()`` over
+``scan_ledger_round_closes`` is the answer, and a second scan asking only for the maximum was the
+same pass under another name. It never instantiates ``CycleEventLog``, so no subscribers fire
+during an admissibility check.
+"""
 
 from __future__ import annotations
 

@@ -1,5 +1,17 @@
-"""L2/L3 transition runner + the `escalate_l2` cascade + per-layer parse/apply. What each layer may
-write, and why the framing is not among it: ``application/optimization/CLAUDE.md``."""
+"""L2/L3 transition runner + the `escalate_l2` cascade + per-layer parse/apply.
+
+Two tracks, decided by the round's evidence. A healthy analysable round leaves L1 critique to do
+its job — critique is the prompt-improvement surface and stays concentrated, so it is NOT the
+issue-router and carries no backend-fault diagnostics. Accumulated evidence of a systemic fault
+instead routes to L2 as a weak preemptor, bypassing ``l1_patience`` so the loop stops grinding
+dead rounds, and L2 judges recoverability.
+
+``_parse_l2`` coerces ``{name: slot}`` onto the current layout, validates, and writes the new
+layout to the OSP only when HARD checks pass; ``_apply_l2`` is the whole of the write side. A
+control output fires after the layer's normal output is adopted and the exit-phase event emitted.
+
+What each layer may write, and why the framing is not among it:
+``application/optimization/CLAUDE.md``."""
 
 from __future__ import annotations
 
