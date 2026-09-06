@@ -3,6 +3,8 @@ outer dataset; no name test recognises one. ``extra="forbid"`` throughout: the t
 
 from __future__ import annotations
 
+import itertools
+import re
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ConfigDict, Field, ValidationError, model_validator
@@ -66,12 +68,76 @@ class InnerTask(StrictModel):
     inner_provider: str | None = None
 
 
+def _level_slug(value: object) -> str:
+    """One axis level as it appears in a generated cell id. That id is the OUTER QUERY, so it has
+    to stay readable and byte-stable across runs — a provider-qualified model name carries ``/``
+    and ``:``, which read as a path and a scheme everywhere the id travels."""
+    return re.sub(r"[^A-Za-z0-9]+", "-", str(value)).strip("-") or "none"
+
+
 class InnerTasks(StrictModel):
     model_config = ConfigDict(frozen=True)
 
     inner_benchmark: str = Field(min_length=1)
     inner_benchmark_config: InnerBenchmarkConfig
     tasks: list[InnerTask] = Field(min_length=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _expand_axes(cls, data: object) -> object:
+        """``axes:`` is the GENERATED spelling of ``tasks:`` — the cartesian product of the levels
+        declared per axis, one cell per combination, ids derived from the coordinate.
+
+        Generated rather than hand-listed because a BALANCED factorial is what makes a marginal
+        readable. A hand-enumerated roster is observational: two axes can cut it into the identical
+        partition, and their marginals are then one contrast wearing two names — measured on five
+        banked campaigns, ``agent.model`` split 292.2s against 58.5s and was aliased exactly by
+        ``dataset``, so the "slower model" was the harbor bank. ``FactorReading.confounded_with``
+        (``application/evidence.py``) names that when it happens; a full product cannot alias in
+        the first place, which is the whole reason to generate.
+
+        Expanded HERE, before field validation, so the spawner, the ruler and the API's
+        outer-dataset probe all see an ordinary cell list and there is no second path to keep in
+        step. ``axes`` never reaches the model, so ``extra="forbid"`` still holds for everything
+        else."""
+        if not isinstance(data, dict) or "axes" not in data:
+            return data
+        raw = dict(data)
+        axes = raw.pop("axes")
+        if raw.get("tasks"):
+            raise ValueError(
+                "a panel declares `axes:` or `tasks:`, never both — the product would have to be "
+                "reconciled with the list, and which one wins has no right answer."
+            )
+        if not isinstance(axes, dict) or not axes:
+            raise ValueError("`axes:` must be a non-empty mapping of cell field → list of levels")
+        griddable = set(InnerTask.model_fields) - {"id", "n_inner_rounds"}
+        for key, levels in axes.items():
+            if key == "n_inner_rounds":
+                raise ValueError(
+                    "`axes.n_inner_rounds` is not a grid axis — depth is CONTINUED on a cell, "
+                    "never forked into a second one. Run the grid at one depth, then raise "
+                    "`max_inner_rounds` and re-run: every cell deepens in place."
+                )
+            if key not in griddable:
+                raise ValueError(
+                    f"`axes.{key}` is not a griddable cell field; an axis is one of "
+                    f"{', '.join(sorted(griddable))}. `id` is derived from the coordinate."
+                )
+            if not isinstance(levels, list) or not levels:
+                raise ValueError(f"`axes.{key}` must be a non-empty list of levels")
+            if len({_level_slug(v) for v in levels}) != len(levels):
+                raise ValueError(
+                    f"`axes.{key}` repeats a level — each level is one column of the grid, and "
+                    "two spellings of one value would generate two cells that measure the same "
+                    "thing."
+                )
+        keys = list(axes)
+        raw["tasks"] = [
+            {"id": "__".join(_level_slug(v) for v in combo), **dict(zip(keys, combo, strict=True))}
+            for combo in itertools.product(*(axes[k] for k in keys))
+        ]
+        return raw
 
     def dataset_for(self, cell: InnerTask | None) -> str:
         """Which benchmark a cell runs — its own where it names one, the panel's otherwise. The
@@ -91,12 +157,14 @@ class InnerTasks(StrictModel):
             if task.id in seen_ids:
                 raise ValueError(f"duplicate task id {task.id!r}")
             seen_ids.add(task.id)
-            # The fields a CELL declares that reach `InnerTaskSpec`; the rest of the spec is
-            # shared by every cell on the panel, so matching on these is matching on the spec.
+            # The TREATMENT fields a cell declares; the rest of the spec is shared by every cell on
+            # the panel, so matching on these is matching on the spec. `n_inner_rounds` is absent
+            # deliberately — it reaches `InnerTaskSpec.n_rounds`, which `_DEPTH_FIELDS` holds out
+            # of the identity, so two cells differing only in depth ARE one cell and have to
+            # collide here. Keep this tuple and `_DEPTH_FIELDS` in step.
             key = (
                 self.dataset_for(task),
                 task.inner_dataset_seed,
-                task.n_inner_rounds,
                 task.inner_model,
                 task.inner_provider,
             )
@@ -104,10 +172,25 @@ class InnerTasks(StrictModel):
                 raise ValueError(
                     f"tasks {twin!r} and {task.id!r} resolve to the same inner campaign "
                     f"(dataset={key[0]!r}, seed={key[1]}) — give one a different seed, or "
-                    "drop it; two names for one cell is not two cells."
+                    "drop it; two names for one cell is not two cells. A different "
+                    "`n_inner_rounds` does not separate them: depth is CONTINUED on one cell, "
+                    "never forked into a second."
                 )
             seen_specs[key] = task.id
         return self
+
+
+# The DEPTH half of a cell spec — how far a cell was run, never what it IS. `inner_campaign_id`
+# hashes everything else, so these may all change on a cell that has already banked rounds and it
+# CONTINUES rather than restarting at round 0. That is the whole point of a grid: run the census to
+# depth 0, read the table, then deepen only the combinations that earned it. Hashing them made
+# continuation work exactly when it was not needed — while the budget held still — and silently
+# restart whenever it was.
+#
+# Declared as the budget half and SUBTRACTED, so a field added to the spec defaults to identity.
+# That is the safe direction: a new treatment field forking a new cell wastes a run, where a new
+# budget field silently continuing a differently-configured cell corrupts the measurement.
+_DEPTH_FIELDS: frozenset[str] = frozenset({"n_rounds", "lives", "n_samples", "n_samples_origin"})
 
 
 class InnerTaskSpec(StrictModel):
@@ -123,6 +206,14 @@ class InnerTaskSpec(StrictModel):
     inner_model: str | None = None
     inner_provider: str | None = None
     inner_optimizer_temperature: float | None = None
+
+    def treatment(self) -> dict[str, Any]:
+        """What makes this a different CELL rather than the same cell run further — the identity
+        ``inner_campaign_id`` hashes. Everything outside :data:`_DEPTH_FIELDS`."""
+        return {k: v for k, v in self.model_dump(mode="json").items() if k not in _DEPTH_FIELDS}
+
+
+assert set(InnerTaskSpec.model_fields) >= _DEPTH_FIELDS
 
 
 def inner_tasks_path(dataset_dir: Path) -> Path:

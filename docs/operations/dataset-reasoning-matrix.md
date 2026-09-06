@@ -21,7 +21,18 @@ Groq enforces a per-model output ceiling — ~2048 tokens on `gpt-oss-20b` — a
 
 ## Reading a model A/B
 
-**A ranking is tied to the dataset's I/O shape and must be re-run per dataset.** JustLogic sends a long premise block and returns a short label plus a reasoning trace, so input dominates and per-Mtok *input* price carries weight it would not carry on a generate-heavy task. Rank in the operator's order: **speed, then cost, then quality.** Accuracy from a 10-row draw is **not** comparable to the 40-row panel bank — `draw_bank` samples, so a 10-draw is a different bank, not a prefix.
+**Read it with `evidence --metric latency`, which serves the factorial half** — the factors a
+selection varies on, the marginal at each level, and **which factors are ALIASED**, meaning they
+cut the roster into the identical groups so no evidence in it can tell them apart. That last one
+is the trap this section exists to stop: on five banked campaigns `agent.model` split 292.2s
+against 58.5s and was aliased exactly by `dataset`, so the slow "model" was the harbor bank. A
+marginal with an alias named beside it is one contrast under several headings, never several.
+`--grid dataset,llm_only.model` crosses two of them for which COMBINATION leads; every other factor
+is marginalised into the cells and named there. **Aliasing is what a hand-assembled roster earns** —
+a panel declaring `axes:` (`inner_tasks.yaml`) generates the full product, and a full product cannot
+alias. That is the reason to generate the cells rather than list them.
+
+**A ranking is tied to the dataset's I/O shape.** JustLogic sends a long premise block and returns a short label plus a reasoning trace, so input dominates and per-Mtok *input* price carries weight it would not carry on a generate-heavy task. Rank in the operator's order: **speed, then cost, then quality** — the metric catalogue's own keys, so the order is a pick rather than a re-derivation. Accuracy from a 10-row draw is **not** comparable to the 40-row panel bank — `draw_bank` samples, so a 10-draw is a different bank, not a prefix.
 
 Three findings from the JustLogic-d234 A/B that no catalogue would have given:
 

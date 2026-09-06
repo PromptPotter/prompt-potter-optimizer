@@ -705,7 +705,11 @@ class RebaseRequest(StrictModel):
 
 
 class OperatorSweepFile(StrictModel):
-    """Operator YAML under ``datasets/{name}/sweep/``; the dispatcher widens it to a ``ForkSpec``.
+    """DEPRECATED, removal pending — superseded by ``InnerTasks``' ``axes:``, which declares the
+    same contrast as a generated product, reaches DATASET (a fork cannot, being inside one
+    campaign), and is read back by ``evidence --grid``. Kept only until a grid has run for real.
+
+    Operator YAML under ``datasets/{name}/sweep/``; the dispatcher widens it to a ``ForkSpec``.
     Every field but ``reason`` is a CONTRAST LEVER — ``reason`` is provenance and changes nothing
     the fork runs."""
 

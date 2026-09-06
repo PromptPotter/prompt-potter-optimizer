@@ -978,6 +978,47 @@ export interface ArmReplicate {
   n_instruments: number;
 }
 
+/** One cell of a 2-D projection — every subject sharing a (row, column) coordinate, pooled. */
+export interface FactorCell {
+  row: string;
+  col: string;
+  subjects: string[];
+  value: number | null;
+  ci_lo: number | null;
+  ci_hi: number | null;
+  n_cells: number;
+}
+
+/** The 2-D face of the factor cube that the reader asked for. */
+export interface FactorGridReading {
+  row_key: string;
+  col_key: string;
+  cells: FactorCell[];
+  marginalised: string[];
+  poolable: boolean;
+  note: string;
+}
+
+/** One level of one factor, and what the subjects at that level measured together. */
+export interface FactorLevel {
+  level: string;
+  subjects: string[];
+  value: number | null;
+  ci_lo: number | null;
+  ci_hi: number | null;
+  n_cells: number;
+}
+
+/** One factor the selection varies on, with its levels — the axis half of a factorial read. */
+export interface FactorReading {
+  key: string;
+  kind: 'dataset' | 'config' | 'prompt_field';
+  levels: FactorLevel[];
+  poolable: boolean;
+  confounded_with: string[];
+  note: string;
+}
+
 /** The additive cell + subject decomposition over the cells every subject measured. */
 export interface EvidenceVariance {
   cell_effect_sd: number;
@@ -1081,6 +1122,7 @@ export interface SubjectReading {
   ci_hi: number | null;
   n_cells: number;
   unscorable_cells: string[];
+  levels: Record<string, string>;
 }
 
 /** One unordered pair, blocked on the cells BOTH subjects scored — pairing removes cell */
@@ -1113,6 +1155,8 @@ export interface Evidence {
   comparability: Comparability;
   metric: MetricReading;
   unread_subjects: string[];
+  factors: FactorReading[];
+  grid: FactorGridReading | null;
   replicates: ArmReplicate[];
   variance: EvidenceVariance | null;
   power: EvidencePower | null;

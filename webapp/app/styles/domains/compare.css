@@ -412,3 +412,59 @@
 .cmp-expr-bad {
   border-color: var(--color-danger);
 }
+
+/* --- The factor grid ------------------------------------------------------------------------
+   The factorial read laid out as a table. It borrows `.l4-table` for the frame rather than
+   defining a second one; only what a GRID needs beyond a list lives here — the two axis pickers,
+   the margin band, and the per-subject stack inside one cell. */
+.l4-factor-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-12);
+  margin-bottom: var(--space-12);
+}
+.l4-factor-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+.l4-factor-pick select {
+  padding: var(--space-4) var(--space-8);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-background-secondary);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+/* The grid holds one column per level, so it outgrows the pane by design. Intrinsic width plus
+   the wrapper's scroll — never a percentage, which would compress the columns until the level
+   labels collided and nothing would overflow to say so. */
+.l4-factor-grid {
+  min-width: max-content;
+}
+.l4-factor-grid th[scope="row"] {
+  text-align: left;
+  font-weight: 400;
+  color: var(--color-text-secondary);
+}
+/* The served marginal, set apart from the cells: it is a different population — every subject at
+   that level, not the one in this square — and a reader who takes it for another cell has read a
+   pooled number as a measurement. */
+.l4-margin {
+  background: var(--color-background-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.l4-cell-subject {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.l4-cell-n {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+.l4-cell-empty {
+  color: var(--color-text-secondary);
+}

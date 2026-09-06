@@ -31,15 +31,18 @@ export function useEvidence(
   winnerChain: boolean,
   config: boolean,
   metric: string,
+  // `row,col` over two served factors, empty for none. A dep rather than a client-side grouping
+  // because the cells are POOLED server-side, so changing an axis is a different read.
+  grid: string,
 ): EvidenceRead {
   // Sorted so the same SET refetches once however the operator got there.
   const key = [...subjects].sort().join(SEP);
   const { data, loading, error, kind } = useFetch<Evidence>(
     key
       ? (signal) =>
-          fetchEvidence(key.split(SEP), { ranking, winnerChain, config, metric }, signal)
+          fetchEvidence(key.split(SEP), { ranking, winnerChain, config, metric, grid }, signal)
       : null,
-    [key, ranking, winnerChain, config, metric],
+    [key, ranking, winnerChain, config, metric, grid],
     "invalid",
   );
 

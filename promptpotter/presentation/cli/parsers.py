@@ -131,8 +131,10 @@ def _add_new_args(p_new: argparse.ArgumentParser) -> None:
         "--sweep-batch",
         dest="sweep",
         action="store_true",
-        help="Multi-fork batch from datasets/<name>/sweep/*.yaml: mint "
-        "one sweep fork per payload, run each.",
+        help="DEPRECATED, removal pending — declare `axes:` in the dataset's inner_tasks.yaml "
+        "instead and read it with `evidence --grid`, which crosses DATASET as well and generates a "
+        "balanced product that cannot alias. Multi-fork batch from datasets/<name>/sweep/*.yaml: "
+        "mint one sweep fork per payload, run each.",
     )
     mode_group.add_argument(
         "--diag",
@@ -513,6 +515,18 @@ def build_parser() -> argparse.ArgumentParser:
         "only where the selection carries them — the read prints its own 'Offered here:' line — "
         "and 'expr:<formula>' composes over the names on that same line, e.g. "
         "'expr:lift / latency'.",
+    )
+    p_evidence.add_argument(
+        "--grid",
+        dest="grid",
+        default=None,
+        metavar="ROW,COL",
+        help="Cross two of the factors this selection varies on and print the pooled cell at each "
+        "coordinate — 'which combination is fastest', rather than which level is on average. Names "
+        "come from the factor block this read already prints, e.g. "
+        "'--grid dataset,llm_only.model'. Every OTHER factor is marginalised into the cells and "
+        "named as such; to hold one fixed instead, narrow the selection to its level. Two axes at "
+        "any number of factors — a third is a decision about that factor, never a third dimension.",
     )
     p_evidence.add_argument(
         "--ranking",

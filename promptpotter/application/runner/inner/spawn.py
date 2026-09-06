@@ -356,9 +356,15 @@ def inner_campaign_id(
     The RESOLVED overrides, never the declared ones — the prompts are built from the resolution, so
     hashing the declaration made the id both over- and under-specific at once: two arms whose
     declarations resolve to one prompt paid for two inner campaigns and continued neither, while a
-    resolution-inert re-declaration restarted a banked cell at round 0."""
+    resolution-inert re-declaration restarted a banked cell at round 0.
+
+    The cell's TREATMENT, never its budget (:data:`~promptpotter.application.runner.inner.tasks._DEPTH_FIELDS`).
+    Hashing the whole spec put the round cap, the lives and the sample breadth into the identity, so
+    raising a cell's depth minted a second campaign and left the first one's rounds stranded —
+    continuation worked only while the budget held still, which is the one case that never needs it.
+    Depth is what a cell has SPENT; two cells are two cells only where their treatments differ."""
     purpose = "backfill" if role is MeasurementRole.BACKFILL else "own"
-    digest = stable_hash([spec.model_dump(mode="json"), resolved_overrides(overrides), purpose])[:6]
+    digest = stable_hash([spec.treatment(), resolved_overrides(overrides), purpose])[:6]
     return f"{spec.inner_dataset}__{digest}"
 
 

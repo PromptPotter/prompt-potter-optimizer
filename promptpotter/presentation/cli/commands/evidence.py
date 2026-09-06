@@ -150,6 +150,75 @@ def _config_lines(ev: Evidence) -> list[str]:
     return lines
 
 
+def _factor_lines(ev: Evidence) -> list[str]:
+    """What this selection varies on, and the marginal at each level.
+
+    Separable factors first, because they are the only ones a reader may act on: a factor aliased
+    by another cuts the roster identically, so its column is the other one's number under a
+    different heading. Printing them in discovery order buried the two real contrasts among
+    fifteen restatements of the dataset."""
+    if not ev.factors:
+        return []
+    unit = ev.metric.spec.unit
+    free = [f for f in ev.factors if not f.confounded_with]
+    aliased = [f for f in ev.factors if f.confounded_with]
+    lines = [
+        "",
+        f"{len(ev.factors)} factor(s) vary across {len(ev.subjects)} subject(s), "
+        f"read on {ev.metric.spec.axis_label}. "
+        f"{len(free)} separable, {len(aliased)} aliased by another.",
+    ]
+    for factor in (*free, *aliased):
+        head = f"  {factor.key} [{factor.kind}]"
+        if factor.confounded_with:
+            head += f"  — ALIASED BY {', '.join(factor.confounded_with)}; this column is theirs"
+        lines.append("")
+        lines.append(head)
+        for level in factor.levels:
+            value = "—" if level.value is None else f"{level.value:,.2f} {unit}"
+            lines.append(
+                f"      {_clip(level.level, 38):<40}{value:>18}"
+                f"   {level.n_cells} cell(s), {len(level.subjects)} subject(s)"
+            )
+        if factor.note:
+            lines.append(f"      {factor.note}")
+    return lines
+
+
+def _grid_lines(ev: Evidence) -> list[str]:
+    """The requested 2-D face — the pooled value at each coordinate.
+
+    The header counts measured coordinates against the full product, because a ragged grid is the
+    finding: a combination nobody ran reads as an em-dash, and 6-of-12 says the census is half
+    unrun rather than that six cells lost."""
+    if (grid := ev.grid) is None:
+        return []
+    rows = sorted({c.row for c in grid.cells})
+    cols = sorted({c.col for c in grid.cells})
+    at = {(c.row, c.col): c for c in grid.cells}
+    width = max((len(_clip(c, 16)) for c in cols), default=8) + 3
+    lines = [
+        "",
+        f"{grid.row_key} x {grid.col_key}, read on {ev.metric.spec.axis_label} — "
+        f"{len(grid.cells)} of {len(rows) * len(cols)} coordinates measured, "
+        f"in {ev.metric.spec.unit}.",
+    ]
+    if grid.marginalised:
+        lines.append(f"  Marginalised into every cell: {', '.join(grid.marginalised)}.")
+    if grid.note:
+        lines.append(f"  {grid.note}")
+    lines.append("")
+    lines.append("  " + "".ljust(22) + "".join(_clip(c, 16).rjust(width) for c in cols))
+    for row in rows:
+        painted = []
+        for col in cols:
+            cell = at.get((row, col))
+            value = "—" if cell is None or cell.value is None else f"{cell.value:,.2f}"
+            painted.append(value.rjust(width))
+        lines.append("  " + _clip(row, 20).ljust(22) + "".join(painted))
+    return lines
+
+
 def _diff_window(values: list[str | None], width: int) -> list[str]:
     """Clip each cell around where the row FIRST diverges, not around its start.
 
@@ -366,6 +435,17 @@ async def cmd_evidence(args: argparse.Namespace) -> CommandResult:
     specs = specs or [
         SubjectSpec("campaign", cid) for cid in campaigns_on_dataset(stores, args.dataset or "")
     ]
+    grid: tuple[str, str] | None = None
+    if args.grid:
+        axes = [a.strip() for a in args.grid.split(",") if a.strip()]
+        if len(axes) != 2:
+            msg = (
+                f"--grid takes exactly two factor names separated by a comma, got {args.grid!r}. "
+                "A grid has two axes at any number of factors — the rest are marginalised into "
+                "the cells, never given a third dimension."
+            )
+            return CommandResult(data={"error": msg}, human=msg)
+        grid = (axes[0], axes[1])
     try:
         ev = subject_evidence(
             stores,
@@ -374,6 +454,7 @@ async def cmd_evidence(args: argparse.Namespace) -> CommandResult:
             include_winner_chain=args.winner_chain,
             include_config=args.config,
             metric=args.metric or MEASURAND,
+            grid=grid,
         )
     except (ValueError, SyntaxError) as exc:
         # No prefix: the read raises about the METRIC or about the SELECTION and says which, so
@@ -382,6 +463,8 @@ async def cmd_evidence(args: argparse.Namespace) -> CommandResult:
         return CommandResult(data={"error": str(exc)}, human=str(exc))
     lines = [
         *_roster_lines(ev),
+        *_factor_lines(ev),
+        *_grid_lines(ev),
         *_config_lines(ev),
         *_pairwise_lines(ev),
         *_variance_lines(ev),

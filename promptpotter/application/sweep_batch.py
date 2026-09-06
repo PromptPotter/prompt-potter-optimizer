@@ -1,4 +1,10 @@
-"""Sweep-batch orchestration — one fork per ``OperatorSweepFile``, widened to a ``ForkSpec`` before the unified
+"""DEPRECATED, removal pending. Superseded by a GRID: ``axes:`` in a dataset's ``inner_tasks.yaml``
+declares the same contrast as a generated full product, and ``evidence --grid`` reads it back. Two
+things this cannot do and that one can — vary the DATASET (every fork here shares one campaign, so
+the dataset is fixed above them) and generate a BALANCED product (a hand-listed roster aliases, and
+an aliased factor is one contrast wearing two names). Kept only until a grid has run for real.
+
+Sweep-batch orchestration — one fork per ``OperatorSweepFile``, widened to a ``ForkSpec`` before the unified
 ``_mint_fork``. Reached from ``new --sweep-batch``; the second hand-rolled harness for this job is gone."""
 
 from __future__ import annotations

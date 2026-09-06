@@ -1897,9 +1897,26 @@
             "title": "Edits",
             "type": "array"
           },
+          "factors": {
+            "items": {
+              "$ref": "#/components/schemas/FactorReading"
+            },
+            "title": "Factors",
+            "type": "array"
+          },
           "generated_at": {
             "title": "Generated At",
             "type": "string"
+          },
+          "grid": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactorGridReading"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "metric": {
             "$ref": "#/components/schemas/MetricReading"
@@ -2068,6 +2085,236 @@
           "n_subjects"
         ],
         "title": "EvidenceVariance",
+        "type": "object"
+      },
+      "FactorCell": {
+        "additionalProperties": false,
+        "description": "One cell of a 2-D projection — every subject sharing a (row, column) coordinate, pooled.\n\nServed rather than left to the browser for the reason every other number here is: a cell\nholding three subjects IS an aggregate, and a surface that averaged them would re-answer under\nits own guess at the weighting (``webapp/CLAUDE.md`` § Scoring authority).",
+        "properties": {
+          "ci_hi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Hi"
+          },
+          "ci_lo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Lo"
+          },
+          "col": {
+            "title": "Col",
+            "type": "string"
+          },
+          "n_cells": {
+            "title": "N Cells",
+            "type": "integer"
+          },
+          "row": {
+            "title": "Row",
+            "type": "string"
+          },
+          "subjects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Subjects",
+            "type": "array"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "row",
+          "col",
+          "subjects",
+          "value",
+          "ci_lo",
+          "ci_hi",
+          "n_cells"
+        ],
+        "title": "FactorCell",
+        "type": "object"
+      },
+      "FactorGridReading": {
+        "additionalProperties": false,
+        "description": "The 2-D face of the factor cube that the reader asked for.\n\nA face rather than the cube, permanently. A third factor does not need a third visual\ndimension; it needs a decision about what happens to it, and there are exactly two — it is\nMARGINALISED (pooled into the values here) or it is FIXED (dropped from the selection). Both\nleave a flat grid, so five factors cost the same surface as two and no display dimension is\never added — which is also why a fourth factor raises no new question. ``marginalised`` names\nwhat was collapsed, because a cell silently pooling over an axis the reader forgot about is the\none way this panel could mislead.\n\nA projection is REQUESTED rather than served for every pair: a roster varying on fifteen keys\nholds 105 of them, and the reader is looking at one.",
+        "properties": {
+          "cells": {
+            "items": {
+              "$ref": "#/components/schemas/FactorCell"
+            },
+            "title": "Cells",
+            "type": "array"
+          },
+          "col_key": {
+            "title": "Col Key",
+            "type": "string"
+          },
+          "marginalised": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Marginalised",
+            "type": "array"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "poolable": {
+            "title": "Poolable",
+            "type": "boolean"
+          },
+          "row_key": {
+            "title": "Row Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "row_key",
+          "col_key",
+          "cells",
+          "marginalised",
+          "poolable",
+          "note"
+        ],
+        "title": "FactorGridReading",
+        "type": "object"
+      },
+      "FactorLevel": {
+        "additionalProperties": false,
+        "description": "One level of one factor, and what the subjects at that level measured together.\n\n``value`` is the MARGINAL — pooled over every cell every subject at this level scored, not a\nmean of their means, so a subject that measured twice as many cells carries twice the weight it\nearned. ``None`` where the factor is not poolable, or where a level holds no scored cell; a\nsurface renders that as absent rather than as zero.",
+        "properties": {
+          "ci_hi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Hi"
+          },
+          "ci_lo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Lo"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "n_cells": {
+            "title": "N Cells",
+            "type": "integer"
+          },
+          "subjects": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Subjects",
+            "type": "array"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "level",
+          "subjects",
+          "value",
+          "ci_lo",
+          "ci_hi",
+          "n_cells"
+        ],
+        "title": "FactorLevel",
+        "type": "object"
+      },
+      "FactorReading": {
+        "additionalProperties": false,
+        "description": "One factor the selection varies on, with its levels — the axis half of a factorial read.\n\nFactors are DISCOVERED, never declared: a key that every subject answers identically is not a\nfactor, it is a constant, and the operator should not have to name what the roster already\nshows. Discovery spans the dataset each subject ran on and the resolved config it ran under,\nwhich are two keyspaces and one question.\n\n``poolable`` is the verdict on the ``value`` column, and it is a property of the METRIC against\nthe roster rather than of this factor: see :data:`_POOLABLE_UNITS`. False leaves the levels and\ntheir membership intact — grouping is always honest, only the aggregate is not — so a surface\ncan still lay the grid out and say why the cells are blank.\n\n``confounded_with`` is the one that decides whether a marginal may be BELIEVED, and it is why\nthis is a reading rather than a group-by. A roster assembled from campaigns that already ran is\nobservational, not a designed grid: nothing balanced it, so two factors can cut the subjects\ninto the identical partition and their marginals are then the same number wearing two names.\nMeasured, on five banked campaigns: ``agent.model`` split 292.2s against 58.5s and was aliased\nexactly by ``dataset``, so the \"slower model\" was the harbor bank. Naming the alias is the\nwhole defence — a surface can gray the column, and a reader who fixes one of the pair gets an\nhonest contrast on the other.",
+        "properties": {
+          "confounded_with": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Confounded With",
+            "type": "array"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "dataset",
+              "config",
+              "prompt_field"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "levels": {
+            "items": {
+              "$ref": "#/components/schemas/FactorLevel"
+            },
+            "title": "Levels",
+            "type": "array"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "poolable": {
+            "title": "Poolable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "levels",
+          "poolable",
+          "confounded_with",
+          "note"
+        ],
+        "title": "FactorReading",
         "type": "object"
       },
       "FileContentResponse": {
@@ -4258,6 +4505,13 @@
           "label": {
             "title": "Label",
             "type": "string"
+          },
+          "levels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Levels",
+            "type": "object"
           },
           "mask": {
             "anyOf": [
@@ -6999,6 +7253,18 @@
               "default": "measurand",
               "description": "Which number to compare on: a key from the catalogue the response echoes back, or `expr:<formula>` composed over `metric.namespace`. Both are resolved against THIS selection: a metric no selected subject carries is not offered, and `measurand` is the seed's own lift where the cells carry one and the cell's own fitness where a cell is a sample.",
               "title": "Metric",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Cross two of the factors in `factors` and serve the POOLED value at each coordinate — `dataset,llm_only.model`. Answers 'which combination', where the factor marginals answer 'which level on average'. Every other factor is marginalised into the cells and named in `grid.marginalised`; to hold one fixed, narrow `subject` to its level instead, so the server pools over what is actually being looked at. Requested rather than served for all pairs because a roster varying on fifteen keys has 105 of them. Two axes at any number of factors.",
+            "in": "query",
+            "name": "grid",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Cross two of the factors in `factors` and serve the POOLED value at each coordinate — `dataset,llm_only.model`. Answers 'which combination', where the factor marginals answer 'which level on average'. Every other factor is marginalised into the cells and named in `grid.marginalised`; to hold one fixed, narrow `subject` to its level instead, so the server pools over what is actually being looked at. Requested rather than served for all pairs because a roster varying on fifteen keys has 105 of them. Two axes at any number of factors.",
+              "title": "Grid",
               "type": "string"
             }
           }

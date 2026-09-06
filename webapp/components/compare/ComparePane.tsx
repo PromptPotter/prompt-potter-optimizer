@@ -32,6 +32,7 @@ import { maskedSubject } from "@/lib/api/reads";
 import { ChannelCards } from "./ChannelCards";
 import { Coverage, EvidenceCharts, SeriesLegend, type CompareView } from "./EvidenceCharts";
 import { ChannelMask } from "./ChannelMask";
+import { FactorGrid } from "./FactorGrid";
 import { NO_EDITS, type ScenarioEdits } from "./config-edit";
 import { isCustomMetric, MetricExpression, MetricPicker } from "./MetricPicker";
 import { PairwisePanel } from "./PairwisePanel";
@@ -93,12 +94,17 @@ export function ComparePane() {
   // Empty means "unset": `fetchEvidence` then omits the query param and the SERVER picks its own
   // default, so the browser never needs a second copy of what that default is.
   const [metric, setMetric] = useState("");
+  // Which two factors the grid crosses, as the server's `row,col`. Empty until the operator picks
+  // a pair — and held HERE rather than inside `FactorGrid` because the cells are pooled
+  // server-side, so an axis change is a refetch, not a regroup.
+  const [grid, setGrid] = useState("");
   const { evidence, loading, error, invalidMetric } = useEvidence(
     selected,
     ranking,
     winnerChain,
     config,
     metric,
+    grid,
   );
 
   // Turning the selection over invalidates the ranking press — the walk was for a different
@@ -321,6 +327,7 @@ export function ComparePane() {
                   >
                     <WinnerChains evidence={evidence} shown={winnerChain} hasBranch={hasBranch} />
                   </CardFrame>
+                  <FactorGrid evidence={evidence} grid={grid} onGrid={setGrid} />
                   <PairwisePanel
                     reading={evidence.metric}
                     nRead={evidence.subjects.filter((c) => c.n_cells > 0).length}

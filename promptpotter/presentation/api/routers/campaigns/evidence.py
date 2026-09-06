@@ -108,6 +108,20 @@ def get_evidence(
             )
         ),
     ] = MEASURAND,
+    grid: Annotated[
+        str,
+        Query(
+            description=(
+                "Cross two of the factors in `factors` and serve the POOLED value at each "
+                "coordinate — `dataset,llm_only.model`. Answers 'which combination', where the "
+                "factor marginals answer 'which level on average'. Every other factor is "
+                "marginalised into the cells and named in `grid.marginalised`; to hold one fixed, "
+                "narrow `subject` to its level instead, so the server pools over what is actually "
+                "being looked at. Requested rather than served for all pairs because a roster "
+                "varying on fifteen keys has 105 of them. Two axes at any number of factors."
+            )
+        ),
+    ] = "",
 ) -> Evidence:
     """Roster, comparability, replicates, the cell/subject/residual decomposition, what the
     selection can resolve, the run-order confound, and — under the selected metric — a merged
@@ -126,6 +140,12 @@ def get_evidence(
             for cid in campaigns_on_dataset(stores, dataset)
             if (spec := SubjectSpec("campaign", cid)).key not in named
         ]
+    axes = [a.strip() for a in grid.split(",") if a.strip()]
+    if grid and len(axes) != 2:
+        raise BadRequestError(
+            f"`grid` takes exactly two factor names separated by a comma, got {grid!r}. A grid has "
+            "two axes at any number of factors — the rest are marginalised into the cells."
+        )
     try:
         return subject_evidence(
             stores,
@@ -134,6 +154,7 @@ def get_evidence(
             include_winner_chain=winner_chain,
             include_config=config,
             metric=metric,
+            grid=(axes[0], axes[1]) if axes else None,
         )
     except (ValueError, SyntaxError) as exc:
         # Passed through unprefixed — the read says whether the METRIC or the SELECTION was the

@@ -471,7 +471,13 @@ export function maskedSubject(
 
 export function fetchEvidence(
   subjects: readonly string[],
-  opts: { ranking?: boolean; winnerChain?: boolean; config?: boolean; metric?: string } = {},
+  opts: {
+    ranking?: boolean;
+    winnerChain?: boolean;
+    config?: boolean;
+    metric?: string;
+    grid?: string;
+  } = {},
   signal?: AbortSignal,
 ): Promise<Evidence> {
   const qs = subjects.map((s) => `subject=${encodeURIComponent(s)}`);
@@ -481,6 +487,9 @@ export function fetchEvidence(
   // A catalogue key or a composed `expr:…`, opaque here — the server owns both spellings, and
   // `components/compare/MetricPicker.tsx` is the one place the browser spells the prefix.
   if (opts.metric) qs.push(`metric=${encodeURIComponent(opts.metric)}`);
+  // `row,col` over two of the served `factors`. Sent rather than grouped here because the cell is
+  // POOLED — an aggregate, and this layer computes none (webapp/CLAUDE.md § Scoring authority).
+  if (opts.grid) qs.push(`grid=${encodeURIComponent(opts.grid)}`);
   return jget<Evidence>(`${API}/evidence?${qs.join("&")}`, signal);
 }
 
