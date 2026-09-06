@@ -360,6 +360,12 @@ it.
 
 Closed items are not tracked here — `git log` is the history layer.
 
+## 2026-09-06
+
+- **`ConfigCoupling.estimand` and `.knobs`** — VALID. `ConfigMapPanel.tsx::CouplingRow` (line 27) renders `severity`, `labels`, `relation`, `consequence`, and uses `name` as the React key (line 83); it reads neither `ConfigCoupling.estimand` nor `ConfigCoupling.knobs` (the string list distinct from `EstimandGroup.knobs: ConfigKnob[]`). Both fields exist in `types.generated.ts:1733` and `manifests.py:366–370`. No other webapp consumer or CLI reader found. Blocker (wire decision) unchanged.
+- **`CycleResult.origin_level_se` declared, no reader** — VALID. Field at `domain/results.py:878`; written at `application/runner/entry.py:457`; exercised in `tests/test_numerics.py:2441`. `l4/proxies.py:129` (`mean_parent_level_se`) carries the comment "origin_level is deliberately absent" (line 135) and does not read `origin_level_se`. Field absent from `types.generated.ts` and `docs/specs/api-openapi.yaml`. Blocker (policy call on undocumented `--json` keys) unchanged.
+- **`overlaySetsModelOutsideAllowed` re-implements server predicate** — VALID. `webapp/components/shell/searchpoint/SteerForkPanel.tsx:128` still calls `overlaySetsModelOutsideAllowed(steers, allowedModels)` client-side; `allowedModels` is read from served `detail?.config.allowed_models` (line 112) but the predicate itself is computed in the browser. No served verdict field found. Blocker (new served field) unchanged.
+
 ## verified 2026-09-02
 
 - `` `datasets/bbeh/sweep/*.yaml` `` — 12 arms — STALE — directory absent from working tree; `git log --all --full-history -- "datasets/bbeh/sweep/*.yaml"` returns empty. The "delete the dir" action is already done.
