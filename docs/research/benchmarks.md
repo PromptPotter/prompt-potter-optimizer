@@ -5,8 +5,7 @@ pins → [`../operations/dataset-reasoning-matrix.md`](../operations/dataset-rea
 Selection criteria and the recon detail behind each verdict →
 [`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md).
 The BBEH head-to-head protocol →
-[`bbeh-comparison/README.md`](bbeh-comparison/README.md). Peer systems and their published numbers →
-[`related-work.md`](related-work.md).
+[`bbeh-comparison/README.md`](bbeh-comparison/README.md).
 
 > **Nothing here is a result, and that is a gate rather than an omission.** Every figure below is a
 > 25-sample admission screen — what an *origin* scored, used to decide whether a dataset is worth
@@ -135,5 +134,21 @@ Definition only; instance assembly TBD. PromptPotter is the reference solver.
   PopQA, FEVER · multi-step agent: GAIA, τ-bench · code pipeline: SWE-bench · long-context: LongBench,
   FRAMES. Aspiration: ship our own procedurally-generated instances.
 
-See [`metrics.md`](metrics.md) for the four-metric convention (Acc, HC, SE, R₉₀) that complements
-absolute accuracy.
+## The four metrics we report
+
+Absolute accuracy is meaningful only against a known base model and origin prompt: 60 → 75 and 90 → 93 look comparable until you know the first captured 75% of the available headroom and the second 33%. A published table reports all four per (method, model), from `results_*.json`.
+
+| Metric | Symbol | Formula | What it separates |
+|---|---|---|---|
+| **Absolute Accuracy** | Acc | `correct / total` on test | Raw performance of the best prompt found — the standard comparison point |
+| **Headroom Captured** | HC | `(Acc_opt − Acc_base) / (Acc_ceil − Acc_base)` | Fraction of available improvement realized; normalizes across models |
+| **Sample Efficiency** | SE | `HC / N_queries` | Headroom captured per optimization query spent |
+| **Convergence Profile** | R₉₀ | queries to reach 90% of final HC | "Finds good prompts" from "finds them fast" |
+
+### The winner's own number is biased upward
+
+All four are read off the **selected** candidate, and selection and estimation must not come from the same rows. Where they do, the reported figure overstates what the prompt will do on deployment: the argmax of noisy means is optimistic, and PoBB compounds it, because elimination stops an arm at a data-dependent time, so the survivor's mean is already biased before a max is taken over it. Being Bayesian is not an exemption — the selected arm's posterior mean still conditions on the selection that chose it. Neither is subset-invariant θ, which corrects for *which samples* were scored rather than *which candidate was chosen*; reaching for θ here is the plausible wrong move.
+
+**Published head-to-head figures are clean** — the split that makes them so is owned by [`bbeh-comparison/README.md`](bbeh-comparison/README.md) § The protocol. **In-campaign figures are not:** the winner's `composite_fitness`, the round banner, the dashboard headline and `export.json`'s fitness are all computed on the rows that selected the winner. The fix is a reserved partition the loop never scores on, tracked in [`../specs/roadmap.md`](../specs/roadmap.md) § Selection-clean reporting.
+
+Named and corrected for in *Correcting the Winner's Curse in Adaptive Benchmarking* ([arXiv:2605.05973](https://arxiv.org/abs/2605.05973)), whose protocol assumes a fixed shortlist and smooth stabilized selection — the assumption PoBB's adaptive stopping strains, so their estimator needs checking against it before it is adopted.

@@ -81,11 +81,35 @@ Recorded booleans from pre-graded decisions coerce to 0.0/1.0 — the identical 
 1. **Tie-breaking at budget cap.** When the round cap is reached and the top 2–3 candidates have similar `P(best)`, no test declares a clean winner. Ship pick-by-point-estimate; design a cap-extension policy after observing how often this fires.
 2. **Small-*n* θ edge cases.** Few observations do NOT keep the gate conservative on their own — the ties narrow both `se`, so at a low base rate `p_best` sat at 0.124 rather than near 0.5 and every arm was cut at `n_min` (`sealqa-longseal-12`, four arms, identical to six decimals). Step 4 bounds that; the EB hyperprior on the ability variance is what keeps the small-*n* fit itself from collapsing.
 
+## Why this family and not another
+
+Mid-round abortion is an instance of **best-arm identification** in stochastic multi-armed bandits: given a fixed population of arms and a per-pull noisy reward, identify the highest mean at minimum sample cost. The literature splits on fixed-budget vs fixed-confidence, frequentist vs Bayesian, and pairwise vs population; PoBB sits in one cell, and three design choices put it there.
+
+- **Population-aware over pairwise** — the question is "is this the round winner?", not "is it worse than each prior?", and only the joint posterior across all candidates answers it. This is what rules out LUCB (Kalyanakrishnan 2012), Bayes-UCB (Kaufmann 2012) and Hoeffding Races (Maron & Moore 1993), each of which only ever compares to the current leader.
+- **Bayesian over frequentist** — `P(c is best)` is one operator-readable number ("c042 73% probability of winning round"); a Holm-corrected p-value or a Hoeffding bound is not.
+- **Fixed-confidence (ε) over fixed-budget** — broken candidates stop as soon as the evidence floor is met, indistinguishable ones run to the cap. Phased fixed-budget algorithms cannot do the first: Successive Rejects (Audibert 2010) and Sequential Halving (Karnin 2013) both run a clearly-broken candidate to the phase boundary.
+
+**Wilcoxon signed-rank + Holm-Bonferroni is what this replaced**, and it was pairwise with no joint distribution and variance-agnostic by construction. Holm survives in the codebase as a *reporting* correction only (`shared/statistics.py::holm_adjusted`) and reaches nothing in the loop. **OCBA** (Chen 2000) is the closest classical relative — same population-aware Bayesian family, but it addresses budget *allocation* where this is a stop rule; PoBB likewise drops Top-Two Thompson Sampling's allocation half, since the loop iterates candidates deterministically, and keeps the stop rule.
+
+## Comparison to MCTS
+
+PromptPotter **is** AlphaZero-shaped MCTS over the lineage tree, and all four phases are present.
+
+- **Selection.** When L2/L3 judges the current subtree exhausted it emits `fork_proposal: {reason}` — *whether* to rewind, a judgment no rule makes well. *Where* is then decided by UCB1 over the backpropagated tree (`application/mask/backprop.py::select_rewind_round`): each ancestor's mean ability plus an exploration bonus for how little it has been tried. The layer deliberately does *not* name the round, because no panel ever enumerated the ancestors and their fitness, so a free-form offset was an unanchored guess carrying the loop's most expensive decision.
+- **Expansion.** A round: L1 proposes a population from the selected node.
+- **Simulation.** A deterministic forward pass on the eval set rather than a random rollout — AlphaZero is the published precedent for exactly that swap, which is why the determinism does not make this not-MCTS. Within a round, PoBB prunes losers before they consume the budget, a sharper instrument than UCB1 for the *sibling* comparison because a round's arms are measured on shared samples.
+- **Backpropagation.** Each round's Rasch ability θ is rolled up to every ancestor as visit count + value (`accumulate_node_stats`), so an ancestor's statistics answer what re-expanding from there actually yielded, including in branches it never ran itself.
+
+Two design points the naive construction gets wrong, both load-bearing. **Value must be θ, not accuracy** — rounds score different sample subsets, so a deep branch that drifted onto easier samples would out-rank a shallow honest one, and averaging that up a lineage quietly rewards the drift. And **a fork's inherited prefix is not a fresh visit**: a fork copies its parent's rounds forward, so counted naively an ancestor's visit count inflates by every descendant's copied prefix, silently, since the fold still returns a plausible number. The fold keeps only each cycle's own new rounds and re-attaches its spine to the branch-point.
+
+Rollout cost is where we stay deliberately conservative: a "rollout" here is a full round of LLM calls per candidate, so exploration is sample-efficient by design — closer to AlphaZero's PUCT than to vanilla UCT over free rollouts. What it buys is **recovery from dead-end branches**: a trajectory that exhausts itself no longer just ends the cycle.
+
 ## References
 
 - **Russo, D. (2016).** *Simple Bayesian Algorithms for Best Arm Identification.* COLT. — the PoBB / Top-Two Thompson Sampling family.
 - **Maurer & Pontil (2009).** *Empirical Bernstein bounds and sample-variance penalization.* COLT.
 - **Kalyanakrishnan et al. (2012).** *PAC subset selection in stochastic multi-armed bandits.* ICML. — LUCB; rejected as too pairwise.
 - **Audibert, Bubeck, Munos (2010).** *Best arm identification in multi-armed bandits.* COLT. — Successive Rejects; rejected for not adapting within-round.
+- **Chen, C.-H. (2000).** *Optimal Computing Budget Allocation.* Operations Research. — the closest classical relative; allocation rather than a stop rule.
 
 The `classify_result()` rule table and its three load-boundary effects: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md#classify_result--fatal-classification). Operator framing: [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#deprecated-samples).

@@ -87,7 +87,7 @@ OIDC_CALLBACK_PATH="/api/v1/auth/callback/google"
 
 # --- brand (whitelabel) — DRAFT ------------------------------------------
 # Wired and gate-green, but no fork has been built from it yet. If you are the
-# first, read docs/developer/whitelabel.md's draft banner: it says exactly which
+# first, read README.md's tier table: it says exactly which
 # half is proven and which is only intended.
 #
 # The ONE declaration of the name this unit wears. `brand-env.sh` fans it out
@@ -95,7 +95,7 @@ OIDC_CALLBACK_PATH="/api/v1/auth/callback/google"
 # for the webapp build. Leave a line commented to keep the upstream default —
 # an unset value is never written, so nothing here half-brands the install.
 #
-# Read docs/developer/whitelabel.md before renaming anything NOT in this block:
+# Read README.md § Running it under your own name before renaming anything NOT in this block:
 # the package, the CLI verb and the .promptpotter/ state tree are a different
 # tier, and renaming the state tree orphans every campaign under it.
 
@@ -108,7 +108,7 @@ OIDC_CALLBACK_PATH="/api/v1/auth/callback/google"
 #BRAND_DESCRIPTION="LLM-driven program evolution for prompts and pipeline parameters."
 
 # Who DISTRIBUTES this unit — yours to repaint. (Who POWERS it is a provenance
-# fact with no override; see whitelabel.md.)
+# fact with no override; see README.md.)
 #PUBLISHER_NAME="PromptPotter"
 #PUBLISHER_URL="https://promptpotter.com"
 

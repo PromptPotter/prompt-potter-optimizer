@@ -1121,7 +1121,7 @@ paths:
       summary: Patch a sparse subset of mutable `DraftCampaign` fields.
       description: |
         Drives the chat ↔ panel dual-surface mutation path (see
-        `docs/specs/roadmap.md § State binding`). Both the
+        `docs/specs/roadmap.md § State-sync`). Both the
         assistant tool-call surface and the panel "Apply" button ride this
         same verb. Check-in scoped — dispatched through `CommandDispatcher`
         onto the check-in cycle's ledger (`cycle_chk_*`, minted with its own

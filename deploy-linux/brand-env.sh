@@ -9,7 +9,7 @@
 # An unset deploy.config value is never written or exported, which is what
 # leaves the upstream default in place instead of blanking it.
 #
-# Full map + what must never be renamed: docs/developer/whitelabel.md — which is
+# Full map + what must never be renamed: README.md § Running it under your own name — which is
 # a DRAFT: these functions are exercised, but no deploy has yet run through them.
 
 # The env file is not always the caller's to touch: systemd loads EnvironmentFile as root, so on an

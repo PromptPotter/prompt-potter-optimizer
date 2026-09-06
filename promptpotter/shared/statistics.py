@@ -276,7 +276,7 @@ def holm_adjusted(p_values: list[float]) -> list[float]:
     valid under the dependence those shared arms create.
 
     This is a reporting correction and reaches nothing in the loop: candidate selection retired Holm for PoBB
-    (``docs/research/related-work.md``) and keeps it."""
+    (``docs/methods/candidate-elimination.md``) and keeps it."""
     m = len(p_values)
     if m == 0:
         return []

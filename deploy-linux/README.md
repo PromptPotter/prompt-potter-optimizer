@@ -21,13 +21,55 @@ $EDITOR deploy.config        # set APP_NAME, APP_MODULE, REPO_URL, PUBLIC_HOSTNA
 Every value can also be overridden inline for a one-off, e.g.
 `PUBLIC_HOSTNAME=staging.example.com ./install-tunnel.sh`.
 
-**Running it under your own name?** The file's `--- brand ---` block is the one
-declaration: `brand-env.sh` writes the engine's copy into `.env` and exports the
-webapp's `NEXT_PUBLIC_*` twins before the build, on both `bootstrap.sh` and
-`update.sh` — so editing the block and re-deploying repaints the install, and an
-update never repaints it back. Anything *outside* that block (the package, the
-CLI verb, the `.promptpotter/` state tree) is a different tier with a real cost:
-[`docs/developer/whitelabel.md`](../docs/developer/whitelabel.md).
+## Running it under your own name
+
+**The brand is data; the identity is code.** Anything a customer reads — names, URLs, legal links —
+comes from declarations outside the source tree, and upstream never has to know. The package name,
+the CLI verb and the on-disk state tree are identity: renaming them costs you every merge from
+upstream afterwards. Four renames, increasingly expensive, and **most forks only ever do the first
+two**:
+
+| Tier | You change | Costs you |
+|---|---|---|
+| 0 | the repo name, and fork-vs-mirror | nothing, if you decide it first |
+| 1 | `deploy.config`'s `--- brand ---` block → rebuild | nothing — it is data |
+| 2 | `deploy.config`'s hostname/unit block | one re-run of the install scripts |
+| 3 | the package, the CLI verb, the `.promptpotter/` state tree | merge conflicts forever, and orphaned campaigns |
+
+Do them in order, and **verify sign-in end to end between 2 and 3** — tier 2 is what breaks the OIDC
+round trip, and tier 3 makes that breakage much harder to attribute.
+
+**Tier 1.** The `--- brand ---` block is the ONE declaration: `brand-env.sh` writes the engine's copy
+into `.env` and exports the webapp's `NEXT_PUBLIC_*` twins before the build, on both `bootstrap.sh`
+and `update.sh` — so editing the block and re-deploying repaints the install, and an update never
+repaints it back. An unset value is never written, so a half-filled block leaves upstream defaults
+standing. Three rules the fields encode: **`PUBLISHER_*` is yours, the provider is not** (the
+provider names who *powers* it — provenance, the one field with no override);
+**`MARKETING_URL=""` drops the login showcase whole**, so a reseller never funnels its paying users
+upstream; and **`TERMS_URL` / `PRIVACY_URL` / `IMPRINT_URL` are separate overrides**, because
+clearing the marketing URL must not take the consent links down with it. The webapp inlines its half
+at build time, so **the rebuild IS the rename** — there is no runtime brand config to drift. Swapping
+the mark is a file swap rather than a config key: [`../BRAND.md`](../BRAND.md) § Replacing the mark.
+
+**Tier 2** is the rest of `deploy.config` — systemd unit, cloudflared tunnel, install dir, public
+hostname — which the four `deploy-linux/*.sh` scripts read and nothing else. **Two files the scripts
+do not write, and sign-in stays broken until both move:** `.env`'s `ALLOWED_ORIGINS` and
+`.promptpotter/identity/oidc.json`'s `redirect_uri`, plus the matching redirect URI in the OAuth
+provider's console. The failure is silent from the app's side — the provider rejects the callback, so
+nothing on the box logs a cause.
+
+**Tier 3** renames the `promptpotter` package, its CLI verb, the `$PROMPTPOTTER_*` variables and the
+state tree. The tree is named in one place (`config/paths.py`), so the tier is cheap to *write* and
+expensive to *live with*. **Move the tree; never teach the resolver to read both**, and count what
+would move first: `ls .promptpotter/projects/*/campaigns`.
+
+**Never rename**, at any tier: the **provider** (provenance, not a label) · `prompt_variants.json`'s
+**`"source"`** (a citation) · **dataset names and `campaign_id`**, since `sample_id` is part of the
+measurement cache key and renaming voids the archive without saying so · **`name:` in
+`assets/optimizer/pipeline.yaml`**, which identifies the optimizer pipeline rather than the seller.
+
+*(Written against the live single-tenant install; no second unit has been built from it, so tier 3
+in particular has never been walked. Expect the first real adopter to find a gap.)*
 
 ## One-time prep (on Cloudflare's side, ~3 min)
 
@@ -102,6 +144,7 @@ Set these in `deploy.config` (or pass on the command line):
 | cloudflared config | `~/.cloudflared/config.yml` + `~/.cloudflared/<UUID>.json` |
 | logs (uvicorn) | `journalctl -u $APP_NAME -f` |
 | logs (tunnel) | `journalctl -u cloudflared -f` |
+| logs (admin bot) | `journalctl -u $APP_NAME-admin-bot -f` |
 
 ## Verifying
 
@@ -118,66 +161,42 @@ curl -I https://$PUBLIC_HOSTNAME/api/v1/health
 
 ## Updating later — one command
 
-`update.sh` is the whole routine after any change: it mirrors origin, refreshes
-deps, rebuilds the webapp, restarts the app — and does the same for the backend
-when `BACKEND_DIR` is set in `deploy.config`. Re-runnable; never stalls on a
-diverged box (tracked files are force-matched to origin; `.env`/runtime survive).
-The sync can replace the script mid-run, so it re-execs the new copy once and says
-so — a fix to `update.sh` itself takes effect on the deploy that ships it. It
-restarts the admin bot but never rewrites its unit: a change to that unit (its data
-root, its env file) needs `./install-admin-bot.sh`.
-It needs `deploy.config` (same one from setup) and aborts with the fix if it's
-missing — without it there's no real `INSTALL_DIR` to act on.
-
-The closing health line polls for up to 30s (`health.sh::wait_healthy`) rather
-than probing once, because uvicorn takes a few seconds to bind and the old
-one-shot check reported `✗ app down` on deploys that were fine. So a red cross
-there now means it really did not come up.
-
 ```bash
 cd "$INSTALL_DIR/deploy-linux" && ./update.sh   # deploy-linux lives inside the repo
 ```
 
-`./update.sh: Permission denied`? The exec bit didn't survive the clone — run
-`bash update.sh` once; the pull it does restores `100755` for next time.
+It mirrors origin, refreshes deps, rebuilds the webapp and restarts the app — plus the backend when
+`BACKEND_DIR` is set. Re-runnable, and it never stalls on a diverged box: tracked files are
+force-matched to origin while `.env` and runtime survive. Four things worth knowing:
+
+- **The sync can replace the script mid-run**, so it re-execs the new copy once and says so — a fix
+  to `update.sh` itself takes effect on the deploy that ships it.
+- **It restarts the admin bot but never rewrites its unit.** A change to that unit — its data root,
+  its env file — needs `./install-admin-bot.sh`.
+- **The closing health line polls for up to 30s** (`health.sh::wait_healthy`) rather than probing
+  once, since uvicorn takes a few seconds to bind. A red cross there means it really did not come up.
+- **`Permission denied`?** The exec bit didn't survive the clone — run `bash update.sh` once, and the
+  pull it does restores `100755`.
 
 ## Security posture
 
-> The full model + the post-install hardening checklist (systemd unit, PP↔TermNorm
-> token, firewall decision) is [`docs/operations/access-model.md`](../docs/operations/access-model.md)
-> § Deploy actions. This section is the perimeter summary.
+**The whole model, the post-install hardening checklist and the admin-bot setup** are owned by
+[`docs/operations/access-model.md`](../docs/operations/access-model.md). This is the perimeter in
+four lines:
 
-Stage-1 OIDC. Provider config: `.promptpotter/identity/oidc.json`. Signing up grants
-access, so what bounds a stranger is `FREE_TIER_SPEND_CAP_USD`, not an approval queue;
-`.promptpotter/identity/blocklist.json` is the revoke (re-read on every request — edits
-are instant, no restart). Set `HOST_ADMIN_EMAIL` in `.env` or nothing ever claims this
-box, and `HOST_ADMIN_ISSUER` beside it so the claim is pinned to one provider rather than to an
-address any wired provider could assert. Don't stack Cloudflare Access — double-gate.
+- **Signing up IS the grant.** Stage-1 OIDC, provider config at `.promptpotter/identity/oidc.json`;
+  what bounds a stranger is `FREE_TIER_SPEND_CAP_USD`, not an approval queue.
+- **`blocklist.json` is the revoke**, re-read on every request — edits are instant, no restart.
+- **Set `HOST_ADMIN_EMAIL` and `HOST_ADMIN_ISSUER`** or nothing ever claims this box. The issuer
+  pins the claim to one provider rather than to an address any wired provider could assert.
+- **Don't stack Cloudflare Access in front of the OIDC gate** — that is a double-gate; pick one.
 
-**The one rule:** a control-plane change never has an inbound door open to the
-internet. The blocklist is your front-door lock; editing it is a privileged action,
-so it is **not** exposed as a public endpoint. Instead an **on-box admin bot**
-reaches *out* to Telegram (long-poll, no open port, nothing new to attack) and edits
-the local file — the zero-trust / Purdue posture (protected zone never reachable from
-the lowest-trust zone). Full rationale:
-[`docs/adr/0004-operator-admin-channels.md`](../docs/adr/0004-operator-admin-channels.md).
-
-### Block someone from your phone
-
-```bash
-# .env (0600, never committed):
-#   ADMIN_BOT_TELEGRAM_TOKEN=...   (from @BotFather; the API sends sign-in alerts on it too,
-#                                   so it stays here even after a BOT_ENV_FILE split)
-#   ADMIN_BOT_CHAT_ID=...          (your numeric chat id, locks the bot to you)
-#   ADMIN_BOT_PASSPHRASE=...       (optional 2nd factor; move to BOT_ENV_FILE — bot-only)
-./install-admin-bot.sh            # systemd service, outbound-only, auto-restart
-```
-
-Then message the bot `/block them@example.com`, `/unblock ...`, `/blocked`. Changes are
-audited to `.promptpotter/identity/blocklist_audit.jsonl`. Step-by-step + secret
-hygiene: [`docs/operations/access-model.md`](../docs/operations/access-model.md).
-
-| logs (admin bot) | `journalctl -u $APP_NAME-admin-bot -f` |
+**The one rule: a control-plane change never has an inbound door open to the internet.** The
+blocklist is the front-door lock, so editing it is not a public endpoint. An on-box admin bot reaches
+*out* to Telegram — long-poll, no open port — and edits the local file, which is the zero-trust
+posture of a protected zone never reachable from the lowest-trust one. Rationale:
+[`docs/adr/0004-operator-admin-channels.md`](../docs/adr/0004-operator-admin-channels.md); the bot's
+keys, commands and secret hygiene are access-model.md's. Install it with `./install-admin-bot.sh`.
 
 ## Uninstall
 
