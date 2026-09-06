@@ -23,9 +23,9 @@ Every figure below carries its corpus size and date. **Recompute before citing**
 
 The optimizer is three nested generation loops (`promptpotter/CLAUDE.md`):
 
-- **L1** (`l1_generate`) generates candidate prompts with cause from its evidence surface — the panels its live layout renders (`NODE_LAYOUTS["l1_generate"].floor`, `domain/l1_layout.py` — read the membership there) — with `task_context` from L2 and `plan` from L3.
-- **L2** (`l2_context`) refines `task_context` on L1 stall.
-- **L3** (`l3_plan`) replans on L2 stall.
+- **L1** (`l1_generate`) generates candidate prompts with cause from its evidence surface — the panels its live layout renders (`NODE_LAYOUTS["l1_generate"].floor`, `domain/l1_layout.py` — read the membership there) — under `plan` from L3 and the operator's frozen `task_context`.
+- **L2** (`l2_context`) fires on L1 stall and moves L1's surface — `l1_layout` (which panels L1 sees) and `l1_overrides` (how hard it explores). **It cannot write `task_context`**: `L2ContextOutput` has no such field and `TaskDecomposition.merge` raises on it, so a fire that changed neither lever bought nothing.
+- **L3** (`l3_plan`) replans on L2 stall, writing `OptSearchPoint.plan`.
 
 **Never name a panel from memory.** The citable set is *derived* — `@signal(..., citable=True)` intersected with the node's live layout by `citable_fields` (`dispatch/injections/registry.py`). A panel that does not render invites a fabricated citation, which is exactly how `sibling_yield` — a name this skill carried for weeks — went on being cited after it was deleted from the code.
 
@@ -83,15 +83,10 @@ Read this before proposing any new run. It is the reason a year of panels produc
 
 ## What the outer panel can and cannot tell you (73 cells / 17 arms / 6 seeds, 2026-08-15)
 
-> **Recompute this section before trusting it — `promptpotter evidence --campaign <id> ...` now
-> answers most of it on demand.** The variance split is `variance.{cell_effect_sd,arm_effect_sd,
-> residual_sd}`, the resolving power is `power.{paired_se,min_detectable_effect,
-> cells_for_largest_gap}`, and the replicate and run-order reasoning are `replicates` /
-> `order_confound`. The figures below are a READING taken on 2026-08-15, not a standing fact:
-> this skill's own rule is to prefer the answer already on disk, and that answer now has a verb.
+> **`promptpotter evidence --campaign <id>` answers the variance and power half of this on demand — run it rather than reading a figure here.** The split is `variance.{cell_effect_sd,arm_effect_sd,residual_sd}`, the resolving power `power.{paired_se,min_detectable_effect,cells_for_largest_gap}`, and the replicate and run-order reasoning `replicates` / `order_confound`. What stays below is what the verb does not answer.
 
-- **Variance structure.** Seed effect SD **0.198**, arm effect **0.109** (both shrunk by their own estimation error), residual **0.170** — so seed variance is ~3.3x arm variance, and pairing every arm across the same cells is what makes the comparison possible at all. A typical two-arm gap (0.154 logits) resolves at **~10 paired cells**; the panel runs 6. Un-paired it would take **22.9**. The earlier "~35 cells/arm" figure came from a 39-cell read where the arm effect measured 0.077; it roughly doubled as the corpus grew, so **the panel is closer to working than it used to look** — and 6 → 10 cells is the cheapest move on the board.
-- **Read the SHAPE as well as the scalar — it is legible at n=6 where the scalar is not.** Every cell records a per-round `improved` verdict (a *within-round* paired comparison against the matched parent on the same samples), so it touches neither the θ anchor nor the re-drawn subset. A 6-cell panel carries ~24 of those against 6 scalars. Rendered per cell by `application/runner/inner/spawn.py::_lift_shape`.
+- **Pairing is what makes the comparison possible at all**, because seed variance runs several times arm variance. On the 2026-08-15 corpus a typical two-arm gap resolved at ~10 paired cells against 22.9 un-paired, and the panel runs 6 — so **6 → 10 cells is the cheapest move on the board**. The arm effect roughly doubled as the corpus grew from 39 to 73 cells, so the panel is closer to working than an older read suggested; re-read it with the verb before quoting either number.
+- **Read the SHAPE as well as the scalar — it is legible at n=6 where the scalar is not.** Every cell records a per-round `improved` verdict, a *within-round* paired comparison against the matched parent on the same samples, so it touches neither the θ anchor nor the re-drawn subset. A 6-cell panel carries ~24 of those against 6 scalars (`application/runner/inner/spawn.py::_lift_shape`).
 - **Target shape:** most cells lift in round 1 (most headroom, cleanest evidence), about half again in round 2, stragglers in round 3, thinning as they saturate. **Measured: `r1 3/6 · r2 1/5 · r3 2/3 · r4 1/3`** — rounds 3-4 behave; round 1 lifts only half the time and round 2 nearly flatlines. **That is the live defect and it is an `l1_generate` problem** — diagnose it from candidates already on disk, not from a new run.
 - **The scored term is `mean_round_delta`**, and what it rewards is lifting **early**: a cell that climbs in round 1 and holds scores above one reaching the same place in round 4. So edits that make L1 find its hypothesis sooner are worth more than edits that make it find a better one later. (Why that term and not another: [`docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md) § The measurand.)
 - **Validate any cheap proxy at the ARM level, never per-cell.** Truncating cells to round 1 is 2.2x cheaper per verdict and *wrong*: per-cell correlation 0.663 (passes the usual `proxy_lift_corr >= 0.6` bar) but **arm-effect correlation 0.371**, ordering 13 of 21 pairs against 10.5 for a coin. Put the bar where the decision is made.
@@ -99,7 +94,7 @@ Read this before proposing any new run. It is the reason a year of panels produc
 - **A panel cell whose constant-answer floor exceeds its origin accuracy is disqualified** (`application/seed_screen.py::rewards_collapse`) — a candidate that stops reasoning and hedges to one label then outscores the parent, every round. The raw floor is the wrong reading; the *gap* is. Of the first six seeds, three were retired and only **one** on this criterion — `inner_tasks.yaml` records the grounds per seat and explicitly forbids citing the collapse verdict for seed-5.
 - **Calibration — what a WIN is worth here.** A winning inner round buys **1-4 rows in 28** (`+0.036 / +0.071 / +0.107 / +0.143` are the only positive matched-parent lifts ever recorded). Improvement is granular and infrequent; do not read a +0.036 round as noise, and do not expect an edit to produce more than a few rows.
 - **Where lift lands says how long to run.** The round carrying a campaign's best accuracy is spread uniformly across the whole budget, and the strongest run on disk peaked on its LAST round, still climbing. A flat round 2 is not evidence the search is done.
-- **Budget: a limit stated on one axis binds all of them** (`<one-budget>`, `docs/developer/conventions.md`). "Only $0.50" against a five-hour panel is a budget increase. Price every proposal in wall-clock *and* dollars.
+- **A limit stated on one axis binds all of them** — owned by `docs/developer/conventions.md` § Reasoning doctrine `<one-budget>`; here it means pricing every panel proposal in wall-clock *and* dollars before proposing it.
 
 ## The plan, as a proposal — not a contract
 
@@ -269,15 +264,4 @@ Paths below are repo-relative; this file sits at `.claude/skills/potter-self/`.
 - **Persistence + the identity fingerprint** — `docs/operations/persistence-and-state.md` (fact 4 owns what `_identity_config` reads).
 - **Conventions** — `docs/developer/conventions.md`. Style, no-back-compat, no-hidden-defaults, the reasoning doctrines.
 
-## A short worked example
-
-Operator pauses at round 2: "Why isn't this going anywhere? The candidates all look different."
-
-1. Open `round_0001.json` and `round_0002.json`. Pull every `changes_description` and read them side by side. Four distinct strings — and all four ask the target to reason more carefully before committing to an answer. One hypothesis, four wordings.
-2. Check `l1_n_repeat`: 0. Confirms nothing — `idea_fingerprint` is lexical and blind to this.
-3. PoBB stream flat, all candidates to `n_min`. Composite ≈ parent. Consistent with four arms testing one idea.
-4. Critique agrees ("candidates converge on the same remedy") — so this is L1, not scoring.
-5. Classify: **semantic restatement**, the lead entry. Not mode collapse in the mechanical sense; the strings differ.
-6. Propose: require `changes_description` to open with the hypothesis under test, and forbid a hypothesis already present in `mutation_memory`. Predict: by round 3 at least two candidates cite *different* evidence panels and name distinct hypotheses.
-
-Re-run one round. Compare against the prediction. If the hypotheses are still one idea, the edit was wrong — reclassify rather than rewording it again, which is the same failure one level up.
+**When an edit does not produce its predicted effect, reclassify rather than rewording it** — rewording a failed edit is the same failure one level up.

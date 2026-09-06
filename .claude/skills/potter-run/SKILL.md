@@ -24,7 +24,7 @@ broke", "bug-hunting", an operator already mid-investigation.
 - Read past the headline into the round's LLM I/O. A green accuracy over an empty panel is a finding.
 - Authority: halt a run, fix at its ROOT, relaunch — without asking. Name the structural cause
   before touching code; default the fix to the `promptpotter/assets/optimizer/` optimizer prompts
-  (`pipeline.yaml::resolved_prompts` inner, `sets/*.yaml` outer) (`<root-fix>`, `<dispatch-first>`).
+  (`pipeline.yaml::resolved_prompts` inner, `sets/*.yaml` outer) (`<root-fix>`; `<dispatch-first>` in `promptpotter/application/optimization/CLAUDE.md`).
 - **Never commit.** Fixes accumulate uncommitted; name every path touched so the operator can
   `git add` by path (a second session commits to `main` concurrently).
 
@@ -194,9 +194,9 @@ wrong after reading both numbers, ask what the round measured, not which estimat
 ## Configs are the source of truth
 
 The skill carries no parallel default-ladder. `dataset.md` (entry point, init flags) ·
-`campaign.json` (max_rounds, n_variants, sp_budget_ttest, patiences) · `pipeline.yaml` (pipeline,
+`campaign.yaml` (max_rounds, n_variants, sp_budget_ttest, patiences) · `pipeline.yaml` (pipeline,
 model, caps). BBEH only: `notebooks/bbeh_potter.ipynb::build_campaign_config()` shadows
-`campaign.json` and wins. Per-dataset model + `reasoning_effort` + `max_tokens` defaults live in
+`campaign.yaml` and wins. Per-dataset model + `reasoning_effort` + `max_tokens` defaults live in
 [`docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md).
 The `pipeline.yaml` `model` field is a live operator knob (Groq daily-volume swaps 120b → 20b), not
 a fixed default. `max_tokens` is never set numerically in node configs — provider ceiling applies;
@@ -217,7 +217,7 @@ leaderboard picks.
 - **Bounded retries are already handled.** `BackendClient.run_query()` retries 429 (Retry-After)
   and 5xx/transport with backoff, 5 attempts. If 5xx still propagates, halt and say so — don't loop
   on top of the client's loop.
-- Error prefixes (`[CLIENT]` / `[SERVER]` / `[CONNECTION]` / `[PIPELINE]`) → `output.log` + the
+- Error prefixes (`[CLIENT]` / `[SERVER]` / `[CONNECTION]` / `[PIPELINE]`) → `logs/latest.log` + the
   latest `rounds/round_NNNN.json`.
 - Surface the kill command (`tasklist | findstr python` → `taskkill //F //PID <pid>`) only when
   recommending a long-running launch in *this* turn. If a CLI call auto-backgrounds, kill it before

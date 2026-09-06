@@ -140,6 +140,10 @@ campaign_config.json
 # teach-impeccable skill scratch (unrelated to PromptPotter)
 .impeccable.md
 
+# Third-party agent harness config — points its own tool at this repo's CLAUDE.md.
+# Local to whoever runs that tool; it configures no PromptPotter behaviour.
+opencode.json
+
 # Release staging — scripts/build_release.py copies webapp/out and the tracked
 # datasets/ definitions in here so setuptools can ship them. Both are derived, so
 # they are built on demand, never committed.

@@ -3,6 +3,7 @@ as a first-class observability target."""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from promptpotter.config.settings import settings
@@ -31,6 +32,12 @@ class MLflowSink:
         import mlflow
 
         if not self._initialized:
+            # MLflow 3.15 put the filesystem tracking backend in maintenance mode: `FileStore`
+            # RAISES unless this opts out, so flipping MLFLOW_ENABLED without it kills the round
+            # the first sink fires on. The local tree IS this sink's contract — a trace mirror
+            # beside `events.jsonl`, per §0 Persistence — and the migration MLflow points at
+            # (`sqlite:///`) wants SQLAlchemy + alembic, which `mlflow-skinny` deliberately omits.
+            os.environ["MLFLOW_ALLOW_FILE_STORE"] = "true"
             tracking_uri = (self._traces_dir / "mlruns").resolve().as_uri()
             mlflow.set_tracking_uri(tracking_uri)
             mlflow.set_experiment(experiment_name=f"{self._tenant_id}/{self._cycle_id}")

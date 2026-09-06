@@ -52,7 +52,7 @@ api = [
     "scalar-fastapi>=1.0.0",   # why kept: API doc UI on the FastAPI app
     "uvicorn[standard]>=0.27.0",  # why kept: ASGI server for the API
     "sse-starlette>=2.4.1",    # why kept: EventSourceResponse owns events:subscribe SSE framing + heartbeat + teardown on client-disconnect/server-shutdown (patches uvicorn handle_exit, so one Ctrl+C shuts down clean)
-    "cryptography>=46.0.7",    # why kept: RS256 / ES256 JWS verification for OIDC ID tokens (Stage-1 identity foundation, ADR-0002). Floor past PYSEC-2026-35/36 + CVE-2026-26007.
+    "cryptography>=50.0.0",    # why kept: RS256 / ES256 JWS verification for OIDC ID tokens (Stage-1 identity foundation, ADR-0002). Floor past PYSEC-2026-35/36 + CVE-2026-26007, and now past GHSA-g6cj-pr64-35w5 (PKCS#7 Bleichenbacher oracle, fixed in 50.0.0). Held at 49 until `observability` moved off full mlflow, which required `cryptography<50`.
 ]
 excel = [
     # why kept: .xlsx ingest (`application/datasets/csv_ingest.py::_read_xlsx`) + the
@@ -63,10 +63,18 @@ excel = [
 ]
 dspy = [
     # why kept: `presentation/teleprompter.py` (PromptPotterOpt) + the `dspy` connector, which
-    # runs the caller's own `dspy.Module` in-process. Deliberately absent from `all`: it drags
-    # litellm + optuna + pandas, and only a caller who asked to be a DSPy optimizer needs it.
-    # The connector's import is function-local, so `promptpotter.connectors` still loads without
-    # it; importing the teleprompter without it raises naming this extra.
+    # runs the caller's own `dspy.Module` in-process. Deliberately absent from `all`: only a
+    # caller who asked to be a DSPy optimizer needs it. The connector's import is function-local,
+    # so `promptpotter.connectors` still loads without it; importing the teleprompter without it
+    # raises naming this extra.
+    #
+    # It is the sole reason `diskcache` (GHSA-w8v5-vhqr-4h9v, unpatched — 5.6.3 is both the last
+    # release and the affected one) is in `uv.lock`, and dspy 3.3.1 still requires it, so there is
+    # no skinny-shaped swap. `uv lock` resolves EVERY declared extra, so a lock scanner sees this
+    # whether or not anyone installs it — the alert is not evidence the surface is reachable.
+    # Deleting the extra would drop exactly 4 packages (dspy, gepa, orjson, diskcache) and break
+    # `pip install promptpotter[dspy]`, which README + ADR-0006 + `docs/developer/dspy-optimizer.md`
+    # publish. Dismiss the alert; do not trade the published install path for it.
     "dspy>=3.0.0",
 ]
 harbor = [
@@ -108,11 +116,23 @@ benchmarks = [
 ]
 observability = [
     "langfuse>=2.0.0",  # why kept: per-call trace mirror (events.jsonl + cloud)
-    "mlflow>=3.15.0",   # why kept: peer optional sink alongside Langfuse,
+    "mlflow-skinny>=3.15.0",  # why kept: peer optional sink alongside Langfuse,
                         # gated on settings.MLFLOW_ENABLED (off by default).
                         # Per §0 dormant-but-named — the import path stays
                         # so flipping the flag works without a code change.
                         # Floor raised onto 3.15 to clear GHSA-7gwp-5pfp-969j (SSRF).
+                        # SKINNY, not full `mlflow`, and the distinction is load-bearing twice
+                        # over. `mlflow_sink.py` calls only the tracking client — set_tracking_uri
+                        # / set_experiment / start_run / log_params / log_metrics / set_tags —
+                        # against a local `file://` store, which is exactly skinny's surface; the
+                        # module stays `import mlflow`, so nothing downstream moves. Full mlflow
+                        # requires `cryptography<50`, and it was the ONLY thing pinning this repo
+                        # below the 50.0.0 that fixes GHSA-g6cj-pr64-35w5 (PKCS#7 Bleichenbacher
+                        # oracle) — skinny declares no cryptography at all. It also drops the
+                        # `mlflow` distribution that carries GHSA-h7x2-h6g9-p789, an AI-Gateway
+                        # SSRF with NO upstream patch (3.16.0 still leaves `api_base` unvalidated
+                        # in `server/gateway_api.py::raw_proxy`) — unreachable for us either way,
+                        # because that is a bug in `mlflow server`, which we never run.
 ]
 anthropic = [
     "anthropic>=0.18.0",  # why kept: Anthropic SDK as a peer of the OpenAI-compatible client
@@ -129,13 +149,13 @@ all = [
     "scalar-fastapi>=1.0.0",
     "uvicorn[standard]>=0.27.0",
     "sse-starlette>=2.4.1",
-    "cryptography>=46.0.7",
+    "cryptography>=50.0.0",
     "openpyxl>=3.1.0",
     "jupyterlab>=4.0",
     "ipython>=8.0",
     "scipy>=1.12.0",
     "langfuse>=2.0.0",
-    "mlflow>=3.15.0",
+    "mlflow-skinny>=3.15.0",
     "anthropic>=0.18.0",
 ]
 dev = [

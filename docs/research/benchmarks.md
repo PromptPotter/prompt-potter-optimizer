@@ -6,6 +6,8 @@ Selection criteria and the recon detail behind each verdict →
 [`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md).
 The BBEH head-to-head protocol →
 [`bbeh-comparison/README.md`](bbeh-comparison/README.md).
+Who the peers are and how we compare on capability rather than score →
+[`related-work.md`](related-work.md).
 
 > **Nothing here is a result, and that is a gate rather than an omission.** Every figure below is a
 > 25-sample admission screen — what an *origin* scored, used to decide whether a dataset is worth
