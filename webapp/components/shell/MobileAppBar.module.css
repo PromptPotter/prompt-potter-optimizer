@@ -42,7 +42,7 @@
 }
 
 /* Something is running on the other screen. Paired with the aria-label's count —
-   never colour alone (BRAND.md: accessibility is positioning). */
+   never colour alone (promptpotter-web/BRAND.md: accessibility is positioning). */
 .dotted::after {
   content: "";
   position: absolute;

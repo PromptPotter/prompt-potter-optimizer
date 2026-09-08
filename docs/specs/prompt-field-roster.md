@@ -123,7 +123,7 @@ Whatever ships, the interaction is the same and it is small:
   handler; a drag-and-drop library is a package for a `.map()` and a transform.
 - **A new `components/ui/` primitive**, with an RTL test — `webapp/CLAUDE.md` forbids hand-rolling
   a second one of anything, and a reorderable list is a thing several surfaces will want.
-- **Keyboard parity is not optional.** `BRAND.md`'s accessibility floor covers painted surfaces;
+- **Keyboard parity is not optional.** `promptpotter-web/BRAND.md`'s accessibility floor covers painted surfaces;
   a handle takes `↑`/`↓` (or `Alt+↑`/`Alt+↓`) with an `aria-live` announcement of the new position.
 - **Commit on drop, not per move** — the same discipline `ui/CommitInput` owns. One
   `edit-draft-campaign` per drop, never one per `pointermove`.

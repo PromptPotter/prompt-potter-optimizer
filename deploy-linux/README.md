@@ -48,8 +48,18 @@ provider names who *powers* it — provenance, the one field with no override);
 **`MARKETING_URL=""` drops the login showcase whole**, so a reseller never funnels its paying users
 upstream; and **`TERMS_URL` / `PRIVACY_URL` / `IMPRINT_URL` are separate overrides**, because
 clearing the marketing URL must not take the consent links down with it. The webapp inlines its half
-at build time, so **the rebuild IS the rename** — there is no runtime brand config to drift. Swapping
-the mark is a file swap rather than a config key: [`../BRAND.md`](../BRAND.md) § Replacing the mark.
+at build time, so **the rebuild IS the rename** — there is no runtime brand config to drift.
+
+**Swapping the mark is a file swap, not a config key.** Three files under `webapp/public/brand/`, and
+nothing else refers to them: `mark-pot.png` (login eyebrow, running-jobs button, About-this-unit), the
+`tab-icon-pot-32` ink/bone pair, and `app-icon-pot-512.png`. Three constraints they carry: **the alpha
+channel is the mark** — it is masked and painted with `currentColor`, so artwork with the ink baked in
+cannot tint; the tab icon is **two files**, because a raster cannot carry the light/dark media query
+internally; and the app icon must stay **opaque**, because a launcher composites it onto a ground you do
+not control. **Do not wrap the mark in a circle** to make one file survive both themes — the tab pair is
+what solves that. `SurfaceFavicon.tsx`'s gold/ink tab grounds have no override yet, so a distributor's tab
+still says *which install* this is in our colours. Why each constraint exists →
+[`promptpotter-web/BRAND.md`](../../promptpotter-web/BRAND.md) § Replacing the mark.
 
 **Tier 2** is the rest of `deploy.config` — systemd unit, cloudflared tunnel, install dir, public
 hostname — which the four `deploy-linux/*.sh` scripts read and nothing else. **Two files the scripts

@@ -11,7 +11,7 @@
 // <img> bakes the ink in: these three surfaces sit on cobalt, on white and on
 // near-black, and the glyph has to tint with theme and hover. The mask takes
 // only the alpha channel, so colour still comes from the cascade and a
-// whitelabel host's accent flows through — BRAND.md principle 5.
+// whitelabel host's accent flows through — promptpotter-web/BRAND.md principle 4.
 //
 // NO enclosing circle — a disc lockup was tried and rejected. The browser-tab
 // icon solves light/dark chrome with two cuts instead (see app/layout.tsx).

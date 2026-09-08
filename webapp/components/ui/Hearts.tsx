@@ -11,7 +11,7 @@ import { heartPips, heartsLabel } from "@/lib/derivations";
 // the round counter carries no scale either. Zero hearts renders a skull, never an empty
 // row — the absence of a mark reads as "no lives mode", which is a different fact.
 //
-// Accessibility: the icons are aria-hidden; the wrapper carries the words (BRAND.md —
+// Accessibility: the icons are aria-hidden; the wrapper carries the words (promptpotter-web/BRAND.md —
 // state pairs colour/shape with a label, never colour alone).
 export const Hearts = memo(function Hearts({
   hearts,
