@@ -1,11 +1,13 @@
 "use client";
+import { useState } from "react";
 import { cx } from "@/lib/cx";
 import { measurementNode } from "@/lib/derivations";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
-import { CopyButton } from "@/components/ui";
+import { Button, CopyButton, Dialog } from "@/components/ui";
 import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
+import { MechanismsPanel } from "@/components/dashboard/control/MechanismsPanel";
 import { RoundAxis } from "./RoundAxis";
 import type { PipelineDoc } from "./types";
 
@@ -13,12 +15,24 @@ import type { PipelineDoc } from "./types";
 // pipeline renderer. It draws no graph of its own — a hand-placed geometry here is a second
 // answer to a shape the manifest already declares (`webapp/CLAUDE.md` § Component
 // conventions).
+//
+// The mechanism toggles hang off this card rather than off the page, because they are
+// policy of THIS loop and nothing else: `per_round_resubset` decides whether the round
+// re-cuts its subset, the elimination toggles decide which arms PoBB kills. A page-level
+// lane said only where the values are stored. Read-only here — the editable mode is
+// ingest's, at authoring time.
+//
+// The trigger rides the CANVAS, not the toolbar: the toolbar is already four things
+// competing for one glance (title, round axis, live status, copy), and a fifth word there
+// buried the one that moves — the round and its state. On the dot grid beside the nodes it
+// is an icon on the thing it configures.
 
 interface Props {
   pipeline: PipelineDoc | null;
 }
 
 export function OptimizerCard({ pipeline }: Props) {
+  const [mechanismsOpen, setMechanismsOpen] = useState(false);
   // Self-sourced liveness from the cycle stream (poll age), not `dash` truthiness — a
   // frozen campaign still has a `dash` snapshot but is not live.
   const { dash, isLive } = useDashboard();
@@ -92,7 +106,49 @@ export function OptimizerCard({ pipeline }: Props) {
           tone="neutral"
           models={models}
         />
+        <Button
+          variant="ghost"
+          className="workflow-mech"
+          aria-haspopup="dialog"
+          aria-expanded={mechanismsOpen}
+          aria-label="Mechanisms"
+          title="Mechanisms — pluggable sorting + early-abort toggles"
+          onClick={() => setMechanismsOpen(true)}
+        >
+          <SlidersIcon />
+        </Button>
       </div>
+      <Dialog
+        open={mechanismsOpen}
+        title="Mechanisms"
+        onClose={() => setMechanismsOpen(false)}
+      >
+        <p className="mech-lead">
+          Pluggable sorting + early-abort toggles (campaign.json)
+        </p>
+        <MechanismsPanel />
+      </Dialog>
     </div>
+  );
+}
+
+// Module level, not a closure inside the card: a component defined during render is
+// remounted on every poll tick.
+function SlidersIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3" />
+      <path d="M1 14h6M9 8h6M17 16h6" />
+    </svg>
   );
 }

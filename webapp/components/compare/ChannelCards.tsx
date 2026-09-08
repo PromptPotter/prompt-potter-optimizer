@@ -55,6 +55,7 @@ import {
   nodeOverlays,
   pathOf,
   scoreboardRow,
+  searchpointCopyChoices,
   selectedCandidateOf,
   walkCourses,
   type LineageIndex,
@@ -73,7 +74,7 @@ import {
   withOverlay,
   type ScenarioEdits,
 } from "./config-edit";
-import { SegmentedControl } from "@/components/ui";
+import { CopyButton, SegmentedControl } from "@/components/ui";
 
 // Every address at or above one, leaf first — the walk a "nearest enclosing X" question takes.
 function prefixes(path: CyclePath): CyclePath[] {
@@ -510,74 +511,98 @@ function ChannelCard({
               whole point of being able to walk at all — so it stays OPEN across a pick. Closing
               it when the operator walks somewhere would shut the panel at the exact moment they
               asked to see something. */}
-          <details className="cmp-channel-setup" open={setupOpen}>
-            <summary
-              onClick={(e) => {
-                e.preventDefault();
-                setSetupOpen((v) => !v);
-              }}
-            >
-              <span>
-                {selected ? `${selected.label} · round ${selected.round ?? 0}` : "This searchpoint"}
-              </span>
-              {!pickedIsOwn && (
-                <span className="l4-dim">
-                  {" "}
-                  — this channel reads at {head.own?.label ?? reading.label}
+          {/* The copy control rides the summary's row as a SIBLING of the disclosure, never
+              inside it. `<summary>` takes phrasing content and its accessible name is computed
+              from its own descendants, so a `CopyButton` offering several readings put a floating
+              `role="menu"` into both: invalid markup, and — while open — its rows spoken as part
+              of the disclosure's name. */}
+          <div className="cmp-channel-setup-row">
+            <details className="cmp-channel-setup" open={setupOpen}>
+              <summary
+                onClick={(e) => {
+                  e.preventDefault();
+                  setSetupOpen((v) => !v);
+                }}
+              >
+                <span>
+                  {selected
+                    ? `${selected.label} · round ${selected.round ?? 0}`
+                    : "This searchpoint"}
                 </span>
+                {!pickedIsOwn && (
+                  <span className="l4-dim">
+                    {" "}
+                    — this channel reads at {head.own?.label ?? reading.label}
+                  </span>
+                )}
+                <ChannelRestore edits={edits} subjectKey={pickedKey} onEdits={onEdits} />
+              </summary>
+              {pipeline?.node_config_schema ? (
+                <SearchpointDrillIn
+                  row={pickedRow}
+                  cfg={pickedCfg}
+                  samples={pickedSamples}
+                  arms={pickedArms}
+                  schema={pipeline.node_config_schema}
+                  outputSchema={pipeline.node_output_schema}
+                  // Seeded with the operator's scenario written back in, not with the bare record:
+                  // the values editor drops its own draft whenever the seed changes, so a restore
+                  // puts the inputs back by itself rather than clearing the record underneath them.
+                  overlay={pickedSeed}
+                  pending={
+                    docLoading
+                      ? "Reading this searchpoint's round document…"
+                      : "No round document on disk for this point — a round still scoring has not written one yet, and this tab streams no cycle to read it from."
+                  }
+                  onOverlay={(next) =>
+                    onEdits(withOverlay(edits, pickedKey, next, pickedCfg?.config ?? {}))
+                  }
+                  actions={
+                    selected &&
+                    pickedPath && (
+                      <SteerForkAction
+                        candidate={selectedCandidateOf(selected, pickedPath.at(-1)?.cycleId ?? "")}
+                        path={pickedPath}
+                        // No stream for this branch — exactly one cycle streams and it is whichever
+                        // the dashboard is parked on. The seed comes from the round file, which is
+                        // the only source this tab could honestly have.
+                        dash={null}
+                        schema={pipeline.node_config_schema}
+                        outputSchema={pipeline.node_output_schema}
+                        parentIsLive={
+                          index.get(encodeCyclePath(pickedPath))?.course?.run_phase === "running"
+                        }
+                      />
+                    )
+                  }
+                />
+              ) : (
+                // No schema, no editor. `configRows` answers `[]` for a null one and the editor
+                // then prints "this node declares no configurable params" — which is a claim about
+                // the pipeline, not about the fetch, and it would be false.
+                <p className="l4-note">
+                  This point&rsquo;s dataset declares no pipeline on this instance, so its
+                  configuration cannot be shown in the pipeline&rsquo;s own terms. The table below
+                  lists what its round document recorded.
+                </p>
               )}
-              <ChannelRestore edits={edits} subjectKey={pickedKey} onEdits={onEdits} />
-            </summary>
-            {pipeline?.node_config_schema ? (
-              <SearchpointDrillIn
-                row={pickedRow}
-                cfg={pickedCfg}
-                samples={pickedSamples}
-                arms={pickedArms}
-                schema={pipeline.node_config_schema}
-                outputSchema={pipeline.node_output_schema}
-                // Seeded with the operator's scenario written back in, not with the bare record:
-                // the values editor drops its own draft whenever the seed changes, so a restore
-                // puts the inputs back by itself rather than clearing the record underneath them.
-                overlay={pickedSeed}
-                pending={
-                  docLoading
-                    ? "Reading this searchpoint's round document…"
-                    : "No round document on disk for this point — a round still scoring has not written one yet, and this tab streams no cycle to read it from."
-                }
-                onOverlay={(next) =>
-                  onEdits(withOverlay(edits, pickedKey, next, pickedCfg?.config ?? {}))
-                }
-                actions={
-                  selected &&
-                  pickedPath && (
-                    <SteerForkAction
-                      candidate={selectedCandidateOf(selected, pickedPath.at(-1)?.cycleId ?? "")}
-                      path={pickedPath}
-                      // No stream for this branch — exactly one cycle streams and it is whichever
-                      // the dashboard is parked on. The seed comes from the round file, which is
-                      // the only source this tab could honestly have.
-                      dash={null}
-                      schema={pipeline.node_config_schema}
-                      outputSchema={pipeline.node_output_schema}
-                      parentIsLive={
-                        index.get(encodeCyclePath(pickedPath))?.course?.run_phase === "running"
-                      }
-                    />
-                  )
-                }
+            </details>
+            {/* Same readings the dashboard's Scoring inspector offers, off the same builder: a
+                point pasted from a Compare channel has to be comparable to one pasted there, and
+                two hosts each deciding what "this searchpoint" means is exactly how that stops
+                being true. */}
+            <span className="cmp-channel-setup-copy">
+              <CopyButton
+                choices={searchpointCopyChoices({
+                  cfg: pickedCfg,
+                  row: pickedRow,
+                  samples: pickedSamples,
+                  arms: pickedArms,
+                })}
+                title="Copy this searchpoint"
               />
-            ) : (
-              // No schema, no editor. `configRows` answers `[]` for a null one and the editor then
-              // prints "this node declares no configurable params" — which is a claim about the
-              // pipeline, not about the fetch, and it would be false.
-              <p className="l4-note">
-                This point&rsquo;s dataset declares no pipeline on this instance, so its
-                configuration cannot be shown in the pipeline&rsquo;s own terms. The table below
-                lists what its round document recorded.
-              </p>
-            )}
-          </details>
+            </span>
+          </div>
         </>
       )}
     </section>

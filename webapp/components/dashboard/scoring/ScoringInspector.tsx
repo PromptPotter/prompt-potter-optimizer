@@ -8,7 +8,9 @@ import {
   candidateObserveConfig,
   liveCandidateObserveConfig,
   samplesForRow,
+  searchpointCopyChoices,
 } from "@/lib/derivations";
+import { CopyButton } from "@/components/ui";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useRoundCandidates } from "@/lib/hooks/useRoundCandidates";
 import { SearchpointDrillIn } from "@/components/shell/searchpoint/SearchpointDrillIn";
@@ -64,6 +66,14 @@ export function ScoringInspector({ selected, onClose }: Props) {
     <section className="scoring-inspector" aria-label="Scoring inspector">
       <div className="inspector-head">
         <span>Scoring · {selected.label}</span>
+        {/* The panel below is presentational and frames nothing, so the copy sits in the one
+            header there is. WHAT it copies is not this host's decision — both hosts of the
+            drill-in read the same builder, or a paste from Records and a paste from here
+            would not be the same document. */}
+        <CopyButton
+          choices={searchpointCopyChoices({ cfg, row, samples, arms: arms || null })}
+          title={`Copy ${selected.label}`}
+        />
         <button
           type="button"
           className="inspector-close"

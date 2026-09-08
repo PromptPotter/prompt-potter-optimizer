@@ -28,7 +28,7 @@ import {
 import type { CandidateSearchPoint, CandidateVerdict } from "@/lib/derivations";
 import { SampleRowItem, SAMPLE_RENDER_CAP } from "@/components/shell/samples/SampleRowItem";
 import { fmtPct0, unitCount, unitPlural } from "@/lib/format";
-import { Badge, SegmentedControl, type Segment } from "@/components/ui";
+import { Badge, CopyButton, SegmentedControl, type Segment } from "@/components/ui";
 import { NodeSurface } from "./NodeSurface";
 import { PanelCellRow } from "./PanelCellRow";
 
@@ -333,7 +333,20 @@ export function MeasurementRun({
                   rows are the subject, the program is the thing you check against them. */}
               {oneCandidate && g.spec && (
                 <details className="rsv-spec">
-                  <summary>What {g.candidate.label} ran</summary>
+                  <summary>
+                    What {g.candidate.label} ran
+                    {/* An inner candidate's spec is reachable from nowhere else — the Scoring
+                        inspector reads the cycle the dashboard streams, and this is a run one
+                        hop down. */}
+                    <CopyButton
+                      data={{
+                        label: g.candidate.label,
+                        resolved_pipeline_params: g.spec.pipeline_overlay,
+                        prompt_fields: g.spec.origin_prompt_fields,
+                      }}
+                      title={`Copy what ${g.candidate.label} ran`}
+                    />
+                  </summary>
                   <NodeSurface
                     node={null}
                     point={g.spec}

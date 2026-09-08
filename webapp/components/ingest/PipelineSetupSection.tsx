@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { DraftCampaignWire, DraftPatch } from "@/lib/api";
 import { StaticConnectorProvider, useConnector } from "@/lib/hooks/useConnector";
-import { SegmentedControl } from "@/components/ui";
+import { CopyButton, SegmentedControl } from "@/components/ui";
 import { useSelection } from "@/lib/SelectionContext";
 import { targetNodeIds } from "@/lib/terms";
 import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
@@ -94,6 +94,16 @@ function PipelineSetupInner({
     <section className="setup-preview pipeline-setup">
       <header className="setup-preview-head">
         <span className="setup-preview-title">Pipeline</span>
+        {/* The origin as authored, before anything has run — the one form of this document the
+            round files never hold, and the only reading of a draft there is. */}
+        <CopyButton
+          data={{
+            pipeline_steps: draft.active_steps,
+            resolved_pipeline_params: draft.pipeline_overlay,
+            prompt_fields: draft.origin_prompt_fields,
+          }}
+          title="Copy this origin as JSON"
+        />
       </header>
 
       <SegmentedControl

@@ -2,10 +2,11 @@
 import type { ReactNode } from "react";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 
-// Collapsible signal section. Two of these stack on the Dashboard tab
-// (Now / Live state). Each lane's open/closed state persists in
-// localStorage under `promptpotter.dash.lane.{id}` so a reload returns the
-// operator to the layout they last left.
+// Collapsible signal section. Two of these stack at the foot of the Dashboard
+// tab (2ndary-relevant-info / Config map) — what is page-level, below what the
+// loop is doing. Each lane's open/closed state persists in localStorage under
+// `promptpotter.dash.lane.{id}` so a reload returns the operator to the layout
+// they last left.
 
 const KEY_PREFIX = "promptpotter.dash.lane.";
 

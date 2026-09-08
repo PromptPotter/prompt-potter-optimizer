@@ -31,6 +31,41 @@ export function Menu({
   );
 }
 
+// A row that DOES something, rather than reporting a state. It keeps the checkable
+// rows' gutter so labels line up in a menu that mixes the two, and renders nothing
+// in it: a permanent empty box would read as an unchecked toggle.
+export function MenuItem({
+  onClick,
+  disabled,
+  title,
+  children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  title?: string;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      className={s.item}
+      disabled={disabled}
+      title={title}
+      // A menu row's click is the menu's, never the frame's. Without this a menu opened from
+      // inside a `<summary>` or a clickable row fires that frame on the way out.
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onClick();
+      }}
+    >
+      <span className={s.check} aria-hidden="true" />
+      <span className={s.label}>{children}</span>
+    </button>
+  );
+}
+
 // A checkable row — the menu form of a toggle. `on` renders the check, so the
 // state is legible without opening anything else.
 export function MenuCheck({

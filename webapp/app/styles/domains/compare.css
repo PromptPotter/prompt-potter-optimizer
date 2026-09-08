@@ -183,6 +183,20 @@
   color: var(--color-text-tertiary);
   font-family: var(--font-mono);
 }
+/* Right edge of the summary row, so the copy sits where every other panel's does rather than
+   packed against the restore link — but OUTSIDE `<summary>`, which is a label and may hold
+   neither a floating menu's markup nor its words in its accessible name. Absolute against the
+   row, so the disclosure keeps its own flex and nothing shifts when it opens. */
+.cmp-channel-setup-row {
+  position: relative;
+}
+.cmp-channel-setup-copy {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+}
 /* An editable cell. The input is the value — no box, no chrome — until it holds something the
    record does not, which is the one state worth ink. */
 .cmp-cfg-cell {

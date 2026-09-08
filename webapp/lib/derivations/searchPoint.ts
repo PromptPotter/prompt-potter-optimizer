@@ -18,7 +18,7 @@ import {
 } from "@/lib/poll";
 import { candidateLabel } from "@/lib/candidate-label";
 import { PROMPT_STRING_FIELDS } from "@/lib/prompt-fields";
-import type { RoundResult } from "@/lib/types";
+import type { ElectedRow, RoundResult, SampleRow } from "@/lib/types";
 import { roundHasCandidates, sortedRounds } from "./round-candidates";
 import { wasElected } from "./election";
 
@@ -58,6 +58,60 @@ export interface ObserveConfig {
   config: Record<string, unknown>;
   // Header sub-line naming which searchpoint this is (origin / live — C1.3 / …).
   label: string;
+}
+
+// WHAT a searchpoint panel hands to the clipboard, coarsest last. Built here rather than at
+// each host because the PAYLOAD is the half that drifts: the drill-in's two hosts and the chat
+// run card would otherwise each decide separately what "this searchpoint" is, and a paste from
+// one would not be comparable to a paste from the other.
+//
+// Nothing is computed — every value is served, and each reading is a strict superset of the one
+// above it. Keys are the SERVED names (`resolved_pipeline_params`, `prompt_fields`) so a paste
+// greps against `round_NNNN.json`; `label` is the row's join key rather than `cfg.label`, which
+// is a decorated header string ("live — C4.3") and must never be joined on.
+//
+// A reading with nothing behind it is DROPPED, not offered empty — the `observeOptions`
+// discipline: a menu row that copies `null` is the affordance dishonesty this avoids. So the
+// samples row carries the count, and it carries EVERY sample rather than the render cap the
+// list stops at: a cap is a screen budget and a copy has none.
+export function searchpointCopyChoices({
+  cfg,
+  row,
+  samples = [],
+  arms = null,
+}: {
+  cfg: ObserveConfig | null;
+  row?: ElectedRow | null;
+  samples?: readonly SampleRow[];
+  arms?: number | null;
+}): { key: string; label: string; data: unknown }[] {
+  const spec = cfg
+    ? {
+        // `label` is emitted only when a ROW answers for it. Falling back to `cfg.label` put the
+        // decorated header ("live — C4.3") under the key this whole payload is JOINED on — the one
+        // thing the note above forbids — and a paste carrying it greps against no round file while
+        // looking exactly like one that would. The decoration rides its own key instead, so the
+        // reader still knows which panel produced the copy.
+        ...(row ? { label: row.label } : { shown_as: cfg.label }),
+        resolved_pipeline_params: cfg.config,
+        prompt_fields: cfg.promptFields,
+      }
+    : null;
+  // No spec yet (the round file is still loading) but a row already resolved: the scores are
+  // still worth handing over, and the label alone still names what they belong to.
+  const scored = row ? { ...(spec ?? { label: row.label }), arms, scored: row } : null;
+
+  const choices: { key: string; label: string; data: unknown }[] = [];
+  if (spec) choices.push({ key: "spec", label: "Searchpoint spec", data: spec });
+  if (scored) choices.push({ key: "scored", label: "Spec + scores", data: scored });
+  if (scored && samples.length > 0) {
+    choices.push({
+      key: "full",
+      label: `Spec + scores + ${samples.length} samples`,
+      data: { ...scored, samples },
+    });
+  }
+  return choices;
 }
 
 // Project the six PromptTemplate string fields out of ONE node's resolved params.

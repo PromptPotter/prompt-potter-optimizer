@@ -199,10 +199,12 @@
 .pcr-note{flex:0 0 auto;font-size:var(--text-xs);font-style:italic}
 
 
-/* Mechanisms panel — read-only view of the campaign's pluggable orchestration
-   toggles (campaign.json::optimization.mechanisms). One CardFrame per group;
-   each row pairs the toggle label with an ON/OFF badge (state = colour + text,
-   never colour alone). "•" on the badge marks a non-default value. */
+/* Mechanisms panel — the campaign's pluggable orchestration toggles
+   (campaign.json::optimization.mechanisms). Read-only inside the Optimizer
+   card's modal, editable in the ingest draft. One CardFrame per group; each row
+   pairs the toggle label with an ON/OFF badge (state = colour + text, never
+   colour alone). "•" on the badge marks a non-default value. */
+.mech-lead{margin:0 0 var(--space-12);font-size:var(--text-sm);line-height:1.5;color:var(--color-text-tertiary)}
 .mech-empty{margin:0;padding:var(--space-8) var(--space-4);font-size:var(--text-sm);color:var(--color-text-tertiary)}
 .mech-groups{display:flex;flex-direction:column;gap:var(--space-12)}
 .mech-card-title{font-size:var(--text-base);font-weight:600}

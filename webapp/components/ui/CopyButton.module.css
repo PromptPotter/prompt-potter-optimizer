@@ -13,3 +13,10 @@
 .copy:focus-visible {
   color: var(--color-accent);
 }
+
+/* Text face. `--text-base` exists to seat the 14px glyph; a word set at it shouts
+   over the small print it sits beside, so a label takes the row's own size. */
+.text {
+  font-size: var(--text-xs);
+  padding: 3px var(--space-8);
+}

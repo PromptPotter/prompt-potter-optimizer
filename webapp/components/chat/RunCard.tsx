@@ -16,6 +16,7 @@ import {
   sampleFlips,
   samplesForRow,
   searchPointDiff,
+  searchpointCopyChoices,
   type DiffGroup,
   type ObserveState,
   type ObserveTarget,
@@ -247,7 +248,19 @@ function ConfigBox({
             ariaLabel="Which searchpoint to show"
           />
         ) : null}
-        {cfg ? <CopyButton data={copyPayload(cfg)} title="Copy this prompt and config" /> : null}
+        {/* The same readings the searchpoint drill-in offers, off the same builder — this card
+            used to be the ONLY surface that could copy a searchpoint, and it did so through a
+            serializer only it could use. The text form stays as one choice: it is a prompt a
+            human reads, not a document to grep against a round file. */}
+        <CopyButton
+          choices={[
+            ...searchpointCopyChoices({ cfg, row: shownRow }),
+            ...(cfg
+              ? [{ key: "text", label: "Prompt + config as text", data: copyPayload(cfg) }]
+              : []),
+          ]}
+          title="Copy this searchpoint"
+        />
       </div>
       {!cfg ? (
         <p className="run-box-note">

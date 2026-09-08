@@ -10,7 +10,6 @@ import { NowTriad } from "./NowTriad";
 import { Lane } from "./Lane";
 import { LiveStateCard } from "@/components/dashboard/scoring/LiveStateCard";
 import { OuterSignalPanel } from "@/components/dashboard/scoring/OuterSignalPanel";
-import { MechanismsPanel } from "@/components/dashboard/control/MechanismsPanel";
 import { ConfigMapPanel } from "@/components/dashboard/control/ConfigMapPanel";
 
 // The Dashboard tab's arrangement, owned here rather than inline in the shell:
@@ -60,16 +59,6 @@ export function DashboardTab() {
       >
         <DashSpine>
           <LiveStateCard />
-        </DashSpine>
-      </Lane>
-      <Lane
-        id="mechanisms"
-        title="Mechanisms"
-        subtitle="Pluggable sorting + early-abort toggles (campaign.json)"
-        defaultOpen={false}
-      >
-        <DashSpine>
-          <MechanismsPanel />
         </DashSpine>
       </Lane>
       <Lane

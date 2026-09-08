@@ -13,6 +13,7 @@
 
 import { useState } from "react";
 import { PotterMark } from "@/components/brand/PotterMark";
+import { CopyButton } from "@/components/ui";
 import { BRAND, softwareApplicationLd } from "@/lib/brand";
 import { fetchHealth } from "@/lib/api";
 import { useFetch } from "@/lib/hooks/useFetch";
@@ -21,7 +22,6 @@ import { formatDiagnostics, useIncidents } from "@/lib/diagnostics";
 export function AboutUnit() {
   const [showHow, setShowHow] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
-  const [copied, setCopied] = useState<"ld" | "diag" | null>(null);
 
   // Health unreachable → version stays null (we render blank, never invent one).
   const { data: health } = useFetch(() => fetchHealth(), []);
@@ -30,17 +30,6 @@ export function AboutUnit() {
 
   const verified = BRAND.verification === "verified";
   const raw = JSON.stringify(softwareApplicationLd(), null, 2);
-
-  const copy = async (what: "ld" | "diag") => {
-    const text = what === "ld" ? raw : formatDiagnostics({ version });
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(what);
-      window.setTimeout(() => setCopied(null), 1600);
-    } catch {
-      // Clipboard blocked — the <pre> below stays selectable as the fallback.
-    }
-  };
 
   return (
     <>
@@ -167,9 +156,9 @@ export function AboutUnit() {
               View JSON-LD
             </button>
             {showRaw ? (
-              <button type="button" className="about-unit-copy" onClick={() => void copy("ld")}>
-                {copied === "ld" ? "Copied" : "Copy"}
-              </button>
+              <CopyButton data={raw} title="Copy the JSON-LD record">
+                Copy
+              </CopyButton>
             ) : null}
           </div>
           <div className={`about-unit-disclosure${showRaw ? " open" : ""}`}>
@@ -196,14 +185,15 @@ export function AboutUnit() {
                 ? "No recent failures"
                 : `${incidents.length} recent failure${incidents.length === 1 ? "" : "s"}`}
             </span>
-            <button
-              type="button"
-              className="about-unit-copy"
-              onClick={() => void copy("diag")}
+            <CopyButton
+              // Lazy: the blob stamps `captured`, and that has to be when the operator asked
+              // for it, not when this pane last drew.
+              data={() => formatDiagnostics({ version })}
+              title="Copy the last 24 hours of failed requests"
               disabled={incidents.length === 0}
             >
-              {copied === "diag" ? "Copied" : "Copy diagnostics"}
-            </button>
+              Copy diagnostics
+            </CopyButton>
           </div>
           <p className="account-muted">
             The last 24 hours of failed requests — ids, codes and paths only, never
