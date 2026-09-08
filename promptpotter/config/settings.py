@@ -25,7 +25,7 @@ APP_VERSION: str = _app_version()
 # The version the consent gate requires. Bumping it re-prompts every user, since the version
 # recorded in ``user.json`` no longer matches. Keep in sync with the marketing site's
 # /terms + /privacy.
-TERMS_VERSION: str = "2026-06-21"
+TERMS_VERSION: str = "2026-09-08"
 
 # Defaults for backend connection (not env-driven — override via CLI args)
 DEFAULT_BACKEND_URL = "http://127.0.0.1:8000"
