@@ -112,12 +112,19 @@ if [[ -n "$BACKEND_DIR" ]]; then
 fi
 
 # --- health -----------------------------------------------------------------
+# These three decide the EXIT CODE, and they are the only things that do. `bad` only prints, so
+# until this counter existed the script ended 0 while announcing `✗ app down` — a deploy that left
+# the service dead reported success to whoever ran it and to anything reading `$?`. The restamp
+# above deliberately stays advisory (see its comment); "the data pass reported skips" and "the app
+# is not serving" are different questions, and only the second one means the deploy failed.
 say "health"
-if wait_healthy "http://127.0.0.1:$BIND_PORT$HEALTH_PATH"; then ok "app up ($BIND_PORT)"; else bad "app down — journalctl -u $SERVICE_NAME -e"; fi
+down=0
+if wait_healthy "http://127.0.0.1:$BIND_PORT$HEALTH_PATH"; then ok "app up ($BIND_PORT)"; else bad "app down — journalctl -u $SERVICE_NAME -e"; down=1; fi
 # The bot has no port to probe — outbound-only is the charter — so `is-active` IS its health.
 if systemctl cat "$BOT_SERVICE_NAME.service" >/dev/null 2>&1; then
-  if systemctl is-active --quiet "$BOT_SERVICE_NAME"; then ok "admin bot up"; else bad "admin bot down — journalctl -u $BOT_SERVICE_NAME -e"; fi
+  if systemctl is-active --quiet "$BOT_SERVICE_NAME"; then ok "admin bot up"; else bad "admin bot down — journalctl -u $BOT_SERVICE_NAME -e"; down=1; fi
 fi
 if [[ -n "$BACKEND_DIR" ]]; then
-  if wait_healthy "http://127.0.0.1:$BACKEND_PORT/status"; then ok "backend up ($BACKEND_PORT)"; else bad "backend down — journalctl -u ${BACKEND_SERVICE:-?} -e"; fi
+  if wait_healthy "http://127.0.0.1:$BACKEND_PORT/status"; then ok "backend up ($BACKEND_PORT)"; else bad "backend down — journalctl -u ${BACKEND_SERVICE:-?} -e"; down=1; fi
 fi
+exit "$down"

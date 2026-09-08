@@ -33,7 +33,9 @@ python -m promptpotter resume
 
 No key set yet? `new` offers to write one on first run. `resume` picks up wherever the last run stopped — Ctrl+C pauses a campaign rather than losing it.
 
-Working in [Claude Code](https://claude.com/claude-code)? Type `/potter-run` instead: the bundled skill audits your setup, picks a dataset, runs init, and reads the rounds back to you as they land.
+**`new` also needs a pipeline backend to score against** — the default is [TermNorm](https://github.com/runfish5/TermNorm-excel) on `:8000`, and a campaign refuses to start without one. Setting it up by hand is [`03-first-campaign.md` § No backend?](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/manual/03-first-campaign.md#no-backend).
+
+Working in [Claude Code](https://claude.com/claude-code)? Type `/potter-run` instead — it downloads and starts that backend for you, then audits your setup, picks a dataset, runs init, and reads the rounds back to you as they land.
 
 ## 📺 Watch it work
 

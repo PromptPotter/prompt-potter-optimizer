@@ -28,6 +28,19 @@ it.
 
 ## Open — multi-arc, no blocker
 
+- **Nothing in CI runs the app — no server is ever started and no browser is ever opened**, so a
+  whole class of first-user breakage ships green. `scripts/smoke_wheel.py` reaches the API through
+  `app.openapi()` and never issues an HTTP request, so a 500 inside a router or a static mount
+  resolving to nothing passes both wheel jobs; there is no Playwright suite anywhere, and
+  `webapp/components/onboarding/{AccessGate,ConsentGate,AllowanceSpent,WelcomeLockoutModal}.tsx` —
+  the four surfaces a brand-new account meets before it sees anything else — have no test of any
+  kind. Vitest is jsdom units of primitives and pure derivations; nothing renders `app/page.tsx` or
+  navigates a route. Three arcs, and the first is worth more than the other two: (1) start uvicorn
+  from the built wheel and fetch `/` plus one API read; (2) a scripted browser walk of the
+  zero-campaign path, asserting console-clean; (3) coverage on the four onboarding components.
+  **Re-test:** `grep -rn "openapi()\|uvicorn" scripts/smoke_wheel.py` — if it still never starts a
+  server, arc 1 is open; `ls webapp/**/*.spec.ts webapp/e2e 2>/dev/null` empty means arcs 2–3 are.
+
 - **The mobile pass was verified at 375/1440 on chat/dashboard/files/verify only.** Unswept: 393,
   412, 768 and landscape; login, onboarding, l4, account modal, candidates, lineage. No Lighthouse
   number was recorded, so there is no before/after. Action: sweep + record one pass.

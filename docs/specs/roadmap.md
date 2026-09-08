@@ -195,7 +195,7 @@ UCB1 over normalized Rasch θ decides where a rebase fork re-expands from (`mask
 Shape: a third pure fold beside `divergence.py` and `scenario.py`, over the same `SpineCycle` list UCB already loads, emitting a per-candidate-cut `ForfeitReading`. **Served diagnostic FIRST** — stamped on the tree's course nodes so the operator sees the price of each WHERE — and only then folded into the acquisition as `Q − λ·forfeit`, λ a settings constant beside `UCB_EXPLORATION_C`. It never reaches L2 as prose: WHETHER to fork is the LLM's call and WHERE stays UCB's arithmetic, so no panel enumerates ancestors.
 
 ### Plus-backlog (opportunistic, unscheduled)
-Hard-Sample Sorter Phase 2/3 · Webapp perf: SSE client cutover for the **dashboard** (the *chat* already consumes `events:subscribe` via `useCycleEvents`; the dashboard still 2 s-polls), SWR/TanStack, strip redundant memos under React Compiler (keep `l1RoundsKey` fingerprints) · MCP server mode · research extensions.
+Parent selection — collapse `elect_round_winner`'s greedy promotion and `select_rewind_round`'s UCB1 into one acquisition over the lineage tree, gated on a prior-vs-θ-rank correlation reading: [`parent-selection.md`](parent-selection.md) · Hard-Sample Sorter Phase 2/3 · Webapp perf: SSE client cutover for the **dashboard** (the *chat* already consumes `events:subscribe` via `useCycleEvents`; the dashboard still 2 s-polls), SWR/TanStack, strip redundant memos under React Compiler (keep `l1RoundsKey` fingerprints) · MCP server mode · research extensions.
 
 ## Captured — pending triage
 

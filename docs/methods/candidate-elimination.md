@@ -8,6 +8,10 @@ Each round evolves *N* individuals (default *N* = 5) via an LLM optimizer prompt
 
 The statistical model underneath — Rasch θ/δ, the graded response, the `√φ` SE correction — is owned by [`verdict-resolution.md`](verdict-resolution.md), and so is the **round order** this page depends on one property of: it is *shared, never re-ranked per candidate*, so shared prefixes keep the paired stats comparable. A per-candidate re-rank front-loads the seed's own hit set and blinds every gate here until the tail.
 
+## Prior art — fishtest
+
+**Stockfish's fishtest has run this loop since 2013**: a proposed patch, thousands of noisy games against the current master, SPRT deciding accept/reject, winner becomes the master. Know two correspondences before claiming novelty — their opening-book curation (unbalanced positions, because a draw carries almost no information about relative strength) is our seed-misses-first ordering, and Elo is Bradley–Terry, so the same logistic family as [`verdict-resolution.md`](verdict-resolution.md)'s Rasch model. What is *not* theirs: an automated proposer over structure and text, N-arm best-arm identification rather than a two-arm test, and reuse of measurement across a changed instrument.
+
 ## Why the comparison has to be paired
 
 PoBB (Russo 2016) assumes every arm is observed on an i.i.d. sample of one distribution. The shared round order deliberately violates that: it front-loads the decision-relevant samples (the seed's misses — the only place a candidate can win) so a dead candidate is abandoned within a handful of queries. Unpaired, two arms measured on near-disjoint sets get compared as though they were iid — a leader that ran only the easy prefix reads as unbeatable, and every later candidate, measured hard-first, is eliminated against a rate the leader never had to earn.
