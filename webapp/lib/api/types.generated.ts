@@ -732,6 +732,22 @@ export interface MeasurementSeriesResponse {
   mean_fitness: number | null;
 }
 
+/** What ONE model accepts and costs — resolved server-side, served per model id. */
+export interface ModelCapability {
+  model: string;
+  reasoning_efforts: string[] | null;
+  reasoning_note: string;
+  source: string;
+  display_name: string;
+  context_length: number | null;
+  max_output_tokens: number | null;
+  input_usd_per_mtok: number | null;
+  output_usd_per_mtok: number | null;
+  modality: string;
+  moderated: boolean | null;
+  fetched_at: string;
+}
+
 /** One param a node carries — the COMPLETE per-node list, which is what lets a reader sum */
 export interface NodeConfigParam {
   key: string;
@@ -1807,7 +1823,7 @@ export interface ConfigOverrides {
   scoring: string | Record<string, string> | null;
 }
 
-/** The dataset's ``pipeline.yaml`` declares the MAXIMUM tunable surface; a campaign may only */
+/** A campaign's own declaration over the dataset's, and the two halves do NOT compose the same */
 export interface NodeSearchNarrowing {
   param_keys: string[] | null;
   param_allowed_values: Record<string, string[]>;
@@ -1842,7 +1858,7 @@ export type RunPhase = 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 
 export type DashboardState = 'init' | 'origin' | 'scoring' | 'between_samples' | 'between_candidates' | 'l1_generate' | 'l2_refining' | 'l3_replanning' | 'escalation' | 'stopped';
 
 // Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).
-export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-spend-budget' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-allowed-models' | 'set-campaign-label' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign';
+export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-spend-budget' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-campaign-label' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign';
 
 // Kinds no activity item is ever made of — the ray drops them and the translator
 // returns null. Complement of domain/projection_envelope.py::RENDERS_AS_ACTIVITY.

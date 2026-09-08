@@ -1,5 +1,5 @@
 "use client";
-import type { DraftPatch, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
+import type { DraftPatch, ModelCapability, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
 import type { CandidateSearchPoint, ConfigMode } from "@/lib/derivations";
 import { outputContract } from "@/lib/derivations";
 import type { PipelineViewNode } from "@/components/workflow";
@@ -25,6 +25,8 @@ export function NodeSurface({
   mode,
   babysitEditable,
   compact,
+  modelCapabilities,
+  permittedModels,
   onApply,
   onConfigChange,
 }: {
@@ -50,6 +52,12 @@ export function NodeSurface({
   // boxes shorten, the output contract collapses. It changes what is IN VIEW, never
   // what exists — every part stays one disclosure away.
   compact?: boolean;
+  // What each model on the menu accepts and costs, keyed by model id — the reasoning ladder
+  // and the metadata card. Absent = UNKNOWN, never a menu of unsupported models.
+  modelCapabilities?: Record<string, ModelCapability>;
+  // values mode only: the origin's per-node permitted model sets, so an un-permitted steer is
+  // disabled rather than rejected on confirm.
+  permittedModels?: Record<string, readonly string[]>;
   // Prompt edits + search-space config edits ride this DraftPatch. Values-mode config
   // edits ride `onConfigChange` (the flat fork overlay). **Absence IS read-only** — there
   // is no second flag for it, so no host can claim editable while passing no callback.
@@ -85,6 +93,8 @@ export function NodeSurface({
         babysitEditable={babysitEditable}
         readOnly={configReadOnly}
         compact={compact}
+        modelCapabilities={modelCapabilities}
+        permittedModels={permittedModels}
         onApply={onApply}
         onChange={onConfigChange}
       />

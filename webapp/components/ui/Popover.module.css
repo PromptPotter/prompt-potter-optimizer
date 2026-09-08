@@ -36,3 +36,12 @@
   margin-top: 0;
   margin-bottom: 2px;
 }
+
+/* OVER the trigger, not below it — the Windows-95 dropdown LIST, where the popup covers the
+   closed box and the current value sits under the cursor rather than being repeated beside it.
+   `min-width: 100%` so the panel is never narrower than the line it replaces. */
+.sideOver {
+  top: 0;
+  margin-top: 0;
+  min-width: 100%;
+}

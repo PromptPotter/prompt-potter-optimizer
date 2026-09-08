@@ -10,9 +10,11 @@ interface Props {
   /** Floating panel content. Call `close` after an action to dismiss. */
   children: (args: { close: () => void }) => ReactNode;
   align?: "left" | "right";
-  /** Which side of the trigger the panel opens on. A trigger at the bottom of
-      its scrollport (the chat composer) opens upward or the panel is offscreen. */
-  side?: "bottom" | "top";
+  /** Where the panel opens relative to the trigger. `bottom` is the default; `top` for a
+      trigger at the bottom of its scrollport (the chat composer), which would otherwise open
+      offscreen; `over` covers the trigger itself — the dropdown-LIST idiom, where the panel
+      replaces the closed line rather than hanging off it, so the current value is shown once. */
+  side?: "bottom" | "top" | "over";
   className?: string;
 }
 
@@ -52,7 +54,14 @@ export function Popover({
     <div className={cx(s.wrap, className)} ref={ref}>
       {renderTrigger({ open, toggle })}
       {open && (
-        <div className={cx(s.panel, align === "right" && s.alignRight, side === "top" && s.sideTop)}>
+        <div
+          className={cx(
+            s.panel,
+            align === "right" && s.alignRight,
+            side === "top" && s.sideTop,
+            side === "over" && s.sideOver,
+          )}
+        >
           {children({ close })}
         </div>
       )}

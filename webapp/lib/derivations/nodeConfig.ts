@@ -13,7 +13,8 @@
 //
 // Pure data→data (no React, no I/O) so it rides the lib Vitest scope.
 
-import type { DraftPatch, NodeConfigParam } from "@/lib/api";
+import type { DraftPatch, ModelCapability, NodeConfigParam } from "@/lib/api";
+import type { NodeSearchNarrowing } from "@/lib/api/types";
 
 export type ConfigMode = "search-space" | "values";
 
@@ -33,12 +34,18 @@ export interface ConfigRow {
   // overlay nor the schema carries it (declared but unset, e.g. max_tokens).
   value: string;
   // The schema's value (origin). A change vs this lands the param in `config`
-  // (search-space); also the enum's "origin" chip tag.
+  // (search-space).
   baseValue: string;
-  // search-space: the optimizer may NOT move this param (leaves `param_keys`).
-  // Always true for `model`/`provider` — they are never an optimizer axis.
+  // search-space: the optimizer may NOT move this param (it leaves `param_keys`).
+  //
+  // **Only a FREE-VALUED param carries this.** An enumerable axis — `model` and every enum —
+  // locks by being ticked down to one permitted value, so `allowed.length <= 1` IS its lock and
+  // a second boolean beside it could only contradict it. `number`/`string`/`bool` have no set to
+  // narrow, so there the padlock is the control.
   locked: boolean;
-  // search-space: the allowed-values subset the optimizer may use when open.
+  // search-space: the permitted subset. What the optimizer may pick where the axis is open, and
+  // (for `model`) what a human may steer a fork to without grading the branch C — ONE set,
+  // because they were one question asked twice.
   allowed: string[];
   // values: present in the candidate overlay (vs the config floor) — keep it in
   // the emitted overlay even when the operator leaves it untouched.
@@ -129,6 +136,57 @@ export function nodeReach(
   };
 }
 
+/** The ladder a `reasoning_effort` row actually offers, once a model is picked.
+ *
+ *  **The MODEL's answer replaces the NODE's**, rather than narrowing it: a node's declared list is
+ *  a default authored before anyone knew which model would run there, so a node offering three
+ *  rungs on a model that takes five was hiding two real search positions. Unknown — the model is
+ *  absent from the catalogue snapshot, or none was fetched — falls back to the node's list
+ *  untouched, because an absent answer rendered as "no" silently deletes a search axis.
+ *
+ *  This picks between two SERVED lists on a served null and computes nothing (`webapp/CLAUDE.md`
+ *  § Scoring authority): both the ladder and the reason for it come down resolved. */
+export function effortLadder(row: ConfigRow, caps: ModelCapability | undefined): string[] {
+  if (row.key !== "reasoning_effort") return row.options;
+  return caps?.reasoning_efforts ?? row.options;
+}
+
+/** Client twin of the Python `overlay_sets_model_outside_allowed`
+ *  (`promptpotter/domain/pipeline_overlay.py`). True iff a fork's `pipeline_overlay` steers a node
+ *  to a responder the origin has NOT permitted — the ADR-0005 babysit (grade-C) trigger. Keeps the
+ *  client warning on the SAME predicate the server gate enforces at `fork-cycle`.
+ *
+ *  *permitted* is per NODE — the frozen `config.optimizer_narrowing[node].param_allowed_values
+ *  .model`, which is the ONE permitted set. A node absent from it permits nothing, the restrictive
+ *  default. A `provider` edit has no permitted set that could sanction it, so it always counts. */
+export function overlaySetsModelOutsideAllowed(
+  overlay: Record<string, unknown> | null | undefined,
+  permitted: Record<string, readonly string[]> | null | undefined,
+): boolean {
+  for (const [node, cfg] of Object.entries(overlay ?? {})) {
+    if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) continue;
+    const c = cfg as Record<string, unknown>;
+    if ("provider" in c) return true;
+    const model = c.model;
+    if (model != null && !new Set(permitted?.[node] ?? []).has(String(model))) return true;
+  }
+  return false;
+}
+
+/** The per-node permitted model sets, read off a campaign's frozen `config.optimizer_narrowing`.
+ *  The ONE derivation, so the warning above and the server's gate cannot disagree. */
+export function permittedModelsFromNarrowing(
+  narrowing: unknown,
+): Record<string, readonly string[]> {
+  const out: Record<string, readonly string[]> = {};
+  if (!narrowing || typeof narrowing !== "object") return out;
+  for (const [node, block] of Object.entries(narrowing as Record<string, unknown>)) {
+    const models = asObj(asObj(block).param_allowed_values).model;
+    if (Array.isArray(models)) out[node] = models.map(String);
+  }
+  return out;
+}
+
 // What the agent list says out loud. `l1` fires every round and `l2` only on a stall, so they
 // are not interchangeable and a bare "the optimizer" would flatten them.
 export function agentLabel(agent: string): string {
@@ -181,12 +239,10 @@ export function configRows(
       const baseValue = p.value == null ? "" : String(p.value);
       const narrowed = overlayAllowed[p.key];
       if (mode === "search-space") {
-        const isModel = p.kind === "model";
-        // model/provider are always optimizer-locked; every other param inherits
-        // the overlay's open-set, or — unset — whether any agent reaches it today.
-        const locked = isModel
-          ? true
-          : overlayKeys !== undefined
+        // Every param inherits the overlay's open-set, or — unset — whether any agent reaches it
+        // today. `model` is no exception now: it is an axis wherever its node opened one.
+        const locked =
+          overlayKeys !== undefined
             ? !overlayKeys.includes(p.key)
             : p.movable_by.length === 0;
         rows.push({
@@ -230,11 +286,46 @@ export function configRows(
   return rows;
 }
 
-// search-space emit: merge this node's rows onto the draft overlay → patch.
-// `param_keys` = the open (unlocked) non-model params; `param_allowed_values`
-// narrows an open enum only when a strict subset; `config` carries changed origin
-// values (incl. the chosen model). model/provider are always optimizer-locked, so
-// there is no model-lock knob to emit.
+/** Whether two value sets hold the same members, order and duplicates ignored. The predicate
+ *  `nodeOverlayPatch` writes a `param_allowed_values` entry on: DIFFERS, not "is a strict subset",
+ *  because an operator may WIDEN an axis — adding a model the catalogue predates, or a reasoning
+ *  rung the node never listed — and a subset test drops exactly that edit on the floor.
+ *  `PipelineSchema.narrow` REPLACES `param_allowed_values` (only `param_keys` subsets), so the
+ *  widened list survives the mint. */
+function sameMembers(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(b);
+  return a.every((v) => set.has(v));
+}
+
+/** WHAT THE OPTIMIZER MAY DO on one node, from its rows — `param_keys` (the open axes) and
+ *  `param_allowed_values` (each enumerable axis's permitted set, stated whenever it differs from
+ *  the declared one).
+ *
+ *  Its own function because the two hosts that emit it want DIFFERENT things around it: the draft
+ *  origin wraps it in a `DraftPatch` alongside the config values, while the steer fork sends it
+ *  alone, as `OperatorForkOverride.optimizer_narrowing`. Read one out of the other's envelope and
+ *  the second host is unwrapping a shape the first happened to choose. */
+export function nodeNarrowing(rows: ConfigRow[]): NodeSearchNarrowing {
+  const paramKeys: string[] = [];
+  const allowedValues: Record<string, string[]> = {};
+  for (const r of rows) {
+    // An enumerable axis narrowed to ONE permitted value is pinned by construction — which is
+    // why `locked` on such a row is derived here rather than toggled.
+    const enumerable = r.kind === "enum" || r.kind === "model";
+    const locked = enumerable ? r.allowed.length <= 1 : r.locked;
+    if (!locked) paramKeys.push(r.key);
+    if (enumerable && r.allowed.length > 0 && !sameMembers(r.allowed, r.options)) {
+      // Written even when the axis is PINNED: the permitted set is what a human fork may steer
+      // to un-tainted, which outlives whether the optimizer may move it.
+      allowedValues[r.key] = r.allowed;
+    }
+  }
+  return { param_keys: paramKeys, param_allowed_values: allowedValues };
+}
+
+// search-space emit: merge this node's rows onto the draft overlay → patch. `config` carries the
+// changed origin values (the chosen model included); the permission half is `nodeNarrowing`.
 export function nodeOverlayPatch(
   base: Record<string, unknown>,
   node: string,
@@ -242,16 +333,7 @@ export function nodeOverlayPatch(
 ): DraftPatch {
   const overlay = JSON.parse(JSON.stringify(base)) as Record<string, Record<string, unknown>>;
   const config: Record<string, unknown> = {};
-  const paramKeys: string[] = [];
-  const allowedValues: Record<string, string[]> = {};
-
   for (const r of rows) {
-    if (r.kind !== "model" && !r.locked) {
-      paramKeys.push(r.key);
-      if (r.kind === "enum" && r.allowed.length > 0 && r.allowed.length < r.options.length) {
-        allowedValues[r.key] = r.allowed;
-      }
-    }
     if (r.value !== r.baseValue && r.value !== "") {
       config[r.key] = coerce(r.kind, r.value);
     }
@@ -261,7 +343,7 @@ export function nodeOverlayPatch(
   const prevConfig = (prev.config ?? {}) as Record<string, unknown>;
   overlay[node] = {
     ...prev,
-    optimizer: { param_keys: paramKeys, param_allowed_values: allowedValues },
+    optimizer: nodeNarrowing(rows),
     ...(Object.keys(config).length > 0 ? { config: { ...prevConfig, ...config } } : {}),
   };
   return { pipeline_overlay: overlay };

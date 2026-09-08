@@ -4,7 +4,6 @@ import { useRef, useState } from "react";
 import {
   postForkCycle,
   postPauseCycle,
-  type DraftPatch,
   type RunLimitOverrides,
   type OperatorForkOverride,
 } from "@/lib/api";
@@ -21,6 +20,7 @@ import {
   configOverridesFromDefaults,
   isWidgetParam,
   overlaySetsModelOutsideAllowed,
+  permittedModelsFromNarrowing,
   searchPoint,
 } from "@/lib/derivations";
 import { useFetch } from "@/lib/hooks/useFetch";
@@ -94,24 +94,24 @@ export function SteerForkPanel({
     : candidateSearchPoint(doc, candidate.candidate_id);
   const seedPrompt = seed?.origin_prompt_fields ?? {};
   const overlay = seed?.pipeline_overlay ?? {};
-  // Nodes with a lockable param — a param this editor can DRAW that isn't the model
-  // (model/provider are always optimizer-locked, never a per-node lock). The served
-  // list also carries the prompt + nested params, which have no widget, so the
-  // widget filter is what keeps a prompt-only pipeline (pp-self) hiding the lock
-  // block entirely rather than printing a "no configurable params" box per node.
-  const lockableNodes = Object.entries(schema ?? {})
-    .filter(([, params]) => params.some((p) => isWidgetParam(p) && p.kind !== "model"))
+  // Nodes carrying a param this editor can DRAW. The served list also holds the prompt +
+  // nested params, which have no widget, so the widget filter is what keeps a prompt-only
+  // pipeline (pp-self) hiding the permission block entirely rather than printing a "no
+  // configurable params" box per node.
+  const permissionNodes = Object.entries(schema ?? {})
+    .filter(([, params]) => params.some(isWidgetParam))
     .map(([nodeId]) => nodeId);
-  // The origin's declared model allow-list (`CampaignConfig.allowed_models`). Absent /
-  // empty in the snapshot = nothing sanctioned = the restrictive default, so ANY model
-  // steer taints — matching the server gate (`overlay_sets_model_outside_allowed`).
+  // The origin's per-node permitted model sets, read off the frozen
+  // `config.optimizer_narrowing` — the ONE permitted set, already served whole. A node absent
+  // from it permits nothing, the restrictive default, so ANY model steer there taints —
+  // matching the server gate (`overlay_sets_model_outside_allowed`).
   const { data: detail } = useFetch(
     campaignId ? (signal) => fetchCampaignDetail(campaignId, signal) : null,
     [campaignId],
   );
-  const allowedModels = (detail?.config.allowed_models as string[] | undefined) ?? [];
-  // Whether the acting operator may steer a locked axis at all. Steering model/provider
-  // outside the allow-list is the ADR-0005 babysit act, gated server-side on
+  const permittedModels = permittedModelsFromNarrowing(detail?.config.optimizer_narrowing);
+  // Whether the acting operator may steer to an un-permitted model at all. That is the
+  // ADR-0005 babysit act, gated server-side on
   // `campaign.babysit` (404 without); the client reflects it so a principal who lacks
   // the cap sees the row read-only rather than a 404 on confirm. Owners hold every cap.
   const canBabysit = !!me?.capabilities?.includes("campaign.babysit");
@@ -122,12 +122,16 @@ export function SteerForkPanel({
     string,
     Record<string, unknown>
   > | null>(null);
-  // Warn only when the picked model is OUTSIDE what the origin sanctioned — a clean
-  // steer to a sanctioned model shows nothing (the shipped allow-list gate, not the
-  // old "any locked axis exists" blanket).
+  // Warn only when the picked model is OUTSIDE what the node permits — a clean steer to a
+  // permitted model shows nothing (the shipped permitted-set gate, not the old "any locked
+  // axis exists" blanket).
+  // What THIS steer's nodes permit, flattened for the warning's own sentence.
+  const permittedList = [
+    ...new Set(Object.values(permittedModels).flatMap((m) => [...m])),
+  ];
   const steersDisallowedModel = overlaySetsModelOutsideAllowed(
     pickedOverlay ?? overlay,
-    allowedModels,
+    permittedModels,
   );
 
   // Captured working copies, read at confirm. Refs (not state) so a textarea
@@ -136,20 +140,10 @@ export function SteerForkPanel({
   // the loaded seed value as-is (handles the async round-file load too).
   const editedPrompt = useRef<Record<string, unknown> | null>(null);
   const editedOverlay = useRef<Record<string, Record<string, unknown>> | null>(null);
-  // Per-node search-space lock edits, keyed by node → NodeSearchNarrowing
-  // (`{param_keys, param_allowed_values}`). Each per-node lock editor emits the
-  // whole-overlay patch; we keep only its `optimizer` block. Rides
-  // `OperatorForkOverride.optimizer_narrowing` → the fork seed (cycle-level lock
-  // override of the campaign's mint-time narrowing). Empty = inherit unchanged.
+  // Per-node search-space permission edits, keyed by node. Rides
+  // `OperatorForkOverride.optimizer_narrowing` → the fork seed (cycle-level override of the
+  // campaign's mint-time narrowing). Empty = inherit unchanged.
   const editedNarrowing = useRef<Record<string, NodeSearchNarrowing>>({});
-  const captureLocks = (nodeId: string, patch: DraftPatch) => {
-    const overlay = (patch.pipeline_overlay ?? {}) as Record<
-      string,
-      { optimizer?: NodeSearchNarrowing }
-    >;
-    const opt = overlay[nodeId]?.optimizer;
-    if (opt) editedNarrowing.current = { ...editedNarrowing.current, [nodeId]: opt };
-  };
   // Seed with the pre-filled "remaining" defaults so confirming an untouched
   // reconcile dialog forks with the SHOWN ceilings — not a silent inherit of
   // the parent's full budget. `LimitReconcile.onChange` overwrites on edit.
@@ -207,17 +201,17 @@ export function SteerForkPanel({
         </p>
       )}
 
-      {/* Babysit warning. Shown only when the picked model/provider is OUTSIDE the
-          origin's allowed_models (a sanctioned model is a clean steer) and the operator
-          holds the cap. Steering outside the allow-list marks the branch grade C. */}
+      {/* Babysit warning. Shown only when the picked model/provider is OUTSIDE what the node
+          permits (a permitted model is a clean steer) and the operator holds the cap. Steering
+          outside it marks the branch grade C. */}
       {steersDisallowedModel && canBabysit ? (
         <div className="steer-fork-babysit">
           <p className="steer-fork-babysit-warn" role="note">
-            This model isn&apos;t in the origin&apos;s allowed models
-            {allowedModels.length > 0 ? ` (${allowedModels.join(", ")})` : ""}. Steering to
+            This model isn&apos;t one this node permits
+            {permittedList.length > 0 ? ` (${permittedList.join(", ")})` : ""}. Steering to
             it marks this branch — and every round after it — operator-babysat (grade C):
             excluded from clean comparison, origin reuse, and the L4 rollup. The
-            measurement is still recorded; it just isn&apos;t a clean one. Pick a sanctioned
+            measurement is still recorded; it just isn&apos;t a clean one. Pick a permitted
             model to keep a clean branch.
           </p>
         </div>
@@ -231,6 +225,7 @@ export function SteerForkPanel({
         outputSchema={outputSchema}
         mode="values"
         babysitEditable={canBabysit}
+        permittedModels={permittedModels}
         onApply={(p) => {
           editedPrompt.current = p.origin_prompt_fields ?? {};
         }}
@@ -240,29 +235,29 @@ export function SteerForkPanel({
         }}
       />
 
-      {/* Per-node search-space LOCK editor — which params the optimizer may move on
-          the fork. Seeded from `{}` so each row reflects the served (campaign-narrowed)
-          schema's tunability; edits ride `optimizer_narrowing` on the fork seed. The
-          model rides the node surface as a steerable value (its optimizer-lock is the
-          fork-level axis toggle), so a node whose ONLY served param is the model has
-          nothing to lock here — render lock rows only for nodes that carry a lockable
-          param, and drop the whole block when none do (a prompt-only pipeline like
-          pp-self, whose tunable surface is the prompt fields above). */}
-      {lockableNodes.length > 0 ? (
+      {/* Per-node PERMISSION editor — what the optimizer may do on the fork. Seeded from `{}`
+          so each row reflects the served (campaign-narrowed) schema's tunability; edits ride
+          `optimizer_narrowing` on the fork seed. It is passed no `onApply`, which is what makes
+          every VALUE here read-only text: the values are steered in the node surface above, and
+          this surface states only what may move. Rendered for nodes carrying a widget param,
+          and dropped entirely when none do (a prompt-only pipeline like pp-self, whose tunable
+          surface is the prompt fields above). */}
+      {permissionNodes.length > 0 ? (
         <div className="steer-fork-locks">
           <p className="steer-fork-sub">
-            Lock or unlock what the optimizer may tune on this fork — 🔒 holds a param at
-            its value, 🔓 lets the optimizer move it.
+            What the optimizer may tune on this fork. ☑ = a value it may pick; one left and
+            the axis is pinned. 🔒 / 🔓 = held / tunable, for the params with no value list.
           </p>
-          {lockableNodes.map((nodeId) => (
+          {permissionNodes.map((nodeId) => (
             <NodeConfigEditor
               key={nodeId}
               mode="search-space"
-              locksOnly
               schema={schema}
               node={nodeId}
               seedOverlay={{}}
-              onApply={(patch) => captureLocks(nodeId, patch)}
+              onNarrowing={(n) => {
+                editedNarrowing.current = { ...editedNarrowing.current, [nodeId]: n };
+              }}
             />
           ))}
         </div>

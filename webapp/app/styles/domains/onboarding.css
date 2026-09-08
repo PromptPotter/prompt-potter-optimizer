@@ -105,14 +105,19 @@
 .config-lock:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
 .config-input{flex:1;min-width:min(120px,100%);font:inherit;font-size:var(--text-sm);padding:var(--space-4) var(--space-8);border-radius:6px;border:0.5px solid var(--color-border);background:var(--color-background-primary);color:var(--color-text-primary);font-family:var(--font-mono)}
 .config-input:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
+/* A value this surface states but does not set (the steer fork's permission editor, whose values
+   are steered above). Deliberately unlike .config-input — no frame, no field background — so it
+   never reads as an input that has been greyed out. */
+.config-static{flex:1;min-width:0;font-size:var(--text-sm);font-family:var(--font-mono);color:var(--color-text-secondary);overflow-wrap:anywhere}
 .config-hint{grid-column:2;font-size:var(--text-xs);line-height:1.4;color:var(--color-text-tertiary)}
-.config-level{display:inline-flex;align-items:center;gap:var(--space-4);font-size:var(--text-xs);padding:2px var(--space-10);border-radius:9px;border:0.5px solid var(--color-border);background:transparent;color:var(--color-text-tertiary);text-transform:lowercase;cursor:pointer}
-.config-level:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
-.config-level.is-on{color:white;background:var(--color-accent);border-color:var(--color-accent);font-weight:600}
-.config-level.is-off{opacity:0.55;border-style:dashed;text-decoration:line-through}
-.config-level.is-origin{box-shadow:0 0 0 1.5px var(--color-success)}
-.config-level.is-disabled{opacity:0.4;cursor:not-allowed;text-decoration:none}
-.config-origin-tag{font-size:var(--text-xs);font-weight:700;text-transform:uppercase;letter-spacing:0.04em;padding:0 3px;border-radius:4px;background:var(--color-success);color:white;text-decoration:none}
+/* The picked model's card — a plain definition list under the model row. Only what the
+   catalogue actually carries renders, so a missing field shortens the card instead of
+   blanking it. */
+.model-card{margin:var(--space-4) 0 0;display:flex;flex-direction:column;gap:1px;font-size:var(--text-xs);color:var(--color-text-tertiary)}
+.model-card-name{color:var(--color-text-secondary);font-family:var(--font-mono);overflow-wrap:anywhere}
+.model-card-row{display:flex;gap:var(--space-8)}
+.model-card-row dt{flex:0 0 auto;width:5.5em}
+.model-card-row dd{margin:0;min-width:0;overflow-wrap:anywhere}
 /* Node-level master lock: it needs a BOX for its separator, which `display:contents` denies,
    so it spans the editor and re-reads the two columns through `subgrid` to stay aligned. */
 .config-node-row{grid-column:1/-1;display:grid;grid-template-columns:subgrid;align-items:center;justify-items:start;padding-bottom:8px;margin-bottom:2px;border-bottom:0.5px solid var(--color-border)}

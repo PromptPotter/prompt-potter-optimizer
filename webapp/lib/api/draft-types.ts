@@ -5,7 +5,7 @@
 // (`PipelineView`). That edge points the wrong way and is tolerated in exactly one file so a
 // reader can see the whole of it at once rather than finding it mid-request-helper.
 
-import type { NodeConfigParam, NodeOutputSchema } from "./types";
+import type { ModelCapability, NodeConfigParam, NodeOutputSchema } from "./types";
 import type { PipelineView } from "@/components/workflow";
 
 // M13 chat-first dataset ingest: upload + mint a durable `checkin` campaign (`draft_id` IS the
@@ -18,25 +18,6 @@ import type { PipelineView } from "@/components/workflow";
 // operator-stated or auto-confirmed. No field reaches mint while `unset`
 // or `proposed` (the deterministic `origin_readiness` gate).
 export type ProvenanceTag = "unset" | "proposed" | "confirmed";
-// The permission surface the new-campaign UI renders before commit. A draft's `pipeline_overlay`
-// is empty until then, so the connector's node-config seed would otherwise be invisible and a
-// locked-out param would read as merely defaulted. Server-derived per request.
-export interface OptimizerLocks {
-  // Connector default pipeline step list (e.g. `["llm_only"]`).
-  pipeline: string[];
-  // Params the optimizer may never permute on any node (`["model","provider"]`) —
-  // always locked (an invariant, not a per-campaign policy).
-  forbidden_axes: string[];
-  nodes: Record<string, OptimizerNodeLocks>;
-}
-export interface OptimizerNodeLocks {
-  // Effective per-node config floor (connector seed + overlay) — the active
-  // value of each control, e.g. `{ reasoning_effort: "low", temperature: 0 }`.
-  config: Record<string, unknown>;
-  // Closed set the optimizer may permute per param. A ladder value absent here
-  // renders crossed-out (optimizer locked out).
-  param_allowed_values: Record<string, string[]>;
-}
 // A categorical input the draft's pipeline requires beyond (pipeline + dataset + origin),
 // derived server-side from the node types. The ingest UI gives each unfulfilled one a drop-zone
 // so the operator supplies it in place.
@@ -87,13 +68,12 @@ export interface DraftCampaignWire {
   // list isn't sent — a library can run to tens of thousands of entries; the UI
   // needs only fulfilled-ness + size.
   candidate_library_size: number;
-  // The origin's sanctioned inner-optimizer model allow-list (ticked in setup).
-  // Empty = nothing sanctioned = restrictive default (any human model steer taints).
-  allowed_models: string[];
   created_at: string;
   updated_at: string;
-  // Connector-derived backend-pipeline permission surface; see `OptimizerLocks`.
-  optimizer_locks: OptimizerLocks;
+  // The pipeline this draft actually runs — its own choice (preserved on reuse) over the
+  // connector default. What a node's axes are and who may move them is `node_config_schema`
+  // below and nowhere else; a second permission projection beside it could only disagree.
+  active_steps: string[];
   // The draft's parsed pipeline render — graph `view` + per-node config/output
   // schema, the SAME shape `GET /datasets/{name}/pipeline` serves for a committed
   // dataset, but computed from the draft (a pre-commit check-in has no
@@ -102,6 +82,19 @@ export interface DraftCampaignWire {
   pipeline_view: PipelineView | null;
   node_config_schema: Record<string, NodeConfigParam[]>;
   node_output_schema: Record<string, NodeOutputSchema | null>;
+  // WHERE the schema above came from, because an empty axis set has two very different
+  // causes. `backend` = the service's own declaration was read at check-in, so
+  // `movable_by` is authoritative. `local` = an in-process connector, whose manifest IS
+  // the declaration. `unreachable` = the probe failed, and NOTHING here can be read as a
+  // lock the operator set — an editor drawing padlocks off this state is asserting a
+  // permission nobody chose.
+  schema_source: "backend" | "local" | "unreachable";
+  // What each model on the menu ACCEPTS and costs, keyed by model id — resolved server-side
+  // through the operator's hand-authored override, then the per-tenant provider snapshot.
+  // Keyed by model, not folded into the `reasoning_effort` row, so switching models re-answers
+  // the ladder with no round-trip. `reasoning_efforts: null` is UNKNOWN and must never render
+  // as unsupported: an absent answer shown as "no" silently deletes a real search axis.
+  model_capabilities: Record<string, ModelCapability>;
   // The active pipeline's required inputs + whether each is fulfilled. Drives the
   // "drop the missing input" affordance in the ready panel.
   dependencies: PipelineDependencyWire[];
@@ -149,9 +142,6 @@ export interface DraftPatch {
   // shallow-merged onto the draft's current overrides server-side — send one
   // knob or several; a nested `mechanisms` replaces wholesale.
   optimization_overrides?: Partial<OptimizationOverridesWire>;
-  // The origin's sanctioned model allow-list. Replaces the draft's set wholesale
-  // (the checklist sends the full ticked list); [] clears it (restrictive default).
-  allowed_models?: string[];
 }
 export interface StartCheckinResponse {
   campaign_id: string;

@@ -18,3 +18,4 @@ export * from "./SegmentedControl";
 export * from "./states";
 export * from "./Switch";
 export * from "./Toolbar";
+export * from "./ValueList";

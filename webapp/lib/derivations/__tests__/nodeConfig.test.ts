@@ -2,13 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
   applyFlatEdits,
   configRows,
+  effortLadder,
   nodeOverlayPatch,
   nodeReach,
   overlayEdits,
+  overlaySetsModelOutsideAllowed,
+  permittedModelsFromNarrowing,
   seedOverlayFromRows,
   type ConfigRow,
 } from "../nodeConfig";
-import type { NodeConfigParam } from "@/lib/api";
+import type { ModelCapability, NodeConfigParam } from "@/lib/api";
 
 function row(over: Partial<ConfigRow> & { key: string; kind: string }): ConfigRow {
   return {
@@ -49,12 +52,12 @@ describe("nodeOverlayPatch (search-space emit)", () => {
     expect(opt.param_allowed_values).toEqual({});
   });
 
-  it("narrows an enum's allowed-values only when a strict subset", () => {
+  it("states an enum's permitted set whenever it DIFFERS from the declared one", () => {
     const patch = nodeOverlayPatch({}, "llm", [
       row({
         key: "reasoning_effort",
         kind: "enum",
-        allowed: ["low"],
+        allowed: ["low", "medium"],
         options: ["low", "medium", "high"],
       }),
       row({ key: "response_format", kind: "enum", allowed: ["t", "j"], options: ["t", "j"] }),
@@ -63,19 +66,62 @@ describe("nodeOverlayPatch (search-space emit)", () => {
       string,
       string[]
     >;
-    // strict subset → narrowed; full set → omitted
-    expect(opt.param_allowed_values).toEqual({ reasoning_effort: ["low"] });
+    // differs → stated; same members → omitted
+    expect(opt.param_allowed_values).toEqual({ reasoning_effort: ["low", "medium"] });
   });
 
-  it("carries a changed origin value into config, coerced by kind; model excluded from param_keys", () => {
+  it("writes a WIDENED set too — an operator may add a value the node never declared", () => {
+    const patch = nodeOverlayPatch({}, "llm", [
+      row({
+        key: "reasoning_effort",
+        kind: "enum",
+        allowed: ["low", "medium", "minimal"],
+        options: ["low", "medium"],
+      }),
+    ]);
+    const opt = (patch.pipeline_overlay!.llm as Record<string, unknown>).optimizer as Record<
+      string,
+      string[]
+    >;
+    expect(opt.param_allowed_values).toEqual({
+      reasoning_effort: ["low", "medium", "minimal"],
+    });
+  });
+
+  it("pins an enumerable axis narrowed to ONE value — no `locked` flag needed", () => {
+    const patch = nodeOverlayPatch({}, "llm", [
+      row({ key: "reasoning_effort", kind: "enum", allowed: ["low"], options: ["low", "high"] }),
+      row({ key: "model", kind: "model", allowed: ["m1"], options: ["m1", "m2"] }),
+    ]);
+    const opt = (patch.pipeline_overlay!.llm as Record<string, unknown>).optimizer as Record<
+      string,
+      unknown
+    >;
+    expect(opt.param_keys).toEqual([]);
+    // The permitted set is still stated — it is what a human fork may steer to un-tainted,
+    // which outlives whether the optimizer may move the axis.
+    expect(opt.param_allowed_values).toEqual({ reasoning_effort: ["low"], model: ["m1"] });
+  });
+
+  it("carries a changed origin value into config; model is an axis like any other", () => {
     const patch = nodeOverlayPatch({}, "entity_profiling", [
       row({ key: "temperature", kind: "number", value: "0.2", baseValue: "0.3" }),
-      row({ key: "model", kind: "model", value: "m2", baseValue: "m1", options: ["m1", "m2"] }),
+      row({
+        key: "model",
+        kind: "model",
+        value: "m2",
+        baseValue: "m1",
+        allowed: ["m1", "m2"],
+        options: ["m1", "m2"],
+      }),
     ]);
     const node = patch.pipeline_overlay!.entity_profiling as Record<string, unknown>;
     expect(node.config).toEqual({ temperature: 0.2, model: "m2" });
-    // temperature (open) lands in param_keys; model never does (always locked)
-    expect((node.optimizer as Record<string, unknown>).param_keys).toEqual(["temperature"]);
+    // Two models permitted, so `model` is open — it is no longer a forbidden key.
+    expect((node.optimizer as Record<string, unknown>).param_keys).toEqual([
+      "temperature",
+      "model",
+    ]);
   });
 
   it("merges onto an existing overlay without clobbering other nodes", () => {
@@ -87,9 +133,9 @@ describe("nodeOverlayPatch (search-space emit)", () => {
   });
 });
 
-// The server `node_config_schema` for an llm_only node: model (a select of
-// available_models, optimizer-locked but operator-editable), reasoning_effort
-// (enum), temperature (number), max_tokens (number, declared but unset).
+// The server `node_config_schema` for an llm_only node: model (this node opens it, so it is a
+// real axis with `available_models` as its menu), reasoning_effort (enum), temperature (number),
+// max_tokens (number, declared but unset).
 const schema: Record<string, NodeConfigParam[]> = {
   llm_only: [
     {
@@ -98,8 +144,8 @@ const schema: Record<string, NodeConfigParam[]> = {
       kind: "model",
       options: ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
       description: "",
-      optimizer_locked: true,
-      movable_by: [],
+      optimizer_locked: false,
+      movable_by: ["l1"],
       held: false,
     },
     {
@@ -147,7 +193,7 @@ describe("configRows (values mode)", () => {
     ]);
     expect(byKey.model!.kind).toBe("model");
     expect(byKey.model!.options).toEqual(["openai/gpt-oss-120b", "openai/gpt-oss-20b"]);
-    expect(byKey.model!.optimizerLocked).toBe(true); // shown, not dropped
+    expect(byKey.model!.optimizerLocked).toBe(false); // an axis, not a cost lever
     expect(byKey.reasoning_effort!.kind).toBe("enum");
     expect(byKey.temperature!.kind).toBe("number");
     expect(byKey.max_tokens!.value).toBe(""); // declared but unset
@@ -188,7 +234,7 @@ describe("seedOverlayFromRows (values emit)", () => {
     expect(seedOverlayFromRows(rows, {})).toEqual({ llm_only: { reasoning_effort: "high" } });
   });
 
-  it("lets the operator override the optimizer-locked model", () => {
+  it("lets the operator override the model on a fork", () => {
     const overlay = seedOverlayFromRows(rows, { "llm_only.model": "openai/gpt-oss-20b" });
     expect(overlay.llm_only!.model).toBe("openai/gpt-oss-20b");
   });
@@ -233,7 +279,8 @@ describe("overlayEdits + applyFlatEdits", () => {
 });
 
 // The reading the picture draws. The denominator is what is OPENABLE — nearly every param,
-// since opening an axis is adding its key to `param_keys`. Only model/provider sit outside.
+// since opening an axis is adding its key to `param_keys`. Only `provider` and `route_order` sit
+// outside; `model` is an ordinary axis and counts.
 describe("nodeReach", () => {
   const param = (over: Partial<NodeConfigParam> & { key: string }): NodeConfigParam => ({
     value: null,
@@ -261,12 +308,12 @@ describe("nodeReach", () => {
     expect(r).toMatchObject({ state: "locked", open: 0, openable: 1, held: true });
   });
 
-  it("model and provider alone leave nothing to lock", () => {
+  it("the cost levers alone leave nothing to lock", () => {
     const r = nodeReach(
       {
         n: [
-          param({ key: "model", kind: "model", optimizer_locked: true }),
           param({ key: "provider", kind: "string", optimizer_locked: true }),
+          param({ key: "route_order", kind: "string", optimizer_locked: true }),
         ],
       },
       "n",
@@ -274,11 +321,21 @@ describe("nodeReach", () => {
     expect(r).toMatchObject({ state: "nothing", open: 0, openable: 0 });
   });
 
+  it("a model row COUNTS — it is an axis, shut or open like any other", () => {
+    const shut = nodeReach({ n: [param({ key: "model", kind: "model" })] }, "n");
+    expect(shut).toMatchObject({ state: "locked", open: 0, openable: 1 });
+    const open = nodeReach(
+      { n: [param({ key: "model", kind: "model", movable_by: ["l1"] })] },
+      "n",
+    );
+    expect(open).toMatchObject({ state: "open", open: 1, openable: 1, agents: ["l1"] });
+  });
+
   it("every openable axis searched reads as open, and forbidden keys do not dilute it", () => {
     const r = nodeReach(
       {
         n: [
-          param({ key: "model", kind: "model", optimizer_locked: true }),
+          param({ key: "provider", kind: "string", optimizer_locked: true }),
           param({ key: "instruction", kind: "prompt", movable_by: ["l1"] }),
         ],
       },
@@ -306,5 +363,86 @@ describe("nodeReach", () => {
       "l1_generate",
     );
     expect(r).toMatchObject({ state: "open", open: 1, openable: 1, agents: ["l2"] });
+  });
+});
+
+
+// Mirrors the Python truth table (`domain/pipeline_overlay.py`): the client warning and the server
+// babysit gate must agree. The permitted set is per NODE now — one campaign-wide list was the
+// second spelling of what `param_allowed_values["model"]` already said.
+describe("overlaySetsModelOutsideAllowed", () => {
+  const permitted = { l1_generate: ["openai/gpt-oss-120b"] };
+  const ds = { l1_generate: { model: "deepseek/deepseek-v4-flash:nitro" } };
+  const oss = { l1_generate: { model: "openai/gpt-oss-120b" } };
+  const out = overlaySetsModelOutsideAllowed;
+
+  it("taints a model the node does not permit", () => expect(out(ds, permitted)).toBe(true));
+  it("is clean for a permitted model", () => expect(out(oss, permitted)).toBe(false));
+  it("is restrictive when nothing is declared", () => expect(out(ds, {})).toBe(true));
+  it("treats an absent map as nothing permitted", () => expect(out(ds, null)).toBe(true));
+  it("is per NODE — another node's grant does not carry", () =>
+    expect(out(oss, { l2_context: ["openai/gpt-oss-120b"] })).toBe(true));
+  it("ignores a non-model edit", () =>
+    expect(out({ l1_generate: { temperature: 0.9 } }, permitted)).toBe(false));
+  it("always taints a provider edit", () =>
+    expect(out({ l1_generate: { provider: "openrouter" } }, permitted)).toBe(true));
+  it("is clean for an empty overlay", () => expect(out({}, permitted)).toBe(false));
+  it("handles a null overlay", () => expect(out(null, permitted)).toBe(false));
+  it("skips non-object node entries", () =>
+    expect(out({ steps: ["a", "b"], l1_generate: oss.l1_generate }, permitted)).toBe(false));
+});
+
+describe("permittedModelsFromNarrowing", () => {
+  it("reads the per-node model list off a frozen narrowing", () => {
+    expect(
+      permittedModelsFromNarrowing({
+        l1_generate: { param_allowed_values: { model: ["a", "b"], reasoning_effort: ["low"] } },
+        l2_context: { param_keys: ["temperature"] },
+      }),
+    ).toEqual({ l1_generate: ["a", "b"] });
+  });
+
+  it("is empty for anything that is not a narrowing", () => {
+    expect(permittedModelsFromNarrowing(null)).toEqual({});
+    expect(permittedModelsFromNarrowing("nope")).toEqual({});
+  });
+});
+
+// The MODEL's ladder replaces the NODE's, and an unknown model must never subtract a rung.
+describe("effortLadder", () => {
+  const caps = (over: Partial<ModelCapability>): ModelCapability => ({
+    model: "m",
+    reasoning_efforts: null,
+    reasoning_note: "",
+    source: "unknown",
+    display_name: "",
+    context_length: null,
+    max_output_tokens: null,
+    input_usd_per_mtok: null,
+    output_usd_per_mtok: null,
+    modality: "",
+    moderated: null,
+    fetched_at: "",
+    ...over,
+  });
+  const effort = row({
+    key: "reasoning_effort",
+    kind: "enum",
+    options: ["low", "medium"],
+  });
+
+  it("replaces the node's list — WIDER is the point, not only narrower", () => {
+    expect(effortLadder(effort, caps({ reasoning_efforts: ["none", "low", "medium", "high"] })))
+      .toEqual(["none", "low", "medium", "high"]);
+  });
+
+  it("falls back to the node's list when the model is UNKNOWN", () => {
+    expect(effortLadder(effort, caps({}))).toEqual(["low", "medium"]);
+    expect(effortLadder(effort, undefined)).toEqual(["low", "medium"]);
+  });
+
+  it("leaves every other axis alone", () => {
+    const model = row({ key: "model", kind: "model", options: ["a", "b"] });
+    expect(effortLadder(model, caps({ reasoning_efforts: ["high"] }))).toEqual(["a", "b"]);
   });
 });

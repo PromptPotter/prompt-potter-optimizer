@@ -96,19 +96,6 @@ export async function postForkCycle(
   if (opts.keepRounds) payload.keep_rounds = true;
   return postCommand("fork-cycle", payload);
 }
-// Rewrite a campaign's inner-optimizer model allow-list — the frozen
-// `campaign.json::config`, the single source both the fork cap-gate and the runner's
-// grade-C stamp read. Replaces the set wholesale; [] clears it (restrictive default).
-// Owner-gated server-side (`campaign.lifecycle`); the optimizer never touches it.
-export async function postSetAllowedModels(
-  campaignId: string,
-  allowedModels: string[],
-): Promise<CommandAcceptedBody> {
-  return postCommand("set-allowed-models", {
-    campaign_id: campaignId,
-    allowed_models: allowedModels,
-  });
-}
 // Give a campaign an operator name — `campaign.json::label`, which
 // `lib/names.ts::campaignDisplayName` prefers over the dataset name everywhere a
 // campaign is named to a human. `""` clears it and restores that fallback, so an

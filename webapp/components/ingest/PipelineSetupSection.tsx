@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { DraftCampaignWire, DraftPatch } from "@/lib/api";
 import { StaticConnectorProvider, useConnector } from "@/lib/hooks/useConnector";
-import { SegmentedControl, Chip, ChipGroup } from "@/components/ui";
+import { SegmentedControl } from "@/components/ui";
 import { useSelection } from "@/lib/SelectionContext";
 import { targetNodeIds } from "@/lib/terms";
 import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
@@ -21,7 +21,7 @@ import { interiorNodes, searchPoint } from "@/lib/derivations";
 // yet — so the draft carries its own pipeline render (byte-identical to what Start
 // commits), which lets the node editor render before commit instead of hanging on
 // "Loading node…". The toggle writes `draft.pipeline_steps`, which commit +
-// `derive_optimizer_locks` read.
+// `draft_active_steps` read.
 
 const LLM_ONLY: string[] = ["llm_only"];
 
@@ -65,32 +65,12 @@ function PipelineSetupInner({
   const cv = useConnector();
   const { node: selected, setSelectionForNode } = useSelection();
 
-  // The model catalogue the allow-list picks from — the union of every model-kind
-  // param's options across nodes (server-populated from `PipelineSchema.available_models`).
-  const modelCatalogue = useMemo(() => {
-    const set = new Set<string>();
-    for (const params of Object.values(cv.nodeConfigSchema ?? {})) {
-      for (const p of params) if (p.kind === "model") for (const o of p.options) set.add(o);
-    }
-    return [...set];
-  }, [cv.nodeConfigSchema]);
-  const allowedModels = draft.allowed_models ?? [];
-  // Toggle a model in/out of the origin's allow-list — the full ticked list rides
-  // one patch (server replaces wholesale). Unticking to empty is the restrictive
-  // default (any human model steer then taints the branch grade C).
-  const toggleAllowed = (model: string) =>
-    onApply({
-      allowed_models: allowedModels.includes(model)
-        ? allowedModels.filter((m) => m !== model)
-        : [...allowedModels, model],
-    });
-
   // Research+Match preset = the committed pipeline's nodes (stable during setup).
   // `llm_only` isn't in a committed Research+Match view, so its preset is fixed.
   const nodes = interiorNodes(cv.view);
   const researchSteps = nodes.map((n) => n.id);
   const hasResearch = researchSteps.length > 0;
-  const isLlmOnly = arraysEqual(draft.optimizer_locks.pipeline, LLM_ONLY);
+  const isLlmOnly = arraysEqual(draft.active_steps, LLM_ONLY);
   // A node detail is only valid for a target-scoped selection that is one of
   // THIS view's nodes (the selection axis is app-global; a Chat-tab selection
   // for another dataset simply won't match, so no stale detail shows).
@@ -128,6 +108,18 @@ function PipelineSetupInner({
         ariaLabel="Pipeline mode"
       />
 
+      {/* An unread schema is NOT a locked one. Which params the optimizer may move is
+          declared by the backend and nowhere else, so when the probe failed the editor
+          below is showing config without permissions — say so rather than let every axis
+          render as an operator's choice to pin it. */}
+      {draft.schema_source === "unreachable" ? (
+        <p className="bnode-role">
+          Backend unreachable at check-in, so which params the optimizer may tune is
+          unknown — only the backend declares that. Values below are still yours to set;
+          reopen this origin once the backend is up to see its real search axes.
+        </p>
+      ) : null}
+
       {isLlmOnly ? (
         <>
           <p className="bnode-role">
@@ -144,6 +136,7 @@ function PipelineSetupInner({
               schema={cv.nodeConfigSchema}
               outputSchema={cv.nodeOutputSchema}
               mode="search-space"
+              modelCapabilities={draft.model_capabilities}
               onApply={onApply}
             />
           ) : (
@@ -174,30 +167,6 @@ function PipelineSetupInner({
         </>
       )}
 
-      {/* Origin allow-list: which models a human may steer a fork to without a
-          babysit warning. The optimizer never searches the model regardless; this
-          governs only the direct human steer. Ticked → clean; unticked → grade C. */}
-      {modelCatalogue.length > 0 ? (
-        <div className="pipeline-setup-allowed">
-          <p className="bnode-role">
-            Allowed models — which models a human may steer a fork to without tainting it.
-            A fork steered to an unticked model still runs but is marked grade C (not a
-            clean measurement). None ticked = nothing sanctioned (any model steer warns).
-          </p>
-          <ChipGroup label="Allowed models" showLabel>
-            {modelCatalogue.map((m) => (
-              <Chip
-                key={m}
-                on={allowedModels.includes(m)}
-                onClick={() => toggleAllowed(m)}
-                title={`${allowedModels.includes(m) ? "Allowed" : "Not allowed"}: ${m}`}
-              >
-                {m}
-              </Chip>
-            ))}
-          </ChipGroup>
-        </div>
-      ) : null}
     </section>
   );
 }

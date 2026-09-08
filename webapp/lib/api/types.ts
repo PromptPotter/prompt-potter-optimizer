@@ -58,6 +58,7 @@ export type {
   CurrentRound,
   DashboardCandidate,
   MeasurementSeriesResponse,
+  ModelCapability,
   NodeConfigParam,
   NodeOutputSchema,
   PipelineView,
