@@ -140,15 +140,13 @@ class DraftCampaign:
         return {
             "draft_id": self.draft_id,
             "slug": self.slug,
-            # Only the wire boundary normalizes to {query, ground_truth} — the internal rows
-            # stay keyed by raw header names, which is what the resolver reads as sample_rows.
-            "sample_preview": [
-                {
-                    "query": row.get(self.column_query, ""),
-                    "ground_truth": row.get(self.column_ground_truth, ""),
-                }
-                for row in self.sample_preview
-            ],
+            # Raw header-keyed rows, same as ``to_disk`` and the resolver's ``sample_rows``.
+            # This used to project through ``column_query``/``column_ground_truth``, which
+            # are "" until the operator confirms them — so every row served blank on any CSV
+            # whose headers are not literally query/ground_truth, and the preview an operator
+            # would read to CHOOSE the mapping was erased by the mapping being unchosen. The
+            # browser has ``headers`` beside this and renders the columns itself.
+            "sample_preview": [dict(row) for row in self.sample_preview],
             "n_samples": self.n_samples,
             "connector": self.connector,
             "scoring_composite": self.scoring_composite,

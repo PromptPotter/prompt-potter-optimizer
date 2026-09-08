@@ -20,7 +20,7 @@
 // through round 0 — until a remount. A live unit re-reads on the same poll shape the tree
 // uses; a stopped one still reads once, because nothing under it can change.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePoll } from "./usePoll";
 import {
   failureKind,
@@ -173,6 +173,21 @@ export function useDatasetPreview(
   const descend = path ? encodeDescend(path) : "";
   const unitKey = path ? encodeCyclePath(path) : null;
   const sliceKey: SliceKey | null = unitKey ? `${unitKey}\x1f${scope}\x1f${order ?? ""}` : null;
+  // ONE object claims a slice and fills it, and `null` is the whole of "not addressable yet".
+  // It used to be two conditions — the effect keyed on `(sliceKey, unitKey)` while `load`
+  // additionally required a dataset name — and they disagree on every cold boot, because
+  // `datasetName` comes from a LATER read than the address does (the `/cycles` row, or
+  // `useLeafCycleIndex` on a drill-in). The effect marked the slice started, `load` returned
+  // silently, no state was written, and the ref then refused the retry that arrived with the
+  // name. The panel showed "loading" over a fetch nobody would ever make, and the only escape
+  // was the live re-read below — which a cycle paused at origin review does not get.
+  const req = useMemo(
+    () =>
+      sliceKey && unitKey && rootCampaignId && rootCycleId && datasetName
+        ? { key: sliceKey, unit: unitKey, rootCampaignId, rootCycleId, datasetName }
+        : null,
+    [sliceKey, unitKey, rootCampaignId, rootCycleId, datasetName],
+  );
 
   const [slices, setSlices] = useState<Record<SliceKey, ScopeState>>({});
   // Slices already fetched or in flight. A ref, not state: it must not re-run the
@@ -186,9 +201,8 @@ export function useDatasetPreview(
   // measured, and a failed poll is not news about them.
   const load = useCallback(
     async (signal: AbortSignal, seeding: boolean) => {
-      if (!sliceKey || !unitKey || !rootCampaignId || !rootCycleId || !datasetName) return;
-      const key = sliceKey;
-      const unit = unitKey;
+      if (!req) return;
+      const { key, unit, rootCampaignId, rootCycleId, datasetName } = req;
       // Captured with the rest of the request identity; the fetchers take `undefined`.
       const ord = order ?? undefined;
       try {
@@ -208,6 +222,8 @@ export function useDatasetPreview(
             ord,
           ).catch(() => null),
         ]);
+        // Dropped, and the MARK is released by the effect's cleanup rather than here — see the
+        // ordering note there. Releasing from this side lands a microtask too late.
         if (signal.aborted) return;
         setSlices((prev) => ({
           ...keepUnit(prev, unit),
@@ -219,12 +235,7 @@ export function useDatasetPreview(
           },
         }));
       } catch (e) {
-        if (signal.aborted) {
-          // Never leave an aborted attempt marked as done — the next mount of this
-          // same slice must be free to try again.
-          if (seeding) started.current.delete(key);
-          return;
-        }
+        if (signal.aborted) return;
         if (!seeding) return;
         // A scope whose artifact does not exist yet answers 404, and that is an
         // honest EMPTY, not a failure: a campaign legitimately has no pooled slice
@@ -241,30 +252,53 @@ export function useDatasetPreview(
         }));
       }
     },
-    [sliceKey, unitKey, rootCampaignId, rootCycleId, descend, datasetName, scope, order],
+    [req, descend, scope, order],
   );
 
   useEffect(() => {
-    if (!sliceKey || !unitKey) return;
+    if (!req) return;
     // Forget attempts for units no longer in view, so navigating back re-fetches
     // rather than waiting on a "done" mark for data that has since been pruned.
-    const prefix = `${unitKey}\x1f`;
+    const prefix = `${req.unit}\x1f`;
     for (const k of [...started.current]) if (!k.startsWith(prefix)) started.current.delete(k);
-    if (started.current.has(sliceKey)) return;
-    started.current.add(sliceKey);
+    if (started.current.has(req.key)) return;
+    started.current.add(req.key);
     const ac = new AbortController();
-    void load(ac.signal, true);
-    return () => ac.abort();
-  }, [sliceKey, unitKey, load]);
+    // The mark is released HERE, in the cleanup, and the ordering is the whole point: React runs
+    // cleanup before the next effect body, so a re-run that keeps the same `key` — a late
+    // `datasetName` landing for the same unit, or a dev double-mount — finds the mark gone and
+    // re-claims. Released from inside the aborted `load` instead, it landed a microtask LATER: the
+    // body had already read the mark and returned, leaving the slice with neither a fetch in
+    // flight nor a claim, on deps that no longer change. That is "loading" for the life of the
+    // tab, which is the exact failure this hook was rewritten to end.
+    let settled = false;
+    void load(ac.signal, true).then(
+      () => {
+        settled = true;
+      },
+      // `load` catches its own failures, so this arm is the impossible one — and if it ever
+      // fires nothing was written, so the slice must stay re-claimable rather than marked done.
+      () => started.current.delete(req.key),
+    );
+    return () => {
+      ac.abort();
+      if (!settled) started.current.delete(req.key);
+    };
+  }, [req, load]);
 
   // The live re-read. Only the slice in view, and only while the unit is measuring —
   // `keepUnit` already holds nothing else, and a stopped cycle's rows cannot change.
   usePoll((signal) => load(signal, false), {
     intervalMs: LIVE_REFRESH_MS,
-    enabled: live && sliceKey !== null,
+    enabled: live && req !== null,
   });
 
   if (!sliceKey) return EMPTY;
+  // Addressed, but not yet resolvable — the name this roster is keyed by has not landed.
+  // Its own arm, because the sibling-borrow below answers a DIFFERENT question ("this scope
+  // is in flight, show the neighbouring one greyed") and there is no neighbour to borrow
+  // when nothing about the unit has been read yet.
+  if (!req) return { ...EMPTY_SLICE, splitTest: null, order: null, isStale: true, error: null };
   const state = slices[sliceKey];
 
   // Still in flight for the requested (unit, scope). Fall back to ANY slice already

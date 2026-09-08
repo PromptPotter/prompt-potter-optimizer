@@ -44,7 +44,10 @@ export interface OptimizationOverridesWire {
 export interface DraftCampaignWire {
   draft_id: string;
   slug: string;
-  sample_preview: Array<{ query: string; ground_truth: string }>;
+  // First 10 parsed rows, keyed by the RAW upload headers — NOT projected through
+  // `column_query`/`column_ground_truth`, which are "" until the operator confirms them.
+  // Render against `headers`; the mapping decorates the columns, it does not select them.
+  sample_preview: Array<Record<string, string>>;
   n_samples: number;
   connector: string;
   scoring_composite: string;

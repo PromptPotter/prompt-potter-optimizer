@@ -96,36 +96,23 @@ export function HardSamplesHeatmap() {
   // instead only made the re-derivation agree with itself. An ordering is a score: the
   // fix is not to sort it correctly, it is not to sort it.
 
-  // THREE facts, three sentences. A failed read and an empty roster were split
-  // first (both used to `return null`, so a 404 was indistinguishable from a
-  // collapsed panel); the third — STILL LOADING — stayed folded into "empty", and
-  // that is the one an operator meets most. The roster is four `limit=1000` reads
-  // awaited together, so the first load is genuinely slow, and for its whole
-  // duration this panel asserted the campaign had no samples and hid its two
-  // controls with it. `useDatasetPreview` already reports that state
-  // (`isStale` with an empty slice, its comment: "show a loading affordance, not
-  // blank chrome") — the claim was made over the top of the signal.
-  if (datasetError) {
-    return (
-      <div className="hs-heat-wrap">
-        <p className="hs-heat-empty" role="status">
-          Couldn&rsquo;t read this campaign&rsquo;s samples
-          {datasetName ? ` (${datasetName})` : ""}.
-        </p>
-      </div>
-    );
-  }
-  if (datasetItems.length === 0) {
-    return (
-      <div className="hs-heat-wrap">
-        <p className="hs-heat-empty" role="status">
-          {datasetStale
-            ? "Loading this campaign’s samples…"
-            : "No samples on this campaign’s dataset yet."}
-        </p>
-      </div>
-    );
-  }
+  // FOUR facts, four sentences, and none of them replaces the control row. A failed
+  // read and an empty roster were split first (both used to `return null`, so a 404
+  // was indistinguishable from a collapsed panel); STILL LOADING came next, because
+  // the roster is four `limit=1000` reads and for their whole duration this panel
+  // asserted the campaign had no samples. The fourth is a CHECK-IN: `datasets/{slug}/`
+  // is written at Start, so `/preview` 404s by construction, and "no samples yet" reads
+  // as a broken dataset when nothing is broken. The rows for that state are on the
+  // draft, rendered by the check-in panel below this hero.
+  const rosterNote = datasetError
+    ? `Couldn’t read this campaign’s samples${datasetName ? ` (${datasetName})` : ""}.`
+    : datasetItems.length > 0
+      ? null
+      : dash?.run_phase === "checkin"
+        ? "Not committed yet — the sample bank is written when this campaign starts."
+        : datasetStale
+          ? "Loading this campaign’s samples…"
+          : "No samples on this campaign’s dataset yet.";
 
   // Mean fitness, not a hit rate: on a binary scorer the two are the same number
   // (the mean of 0/1 IS the hit rate), and on a graded one only this reports
@@ -139,33 +126,38 @@ export function HardSamplesHeatmap() {
 
   return (
     <div className="hs-heat-wrap">
+      {/* ONE control row, whatever the roster says. `SampleTrajectoryMiniButton` reads
+          `dash.rounds`, not the roster, so a roster read has no business hiding it — and
+          it did, because each state above used to replace the whole row with a sentence. */}
       <div className="hs-controls-row">
-        <button
-          type="button"
-          className="hs-heat-mini-btn"
-          onClick={() => setHeatExpanded((e) => !e)}
-          aria-expanded={heatExpanded}
-          aria-label={heatExpanded ? "Collapse sample heat-map" : `Expand sample heat-map. ${summary}.`}
-          title={`${summary} — click to ${heatExpanded ? "collapse" : "expand"} · drag to resize`}
-        >
-          <span className="hs-heat-mini" aria-hidden="true">
-            {datasetItems.map((it) => {
-              const ms = perSample.get(it.sample_id);
-              let cls: "hit" | "miss" | "none" = "none";
-              if (ms && ms.length > 0) {
-                const mean =
-                  ms.reduce((k, m) => k + m.fitness, 0) / ms.length;
-                cls = mean >= 0.5 ? "hit" : "miss";
-              }
-              return (
-                <span
-                  key={it.sample_id}
-                  className={`hs-heat-mini-cell ${cls}`}
-                />
-              );
-            })}
-          </span>
-        </button>
+        {rosterNote ? (
+          <p className="hs-heat-empty" role="status">
+            {rosterNote}
+          </p>
+        ) : (
+          <button
+            type="button"
+            className="hs-heat-mini-btn"
+            onClick={() => setHeatExpanded((e) => !e)}
+            aria-expanded={heatExpanded}
+            aria-label={
+              heatExpanded ? "Collapse sample heat-map" : `Expand sample heat-map. ${summary}.`
+            }
+            title={`${summary} — click to ${heatExpanded ? "collapse" : "expand"} · drag to resize`}
+          >
+            <span className="hs-heat-mini" aria-hidden="true">
+              {datasetItems.map((it) => {
+                const ms = perSample.get(it.sample_id);
+                let cls: "hit" | "miss" | "none" = "none";
+                if (ms && ms.length > 0) {
+                  const mean = ms.reduce((k, m) => k + m.fitness, 0) / ms.length;
+                  cls = mean >= 0.5 ? "hit" : "miss";
+                }
+                return <span key={it.sample_id} className={`hs-heat-mini-cell ${cls}`} />;
+              })}
+            </span>
+          </button>
+        )}
         <SampleTrajectoryMiniButton
           expanded={bankExpanded}
           rounds={dash?.rounds ?? []}
@@ -175,7 +167,7 @@ export function HardSamplesHeatmap() {
       {(bankExpanded || heatExpanded) && (
         <RotatePrompt surfaceName="The sample heat-map" skipRender>
           {bankExpanded && <SampleTrajectory rounds={dash?.rounds ?? []} />}
-          {heatExpanded && (
+          {heatExpanded && !rosterNote && (
             <div className="hs-expand-wrap">
               <HardSamplesTable perSample={perSample} />
             </div>

@@ -3579,17 +3579,13 @@ components:
           minItems: 0
           maxItems: 10
           description: |
-            First 10 parsed rows; read-only. Projected to the `{query,
-            ground_truth}` wire shape using the resolved `column_query` /
-            `column_ground_truth` mapping (the internal bank stays keyed by raw
-            headers). Both fields are blank until the columns are confirmed.
+            First 10 parsed rows; read-only. Keyed by the RAW upload headers, so
+            the rows survive an unresolved `column_query` / `column_ground_truth`
+            — a client renders them against `headers` and marks the two mapped
+            columns itself.
           items:
             type: object
-            required: [query, ground_truth]
-            additionalProperties: false
-            properties:
-              query: { type: string }
-              ground_truth: { type: string }
+            additionalProperties: { type: string }
         n_samples:
           type: integer
           minimum: 0

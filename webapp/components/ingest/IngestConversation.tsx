@@ -10,6 +10,7 @@ import { SlugField } from "@/components/forms/SlugField";
 import { MechanismsPanel } from "@/components/dashboard/control/MechanismsPanel";
 import { RunSummaryItem } from "@/components/chat/RunCard";
 import { ColumnMappingPicker } from "./ColumnMappingPicker";
+import { DatasetPreview } from "./DatasetPreview";
 import { ComposerTools } from "./ComposerTools";
 import { PipelineSetupSection } from "./PipelineSetupSection";
 import { OptimizerSetupSection } from "./OptimizerSetupSection";
@@ -341,6 +342,9 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
           onApply={flow.applyPatch}
         />
       ) : null}
+
+      {/* Above the picker on purpose: the mapping is chosen by reading the rows. */}
+      <DatasetPreview draft={draft} />
 
       <ColumnMappingPicker draft={draft} onApply={flow.applyPatch} />
 
