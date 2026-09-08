@@ -85,6 +85,57 @@ class NodeType(enum.StrEnum):
     CACHE = "cache"
 
 
+class NodeKind(enum.StrEnum):
+    """What a node IS — the CLOSED vocabulary a manifest's ``type:`` may name.
+
+    Three families, and the third is the one that needed naming. A THINKING node runs a model, so a
+    model, a reasoning rung and a temperature are its own. A retrieval or plumbing node moves data.
+    A **GATEWAY** node runs another PIPELINE: every tunable it appears to have belongs to the
+    pipeline it hands off to, which is why it carries no config of its own — and why one stray key
+    on it drew a padlocked ``reasoning_effort`` row on the single node in the optimizer graph that
+    does not reason. ``node_config_schema`` derives a node's params from ``current_config``, so
+    without a kind to ask, a config key was left deciding what the node was.
+
+    Closed rather than an open string because the open one had to be read by SHAPE
+    (``startswith("llm")``), which cannot tell a DECLARED type from a DERIVED view kind — and
+    ``presentation/teleprompter.py`` writes ``"llm"``, which is the latter. Five members below
+    still spell one concept — "runs a model" — and collapsing them is a dataset migration rather
+    than a rename, so until it happens each is NAMED here rather than matched by shape: a spelling
+    nobody listed is now refused at parse instead of silently reading as a tool.
+    """
+
+    # Thinking — it runs a model.
+    LLM = "llm"
+    GENERATION = "generation"
+    LLM_OPTIMIZER = "llm/optimizer"
+    OPTIMIZER_PROMPT = "optimizer_prompt"
+    AGENT = "agent"
+    # Retrieval and plumbing — it moves data.
+    RETRIEVER = "retriever"
+    TOOL = "tool"
+    CACHE = "cache"
+    # Gateway — it runs another pipeline rather than doing the work itself. The WIRE spelling stays
+    # `measurement`: three manifests, the served `PipelineViewNode.kind` and the webapp's own
+    # measurement arm already say it, and a second word for one concept is what this enum exists to
+    # stop. `GATEWAY` is what the code says, because "it hands off" is the fact every reader wants.
+    GATEWAY = "measurement"
+
+
+# A real choice WITHIN the type, so it is asserted rather than derived (`promptpotter/CLAUDE.md`
+# § Ask the typed predicate): the members are listed, and the assert is what catches a new kind
+# added above without deciding which family it joins.
+THINKING_KINDS: frozenset[NodeKind] = frozenset(
+    {
+        NodeKind.LLM,
+        NodeKind.GENERATION,
+        NodeKind.LLM_OPTIMIZER,
+        NodeKind.OPTIMIZER_PROMPT,
+        NodeKind.AGENT,
+    }
+)
+assert frozenset(NodeKind) >= THINKING_KINDS
+
+
 # The dependency kind a ``candidate_source`` node raises, and the file that
 # fulfils it on disk. A candidate_source node ranks each query against a target
 # library; without one the pool is just the answers already in the dataset (a
@@ -215,7 +266,10 @@ class PipelineNode(StrictModel):
     model_config = ConfigDict(frozen=True)
 
     name: str
-    wire_type: str = ""
+    # `None` is "the producer declared no type", a real state (`teleprompter.py` writes one) and
+    # deliberately not a member: an UNDECLARED node reading as some default kind is the silence
+    # this enum replaces. Anything else is refused at parse.
+    wire_type: NodeKind | None = None
     node_type: NodeType = NodeType.NONE
     param_keys: set[str] = Field(default_factory=set)
     # What ``narrow`` TOOK AWAY — the axes this dataset declared and this campaign closed.
@@ -259,7 +313,7 @@ class PipelineNode(StrictModel):
         return (
             self.name == "llm_only"
             or self.is_llm
-            or self.wire_type == "generation"
+            or self.wire_type is NodeKind.GENERATION
             or self.langfuse_type == "generation"
         )
 
@@ -322,6 +376,14 @@ class ModelCapability(StrictModel):
     model: str
     reasoning_efforts: list[str] | None
     reasoning_note: str
+    # The GENERAL case of the row above: which keys we would put on the request that this model
+    # does not accept, so a setting the provider silently drops is REPORTED rather than rendered as
+    # live. Scoped to what `openai_compat.chat` actually sends (`PROVIDER_REQUEST_PARAMS`) — a
+    # catalogue has no opinion on a backend's own `max_sites`, and marking one would be a
+    # confident wrong answer. `None` is UNKNOWN and never "accepts everything": same rule as
+    # `reasoning_efforts`, because striking a row on an absent answer deletes a real setting.
+    # `[]` is the real "takes everything we send".
+    unsupported_params: list[str] | None = None
     # Which layer answered: "override" (operator-authored), "openrouter" (fetched snapshot),
     # "unknown". Shown so a narrowed list can say whose claim it is.
     source: str
@@ -429,6 +491,32 @@ class PipelineSchema(StrictModel):
         unbounded string the LLM would fill with an invented model id."""
         declared = node.param_allowed_values.get("model")
         return list(declared) if declared else list(self.available_models)
+
+    def selectable_models(self) -> list[str]:
+        """Every model a surface here can put on screen — the catalogue UNION each node's own
+        permitted set and the value it currently carries.
+
+        A UNION, deliberately, where :meth:`model_options` PREFERS: that one answers "what bounds
+        this node", so a declared set replaces the catalogue — right for the run, wrong here.
+        A model row's menu is the catalogue plus whatever the node permits, so narrowing to one
+        model must not cost the capabilities of the models still on the menu; switching between
+        them re-answers the reasoning ladder with no round-trip, and that is the whole reason this
+        is resolved for a SET rather than for the pick.
+
+        And it is not ``available_models`` alone. That is the ADMIN's catalogue, and a model the
+        OPERATOR typed deliberately rides ``param_allowed_values.model`` instead
+        (``draft_build._origin_pipeline_json`` states why merging the two would erase the one thing
+        that marks a value as theirs) — so asking the catalogue could not, by construction, answer
+        for a typed model. Picking one resolved no capabilities at all, and the card carrying its
+        context, price and modality rendered nothing, silently, on the very surface where the model
+        is chosen and the spend is committed.
+        """
+        models = set(self.available_models)
+        for node in self.config_nodes:
+            models.update(node.param_allowed_values.get("model", ()))
+            if isinstance(picked := node.current_config.get("model"), str) and picked:
+                models.add(picked)
+        return sorted(models)
 
     def node_config_schema(
         self, l2_axes: dict[str, set[str]] | None = None
@@ -649,7 +737,9 @@ __all__ = [
     "CANDIDATE_LIBRARY",
     "CANDIDATE_LIBRARY_FILE",
     "MOVABLE_AGENTS",
+    "THINKING_KINDS",
     "NodeConfigParam",
+    "NodeKind",
     "NodeOutputSchema",
     "NodePromptInfo",
     "NodeType",

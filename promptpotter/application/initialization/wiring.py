@@ -177,12 +177,20 @@ async def _resolve_pipeline_schema(
     if dataset_config_dir is not None:
         local_raw = read_yaml_optional(dataset_pipeline_path(dataset_config_dir))
 
+    # A `PayloadInvalidError` from the parser is a DECLARATION the operator got wrong — an unknown
+    # node type, a gateway carrying config — and it is re-raised rather than warned past. Falling
+    # back to the local file would answer a broken declaration with a different pipeline, and
+    # falling through to the generic raise below would report "nothing usable" for a file that
+    # parses fine but for one named node. Everything else here is still a REACHABILITY problem,
+    # which is exactly what the fallback exists for.
     if backend_resp:
         merged = _apply_dataset_overlay(backend_resp, local_raw or {})
         try:
             schema = parse_pipeline_response(merged)
             status(f"Pipeline: {schema.name} ({len(schema.nodes)} nodes)")
             return schema
+        except PayloadInvalidError:
+            raise
         except Exception as exc:
             logger.warning("Failed to parse merged pipeline schema: %s", exc)
 
@@ -191,6 +199,8 @@ async def _resolve_pipeline_schema(
             schema = parse_pipeline_response(local_raw)
             status(f"Pipeline: {schema.name} ({len(schema.nodes)} nodes, offline)")
             return schema
+        except PayloadInvalidError:
+            raise
         except Exception as exc:
             logger.warning("Failed to parse offline pipeline.yaml: %s", exc)
 

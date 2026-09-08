@@ -2,7 +2,12 @@
 // vocabulary every graph surface reads. The graph shapes themselves are re-exported from
 // the generated wire types, never mirrored here.
 
-import type { NodeConfigParam, NodeOutputSchema, PipelineView } from "@/lib/api";
+import type {
+  ModelCapability,
+  NodeConfigParam,
+  NodeOutputSchema,
+  PipelineView,
+} from "@/lib/api";
 
 export type { PipelineView, PipelineViewEdge, PipelineViewNode } from "@/lib/api";
 
@@ -61,6 +66,10 @@ export interface PipelineDoc {
   // Read-only there: the optimizer's own pipeline is edited by hand.
   node_config_schema?: Record<string, NodeConfigParam[]>;
   node_output_schema?: Record<string, NodeOutputSchema | null>;
+  // What each model on those rows accepts and costs. Optimizer-LOCKED is not unpriced: the model
+  // is fixed, but which effort rungs it takes and what a round of it costs are the same facts the
+  // rows need — and this is the surface on which a dead `reasoning_effort` was first read.
+  model_capabilities?: Record<string, ModelCapability>;
   // The prompt each optimizer node STARTS from, keyed `"{node}/{version}"` — a node
   // declaring several prompts carries one entry per version. It is the floor under a
   // searchpoint that carries no evolved delta for that node, without which the detail

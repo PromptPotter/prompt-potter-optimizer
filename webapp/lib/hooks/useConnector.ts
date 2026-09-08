@@ -43,6 +43,7 @@ import {
   fetchDatasetPipeline,
   type BackendHealthResponse,
   type BackendResponse,
+  type ModelCapability,
   type NestedPipelineRef,
   type NodeConfigParam,
   type NodeOutputSchema,
@@ -67,6 +68,7 @@ const EMPTY: ConnectorView = {
   health: null,
   nodeConfigSchema: null,
   nodeOutputSchema: null,
+  modelCapabilities: {},
   phase: null,
   nests: null,
 };
@@ -97,6 +99,9 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
     string,
     NodeOutputSchema | null
   > | null>(null);
+  // `{}` rather than `null`: an unresolved catalogue and a resolved-but-empty one are the same
+  // answer to every reader — UNKNOWN, render nothing struck — so there is no second state to keep.
+  const [modelCapabilities, setModelCapabilities] = useState<Record<string, ModelCapability>>({});
   const [nests, setNests] = useState<NestedPipelineRef | null>(null);
 
   // Render-phase guarded reset — drops every dataset-keyed slot together
@@ -111,6 +116,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
     setBackendType(null);
     setNodeConfigSchema(null);
     setNodeOutputSchema(null);
+    setModelCapabilities({});
     setNests(null);
   }
 
@@ -163,6 +169,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
           setBackendType(resp?.backend_type ?? null);
           setNodeConfigSchema(resp?.node_config_schema ?? null);
           setNodeOutputSchema(resp?.node_output_schema ?? null);
+          setModelCapabilities(resp?.model_capabilities ?? {});
           setNests(resp?.nests ?? null);
           setLoaded({ key: datasetName, failed: false });
         }
@@ -173,6 +180,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
           setBackendType(null);
           setNodeConfigSchema(null);
           setNodeOutputSchema(null);
+          setModelCapabilities({});
           setNests(null);
           setLoaded({ key: datasetName, failed: true });
         }
@@ -267,6 +275,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
       health,
       nodeConfigSchema,
       nodeOutputSchema,
+      modelCapabilities,
       phase,
       nests,
     };
@@ -282,6 +291,7 @@ function useConnectorViewEngine(datasetName: string | null): ConnectorView {
     health,
     nodeConfigSchema,
     nodeOutputSchema,
+    modelCapabilities,
     phase,
     nests,
   ]);

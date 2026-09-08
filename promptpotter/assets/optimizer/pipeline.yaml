@@ -77,11 +77,14 @@ nodes:
       the wire-cost extraction, so they carry `cost_usd: null`, and the next run on it is the
       first that can settle the comparison. The pin sits on 0423 until it does. Latency is the
       only measured difference so far: 16.1s vs 23.0s median.
+  # The MEASUREMENT node: it runs the whole campaign pipeline against the panel and makes no
+  # optimizer call of its own — no model, no prompt, no tunable, so `config` stays empty and the
+  # menus alias does not belong here. `node_config_schema` derives a node's params from
+  # `current_config`, so the dead `reasoning_effort: high` that stood here drew a padlocked
+  # reasoning row on the one node in this graph that does not reason.
   l1_score:
     type: measurement
-    optimizer: *node_menus
-    config:
-      reasoning_effort: high
+    config: {}
   l1_critique:
     type: agent
     optimizer: *node_menus

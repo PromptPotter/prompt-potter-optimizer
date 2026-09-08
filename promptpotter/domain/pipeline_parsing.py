@@ -8,8 +8,11 @@ from typing import Any
 from promptpotter.config.settings import WELL_KNOWN_PARAM_TYPES
 from promptpotter.domain.pipeline_schema import (
     SCHEMA_DESCRIPTIONS_PARAM,
+    THINKING_KINDS,
+    NodeKind,
     NodeOutputSchema,
     NodePromptInfo,
+    NodeType,
     ObservationMapping,
     PipelineNode,
     PipelineSchema,
@@ -17,6 +20,7 @@ from promptpotter.domain.pipeline_schema import (
     PipelineViewEdge,
     PipelineViewNode,
 )
+from promptpotter.shared.errors import PayloadInvalidError
 
 logger = logging.getLogger(__name__)
 
@@ -62,28 +66,61 @@ def strip_lone_surrogates(obj: Any) -> Any:
     return obj
 
 
+def _node_kind(name: str, raw: object) -> NodeKind | None:
+    """The declared ``type:``, admitted only if :class:`NodeKind` names it. RAISES on anything
+    else — a typed setup error, not a warning, because the alternative is what stood before: an
+    unrecognised type fell through to ``tool`` and the run proceeded describing the node wrongly on
+    every surface. Absent stays ``None``; that is a producer saying nothing, not a bad answer."""
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, str):
+        try:
+            return NodeKind(raw)
+        except ValueError:
+            pass
+    # One raise for both misses — an unknown spelling and a non-string (a YAML `type: 3`) are the
+    # same answer to the operator, and splitting them would state the permitted set twice.
+    raise PayloadInvalidError(
+        f"node {name!r} declares type {raw!r}, which is not a node kind. One of: "
+        f"{', '.join(sorted(k.value for k in NodeKind))}.",
+        code="pipeline_config_invalid",
+        details={"node": name, "declared_type": str(raw)},
+    )
+
+
 def _derive_node_kind(node: PipelineNode | None) -> str:
-    """Cache role wins — a hit short-circuits the pipeline — then the LLM-bearing signals,
-    broadest first, so a node carrying the model axis can never read as anything else."""
+    """The DECLARED kind (:class:`NodeKind`) mapped to the coarser vocabulary the CLIENT styles
+    (``PipelineViewNode.kind``). Cache role wins — a hit short-circuits the pipeline — then the
+    model-axis signal, so a node carrying it can never read as anything else.
+
+    TOTAL over ``NodeKind`` rather than matched by prefix. ``startswith("llm")`` could not tell a
+    declared type from a view kind spelled into a manifest, and every unlisted string fell through
+    to ``tool`` — so a kind the client styles for nothing and a kind nobody declared were one
+    answer. Now the first is this match's job and the second is refused at parse."""
     if node is None:
         return "tool"
-    if str(node.node_type) == "cache":
+    if node.node_type is NodeType.CACHE:
         return "cache"
     if node.runs_llm:
         return "llm"
-    # `llm/optimizer` and `agent` bear an LLM without carrying the MODEL AXIS, which is all
-    # `runs_llm` asks about — an in-process optimizer node resolves no carrier.
-    if node.wire_type.startswith("llm") or node.wire_type == "agent":
-        return "llm"
-    # A kind this cannot emit is a kind the client styles and captions for nothing, so every
-    # member of the served vocabulary has a branch here (`pipeline_schema.PipelineViewNode`).
-    if node.wire_type == "measurement":
-        return "measurement"
-    if node.wire_type == "retriever":
-        return "retriever"
-    if node.wire_type == "tool":
+    kind = node.wire_type
+    # An undeclared node is plumbing until its producer says otherwise — the one place the old
+    # catch-all survives, now naming the single input it actually covers.
+    if kind is None:
         return "tool"
-    return "tool"
+    if kind in THINKING_KINDS:
+        # `llm/optimizer` and `agent` bear an LLM without carrying the MODEL AXIS, which is all
+        # `runs_llm` asks about — an in-process optimizer node resolves no carrier.
+        return "llm"
+    match kind:
+        case NodeKind.GATEWAY:
+            return "measurement"
+        case NodeKind.RETRIEVER:
+            return "retriever"
+        case NodeKind.TOOL | NodeKind.CACHE:
+            return "tool"
+        case _:  # pragma: no cover — THINKING_KINDS covers the rest, and the assert pins that
+            raise AssertionError(f"NodeKind {kind!r} has no view kind")
 
 
 def derive_pipeline_view(
@@ -292,10 +329,25 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         opt = node.get("optimizer", {})
         nc = node.get("config", {})
         pk = set(opt.get("param_keys", []))
+        kind = _node_kind(name, node.get("type"))
+        # A GATEWAY runs another PIPELINE, so the tunables it appears to have are that pipeline's
+        # and it owns none. Refused here rather than filtered downstream: `node_config_schema`
+        # derives a node's params from `param_keys | param_keys_held | current_config`, so a key
+        # left standing in EITHER block becomes a row on every surface — which is how a dead
+        # `reasoning_effort` came to be drawn, padlocked, on the one node in the optimizer graph
+        # that does not reason. Both blocks, or the rule holds on the half that bit once.
+        if kind is NodeKind.GATEWAY and (declared := sorted(set(nc) | pk)):
+            raise PayloadInvalidError(
+                f"node {name!r} is a gateway ({kind.value}): it runs another pipeline, so its "
+                f"tunables belong to that pipeline and it declares none of its own. Remove "
+                f"{declared} from its `config` / `optimizer.param_keys`.",
+                code="pipeline_config_invalid",
+                details={"node": name, "kind": kind.value, "declared_keys": declared},
+            )
 
         step_kwargs: dict[str, Any] = {
             "name": name,
-            "wire_type": node.get("type", ""),
+            "wire_type": kind,
             "node_type": node.get("node_role", ""),
             "param_keys": pk,
             "param_descriptions": opt.get("param_descriptions", {}),

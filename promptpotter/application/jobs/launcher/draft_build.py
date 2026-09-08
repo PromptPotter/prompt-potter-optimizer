@@ -26,7 +26,7 @@ from promptpotter.domain.pipeline_schema import (
     dependencies_from_node_types,
 )
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.llm.capabilities import resolve_menu
+from promptpotter.infrastructure.llm.capabilities import resolve_schema_menu
 
 
 def _origin_pipeline_json(draft: DraftCampaign, nodes: dict[str, Any]) -> dict[str, Any]:
@@ -125,12 +125,12 @@ def _draft_pipeline_render(draft: DraftCampaign, workspace: Path | None) -> dict
         "pipeline_view": schema.view.model_dump(by_alias=True) if schema.view is not None else None,
         "node_config_schema": schema.node_config_schema(),
         "node_output_schema": schema.node_output_schemas(),
-        # Every model on the MENU, not only the picked one: switching models must re-answer the
-        # reasoning ladder with no round-trip, which is what keeps the surface honest while the
-        # operator is still deciding.
+        # Every model a node may be SET to, not only the picked one: switching models must
+        # re-answer the reasoning ladder with no round-trip, which is what keeps the surface honest
+        # while the operator is still deciding. Which models those are, and why it is not the admin
+        # catalogue, is `resolve_schema_menu`'s — the same call the two read doors make.
         "model_capabilities": {
-            m: c.model_dump()
-            for m, c in resolve_menu(schema.available_models, workspace=workspace).items()
+            m: c.model_dump() for m, c in resolve_schema_menu(schema, workspace=workspace).items()
         },
         # WHY the axes read as they do, so an empty answer is never mistaken for a locked one.
         # A remote connector with no captured declaration means the probe failed, and the editor

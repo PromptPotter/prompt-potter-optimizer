@@ -108,6 +108,17 @@ def _failure_diagnostics(response: ChatCompletion, first: TokenAccount) -> dict[
     }
 
 
+# The node-config keys that ride the LLM REQUEST — exactly what `OpenAICompatibleClient.chat` puts
+# on the wire, which is the only set a provider's `supported_parameters` can speak about. Declared
+# beside the sender because that is what makes it answerable: a key added to `chat` and not added
+# here is one nothing can report as ignored. Everything else a node declares (`max_sites`,
+# `scrape_timeout`, …) belongs to the BACKEND, and no model catalogue has an opinion on it —
+# marking one of those would be a confident wrong answer.
+PROVIDER_REQUEST_PARAMS: frozenset[str] = frozenset(
+    {"temperature", "max_tokens", "reasoning_effort", "seed", "response_format"}
+)
+
+
 class OpenAICompatibleClient(LLMClientBase):
     def __init__(
         self,

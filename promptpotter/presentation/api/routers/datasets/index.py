@@ -3,7 +3,8 @@ and need nothing measured. The leaderboard reads live in ``leaderboard.py``, ing
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from pathlib import Path
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -14,8 +15,14 @@ from promptpotter.application.datasets.authored import (
 from promptpotter.application.runner.inner.tasks import inner_tasks_path, load_inner_tasks
 from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.pipeline_schema import NodeConfigParam, NodeOutputSchema, PipelineView
+from promptpotter.domain.pipeline_schema import (
+    ModelCapability,
+    NodeConfigParam,
+    NodeOutputSchema,
+    PipelineView,
+)
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.llm.capabilities import resolve_schema_menu
 from promptpotter.infrastructure.store.dataset_access import (
     dataset_pipeline_path,
     list_readable_datasets,
@@ -29,9 +36,6 @@ from promptpotter.presentation.api.routers.datasets._router import datasets_rout
 from promptpotter.shared.errors import (
     NotFoundError,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 class DatasetIndexEntry(StrictModel):
@@ -118,6 +122,12 @@ class DatasetPipelineResponse(StrictModel):
     # The only wire naming a nested pipeline: otherwise a client can recover the inner
     # benchmark only as a prefix of `spawned_by.task`, which needs a cell already spawned.
     nests: NestedPipelineRef | None
+    # What each model on this pipeline's menu ACCEPTS and costs, resolved server-side so no surface
+    # re-derives it. It rides the pipeline read rather than a call of its own because it answers
+    # about `node_config_schema`'s rows — which effort rungs are inert, which declared param the
+    # provider drops, what one Mtok costs — and a row rendered before its capabilities land is a
+    # row asserting a setting that may not exist. Empty is UNKNOWN, never "supports nothing".
+    model_capabilities: dict[str, ModelCapability]
 
 
 def _nested_pipeline(dataset_dir: Path, view: PipelineView | None) -> NestedPipelineRef | None:
@@ -168,6 +178,7 @@ def get_dataset_pipeline(name: str, stores: StoresDep) -> DatasetPipelineRespons
         node_config_schema=schema.node_config_schema(),
         node_output_schema=schema.node_output_schemas(),
         nests=_nested_pipeline(dataset_dir, schema.view),
+        model_capabilities=resolve_schema_menu(schema, workspace=Path(stores.base_dir)),
     )
 
 

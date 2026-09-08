@@ -222,6 +222,10 @@ function SearchSpaceEditor({
               key={r.key}
               row={r}
               readOnly={readOnly}
+              // The general case of the struck rungs below: a key the picked model does not
+              // accept. `unsupported_params` is the SERVED answer over what we actually send, so
+              // `undefined` here means the catalogue said nothing and the row claims nothing.
+              ignoredBy={caps?.unsupported_params?.includes(r.key) ? pickedModel : undefined}
               onToggleLock={singleNode ? undefined : () => update(i, { locked: !r.locked })}
               onValue={onApply ? (v) => update(i, { value: v }) : undefined}
             />
@@ -448,12 +452,16 @@ function ConfigRowView({
   values = false,
   readOnly,
   permitted,
+  ignoredBy,
   onToggleLock,
   onValue,
 }: {
   row: ConfigRow;
   values?: boolean;
   readOnly: boolean;
+  // The picked model, when it does NOT accept this key — so the row says the value is dropped
+  // rather than showing it as a live setting. Undefined = accepted, or the catalogue never said.
+  ignoredBy?: string;
   // values mode: the models this node permits. Options outside it are disabled — steering
   // there is the babysit act and this principal lacks the cap. Undefined = no restriction.
   permitted?: readonly string[];
@@ -470,6 +478,19 @@ function ConfigRowView({
         {values && row.fromCandidate ? (
           <span className="config-evolved" title="Carried from this searchpoint">
             ·evolved
+          </span>
+        ) : null}
+        {/* A setting the provider DROPS is the one thing a config row must not render as live:
+            the value sits there looking set, the model never receives it, and nothing anywhere
+            says so — which is how `reasoning_effort: low` read as a bound on a model that emitted
+            99% reasoning tokens. Wears the same badge as a held axis because it is the same fact
+            to a reader: not in play, reason in the title. */}
+        {ignoredBy ? (
+          <span
+            className="config-optlocked"
+            title={`${ignoredBy} does not accept ${row.key} — it is dropped by the provider, so this value has no effect.`}
+          >
+            ⊘
           </span>
         ) : null}
         {/* Two states on screen — the optimizer may move this axis, or it may not — because

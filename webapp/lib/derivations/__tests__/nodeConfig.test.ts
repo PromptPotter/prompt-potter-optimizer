@@ -414,6 +414,7 @@ describe("effortLadder", () => {
     model: "m",
     reasoning_efforts: null,
     reasoning_note: "",
+    unsupported_params: null,
     source: "unknown",
     display_name: "",
     context_length: null,
@@ -446,3 +447,4 @@ describe("effortLadder", () => {
     expect(effortLadder(model, caps({ reasoning_efforts: ["high"] }))).toEqual(["a", "b"]);
   });
 });
+

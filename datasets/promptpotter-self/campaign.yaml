@@ -21,7 +21,8 @@ campaign_config:
           - deepseek/deepseek-v4-flash:nitro
           - qwen/qwen3.8-27b:nitro
           - openai/gpt-oss-120b
-    l1_score: *pp_self_models
+    # `l1_score` is absent on purpose, and is the only node here that is: it is the measurement
+    # node, so it runs no model and a permitted model set on it names nothing.
     l1_critique: *pp_self_models
     l2_context: *pp_self_models
     l3_plan: *pp_self_models

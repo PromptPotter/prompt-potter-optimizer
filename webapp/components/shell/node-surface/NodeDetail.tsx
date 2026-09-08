@@ -82,6 +82,12 @@ export function NodeDetail({ node: selected, draft, onClose, onPromptApply }: Pr
   const outputSchema = isOptimizer
     ? (optimizer?.node_output_schema ?? null)
     : cv.nodeOutputSchema;
+  // Off the SAME read as the rows it qualifies. Fetched separately, a row would draw an effort
+  // rung, a temperature or a price before anything could say the model takes no such parameter —
+  // and a setting the provider silently drops reads exactly like one that is in force.
+  const modelCapabilities = isOptimizer
+    ? (optimizer?.model_capabilities ?? {})
+    : cv.modelCapabilities;
 
   const {
     nodes: roundNodes,
@@ -90,6 +96,40 @@ export function NodeDetail({ node: selected, draft, onClose, onPromptApply }: Pr
     loading: nodesLoading,
   } = useRoundNodes();
   const block: NodeBlock | null = isOptimizer ? (roundNodes[id] ?? null) : null;
+
+  // The optimizer manifest's prompt for this node, resolved HERE rather than inside
+  // `OptimizerProgram`: the header's copy needs the same spec the body renders, and computing it
+  // twice is how the two would come to disagree about what this node runs.
+  const origin = nodeOriginPrompt(optimizer, id);
+
+  // WHAT this panel can hand over, and the two are not one payload. PROGRAM is what the node IS
+  // — the half every scope has. RUN is the audit block, optimizer-scoped and absent until the
+  // node fires, so it is DROPPED rather than offered empty.
+  //
+  // The header used to copy `block ?? {id, scope, label, kind}` alone, and `block` is hard-null
+  // in target scope (above) — so on the panel headed "Searchpoint" the button handed over a
+  // four-key stub and never the searchpoint, which was in scope two frames down.
+  const identity = { id, scope, label: node?.label ?? id, kind: servedKind };
+  const program = isOptimizer
+    ? { ...identity, prompt_fields: origin?.fields ?? {} }
+    : draft
+      ? {
+          ...identity,
+          resolved_pipeline_params: draft.pipeline_overlay,
+          prompt_fields: draft.origin_prompt_fields,
+        }
+      : observe.cfg
+        ? {
+            ...identity,
+            searchpoint: observe.cfg.label,
+            resolved_pipeline_params: observe.cfg.config,
+            prompt_fields: observe.cfg.promptFields,
+          }
+        : identity;
+  const copyChoices = [
+    { key: "program", label: "What this node runs", data: program },
+    ...(block ? [{ key: "run", label: `What it did in round ${viewedRound}`, data: block }] : []),
+  ];
 
   const livePhaseNode = dash?.current_round.active_node ?? null;
   // `viewingLive` too: a node inspected on a historical round is not live, even when
@@ -120,10 +160,7 @@ export function NodeDetail({ node: selected, draft, onClose, onPromptApply }: Pr
                 {viewingLive ? " · live" : ""}
               </span>
             )}
-            <CopyButton
-              data={block ?? { id, scope, label: node?.label ?? id, kind: servedKind }}
-              title="Copy this node's full I/O as JSON"
-            />
+            <CopyButton choices={copyChoices} title="Copy this node as JSON" />
             <button
               type="button"
               className="bnode-close"
@@ -141,10 +178,10 @@ export function NodeDetail({ node: selected, draft, onClose, onPromptApply }: Pr
         {isOptimizer ? (
           <OptimizerProgram
             node={node}
-            id={id}
+            origin={origin}
             schema={schema}
             outputSchema={outputSchema}
-            doc={optimizer}
+            modelCapabilities={modelCapabilities}
           />
         ) : (
           <TargetProgram
@@ -153,6 +190,7 @@ export function NodeDetail({ node: selected, draft, onClose, onPromptApply }: Pr
             observe={observe}
             schema={schema}
             outputSchema={outputSchema}
+            modelCapabilities={modelCapabilities}
             isLive={isLive}
             onPromptApply={onPromptApply}
           />
@@ -186,18 +224,18 @@ function scopeLabel(isOptimizer: boolean): string {
 // than by a flag someone could flip.
 function OptimizerProgram({
   node,
-  id,
+  origin,
   schema,
   outputSchema,
-  doc,
+  modelCapabilities,
 }: {
   node: Parameters<typeof NodeSurface>[0]["node"];
-  id: string;
+  // Resolved by the panel, so the header's copy and this body cannot show two prompts.
+  origin: ReturnType<typeof nodeOriginPrompt>;
   schema: Parameters<typeof NodeSurface>[0]["schema"];
   outputSchema: Parameters<typeof NodeSurface>[0]["outputSchema"];
-  doc: Parameters<typeof nodeOriginPrompt>[0];
+  modelCapabilities: Parameters<typeof NodeSurface>[0]["modelCapabilities"];
 }) {
-  const origin = nodeOriginPrompt(doc, id);
   return (
     <>
       <NodeSurface
@@ -206,6 +244,7 @@ function OptimizerProgram({
         configSeed={{}}
         schema={schema}
         outputSchema={outputSchema}
+        modelCapabilities={modelCapabilities}
         mode="values"
       />
       {origin && origin.count > 1 && (
@@ -227,6 +266,7 @@ function TargetProgram({
   observe,
   schema,
   outputSchema,
+  modelCapabilities,
   isLive,
   onPromptApply,
 }: {
@@ -235,6 +275,7 @@ function TargetProgram({
   observe: ReturnType<typeof useObserveSearchPoint>;
   schema: Parameters<typeof NodeSurface>[0]["schema"];
   outputSchema: Parameters<typeof NodeSurface>[0]["outputSchema"];
+  modelCapabilities: Parameters<typeof NodeSurface>[0]["modelCapabilities"];
   isLive: boolean;
   onPromptApply?: (patch: DraftPatch) => void;
 }) {
@@ -251,6 +292,7 @@ function TargetProgram({
         configSeed={authoring ? draft.pipeline_overlay : {}}
         schema={schema}
         outputSchema={outputSchema}
+        modelCapabilities={modelCapabilities}
         mode={authoring ? "search-space" : "values"}
         onApply={authoring ? onPromptApply : undefined}
       />
@@ -282,6 +324,7 @@ function TargetProgram({
             configSeed={observe.cfg.config}
             schema={schema}
             outputSchema={outputSchema}
+            modelCapabilities={modelCapabilities}
             label={observe.cfg.label}
             mode="values"
           />

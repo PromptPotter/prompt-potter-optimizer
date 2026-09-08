@@ -31,7 +31,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from promptpotter.domain.pipeline_schema import ModelCapability
+from promptpotter.domain.pipeline_schema import ModelCapability, PipelineSchema
 from promptpotter.infrastructure.store.io import (
     read_json_tolerant,
     read_yaml_optional,
@@ -173,8 +173,20 @@ def resolve_model_capabilities(model: str, *, workspace: Path) -> ModelCapabilit
             source="unknown",
         )
 
-    params = record.get("supported_parameters")
-    params = [str(p) for p in params] if isinstance(params, list) else []
+    from promptpotter.infrastructure.llm.openai_compat import PROVIDER_REQUEST_PARAMS
+
+    raw_params = record.get("supported_parameters")
+    # The GENERAL answer, computed once here so no surface re-derives it: of the keys we would
+    # actually send, which does this model not accept. Only where the catalogue DECLARED a list —
+    # a record without one says nothing, and an absent list read as "supports none" would strike
+    # every row on a model that takes them all.
+    unsupported: list[str] | None
+    if isinstance(raw_params, list):
+        params = [str(p) for p in raw_params]
+        unsupported = sorted(PROVIDER_REQUEST_PARAMS - set(params))
+    else:
+        params = []
+        unsupported = None
     takes_effort = _EFFORT_PARAM in params
     return ModelCapability(
         model=model,
@@ -187,18 +199,33 @@ def resolve_model_capabilities(model: str, *, workspace: Path) -> ModelCapabilit
             else "Takes no reasoning_effort parameter, so only the two rungs that send nothing."
         ),
         source="openrouter",
+        unsupported_params=unsupported,
         **_card(model, record, str(cached.get("fetched_at") or "")),
     )
 
 
 def resolve_menu(models: Sequence[str], *, workspace: Path | None) -> dict[str, ModelCapability]:
-    """Every model on a menu, resolved once — the ONE function both wire producers call.
+    """Every model on a menu, resolved once.
 
     *workspace* ``None`` yields an empty map, which every reader must render as UNKNOWN rather
     than as a menu of unsupported models."""
     if workspace is None:
         return {}
     return {m: resolve_model_capabilities(m, workspace=workspace) for m in models}
+
+
+def resolve_schema_menu(
+    schema: PipelineSchema, *, workspace: Path | None
+) -> dict[str, ModelCapability]:
+    """Every model a SCHEMA can put on screen, resolved — the ONE call each wire producer makes.
+
+    The PAIRING is the rule, not the convenience. Ask ``available_models`` here instead — the
+    obvious spelling, and the one that stood — and a model the OPERATOR typed resolves nothing at
+    all, because a typed value rides ``param_allowed_values.model`` and by construction never
+    reaches the admin catalogue. The card carrying that model's context, price and modality then
+    rendered blank, silently, on the surface where the spend is committed. Spelled once, so the
+    next door to open cannot re-derive it wrongly."""
+    return resolve_menu(schema.selectable_models(), workspace=workspace)
 
 
 async def refresh_model_capabilities(workspace: Path, *, timeout: float = 15.0) -> int:
@@ -254,4 +281,5 @@ __all__ = [
     "refresh_model_capabilities",
     "resolve_menu",
     "resolve_model_capabilities",
+    "resolve_schema_menu",
 ]

@@ -1473,6 +1473,13 @@
             "title": "Connector",
             "type": "string"
           },
+          "model_capabilities": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ModelCapability"
+            },
+            "title": "Model Capabilities",
+            "type": "object"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -1535,7 +1542,8 @@
           "view",
           "node_config_schema",
           "node_output_schema",
-          "nests"
+          "nests",
+          "model_capabilities"
         ],
         "title": "DatasetPipelineResponse",
         "type": "object"
@@ -3496,6 +3504,130 @@
           "axis_label"
         ],
         "title": "MetricSpec",
+        "type": "object"
+      },
+      "ModelCapability": {
+        "additionalProperties": false,
+        "description": "What ONE model accepts and costs — resolved server-side, served per model id.\n\nKeyed by MODEL rather than folded into the `reasoning_effort` param row, because the answer\nchanges the moment the operator picks a different model and a surface must be able to say so\nwith no round-trip.\n\n`reasoning_efforts` `None` is UNKNOWN and never \"unsupported\": a caller keeps the node's own\ndeclared ladder untouched. Rendering an absent answer as \"no\" silently deletes a real search\naxis, which is the failure this type was written after. `reasoning_note` is populated in EVERY\narm — unknown, no effort knob, operator override, full ladder — because a reason that appears\nonly sometimes is a state nothing can report.\n\nEvery card field is optional and a surface renders only what is present. Populated from the\nprovider catalogue snapshot, which is a third party's claim and goes stale on their schedule.",
+        "properties": {
+          "context_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Length"
+          },
+          "display_name": {
+            "default": "",
+            "title": "Display Name",
+            "type": "string"
+          },
+          "fetched_at": {
+            "default": "",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "input_usd_per_mtok": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Usd Per Mtok"
+          },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output Tokens"
+          },
+          "modality": {
+            "default": "",
+            "title": "Modality",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "moderated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moderated"
+          },
+          "output_usd_per_mtok": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Usd Per Mtok"
+          },
+          "reasoning_efforts": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Efforts"
+          },
+          "reasoning_note": {
+            "title": "Reasoning Note",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "unsupported_params": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unsupported Params"
+          }
+        },
+        "required": [
+          "model",
+          "reasoning_efforts",
+          "reasoning_note",
+          "source"
+        ],
+        "title": "ModelCapability",
         "type": "object"
       },
       "NestedPipelineRef": {

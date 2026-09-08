@@ -3,6 +3,7 @@ the webapp through the generated TS) and neither is live telemetry — that is t
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Query
@@ -18,6 +19,7 @@ from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.run_records import MintKind
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.llm.capabilities import resolve_schema_menu
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import descend_store
 from promptpotter.presentation.api.deps import (
@@ -295,7 +297,7 @@ def get_machine_status(identity: IdentityDep, jobs: JobRegistryDep) -> MachineSt
 
 
 @active_router.get("/optimizer-pipeline", tags=["Optimizer"])
-def get_optimizer_pipeline() -> dict[str, Any]:
+def get_optimizer_pipeline(stores: StoresDep) -> dict[str, Any]:
     """Bundled ``promptpotter/assets/optimizer/pipeline.yaml`` + its generated
     ``resolved_schemas.json`` sibling — nodes + pipelines + ``view``
     topology, plus the per-node typed config surface (``node_config_schema`` /
@@ -322,6 +324,14 @@ def get_optimizer_pipeline() -> dict[str, Any]:
     pipeline["node_output_schema"] = {
         node: (out.model_dump() if out is not None else None)
         for node, out in schema.node_output_schemas().items()
+    }
+    # Optimizer-LOCKED is not the same as unpriced: the model is fixed, but which effort rungs it
+    # actually accepts and what a round of it costs are the same facts every other node's rows need.
+    # Per tenant, because the hand-authored override that corrects a wrong catalogue lives in their
+    # workspace — which is what makes ``StoresDep`` load-bearing here rather than decoration.
+    pipeline["model_capabilities"] = {
+        m: c.model_dump()
+        for m, c in resolve_schema_menu(schema, workspace=Path(stores.base_dir)).items()
     }
     return pipeline
 

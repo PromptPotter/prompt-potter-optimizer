@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.escalation_signals import INVARIANT_REASONS
 from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.rendering import display_fitness, display_rank_key
 
 if TYPE_CHECKING:
@@ -250,11 +251,16 @@ def _scoreboard(
 # reference (``from .display import DISPLAY_TAGS``).
 DISPLAY_TAGS: dict[str, str] = {}
 
-_WIRE_TYPE_TAGS: dict[str, str] = {
-    "generation": "ai",
-    "retriever": "retr",
-    "tool": "tool",
-    "cache": "cach",
+# Keyed on the closed vocabulary, so a kind added there is a name this map can be asked about
+# rather than one that silently takes the initials fallback below. Partial on purpose, and the
+# test is whether a SHARED tag beats the node's own name: the optimizer's kinds (`l1_g`, `l1_c`)
+# and the in-process `llm` the teleprompter writes read better as themselves, and a graph with
+# two of one kind gets `ai_1`/`ai_2` — a family tag buying a number is worse than the name.
+_WIRE_TYPE_TAGS: dict[NodeKind, str] = {
+    NodeKind.GENERATION: "ai",
+    NodeKind.RETRIEVER: "retr",
+    NodeKind.TOOL: "tool",
+    NodeKind.CACHE: "cach",
 }
 
 
@@ -262,7 +268,10 @@ def _build_display_tags(schema: PipelineSchema) -> dict[str, str]:
     from collections import Counter
 
     base_tags: list[tuple[str, str]] = [
-        (n.name, _WIRE_TYPE_TAGS.get(n.wire_type, "") or n.name[:4]) for n in schema.nodes
+        # An UNDECLARED node has no kind to read a tag off, so it falls to its own initials —
+        # the same place a declared kind this map does not carry lands.
+        (n.name, (_WIRE_TYPE_TAGS.get(n.wire_type) if n.wire_type else None) or n.name[:4])
+        for n in schema.nodes
     ]
     tag_counts = Counter(tag for _, tag in base_tags)
     tag_seq: dict[str, int] = {}

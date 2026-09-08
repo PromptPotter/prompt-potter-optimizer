@@ -143,6 +143,7 @@ export interface DegradationHealth {
   transient_count: number;
   no_result_count: number;
   hole_count: number;
+  not_attempted: number;
   answer_modal_share: number | null;
   degraded_rate: number;
   consecutive_degraded_rounds: number;
@@ -151,6 +152,7 @@ export interface DegradationHealth {
   node_failure_rates: Record<string, number>;
   node_warnings: Record<string, string[]>;
   suggested_action: string | null;
+  last_error: string | null;
 }
 
 /** How sharply each cell was measured, against how far apart the cells landed — the two bars */
@@ -437,6 +439,7 @@ export interface RoundResult {
   p_value: number | null;
   verdict_reason: string | null;
   degraded_samples: number;
+  not_attempted: number;
   deprecated: number;
   escalation_signal: unknown | null;
   matched_parent_accuracy: number | null;
@@ -737,6 +740,7 @@ export interface ModelCapability {
   model: string;
   reasoning_efforts: string[] | null;
   reasoning_note: string;
+  unsupported_params: string[] | null;
   source: string;
   display_name: string;
   context_length: number | null;
@@ -806,6 +810,7 @@ export interface DatasetPipelineResponse {
   node_config_schema: Record<string, NodeConfigParam[]>;
   node_output_schema: Record<string, NodeOutputSchema | null>;
   nests: NestedPipelineRef | null;
+  model_capabilities: Record<string, ModelCapability>;
 }
 
 export interface ActiveSessionResponse {

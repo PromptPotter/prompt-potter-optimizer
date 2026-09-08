@@ -22,6 +22,7 @@
 import type {
   BackendHealthResponse,
   BackendResponse,
+  ModelCapability,
   NestedPipelineRef,
   NodeConfigParam,
   NodeOutputSchema,
@@ -64,6 +65,12 @@ export interface ConnectorView {
   // The per-node structured-output contract (read-only), shown beside the config
   // so the operator sees the whole node. Same fetch.
   nodeOutputSchema: Record<string, NodeOutputSchema | null> | null;
+  // What each model on those rows ACCEPTS and costs, keyed by model id — served
+  // beside the rows it qualifies, never fetched per pick. It is what strikes an
+  // effort rung the model has no parameter for, marks a declared param the
+  // provider silently drops, and draws the context/price card. Empty is UNKNOWN
+  // (an unresolved catalogue), never "this model supports nothing".
+  modelCapabilities: Record<string, ModelCapability>;
   // Which node of THIS pipeline runs another whole pipeline, and whose — served,
   // never guessed from a node name. Null for every ordinary dataset. It is what
   // lets the mechanics panel walk the layer stack past this dataset.

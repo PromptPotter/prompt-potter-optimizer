@@ -419,7 +419,8 @@ function PipelineBox({
           const nests = nestAt(n.id);
           const reach = nodeReach(schema, n.id);
           // Drawn on a nesting node too: the badge sits BESIDE the glyph, so "this runs a
-          // pipeline" and "its own axes are shut" never compete for one mark. `l1_score` is both.
+          // pipeline" and "its own axes are shut" never compete for one mark — two facts, two
+          // marks. A measurement node declares no axis at all and takes the bare dot.
           const lock: "open" | "closed" | null = !reach
             ? null
             : reach.state === "locked"
