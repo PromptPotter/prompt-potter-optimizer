@@ -36,8 +36,8 @@ up. That is the recursion working; a per-depth agent name would be a second spel
 #      pipeline's wire contract, and a mutated `output_schema` (e.g. an L1 variant
 #      that replaced it with a raw `{{format_string}}` template) breaks the backend
 #      ("Schema must contain 'properties'"). So `node_param_keys` strips them from
-#      the optimizer's emittable surface — UNCONDITIONALLY, unlike model/provider
-#      (`PARAM_FORBIDDEN_KEYS`), which have an ablation unlock; the schema never does.
+#      the optimizer's emittable surface — UNCONDITIONALLY, unlike `schema_field_rename`,
+#      which has an ablation unlock; the schema contract never does.
 #      `answer_field` is the same structural contract by another name: it names WHICH
 #      slot of `output_schema` carries the answer, so a mutated one makes the executor
 #      destructure the wrong field and grade every sample against reasoning prose.
@@ -281,10 +281,12 @@ class NodeConfigParam(StrictModel):
     only true lock: nobody may, and changing it costs a fork.
 
     Two fields say WHY a shut axis is shut, and the difference is the whole point:
-    `optimizer_locked` = never an axis (`PARAM_FORBIDDEN_KEYS` — a confound guard, nobody's
-    decision); `held` = the dataset offered it and this campaign closed it (`param_keys_held`
-    — somebody's decision, and reversible). Neither = plain configuration, never an axis at
-    all."""
+    `optimizer_locked` = never an axis (`PARAM_FORBIDDEN_KEYS` — `provider` and `route_order`,
+    cost levers set against a measured capture, nobody's decision); `held` = the dataset offered
+    it and this campaign closed it (`param_keys_held` — somebody's decision, and reversible).
+    Neither = plain configuration, never an axis at all. **`model` is in neither set**: it is an
+    ordinary axis whose openness is its node's own `param_keys` answer, and its permitted values
+    are `param_allowed_values["model"]` (see `PipelineSchema.model_options`)."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -298,9 +300,53 @@ class NodeConfigParam(StrictModel):
     held: bool = False
 
 
+class ModelCapability(StrictModel):
+    """What ONE model accepts and costs — resolved server-side, served per model id.
+
+    Keyed by MODEL rather than folded into the `reasoning_effort` param row, because the answer
+    changes the moment the operator picks a different model and a surface must be able to say so
+    with no round-trip.
+
+    `reasoning_efforts` `None` is UNKNOWN and never "unsupported": a caller keeps the node's own
+    declared ladder untouched. Rendering an absent answer as "no" silently deletes a real search
+    axis, which is the failure this type was written after. `reasoning_note` is populated in EVERY
+    arm — unknown, no effort knob, operator override, full ladder — because a reason that appears
+    only sometimes is a state nothing can report.
+
+    Every card field is optional and a surface renders only what is present. Populated from the
+    provider catalogue snapshot, which is a third party's claim and goes stale on their schedule.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    model: str
+    reasoning_efforts: list[str] | None
+    reasoning_note: str
+    # Which layer answered: "override" (operator-authored), "openrouter" (fetched snapshot),
+    # "unknown". Shown so a narrowed list can say whose claim it is.
+    source: str
+    display_name: str = ""
+    context_length: int | None = None
+    max_output_tokens: int | None = None
+    input_usd_per_mtok: float | None = None
+    output_usd_per_mtok: float | None = None
+    modality: str = ""
+    moderated: bool | None = None
+    fetched_at: str = ""
+
+
 class NodeSearchNarrowing(StrictModel):
-    """The dataset's ``pipeline.yaml`` declares the MAXIMUM tunable surface; a campaign may only
-    SUBSET it. Prompt-decomposition fields stay tunable regardless — the prompt is always evolved."""
+    """A campaign's own declaration over the dataset's, and the two halves do NOT compose the same
+    way — see :meth:`PipelineSchema.narrow`.
+
+    ``param_keys`` SUBSETS: the dataset's ``pipeline.yaml`` declares the maximum tunable surface
+    and a campaign may only close axes within it. Prompt-decomposition fields stay tunable
+    regardless — the prompt is always evolved.
+
+    ``param_allowed_values`` REPLACES: a value space is not a permission over the dataset's, it is
+    this campaign's statement of what its axis ranges over, with the dataset's list as the default
+    it starts from. That is what lets an operator ADD a value — a model the catalogue predates, a
+    reasoning rung a node never listed — through the channel that already carries the narrowing."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -372,6 +418,18 @@ class PipelineSchema(StrictModel):
         from the surface is not a locked node, it is nothing at all."""
         return self.declared_nodes or self.nodes
 
+    def model_options(self, node: "PipelineNode") -> list[str]:
+        """The PERMITTED model set for one node — its own ``param_allowed_values["model"]`` when
+        declared, else the pipeline's ``available_models`` catalogue.
+
+        The single answer to "which models may run here", shared by the L1 wire schema (whose enum
+        this bounds), ``validate_overrides`` (which rejects against it) and the param catalogue the
+        optimizer prompt renders. **Empty is a real answer** — no catalogue and no declaration
+        means the axis has no value space, and a caller must then emit nothing rather than an
+        unbounded string the LLM would fill with an invented model id."""
+        declared = node.param_allowed_values.get("model")
+        return list(declared) if declared else list(self.available_models)
+
     def node_config_schema(
         self, l2_axes: dict[str, set[str]] | None = None
     ) -> dict[str, list[NodeConfigParam]]:
@@ -403,6 +461,11 @@ class PipelineSchema(StrictModel):
                 elif n.param_types.get(key) in NESTED_PARAM_TYPES:
                     kind = "nested"
                 elif key == "model":
+                    # The CATALOGUE, and only the catalogue — never the permitted set. Two things
+                    # rest on that. Narrowing must not shrink `options`, or unticking a model
+                    # would be a one-way ratchet the operator could not undo. And a value the
+                    # operator TYPED is exactly one this list does not carry, which is the only
+                    # thing that lets a surface mark it as theirs rather than the admin's.
                     kind, options = "model", list(self.available_models)
                 elif key in n.param_allowed_values:
                     kind, options = "enum", list(n.param_allowed_values[key])
@@ -416,10 +479,11 @@ class PipelineSchema(StrictModel):
                         else "string"
                     )
                 # Who may move this axis, in ``MOVABLE_AGENTS`` order — one source per agent,
-                # so a member added to that tuple has to be given one here. model/provider are
-                # operator-owned and searched by nobody, so they short-circuit to the empty
-                # list. A config-only key (in current_config, not param_keys) admits neither
-                # agent: it is a setting, not an axis.
+                # so a member added to that tuple has to be given one here. `provider` and
+                # `route_order` are cost levers searched by nobody, so they short-circuit to the
+                # empty list; `model` does NOT — it is an ordinary axis and answers here exactly
+                # as the node's `param_keys` says. A config-only key (in current_config, not
+                # param_keys) admits neither agent: it is a setting, not an axis.
                 forbidden = key in PARAM_FORBIDDEN_KEYS
                 reach = {"l1": n.param_keys, "l2": (l2_axes or {}).get(n.name, set())}
                 movable = [] if forbidden else [a for a in MOVABLE_AGENTS if key in reach[a]]
@@ -432,17 +496,18 @@ class PipelineSchema(StrictModel):
                         description=n.param_descriptions.get(key, ""),
                         optimizer_locked=forbidden,
                         movable_by=movable,
-                        # A forbidden key is never HELD, however it left `param_keys`: a
-                        # dataset may list `model` there and narrowing then drops it, but
-                        # nobody closed an axis — there was none to close, and saying
-                        # otherwise puts a padlock on the confound guard.
+                        # A forbidden key is never HELD, however it left `param_keys`: nobody
+                        # closed an axis — there was none to close, and saying otherwise puts a
+                        # padlock on a cost lever.
                         held=not forbidden and key in n.param_keys_held,
                     )
                 )
             if n.name == model_carrier and self.available_models:
-                # Synthesized carrier model row: optimizer-locked (never searched) yet
-                # operator-editable on a fork — the seed overlay outranks the dataset,
-                # same posture as a native model row.
+                # Synthesized carrier row: the node never DECLARED a model, so nothing here is an
+                # axis — plain configuration (`movable_by=[]`, `held=False`), operator-editable on
+                # a fork because the seed overlay outranks the dataset. Not `optimizer_locked`,
+                # which means "a cost lever nobody may search"; this is simply a key the node
+                # did not open.
                 params.append(
                     NodeConfigParam(
                         key="model",
@@ -451,7 +516,6 @@ class PipelineSchema(StrictModel):
                         options=list(self.available_models),
                         description="Optimizer model for this node — install-global by "
                         "default, operator-steerable on a fork.",
-                        optimizer_locked=True,
                     )
                 )
             out[n.name] = params
@@ -481,8 +545,14 @@ class PipelineSchema(StrictModel):
         )
 
     def narrow(self, narrowing: dict[str, NodeSearchNarrowing] | None) -> "PipelineSchema":
-        """Intersects, never widens; prompt-decomposition fields are always kept tunable. Empty
-        narrowing is a no-op and a node absent from the mapping is unchanged."""
+        """**Keys SUBSET, values REPLACE** — the two halves protect different things, and only the
+        first is the maximum-surface contract. Prompt-decomposition fields are always kept tunable.
+        Empty narrowing is a no-op and a node absent from the mapping is unchanged.
+
+        ``param_keys`` intersects: a campaign may close an axis the dataset opened, never open one
+        it closed. ``param_allowed_values`` assigns: the value space is the campaign's own
+        declaration, with the dataset's list as its default — which is what lets an operator ADD a
+        model or a reasoning rung that no `pipeline.yaml` on disk carries."""
         if not narrowing:
             return self
 
@@ -498,14 +568,10 @@ class PipelineSchema(StrictModel):
                 else:
                     kept = set(nv.param_keys)
                     keys = (n.param_keys & kept) | (n.param_keys & _PROMPT_OWNED_FIELDS)
-                allowed = dict(n.param_allowed_values)
-                for param, vals in nv.param_allowed_values.items():
-                    subset = set(vals)
-                    allowed[param] = (
-                        [v for v in allowed[param] if v in subset]
-                        if param in allowed
-                        else list(vals)
-                    )
+                allowed = {
+                    **n.param_allowed_values,
+                    **{k: list(v) for k, v in nv.param_allowed_values.items()},
+                }
                 out.append(
                     n.model_copy(
                         update={

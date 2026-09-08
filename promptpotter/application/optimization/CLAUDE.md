@@ -62,9 +62,11 @@ Fires only on L2 stall. Produces a **strategic replan** — the framing surface,
 - **`unlock_schema_field_rename` is a bool, never the `ConfigOverrides` object.** Handed the whole delta, a layer could move its own spend ceiling. It is the layer's only search-policy request and can ride nothing but this rewind, because `schema_field_rename` invalidates comparability and must mint a sibling.
 - **A REASON is what makes `terminate_proposal` a decision.** The field is optional, so a blank one is a volunteered field — ignored, exactly as one arriving with the capability off is — and both the honored stop and the ignored blank land on the operator's warnings channel, because a halt whose reason lives only in a log line is a halt nobody can act on.
 
-## The optimizer never searches WHO ANSWERS
+## The optimizer never searches the GATEWAY or the ROUTE
 
-Not the model, not the gateway, not the route. `PARAM_FORBIDDEN_KEYS` (`domain/search_point.py` — read the set there) is an INVARIANT rather than a toggle: those keys are never emitted for the LLM to set, so the lock is structural and not policed per round. A human may steer the model on a fork via the seed overlay; steering outside `CampaignConfig.allowed_models` is cap-gated and taints the branch babysat ([ADR-0005](../../../docs/adr/0005-delegated-principals-and-capability-scoping.md) §4). Either way the done C0 is inherited, not re-measured.
+`PARAM_FORBIDDEN_KEYS` (`domain/search_point.py` — read the set there) holds `provider` and `route_order`, and is an INVARIANT rather than a toggle: neither is emitted for the LLM to set, so the lock is structural and not policed per round. Both are cost levers the operator sets against a measured capture, and hosts of one model disagree systematically.
+
+**`model` is NOT in that set and is a legitimate axis.** Whether it is open is the answer of a node's own `optimizer.param_keys`, per dataset — so an instrument that must not move under the arms it measures closes it there (`justlogic-d234`, `bbeh`), and a campaign free to search it leaves it open. Its permitted values are `param_allowed_values["model"]`, the ONE set: what the optimizer may pick, and what a human may steer a fork to un-tainted. Steering outside it is cap-gated and taints the branch babysat ([ADR-0005](../../../docs/adr/0005-delegated-principals-and-capability-scoping.md) §4). Either way the done C0 is inherited — `WHO_ANSWERS_KEYS` (model + the two cost levers) is what that inherit reads, and it is deliberately the wider set.
 
 ## Editing a renderer's PROSE is a measurement change
 

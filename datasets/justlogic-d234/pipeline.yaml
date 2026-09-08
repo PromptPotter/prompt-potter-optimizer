@@ -51,9 +51,12 @@ nodes:
       answer_field: answer
     optimizer:
       param_keys:
+        # `model` is deliberately NOT here. This is the L4 inner instrument, and its menu is
+        # one model under two ROUTES (`:nitro` and plain) — opening the axis would let L1
+        # flip the host while reporting a prompt, which is the confound `route_order` is
+        # forbidden for, wearing a model name.
         - temperature
         - max_tokens
-        - model
         - reasoning_effort
         - persona
         - task_intent

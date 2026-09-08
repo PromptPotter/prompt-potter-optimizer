@@ -237,7 +237,10 @@ def _origin_candidate_id(session: Session, cycle_id: str, from_round: int) -> st
 
 def _maybe_fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx, session: Session) -> None:
     """``--steer-model NODE=MODEL``: the CLI twin of the web steer-fork; C0 is INHERITED, so only the
-    candidate is measured. Outside ``allowed_models`` needs ``campaign.babysit`` and grades the branch C."""
+    candidate is measured. Outside what the node PERMITS needs ``campaign.babysit`` and grades the
+    branch C — and the fork then DECLARES the model it was steered to, so the branch carries its own
+    permitted set and the next fork from it is clean. Widening is a fork act, never an in-place
+    manifest edit: the permitted set is ``Scope.DATA``."""
     specs = getattr(args, "steer_model", None)
     if not specs:
         return
@@ -249,9 +252,10 @@ def _maybe_fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx, sessio
 
     from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
         mint_operator_fork,
-        sanctioned_models,
+        permitted_models,
         steer_is_babysit,
     )
+    from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
     from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
     from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, has_capability
 
@@ -264,22 +268,22 @@ def _maybe_fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx, sessio
         overlay.setdefault(node, {})["model"] = model
 
     # The SAME question the web fork-cycle applier asks, of the same list — the origin's frozen
-    # `allowed_models`, off the campaign manifest. `ctx.campaign_config` is a different list, one
-    # the inherited overlay and the cycle seed have already moved.
+    # per-node permitted set, off the campaign manifest. `ctx.campaign_config` is a different list,
+    # one the inherited overlay and the cycle seed have already moved.
+    permitted = permitted_models(session.store, ctx.campaign_id)
     disallowed = steer_is_babysit(session.store, ctx.campaign_id, overlay)
     if disallowed:
-        allowed_models = sanctioned_models(session.store, ctx.campaign_id)
         # Same capability gate the web fork-cycle applier runs. The terminal owner
         # holds it; a delegated sub-principal without it is refused here.
         if not has_capability(session.identity, CAMPAIGN_BABYSIT_CAP):
             raise SystemExit(
-                f"ERROR: steering to a model outside the origin's allowed_models "
+                f"ERROR: steering to a model the node does not permit "
                 f"requires the {CAMPAIGN_BABYSIT_CAP} capability."
             )
         models = ", ".join(sorted(m for c in overlay.values() for m in [c.get("model")] if m))
         print()
-        print(f"⚠  Steering the inner-optimizer model to {models} — NOT in the origin's")
-        print(f"   allowed_models {allowed_models or '[] (nothing sanctioned)'}.")
+        print(f"⚠  Steering the inner-optimizer model to {models} — NOT permitted by")
+        print(f"   the origin: {permitted or '{} (nothing sanctioned)'}.")
         print("   This branch will be marked babysat (grade C); the origin's C0 is inherited.")
         print()
         # The `campaign.babysit` cap (checked above) is the authorization — same as the
@@ -292,6 +296,20 @@ def _maybe_fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx, sessio
     config_overrides = (
         ConfigOverrides(max_rounds=steer_max) if steer_max is not None else ConfigOverrides()
     )
+    # The fork DECLARES the model it was steered to, joined to what the parent permitted.
+    # `narrow()` REPLACES `param_allowed_values` (keys still subset), so the seed's list stands.
+    narrowing = {
+        node: NodeSearchNarrowing(
+            param_allowed_values={
+                "model": [
+                    str(cfg["model"]),
+                    *(m for m in permitted.get(node, ()) if m != cfg["model"]),
+                ]
+            }
+        )
+        for node, cfg in overlay.items()
+        if cfg.get("model")
+    }
     parent_cycle_id = ctx.cycle_id
     new_cycle_id = mint_operator_fork(
         stores=session.store,
@@ -300,7 +318,11 @@ def _maybe_fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx, sessio
         # The origin candidate in the parent's round 0 — the C0 the fork inherits
         # (skips the origin re-score, straight to L1 on the steered model).
         from_candidate_id=_origin_candidate_id(session, parent_cycle_id, 0),
-        seed=CycleSeed(pipeline_overlay=overlay, config_overrides=config_overrides),
+        seed=CycleSeed(
+            pipeline_overlay=overlay,
+            config_overrides=config_overrides,
+            optimizer_narrowing=narrowing,
+        ),
         steered_by=str(session.identity.user_id),
     )
     ctx.cycle_id = new_cycle_id

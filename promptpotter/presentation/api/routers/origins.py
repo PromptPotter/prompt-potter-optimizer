@@ -15,10 +15,14 @@ from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     load_dataset_campaign_config,
 )
-from promptpotter.application.datasets.ingest import draft_from_dataset
+from promptpotter.application.datasets.ingest import (
+    draft_from_dataset,
+    fetch_backend_nodes,
+    refresh_capabilities,
+)
 from promptpotter.application.datasets.loaders import resolve_dataset_items
 from promptpotter.application.datasets.prompts import has_dataset_prompts
-from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_locks
+from promptpotter.application.jobs.launcher.draft_build import draft_wire
 from promptpotter.application.optimization.task_context import committed_task_context
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import resolve_pipeline_config_params
@@ -30,6 +34,7 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
+    backend_type_of_dataset,
     dataset_pipeline_path,
     is_dataset_dir,
     list_readable_datasets,
@@ -177,11 +182,10 @@ def _prepared_origins(stores: Stores, campaign_ids: set[str]) -> list[OriginEntr
         if ref.tier != "yours" or not ref.n_samples:
             continue
         d = stores.tenant_datasets.dataset_dir(ref.name)
-        # Ready = ships a prompts/ dir (any node-named or default.yaml prompt — the
-        # origin OSP resolves the per-node file like the mint does, see
-        # `resolve_origin_opt_search_point`) + a pipeline.yaml. Hardcoding
-        # `default.json` here wrongly dropped datasets whose prompt is node-named
-        # (e.g. termnorm's `entity_profiling.json`).
+        # Ready = ships a prompts/ dir (any node-named or `default.yaml` prompt — the origin OSP
+        # resolves the per-node file like the mint does, see `resolve_origin_opt_search_point`)
+        # + a pipeline.yaml. Never a hardcoded filename: that drops every dataset whose prompt is
+        # node-named, such as termnorm's `entity_profiling.yaml`.
         if not has_dataset_prompts(d) or not is_dataset_dir(d):
             continue
         origin_id = _dataset_origin_id(stores, d, ref.name)
@@ -233,7 +237,7 @@ def _campaign_for_origin(stores: Stores, origin_id: str) -> Campaign | None:
 
 
 @origins_router.post("/{origin_id}/draft")
-def draft_from_origin(origin_id: str, stores: StoresDep) -> dict[str, Any]:
+async def draft_from_origin(origin_id: str, stores: StoresDep) -> dict[str, Any]:
     """Open a chosen prior origin as a prefilled check-in campaign — the picker's
     "Reuse an origin" path for a campaign-backed origin.
 
@@ -249,6 +253,7 @@ def draft_from_origin(origin_id: str, stores: StoresDep) -> dict[str, Any]:
     if match is None:
         raise NotFoundError(f"Origin '{origin_id}' not found", code="command_target_not_found")
     dataset_dir = readable_dataset_dir(stores, match.dataset_name)
+    await refresh_capabilities(stores)
     seed = stores.campaigns.read_cycle_seed(match.root_hop)
     overrides: dict[str, Any] = {"reused_origin_id": origin_id}
     if seed is not None and seed.origin_prompt_fields:
@@ -258,5 +263,8 @@ def draft_from_origin(origin_id: str, stores: StoresDep) -> dict[str, Any]:
         dataset_dir=dataset_dir,
         dataset_name=match.dataset_name,
         overrides=overrides,
+        backend_nodes=await fetch_backend_nodes(
+            backend_type_of_dataset(stores, match.dataset_name)
+        ),
     )
-    return draft_wire_with_locks(draft)
+    return draft_wire(draft, stores.base_dir)

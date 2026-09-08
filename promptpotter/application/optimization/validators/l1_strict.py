@@ -70,7 +70,6 @@ def validate_overrides(
     """The deterministic twin of the emitted schema's constraints: both layers run because not
     every provider enforces structured output with full fidelity."""
     failures: list[ValidationFailure] = []
-    allowed_models = list(pipeline_schema.available_models)
     emittable = pipeline_schema.node_param_keys()
     for node_name, node_params in pipeline_params_override.items():
         if not isinstance(node_params, dict):
@@ -109,7 +108,7 @@ def validate_overrides(
                     )
                 )
                 continue
-            # After the locked axes, so a leaked `model` keeps its specific reason.
+            # After the forbidden axes, so a leaked `provider` keeps its specific reason.
             if param not in node_emittable:
                 failures.append(
                     ValidationFailure(
@@ -135,13 +134,17 @@ def validate_overrides(
                     )
                 )
                 continue
-            if param == "model" and allowed_models:
-                if value is not None and value not in allowed_models:
+            if param == "model":
+                # Per NODE, and it fires on an EMPTY permitted set too: no value space means
+                # no model may be proposed here. A `None` is "leave it unset", the same
+                # reading the declared-type arm above takes.
+                permitted = pipeline_schema.model_options(node)
+                if value is not None and value not in permitted:
                     failures.append(
                         ValidationFailure(
                             axis=f"{node_name}.model",
                             value=str(value),
-                            allowed=allowed_models,
+                            allowed=permitted,
                             reason="not_in_available_models",
                         )
                     )

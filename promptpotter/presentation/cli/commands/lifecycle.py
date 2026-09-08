@@ -28,7 +28,6 @@ from promptpotter.presentation.api.middleware.command_dispatcher import (
     LifecyclePayload,
     PauseCyclePayload,
     ReplaceDatasetPayload,
-    SetAllowedModelsPayload,
     SetCampaignLabelPayload,
     SkipSearchpointPayload,
     StepCyclePayload,
@@ -51,7 +50,6 @@ __all__ = [
     "cmd_pause",
     "cmd_rename",
     "cmd_replace_dataset",
-    "cmd_set_allowed_models",
     "cmd_set_budget",
     "cmd_skip_searchpoint",
     "cmd_step_cycle",
@@ -370,38 +368,6 @@ async def cmd_cleanup_empty_cycles(args: argparse.Namespace) -> CommandResult:
     return CommandResult(
         data={"campaign_id": campaign_id, "cycle_id": cycle_id, "status": "cleaned"},
         human=f"{campaign_id}/{cycle_id} -> empty sibling cycles removed.",
-    )
-
-
-async def cmd_set_allowed_models(args: argparse.Namespace) -> CommandResult:
-    """Set the models a steered fork may pick from.
-
-    Its absence had teeth: ``resume --steer-model`` refuses against exactly this list
-    (``fork_siblings.py::steer_is_babysit``), so a terminal-only operator could hit the refusal
-    with no terminal way to widen it. Empty clears the list.
-    """
-    raw: str = str(getattr(args, "models", "") or "")
-    models = [m.strip() for m in raw.split(",") if m.strip()]
-    stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
-    campaign_id = resolve_campaign_hint(stores, args.campaign_id)
-    refused = await _refused(
-        CommandDispatcher(stores).dispatch_campaign_config(
-            kind="set-allowed-models",
-            payload=SetAllowedModelsPayload(campaign_id=campaign_id, allowed_models=models),
-            idempotency_key=uuid.uuid4().hex,
-        ),
-        {"campaign_id": campaign_id},
-    )
-    if refused is not None:
-        return refused
-    logger.info("campaign %s -> allowed models %s", campaign_id, models)
-    return CommandResult(
-        data={"campaign_id": campaign_id, "allowed_models": models},
-        human=(
-            f"{campaign_id} -> steerable to {', '.join(models)}"
-            if models
-            else f"{campaign_id} -> allowed-model list cleared"
-        ),
     )
 
 

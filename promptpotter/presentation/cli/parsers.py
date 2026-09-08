@@ -689,20 +689,6 @@ def build_parser() -> argparse.ArgumentParser:
     # pointer, which for a delete would make the likeliest typo the destructive one.
     p_del_cycle.add_argument("--cycle", required=True, help="Cycle id to remove.")
 
-    p_allowed = sub.add_parser(
-        "set-allowed-models",
-        help="Set the models a steered fork may pick from. `resume --steer-model` refuses "
-        "against exactly this list, so this is how that refusal is widened from the terminal. "
-        "Pass an empty list to clear it.",
-    )
-    p_allowed.add_argument("campaign_id", help="Target campaign id ({dataset}__{rand6_hex})")
-    p_allowed.add_argument(
-        "models",
-        nargs="?",
-        default="",
-        help="Comma-separated model ids; omit to clear the list.",
-    )
-
     p_replace = sub.add_parser(
         "replace-dataset",
         help="Version a dataset slug and repoint what referenced it — the terminal half of what "

@@ -46,7 +46,15 @@ LEDGER_BASELINE = {
     # quoted down to its typos, and these two rubrics are ours — a reader must be able to tell
     # which is which without reading the git history. It pays for itself in the same commit by
     # collapsing the ask-parse-verdict body every judge repeated into `call.py::graded`.
-    "modules": 340,
+    # +1: `infrastructure/llm/capabilities.py` — which decoding parameters a MODEL accepts,
+    # resolved operator-override → per-tenant provider snapshot → unknown. Not foldable into
+    # `registry.py::_MODEL_PROFILES` beside it, and the split is the point: that table is
+    # evidence WE measured and ships in the wheel, this is a third party's claim that goes stale
+    # on their schedule and is cached per tenant. Merging them makes one file both evidence and
+    # cache, with no way to say which layer answered. It pays for itself immediately — the node
+    # ladder and the model's are different sets, and conflating them let a campaign search
+    # `reasoning_effort` on a model that does not take the parameter at all.
+    "modules": 341,
     "init_files": 49,
     # +1: `judges/__init__.py` — flagged for the same reason `connectors/__init__.py` is, and by
     # the same text test: a registry module has both an `__all__` and imports. Named rather than
@@ -57,7 +65,12 @@ LEDGER_BASELINE = {
     # whatever its shape, and how a campaign grades a cell IS one decision however many steps it
     # takes. `Scope.DATA` because swapping a judge invalidates every verdict taken under the old
     # one; `Estimand.GATE` because it decides what counts as a correct answer.
-    "config_leaf_fields": 40,
+    # −1: `CampaignConfig.allowed_models` — folded into `optimizer_narrowing`, which already
+    # carried a per-node `param_allowed_values`. With `model` a real search axis, "which models
+    # may this node run" and "which models may a human steer a fork to un-tainted" stopped being
+    # two questions, and the second field could only disagree with the first. Its command kind,
+    # store method, CLI verb and dashboard panel went with it.
+    "config_leaf_fields": 39,
     # +1: `QUEUE_MAX_WAIT_S` — how long a launch may wait in line before it is withdrawn. It is a
     # setting and not a constant because it is the one queue number a HOST has to be able to
     # answer for: on a shared box it decides when someone else's waiting launch is given up on.

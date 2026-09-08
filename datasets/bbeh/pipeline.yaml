@@ -24,10 +24,12 @@ nodes:
       reasoning_effort: low
     optimizer:
       param_keys:
+        # `model` is deliberately NOT here: this dataset's model is a measurement premise
+        # (task_description.md), so the axis stays closed even though the engine would now
+        # search it. `provider` cannot be opened by any dataset — it is a cost lever.
         - provider
         - temperature
         - max_tokens
-        - model
         - reasoning_effort
         - persona
         - task_intent

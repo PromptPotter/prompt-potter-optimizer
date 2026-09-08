@@ -481,22 +481,17 @@ class CampaignConfig(StrictModel):
         dict[str, NodeSearchNarrowing], Knob(Scope.DATA, Estimand.SEARCH)
     ] = Field(
         default_factory=dict,
-        description="Per-node narrowing of the dataset-declared optimizer search "
-        "space — the per-campaign param-lock + allowed-values lever beside "
-        "`exclude_nodes` (whole node). model/provider are always locked. Subsets "
-        "only; applied onto the schema by `PipelineSchema.narrow` at pipeline setup.",
-    )
-    allowed_models: Annotated[list[str], Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
-        default_factory=list,
-        description="The origin's permitted model set — the allow-list a human fork "
-        "may steer the inner-optimizer model to WITHOUT tainting the branch. Distinct "
-        "from `PipelineSchema.available_models` (the backend's whole catalogue, the menu "
-        "this is picked from). Governs only the direct human steer; the optimizer never "
-        "searches model/provider regardless (`PARAM_FORBIDDEN_KEYS` invariant). A steer "
-        "to a model NOT in this set is a `campaign.babysit` act — warned + graded C "
-        "(`overlay_sets_model_outside_allowed`). EMPTY = no model sanctioned, so any "
-        "model steer taints (restrictive default — hard to break out of the origin); a "
-        "non-empty set is the operator explicitly sanctioning those models.",
+        description="Per-node declaration over the dataset's optimizer search space — the "
+        "per-campaign param-lock + value-space lever beside `exclude_nodes` (whole node). "
+        "`provider`/`route_order` are always locked. **`param_keys` SUBSETS and "
+        "`param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied at pipeline "
+        "setup): a campaign may only close axes the dataset opened, but the value space is "
+        "its own statement — which is what lets an operator ADD a model or a reasoning rung "
+        "no `pipeline.yaml` on disk carries. `param_allowed_values['model']` is also the ONE "
+        "permitted model set: what the optimizer may pick, and what a human fork may steer to "
+        "without tainting the branch. A steer outside it is a `campaign.babysit` act — warned "
+        "+ graded C (`overlay_sets_model_outside_allowed`). Nothing declared for a node = "
+        "nothing sanctioned there, the restrictive default.",
     )
     scoring: Annotated[str | dict[str, str] | None, Knob(Scope.DATA, Estimand.GATE)] = Field(None)
     judges: Annotated[dict[str, JudgeSpec], Knob(Scope.DATA, Estimand.GATE)] = Field(
@@ -512,7 +507,7 @@ class CampaignConfig(StrictModel):
         "`Scope.DATA` because swapping a judge invalidates every verdict taken under the "
         "old one, so a resume must run divergence detection rather than carry them forward. "
         "**Their models are declared here and inherited from nowhere** — not from "
-        "`allowed_models`, not from the pipeline's node config, not from the optimizer's own "
+        "the permitted model set, not from the pipeline's node config, not from the optimizer's own "
         "LLMs. A judge is a ruler, and a ruler that moved with whatever the search was last "
         "steered to would not be one.",
     )
@@ -577,16 +572,13 @@ def apply_inherited_overlay(
     if seed is not None:
         narrowing.update(seed.optimizer_narrowing)
     frozen_overrides: dict[str, Any] = frozen_config.get("pipeline_overrides") or {}
-    # `allowed_models` is the campaign's committed model allow-list — the SINGLE source
-    # of truth is the frozen snapshot (edited only by the cap-gated `set-allowed-models`
-    # command; the live dataset file is a mint-time SEED). Re-apply it unconditionally so
-    # the runner's grade-C stamp reads the SAME value the fork-cycle cap-gate reads off
-    # `campaign.config` — never the live file, which would let the two disagree. Absent =
-    # the restrictive default ([]), same as the snapshot's own default.
+    # The frozen snapshot wins over the live dataset file, which is a mint-time SEED — so the
+    # runner's grade-C stamp reads the SAME permitted model set the fork-cycle cap-gate reads off
+    # `campaign.config`, and the two cannot disagree. That is why `frozen_narrowing` is merged
+    # SECOND above, and the seed's own declaration last of all.
     return config.model_copy(
         update={
             "pipeline_overrides": {**config.pipeline_overrides, **frozen_overrides},
             "optimizer_narrowing": narrowing,
-            "allowed_models": list(frozen_config.get("allowed_models") or []),
         }
     )

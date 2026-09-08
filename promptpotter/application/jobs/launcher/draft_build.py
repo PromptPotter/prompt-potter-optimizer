@@ -1,8 +1,13 @@
-"""Pure projections from a :class:`DraftCampaign` to the files and wire shapes the commit +
-new-campaign UI need — no launch side effects, no JobRegistry, no asyncio."""
+"""Projections from a :class:`DraftCampaign` to the files and wire shapes the commit +
+new-campaign UI need — no launch side effects, no JobRegistry, no asyncio.
+
+One read of the tenant workspace, not pure: the per-model capability layers
+(``infrastructure/llm/capabilities``). It is passed in as a path rather than reached for, so a
+caller with no workspace simply gets no capability block instead of a fabricated one."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from promptpotter import connectors
@@ -10,6 +15,7 @@ from promptpotter.application.campaign_config import freeze_campaign_config, loa
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     merge_pipeline_overlay,
+    resolved_node_schema,
 )
 from promptpotter.application.datasets.origin_readiness import origin_readiness
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
@@ -19,12 +25,17 @@ from promptpotter.domain.pipeline_schema import (
     PipelineDependency,
     dependencies_from_node_types,
 )
-from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, TaskDecomposition
+from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.infrastructure.llm.capabilities import resolve_menu
 
 
-def _build_origin_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
-    """The committed file is the dataset's ``pipeline.yaml`` OVERLAY; the backend's live
-    ``GET /pipeline`` is the actual schema. ``pipelines.default`` overrides the pipeline order."""
+def _origin_pipeline_json(draft: DraftCampaign, nodes: dict[str, Any]) -> dict[str, Any]:
+    """*nodes* is the caller's choice of layer depth, and the two callers deliberately differ:
+    the committed file gets :func:`merge_pipeline_overlay` (an OVERLAY — the backend still owns
+    the schema at run time), the rendered one gets :func:`resolved_node_schema` (the backend's
+    declaration underneath it, because ``param_keys`` lives nowhere else). Passing it in rather
+    than branching inside is what keeps "what we write" and "what we draw" from drifting into
+    one flag nobody can read. ``pipelines.default`` overrides the pipeline order."""
     pipeline: dict[str, Any] = {
         "name": draft.slug,
         "backend_type": draft.connector,
@@ -34,11 +45,27 @@ def _build_origin_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
     steps = draft.pipeline_steps or list(connector.default_pipeline)
     if steps:
         pipeline["pipelines"] = {"default": list(steps)}
+    # The model MENU, from the one function that feeds both the committed file and the
+    # pre-commit render — so a check-in dataset gets the same catalogue a hand-authored
+    # benchmark declares, instead of the empty list that leaves its model list with nothing
+    # to offer. The ADMIN's catalogue and nothing else: a model the operator typed rides
+    # `nodes.{n}.optimizer.param_allowed_values.model`, which is what BOUNDS the run
+    # (`PipelineSchema.model_options` prefers it), and folding it in here would erase the one
+    # difference that lets a surface say which values are theirs. Absent when the connector
+    # declares none: no menu is a real answer.
+    if connector.available_models:
+        pipeline["available_models"] = list(connector.available_models)
 
-    nodes = merge_pipeline_overlay(draft, connector)
     if nodes:
         pipeline["nodes"] = nodes
     return pipeline
+
+
+def _build_origin_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
+    """What gets COMMITTED as ``datasets/{slug}/pipeline.yaml``."""
+    return _origin_pipeline_json(
+        draft, merge_pipeline_overlay(draft, connectors.get(draft.connector))
+    )
 
 
 def split_overlay(
@@ -63,32 +90,11 @@ def split_overlay(
     return overrides, narrowing
 
 
-def derive_optimizer_locks(draft: DraftCampaign) -> dict[str, Any]:
-    """Makes the connector defaults visible BEFORE commit — a draft's ``pipeline_overlay`` is empty
-    until then, so without this the UI cannot show the optimizer is LOCKED OUT of an axis."""
+def draft_active_steps(draft: DraftCampaign) -> list[str]:
+    """The pipeline this draft actually runs — its own choice (preserved on reuse) over the
+    connector default, so the UI shows the dataset's real pipeline and not `llm_only`."""
     connector = connectors.get(draft.connector)
-    # The active pipeline is the permission surface — the optimizer can only move
-    # nodes that actually run. Scope the per-node locks to it so the panel shows
-    # only the dataset's real nodes (not every node the backend has registered,
-    # e.g. llm_only / direct_prompt for a Research+Match dataset).
-    steps = draft.pipeline_steps or list(connector.default_pipeline)
-    active = set(steps)
-    node_locks: dict[str, Any] = {}
-    for node_name, overlay in merge_pipeline_overlay(draft, connector).items():
-        if active and node_name not in active:
-            continue
-        optimizer = overlay.get("optimizer", {})
-        node_locks[node_name] = {
-            "config": dict(overlay.get("config", {})),
-            "param_allowed_values": dict(optimizer.get("param_allowed_values", {})),
-        }
-    return {
-        # The draft's chosen pipeline (preserved on reuse) over the connector
-        # default — so the UI shows the dataset's real pipeline, not llm_only.
-        "pipeline": steps,
-        "forbidden_axes": sorted(PARAM_FORBIDDEN_KEYS),
-        "nodes": node_locks,
-    }
+    return draft.pipeline_steps or list(connector.default_pipeline)
 
 
 def draft_pipeline_dependencies(draft: DraftCampaign) -> tuple[PipelineDependency, ...]:
@@ -106,27 +112,50 @@ def _dependency_fulfilled(dep: PipelineDependency, draft: DraftCampaign) -> bool
     return False
 
 
-def _draft_pipeline_render(draft: DraftCampaign) -> dict[str, Any]:
+def _draft_pipeline_render(draft: DraftCampaign, workspace: Path | None) -> dict[str, Any]:
     """A check-in has no committed ``datasets/{slug}/``, so its pipeline is read off the draft, not
     disk — the ingest node editor renders with no fetch-by-slug and no second endpoint."""
-    schema = parse_pipeline_response(_build_origin_pipeline_json(draft))
+    connector = connectors.get(draft.connector)
+    schema = parse_pipeline_response(
+        _origin_pipeline_json(draft, resolved_node_schema(draft, connector))
+    )
     cfg = load_campaign_config(_build_default_campaign_json(draft)["campaign_config"])
     schema = schema.narrow(cfg.optimizer_narrowing)
     return {
         "pipeline_view": schema.view.model_dump(by_alias=True) if schema.view is not None else None,
         "node_config_schema": schema.node_config_schema(),
         "node_output_schema": schema.node_output_schemas(),
+        # Every model on the MENU, not only the picked one: switching models must re-answer the
+        # reasoning ladder with no round-trip, which is what keeps the surface honest while the
+        # operator is still deciding.
+        "model_capabilities": {
+            m: c.model_dump()
+            for m, c in resolve_menu(schema.available_models, workspace=workspace).items()
+        },
+        # WHY the axes read as they do, so an empty answer is never mistaken for a locked one.
+        # A remote connector with no captured declaration means the probe failed, and the editor
+        # must say "axes unknown" rather than draw a padlock nobody set.
+        "schema_source": (
+            "backend"
+            if draft.backend_nodes
+            else "local"
+            if connector.in_process_run is not None
+            else "unreachable"
+        ),
     }
 
 
-def draft_wire_with_locks(draft: DraftCampaign) -> dict[str, Any]:
+def draft_wire(draft: DraftCampaign, workspace: Path | None = None) -> dict[str, Any]:
     """``readiness`` is the **server-authoritative** mint gate, recomputed on every draft response —
-    the UI gates Start on it, never on a client re-derivation that would drift."""
+    the UI gates Start on it, never on a client re-derivation that would drift.
+
+    *workspace* is the tenant's own root, and only the per-model capability block needs it. Omit
+    it and that block is empty, which every reader must render as UNKNOWN."""
     readiness = origin_readiness(draft)
     return {
         **draft.to_wire(),
-        "optimizer_locks": derive_optimizer_locks(draft),
-        **_draft_pipeline_render(draft),
+        "active_steps": draft_active_steps(draft),
+        **_draft_pipeline_render(draft, workspace),
         "dependencies": [
             {**dep.model_dump(), "fulfilled": _dependency_fulfilled(dep, draft)}
             for dep in draft_pipeline_dependencies(draft)
@@ -153,7 +182,6 @@ def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
             "scoring": f"{draft.scoring_composite}(predicted, ground_truth)",
             "exclude_nodes": list(connector.default_exclude_nodes),
             "optimization": optimization,
-            **({"allowed_models": list(draft.allowed_models)} if draft.allowed_models else {}),
         }
     )
     return {"campaign_config": freeze_campaign_config(config)}

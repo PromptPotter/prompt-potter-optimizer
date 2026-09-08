@@ -302,21 +302,6 @@ class CampaignStore:
         data.update(updates)
         write_json(path, data)
 
-    def set_allowed_models(self, campaign_id: str, allowed_models: list[str]) -> None:
-        """The SINGLE source of truth for the allow-list, read by the fork cap-gate and the
-        runner's overlay. Identity-neutral: not in ``root_content_hash``, so no re-measure."""
-        path = self._manifest_path(campaign_id)
-        data = read_json(path)
-        config = data.get("config")
-        if not isinstance(config, dict):
-            config = {}
-        if allowed_models:
-            config["allowed_models"] = list(allowed_models)
-        else:
-            config.pop("allowed_models", None)
-        data["config"] = config
-        write_json(path, data)
-
     def repoint_dataset(self, old_name: str, new_name: str) -> int:
         """Rewrites the manifest pin ``campaign.json::dataset_name`` — the ONE owner, which
         every cycle-level reader derives from — across every lifecycle, archived included."""

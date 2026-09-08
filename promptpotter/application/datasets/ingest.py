@@ -3,9 +3,12 @@ CLI/web parity real. The first action mints a durable check-in, so ``draft_id`` 
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from pathlib import Path
 from typing import Any
 
+from promptpotter import connectors
 from promptpotter.application.datasets.authored import read_authored_dataset
 from promptpotter.application.datasets.csv_ingest import (
     IngestError,
@@ -27,8 +30,11 @@ from promptpotter.application.datasets.prompts import (
     list_dataset_prompts,
     load_dataset_prompt,
 )
+from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.origin_provenance import Provenance
+from promptpotter.infrastructure.backend import build_backend_client
+from promptpotter.infrastructure.llm.capabilities import refresh_model_capabilities
 from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.infrastructure.store.stores import Stores
 
@@ -38,6 +44,50 @@ from promptpotter.infrastructure.store.stores import Stores
 # file the operator already chose, so it relies on the per-row cap in
 # ``read_tabular`` instead.
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+
+logger = logging.getLogger(__name__)
+
+
+async def fetch_backend_nodes(
+    connector_name: str, *, backend_url: str = DEFAULT_BACKEND_URL
+) -> dict[str, Any]:
+    """The backend's own ``GET /pipeline::nodes``, read ONCE per check-in and stored on the draft.
+
+    This is the half a draft cannot derive. ``optimizer.param_keys`` — which params are search
+    AXES — is declared by the service and by nothing else, so a setup screen built from the
+    connector seed alone concludes that nothing is movable and draws a lock the run does not
+    enforce. Fetched here, at the surface that already owns backend wiring, rather than inside
+    the pure projection that renders it.
+
+    An in-process connector has no service to ask and its manifest IS the declaration; a probe
+    that fails returns ``{}``, which the wire reports as ``schema_source: unreachable`` instead
+    of letting an empty answer read as a locked one.
+    """
+    connector = connectors.get(connector_name)
+    if connector.execution == "in_process":
+        return {}
+    client = build_backend_client(connector, backend_url)
+    try:
+        resp = await client.fetch_pipeline()
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        raise
+    except Exception as exc:
+        logger.info("check-in could not read %s pipeline schema: %s", connector_name, exc)
+        return {}
+    finally:
+        await client.aclose()
+    nodes = (resp.get("data") or resp).get("nodes")
+    return dict(nodes) if isinstance(nodes, dict) else {}
+
+
+async def refresh_capabilities(stores: Stores) -> None:
+    """Refresh this tenant's model-capability snapshot on the same beat as the pipeline probe.
+
+    Best-effort by construction: the refresh keeps any prior snapshot when the catalogue cannot be
+    read, and a missing snapshot resolves to UNKNOWN rather than to "unsupported". So a check-in
+    never blocks on a third party's uptime, and never narrows an axis because of it either.
+    """
+    await refresh_model_capabilities(Path(stores.base_dir))
 
 
 def _column_label_sets(
@@ -66,6 +116,7 @@ def ingest_draft(
     blob: bytes,
     filename: str,
     slug: str | None = None,
+    backend_nodes: dict[str, Any] | None = None,
 ) -> DraftCampaign:
     """Format is detected from ``filename``. ``SlugTakenError`` is raised BEFORE the check-in campaign is
     minted, so a collision leaves no orphan. Byte-size capping belongs to the wire boundary, not here."""
@@ -87,6 +138,7 @@ def ingest_draft(
         source_file=filename or "",
         column_label_sets=_column_label_sets(list(table.headers), list(table.rows)),
     )
+    draft = draft.patch(backend_nodes=dict(backend_nodes or {}))
     # Mint the check-in campaign + stash the raw rows + headers under it;
     # materialization to Samples waits until the column mapping is confirmed (at
     # Start). The resolution block lets an operator open checkin/cache.json and
@@ -107,6 +159,7 @@ def draft_from_dataset(
     dataset_dir: Path,
     dataset_name: str,
     overrides: dict[str, Any] | None = None,
+    backend_nodes: dict[str, Any] | None = None,
 ) -> DraftCampaign:
     """Build a fully-confirmed draft straight from an authored dataset's files, then mint a check-in. The
     node config rides through as ``pipeline_overlay``, PRESERVING the backend model/provider."""
@@ -130,10 +183,9 @@ def draft_from_dataset(
             ),
         )
 
-    # One validated parse of the dataset's config files. The `or` ladders below
-    # fire only where the authored file leaves a field empty. (The optimizer LLM
-    # is install-global — promptpotter/assets/optimizer/pipeline.yaml — so the draft no
-    # longer carries provider/model.)
+    # One validated parse of the dataset's config files. The `or` ladders below fire only where
+    # the authored file leaves a field empty. The optimizer LLM is install-global
+    # (`promptpotter/assets/optimizer/pipeline.yaml`), so no draft carries provider/model.
     authored = read_authored_dataset(dataset_dir)
     cc = authored.campaign_config
     task = authored.task_description
@@ -198,6 +250,9 @@ def draft_from_dataset(
             # Preserve the dataset's own pipeline (full Research+Match, llm_only, …)
             # so reuse doesn't reset to the connector default.
             "pipeline_steps": authored.active_steps,
+            # Reuse re-probes rather than inheriting: the committed dataset carries only the
+            # overlay, and the service may have moved since it was written.
+            "backend_nodes": dict(backend_nodes or {}),
             # The origin HOLDS its candidate library — carry the committed value so
             # reopening surfaces the dependency as already FULFILLED (not Missing),
             # and a re-mint re-persists it through the one origin-write seam.
@@ -217,4 +272,11 @@ def draft_from_dataset(
     return keyed
 
 
-__all__ = ["MAX_UPLOAD_BYTES", "SlugTakenError", "draft_from_dataset", "ingest_draft"]
+__all__ = [
+    "MAX_UPLOAD_BYTES",
+    "SlugTakenError",
+    "draft_from_dataset",
+    "fetch_backend_nodes",
+    "ingest_draft",
+    "refresh_capabilities",
+]

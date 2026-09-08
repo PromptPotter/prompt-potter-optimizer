@@ -14,13 +14,30 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
-PARAM_FORBIDDEN_KEYS: frozenset[str] = frozenset({"model", "provider", "route_order"})
-"""Optimizer-forbidden ``pipeline_params[node]`` keys (operator-fixed via dataset overlay).
+WHO_ANSWERS_KEYS: frozenset[str] = frozenset({"model", "provider", "route_order"})
+"""The keys naming WHO ANSWERS the call, rather than what is asked of them. A steer that touches
+only these leaves the origin unchanged in every other respect, which is what three readers need:
+the fork inherits its done C0 (``pipeline_overlay.overlay_is_locked_axis_only``), a stale runtime
+failure is matched by responder identity (``dispatch/injections/wounds.py``), and a node is
+recognised as an LLM call at all (``datasets/origin_readiness.py``)."""
 
-``route_order`` is here for the same reason as the other two and not a weaker one: it pins WHICH
-HOST of a model answers, and hosts of one model disagree systematically — an arm that moved the pin
-would be measuring the provider while reporting a prompt. It is a cost lever the operator sets
-against a measured capture, never a search axis."""
+
+PARAM_FORBIDDEN_KEYS: frozenset[str] = frozenset({"provider", "route_order"})
+"""Optimizer-forbidden ``pipeline_params[node]`` keys — the subset of :data:`WHO_ANSWERS_KEYS`
+that is never a search axis, whatever a dataset's ``optimizer.param_keys`` says.
+
+Both are COST levers the operator sets against a measured capture: ``provider`` picks the gateway,
+``route_order`` pins WHICH HOST of a model answers, and hosts of one model disagree systematically
+— an arm that moved either would be measuring the plumbing while reporting a prompt.
+
+``model`` is deliberately NOT here. It is a legitimate axis, and whether it is open is the answer
+of that node's ``optimizer.param_keys`` plus its ``param_allowed_values["model"]`` — a dataset's
+decision, per dataset, not one this constant makes for all of them. Two sets rather than one
+because two questions are asked here: :data:`WHO_ANSWERS_KEYS` names who answers the call, and a
+steer touching nothing else inherits its done C0 instead of re-paying for that origin; this set
+names what nothing may search."""
+
+assert PARAM_FORBIDDEN_KEYS <= WHO_ANSWERS_KEYS
 
 
 PARAM_SCOPE_KEYS: frozenset[str] = frozenset(
@@ -230,6 +247,7 @@ def has_framing(data: Mapping[str, object] | None) -> bool:
 __all__ = [
     "PARAM_FORBIDDEN_KEYS",
     "PARAM_SCOPE_KEYS",
+    "WHO_ANSWERS_KEYS",
     "JobSearchPoint",
     "SearchPoint",
     "TaskDecomposition",

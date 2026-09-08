@@ -42,7 +42,10 @@ from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import PromptExport, build_prompt_export
 from promptpotter.domain.phases import STOP_REASON_INFO, RunPhase, StopOutcome, StopReason
-from promptpotter.domain.pipeline_overlay import overlay_sets_model_outside_allowed
+from promptpotter.domain.pipeline_overlay import (
+    overlay_sets_model_outside_allowed,
+    permitted_models_from_narrowing,
+)
 from promptpotter.domain.results import CycleResult, RoundResult
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import (
@@ -343,13 +346,14 @@ async def _prepare_run(
         campaign_config = _apply_config_overrides(campaign_config, seed.config_overrides)
         if (
             overlay_sets_model_outside_allowed(
-                seed.pipeline_overlay, campaign_config.allowed_models
+                seed.pipeline_overlay,
+                permitted_models_from_narrowing(campaign_config.optimizer_narrowing),
             )
             and session.state.cycle_id
         ):
-            # Steering the model OUTSIDE `allowed_models` (empty = nothing sanctioned) is the
-            # ADR-0005 babysit act. Stamped here because the mint seam could not — the index is
-            # created at init. A steer to a SANCTIONED model reaches this seam and is clean.
+            # Steering the model OUTSIDE what the node permits (nothing declared = nothing
+            # sanctioned) is the ADR-0005 babysit act. Stamped here because the mint seam could
+            # not — the index is created at init. A PERMITTED steer reaches this seam and is clean.
             session.store.campaigns.mark_human_intervened(
                 session.hop,
                 kind="disallowed_model_override",

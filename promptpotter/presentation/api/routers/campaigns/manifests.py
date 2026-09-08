@@ -15,7 +15,7 @@ from promptpotter.application.campaign_config import (
     knob_label,
 )
 from promptpotter.application.jobs.launcher.checkin import load_checkin_draft
-from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_locks
+from promptpotter.application.jobs.launcher.draft_build import draft_wire
 from promptpotter.application.knobs import (
     COUPLINGS,
     check_couplings,
@@ -244,7 +244,7 @@ def get_campaign_checkin(stores: StoresDep, campaign_id: str) -> dict[str, Any]:
     bank = stores.checkin.load_bank(campaign_id) or {}
     block = bank.get("resolution") or {}
     return {
-        "draft": draft_wire_with_locks(draft),
+        "draft": draft_wire(draft, stores.base_dir),
         "resolution": block.get("last_resolution"),
         # Proposals the last turn left unclicked. Without these a re-opened check-in
         # would drop the operator's outstanding actions on the floor.

@@ -13,12 +13,12 @@ from promptpotter.application.datasets.draft_campaign import (
     merge_pipeline_overlay,
 )
 from promptpotter.domain.origin_provenance import Provenance
-from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, PARAM_SCOPE_KEYS
+from promptpotter.domain.search_point import PARAM_SCOPE_KEYS, WHO_ANSWERS_KEYS
 
 # A node's resolved ``config`` block is an LLM call iff it carries any of these
-# axes — model/provider + the per-call tunables. Such a node must own a model
+# axes — who answers + the per-call tunables. Such a node must own a model
 # (see :func:`_check_node_models`).
-_LLM_CALL_KEYS: frozenset[str] = PARAM_FORBIDDEN_KEYS | PARAM_SCOPE_KEYS
+_LLM_CALL_KEYS: frozenset[str] = WHO_ANSWERS_KEYS | PARAM_SCOPE_KEYS
 
 
 @dataclass(frozen=True, slots=True)

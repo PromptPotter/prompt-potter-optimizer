@@ -56,7 +56,9 @@ class InnerBenchmarkConfig(StrictModel):
 
 class InnerTask(StrictModel):
     """One panel cell; ``id`` is the outer query. Omitted overrides inherit the top-level benchmark and
-    model — and the model/provider pair is the panel's ENVIRONMENT axis, operator-set, never searched."""
+    model — and the model/provider pair is the panel's ENVIRONMENT axis, held here by the INNER
+    dataset declining to list ``model`` in its ``optimizer.param_keys``. The engine would search it;
+    the instrument must not move under the arms it measures, so the inner dataset closes it."""
 
     model_config = ConfigDict(frozen=True)
 

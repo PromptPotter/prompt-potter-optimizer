@@ -43,7 +43,7 @@ __all__ = [
     "_mint_fork",
     "cleanup_stub_fork_if_empty",
     "mint_operator_fork",
-    "sanctioned_models",
+    "permitted_models",
     "steer_is_babysit",
 ]
 
@@ -324,7 +324,7 @@ def cleanup_stub_fork_if_empty(
 
 
 def steer_is_babysit(stores: Stores, campaign_id: str, overlay: dict[str, Any] | None) -> bool:
-    """Does *overlay* steer a node OUTSIDE the ORIGIN's sanctioned models — the ADR-0005 §4 babysit
+    """Does *overlay* steer a node OUTSIDE the models that node permits — the ADR-0005 §4 babysit
     action, a distinct capability above the `campaign.run` fork?
 
     ONE read of the sanction, off the campaign manifest where it is FROZEN. A session's resolved
@@ -333,15 +333,17 @@ def steer_is_babysit(stores: Stores, campaign_id: str, overlay: dict[str, Any] |
     """
     from promptpotter.domain.pipeline_overlay import overlay_sets_model_outside_allowed
 
-    campaign = stores.campaigns.load_campaign(campaign_id)
-    allowed = campaign.config.get("allowed_models") if campaign else None
-    return overlay_sets_model_outside_allowed(overlay, allowed)
+    return overlay_sets_model_outside_allowed(overlay, permitted_models(stores, campaign_id))
 
 
-def sanctioned_models(stores: Stores, campaign_id: str) -> Any:
-    """The origin's frozen ``allowed_models`` — for a surface that has to NAME them in its refusal."""
+def permitted_models(stores: Stores, campaign_id: str) -> dict[str, list[str]]:
+    """The origin's frozen permitted model set, per NODE — for the gate above and for any surface
+    that has to NAME them in its refusal."""
+    from promptpotter.domain.pipeline_overlay import permitted_models_from_narrowing
+
     campaign = stores.campaigns.load_campaign(campaign_id)
-    return campaign.config.get("allowed_models") if campaign else None
+    narrowing = campaign.config.get("optimizer_narrowing") if campaign else None
+    return permitted_models_from_narrowing(narrowing)
 
 
 def mint_operator_fork(

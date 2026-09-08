@@ -10,9 +10,11 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.pipeline_schema import SCHEMA_DESCRIPTIONS_PARAM
-from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
+from promptpotter.domain.search_point import WHO_ANSWERS_KEYS
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 __all__ = [
@@ -21,6 +23,7 @@ __all__ = [
     "node_config_items",
     "overlay_is_locked_axis_only",
     "overlay_sets_model_outside_allowed",
+    "permitted_models_from_narrowing",
 ]
 
 
@@ -43,22 +46,46 @@ def node_config_items(pp: dict[str, Any] | None) -> Iterator[tuple[str, dict[str
 
 
 def overlay_is_locked_axis_only(overlay: dict[str, Any] | None) -> bool:
-    """A pure model/provider steer leaves the origin unchanged in every other respect, so the fork
-    INHERITS the done C0 instead of re-scoring it. Gates the inherit path, not the taint."""
+    """A steer touching only WHO ANSWERS leaves the origin unchanged in every other respect, so the
+    fork INHERITS the done C0 instead of re-scoring it. Gates the inherit path, not the taint.
+
+    Reads :data:`WHO_ANSWERS_KEYS`, not the forbidden subset — ``model`` is a searchable axis, so
+    the narrower set misses the model-only steer, which re-asks one question of a different
+    responder and is exactly the case this inherit exists for."""
     keys = [k for _node, cfg in node_config_items(overlay) for k in cfg]
-    return bool(keys) and all(k in PARAM_FORBIDDEN_KEYS for k in keys)
+    return bool(keys) and all(k in WHO_ANSWERS_KEYS for k in keys)
+
+
+def permitted_models_from_narrowing(
+    narrowing: Mapping[str, object] | None,
+) -> dict[str, list[str]]:
+    """The per-node permitted model set, read off a campaign's frozen
+    ``config.optimizer_narrowing``. The ONE derivation of it, so the fork gate, the runner and the
+    CLI cannot disagree about which models a branch sanctions."""
+    out: dict[str, list[str]] = {}
+    for node, block in (narrowing or {}).items():
+        values = getattr(block, "param_allowed_values", None)
+        if values is None and isinstance(block, dict):
+            values = block.get("param_allowed_values")
+        models = (values or {}).get("model") if isinstance(values, dict) else None
+        if isinstance(models, list):
+            out[node] = [str(m) for m in models]
+    return out
 
 
 def overlay_sets_model_outside_allowed(
-    overlay: dict[str, Any] | None, allowed_models: list[str] | None
+    overlay: dict[str, Any] | None, permitted: Mapping[str, Sequence[str]] | None
 ) -> bool:
-    """A ``provider`` edit has no allow-list that could sanction it, so it always counts."""
-    allowed = set(allowed_models or [])
-    for _node, cfg in node_config_items(overlay):
+    """The ADR-0005 babysit trigger: does this steer pick a responder the origin never sanctioned?
+
+    *permitted* is per NODE — the node's own ``param_allowed_values["model"]``. A node absent from
+    it sanctions nothing, the restrictive default. A ``provider`` edit has no permitted set that
+    could sanction it, so it always counts."""
+    for node, cfg in node_config_items(overlay):
         if "provider" in cfg:
             return True
         model = cfg.get("model")
-        if model is not None and model not in allowed:
+        if model is not None and model not in set((permitted or {}).get(node, ())):
             return True
     return False
 

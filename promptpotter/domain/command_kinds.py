@@ -44,7 +44,7 @@ WorkspaceScopedKind = Literal[
 CheckinScopedKind = Literal["edit-draft-campaign", "resolve-origin", "start-checkin"]
 # Campaign-scoped IN-PLACE manifest edits (the campaign persists — distinct from
 # `delete`, the one lifecycle verb that removes a tree). Rewrites `campaign.json`.
-CampaignConfigKind = Literal["set-allowed-models", "set-campaign-label"]
+CampaignConfigKind = Literal["set-campaign-label"]
 
 # Derived from the Literal types themselves, so every registry keyed on it — the dispatcher's
 # `CAP_FOR_KIND` and `PAYLOAD_MODEL_FOR_KIND`, the CLI's `CLI_VERB_FOR_KIND`, the router's

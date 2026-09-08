@@ -43,10 +43,16 @@ def _apply_dataset_overlay(
     backend_resp: dict[str, Any], local_raw: dict[str, Any]
 ) -> dict[str, Any]:
     """Merge dataset ``pipeline.yaml`` overlay onto the backend response.
-    Overlay carries ``pipelines.default`` / per-node config deltas / metadata; backend stays SoT for runtime defaults."""
+    Overlay carries ``pipelines.default`` / per-node config deltas / metadata; backend stays SoT for runtime defaults.
+
+    ``available_models`` rides too, and must: it is the model MENU the operator declared, and with
+    ``model`` a searchable axis it bounds the L1 enum and ``validate_overrides``. Dropped here, a
+    remote-backend dataset would search whatever catalogue the service happened to return."""
     out = copy.deepcopy(backend_resp.get("data") or backend_resp)
     if "pipelines" in local_raw:
         out["pipelines"] = local_raw["pipelines"]
+    if local_raw.get("available_models"):
+        out["available_models"] = local_raw["available_models"]
     out["nodes"] = merge_node_blocks(out.get("nodes") or {}, local_raw.get("nodes") or {})
     return out
 

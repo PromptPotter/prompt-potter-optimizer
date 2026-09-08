@@ -20,12 +20,16 @@ from promptpotter.application.datasets.ingest import (
     MAX_UPLOAD_BYTES,
     SlugTakenError,
     draft_from_dataset,
+    fetch_backend_nodes,
     ingest_draft,
+    refresh_capabilities,
 )
 from promptpotter.application.jobs.launcher.checkin import load_checkin_draft
-from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_locks
+from promptpotter.application.jobs.launcher.draft_build import draft_wire
+from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.dataset_access import (
+    backend_type_of_dataset,
     readable_dataset_dir,
 )
 from promptpotter.presentation.api.deps import (
@@ -82,6 +86,7 @@ async def ingest_dataset(
     nothing runs until the operator starts it via ``/commands/start-checkin``.
     """
     blob = await _read_capped(request, file, MAX_UPLOAD_BYTES)
+    await refresh_capabilities(stores)
 
     # Parse → mint the check-in campaign → persist its bank. Shared with the CLI
     # `new <file>` path (`application/datasets/ingest.py`) so both surfaces drive
@@ -92,6 +97,7 @@ async def ingest_dataset(
             blob=blob,
             filename=file.filename or "",
             slug=slug,
+            backend_nodes=await fetch_backend_nodes(DEFAULT_CONNECTOR),
         )
     except IngestError as exc:
         exc.details["max_samples"] = MAX_SAMPLES
@@ -107,7 +113,7 @@ async def ingest_dataset(
             code="slug_collision",
             details={"slug": exc.slug, "suggested_slug": exc.suggested},
         ) from None
-    return draft_wire_with_locks(draft)
+    return draft_wire(draft, stores.base_dir)
 
 
 @datasets_router.post("/draft/candidate-library")
@@ -203,7 +209,7 @@ async def build_candidate_library_from_column(
 
 
 @datasets_router.post("/{name}/draft")
-def draft_from_existing_dataset(name: str, stores: StoresDep) -> dict[str, Any]:
+async def draft_from_existing_dataset(name: str, stores: StoresDep) -> dict[str, Any]:
     """Open an authored dataset's files as a durable check-in campaign.
 
     The direct path behind "open this dataset in the ingest panel" — a demo /
@@ -213,5 +219,11 @@ def draft_from_existing_dataset(name: str, stores: StoresDep) -> dict[str, Any]:
     starts it via ``/commands/start-checkin``.
     """
     dataset_dir = readable_dataset_dir(stores, name)
-    draft = draft_from_dataset(stores=stores, dataset_dir=dataset_dir, dataset_name=name)
-    return draft_wire_with_locks(draft)
+    await refresh_capabilities(stores)
+    draft = draft_from_dataset(
+        stores=stores,
+        dataset_dir=dataset_dir,
+        dataset_name=name,
+        backend_nodes=await fetch_backend_nodes(backend_type_of_dataset(stores, name)),
+    )
+    return draft_wire(draft, stores.base_dir)

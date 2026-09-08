@@ -7,10 +7,25 @@ campaign_config:
   # now names what runs; gpt-oss-120b stays because `pipeline.yaml::available_models` still
   # offers it as a sanctioned alternative. Move this list in the SAME commit as the manifest —
   # it and `_MODEL_PROFILES` are the two that do not fail loudly when they lag behind it.
-  allowed_models:
-    - deepseek/deepseek-v4-flash:nitro
-    - qwen/qwen3.8-27b:nitro
-    - openai/gpt-oss-120b
+  #
+  # It rides `optimizer_narrowing` now, which is the ONE permitted set — what the optimizer may
+  # pick where an axis is open, and what a human may steer to un-tainted where it is not. A
+  # `param_allowed_values` entry REPLACES the node's own list rather than intersecting with it
+  # (`PipelineSchema.narrow`), so this file may name a model the manifest predates. Identity is
+  # unaffected: `connectors/promptpotter.py::_identity_config` hashes `config` only, so an
+  # `optimizer:` edit voids no banked panel.
+  optimizer_narrowing:
+    l1_generate: &pp_self_models
+      param_allowed_values:
+        model:
+          - deepseek/deepseek-v4-flash:nitro
+          - qwen/qwen3.8-27b:nitro
+          - openai/gpt-oss-120b
+    l1_score: *pp_self_models
+    l1_critique: *pp_self_models
+    l2_context: *pp_self_models
+    l3_plan: *pp_self_models
+    checkin: *pp_self_models
   # ONE measurand: what the inner search DELIVERED — a theta-logit delta over the ADOPTED
   # parent, so exploring costs nothing. The four-factor composite this replaces is described
   # in `domain/l4/proxies.py`; measured over a 39-cell panel, only this term discriminated

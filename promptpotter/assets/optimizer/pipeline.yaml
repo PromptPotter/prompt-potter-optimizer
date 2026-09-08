@@ -33,8 +33,14 @@ nodes:
     # never read.
     optimizer: &node_menus
       param_allowed_values:
+        # These five ARE `capabilities.py::STANDARD_EFFORT_LADDER`, and a YAML cannot import a
+        # constant — so this list cites it by name. A surface resolving a picked model replaces
+        # this ladder with what that model actually takes; the two must not drift.
         reasoning_effort: [none, default, low, medium, high]
         provider: [openrouter, groq, openai, anthropic]
+        # `model` is deliberately absent, so it falls back to `available_models` above — the
+        # optimizer's own model is install-global, and every node here keeps `param_keys` empty
+        # regardless, so nothing searches it.
     config:
       temperature: 0.4
       output_format: json

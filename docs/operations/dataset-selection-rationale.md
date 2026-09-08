@@ -33,7 +33,7 @@ A focus dataset for L1 optimizer prompt evolution must satisfy:
 
 Operator-pinned model for the self-optimizing campaign focus: leading open-source at the 20B-active scale, fast on Groq routing (845 tok/s on `:nitro`-eligible providers, ~5s median per call), very cheap at $0.03 in / $0.14 out per Mtok, and conservative at `low` so the optimizer climbs from the floor — `medium` / `high` stay L1-reachable mutations when sibling-yield supports them.
 
-Pinning is via the `nodes.llm_only.config` overlay in each dataset's `pipeline.yaml`, never `optimizer.param_keys`: L1 cannot propose `model` or `provider` mutations (operator-locked axes per `PARAM_FORBIDDEN_KEYS`).
+Pinning is via the `nodes.llm_only.config` overlay in each dataset's `pipeline.yaml`, and the pin holds because these datasets do not list `model` in `optimizer.param_keys` — the engine searches `model` wherever a dataset opens it. `provider` cannot be opened at all (`PARAM_FORBIDDEN_KEYS`).
 
 ## The roster
 

@@ -120,10 +120,15 @@ class DraftCampaign:
     # materializes to ``{slug}/candidate_library.txt`` and unions into the session's term
     # index. NOT gated — the answers already in the data are a degenerate-but-runnable pool.
     candidate_library: tuple[str, ...] = ()
-    # `CampaignConfig.allowed_models` — the allow-list a human fork may steer the inner model
-    # to without a babysit warning. Top-level on CampaignConfig, NOT under `optimization`.
-    # Empty = nothing sanctioned = restrictive default (any human model steer taints).
-    allowed_models: tuple[str, ...] = ()
+    # The backend's OWN ``GET /pipeline::nodes``, captured once when this draft was created.
+    # Without it a check-in cannot know which params are search AXES: the connector seed carries
+    # narrowing (`param_allowed_values`) but never `param_keys`, so every axis derived as
+    # unmovable and the setup screen drew a lock the engine does not enforce — while the run,
+    # reading the live schema, had the axis open. Captured rather than fetched per response
+    # because it is a material fact about THIS check-in, and one an operator can read back off
+    # disk. Empty = never fetched or the backend was unreachable, which is why the wire carries
+    # `backend_reachable` beside the schema rather than letting empty mean "locked".
+    backend_nodes: dict[str, Any] = field(default_factory=dict)
     # The chosen origin's content id when this draft reused a prior origin. Non-empty routes
     # ``prepare_checkin_run`` through the ``origin_override`` seed, so C0 resolves via the
     # ``seed`` branch and stamps the ``campaign_origin`` lineage.
@@ -159,9 +164,8 @@ class DraftCampaign:
             "origin_prompt_fields": dict(self.origin_prompt_fields),
             # Count, not the list — a library runs to tens of thousands of entries and the UI
             # needs only "is it fulfilled, and how big". The per-dependency ``fulfilled`` flag
-            # rides ``optimizer_locks``' sibling ``dependencies`` block.
+            # rides the wire's own ``dependencies`` block.
             "candidate_library_size": len(self.candidate_library),
-            "allowed_models": list(self.allowed_models),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -190,7 +194,7 @@ class DraftCampaign:
             "pipeline_steps": list(self.pipeline_steps),
             "optimization_overrides": dict(self.optimization_overrides),
             "candidate_library": list(self.candidate_library),
-            "allowed_models": list(self.allowed_models),
+            "backend_nodes": dict(self.backend_nodes),
             "reused_origin_id": self.reused_origin_id,
         }
 
@@ -223,7 +227,7 @@ class DraftCampaign:
             pipeline_steps=list(data.get("pipeline_steps", [])),
             optimization_overrides=dict(data.get("optimization_overrides", {})),
             candidate_library=tuple(data.get("candidate_library", ())),
-            allowed_models=tuple(data.get("allowed_models", ())),
+            backend_nodes=dict(data.get("backend_nodes", {})),
             reused_origin_id=data.get("reused_origin_id", ""),
         )
 
@@ -287,9 +291,26 @@ class DraftCampaign:
 
 
 def merge_pipeline_overlay(draft: DraftCampaign, connector: Connector) -> dict[str, Any]:
-    """The one place the draft's resolved node config is computed — shared by the committed
-    ``pipeline.yaml`` builder, the wire optimizer-locks block and the origin model gate."""
+    """What this check-in WRITES — the committed ``pipeline.yaml`` builder, the wire
+    optimizer-locks block and the origin model gate. Deliberately does NOT fold in
+    :attr:`DraftCampaign.backend_nodes`: the committed file is an OVERLAY on a schema the
+    backend still owns at run time, and snapshotting the backend's ``param_keys`` into it would
+    turn ``split_overlay`` into a narrowing that pins the search space to whatever the service
+    happened to declare on the day of the check-in."""
     return merge_node_blocks(dict(connector.default_node_config), draft.pipeline_overlay or {})
+
+
+def resolved_node_schema(draft: DraftCampaign, connector: Connector) -> dict[str, Any]:
+    """What this check-in SHOWS — the same three layers the runner resolves, in the same order:
+    the backend declares the node, the connector narrows it, the operator overrides.
+
+    The twin of :func:`merge_pipeline_overlay` and the reason they are two functions. Display
+    needs the backend layer or it cannot answer "may the optimizer move this?" — that answer
+    lives in ``optimizer.param_keys``, which only the backend declares. Reading the overlay
+    alone derived every axis as unmovable, so the setup screen drew locks the engine never
+    enforced. Persisting that same merge would be the opposite error, which is why the write
+    path above stops one layer short."""
+    return merge_node_blocks(dict(draft.backend_nodes), merge_pipeline_overlay(draft, connector))
 
 
 def new_draft(

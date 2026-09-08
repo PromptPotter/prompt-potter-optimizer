@@ -48,9 +48,6 @@ COMMANDS = {
     "cleanup-empty-cycles": (
         "promptpotter.presentation.cli.commands.lifecycle:cmd_cleanup_empty_cycles"
     ),
-    "set-allowed-models": (
-        "promptpotter.presentation.cli.commands.lifecycle:cmd_set_allowed_models"
-    ),
     "replace-dataset": "promptpotter.presentation.cli.commands.lifecycle:cmd_replace_dataset",
     "cancel-queued": "promptpotter.presentation.cli.commands.lifecycle:cmd_cancel_queued",
 }
@@ -86,7 +83,6 @@ CLI_VERB_FOR_KIND: dict[str, str | None] = {
     "pause-cycle": "pause",
     "change-spend-budget": "set-budget",
     "set-campaign-label": "rename",
-    "set-allowed-models": "set-allowed-models",
     "replace-dataset": "replace-dataset",
     "edit-draft-campaign": "new",
     "resolve-origin": "new",

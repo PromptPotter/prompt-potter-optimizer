@@ -28,8 +28,11 @@ Two things no other file carries:
 The model, provider and the `output_schema` that carries the answer enum live in `pipeline.yaml`;
 the pin rationale in
 [`../../docs/operations/dataset-reasoning-matrix.md`](../../docs/operations/dataset-reasoning-matrix.md).
-Only `provider` is operator-locked — `model` **is** in `optimizer.param_keys`, and
-`reasoning_effort` is pinned by `param_allowed_values` rather than by exclusion.
+`provider` is operator-locked engine-wide (a cost lever, never any dataset's to open). `model`
+COULD be an axis now — the engine searches it wherever a node lists it — and this dataset
+deliberately does not: its menu is one model under two ROUTES (`:nitro` and plain), so opening it
+would let L1 flip the host while reporting a prompt. `reasoning_effort` is pinned by
+`param_allowed_values` rather than by exclusion.
 
 **The `:nitro` suffix is a deliberate speed trade.** Nitro routes each call to the fastest upstream,
 so a `seed` buys nothing across stacks and is not set — inner-run noise is drawn fresh per arm

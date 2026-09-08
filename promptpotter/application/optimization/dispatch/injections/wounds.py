@@ -16,7 +16,7 @@ from promptpotter.application.optimization.dispatch.bundle import (
 )
 from promptpotter.domain.escalation_signals import RuntimeFailure
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, L1_POSSIBLE
-from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
+from promptpotter.domain.search_point import WHO_ANSWERS_KEYS
 from promptpotter.domain.validators import ValidatorOutcome
 
 # Evidence values safe to render into an UNFENCED panel: a signal name or a slot name, both closed
@@ -36,7 +36,7 @@ def _rf_matches_current_config(
     if not isinstance(current, dict):
         return False
     observed = rf.observed_config
-    return all(observed.get(k) == current.get(k) for k in PARAM_FORBIDDEN_KEYS if k in observed)
+    return all(observed.get(k) == current.get(k) for k in WHO_ANSWERS_KEYS if k in observed)
 
 
 def _validation_block(b: InjectionBundle) -> str:

@@ -70,8 +70,10 @@ def parse_population(
     *,
     prompt_block_catalogue: str = "guidance",
 ) -> tuple[list[OptSearchPoint], list[dict[str, Any] | None]]:
-    """Project proposals into searchpoints. ``model`` / ``provider`` mutations are ALWAYS rejected — operator-owned axes,
-    never on L1's surface. An off-library prompt-field value is rejected only under ``restrict``."""
+    """Project proposals into searchpoints. ``provider`` / ``route_order`` mutations are ALWAYS
+    rejected — cost levers, never on L1's surface; ``model`` rides only where its node opened it,
+    bounded by that node's permitted set. An off-library prompt-field value is rejected only under
+    ``restrict``."""
     opt_sp_list: list[OptSearchPoint] = []
     merged: list[dict[str, Any] | None] = []
     for cp in proposals:

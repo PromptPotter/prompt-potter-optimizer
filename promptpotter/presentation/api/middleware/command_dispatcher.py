@@ -42,7 +42,10 @@ from promptpotter.domain.command_kinds import (
     WorkspaceScopedKind,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.pipeline_overlay import overlay_sets_model_outside_allowed
+from promptpotter.domain.pipeline_overlay import (
+    overlay_sets_model_outside_allowed,
+    permitted_models_from_narrowing,
+)
 from promptpotter.domain.run_records import CommandAckRecord, CommandRecord, CycleSeed
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -173,10 +176,6 @@ CAP_FOR_KIND: dict[str, str] = {
     "register-backend": CAMPAIGN_CREATE_CAP,
     "edit-draft-campaign": CAMPAIGN_CREATE_CAP,
     "resolve-origin": CAMPAIGN_CREATE_CAP,
-    # Editing the allow-list DEFINES what a babysit steer may reach — strictly stronger
-    # authority than `campaign.babysit`. The owner-held `campaign.lifecycle` is what stops a
-    # babysit-delegate self-authorizing by adding their own model to it.
-    "set-allowed-models": CAMPAIGN_LIFECYCLE_CAP,
     # Renaming is how every OTHER surface addresses the campaign to a human, so it sits
     # with the verbs that decide the campaign's existence rather than with the run capabilities.
     "set-campaign-label": CAMPAIGN_LIFECYCLE_CAP,
@@ -329,10 +328,6 @@ class LifecyclePayload(CampaignPayload):
     keep_results: bool = False
 
 
-class SetAllowedModelsPayload(CampaignPayload):
-    allowed_models: list[str]
-
-
 class SetCampaignLabelPayload(CampaignPayload):
     # Required, and `""` is the CLEAR — it restores the dataset-name fallback the display chain
     # already documents. Defaulting it too would give "clear" two spellings, omit and empty, and
@@ -435,7 +430,6 @@ PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {
     "archive-campaign": LifecyclePayload,
     "delete-campaign": LifecyclePayload,
     "unarchive-campaign": LifecyclePayload,
-    "set-allowed-models": SetAllowedModelsPayload,
     "set-campaign-label": SetCampaignLabelPayload,
     "register-backend": RegisterBackendPayload,
     "mint-campaign": MintCampaignPayload,
@@ -522,23 +516,12 @@ class CommandDispatcher:
 
     def _build_campaign_config_applier(self, payload: CampaignPayload) -> Applier:
         cid = payload.campaign_id
-        if isinstance(payload, SetAllowedModelsPayload):
-            models = list(payload.allowed_models)
-            return lambda: self._apply_set_allowed_models(cid, models)
         if isinstance(payload, SetCampaignLabelPayload):
             label = payload.label
             return lambda: self._apply_set_campaign_label(cid, label)
         raise PayloadInvalidError(  # pragma: no cover — the registry pairs every kind with a type
             f"no applier wired for campaign-config payload {type(payload).__name__}"
         )
-
-    def _apply_set_allowed_models(
-        self, campaign_id: str, allowed_models: list[str]
-    ) -> dict[str, Any]:
-        """Rewrites the frozen ``allowed_models`` that both the fork cap-gate and the runner's
-        grade-C stamp read."""
-        self._stores.campaigns.set_allowed_models(campaign_id, allowed_models)
-        return {"campaign_id": campaign_id, "allowed_models": list(allowed_models)}
 
     def _apply_set_campaign_label(self, campaign_id: str, label: str) -> dict[str, Any]:
         """The operator's name for the campaign — what ``campaignDisplayName`` prefers over the
@@ -839,12 +822,14 @@ class CommandDispatcher:
             )
 
             seed = _parse_cycle_seed(payload.seed)
-            # Steering the model OUTSIDE `allowed_models` (empty = nothing sanctioned) is the
-            # ADR-0005 §4 babysit action, a distinct cap above the `campaign.run` fork. A steer to a
-            # SANCTIONED model is a clean human fork.
-            allowed_models = campaign.config.get("allowed_models") if campaign else None
+            # Steering the model OUTSIDE what the node permits (nothing declared = nothing
+            # sanctioned) is the ADR-0005 §4 babysit action, a distinct cap above the
+            # `campaign.run` fork. A PERMITTED steer is a clean human fork.
+            permitted = permitted_models_from_narrowing(
+                campaign.config.get("optimizer_narrowing") if campaign else None
+            )
             steers_disallowed_model = seed is not None and overlay_sets_model_outside_allowed(
-                seed.pipeline_overlay, allowed_models
+                seed.pipeline_overlay, permitted
             )
             if steers_disallowed_model and not has_capability(
                 self._stores.identity, CAMPAIGN_BABYSIT_CAP
@@ -1263,9 +1248,9 @@ def _reread_draft(stores: Stores, draft_id: str) -> Any:
 def reread_draft_wire(stores: Stores, draft_id: str) -> dict[str, Any]:
     """The post-mutation draft, re-read from ``draft.json`` — the response body for a deduped
     ``Idempotency-Key`` retry, whose first attempt already persisted it."""
-    from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_locks
+    from promptpotter.application.jobs.launcher.draft_build import draft_wire
 
-    return draft_wire_with_locks(_reread_draft(stores, draft_id))
+    return draft_wire(_reread_draft(stores, draft_id), stores.base_dir)
 
 
 def origin_effect(stores: Stores, draft_id: str, before: dict[str, Any]) -> dict[str, Any]:
@@ -1288,7 +1273,7 @@ async def dispatch_draft_patch(
     ``CommandRecord`` whatever the ingress looked like."""
     from promptpotter.application.datasets.origin_readiness import origin_projection
     from promptpotter.application.jobs.launcher.checkin import save_checkin_draft
-    from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_locks
+    from promptpotter.application.jobs.launcher.draft_build import draft_wire
 
     draft = _reread_draft(stores, draft_id)
     plan = plan_draft_patch(stores, draft, patch)
@@ -1296,7 +1281,7 @@ async def dispatch_draft_patch(
     def _apply() -> dict[str, Any]:
         updated = apply_draft_patch(draft, plan)
         save_checkin_draft(stores, updated)
-        return draft_wire_with_locks(updated)
+        return draft_wire(updated, stores.base_dir)
 
     before = origin_projection(draft)
     outcome = await CommandDispatcher(stores).dispatch_checkin_command(
@@ -1322,7 +1307,7 @@ async def dispatch_origin_resolution(
     ledger AND re-spends the LLM call that ``on_replay`` serves from ``cache.json``."""
     from promptpotter.application.datasets.origin_readiness import origin_projection
     from promptpotter.application.datasets.origin_resolve import resolve_origin_turn
-    from promptpotter.application.jobs.launcher.draft_build import draft_wire_with_locks
+    from promptpotter.application.jobs.launcher.draft_build import draft_wire
 
     draft = _reread_draft(stores, draft_id)
 
@@ -1338,7 +1323,7 @@ async def dispatch_origin_resolution(
             raise ServiceUnavailableError(
                 f"origin resolver turn failed: {exc}", code="resolver_failed"
             ) from exc
-        return {"resolution": result.resolution, "draft": draft_wire_with_locks(result.draft)}
+        return {"resolution": result.resolution, "draft": draft_wire(result.draft, stores.base_dir)}
 
     def _on_replay() -> dict[str, Any]:
         # `cache.json::resolution` is byte-identical to the live turn's block, so a deduped

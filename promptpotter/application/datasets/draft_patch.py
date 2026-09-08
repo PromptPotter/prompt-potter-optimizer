@@ -43,8 +43,8 @@ class EditDraftPatch(StrictModel):
     scoring_composite: str | None = Field(default=None, min_length=1, max_length=64)
     raw_task_description: str | None = Field(default=None, min_length=1, max_length=16384)
     pipeline_overlay: dict[str, Any] | None = None
-    # Written by the setup-panel mode toggle; read by commit's
-    # `_build_origin_pipeline_json` + `derive_optimizer_locks`.
+    # Written by the setup-panel mode toggle; read by commit's `_build_origin_pipeline_json`
+    # and by `draft_active_steps`.
     pipeline_steps: list[str] | None = None
     column_query: str | None = Field(default=None, max_length=256)
     column_ground_truth: str | None = Field(default=None, max_length=256)
@@ -57,9 +57,6 @@ class EditDraftPatch(StrictModel):
     # From the operator's upload or derived from one of the draft's own columns
     # (`routers/datasets/ingest.py`); both ride this patch.
     candidate_library: list[str] | None = Field(default=None, min_length=1)
-    # Replaces the draft's set wholesale — the checklist sends the full ticked list, and an
-    # empty list clears it (restrictive default). Not gated, like the connector.
-    allowed_models: list[str] | None = None
 
 
 # The fields a caller can carry as ONE raw token — what the CLI's `FIELD=VALUE` can express, and
@@ -106,7 +103,6 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
         (patch.origin_prompt_fields, "origin_prompt_fields"),
         (patch.pipeline_steps, "pipeline_steps"),
         (patch.candidate_library, "candidate_library"),
-        (patch.allowed_models, "allowed_models"),
     ):
         if patch_val is not None:
             changes[draft_attr] = patch_val

@@ -50,7 +50,7 @@ last, so the formula scores the judge under a name promising something else).
 
 ## Scoring, never the optimizer loop — and it is structural
 
-**Nothing that sets the loop's LLMs may reach a judge.** `allowed_models`,
+**Nothing that sets the loop's LLMs may reach a judge.** A node's permitted model set,
 `nodes.{node}.config.model`, the optimizer's own `assets/optimizer/pipeline.yaml`, and any global
 "set every model" steer are all not consulted. A judge's models are declared in
 `campaign.yaml::campaign_config.judges.{term}.stages` and inherited from nowhere — not from the

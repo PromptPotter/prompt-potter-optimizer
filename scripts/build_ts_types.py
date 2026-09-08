@@ -60,6 +60,7 @@ from promptpotter.domain.opt_search_point import (
     WoundChannels,
 )
 from promptpotter.domain.pipeline_schema import (
+    ModelCapability,
     NodeConfigParam,
     NodeOutputSchema,
     NodeSearchNarrowing,
@@ -207,6 +208,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     MeasurementDot,
     SampleSeries,
     MeasurementSeriesResponse,
+    ModelCapability,
     NodeConfigParam,
     NodeOutputSchema,
     PipelineViewNode,  # nested in PipelineView — the emitter does not recurse

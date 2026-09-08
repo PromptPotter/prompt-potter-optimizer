@@ -4,7 +4,8 @@ Each connector packages everything PromptPotter needs to talk to one
 backend kind. A connector is one file under this package exporting a
 ``Connector(...)`` binding (`protocol.py`), registered via the dict in
 `__init__.py`. Operating one is local too: model/provider switches go in
-`datasets/{name}/pipeline.yaml::nodes.{name}.config`, never in the backend's repo.
+`datasets/{name}/pipeline.yaml::nodes.{name}.config`, picked from the menu
+`Connector.available_models` seeds into that file — never in the backend's repo.
 
 **Adding one is local to `connectors/<name>.py` + a dataset directory, and the way that
 claim fails is what to watch for.** Naming two files it must not edit

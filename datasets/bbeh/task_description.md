@@ -29,5 +29,5 @@ Solve one puzzle per task from the BIG-Bench Extra Hard benchmark and commit to 
 
 ## Constraints
 
-- The target model (`llm_only.model`) is pinned for this dataset and must not be proposed as a mutation by L1-generate. The single allowed value is `mistralai/mistral-small-3.2-24b-instruct` (see `datasets/bbeh/pipeline.yaml::available_models`). Provider is also pinned to `openrouter`.
+- The target model (`llm_only.model`) is pinned for this dataset and is not in `optimizer.param_keys`, so L1-generate is never offered it — the engine searches `model` wherever a node opens it, and this one does not. The single value is `mistralai/mistral-small-3.2-24b-instruct` (see `datasets/bbeh/pipeline.yaml::available_models`). Provider is pinned to `openrouter` engine-wide.
 - L1 may freely mutate: `reasoning_effort`, `temperature`, `max_tokens`, and any prompt field (`persona`, `task_intent`, `problem_description`, `instruction`, `thinking_style`, `answer_format`).

@@ -98,9 +98,9 @@ Connector-described pipeline (the shape `GET /pipeline` exposes, plus an operato
 - `name`, `version` — pipeline identity.
 - `backend_type` — connector name; must match a registered connector.
 - `backend_name` — display name for operator surfaces.
-- `nodes` — node graph. Per-node: `runtime` (`backend`/`frontend`/`in_process`) · `node_role` (`candidate_source`/`ranker`/`enricher`/`cache`/`""` — the WIRE key; it maps to `PipelineNode.node_type`, which is the model field, not the key you publish) · `optimizer.param_keys` (list — the SEARCH AXES this node opens to the optimizer; `model`/`provider` are stripped whatever it says, and a campaign narrows the rest) · `optimizer.observation_mappings` (wire-name → optimizer-name) · `optimizer.langfuse_type` · `config` (per-dataset overlay merged onto the wire payload).
+- `nodes` — node graph. Per-node: `runtime` (`backend`/`frontend`/`in_process`) · `node_role` (`candidate_source`/`ranker`/`enricher`/`cache`/`""` — the WIRE key; it maps to `PipelineNode.node_type`, which is the model field, not the key you publish) · `optimizer.param_keys` (list — the SEARCH AXES this node opens to the optimizer; `provider`/`route_order` are stripped whatever it says, `model` is opened by listing it, and a campaign narrows the rest) · `optimizer.observation_mappings` (wire-name → optimizer-name) · `optimizer.langfuse_type` · `config` (per-dataset overlay merged onto the wire payload).
 - `pipelines` — named pipeline variants.
-- `available_models` — model menu shown to L1.
+- `available_models` — the model MENU: what the check-in offers, and the fallback bound on `model` for a node declaring no `optimizer.param_allowed_values.model`. That per-node list is the PERMITTED set — what the optimizer may pick where the axis is open, and what a human fork may steer to un-tainted. A check-in dataset gets the menu from `Connector.available_models`.
 - `resolved_prompts` — prompt-template map keyed by version. (`resolved_schemas` is a
   sibling file, not a key: for `_optimizer` it is generated into
   `resolved_schemas.json` by `scripts/build_optimizer_schemas.py`.)
@@ -111,7 +111,7 @@ Campaign knobs + scoring + optimizer LLM. Validated by `application/campaign_con
 
 **Top-level keys.** `dataset_name`, `scoring`, `judge`, `sp_budget_ttest`, `exclude_nodes` (drop pipeline nodes by name), `pipeline_overrides` (per-node config overlay), `optimization`. (The optimizer LLM is install-global — `promptpotter/assets/optimizer/pipeline.yaml` — not a campaign key.)
 
-`judge` names a registered LLM-as-judge and the models to run it on — `{name, stages: [{role, model, provider, temperature}]}` — for datasets whose answer no matcher can grade. Its verdict is banked as a per-sample observation the `scoring` formula reads by NAME (never a call: a judge is a measurement, not a formula term). **Its models are inherited from nothing** — not `allowed_models`, not node config, not the optimizer's. A third party ships a judge through the `promptpotter.judges` entry-point group, validated like §1's connectors; contract: [`../../promptpotter/judges/CLAUDE.md`](../../promptpotter/judges/CLAUDE.md).
+`judge` names a registered LLM-as-judge and the models to run it on — `{name, stages: [{role, model, provider, temperature}]}` — for datasets whose answer no matcher can grade. Its verdict is banked as a per-sample observation the `scoring` formula reads by NAME (never a call: a judge is a measurement, not a formula term). **Its models are inherited from nothing** — not a node's permitted set, not node config, not the optimizer's. A third party ships a judge through the `promptpotter.judges` entry-point group, validated like §1's connectors; contract: [`../../promptpotter/judges/CLAUDE.md`](../../promptpotter/judges/CLAUDE.md).
 
 **`optimization` knobs:** the stable contract is the mechanism, not a
 frozen key/default table (same rule as §4). Every knob is a

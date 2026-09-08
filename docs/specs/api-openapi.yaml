@@ -852,43 +852,6 @@ paths:
         '409': { $ref: '#/components/responses/VersionConflict' }
         '422': { $ref: '#/components/responses/PayloadInvalid' }
 
-  /commands/set-allowed-models:
-    post:
-      operationId: setAllowedModels
-      summary: Rewrite a campaign's inner-optimizer model allow-list (in place).
-      description: |
-        In-place edit of the campaign's committed `allowed_models` — the frozen
-        `campaign.json::config`, the SINGLE source of truth both the fork-cycle
-        cap-gate and the runner's grade-C stamp read (via `apply_inherited_overlay`).
-        Replaces the set wholesale; an empty list clears it (restrictive default:
-        any human model steer then taints the branch grade C). Campaign-scoped —
-        no `Expected-Version`; the `CommandRecord` lands on the WORKSPACE ledger.
-        Owner-gated on `campaign.lifecycle`, a strictly stronger authority than
-        `campaign.babysit`, so a babysit-delegate cannot self-authorize by adding
-        its own model. Identity-neutral: `allowed_models` is not in
-        `root_content_hash`, so no re-stamp and no re-measure.
-      tags: [campaign]
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              allOf:
-                - $ref: '#/components/schemas/CommandEnvelope'
-                - type: object
-                  required: [kind, payload]
-                  properties:
-                    kind: { const: set-allowed-models }
-                    payload: { $ref: '#/components/schemas/SetAllowedModelsPayload' }
-      responses:
-        '202': { $ref: '#/components/responses/CommandAccepted' }
-        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
-        '403': { $ref: '#/components/responses/CapabilityDenied' }
-        '404': { $ref: '#/components/responses/CommandTargetNotFound' }
-        '422': { $ref: '#/components/responses/PayloadInvalid' }
-
   /commands/set-campaign-label:
     post:
       operationId: setCampaignLabel
@@ -3414,21 +3377,6 @@ components:
                 `payload_invalid` when the composite references unknown
                 evaluator ids.
 
-    SetAllowedModelsPayload:
-      allOf:
-        - $ref: '#/components/schemas/CampaignRef'
-        - type: object
-          required: [allowed_models]
-          additionalProperties: false
-          properties:
-            allowed_models:
-              type: array
-              items: { type: string }
-              description: |
-                The full sanctioned model list, replacing the campaign's set wholesale.
-                Empty clears it (restrictive default). A human fork steered to a listed
-                model is clean; to an unlisted one, babysat (grade C).
-
     SetCampaignLabelPayload:
       allOf:
         - $ref: '#/components/schemas/CampaignRef'
@@ -3498,53 +3446,46 @@ components:
                 Operator verdict. Stored on the round's audit trail; L2/L3
                 may consume in later profiles (no behavior change in v0).
 
-    OptimizerLocks:
+    ModelCapability:
       type: object
       additionalProperties: false
-      required: [pipeline, forbidden_axes, nodes]
+      required: [model, reasoning_efforts, reasoning_note, source]
       description: |
-        Connector-derived permission surface — what the optimizer is allowed to
-        permute on this draft. Boundary-added by
-        `launcher/draft_build.py::draft_wire_with_locks` (via
-        `derive_optimizer_locks`) onto EVERY draft-returning response, so it is
-        required, not optional. The UI renders a ladder value absent from
-        `param_allowed_values` as crossed-out.
+        What ONE model accepts and costs, resolved server-side through the operator's
+        hand-authored `model_capabilities.yaml`, then the per-tenant provider snapshot, then
+        unknown. Every card field is optional and a surface renders only what is present — the
+        catalogue is a third party's claim, so a field it drops must shorten the card rather
+        than blank it.
       properties:
-        pipeline:
+        model: { type: string }
+        reasoning_efforts:
           type: array
-          items: { type: string }
-          description: Connector default pipeline step list, e.g. `["llm_only"]`.
-        forbidden_axes:
-          type: array
+          nullable: true
           items: { type: string }
           description: |
-            Params the optimizer may never permute on any node — always locked, because each
-            of them decides WHO ANSWERS rather than what is asked, and hosts of one model
-            disagree systematically. Mirrors `PARAM_FORBIDDEN_KEYS`; read the members off this
-            array rather than a copy of the set.
-        nodes:
-          type: object
-          additionalProperties:
-            $ref: '#/components/schemas/OptimizerNodeLocks'
-
-    OptimizerNodeLocks:
-      type: object
-      additionalProperties: false
-      required: [config, param_allowed_values]
-      properties:
-        config:
-          type: object
-          additionalProperties: true
+            The `reasoning_effort` ladder this MODEL offers, REPLACING what a node declared —
+            a node's list is a default authored before anyone knew which model would run
+            there. `null` is UNKNOWN and must never render as unsupported: the caller keeps
+            the node's own list untouched, because an absent answer shown as "no" silently
+            deletes a real search axis.
+        reasoning_note:
+          type: string
           description: |
-            Effective per-node config floor (connector seed + overlay) — the
-            active value of each control, e.g.
-            `{ reasoning_effort: "low", temperature: 0 }`.
-        param_allowed_values:
-          type: object
-          additionalProperties:
-            type: array
-            items: { type: string }
-          description: Closed set the optimizer may permute per param.
+            Why the ladder reads as it does — populated in EVERY arm (unknown, no effort knob,
+            operator override, full ladder). A reason that appears only sometimes is a state
+            nothing can report.
+        source:
+          type: string
+          enum: [override, openrouter, unknown]
+          description: Which layer answered, so a moved list can say whose claim it is.
+        display_name: { type: string }
+        context_length: { type: integer, nullable: true }
+        max_output_tokens: { type: integer, nullable: true }
+        input_usd_per_mtok: { type: number, nullable: true }
+        output_usd_per_mtok: { type: number, nullable: true }
+        modality: { type: string }
+        moderated: { type: boolean, nullable: true }
+        fetched_at: { type: string }
 
     OptimizationOverrides:
       type: object
@@ -3745,16 +3686,32 @@ components:
             list isn't sent — a library can run to tens of thousands of entries.
             Populated via `POST /datasets/draft/candidate-library`; committed to
             `{slug}/candidate_library.txt`.
-        allowed_models:
+        active_steps:
           type: array
           items: { type: string }
-          default: []
           description: |
-            The origin's sanctioned inner-optimizer model allow-list, ticked in the
-            check-in pipeline setup. Materializes to `campaign.json::config.allowed_models`
-            (a top-level CampaignConfig field). Empty = nothing sanctioned = restrictive
-            default: any human fork that steers the model taints the branch grade C
-            (`overlay_sets_model_outside_allowed`); a steer to a listed model is clean.
+            The pipeline this draft actually runs — its own choice (preserved on reuse) over
+            the connector default. What a node's axes ARE and who may move them is
+            `node_config_schema`, and nowhere else: a second permission projection beside it
+            could only disagree with it.
+        schema_source:
+          type: string
+          enum: [backend, local, unreachable]
+          description: |
+            WHERE `node_config_schema` came from, because an empty axis set has two very
+            different causes. `backend` = the service's own declaration was read at check-in,
+            so `movable_by` is authoritative. `local` = an in-process connector, whose manifest
+            IS the declaration. `unreachable` = the probe failed, and NOTHING here may be read
+            as a lock the operator set — an editor drawing padlocks off this state asserts a
+            permission nobody chose.
+        model_capabilities:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ModelCapability'
+          description: |
+            What each model on the menu ACCEPTS and costs, keyed by model id. Keyed by MODEL
+            rather than folded into the `reasoning_effort` param row, so switching models
+            re-answers the ladder with no round-trip.
         dependencies:
           type: array
           description: |
@@ -3837,8 +3794,6 @@ components:
             Per-node structured-output contract (read-only), keyed by node id;
             null per node when it declares none. Boundary-added beside
             `pipeline_view`.
-        optimizer_locks:
-          $ref: '#/components/schemas/OptimizerLocks'
         created_at:
           type: string
           format: date-time
@@ -4157,14 +4112,6 @@ components:
                 and its `/from-column` sibling derive this value from an upload or a
                 column and dispatch it as this patch — they are alternate ingresses
                 for `edit-draft-campaign`, not separate write paths.
-            allowed_models:
-              type: array
-              items: { type: string }
-              description: |
-                The origin's sanctioned model allow-list (ticked in the check-in
-                pipeline setup). Replaces the draft's set wholesale; an empty list
-                clears it (restrictive default). Materializes to
-                `campaign.json::config.allowed_models`.
 
     StartCheckinPayload:
       type: object

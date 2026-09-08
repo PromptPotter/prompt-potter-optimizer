@@ -211,6 +211,23 @@ class Connector:
     an origin). Empty mapping means "no seed; the backend schema stands."
     Draft ``pipeline_overlay`` (operator edits) layers on top of this."""
 
+    available_models: tuple[str, ...] = ()
+    """The model catalogue the chat-first ingest writes into a fresh dataset's
+    ``pipeline.yaml::available_models`` — the MENU an origin's permitted set is
+    picked from. Admin-owned, the target-side twin of
+    ``assets/optimizer/pipeline.yaml::available_models``: extend it as this install
+    gains access to more models. Three DISTINCT layers, and collapsing any two is
+    the confusion this field exists to prevent — this is what is AVAILABLE, a node's
+    ``optimizer.param_allowed_values["model"]`` is which of them that node PERMITS
+    (both what the optimizer may pick and what a human may steer to un-tainted), and
+    ``default_node_config``'s ``config.model`` is where the origin STARTS. Whether
+    ``model`` is a search AXIS is a fourth question, answered by that node's
+    ``optimizer.param_keys`` alone. Empty tuple means "no menu" — the node's declared
+    model stands alone and the ingest UI has nothing to offer. A model listed here
+    that needs a ``max_tokens`` floor also needs a ``_MODEL_PROFILES`` entry
+    (``infrastructure/llm/registry.py``); preflight cannot floor what it cannot
+    profile, and neither list fails loudly when it lags the other."""
+
 
 __all__ = [
     "AuthTokenFn",

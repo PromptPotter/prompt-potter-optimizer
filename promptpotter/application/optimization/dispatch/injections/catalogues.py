@@ -36,9 +36,6 @@ def _schema_description_block(node: PipelineNode) -> list[str]:
 @signal(
     "pipeline_param_catalogue",
     kind=InjectionKind.DERIVED,
-    # No "plus available models" — the renderer never emitted them and must not: the model
-    # axis is operator-owned, so advertising the catalogue here would teach a lever L1 cannot
-    # pull (`node_param_keys` strips model/provider before this ever sees them).
     char_cap=None,
     # A value-space menu is what a mutation may SAY, never why it should be made.
     citable=False,
@@ -50,8 +47,10 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> list[Item]:
     schema = b.pipeline_schema
     if schema is None:
         return []
-    # ONE surface: model/provider are always absent (operator-owned, never an
-    # optimizer axis), so the catalogue never advertises them.
+    # ONE surface: `provider`/`route_order` are always absent (cost levers, never an
+    # optimizer axis), so the catalogue never advertises them. `model` appears exactly
+    # where its node opened it, and always WITH its value space — a bare `model` with no
+    # enum would be the one line in this menu inviting an invented id.
     npk = schema.node_param_keys()
     if not npk:
         return []
@@ -64,7 +63,7 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> list[Item]:
         enums = node.param_allowed_values
         bits: list[str] = []
         for p in sorted(params):
-            allowed = enums.get(p)
+            allowed = schema.model_options(node) if p == "model" else enums.get(p)
             if allowed:
                 shown = list(allowed)[:AXES_ENUM_PREVIEW]
                 preview = ", ".join(str(x) for x in shown)
