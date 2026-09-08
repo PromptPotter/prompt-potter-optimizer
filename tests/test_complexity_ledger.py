@@ -94,7 +94,13 @@ LEDGER_BASELINE = {
     # `pipeline_data.step_tokens`, and those rows are exactly the per-sample arrays the candidate
     # row exists to avoid shipping. The same three names `DashboardSample` carries one level down,
     # so this is the existing vocabulary at a second arity rather than a fourth spelling.
-    "cycle_result_fields": 164,
+    # +1: `not_attempted`, on `RoundResult` and on the `DegradationHealth` nested in it — cells of
+    # the panel the walk never SENT. Not derivable from the rows, and that is the whole point: they
+    # carry no row, because an abort used to fabricate one per unreached cell and so gave absence
+    # the shape of failure. With the padding gone the counters are honest but the round can no
+    # longer tell "measured badly" from "barely measured", which is the difference between grading
+    # a pipeline and asking for a re-measure. One name, two arities — the round's and its verdict's.
+    "cycle_result_fields": 165,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same

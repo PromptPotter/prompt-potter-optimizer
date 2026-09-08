@@ -1364,6 +1364,42 @@ def test_a_round_that_measured_nothing_usable_names_which_way_it_broke():
     # …and a NON-origin round that measured nothing abstains, never a fabricated ``healthy``.
     assert compute_round_health(results=[], prior_healths=[]) is None
 
+    # A WALK CUT SHORT is not a broken pipeline. One upstream 429 on cell #1 aborted a 40-cell
+    # origin after two, and the abort then wrote an error row for each of the 38 cells it had
+    # never sent — so `hole_rate` read 0.975 and the operator was told "98% of this round's cells
+    # returned no measurement — pipeline may be structurally broken" about a prompt that had been
+    # measured exactly once. The unreached cells carry no row now; they arrive as coverage, and
+    # coverage is asked BEFORE any rate.
+    cut_short = compute_round_health(
+        results=[
+            _health_row({"llm_only": "success"}, predicted="6500"),
+            {"error": "HTTP 429 rate-limited (window, no Retry-After)", "error_category": "SERVER"},
+        ],
+        prior_healths=[],
+        is_origin=True,
+        not_attempted=38,
+    )
+    assert cut_short is not None
+    assert (cut_short.grade, cut_short.cause) == ("critical", "origin_unmeasured")
+    assert cut_short.samples == 2 and cut_short.not_attempted == 38
+    # The verdict names the coverage, and hands over the error it tells the operator to read.
+    assert cut_short.suggested_action and "2 of 40" in cut_short.suggested_action
+    assert cut_short.last_error is not None and "429" in cut_short.last_error
+    # It still halts — 2 of 40 is no baseline to elect against.
+    assert origin_gate_tripped(cut_short, "critical_only") == StopReason.ORIGIN_GATE
+
+    # `degraded_rate` is over the cells that came back with something to CLASSIFY. Holes can only
+    # ever be in its denominator, so dividing by every attempted cell graded a round closer to 0%
+    # the more completely it failed — which is what "Degraded rate 0%" read beside "98% holed".
+    holed = compute_round_health(
+        results=[_health_row({"llm_only": "success"}, predicted="ok")]
+        + [{"error": "boom", "error_category": "PIPELINE"} for _ in range(9)],
+        prior_healths=[],
+    )
+    assert holed is not None
+    assert holed.hole_count == 9 and holed.samples == 10
+    assert holed.degraded_rate == 0.0  # the one classifiable cell was clean — and says so
+
 
 # 5. PoBB — who is eliminated, and when
 

@@ -15,6 +15,8 @@ function health(
     transient_count: 5,
     no_result_count: 0,
     hole_count: 0,
+    not_attempted: 0,
+    last_error: null,
     answer_modal_share: null,
     degraded_rate: 0.25,
     consecutive_degraded_rounds: 1,

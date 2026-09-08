@@ -502,6 +502,9 @@
 .chat-decision-verdict>div{display:contents}
 .chat-decision-verdict dt{color:var(--color-text-secondary)}
 .chat-decision-verdict dd{margin:0;font-family:var(--font-mono);color:var(--color-text-primary)}
+/* A provider's verbatim error — long, and often one unbroken token. It wraps anywhere and scrolls
+   rather than stretching the card, because the operator has to be able to read all of it. */
+.chat-decision-error{overflow-wrap:anywhere;white-space:pre-wrap;max-height:9em;overflow-y:auto;font-size:var(--text-sm);color:var(--color-danger)}
 .chat-decision-reasons{margin:0;padding-left:18px;font-size:var(--text-sm);color:var(--color-text-secondary);line-height:1.5}
 .chat-decision-actions{display:flex;flex-wrap:wrap;gap:var(--space-8)}
 .chat-decision-btn{padding:var(--space-6) var(--space-14);border-radius:6px;font-size:var(--text-base);font-weight:500;cursor:pointer;border:1px solid var(--color-border);background:var(--color-background-secondary);color:var(--color-text-primary);transition:background .15s,border-color .15s}

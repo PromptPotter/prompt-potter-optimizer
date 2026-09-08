@@ -663,6 +663,10 @@ class RoundResult(StrictModel):
     # election runs.
     verdict_reason: str | None = None
     degraded_samples: int = 0
+    # Cells of the winner's panel never sent, copied from its ``ScoredCandidate``. Read by the
+    # round's degradation verdict, which without it cannot tell a round that measured badly from
+    # one that barely measured at all.
+    not_attempted: int = 0
     # Fatal-warning samples discarded from total/accuracy on the winner's run.
     deprecated: int = 0
     escalation_signal: EscalationSignal | None = None
@@ -1003,6 +1007,12 @@ class DegradationHealth(StrictModel):
     # the answer format), a hole means the cell never reported (re-run it). Uncounted, such a
     # row joins ``samples`` with no numerator and grades a round HEALTHIER the more it has.
     hole_count: int = 0
+    # Cells of the panel that were never SENT, because the walk stopped early. They are NOT
+    # measurements and carry no row: ``samples`` counts what was dispatched, and the panel this
+    # round meant to measure is ``samples + not_attempted``. The distinction is the whole reason
+    # a verdict can say "the origin was not measured" instead of grading a pipeline on cells that
+    # never ran — which is what the abort's fabricated error rows made it do.
+    not_attempted: int = 0
     # Share of this round's predictions on its single commonest label; ``None`` where the answer
     # space makes collapse meaningless. REPORTED, never graded — hedging to one label is the
     # addressable failure the loop exists to correct, so grading it critical would halt the
@@ -1017,6 +1027,14 @@ class DegradationHealth(StrictModel):
     # evidence behind the verdict, connector-agnostic.
     node_warnings: dict[str, list[str]] = Field(default_factory=dict)
     suggested_action: str | None = None
+    # The verbatim ``error`` of the LAST errored cell of the round, which on an abort is the cell
+    # that triggered it — the walk stops there. Named for the position rather than for the role,
+    # because outside an abort there is no trigger and a field called ``first_error`` was answering
+    # with a different cell than the one it claimed. Every ``suggested_action`` that names a hole
+    # tells the operator to "read the row's error text before changing anything", and until this
+    # field there was no surface in the product that showed it: the text is in the round file, and
+    # the operator was left to open it by hand or guess. ``None`` when no cell errored.
+    last_error: str | None = None
 
 
 class PayloadOutcome(StrictModel):

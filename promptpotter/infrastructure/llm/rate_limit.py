@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import re
 import sys
 import threading
@@ -229,10 +230,10 @@ def decide_429_wait(
     *,
     max_attempts: int = MAX_429_ATTEMPTS,
 ) -> RateLimitWait | None:
-    """The pause for one 429 retry, or ``None`` (no usable ``Retry-After``, non-positive, or exhausted) —
-    on which the caller surfaces the original failure. Shared by the backend wire and the optimizer."""
-    wait = parse_retry_after(headers)
-    if wait is None or wait <= 0 or attempt >= max_attempts - 1:
+    """The pause for one 429 retry, or ``None`` — the budget is spent, or the window is one no retry
+    can outlast — on which the caller surfaces the original failure. Shared by the backend wire and
+    the optimizer."""
+    if attempt >= max_attempts - 1:
         return None
     scope = diagnose_rate_limit_scope(headers, body)
     # A per-day/per-hour quota does not reset inside a retry budget — surface it
@@ -240,7 +241,36 @@ def decide_429_wait(
     # silent multi-minute countdown. Per-minute/second windows still wait.
     if scope in _UNWAITABLE_SCOPES:
         return None
-    return RateLimitWait(seconds=wait + 1.0, scope=scope)
+    wait = parse_retry_after(headers)
+    if wait is not None and wait > 0:
+        return RateLimitWait(seconds=wait + 1.0, scope=scope)
+    # No usable header, which is NOT a refusal to be retried: a provider answers a throttled
+    # upstream with "Please retry shortly" and no ``Retry-After`` at all. Reading that absence as
+    # "give up" spent ZERO of the five attempts, and one such blip then voided a whole panel.
+    # Back off by policy instead; an unwaitable quota already returned above.
+    return RateLimitWait(seconds=_unheaded_backoff(attempt), scope=scope)
+
+
+# Backoff for a 429 that named no window: 2s, 4s, 8s, 16s, each with up to 25% jitter so concurrent
+# cells do not retry in lockstep. The LAST of ``MAX_429_ATTEMPTS`` buys no pause — ``decide_429_wait``
+# returns ``None`` on it and the caller surfaces the failure — so five attempts are four waits and a
+# throttled cell costs at most ~37s of clock. The cap binds exactly at the last of those four and
+# only flattens the tail if the attempt budget grows.
+_UNHEADED_BASE_S: float = 2.0
+_UNHEADED_CAP_S: float = 16.0
+
+
+def _unheaded_backoff(attempt: int) -> float:
+    base = min(_UNHEADED_BASE_S * (2.0**attempt), _UNHEADED_CAP_S)
+    return base + random.uniform(0.0, base * 0.25)
+
+
+def is_quota_rate_limit(headers: object | None, body: str | None) -> bool:
+    """Is this 429 a QUOTA the operator has to act on (per-day/per-hour), rather than a window that
+    passes on its own? The one question two callers ask of a 429 — ``decide_429_wait`` to choose
+    between waiting and surfacing, and the sample classifier to choose between a caller fault and a
+    transient one — so it is answered here once instead of by two readings of the scope table."""
+    return diagnose_rate_limit_scope(headers, body) in _UNWAITABLE_SCOPES
 
 
 async def wait_with_countdown(total_sec: float, label: str) -> None:
@@ -530,6 +560,7 @@ __all__ = [
     "build_rate_limiter",
     "decide_429_wait",
     "get_abort_check",
+    "is_quota_rate_limit",
     "parse_retry_after",
     "raise_if_request_too_large",
     "set_abort_check",

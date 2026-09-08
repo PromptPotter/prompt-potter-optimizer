@@ -5,6 +5,7 @@ import { bumpRevalidation } from "@/lib/revalidate";
 import { fmtPct0 } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { Hearts } from "@/components/ui";
+import { HEALTH_CAUSE_LABEL } from "@/lib/derivations";
 import type { ActivityItem } from "@/lib/chat/activity";
 import type { DecisionItem } from "@/lib/chat/decision";
 import type { DegradationHealth } from "@/lib/api/types";
@@ -130,23 +131,51 @@ export function LiveSegment({
 // The origin verdict, folded in from the deleted `OriginGateModal` so no
 // diagnostic is lost when the gate decision moved into the chat.
 function GateVerdictView({ verdict }: { verdict: DegradationHealth }) {
+  // COVERAGE LEADS, because a rate the round could not support is the thing that misled hardest:
+  // this panel used to open on "Degraded rate 0%" beside advice reading "98% of this round's cells
+  // returned no measurement", the two being computed over disjoint sets of rows. What the round
+  // actually MEASURED is the first thing that makes either number readable.
+  const panel = verdict.samples + verdict.not_attempted;
+  // Holes can never reach the degraded numerator, so a round of nothing but holes reports 0% here.
+  // The rate is worth showing only where something came back to classify.
+  const classifiable = verdict.samples - verdict.hole_count;
   return (
     <>
       <dl className="chat-decision-verdict">
         <div>
-          <dt>Degraded rate</dt>
-          <dd>{fmtPct0(verdict.degraded_rate)}</dd>
-        </div>
-        <div>
-          <dt>Structural / transient</dt>
+          <dt>Cells measured</dt>
           <dd>
-            {verdict.structural_count} / {verdict.transient_count}
+            {verdict.samples} of {panel}
+            {verdict.not_attempted > 0 ? ` · ${verdict.not_attempted} never sent` : ""}
           </dd>
         </div>
+        {verdict.hole_count > 0 ? (
+          <div>
+            <dt>Returned nothing</dt>
+            <dd>{verdict.hole_count}</dd>
+          </div>
+        ) : null}
+        {classifiable > 0 ? (
+          <div>
+            <dt>Degraded rate</dt>
+            <dd>
+              {fmtPct0(verdict.degraded_rate)} · {verdict.structural_count} structural /{" "}
+              {verdict.transient_count} transient
+            </dd>
+          </div>
+        ) : null}
         {verdict.dominant_node ? (
           <div>
             <dt>Worst node</dt>
             <dd>{verdict.dominant_node}</dd>
+          </div>
+        ) : null}
+        {/* The advice tells the operator to read the row's error text before changing anything.
+            Until this row, no surface in the product showed it. */}
+        {verdict.last_error ? (
+          <div>
+            <dt>Last error</dt>
+            <dd className="chat-decision-error">{verdict.last_error}</dd>
           </div>
         ) : null}
         {verdict.suggested_action ? (
@@ -158,7 +187,7 @@ function GateVerdictView({ verdict }: { verdict: DegradationHealth }) {
       </dl>
       {verdict.cause ? (
         <ul className="chat-decision-reasons">
-          <li>{verdict.cause}</li>
+          <li>{HEALTH_CAUSE_LABEL[verdict.cause]}</li>
         </ul>
       ) : null}
     </>

@@ -21,6 +21,23 @@ export function roundHealthAt(
   return dash?.rounds?.find((r) => r.round === round)?.health ?? null;
 }
 
+// WHY a round graded below healthy, in words. Keyed on the generated union, so a cause the
+// backend adds is a compile error here rather than a raw enum member rendered at an operator: the
+// gate card printed `verdict.cause` verbatim, and an origin held by one upstream 429 explained
+// itself to the operator with the bare word "holed".
+export const HEALTH_CAUSE_LABEL: Record<NonNullable<DegradationHealth["cause"]>, string> = {
+  origin_unmeasured: "the origin was not measured",
+  origin_incomplete: "the origin is missing cells",
+  backend_unreachable: "the backend was unreachable",
+  structural: "a node failed structurally",
+  unscoreable: "no extractable answer",
+  holed: "cells returned no measurement",
+  evidence_starved: "an enricher produced no evidence",
+  structural_untested: "a structural failure with no clean prior",
+  persistent: "degraded for several rounds running",
+  degraded: "degraded on a share of samples",
+};
+
 export interface DegradedRoundNotice {
   round: number;
   // One-line reason, e.g. "transient noise on entity_profiling" or

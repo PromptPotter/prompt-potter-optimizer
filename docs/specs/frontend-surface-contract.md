@@ -2,14 +2,14 @@
 
 Minimal, dual-read spec of every user-facing surface in `webapp/` — what each
 control **must do**, per state. Companion to `webapp/CLAUDE.md` (implementation
-invariants) and `BRAND.md` / `VOICE.md` (brand/copy). This file owns *behavior*: the
+invariants) and `promptpotter-web/BRAND.md` (brand + copy register). This file owns *behavior*: the
 contract a PR is measured against, and the source of truth when reality drifts.
 
 **How to read.** This file owns the cross-cutting **invariants** and the two consent gates —
 the rules a PR is measured against and that a plausible edit would silently undo. It does **not**
 describe surfaces: what a control renders is owned by the component, and a doc that copies rendered
 strings is a stale screenshot, not a contract. `webapp/CLAUDE.md` owns the implementation rules,
-`BRAND.md` / `VOICE.md` the brand and copy register.
+`promptpotter-web/BRAND.md` the brand and copy register.
 
 ## State vocabulary
 
@@ -72,7 +72,11 @@ invariants:
                       phase goes through a map TOTAL over RunPhase (runPhaseLabel, runPhaseAction):
                       testing `=== "running"` renders half the vocabulary as nothing, which is how
                       a gate-held run — blocked on the operator, first in that ordering — read as
-                      an idle sidebar row.
+                      an idle sidebar row. `isLive` (poll.tsx) is NOT this answer and never
+                      substitutes for it: it means "should transient indicators be on", which is
+                      false at the gate because nothing is being measured, while the producer is
+                      alive and polling for a decision. Read as "the run ended" it froze **Run
+                      finished** into the chat above a card saying the run was holding.
                       COROLLARY (the time-ray). run_phase provably cannot express running vs
                       WEDGED: every await outlasting RUN_FRESH_S must heartbeat (heartbeat.py
                       states the rule, four callers), so a live cycle can never go stale and a

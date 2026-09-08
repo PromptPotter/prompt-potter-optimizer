@@ -147,6 +147,7 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
     p_value: null,
     verdict_reason: null,
     degraded_samples: 0,
+    not_attempted: 0,
     deprecated: 0,
     escalation_signal: null,
     matched_parent_accuracy: null,

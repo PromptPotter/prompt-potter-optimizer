@@ -390,6 +390,12 @@ async def l1_score(
     # The headline sample count rides the winner's ScoredCandidate row, so the round header
     # and the per-candidate table cannot disagree.
     best_total = winner_cs.total if winner_id else base["total"]
+    # Cells of the winner's panel never sent. A PoBB stop is one legitimate reason for it, so this
+    # is REPORTED here and graded only on the origin, where the round has no elimination and a
+    # shortfall can only mean the walk was cut short.
+    best_not_attempted = (
+        max(0, winner_cs.expected_samples - winner_cs.scored_samples) if winner_id else 0
+    )
     p_value: float | None = None
     if base["total"] > 0 and winner_id:
         # A recorded diagnostic; it does not gate promotion. Significance runs on the per-sample
@@ -421,6 +427,7 @@ async def l1_score(
         accuracy=best_acc,
         composite_fitness=best_comp,
         total=best_total,
+        not_attempted=best_not_attempted,
         improved=improved,
         p_value=p_value,
         verdict_reason=verdict_reason,

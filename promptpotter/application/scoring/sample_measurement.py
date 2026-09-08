@@ -19,6 +19,7 @@ from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import QueryMeasurement, is_hit, turn_scalars
 from promptpotter.domain.spend import StepTokenUsage, TokenAccount
+from promptpotter.infrastructure.llm.rate_limit import is_quota_rate_limit
 from promptpotter.infrastructure.llm.telemetry import emit_token_usage
 from promptpotter.shared.errors import ErrorCategory, has_pipeline_warnings
 
@@ -330,10 +331,22 @@ def _classify_http_error(exc: httpx.HTTPStatusError) -> tuple[ErrorCategory, str
     code = exc.response.status_code
     upstream = _extract_upstream_detail(exc)
     if code == 429:
-        retry_after = exc.response.headers.get("Retry-After", "?")
+        # A throttle is only the CALLER's fault when it is a quota no retry can outlast. A
+        # per-minute window that just closed is transient, and CLIENT is read by two consumers that
+        # both punish the candidate for the provider's load: ``query_loop._classify_abort`` voided
+        # the whole panel on the first occurrence, and ``rendering.py::classify_result`` adds
+        # ``backend:client_error`` to ``fatal_codes``, which PoBB fast-eliminates on one sighting.
+        # A quota still reaches both — that one IS the operator's to act on.
+        quota = is_quota_rate_limit(exc.response.headers, exc.response.text)
+        # Says only what this site knows. Its predecessor hardcoded "attempts exhausted" onto every
+        # 429 — including the ones that had spent no attempt at all, because the provider sent no
+        # `Retry-After` and the backoff read that absence as a refusal. The text sent diagnosis the
+        # wrong way for as long as it stood.
+        retry_after = exc.response.headers.get("Retry-After")
+        window = f"Retry-After={retry_after}s" if retry_after else "no Retry-After"
         return (
-            ErrorCategory.CLIENT,
-            f"HTTP 429 rate-limited (Retry-After={retry_after}s, attempts exhausted): {upstream!r}",
+            ErrorCategory.CLIENT if quota else ErrorCategory.SERVER,
+            f"HTTP 429 rate-limited ({'quota' if quota else 'window'}, {window}): {upstream!r}",
         )
     if 400 <= code < 500:
         tail = f" :: {upstream}" if upstream else ""

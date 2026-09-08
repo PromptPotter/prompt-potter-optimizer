@@ -19,6 +19,9 @@ CONSECUTIVE_DEGRADED_CRITICAL: int = 3
 BACKEND_UNREACHABLE_RATE: float = 0.50
 UNSCOREABLE_RATE: float = 0.50
 EVIDENCE_STARVED_RATE: float = 0.40
+# The share of its panel a round must actually have SENT before any rate below is allowed to grade
+# the pipeline. Below it there is no verdict to give — only "re-measure".
+MEASURED_COVERAGE_FLOOR: float = 0.50
 
 
 def classify_sample_failure(
@@ -80,6 +83,8 @@ def compute_degradation_health(
     unreachable_count: int = 0,
     no_result_count: int = 0,
     hole_count: int = 0,
+    not_attempted: int = 0,
+    last_error: str | None = None,
     answer_modal_share: float | None = None,
     node_failure_rates: dict[str, float] | None = None,
     node_warnings: dict[str, list[str]] | None = None,
@@ -87,31 +92,66 @@ def compute_degradation_health(
 ) -> DegradationHealth | None:
     """Never add a PRECISION clause. A Wilson width is not a failure RATE, and reusing the rate flag for one grades every
     round under n≈100 as degraded — which, since only healthy rounds count as priors, arms the untested arm forever."""
-    if attempted <= 0:
+    # COVERAGE IS A PRECONDITION, NOT A RATE — for the ORIGIN, whose shortfall is permanent. Every
+    # rate below divides by cells that were actually SENT, and a walk cut short by an abort, a skip
+    # or a pause leaves cells nothing ever dispatched: they carry no row and say nothing about the
+    # pipeline. A LATER round that comes up short is simply re-measured, so it keeps its rates and
+    # each message states the denominator it read; an origin's shortfall is the baseline every
+    # later round is read against, so below the floor it may not grade a pipeline at all. Its
+    # predecessor could only ask ``attempted <= 0``, because the abort padded the tail with
+    # fabricated error rows and so kept the denominator full — which is how a single upstream 429
+    # came to be reported as "pipeline may be structurally broken".
+    panel = attempted + not_attempted
+    if attempted <= 0 or (is_origin and attempted < panel * MEASURED_COVERAGE_FLOOR):
         if is_origin:
             return DegradationHealth(
                 grade="critical",
                 cause="origin_unmeasured",
-                samples=0,
-                structural_count=0,
-                transient_count=0,
-                no_result_count=0,
+                samples=attempted,
+                structural_count=structural_count,
+                transient_count=transient_count,
+                no_result_count=no_result_count,
                 hole_count=hole_count,
+                not_attempted=not_attempted,
+                last_error=last_error,
                 degraded_rate=0.0,
                 consecutive_degraded_rounds=0,
                 prior_clean_rounds=prior_clean_rounds,
                 suggested_action=(
-                    "the origin scored zero samples — no origin was measured, so "
-                    "candidates would be elected against nothing. The pipeline/connector "
-                    "produced no result rows for the origin (a crash or empty return, not "
-                    "a wrong answer). Fix the pipeline so the origin scores, then rescore."
+                    # ``panel`` is 0 when nothing was sent AND nothing was left unsent — the
+                    # connector returned an empty list and the walk finished. "0 of 0" is not a
+                    # coverage statement, so that case says what happened instead.
+                    (
+                        f"only {attempted} of {panel} origin cells were measured"
+                        if panel
+                        else "the origin measured nothing"
+                    )
+                    + ", so there is no origin to elect candidates against and nothing here says "
+                    "anything about the prompt. "
+                    + (
+                        f"{not_attempted} were never sent — the walk stopped early, so those "
+                        "cells did not fail, they never ran. "
+                        if not_attempted
+                        else "The pipeline/connector returned no result rows at all (a crash or "
+                        "an empty return, not a wrong answer). "
+                    )
+                    + "Re-measure with `resume`. If it stops in the same place, read the error on "
+                    "the last cell that WAS measured — the cause is upstream of the prompt."
                 ),
             )
         return None
     structural_rate = structural_count / attempted
     no_result_rate = no_result_count / attempted
     hole_rate = hole_count / attempted
-    degraded_rate = (structural_count + transient_count) / attempted
+    # Holes are in the denominator and can never be in the numerator — a hole `continue`s before
+    # ``classify_sample_failure`` ever sees it — so a round graded CLOSER TO 0% the more completely
+    # it failed, which is exactly what "Degraded rate 0%" read beside "98% of cells returned no
+    # measurement". The rate is over the cells that came back with something to classify, and
+    # UNREACHABLE is the other kind that never gets there: it `continue`s one arm earlier off the
+    # typed transport error. Subtracting one and not the other leaves the same bug for the failure
+    # mode that produces it most — a backend going down mid-round.
+    classifiable = attempted - hole_count - unreachable_count
+    degraded_rate = (structural_count + transient_count) / classifiable if classifiable else 0.0
     untested = prior_clean_rounds == 0
 
     # The most-failed enricher at/above the starvation threshold — the systemic
@@ -146,7 +186,7 @@ def compute_degradation_health(
         grade, cause = "critical", "structural_untested"
     elif consecutive_degraded_rounds >= CONSECUTIVE_DEGRADED_CRITICAL:
         grade, cause = "critical", "persistent"
-    elif is_origin and (hole_count or no_result_count):
+    elif is_origin and (hole_count or no_result_count or not_attempted):
         # ANY missing cell, not a rate: this baseline is permanent, and every later round quotes
         # the survivors as though nothing were absent. Below every critical cause — it grades
         # `degraded`, and a chain ordered by severity may not let it mask one.
@@ -192,14 +232,17 @@ def compute_degradation_health(
                 "extraction contract), then rescore — don't optimize against it."
             )
         elif cause == "holed":
-            pct = round(hole_rate * 100)
+            # Counts, not a percentage: the rate is over the cells this round SENT, and a round cut
+            # short sent few — so "98% of this round's cells" read as a verdict on the whole panel
+            # when the walk had reached two of forty.
+            never_sent = f", and {not_attempted} more were never sent" if not_attempted else ""
             suggested_action = (
-                f"{pct}% of this round's cells returned no measurement at all — they were "
-                "attempted and errored, so there is nothing here to optimize against and "
-                "nothing about the prompt to conclude. Re-measure: a plain `resume` "
-                "re-runs the cells (their errored rows are never served from cache). If "
-                "they keep failing, the cause is upstream of the prompt — read the row's "
-                "error text before changing anything."
+                f"{hole_count} of the {attempted} cells this round measured returned no "
+                f"measurement at all — they were attempted and errored{never_sent}. There is "
+                "nothing here to optimize against and nothing about the prompt to conclude. "
+                "Re-measure: a plain `resume` re-runs the cells (their errored rows are never "
+                "served from cache). If they keep failing, the cause is upstream of the prompt — "
+                "read the row's error text before changing anything."
             )
         elif cause == "persistent":
             suggested_action = (
@@ -215,10 +258,12 @@ def compute_degradation_health(
                 "Consider aborting, fixing config, and re-minting."
             )
     elif cause == "origin_incomplete":
-        missing = hole_count + no_result_count
+        reported = attempted - hole_count - no_result_count
+        never_sent = f", {not_attempted} of them never sent" if not_attempted else ""
         suggested_action = (
-            f"the origin measured {attempted - missing} of {attempted} cells — {missing} never "
-            "reported. This baseline is what every later round's lift is read against, so the "
+            f"the origin measured {reported} of {panel} cells — {panel - reported} never "
+            f"reported{never_sent}. This baseline is what every later round's lift is read "
+            "against, so the "
             "shortfall is permanent and silent: overlap lines will quote the surviving cells as "
             "though nothing were missing. Re-measure the origin before spending a round on top of "
             "it — a plain `resume` re-runs errored cells, which are never served from cache."
@@ -244,6 +289,8 @@ def compute_degradation_health(
         grade=grade,
         cause=cause,
         samples=attempted,
+        not_attempted=not_attempted,
+        last_error=last_error,
         structural_count=structural_count,
         transient_count=transient_count,
         no_result_count=no_result_count,
@@ -315,6 +362,9 @@ def compute_round_health(
     results: list[dict[str, Any]],
     prior_healths: Sequence[DegradationHealth | None],
     is_origin: bool = False,
+    # Cells of the panel the walk never sent. They have no row in ``results`` by construction, so
+    # this is the only way the verdict learns the round was cut short rather than simply small.
+    not_attempted: int = 0,
 ) -> DegradationHealth | None:
     """The SINGLE computation site: every surface reads ``RoundResult.health`` and none
     recomputes it."""
@@ -322,14 +372,28 @@ def compute_round_health(
 
     structural = transient = unreachable = no_result = holes = 0
     structural_nodes: dict[str, int] = {}
+    # Read from the END of the walk, which is what makes it the TRIGGER: `_absorb` appends a row,
+    # then classifies it, then returns on an abort — so the last errored row IS the cell that
+    # stopped the round, and it is the one message that explains the whole thing. Taken from the
+    # front it was whichever cell errored first, so a transient blip dozens of cells earlier stood
+    # in for the fault that actually halted the walk, on the very row the advice below tells the
+    # operator to read.
+    last_error = next(
+        (
+            msg
+            for r in reversed(results)
+            if is_error_result(r) and (msg := str(r.get("error") or ""))
+        ),
+        None,
+    )
     for r in results:
         # Backend-down samples carry NO diagnostics (empty pipeline_data), so they're
         # invisible to classify_sample_failure — count them off the typed error channel
-        # instead. CONNECTION = the transport failed; ``skipped_after_consecutive_errors``
-        # = the per-candidate circuit-breaker that only fires after a run of those.
-        if error_category(r) == ErrorCategory.CONNECTION or (
-            str(r.get("error") or "") == "skipped_after_consecutive_errors"
-        ):
+        # instead. CONNECTION = the transport failed. This used to also match a row whose
+        # ``error`` read ``skipped_after_consecutive_errors``; that string only ever appeared on
+        # the abort's fabricated tail, so with the padding gone the arm matched nothing. A short
+        # walk is now reported as coverage (``not_attempted``), which is what it is.
+        if error_category(r) == ErrorCategory.CONNECTION:
             unreachable += 1
             continue
         # The pipeline ran (no transport/error) but the terminal ranker emitted no
@@ -403,6 +467,8 @@ def compute_round_health(
         unreachable_count=unreachable,
         no_result_count=no_result,
         hole_count=holes,
+        not_attempted=not_attempted,
+        last_error=last_error,
         # Over every attempted row, not just the scoreable ones: hedging IS how a round
         # produces unscoreable rows, so excluding them would hide the behaviour in the
         # denominator. `modal_answer_share` ignores rows with no prediction itself.

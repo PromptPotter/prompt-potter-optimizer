@@ -41,7 +41,7 @@ export function ChatPane({ checkinCampaignId }: Props) {
   // and its controls go straight to the two panels that draw them.
   const { datasetName } = useHardSamples();
   // Self-sourced live state — the thread's freeze-on-stop edge and the live feed.
-  const { dash, isLive } = useDashboard();
+  const { dash } = useDashboard();
   // The live FEED + its gate-decision control follow the viewed LEAF hop (the same
   // hop the dashboard shows) — drilling into an L4 inner campaign tails that inner
   // cycle's own activity, not the outer thread's candidate cards. The gate decision
@@ -76,7 +76,15 @@ export function ChatPane({ checkinCampaignId }: Props) {
   // cycle to a stopped one walks the same false→null edge, and by then `dash`
   // describes the cycle just navigated TO. Without it that click would file the new
   // cycle's numbers under the old cycle's ending.
-  const liveCycleKey = cycleId && isLive ? cycleId : null;
+  //
+  // Keyed on `hasLiveProducer`, NOT on `isLive`. They answer different questions and this one
+  // wants the second: `isLive` is "should transient indicators be on", which is false at the
+  // ORIGIN GATE because nothing is being measured — while the runner is very much alive, polling
+  // for a decision every second. Reading it as "the run ended" froze **Run finished** into the
+  // thread directly above a card saying *the run is holding before L1*, and the operator, told the
+  // campaign was over, had no reason to touch the three buttons that would have released it. The
+  // right predicate was already imported and already used one line below, for `listening`.
+  const liveCycleKey = cycleId && hasLiveProducer(dash?.run_phase) ? cycleId : null;
   const [prevLiveCycle, setPrevLiveCycle] = useState(liveCycleKey);
   if (liveCycleKey !== prevLiveCycle) {
     setPrevLiveCycle(liveCycleKey);

@@ -117,6 +117,9 @@ def _origin_round(
         accuracy=row.accuracy,
         composite_fitness=row.composite_fitness,
         total=row.total,
+        # What the walk never sent. Truthful only because an abort no longer pads the tail with
+        # fabricated error rows: with the padding, these two were equal on every run.
+        not_attempted=max(0, row.expected_samples - row.scored_samples),
         improved=False,
         parent_accuracy=row.accuracy,
         matched_parent_accuracy=row.accuracy,

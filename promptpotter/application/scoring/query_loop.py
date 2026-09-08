@@ -14,12 +14,9 @@ from typing import TYPE_CHECKING, Any, cast
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.sample_measurement import (
-    _error_result,
-    measure_sample,
-)
-from promptpotter.application.scoring.sample_measurement import (
     execute_stale_data_protocol as _execute_stale_data_protocol,
 )
+from promptpotter.application.scoring.sample_measurement import measure_sample
 from promptpotter.domain.escalation_signals import EscalationSignal
 from promptpotter.domain.phases import RunPhase, StopLoop
 from promptpotter.domain.scoring import CellScorer, QueryMeasurement, is_hit
@@ -230,12 +227,6 @@ class _Acquired:
     deprecated_display: QueryMeasurement | None = None
 
 
-@dataclass
-class _Slot:
-    sample_id: int  # kept beside the task: a cancelled one is never consulted for it
-    task: asyncio.Task[_Acquired]
-
-
 async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState) -> _Acquired:
     cached = ctx.cached_sample_results.get(sample.id)
     if cached is not None:
@@ -353,14 +344,11 @@ async def run_query_loop(
     by_id: dict[int, Sample] = {s.id: s for s in dataset}
     walk_order: list[int] = [s.id for s in dataset]
     n = len(dataset)
-    # ``submitted`` is how far LAUNCHING reached, ``scored_ids`` how far ABSORPTION did;
-    # look-ahead is the gap between them.
-    scored_ids: set[int] = set()
+    # ``submitted`` is how far LAUNCHING reached; ``len(state.results)`` is how far ABSORPTION did,
+    # since ``_absorb`` appends every row it takes. Look-ahead is the gap between them — derived,
+    # not tracked: a second counter beside these two is a third answer nothing reconciles.
     submitted = 0
-    window: deque[_Slot] = deque()
-
-    def _remaining_ids() -> list[int]:
-        return [sid for sid in walk_order if sid not in scored_ids]
+    window: deque[asyncio.Task[_Acquired]] = deque()
 
     def _launch(depth: int) -> None:
         nonlocal submitted
@@ -372,12 +360,7 @@ async def run_query_loop(
             # press consumed mid-fill cannot make its own group's tail report depth 1.
             on_sample_starting(sample.query, submitted, n, sample.id, depth)
         window.append(
-            _Slot(
-                sample_id=sample.id,
-                task=asyncio.create_task(
-                    _acquire(sample, submitted, ctx), name=f"scoring:{sample.id}"
-                ),
-            )
+            asyncio.create_task(_acquire(sample, submitted, ctx), name=f"scoring:{sample.id}")
         )
         submitted += 1
 
@@ -396,13 +379,21 @@ async def run_query_loop(
                 len(state.results),
                 n,
             )
-            return QueryLoopResult(state.results, completed=False, stop_reason="skip")
+            return QueryLoopResult(
+                state.results,
+                completed=False,
+                stop_reason="skip",
+            )
         # Between samples, where every ABSORBED result is already on disk, so this exits cleanly
         # and `resume` continues into the remaining samples.
         if pause_requested(session):
             logger.debug("Pause after query %d/%d.", len(state.results), n)
             declare_run_phase(session, RunPhase.PAUSED)
-            return QueryLoopResult(state.results, completed=False, stop_reason="graceful")
+            return QueryLoopResult(
+                state.results,
+                completed=False,
+                stop_reason="graceful",
+            )
         # Same cadence, because the round-boundary gate cannot fire until the round closes — and
         # for an L4 outer round every sample is an entire inner CAMPAIGN. `StopLoop` is the
         # existing mid-round stop channel and carries the gate's own reason; unwinding via
@@ -433,9 +424,7 @@ async def run_query_loop(
                 break
 
             # Popping from the left IS the in-order-absorption invariant.
-            slot = window.popleft()
-            acquired = await slot.task
-            scored_ids.add(slot.sample_id)
+            acquired = await window.popleft()
             outcome = await _absorb(acquired, n, state, ctx, _check_escalation)
 
             if outcome.escalation:
@@ -446,27 +435,33 @@ async def run_query_loop(
                     escalation_signal=outcome.escalation,
                 )
             if outcome.abort_reason:
-                # The failed sample is already in `scored_ids`, so the complement is the
-                # untouched tail — a discarded look-ahead acquisition included, still owed a row.
-                remaining = _remaining_ids()
+                # The failed sample is already in `state.results`, so the remainder is the untouched
+                # tail — a discarded look-ahead acquisition included. It is COUNTED, never written
+                # as rows. Stamping a cell nothing ever sent with `predicted: "ERROR"` gave absence
+                # the shape of failure, and every reader downstream then drew conclusions about the
+                # pipeline from cells that never ran: one upstream 429 became "98% of this round's
+                # cells returned no measurement — pipeline may be structurally broken", and the
+                # honest verdicts (`origin_unmeasured` / `origin_incomplete`) were unreachable
+                # because the padding kept the denominator full.
                 logger.warning(
-                    "Aborting scoring: %s on query %d. Marking remaining %d as errors.",
+                    "Aborting scoring: %s after query %d/%d. %d cells not attempted.",
                     outcome.abort_reason,
                     len(state.results),
-                    len(remaining),
-                )
-                state.results.extend(
-                    _error_result(
-                        by_id[rsid], outcome.abort_reason, category=ErrorCategory.PIPELINE
-                    )
-                    for rsid in remaining
+                    n,
+                    n - len(state.results),
                 )
                 return QueryLoopResult(
-                    state.results, completed=False, stop_reason=outcome.abort_reason
+                    state.results,
+                    completed=False,
+                    stop_reason=outcome.abort_reason,
                 )
     except KeyboardInterrupt:
         logger.warning("Query loop force-interrupted at query %d/%d.", len(state.results), n)
-        return QueryLoopResult(state.results, completed=False, stop_reason="force")
+        return QueryLoopResult(
+            state.results,
+            completed=False,
+            stop_reason="force",
+        )
     finally:
         # A slot still in flight is DISCARDED, never appended or persisted: recording it makes
         # the run's rows depend on the in-flight depth, which forces a `human_intervened` stamp.
@@ -479,8 +474,8 @@ async def run_query_loop(
                 len(state.results),
                 n,
             )
-            for slot in window:
-                slot.task.cancel()
+            for task in window:
+                task.cancel()
             window.clear()
     # ``asyncio.CancelledError`` is deliberately NOT caught beside the KeyboardInterrupt above.
     # The two arrive from opposite directions — one is the operator asking to stop, the other

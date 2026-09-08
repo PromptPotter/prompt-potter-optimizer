@@ -182,6 +182,7 @@ async def close_round(
         results=round_result.results,
         prior_healths=assemble_prior_healths(cycle.rounds, round_num),
         is_origin=round_num == 0,
+        not_attempted=round_result.not_attempted,
     )
     cb.on_round_complete(round_result, cycle.escalation.l1_stall_count, cycle.escalation.lives)
     persist_round(cycle, round_result, session, cb)
