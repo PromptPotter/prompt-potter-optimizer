@@ -20,7 +20,9 @@ from promptpotter.domain.pipeline_schema import (
     ModelCapability,
     NodeConfigParam,
     NodeOutputSchema,
+    NodeReach,
     PipelineView,
+    reach_map,
 )
 from promptpotter.domain.run_records import MintKind
 from promptpotter.domain.strict_model import StrictModel
@@ -317,6 +319,10 @@ class OptimizerPipelineResponse(StrictModel):
         description="Optimizer-LOCKED is not unpriced: the model is fixed, but which effort rungs "
         "it accepts and what a round costs are the facts every other node's rows need too"
     )
+    reach: dict[str, NodeReach] = Field(
+        description="Where the search reaches per node, summed off the rows above rather than in "
+        "the browser — the same reading a campaign pipeline serves"
+    )
     resolved_prompts: dict[str, dict[str, Any]] = Field(
         description="The prompt each node STARTS from, keyed `{node}/{version}` — the floor under "
         "a searchpoint carrying no evolved delta for that node"
@@ -337,11 +343,14 @@ def get_optimizer_pipeline(stores: StoresDep) -> OptimizerPipelineResponse:
     # The engine's own parse: a second one here had the browser and the engine disagree on menus.
     schema = get_optimizer_schema()
     prompts = optimizer_manifest().get("resolved_prompts") or {}
+    # This is the OPTIMIZER's own manifest, so it is the one route that names L2's axes — and the
+    # reach below must sum the SAME rows it serves, or the glyph and the padlock disagree.
+    rows = schema.node_config_schema(L2_NODE_AXES)
     return OptimizerPipelineResponse(
         view=schema.view,
-        # This is the OPTIMIZER's own manifest, so it is the one route that names L2's axes.
-        node_config_schema=schema.node_config_schema(L2_NODE_AXES),
+        node_config_schema=rows,
         node_output_schema=schema.node_output_schemas(),
+        reach=reach_map(rows),
         # Per tenant, because the hand-authored override that corrects a wrong catalogue lives in
         # their workspace — which is what makes ``StoresDep`` load-bearing here, not decoration.
         model_capabilities=resolve_schema_menu(schema, workspace=Path(stores.base_dir)),

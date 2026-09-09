@@ -187,7 +187,9 @@ world is a strict containment hierarchy:
   asking what a campaign runs and getting a dataset default back is the
   scope error this split exists to make unsayable. One dataset file is
   shared by every campaign built on it, so it is nobody's answer in
-  particular.
+  particular — which is why a campaign still AUTHORING its origin consumes
+  no dataset file at all: `is_checkin` selects which layers exist, and the
+  draft is that campaign's own layer until Start freezes it.
   **`nodes.*.config` is therefore the SEED a new campaign starts from, never
   the answer for one that has already started** — the campaign layer above it
   is what makes an answer campaign-specific. **Moving those keys out of the

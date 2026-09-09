@@ -14,8 +14,8 @@ from promptpotter.application.campaign_config import (
     estimand_doc,
     knob_label,
 )
+from promptpotter.application.datasets.draft_campaign import load_checkin_draft
 from promptpotter.application.evidence import SubjectSpec, parse_subject
-from promptpotter.application.jobs.launcher.checkin import load_checkin_draft
 from promptpotter.application.jobs.launcher.draft_build import draft_wire
 from promptpotter.application.knobs import (
     COUPLINGS,
@@ -31,7 +31,7 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import descend_store
 from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
-from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
+from promptpotter.shared.errors import BadRequestError, NotFoundError, PayloadInvalidError
 
 
 class CampaignSummary(StrictModel):
@@ -301,18 +301,16 @@ def _pipeline_subject(at: str, campaign_id: str) -> SubjectSpec:
     try:
         spec = parse_subject(at)
     except ValueError as exc:
-        raise PayloadInvalidError(str(exc), code="payload_invalid") from exc
+        raise BadRequestError(str(exc)) from exc
     if spec.lens or spec.samples:
-        raise PayloadInvalidError(
+        raise BadRequestError(
             f"Subject {at!r} carries a scoring mask, and a mask cannot change what config a "
-            "point RAN. Drop `lens=` / `samples=` — this read is configuration, not scoring.",
-            code="payload_invalid",
+            "point RAN. Drop `lens=` / `samples=` — this read is configuration, not scoring."
         )
     if spec.campaign_id != campaign_id:
-        raise PayloadInvalidError(
+        raise BadRequestError(
             f"Subject {at!r} addresses campaign {spec.campaign_id!r} but the path names "
-            f"{campaign_id!r} — one request, one subject.",
-            code="payload_invalid",
+            f"{campaign_id!r} — one request, one subject."
         )
     return spec
 

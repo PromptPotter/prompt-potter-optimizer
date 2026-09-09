@@ -674,6 +674,10 @@
             "title": "Dataset Name",
             "type": "string"
           },
+          "is_single_node": {
+            "title": "Is Single Node",
+            "type": "boolean"
+          },
           "model_capabilities": {
             "additionalProperties": {
               "$ref": "#/components/schemas/ModelCapability"
@@ -722,6 +726,13 @@
             "title": "Params",
             "type": "object"
           },
+          "reach": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/NodeReach"
+            },
+            "title": "Reach",
+            "type": "object"
+          },
           "view": {
             "anyOf": [
               {
@@ -744,7 +755,9 @@
           "view",
           "node_output_schema",
           "model_capabilities",
-          "nests"
+          "reach",
+          "nests",
+          "is_single_node"
         ],
         "title": "CampaignPipelineResponse",
         "type": "object"
@@ -1622,6 +1635,13 @@
             "title": "Pipeline",
             "type": "object"
           },
+          "reach": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/NodeReach"
+            },
+            "title": "Reach",
+            "type": "object"
+          },
           "view": {
             "anyOf": [
               {
@@ -1640,6 +1660,7 @@
           "pipeline",
           "view",
           "node_config_schema",
+          "reach",
           "node_output_schema",
           "nests",
           "model_capabilities"
@@ -3792,9 +3813,24 @@
             "title": "Options",
             "type": "array"
           },
+          "permitted": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Permitted"
+          },
           "source": {
             "default": "unset",
             "enum": [
+              "backend",
               "dataset",
               "campaign",
               "seed",
@@ -3843,6 +3879,49 @@
         "title": "NodeOutputSchema",
         "type": "object"
       },
+      "NodeReach": {
+        "additionalProperties": false,
+        "description": "How far the search reaches on ONE node, off the SAME rows a surface renders — summed in the\nbrowser it was counted against whichever schema the caller held. The denominator is what is\nOPENABLE, so a param no agent moves is SHUT, not exempt; a node ABSENT is unknown, not shut.",
+        "properties": {
+          "agents": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Agents",
+            "type": "array"
+          },
+          "held": {
+            "default": false,
+            "title": "Held",
+            "type": "boolean"
+          },
+          "open": {
+            "title": "Open",
+            "type": "integer"
+          },
+          "openable": {
+            "title": "Openable",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "partial",
+              "locked",
+              "nothing"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "open",
+          "openable",
+          "state"
+        ],
+        "title": "NodeReach",
+        "type": "object"
+      },
       "OptimizerPipelineResponse": {
         "additionalProperties": false,
         "description": "What the OPTIMIZER runs — the manifest's peer of ``GET /campaigns/{id}/pipeline``. The raw\nmanifest keys are not served: ``nodes`` was a second, untyped spelling of ``node_config_schema``.",
@@ -3880,6 +3959,14 @@
             "title": "Node Output Schema",
             "type": "object"
           },
+          "reach": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/NodeReach"
+            },
+            "description": "Where the search reaches per node, summed off the rows above rather than in the browser — the same reading a campaign pipeline serves",
+            "title": "Reach",
+            "type": "object"
+          },
           "resolved_prompts": {
             "additionalProperties": {
               "additionalProperties": true,
@@ -3906,6 +3993,7 @@
           "node_config_schema",
           "node_output_schema",
           "model_capabilities",
+          "reach",
           "resolved_prompts"
         ],
         "title": "OptimizerPipelineResponse",

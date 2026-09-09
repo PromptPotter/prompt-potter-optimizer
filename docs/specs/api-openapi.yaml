@@ -3623,12 +3623,14 @@ components:
 
     ParamSource:
       type: string
-      enum: [dataset, campaign, seed, evolved, identity, unset]
+      enum: [backend, dataset, campaign, seed, evolved, identity, unset]
       description: |
         WHICH LAYER set a resolved param's value — stamped BY the merge (last
         writer wins), never diffed against it. A member is admitted with its
-        producer; a campaign read has no `backend` layer, since its schema is
-        parsed off the same `pipeline.yaml` the dataset overlay is read from.
+        producer. `backend` the service's captured declaration, which is the
+        CHECK-IN arm's floor and exists only there — a campaign read has no
+        such layer, its schema being parsed off the same `pipeline.yaml` the
+        dataset overlay is read from.
         `dataset` the slug's `nodes.{n}.config`; `campaign` the frozen
         `pipeline_overlay`, and a check-in draft's overlay (a draft IS the
         pre-committed config); `seed` a cycle seed; `evolved` the candidate's
@@ -3660,7 +3662,16 @@ components:
           description: |
             The MENU. For a model row the catalogue UNION each node's permitted
             set UNION the value carried, so a running value is never off its
-            own menu.
+            own menu; for any other enum, what was declared BEFORE narrowing
+            UNION what the campaign kept, so unticking is never a one-way
+            ratchet.
+        permitted:
+          type: [array, 'null']
+          items: { type: string }
+          description: |
+            The narrower set the babysit gate accepts, where it differs from
+            `options`. `null` means it does not — NOT `[]`, which says nothing
+            may be picked. Two questions, two lists, one source.
         movable_by:
           type: array
           items: { type: string }
@@ -3673,11 +3684,38 @@ components:
           description: The dataset offered it; this campaign closed it.
         description: { type: string }
 
+    NodeReach:
+      type: object
+      required: [open, openable, agents, held, state]
+      description: |
+        How far the search reaches on one node — SERVED, because the client summed
+        `movable_by` itself against the DATASET's narrowing rather than the
+        campaign's. The denominator is what is OPENABLE, so a config param no agent
+        moves is SHUT, not exempt; only `optimizer_locked` rows are outside it.
+      properties:
+        open: { type: integer, minimum: 0 }
+        openable: { type: integer, minimum: 0 }
+        agents:
+          type: array
+          items: { type: string }
+          description: The distinct `movable_by` agents across this node's open axes.
+        held:
+          type: boolean
+          description: Any openable axis this campaign closed.
+        state:
+          type: string
+          enum: [open, partial, locked, nothing]
+          description: |
+            `nothing` is the only state with NO lock — nothing here could ever be
+            opened. Distinct from a node ABSENT from the map, which is unknown: an
+            unread node depicted as shut is a claim nobody made.
+
     CampaignPipelineResponse:
       type: object
       required:
         [campaign_id, cycle_id, dataset_name, connector, backend_type,
-         node_config_schema, node_output_schema, model_capabilities, params]
+         node_config_schema, node_output_schema, model_capabilities, params,
+         reach, is_single_node]
       description: One campaign's resolved pipeline at one searchpoint — the answer, not the parts.
       properties:
         campaign_id: { type: string }
@@ -3706,6 +3744,15 @@ components:
           type: object
           additionalProperties: { $ref: '#/components/schemas/ModelCapability' }
           description: Resolved over the model MENU, not the dataset's catalogue alone.
+        reach:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/NodeReach' }
+          description: The reading OVER the rows beside it, off the same rows — never summed twice.
+        is_single_node:
+          type: boolean
+          description: |
+            A one-node chain, which is a SEARCH-SPACE fact rather than a
+            topology one — served so no surface counts steps to guess it.
         params:
           type: object
           additionalProperties: true
@@ -3989,19 +4036,22 @@ components:
           type: [object, 'null']
           additionalProperties: true
           description: |
-            RETIRED, with `node_config_schema` and `node_output_schema` below —
-            these three are boundary-added here and are the second door onto a
-            question that now has one: `GET /campaigns/{id}/pipeline`. Their
-            reason for existing was that a pre-commit check-in has no
-            `datasets/{slug}/` dir to fetch, so the node editor would hang on
-            "Loading node…". That reason dissolves once the address is a
-            campaign id rather than a dataset name — and a check-in campaign,
-            with its cycle, exists on disk from the first ingest action. The
-            draft wire keeps its authoring fields and stops being a pipeline
-            source.
+            A second DELIVERY of `GET /campaigns/{id}/pipeline`'s answer, never a
+            second source. This block and `node_config_schema` / `reach` /
+            `node_output_schema` / `model_capabilities` / `schema_source` beside
+            it are `pipeline_resolve.resolve_pipeline_for_draft` — the check-in
+            arm of the one resolver — reshaped onto this response. `is_checkin`
+            decides which LAYERS exist (no dataset file, no cycle seed, no round
+            documents), never which endpoint answers.
 
-            The draft's parsed pipeline render — the graph `view` (nodes + edges)
-            the ingest node editor draws. Null when the pipeline declares no view.
+            It rides this response rather than being fetched because the ingest
+            surface already holds it: every draft mutation returns a fresh one,
+            so a fetch would put an HTTP round-trip on each commit-on-blur edit.
+            It used to be a genuinely separate parse, which is why every ingest
+            row came back `source: "unset"` with no merge behind it.
+
+            The graph `view` (nodes + edges) the ingest node editor draws. Null
+            when the pipeline declares no view.
         node_config_schema:
           type: object
           additionalProperties: true
@@ -4030,6 +4080,16 @@ components:
             Per-node structured-output contract (read-only), keyed by node id;
             null per node when it declares none. Boundary-added beside
             `pipeline_view`.
+        reach:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/NodeReach'
+          description: |
+            Where the search reaches on each node, summed server-side off the
+            rows above. Served here for the same reason it is served on the
+            campaign read: summed in the browser it was computed against
+            whichever schema the caller happened to hold, so the padlock on a
+            node and the ring on the same node could disagree.
         created_at:
           type: string
           format: date-time

@@ -121,7 +121,11 @@ invariants:
                       the sanctioned case and says so at its own seam.'
   I9_pipeline_resolution_server_owned: 'What config a node RUNS in a campaign has ONE
                       server-owned answer: GET /campaigns/{id}/pipeline?at=<subject>, resolved by
-                      application/pipeline_resolve.py::resolve_pipeline_for_campaign. I6 is its
+                      application/pipeline_resolve.py::resolve_pipeline_for_campaign. A campaign
+                      still authoring its origin takes that function''s check-in arm
+                      (resolve_pipeline_for_draft), which the draft response also carries — so
+                      StaticConnectorProvider is a second TRANSPORT of one answer, not a second
+                      source, and overlaying anything else into it re-opens this. I6 is its
                       sibling — same shape, different question — and neither is a second
                       mechanism for the other. The browser never joins a VALUE from one store
                       onto a SCHEMA from another. Every param carries a served `source` naming
@@ -143,7 +147,12 @@ invariants:
                       the failure is silent, rendering a benchmark''s template under a heading
                       naming a run that used something else. (2) This read is gated on
                       load_owned and nothing else; a future demo-mode or shared-origin read is
-                      its OWN decision and does not inherit this one.'
+                      its OWN decision and does not inherit this one.
+                      PERMISSION IS SERVED TWICE on every enumerable axis, because one list
+                      cannot say both: `options` is the MENU, `permitted` the narrower set the
+                      gate allows, `null` that they do not differ (never `[]`, which says
+                      nothing may be picked). `narrow` REPLACES `param_allowed_values`, so a
+                      menu that is its own selection can never offer back an unticked value.'
 ```
 
 ## The two blocking gates

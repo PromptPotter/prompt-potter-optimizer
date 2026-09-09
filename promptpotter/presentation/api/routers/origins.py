@@ -3,46 +3,32 @@ not stored — an origin drops off the list when the last campaign using it is a
 
 from __future__ import annotations
 
-import json
 import logging
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter
 from pydantic import Field
 
-from promptpotter.application.datasets.authored import (
-    dataset_campaign_path,
-    load_dataset_campaign_config,
-)
 from promptpotter.application.datasets.ingest import (
     draft_from_dataset,
     fetch_backend_nodes,
     refresh_capabilities,
 )
-from promptpotter.application.datasets.loaders import resolve_dataset_items
 from promptpotter.application.datasets.prompts import has_dataset_prompts
 from promptpotter.application.jobs.launcher.draft_build import draft_wire
-from promptpotter.application.optimization.task_context import committed_task_context
-from promptpotter.application.origin import resolve_origin_opt_search_point
-from promptpotter.application.pipeline_resolve import resolve_pipeline_config_params
-from promptpotter.application.runner.campaign_ids import build_origin_cycle_id
+from promptpotter.application.origin import prospective_origin_id
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.sample import Sample
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
-    dataset_pipeline_path,
     is_dataset_dir,
     list_readable_datasets,
     readable_dataset_dir,
 )
-from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.presentation.api.deps import StoresDep
-from promptpotter.shared.errors import NotFoundError, StoredConfigInvalidError
+from promptpotter.shared.errors import NotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -135,44 +121,6 @@ def _campaign_backed_origins(stores: Stores) -> list[OriginEntry]:
     return out
 
 
-def _dataset_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) -> str | None:
-    """The dataset's CURRENT committed config-aware origin id — the same hash a fresh mint would stamp, computed from disk with no
-    Session. The merge runs through the SHARED resolver, so this prospective id cannot diverge from what a real run stamps."""
-    try:
-        raw = read_yaml(dataset_pipeline_path(dataset_dir))
-        schema = parse_pipeline_response(raw)
-        cfg = load_dataset_campaign_config(dataset_campaign_path(dataset_dir))
-        active = schema.active_steps_excluding(cfg.exclude_nodes)
-        if not active:
-            return None
-        base_pp = resolve_pipeline_config_params(
-            active, cfg.pipeline_overlay, dataset_dir, schema, judges=cfg.judges
-        )
-        opt_sp = resolve_origin_opt_search_point(
-            prompt_node_names=schema.prompt_node_names(),
-            dataset_dir=dataset_dir,
-            task_context=committed_task_context(stores, dataset_name),
-        )
-        items = resolve_dataset_items(stores, dataset_name)
-        if not items:
-            return None
-        samples = [Sample(**it) for it in items]
-        return build_origin_cycle_id(opt_sp, schema, samples, base_pp).removeprefix("cycle_")
-    except (
-        OSError,
-        ValueError,
-        KeyError,
-        TypeError,
-        json.JSONDecodeError,
-        StoredConfigInvalidError,
-    ):
-        # StoredConfigInvalidError included deliberately: this is a SURVEY over every
-        # tenant dataset, so one unreadable neighbour drops itself, never the list.
-        # The dataset's own direct reads still 500 with the restamp remedy.
-        logger.exception("origins: prospective origin id failed for %s", dataset_name)
-        return None
-
-
 def _prepared_origins(stores: Stores, campaign_ids: set[str]) -> list[OriginEntry]:
     """Each ready tenant dataset as its CURRENT config-aware origin, marked *prepared* when that exact config has no campaign
     yet — so an edited-but-unrun config surfaces beside the dataset's older origins and folds in once run."""
@@ -187,7 +135,7 @@ def _prepared_origins(stores: Stores, campaign_ids: set[str]) -> list[OriginEntr
         # node-named, such as termnorm's `entity_profiling.yaml`.
         if not has_dataset_prompts(d) or not is_dataset_dir(d):
             continue
-        origin_id = _dataset_origin_id(stores, d, ref.name)
+        origin_id = prospective_origin_id(stores, d, ref.name)
         if origin_id is None or origin_id in campaign_ids:
             continue
         out.append(

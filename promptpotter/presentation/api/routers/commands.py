@@ -11,8 +11,8 @@ from fastapi.routing import APIRoute
 from pydantic import Field, ValidationError
 
 from promptpotter.application.archive_maintenance import ArchiveReport
+from promptpotter.application.datasets.draft_campaign import load_checkin_draft
 from promptpotter.application.jobs.launcher.checkin import (
-    load_checkin_draft,
     save_checkin_draft,
     start_checkin_campaign,
 )

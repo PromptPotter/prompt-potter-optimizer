@@ -762,7 +762,8 @@ export interface NodeConfigParam {
   optimizer_locked: boolean;
   movable_by: string[];
   held: boolean;
-  source: 'dataset' | 'campaign' | 'seed' | 'evolved' | 'identity' | 'unset';
+  source: 'backend' | 'dataset' | 'campaign' | 'seed' | 'evolved' | 'identity' | 'unset';
+  permitted: string[] | null;
 }
 
 /** Resolved output schema for a TARGET pipeline node — the structured output the */
@@ -770,6 +771,15 @@ export interface NodeOutputSchema {
   fields: string[];
   field_descriptions: Record<string, string>;
   json_schema: Record<string, unknown>;
+}
+
+/** How far the search reaches on ONE node, off the SAME rows a surface renders — summed in the */
+export interface NodeReach {
+  open: number;
+  openable: number;
+  agents: string[];
+  held: boolean;
+  state: 'open' | 'partial' | 'locked' | 'nothing';
 }
 
 /** One node's place in the flow, as a tier and a rank rather than as pixels. */
@@ -809,6 +819,7 @@ export interface DatasetPipelineResponse {
   pipeline: Record<string, unknown>;
   view: PipelineView | null;
   node_config_schema: Record<string, NodeConfigParam[]>;
+  reach: Record<string, NodeReach>;
   node_output_schema: Record<string, NodeOutputSchema | null>;
   nests: NestedPipelineRef | null;
   model_capabilities: Record<string, ModelCapability>;
@@ -972,8 +983,10 @@ export interface CampaignPipelineResponse {
   view: PipelineView | null;
   node_output_schema: Record<string, NodeOutputSchema | null>;
   model_capabilities: Record<string, ModelCapability>;
+  reach: Record<string, NodeReach>;
   /** The inner pipeline this chain nests, if any — the L4 drill-in, on this read */
   nests: NestedPipelineRef | null;
+  is_single_node: boolean;
 }
 
 /** Where one occurrence of an edit was measured on disk. */
@@ -1618,6 +1631,9 @@ export interface OptimizerPipelineResponse {
    * it accepts and what a round costs are the facts every other node's rows
    * need too */
   model_capabilities: Record<string, ModelCapability>;
+  /** Where the search reaches per node, summed off the rows above rather than in
+   * the browser — the same reading a campaign pipeline serves */
+  reach: Record<string, NodeReach>;
   /** The prompt each node STARTS from, keyed `{node}/{version}` — the floor under a
    * searchpoint carrying no evolved delta for that node */
   resolved_prompts: Record<string, Record<string, unknown>>;

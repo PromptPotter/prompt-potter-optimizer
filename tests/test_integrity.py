@@ -35,7 +35,7 @@ from promptpotter.domain.escalation_signals import EscalationSignal, EscalationT
 from promptpotter.domain.measurement_provenance import grade_run
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.pipeline_schema import ParamSource, PipelineSchema
 from promptpotter.domain.run_records import SnapshotRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import QueryMeasurement
@@ -1204,10 +1204,8 @@ def test_a_reused_origin_seeds_exactly_the_config_it_ran() -> None:
     through it at Start, so anything the pair loses is a setting the new campaign runs without,
     unreported. `param_keys: []` is the trap — every axis closed, and falsy."""
     from promptpotter.application.campaign_config import load_campaign_config
-    from promptpotter.application.jobs.launcher.draft_build import (
-        overlay_from_campaign_config,
-        split_overlay,
-    )
+    from promptpotter.application.datasets.draft_campaign import split_overlay
+    from promptpotter.application.jobs.launcher.draft_build import overlay_from_campaign_config
     from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
 
     config = load_campaign_config(
@@ -1223,6 +1221,177 @@ def test_a_reused_origin_seeds_exactly_the_config_it_ran() -> None:
     assert overrides == config.pipeline_overlay
     assert narrowing == config.optimizer_narrowing
     assert narrowing["llm_only"].param_keys == []
+
+
+def _draft(overlay: dict[str, Any]) -> Any:
+    from promptpotter.application.datasets.draft_campaign import DraftCampaign
+    from promptpotter.connectors import DEFAULT_CONNECTOR
+    from promptpotter.domain.identity import TenantId
+
+    now = "2026-09-08T00:00:00Z"
+    return DraftCampaign(
+        draft_id="ds__000001",
+        tenant_id=TenantId("t"),
+        slug="ds",
+        n_samples=1,
+        sample_preview=(),
+        connector=DEFAULT_CONNECTOR,
+        scoring_composite="exact_match",
+        raw_task_description="",
+        pipeline_overlay=overlay,
+        created_at=now,
+        updated_at=now,
+        pipeline_steps=["llm_only"],
+    )
+
+
+def test_a_checkin_resolves_the_config_its_START_will_freeze() -> None:
+    """The pre-mint answer and the post-mint one are the same config, or the operator confirms a
+    campaign that runs something else. The check-in arm used to serve the manifest's frozen
+    snapshot, which for a campaign that has run nothing is whatever the SHARED slug file said."""
+    from promptpotter.application.datasets.draft_campaign import draft_campaign_config
+    from promptpotter.application.pipeline_resolve import resolve_pipeline_for_draft
+
+    draft = _draft({"llm_only": {"config": {"model": "upstage/solar-pro4:nitro"}}})
+    assert draft_campaign_config(draft).pipeline_overlay["llm_only"]["model"] == (
+        "upstage/solar-pro4:nitro"
+    )
+    resolved = resolve_pipeline_for_draft(draft, campaign_id=draft.draft_id, cycle_id="")
+    model = next(p for p in resolved.node_config_schema["llm_only"] if p.key == "model")
+    # And WHICH layer chose it: a draft IS the campaign's pre-committed config, so a surface tells
+    # "you set this" from "the backend shipped it" without a client-side diff.
+    assert (model.value, model.source) == ("upstage/solar-pro4:nitro", "campaign")
+
+
+def test_a_checkin_with_no_overlay_still_resolves_its_backend_floor() -> None:
+    """A fresh upload before anything is touched: no dataset dir, no overlay, no rounds. The editor
+    must render the connector's own declaration — `readable_dataset_dir` finds nothing, so before
+    the check-in arm the schema fell back to zero nodes and the node panel hung on "Loading"."""
+    from promptpotter.application.pipeline_resolve import resolve_pipeline_for_draft
+
+    resolved = resolve_pipeline_for_draft(_draft({}), campaign_id="ds__000002", cycle_id="")
+    assert resolved.params.get("steps"), "a check-in resolved to no pipeline at all"
+    assert resolved.node_config_schema, "no config rows — the node editor would hang"
+    assert resolved.reach.keys() == resolved.node_config_schema.keys()
+
+
+def test_narrowing_an_enum_never_deletes_the_values_it_unticked() -> None:
+    """A ONE-WAY RATCHET: `narrow` REPLACES `param_allowed_values`, so reading the narrowed list as
+    the MENU leaves no gesture that widens it again, and nothing says a search position is gone.
+    `model` was protected by `selectable_models` unioning; every other enum was not."""
+    from promptpotter.application.pipeline_resolve import resolve_pipeline_for_draft
+
+    draft = _draft(
+        {"llm_only": {"optimizer": {"param_allowed_values": {"reasoning_effort": ["low"]}}}}
+    ).patch(
+        backend_nodes={
+            "llm_only": {
+                "optimizer": {
+                    "param_keys": ["reasoning_effort"],
+                    "param_allowed_values": {"reasoning_effort": ["low", "medium", "high"]},
+                }
+            }
+        }
+    )
+    resolved = resolve_pipeline_for_draft(draft, campaign_id="ds__000003", cycle_id="")
+    row = next(p for p in resolved.node_config_schema["llm_only"] if p.key == "reasoning_effort")
+    assert row.permitted == ["low"], "the gate's own set must still be the narrower one"
+    assert set(row.permitted) < set(row.options), "the menu lost what it unticked"
+
+
+def test_the_drafts_CHAIN_reaches_the_mint_on_a_reused_dataset(tmp_path: Path) -> None:
+    """The operator picks LLM-only and the campaign measures the full pipeline. A fresh upload
+    commits its own `pipeline.yaml`, so `pipelines.default` IS the chosen chain; a REUSED dataset
+    writes no file, and nothing else carried `draft.pipeline_steps` to the run."""
+    from promptpotter.application.jobs.launcher.mint_and_start import build_cycle_config
+    from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
+    from promptpotter.infrastructure.store.io import write_yaml
+
+    root = tmp_path / "ds"
+    root.mkdir()
+    write_yaml(
+        root / "campaign.yaml",
+        {
+            "campaign_config": {
+                "optimization": dict(CONNECTORS[DEFAULT_CONNECTOR].default_optimization)
+            }
+        },
+    )
+    schema = parse_pipeline_response(
+        {
+            "nodes": {n: {"type": "generation"} for n in ("llm_only", "web_search", "rerank")},
+            "pipelines": {"default": ["web_search", "rerank", "llm_only"]},
+        }
+    )
+    session = types.SimpleNamespace(
+        store=types.SimpleNamespace(
+            backends=types.SimpleNamespace(load_connector_profile=lambda _id: {})
+        ),
+        backend_id="b",
+        pipeline_schema=schema,
+    )
+
+    chosen = build_cycle_config(cast(Any, session), root, pipeline_steps=["llm_only"])
+    assert sorted(chosen.exclude_nodes) == ["rerank", "web_search"]
+    assert schema.active_steps_excluding(chosen.exclude_nodes) == ["llm_only"]
+    # A draft that never touched the toggle leaves the dataset's answer alone — excluding the
+    # complement of "nothing chosen" would close the whole pipeline.
+    assert build_cycle_config(cast(Any, session), root, pipeline_steps=[]).exclude_nodes == []
+
+
+def test_an_axis_no_agent_moves_is_SHUT_rather_than_exempt() -> None:
+    """The denominator is what is OPENABLE, and opening an axis is adding its key to `param_keys` —
+    exempting a plain config param drew every plumbing node open. `nothing` is not `locked`: a node
+    of confound guards alone has no axis to draw shut. `agents` reads in `MOVABLE_AGENTS` order."""
+    from promptpotter.domain.pipeline_schema import NodeConfigParam, node_reach
+
+    def param(key: str, **over: Any) -> NodeConfigParam:
+        return NodeConfigParam(**{"key": key, "kind": "number", "movable_by": [], **over})
+
+    shut = node_reach([param("output_format"), param("max_tokens")])
+    assert (shut.state, shut.open, shut.openable, shut.held) == ("locked", 0, 2, False)
+    assert node_reach([param("temperature", held=True)]).held is True
+    guards = [param(k, kind="string", optimizer_locked=True) for k in ("provider", "model")]
+    assert node_reach(guards).state == node_reach([]).state == "nothing"
+    partial = node_reach(
+        [
+            param("temperature", movable_by=["l2"]),
+            param("instruction", kind="prompt", movable_by=["l1", "l2"]),
+            param("max_tokens"),
+        ]
+    )
+    assert (partial.state, partial.open, partial.openable, partial.agents) == (
+        "partial",
+        2,
+        3,
+        ["l1", "l2"],
+    )
+
+
+def test_a_measured_point_is_served_the_identity_it_RAN_under() -> None:
+    """Identity is recomputed on every read — right on the RUN path, wrong on a finished point, and
+    this arc's own defect one layer down. Which keys to restore is read off the MERGE's provenance,
+    never a name list; a key the record never carried keeps the resolved value rather than a hole."""
+    from promptpotter.application.pipeline_resolve import _recorded_identity
+
+    stamps: dict[str, dict[str, ParamSource]] = {
+        "agent": {"model": "campaign", "judge_instrument": "identity"}
+    }
+    out = _recorded_identity(
+        {"agent": {"model": "m", "judge_instrument": "todays-hash"}},
+        {"agent": {"model": "SOMETHING-ELSE", "judge_instrument": "the-hash-it-ran"}},
+        stamps,
+    )
+    assert out["agent"]["judge_instrument"] == "the-hash-it-ran"
+    # Only the identity layer. Anything else and the record overwrites the very layering this
+    # endpoint exists to serve.
+    assert out["agent"]["model"] == "m"
+    absent = _recorded_identity(
+        {"agent": {"judge_instrument": "todays"}},
+        {"agent": {}},
+        {"agent": {"judge_instrument": "identity"}},
+    )
+    assert absent["agent"]["judge_instrument"] == "todays"
 
 
 # 5. The dispatch frame — what a node is shown, within what budget

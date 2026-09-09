@@ -65,6 +65,7 @@ from promptpotter.domain.pipeline_schema import (
     NestedPipelineRef,
     NodeConfigParam,
     NodeOutputSchema,
+    NodeReach,
     NodeSearchNarrowing,
     PipelineView,
     PipelineViewEdge,
@@ -213,6 +214,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     ModelCapability,
     NodeConfigParam,
     NodeOutputSchema,
+    NodeReach,
     PipelineViewNode,  # nested in PipelineView — the emitter does not recurse
     PipelineViewEdge,
     PipelineView,

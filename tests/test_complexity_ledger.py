@@ -148,7 +148,25 @@ LEDGER_BASELINE = {
     # +1: a reused origin seeds exactly the config it ran — `overlay_from_campaign_config` must
     # invert `split_overlay`, and `param_keys: []` is a real, falsy declaration. What the pair
     # loses is a setting the new campaign runs without, unreported. (test_integrity § 4)
-    "test_functions": 160,
+    # +1: a check-in resolves the config its START will freeze — the arm served the manifest's
+    # frozen snapshot, which for a campaign that has run nothing is whatever the SHARED slug file
+    # last said. Silent: the operator confirms a campaign that runs something else. (§ 4)
+    # +1: a check-in with no overlay still resolves its backend floor — no dataset dir means
+    # `readable_dataset_dir` finds nothing, and the schema fell back to zero nodes. The node editor
+    # hangs on "Loading", which is the one failure a surface CANNOT recover from. (§ 4)
+    # +1: narrowing an enum never deletes the values it unticked — `narrow` REPLACES
+    # `param_allowed_values`, so a menu that is its own selection can never offer a rung back.
+    # Unrecoverable for the life of the campaign, and nothing says a position was removed. (§ 4)
+    # +1: the draft's CHAIN reaches the mint on a reused dataset — a reused slug writes no
+    # `pipeline.yaml`, so the operator's pipeline toggle reached nothing. Silent: every measurement
+    # describes a program nobody chose, and the picture renders the chain that RAN. (§ 4)
+    # +1: an axis no agent moves is SHUT rather than exempt — the reach arithmetic, ported from the
+    # browser derivation it replaces rather than deleted with it. A wrong count renders a plausible
+    # number, which is the silent half; three TS cases collapse into one here. (§ 4)
+    # +1: a measured point is served the identity it RAN under — identity is recomputed per read,
+    # right on the run path and wrong on a finished one, so a moved instrument was served beside a
+    # run that used another. Silent, and it was 8 live mismatches. (§ 4)
+    "test_functions": 166,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -160,7 +178,15 @@ LEDGER_BASELINE = {
     # hand-written copy of it. Declaring the shape is what deletes the copy, not a new surface.
     # +1: `CampaignPipelineResponse.nests` — the L4 drill-in, read by `useConnector` and opened by
     # `useNestedPipelines`. It rides this read because a nest is a fact about the chain, not a hop.
-    "served_fields": 568,
+    # +5 +3: `NodeReach` and `reach` on the three doors that serve config rows — the browser summed
+    # `movable_by` itself, against whichever schema the caller happened to hold, which on a campaign
+    # read was the DATASET's. `nodeReach` is deleted in the same commit; this is a MOVE.
+    # +1: `NodeConfigParam.permitted` — the babysit gate's own set, where it differs from the menu.
+    # One list cannot say both, and serving only the menu left a model pickable that taints on
+    # confirm. Read by `permittedModels`, which replaces `permittedModelsFromNarrowing`.
+    # +1: `CampaignPipelineResponse.is_single_node` — a SEARCH-SPACE fact, not a step count, so no
+    # surface guesses it by counting. Read by `useConnector`; the client `singleNode` goes with it.
+    "served_fields": 578,
 }
 
 

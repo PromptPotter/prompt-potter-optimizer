@@ -15,12 +15,20 @@ from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     load_dataset_campaign_config,
 )
+from promptpotter.application.datasets.draft_campaign import (
+    DraftCampaign,
+    declared_pipeline_json,
+    draft_campaign_config,
+    load_checkin_draft,
+    rendered_pipeline_json,
+)
 from promptpotter.application.datasets.prompts import (
     dataset_declared_nodes,
     has_dataset_prompts,
     load_dataset_node_overlay,
     load_node_prompt,
 )
+from promptpotter.application.evidence import SubjectSpec
 from promptpotter.application.runner.inner.tasks import inner_tasks_path, load_inner_tasks
 from promptpotter.config.settings import (
     PROMPT_STRING_FIELDS,
@@ -34,12 +42,15 @@ from promptpotter.domain.pipeline_schema import (
     NestedPipelineRef,
     NodeConfigParam,
     NodeOutputSchema,
+    NodeReach,
     NodeSearchNarrowing,
     ParamSource,
     PipelineView,
+    reach_map,
 )
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.capabilities import resolve_schema_menu
+from promptpotter.infrastructure.runtime_flags import is_checkin
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
     dataset_pipeline_path,
@@ -51,7 +62,6 @@ from promptpotter.shared.errors import PayloadInvalidError
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from promptpotter.application.evidence import SubjectSpec
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -74,6 +84,7 @@ __all__ = [
     "missing_template_vars",
     "resolve_pipeline_config_params",
     "resolve_pipeline_for_campaign",
+    "resolve_pipeline_for_draft",
     "resolved_dataset_name",
 ]
 
@@ -133,13 +144,23 @@ def resolve_pipeline_config_params(
     schema: PipelineSchema,
     judges: Mapping[str, JudgeSpec] | None = None,
     *,
+    base_config: Mapping[str, Any] | None = None,
     provenance: MutableMapping[str, dict[str, ParamSource]] | None = None,
 ) -> dict[str, Any]:
     """The SINGLE definition of which node config a cycle id and a measurement key hash — shared
     with ``GET /origins``, so the prospective origin and the real one cannot diverge.
-    ``provenance`` is the display sink of :func:`apply_node_overlay`."""
+    ``base_config`` is the layer a CHECK-IN has instead of a dataset file: the backend's own
+    captured declaration. ``provenance`` is the display sink of :func:`apply_node_overlay`."""
 
     pipeline_params: dict[str, Any] = {"steps": list(active)}
+    if base_config is not None:
+        pipeline_params = apply_node_overlay(
+            pipeline_params,
+            {node: cfg for node, cfg in base_config.items() if node in active},
+            schema,
+            source="backend",
+            provenance=provenance,
+        )
     if dataset_dir is not None:
         # Per-dataset overlay — sparse overrides on backend defaults (e.g. AIME →
         # OpenRouter+Mistral). `dataset_dir` is tenant-first, so ingested datasets honor it.
@@ -362,18 +383,40 @@ class CampaignPipelineResponse(StrictModel):
     view: PipelineView | None
     node_output_schema: dict[str, NodeOutputSchema | None]
     model_capabilities: dict[str, ModelCapability]
+    reach: dict[str, NodeReach]
     nests: NestedPipelineRef | None = Field(
         description="The inner pipeline this chain nests, if any — the L4 drill-in, on this read"
     )
+    is_single_node: bool
 
 
-def _evolved_overlay(stores: Stores, at: SubjectSpec) -> dict[str, Any]:
-    """The addressed candidate's OWN sparse delta, or ``{}``. ``pipeline_params_override``, never
-    ``resolved_pipeline_params`` — that one is the COMPLETE running config, and read as a delta
-    it stamps every param ``evolved`` on every candidate. ``stores`` is already the leaf the caller
-    descended to; descending ``at.inside`` again would go two hops for a one-hop address."""
+def _recorded_identity(
+    params: dict[str, Any],
+    recorded: Mapping[str, Any],
+    provenance: Mapping[str, dict[str, ParamSource]],
+) -> dict[str, Any]:
+    """Give a MEASURED point back the identity values it ran under. Recomputing is right on the RUN
+    path and wrong on a finished read — the same defect as a shared ``pipeline.yaml``, one layer
+    down. Which keys those are is read off the merge's own provenance, never a name list."""
+    out = dict(params)
+    for node, stamps in provenance.items():
+        owned = [k for k, source in stamps.items() if source == "identity"]
+        node_recorded = recorded.get(node)
+        if not owned or not isinstance(node_recorded, dict):
+            continue
+        merged = dict(out.get(node) or {})
+        merged.update({k: node_recorded[k] for k in owned if k in node_recorded})
+        out[node] = merged
+    return out
+
+
+def _evolved_overlay(stores: Stores, at: SubjectSpec) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The addressed candidate's OWN sparse delta and the COMPLETE config it was measured under,
+    off ONE document read. The delta is ``pipeline_params_override``, never
+    ``resolved_pipeline_params`` — read as a delta that stamps every param ``evolved`` on every
+    candidate; the complete one is for identity alone. ``stores`` is already the leaf."""
     if at.kind != "candidate" or not at.cycle_id:
-        return {}
+        return {}, {}
     hop = CycleHop(campaign_id=at.campaign_id, cycle_id=at.cycle_id)
     index = stores.campaigns.load(hop) or {}
     # Newest round first: a candidate id is unique, but scanning down means a re-measured point
@@ -384,8 +427,11 @@ def _evolved_overlay(stores: Stores, at: SubjectSpec) -> dict[str, Any]:
             continue
         for cand in doc.candidate_scores:
             if cand.candidate_id == at.candidate_id:
-                return dict(cand.pipeline_params_override or {})
-    return {}
+                return (
+                    dict(cand.pipeline_params_override or {}),
+                    dict(cand.resolved_pipeline_params or {}),
+                )
+    return {}, {}
 
 
 def nested_pipeline_ref(dataset_dir: Path, view: PipelineView | None) -> NestedPipelineRef | None:
@@ -413,6 +459,64 @@ def _config_floor(campaign: Campaign, dataset_dir: Path | None) -> CampaignConfi
     return load_campaign_config({"optimization": dict(defaults)})
 
 
+def resolve_pipeline_for_draft(
+    draft: DraftCampaign,
+    *,
+    campaign_id: str,
+    cycle_id: str,
+    workspace: Path | None = None,
+) -> CampaignPipelineResponse:
+    """The CHECK-IN arm of the one resolution — same merge, same rows, same provenance.
+    ``is_checkin`` decides which layers EXIST, never which endpoint answers: seed, evolved and the
+    dataset file are simply absent, leaving the backend's declaration under the operator's overlay.
+    The dataset file is not consulted even when the slug exists — one file, shared by every
+    campaign on it, is the defect this seam ends; a reused origin's values arrive via
+    ``origins.py::draft_from_origin`` instead."""
+    schema = parse_pipeline_response(rendered_pipeline_json(draft))
+    # What was on OFFER before this draft narrowed anything, so a menu cannot shrink to its own pick.
+    declared = parse_pipeline_response(declared_pipeline_json(draft))
+    cfg = draft_campaign_config(draft)
+    active, filtered = _resolve_active_schema(
+        schema,
+        exclude=list(cfg.exclude_nodes),
+        narrowing=cfg.optimizer_narrowing,
+        dataset_dir=None,
+    )
+
+    provenance: dict[str, dict[str, ParamSource]] = {}
+    params = resolve_pipeline_config_params(
+        active,
+        cfg.pipeline_overlay,
+        None,
+        filtered,
+        judges=cfg.judges,
+        base_config={n.name: dict(n.current_config) for n in filtered.config_nodes},
+        provenance=provenance,
+    )
+    rows = filtered.node_config_schema(
+        values={n: c for n, c in params.items() if isinstance(c, dict)},
+        sources=provenance,
+        model_menu=filtered.selectable_models(),
+        declared=declared,
+    )
+    return CampaignPipelineResponse(
+        campaign_id=campaign_id,
+        cycle_id=cycle_id,
+        dataset_name=draft.slug,
+        connector=draft.connector,
+        backend_type=draft.connector,
+        params=params,
+        node_config_schema=rows,
+        view=filtered.view,
+        node_output_schema=filtered.node_output_schemas(),
+        model_capabilities=resolve_schema_menu(filtered, workspace=workspace),
+        reach=reach_map(rows),
+        # A dataset dir is what declares an inner panel, and a check-in has none yet.
+        nests=None,
+        is_single_node=filtered.is_single_node,
+    )
+
+
 def resolve_pipeline_for_campaign(
     stores: Stores,
     campaign: Campaign,
@@ -423,7 +527,22 @@ def resolve_pipeline_for_campaign(
     """The ONE campaign-scoped resolution. Five layers through the one merge, each stamping its
     provenance: ``dataset`` < ``campaign`` (the FROZEN snapshot) < ``seed`` < ``evolved`` <
     ``identity``. ``stores`` must already be the store *campaign* lives in: for an L4 inner
-    searchpoint the caller descends ``at.inside`` first, so manifest and rounds come off one tree."""
+    searchpoint the caller descends ``at.inside`` first, so manifest and rounds come off one tree.
+
+    A campaign still AUTHORING takes the check-in arm — one door, two sets of layers. The FLAG
+    decides it, never the presence of a draft: ``finalize_checkin_to_active`` leaves ``draft.json``
+    in place, so a started campaign would otherwise answer from state it has since frozen."""
+    hop_now = campaign.root_hop
+    if is_checkin(stores.campaigns.cycle_dir(hop_now)):
+        draft = load_checkin_draft(stores, campaign.campaign_id)
+        if draft is not None:
+            return resolve_pipeline_for_draft(
+                draft,
+                campaign_id=campaign.campaign_id,
+                cycle_id=hop_now.cycle_id,
+                workspace=workspace,
+            )
+
     dataset_dir: Path | None
     try:
         dataset_dir = readable_dataset_dir(stores, campaign.dataset_name)
@@ -459,12 +578,22 @@ def resolve_pipeline_for_campaign(
         params = apply_node_overlay(
             params, seed.pipeline_overlay, filtered, source="seed", provenance=provenance
         )
-    evolved = _evolved_overlay(stores, at)
+    evolved, measured = _evolved_overlay(stores, at)
     if evolved:
         params = apply_node_overlay(
             params, evolved, filtered, source="evolved", provenance=provenance
         )
+    # LAST, after the layer that computed them: a measured point's identity is a fact of the
+    # measurement, not of today's files.
+    if measured:
+        params = _recorded_identity(params, measured, provenance)
 
+    rows = filtered.node_config_schema(
+        values={n: c for n, c in params.items() if isinstance(c, dict)},
+        sources=provenance,
+        model_menu=filtered.selectable_models(),
+        declared=schema,
+    )
     return CampaignPipelineResponse(
         campaign_id=campaign.campaign_id,
         cycle_id=hop.cycle_id,
@@ -473,15 +602,14 @@ def resolve_pipeline_for_campaign(
         # The campaign's FROZEN kind — one `pipeline.yaml` serves every campaign on the slug.
         backend_type=campaign.backend_type,
         params=params,
-        node_config_schema=filtered.node_config_schema(
-            values={n: c for n, c in params.items() if isinstance(c, dict)},
-            sources=provenance,
-            model_menu=filtered.selectable_models(),
-        ),
+        node_config_schema=rows,
         view=filtered.view,
         node_output_schema=filtered.node_output_schemas(),
         model_capabilities=resolve_schema_menu(filtered, workspace=workspace),
+        reach=reach_map(rows),
+        # On this read so the L4 drill-in needs no second fetch to stitch against.
         nests=nested_pipeline_ref(dataset_dir, filtered.view) if dataset_dir else None,
+        is_single_node=filtered.is_single_node,
     )
 
 

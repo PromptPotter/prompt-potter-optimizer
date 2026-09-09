@@ -9,7 +9,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.datasets.dataset_replace import recover_pending_replacements
-from promptpotter.application.datasets.draft_campaign import DraftCampaign, dataset_source_of
+from promptpotter.application.datasets.draft_campaign import (
+    DraftCampaign,
+    dataset_source_of,
+    load_checkin_draft,
+)
 from promptpotter.application.datasets.origin_readiness import resolution_block
 from promptpotter.application.initialization.session import (
     finalize_checkin_to_active,
@@ -75,15 +79,6 @@ def create_checkin_campaign(
     return campaign_id, cycle_id, save_checkin_draft(stores, draft.patch(draft_id=campaign_id))
 
 
-def load_checkin_draft(stores: Stores, campaign_id: str) -> DraftCampaign | None:
-    """Rehydrate the durable check-in draft, or ``None``. The campaign dir IS the identity, so
-    ``draft_id`` / ``tenant_id`` come from the store's tenant scope — a cross-tenant id isn't found."""
-    data = stores.checkin.read_draft(campaign_id)
-    if data is None:
-        return None
-    return DraftCampaign.from_disk(data, draft_id=campaign_id, tenant_id=stores.identity.tenant_id)
-
-
 def save_checkin_draft(
     stores: Stores, draft: DraftCampaign, *, resolution: dict[str, Any] | None = None
 ) -> DraftCampaign:
@@ -140,11 +135,16 @@ async def prepare_checkin_run(
         materialize_and_write_origin(stores, draft, bank_items=list(bank.get("items", [])))
         dataset_name = draft.slug
         pipeline_overlay: dict[str, Any] = {}
+        # A fresh upload COMMITS its own `pipeline.yaml`, whose `pipelines.default` already IS the
+        # draft's chain — so there is nothing to exclude.
+        pipeline_steps: list[str] = []
         origin_override = None
     else:
         persist_origin_candidate_library(stores, canonical, draft)
         dataset_name = canonical
         pipeline_overlay = draft.pipeline_overlay
+        # A REUSED dataset writes no file, so the draft's chain reaches the run only here.
+        pipeline_steps = list(draft.pipeline_steps)
         # Whenever THIS turn authored an origin, not only when it reused one. Gated on
         # `reused_origin_id` the override was dropped in the case that needs it: a fresh origin
         # over an existing slug never reaches `materialize_and_write_origin` (that writes the
@@ -158,7 +158,9 @@ async def prepare_checkin_run(
     session = await make_session(dataset_name)
 
     dataset_root = readable_dataset_dir(stores, dataset_name)
-    campaign_config = build_cycle_config(session, dataset_root, pipeline_overlay=pipeline_overlay)
+    campaign_config = build_cycle_config(
+        session, dataset_root, pipeline_overlay=pipeline_overlay, pipeline_steps=pipeline_steps
+    )
 
     train_data = session.samples
     plan = resolve_cycle_plan(session, campaign_config, train_data, origin_override=origin_override)
@@ -303,7 +305,6 @@ async def _start_checkin_run(
 __all__ = [
     "PreparedCheckinRun",
     "create_checkin_campaign",
-    "load_checkin_draft",
     "prepare_checkin_run",
     "save_checkin_draft",
     "start_checkin_campaign",

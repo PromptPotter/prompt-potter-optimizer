@@ -9,16 +9,21 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import Field
 
+from promptpotter import connectors
 from promptpotter.application.campaign_config import (
+    CampaignConfig,
     MechanismConfig,
     OptimizationConfig,
     PromptBlockCatalogue,
+    load_campaign_config,
 )
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.identity import TenantId, safe_name
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
+from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
@@ -309,6 +314,144 @@ def resolved_node_schema(draft: DraftCampaign, connector: Connector) -> dict[str
     enforced. Persisting that same merge would be the opposite error, which is why the write
     path above stops one layer short."""
     return merge_node_blocks(dict(draft.backend_nodes), merge_pipeline_overlay(draft, connector))
+
+
+def load_checkin_draft(stores: Stores, campaign_id: str) -> DraftCampaign | None:
+    """Rehydrate the durable check-in draft, or ``None``. The campaign dir IS the identity, so
+    ``draft_id`` / ``tenant_id`` come from the store's tenant scope — a cross-tenant id isn't found.
+
+    Beside the draft rather than beside the launcher: the resolver reads a draft to answer for a
+    check-in campaign, and it cannot import a module that starts runs."""
+    data = stores.checkin.read_draft(campaign_id)
+    if data is None:
+        return None
+    return DraftCampaign.from_disk(data, draft_id=campaign_id, tenant_id=stores.identity.tenant_id)
+
+
+def draft_pipeline_json(draft: DraftCampaign, nodes: dict[str, Any]) -> dict[str, Any]:
+    """A draft as the SAME raw shape ``datasets/{slug}/pipeline.yaml`` holds, so one parser reads
+    both and a check-in is not a second kind of pipeline.
+
+    *nodes* is the caller's choice of layer depth, and the two callers deliberately differ — see
+    the two wrappers below. Passing it in rather than branching inside is what keeps "what we
+    write" and "what we draw" from collapsing into one flag nobody can read.
+    ``pipelines.default`` overrides the pipeline order."""
+    pipeline: dict[str, Any] = {
+        "name": draft.slug,
+        "backend_type": draft.connector,
+        "backend_name": draft.connector,
+    }
+    connector = connectors.get(draft.connector)
+    steps = draft.pipeline_steps or list(connector.default_pipeline)
+    if steps:
+        pipeline["pipelines"] = {"default": list(steps)}
+    # The model MENU, from the one function that feeds both the committed file and the
+    # pre-commit render — so a check-in dataset gets the same catalogue a hand-authored
+    # benchmark declares, instead of the empty list that leaves its model list with nothing
+    # to offer. The ADMIN's catalogue and nothing else: a model the operator typed rides
+    # `nodes.{n}.optimizer.param_allowed_values.model`, which is what BOUNDS the run
+    # (`PipelineSchema.model_options` prefers it), and folding it in here would erase the one
+    # difference that lets a surface say which values are theirs. Absent when the connector
+    # declares none: no menu is a real answer.
+    if connector.available_models:
+        pipeline["available_models"] = list(connector.available_models)
+
+    if nodes:
+        pipeline["nodes"] = nodes
+    return pipeline
+
+
+def committed_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
+    """What gets WRITTEN as ``datasets/{slug}/pipeline.yaml`` — the overlay depth, so the backend
+    still owns the schema at run time."""
+    return draft_pipeline_json(
+        draft, merge_pipeline_overlay(draft, connectors.get(draft.connector))
+    )
+
+
+def rendered_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
+    """What the RESOLVER reads for a check-in campaign — the backend's declaration underneath the
+    overlay, because ``optimizer.param_keys`` lives nowhere else and a surface without it draws
+    locks the run never enforces."""
+    return draft_pipeline_json(draft, resolved_node_schema(draft, connectors.get(draft.connector)))
+
+
+def declared_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
+    """The same pipeline with the OPERATOR's layer left off — what was on offer before this draft
+    narrowed anything.
+
+    The resolver needs both: ``narrow`` REPLACES ``param_allowed_values``, so a value the operator
+    unticked is gone from the narrowed schema, and a menu built from that could never offer it
+    back. Union the two and unticking stays reversible (``pipeline_resolve::_enum_menu``). Reading
+    it off :func:`rendered_pipeline_json` cannot work — that one has already folded the narrowing
+    in, which is exactly the layer this omits."""
+    connector = connectors.get(draft.connector)
+    return draft_pipeline_json(
+        draft, merge_node_blocks(dict(draft.backend_nodes), dict(connector.default_node_config))
+    )
+
+
+def default_campaign_config(draft: DraftCampaign) -> CampaignConfig:
+    """The campaign config a draft mints WITHOUT its node overlay — the floor the split below
+    layers onto, and the same one ``_campaign_config_for_launch`` starts from at Start."""
+    connector = connectors.get(draft.connector)
+    overrides = draft.optimization_overrides
+    optimization: dict[str, Any] = {"max_rounds": overrides["max_rounds"]}
+    optimization.update(dict(connector.default_optimization))
+    optimization["prompt_block_catalogue"] = overrides["prompt_block_catalogue"]
+    optimization["mechanisms"] = dict(overrides["mechanisms"])
+    return load_campaign_config(
+        {
+            "dataset_name": draft.slug,
+            "scoring": f"{draft.scoring_composite}(predicted, ground_truth)",
+            "exclude_nodes": list(connector.default_exclude_nodes),
+            "optimization": optimization,
+        }
+    )
+
+
+def draft_campaign_config(draft: DraftCampaign) -> CampaignConfig:
+    """What this draft WOULD freeze at Start — the floor plus its own node overlay, split into the
+    two flat fields a campaign carries.
+
+    The resolver reads this so the answer an operator sees while authoring IS the answer their
+    campaign runs; ``mint_and_start._campaign_config_for_launch`` performs the same merge onto the
+    committed snapshot. The two agreeing is the point — a setup screen showing something the mint
+    will not reproduce is the defect this whole seam exists to close."""
+    base = default_campaign_config(draft)
+    overrides, narrowing = split_overlay(draft.pipeline_overlay or {})
+    return base.model_copy(
+        update={
+            "pipeline_overlay": {**base.pipeline_overlay, **overrides},
+            "optimizer_narrowing": {**base.optimizer_narrowing, **narrowing},
+        }
+    )
+
+
+def split_overlay(
+    pipeline_overlay: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, NodeSearchNarrowing]]:
+    """The draft's nested overlay as the two flat fields a ``CampaignConfig`` carries.
+
+    A reused dataset's mint applies this split onto the per-campaign snapshot, so the shared,
+    immutable dataset is never mutated; a fresh upload folds the whole overlay into its own file.
+    The RESOLVER applies it too, which is what makes the answer an operator reads while authoring
+    the same one their campaign runs — the split is the campaign layer, before it is frozen."""
+    overrides: dict[str, Any] = {}
+    narrowing: dict[str, NodeSearchNarrowing] = {}
+    for node, block in pipeline_overlay.items():
+        if not isinstance(block, dict):
+            continue
+        config = block.get("config")
+        if isinstance(config, dict) and config:
+            overrides[node] = dict(config)
+        optimizer = block.get("optimizer")
+        if isinstance(optimizer, dict) and optimizer:
+            narrowing[node] = NodeSearchNarrowing(
+                param_keys=optimizer.get("param_keys"),
+                param_allowed_values=optimizer.get("param_allowed_values", {}),
+            )
+    return overrides, narrowing
 
 
 def new_draft(

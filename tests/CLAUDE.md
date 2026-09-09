@@ -49,6 +49,9 @@ which is a thing a flat file can never say, and is why `test_integrity.py` becam
 | `test_resume.py` | Lost or corrupted measurement. A rescore that corrupts prior fitness, a replay that misses a flipped outcome, a fork that inherits the wrong origin, a compaction that drops a paid row. |
 | `test_reaper.py` | The unattended recursive delete, and spend banked before an rmtree. Not the phase label: a wrong terminal stamp neither blocks resume nor survives `_finalize_run`, so it is loud and self-healing. |
 | `test_complexity_ledger.py` | Conceptual-surface creep and its quieter twin, a win nobody recorded. The ratchet asserts EQUALITY, so the surface never moves unexamined in either direction. |
+| `test_pipeline_resolve.py` | A campaign answering with another campaign's config. The merge is on the identity path, so the provenance sink must not move a byte of it; the reach reading and the config floor are the same subject seen from the surface. |
+| `test_origin_seeding.py` | A campaign that RUNS something the operator did not choose — a reused origin seeded from the shared file, a check-in whose pre-mint answer differs from what Start freezes, a chain the toggle never reached, an axis narrowing that cannot be undone. |
+| `test_restamp.py` | A one-shot migration writing a value no surviving record supports. Each pass must be a no-op on the day it runs and idempotent after, or it invents history. |
 
 ## Structural invariants live in production, not tests
 

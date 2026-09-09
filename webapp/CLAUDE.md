@@ -74,7 +74,11 @@ Five surfaces back the dashboard. **Read from the right one, and pick one source
 | `/tree` | `lib/lineage.tsx` | the served genealogy, `course → candidate → course` at any depth |
 | `rounds/round_NNNN.json` | `lib/hooks/useRoundFile.ts`, lazy | the round document — per-sample results, scoreboard, closing OSP |
 | the AUDIT TWIN `.runtime/cache/rounds/…` | `useRoundAudit`, lazy | the per-node LLM I/O, which lives ONLY here |
+<<<<<<< ours
 | `/campaigns/{id}/pipeline?at=` | `lib/hooks/useConnector.ts` → `ConnectorProvider`, keyed on `(campaign, cycle, at)` | the campaign's resolved pipeline — node graph, per-param `value` + `source` + `options`, output contract, model capabilities. **Sole source** for every config row, model chip, lock glyph and provenance badge |
+=======
+| `/campaigns/{id}/pipeline?at=` | `lib/hooks/useConnector.ts` → `ConnectorProvider`, keyed on `(campaign, cycle, at)` | the campaign's resolved pipeline — node graph, per-param `value` + `source`, `options` + `permitted`, served `reach`, output contract, model capabilities. **Sole source** for every config row, model chip, lock glyph, reach ring and provenance badge. A CHECK-IN rides `StaticConnectorProvider` instead, which is a second TRANSPORT of the same answer and never a second source: the draft response carries `resolve_pipeline_for_draft`'s output, the resolver's own check-in arm. Putting anything else into it re-opens the defect |
+>>>>>>> theirs
 
 The rules, none of them derivable from the surfaces themselves:
 

@@ -120,7 +120,7 @@ def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
 def _reload_draft(stores: Stores, campaign_id: str) -> DraftCampaign:
     """The draft as the dispatcher just left it. Every write path persists, so the CLI re-reads
     rather than threading a model the applier already superseded."""
-    from promptpotter.application.jobs.launcher.checkin import load_checkin_draft
+    from promptpotter.application.datasets.draft_campaign import load_checkin_draft
 
     draft = load_checkin_draft(stores, campaign_id)
     assert draft is not None  # just written by the applier

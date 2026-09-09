@@ -22,7 +22,11 @@ from promptpotter.application.datasets.authored import (
 )
 from promptpotter.application.datasets.csv_ingest import Table, materialize_samples
 from promptpotter.application.datasets.dataset_replace import recover_pending_replacements
-from promptpotter.application.datasets.draft_campaign import DraftCampaign
+from promptpotter.application.datasets.draft_campaign import (
+    DraftCampaign,
+    committed_pipeline_json,
+    split_overlay,
+)
 from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
@@ -34,9 +38,7 @@ from promptpotter.application.jobs.launcher.admission import (
 )
 from promptpotter.application.jobs.launcher.draft_build import (
     _build_default_campaign_json,
-    _build_origin_pipeline_json,
     _build_task_context,
-    split_overlay,
 )
 from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
 from promptpotter.application.jobs.quota import QuotaExceededError
@@ -125,9 +127,19 @@ def build_cycle_config(
     dataset_root: Path,
     *,
     pipeline_overlay: dict[str, Any] | None = None,
+    pipeline_steps: list[str] | None = None,
 ) -> CampaignConfig:
     """Load the campaign config for a launch, folding a reused-dataset overlay onto a per-campaign
-    SNAPSHOT — one definition for all three launch paths, leaving the shared dataset immutable."""
+    SNAPSHOT — one definition for all three launch paths, leaving the shared dataset immutable.
+
+    *pipeline_steps* is the draft's own chain, and it rides ``exclude_nodes`` for the same reason
+    the overlay rides a snapshot: on a REUSED dataset nothing writes a `pipeline.yaml`, so
+    `pipelines.default` stays whatever the FIRST campaign on that slug committed. The check-in's
+    LLM-only / Research+Match toggle reached nothing at all — the operator picked a pipeline and
+    the campaign measured another. Excluding the complement is that choice expressed through the
+    channel a campaign already has; a second `pipeline_steps` knob would be `exclude_nodes` spelled
+    twice (measured: they have identical expressive power, and `filter_to_steps` preserves the
+    schema's own order, so a step list cannot even reorder)."""
     file_config = read_campaign_config_file(dataset_campaign_path(dataset_root))
     profile = session.store.backends.load_connector_profile(session.backend_id) or {}
     campaign_config = load_campaign_config({**profile, **file_config})
@@ -137,6 +149,15 @@ def build_cycle_config(
             update={
                 "pipeline_overlay": {**campaign_config.pipeline_overlay, **overrides},
                 "optimizer_narrowing": {**campaign_config.optimizer_narrowing, **narrowing},
+            }
+        )
+    if pipeline_steps:
+        chosen = set(pipeline_steps)
+        campaign_config = campaign_config.model_copy(
+            update={
+                "exclude_nodes": [
+                    n.name for n in session.pipeline_schema.nodes if n.name not in chosen
+                ]
             }
         )
     return campaign_config
@@ -278,7 +299,7 @@ def materialize_and_write_origin(
         sample_order_seed=order_seed,
         source_file=draft.source_file,
         headers=draft.headers,
-        pipeline_json=_build_origin_pipeline_json(draft),
+        pipeline_json=committed_pipeline_json(draft),
         campaign_json=_build_default_campaign_json(draft),
         task_description=draft.raw_task_description,
         prompt_default=draft.committed_prompt_fields(),

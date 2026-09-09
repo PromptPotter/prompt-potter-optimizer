@@ -11,87 +11,19 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter import connectors
-from promptpotter.application.campaign_config import (
-    CampaignConfig,
-    freeze_campaign_config,
-    load_campaign_config,
-)
+from promptpotter.application.campaign_config import CampaignConfig, freeze_campaign_config
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
-    merge_pipeline_overlay,
-    resolved_node_schema,
+    default_campaign_config,
 )
 from promptpotter.application.datasets.origin_readiness import origin_readiness
-from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+from promptpotter.application.pipeline_resolve import resolve_pipeline_for_draft
 from promptpotter.domain.pipeline_schema import (
     CANDIDATE_LIBRARY,
-    NodeSearchNarrowing,
     PipelineDependency,
     dependencies_from_node_types,
 )
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.llm.capabilities import resolve_schema_menu
-
-
-def _origin_pipeline_json(draft: DraftCampaign, nodes: dict[str, Any]) -> dict[str, Any]:
-    """*nodes* is the caller's choice of layer depth, and the two callers deliberately differ:
-    the committed file gets :func:`merge_pipeline_overlay` (an OVERLAY — the backend still owns
-    the schema at run time), the rendered one gets :func:`resolved_node_schema` (the backend's
-    declaration underneath it, because ``param_keys`` lives nowhere else). Passing it in rather
-    than branching inside is what keeps "what we write" and "what we draw" from drifting into
-    one flag nobody can read. ``pipelines.default`` overrides the pipeline order."""
-    pipeline: dict[str, Any] = {
-        "name": draft.slug,
-        "backend_type": draft.connector,
-        "backend_name": draft.connector,
-    }
-    connector = connectors.get(draft.connector)
-    steps = draft.pipeline_steps or list(connector.default_pipeline)
-    if steps:
-        pipeline["pipelines"] = {"default": list(steps)}
-    # The model MENU, from the one function that feeds both the committed file and the
-    # pre-commit render — so a check-in dataset gets the same catalogue a hand-authored
-    # benchmark declares, instead of the empty list that leaves its model list with nothing
-    # to offer. The ADMIN's catalogue and nothing else: a model the operator typed rides
-    # `nodes.{n}.optimizer.param_allowed_values.model`, which is what BOUNDS the run
-    # (`PipelineSchema.model_options` prefers it), and folding it in here would erase the one
-    # difference that lets a surface say which values are theirs. Absent when the connector
-    # declares none: no menu is a real answer.
-    if connector.available_models:
-        pipeline["available_models"] = list(connector.available_models)
-
-    if nodes:
-        pipeline["nodes"] = nodes
-    return pipeline
-
-
-def _build_origin_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
-    """What gets COMMITTED as ``datasets/{slug}/pipeline.yaml``."""
-    return _origin_pipeline_json(
-        draft, merge_pipeline_overlay(draft, connectors.get(draft.connector))
-    )
-
-
-def split_overlay(
-    pipeline_overlay: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, NodeSearchNarrowing]]:
-    """A reused dataset's mint applies this split onto the per-campaign snapshot, so the shared,
-    immutable dataset is never mutated; a fresh upload folds the whole overlay into its own file."""
-    overrides: dict[str, Any] = {}
-    narrowing: dict[str, NodeSearchNarrowing] = {}
-    for node, block in pipeline_overlay.items():
-        if not isinstance(block, dict):
-            continue
-        config = block.get("config")
-        if isinstance(config, dict) and config:
-            overrides[node] = dict(config)
-        optimizer = block.get("optimizer")
-        if isinstance(optimizer, dict) and optimizer:
-            narrowing[node] = NodeSearchNarrowing(
-                param_keys=optimizer.get("param_keys"),
-                param_allowed_values=optimizer.get("param_allowed_values", {}),
-            )
-    return overrides, narrowing
 
 
 def overlay_from_campaign_config(config: CampaignConfig) -> dict[str, Any]:
@@ -140,36 +72,44 @@ def _dependency_fulfilled(dep: PipelineDependency, draft: DraftCampaign) -> bool
 
 
 def _draft_pipeline_render(draft: DraftCampaign, workspace: Path | None) -> dict[str, Any]:
-    """A check-in has no committed ``datasets/{slug}/``, so its pipeline is read off the draft, not
-    disk — the ingest node editor renders with no fetch-by-slug and no second endpoint."""
-    connector = connectors.get(draft.connector)
-    schema = parse_pipeline_response(
-        _origin_pipeline_json(draft, resolved_node_schema(draft, connector))
+    """The draft's half of the ONE resolution, reshaped for the wire.
+
+    It COMPUTES nothing: ``resolve_pipeline_for_draft`` is the same function
+    ``GET /campaigns/{id}/pipeline`` serves for a check-in, so the ingest surface and the campaign
+    route cannot answer differently about the draft between them. It used to parse and narrow the
+    manifest itself, which meant every ingest row came back ``source: "unset"`` with no merge
+    behind it, and the operator's own narrowing reached the editor only through a browser-side
+    derivation."""
+    resolution = resolve_pipeline_for_draft(
+        draft,
+        campaign_id=draft.draft_id,
+        cycle_id="",
+        workspace=workspace,
     )
-    cfg = load_campaign_config(_build_default_campaign_json(draft)["campaign_config"])
-    schema = schema.narrow(cfg.optimizer_narrowing)
     return {
-        "pipeline_view": schema.view.model_dump(by_alias=True) if schema.view is not None else None,
-        "node_config_schema": schema.node_config_schema(),
-        "node_output_schema": schema.node_output_schemas(),
-        # Every model a node may be SET to, not only the picked one: switching models must
-        # re-answer the reasoning ladder with no round-trip, which is what keeps the surface honest
-        # while the operator is still deciding. Which models those are, and why it is not the admin
-        # catalogue, is `resolve_schema_menu`'s — the same call the two read doors make.
-        "model_capabilities": {
-            m: c.model_dump() for m, c in resolve_schema_menu(schema, workspace=workspace).items()
-        },
-        # WHY the axes read as they do, so an empty answer is never mistaken for a locked one.
-        # A remote connector with no captured declaration means the probe failed, and the editor
-        # must say "axes unknown" rather than draw a padlock nobody set.
-        "schema_source": (
-            "backend"
-            if draft.backend_nodes
-            else "local"
-            if connector.in_process_run is not None
-            else "unreachable"
-        ),
+        "pipeline_view": resolution.view,
+        "node_config_schema": resolution.node_config_schema,
+        "node_output_schema": resolution.node_output_schema,
+        "reach": {node: r.model_dump() for node, r in resolution.reach.items()},
+        "model_capabilities": resolution.model_capabilities,
+        "is_single_node": resolution.is_single_node,
+        "schema_source": _draft_schema_source(draft),
     }
+
+
+def _draft_schema_source(draft: DraftCampaign) -> str:
+    """WHY the axes read as they do, so an empty axis set is never mistaken for a locked one.
+    `backend` = the service's own declaration was captured; `local` = an in-process connector,
+    whose manifest IS the declaration; `unreachable` = the probe failed, and nothing here may be
+    read as a lock the operator set. A DRAFT fact, so it rides the draft wire and not the
+    resolution — a campaign read has a schema whoever answered for it."""
+    if draft.backend_nodes:
+        return "backend"
+    return (
+        "local"
+        if connectors.CONNECTORS[draft.connector].in_process_run is not None
+        else "unreachable"
+    )
 
 
 def draft_wire(draft: DraftCampaign, workspace: Path | None = None) -> dict[str, Any]:
@@ -196,22 +136,12 @@ def draft_wire(draft: DraftCampaign, workspace: Path | None = None) -> dict[str,
 
 def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
     """Written as the DELTA from defaults, so a knob nobody chose never reaches disk and a later
-    rename cannot make the file unreadable — which matters because ``CampaignConfig`` forbids extras."""
-    connector = connectors.get(draft.connector)
-    overrides = draft.optimization_overrides
-    optimization: dict[str, Any] = {"max_rounds": overrides["max_rounds"]}
-    optimization.update(dict(connector.default_optimization))
-    optimization["prompt_block_catalogue"] = overrides["prompt_block_catalogue"]
-    optimization["mechanisms"] = dict(overrides["mechanisms"])
-    config = load_campaign_config(
-        {
-            "dataset_name": draft.slug,
-            "scoring": f"{draft.scoring_composite}(predicted, ground_truth)",
-            "exclude_nodes": list(connector.default_exclude_nodes),
-            "optimization": optimization,
-        }
-    )
-    return {"campaign_config": freeze_campaign_config(config)}
+    rename cannot make the file unreadable — which matters because ``CampaignConfig`` forbids extras.
+
+    The node overlay is deliberately NOT folded in here: the mint splits it onto the per-campaign
+    snapshot at launch (``_campaign_config_for_launch``), which is what leaves a REUSED dataset's
+    shared file untouched."""
+    return {"campaign_config": freeze_campaign_config(default_campaign_config(draft))}
 
 
 def _build_task_context(draft: DraftCampaign) -> dict[str, Any]:

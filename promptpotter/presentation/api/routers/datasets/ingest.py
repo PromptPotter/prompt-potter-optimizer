@@ -15,6 +15,7 @@ from promptpotter.application.datasets.csv_ingest import (
     candidate_library_from_rows,
     parse_candidate_library,
 )
+from promptpotter.application.datasets.draft_campaign import load_checkin_draft
 from promptpotter.application.datasets.draft_patch import EditDraftPatch
 from promptpotter.application.datasets.ingest import (
     MAX_UPLOAD_BYTES,
@@ -24,7 +25,6 @@ from promptpotter.application.datasets.ingest import (
     ingest_draft,
     refresh_capabilities,
 )
-from promptpotter.application.jobs.launcher.checkin import load_checkin_draft
 from promptpotter.application.jobs.launcher.draft_build import draft_wire
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.strict_model import StrictModel

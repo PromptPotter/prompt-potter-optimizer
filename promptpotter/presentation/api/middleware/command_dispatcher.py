@@ -1237,7 +1237,7 @@ class CommandDispatcher:
 
 
 def _reread_draft(stores: Stores, draft_id: str) -> Any:
-    from promptpotter.application.jobs.launcher.checkin import load_checkin_draft
+    from promptpotter.application.datasets.draft_campaign import load_checkin_draft
 
     draft = load_checkin_draft(stores, draft_id)
     if draft is None:

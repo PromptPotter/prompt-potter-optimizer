@@ -1,21 +1,34 @@
 from __future__ import annotations
 
+import json
 import logging
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.campaign_config import CampaignConfig
+from promptpotter.application.datasets.authored import (
+    dataset_campaign_path,
+    load_dataset_campaign_config,
+)
+from promptpotter.application.datasets.loaders import resolve_dataset_items
 from promptpotter.application.initialization.loop_start import populate_session_scoring
 from promptpotter.application.initialization.session import Session
+from promptpotter.application.pipeline_resolve import resolve_pipeline_config_params
+from promptpotter.application.runner.campaign_ids import build_origin_cycle_id
 from promptpotter.config.settings import DATASET_NAME
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint
 from promptpotter.domain.pipeline_overlay import overlay_is_locked_axis_only
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.results import RoundParent, ScoredCandidate, candidate_label
 from promptpotter.domain.run_records import CandidateMintedRecord, CycleSeed
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
+from promptpotter.infrastructure.store.io import read_yaml
+from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.shared.errors import StoredConfigInvalidError
 from promptpotter.shared.instrument import (
     NO_ROUND_SLOT,
     MeasuredCandidate,
@@ -484,3 +497,53 @@ async def prepare_scoring_context(
         ),
         dataset,
     )
+
+
+def prospective_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) -> str | None:
+    """The dataset's CURRENT committed config-aware origin id — the same hash a fresh mint would
+    stamp, computed from disk with no Session.
+
+    The PROSPECTIVE twin of ``pipeline_resolve.resolve_pipeline_for_campaign``, and deliberately
+    NOT that function: it answers for a dataset that has no campaign yet, so there is no campaign
+    layer to apply and no manifest to freeze. What the two share is the merge primitive
+    ``resolve_pipeline_config_params``, which is what keeps this id from diverging from the one a
+    real run stamps. It lived in the origins ROUTER, which put a hash computation behind an
+    adapter no other entry point could reach."""
+    # Function-local for the reason the two callers above are: `application/optimization/` imports
+    # this module, so a module-level edge here would close the cycle. Pre-existing shape, not one
+    # this move introduced.
+    from promptpotter.application.optimization.task_context import committed_task_context
+
+    try:
+        raw = read_yaml(dataset_pipeline_path(dataset_dir))
+        schema = parse_pipeline_response(raw)
+        cfg = load_dataset_campaign_config(dataset_campaign_path(dataset_dir))
+        active = schema.active_steps_excluding(cfg.exclude_nodes)
+        if not active:
+            return None
+        base_pp = resolve_pipeline_config_params(
+            active, cfg.pipeline_overlay, dataset_dir, schema, judges=cfg.judges
+        )
+        opt_sp = resolve_origin_opt_search_point(
+            prompt_node_names=schema.prompt_node_names(),
+            dataset_dir=dataset_dir,
+            task_context=committed_task_context(stores, dataset_name),
+        )
+        items = resolve_dataset_items(stores, dataset_name)
+        if not items:
+            return None
+        samples = [Sample(**it) for it in items]
+        return build_origin_cycle_id(opt_sp, schema, samples, base_pp).removeprefix("cycle_")
+    except (
+        OSError,
+        ValueError,
+        KeyError,
+        TypeError,
+        json.JSONDecodeError,
+        StoredConfigInvalidError,
+    ):
+        # StoredConfigInvalidError included deliberately: this is a SURVEY over every
+        # tenant dataset, so one unreadable neighbour drops itself, never the list.
+        # The dataset's own direct reads still 500 with the restamp remedy.
+        logger.exception("origins: prospective origin id failed for %s", dataset_name)
+        return None

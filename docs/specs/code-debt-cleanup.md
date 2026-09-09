@@ -313,10 +313,28 @@ longer "is a feature allowed" but "does the preprint need it", and these do not:
   neighbours all land. Action: document the DSL or drop the three. Blocker: it is an operator-facing
   DSL — reach is a product call.
 
+**Round documents no prune can repair:**
+- **Some fail to load with `health.first_error: extra_forbidden`** — a renamed field, and pruning
+  cannot restore a renamed field's VALUE, so the verb names them and never rewrites them. Fix is
+  the model or a migration of its own; until then `restamp`'s cycle-index re-projection skips
+  those cycles.
+- **Re-test: `python -m promptpotter restamp`** — its "Round documents — N checked, M load" line;
+  equal counts close this.
+
 **Needs a live run, not a decision:**
 - **`_rebank_on_branch`'s re-bank has never been observed** — fixed to take each corrected round
   through the whole ingress, but the cycle it was measured on went with a store wipe, so the fix is
   reasoned, not seen. Repair a fork; confirm each corrected round carries its own `round:complete` on
   the branch.
+- **The `evolved` and `seed` provenance layers have never been stamped by real data.**
+  `pipeline_resolve.py::_evolved_overlay` reads a candidate's sparse `pipeline_params_override`
+  and the seed layer reads the cycle seed's `pipeline_overlay`; every candidate on this workspace
+  is prompt-only, so both feeds are dead here and only the merge primitive beneath them is
+  covered (`tests/test_pipeline_resolve.py`). A campaign that actually MOVES a node param
+  exercises both, and the trap they guard is documented at `_evolved_overlay`: reading
+  `resolved_pipeline_params` instead would stamp every param `evolved` at once.
+  **Re-test:** `grep -rho '"pipeline_params_override": [^,}]*'
+  .promptpotter/projects/*/campaigns/*/cycles/*/rounds/*.json | sort -u` — while the only
+  distinct value is `null`, no live row has reached either layer.
 
 Closed items are not tracked here — `git log` is the history layer.

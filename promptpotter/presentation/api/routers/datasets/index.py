@@ -19,7 +19,9 @@ from promptpotter.domain.pipeline_schema import (
     NestedPipelineRef,
     NodeConfigParam,
     NodeOutputSchema,
+    NodeReach,
     PipelineView,
+    reach_map,
 )
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.capabilities import resolve_schema_menu
@@ -106,6 +108,10 @@ class DatasetPipelineResponse(StrictModel):
     # `optimizer_locked` marks what nobody may ever permute (model/provider) and `held`
     # what THIS campaign closed — either of which the operator may still set on a fork.
     node_config_schema: dict[str, list[NodeConfigParam]]
+    # That sum, done here rather than by the caller. This read answers for a DATASET, so its
+    # reading is about topology — which is exactly what an unrun nested pipeline is, and the only
+    # thing this route is still asked for.
+    reach: dict[str, NodeReach]
     # Per-node structured-output contract (read-only) — the steer panel shows it
     # beside the config so the operator sees the WHOLE node (model + params +
     # prompt + the structured output it produces). None for nodes with no schema.
@@ -148,13 +154,15 @@ def get_dataset_pipeline(name: str, stores: StoresDep) -> DatasetPipelineRespons
     if campaign_path.is_file():
         cfg = load_dataset_campaign_config(campaign_path)
         schema = schema.narrow(cfg.optimizer_narrowing)
+    rows = schema.node_config_schema()
     return DatasetPipelineResponse(
         name=name,
         connector=connector,
         backend_type=backend_type,
         pipeline=schema.model_dump(by_alias=True),
         view=schema.view,
-        node_config_schema=schema.node_config_schema(),
+        node_config_schema=rows,
+        reach=reach_map(rows),
         node_output_schema=schema.node_output_schemas(),
         nests=nested_pipeline_ref(dataset_dir, schema.view),
         model_capabilities=resolve_schema_menu(schema, workspace=Path(stores.base_dir)),

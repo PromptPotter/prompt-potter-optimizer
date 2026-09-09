@@ -318,10 +318,11 @@ class PipelineNode(StrictModel):
         )
 
 
-ParamSource = Literal["dataset", "campaign", "seed", "evolved", "identity", "unset"]
+ParamSource = Literal["backend", "dataset", "campaign", "seed", "evolved", "identity", "unset"]
 """WHICH LAYER set a resolved param's value, stamped BY the merge (last writer wins), never diffed
 against it. Each member is described beside its producer in ``api-openapi.yaml::ParamSource``;
-``identity`` is unoverridable, so no surface may offer to edit it."""
+``backend`` is the CHECK-IN arm's floor (a captured declaration, where a campaign read has a
+dataset file) and ``identity`` is unoverridable, so no surface may offer to edit it."""
 
 
 class NodeConfigParam(StrictModel):
@@ -361,6 +362,54 @@ class NodeConfigParam(StrictModel):
     # "unset" on a DATASET-scoped read, which has no campaign to attribute to; a campaign read
     # stamps every row from the merge that produced it.
     source: ParamSource = "unset"
+    # What the BABYSIT gate accepts without tainting, where that differs from the menu above.
+    # `None` = it does not differ, which is NOT `[]` (nothing may be picked). `options` is a UNION,
+    # so narrowing cannot become a one-way ratchet; the gate enforces the narrower list.
+    permitted: list[str] | None = None
+
+
+class NodeReach(StrictModel):
+    """How far the search reaches on ONE node, off the SAME rows a surface renders — summed in the
+    browser it was counted against whichever schema the caller held. The denominator is what is
+    OPENABLE, so a param no agent moves is SHUT, not exempt; a node ABSENT is unknown, not shut."""
+
+    model_config = ConfigDict(frozen=True)
+
+    open: int
+    openable: int
+    agents: list[str] = Field(default_factory=list)
+    held: bool = False
+    state: Literal["open", "partial", "locked", "nothing"]
+
+
+def node_reach(params: list[NodeConfigParam]) -> NodeReach:
+    """Take the node's OWN rows, so the picture and the count cannot disagree about one node."""
+    openable = [p for p in params if not p.optimizer_locked]
+    opened = [p for p in openable if p.movable_by]
+    agents = sorted({a for p in opened for a in p.movable_by}, key=MOVABLE_AGENTS.index)
+    state: Literal["open", "partial", "locked", "nothing"] = (
+        "nothing"
+        if not openable
+        else "locked"
+        if not opened
+        else "open"
+        if len(opened) == len(openable)
+        else "partial"
+    )
+    return NodeReach(
+        open=len(opened),
+        openable=len(openable),
+        agents=agents,
+        held=any(p.held for p in openable),
+        state=state,
+    )
+
+
+def reach_map(rows: dict[str, list[NodeConfigParam]]) -> dict[str, NodeReach]:
+    """Every door that serves ``node_config_schema`` serves the reading OVER it, off the same rows —
+    four do, and while any one omitted it the browser summed its own against whichever schema the
+    caller happened to hold, which on a campaign read was the DATASET's."""
+    return {node: node_reach(node_rows) for node, node_rows in rows.items()}
 
 
 class NestedPipelineRef(StrictModel):
@@ -547,6 +596,7 @@ class PipelineSchema(StrictModel):
         values: Mapping[str, Mapping[str, object]] | None = None,
         sources: Mapping[str, Mapping[str, ParamSource]] | None = None,
         model_menu: list[str] | None = None,
+        declared: "PipelineSchema | None" = None,
     ) -> dict[str, list[NodeConfigParam]]:
         """COMPLETE by contract, so a reader answers "may anything move here?" by summing
         ``movable_by``. A param dropped here is invisible to every caller — filter downstream.
@@ -557,9 +607,11 @@ class PipelineSchema(StrictModel):
         Its source is ``dispatch/schemas.py::L2_NODE_AXES`` — the same table L2's own override
         parsing reads, so the picture and the parser cannot disagree about L2's reach.
 
-        *values* / *sources* / *model_menu* are a CAMPAIGN read's answer written over the schema's
-        own: the resolved value per param, the layer that won it, and the model row's menu as a
-        union so narrowing is never a one-way ratchet. Absent, a row carries the declaration."""
+        *values* / *sources* / *model_menu* / *declared* are a CAMPAIGN read's answer written over
+        the schema's own: the resolved value per param, the layer that won it, and the menus as a
+        union with what was declared BEFORE narrowing — :meth:`narrow` REPLACES an enum's allowed
+        values, so reading the narrowed list as the menu makes unticking a rung a one-way ratchet.
+        ``permitted`` carries the narrower half, ``None`` where the two do not differ."""
         # A model row is synthesized on the carrier only when no node OWNS a model —
         # otherwise the native row (justlogic's `llm_only.model`) is authoritative.
         model_declared = any(
@@ -575,8 +627,10 @@ class PipelineSchema(StrictModel):
             # never written to `current_config` (`max_tokens`, declared and unset) otherwise
             # leaves the surface entirely — the one row that most needed to say it was held.
             keys = n.param_keys | n.param_keys_held | set(n.current_config)
+            declared_node = declared.get_node(n.name) if declared else None
             for key in sorted(keys - SCHEMA_OWNED_FIELDS):
                 options: list[str] = []
+                permitted: list[str] | None = None
                 if key in _PROMPT_OWNED_FIELDS:
                     kind = "prompt"
                 elif n.param_types.get(key) in NESTED_PARAM_TYPES:
@@ -588,8 +642,17 @@ class PipelineSchema(StrictModel):
                     # operator TYPED is exactly one this list does not carry, which is the only
                     # thing that lets a surface mark it as theirs rather than the admin's.
                     kind, options = "model", list(model_menu or self.available_models)
+                    permitted = self.model_options(n) if self.model_options(n) != options else None
                 elif key in n.param_allowed_values:
-                    kind, options = "enum", list(n.param_allowed_values[key])
+                    kind = "enum"
+                    narrowed = list(n.param_allowed_values[key])
+                    wide = (
+                        list(declared_node.param_allowed_values.get(key, ()))
+                        if declared_node
+                        else []
+                    )
+                    options = list(dict.fromkeys([*wide, *narrowed]))
+                    permitted = narrowed if options != narrowed else None
                 else:
                     t = n.param_types.get(key, "string")
                     kind = (
@@ -614,6 +677,7 @@ class PipelineSchema(StrictModel):
                         value=resolved.get(key, n.current_config.get(key)),
                         kind=kind,
                         options=options,
+                        permitted=permitted,
                         description=n.param_descriptions.get(key, ""),
                         optimizer_locked=forbidden,
                         movable_by=movable,
@@ -636,6 +700,11 @@ class PipelineSchema(StrictModel):
                         value=resolved.get("model", n.current_config.get("model")),
                         kind="model",
                         options=list(model_menu or self.available_models),
+                        permitted=(
+                            self.model_options(n)
+                            if self.model_options(n) != list(model_menu or self.available_models)
+                            else None
+                        ),
                         description="Optimizer model for this node — install-global by "
                         "default, operator-steerable on a fork.",
                         source=stamped.get("model", "unset"),

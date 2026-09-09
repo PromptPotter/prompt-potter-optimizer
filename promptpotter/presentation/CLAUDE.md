@@ -24,7 +24,7 @@ what may not happen here is § Out-of-bounds.
   (display); the per-cycle markdown writers (`log.md`, `review.md`) now live
   in `application/output.py` (orchestration-side), not here.
 - **No business logic here** — `cli/` and `api/` parse, route, and format; anything else is drift into the wrong layer.
-  **Two live violations, both assembling a pipeline answer inside the router:** `routers/active.py::get_optimizer_pipeline` parses the manifest and composes `view` / `node_config_schema` / `node_output_schema` / `model_capabilities` inline, and `routers/origins.py::_dataset_origin_id` re-reads the pipeline yaml and calls `resolve_pipeline_config_params` a second time. Two routers, two resolutions, one file — which is how the browser and the engine came to read different declarations off the same manifest. Both collapse into `application/pipeline_resolve.py::resolve_pipeline_for_campaign`; a router calls it and formats the result.
+  Both former violations are closed. `routers/active.py::get_optimizer_pipeline` calls `get_optimizer_schema`, which IS `parse_pipeline_response`, so the engine and the browser can no longer read one manifest through two parsers; and the prospective origin id is `application/origin.py::prospective_origin_id`, which the router calls. That one is deliberately NOT the campaign resolution — it answers for a dataset with no campaign yet, so it rides the shared primitive `resolve_pipeline_config_params` rather than `resolve_pipeline_for_campaign`, and collapsing the two would be the scope error the split exists to prevent.
 - **One orchestration layer under every adapter.** A behavior reachable from the CLI but not the notebook or webapp is a bug, not a feature.
 
 ## No ad-hoc mutating routes
