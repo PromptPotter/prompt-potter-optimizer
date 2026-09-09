@@ -169,14 +169,25 @@ world is a strict containment hierarchy:
   benchmarking vs tenant work); both share the `pipeline.yaml` /
   `campaign.yaml` / `task_description.md` shape.
   This tier holds **datasets only** — the optimizer's own pipeline is install content under the package (`config/paths.py::optimizer_assets_root`), never a target in this tier. A checkout resolves benchmark definitions from `datasets/`; a wheel ships the same definitions as install content and resolves them there. Either way the tier is **read-only**, so a benchmark's materialized rows are not kept in it: they are the operator's, and `readable_dataset_rows` resolves them from the tenant tree (`store/dataset_access.py`).
-  **One resolution
-  seam:** `readable_dataset_dir` picks the dir (tenant slug first,
-  repo benchmark second) once at init and stamps it on
+  **Two resolution seams, and they answer different questions.** The
+  **dataset-file** seam is `readable_dataset_dir` — it picks the dir
+  (tenant slug first, repo benchmark second) once at init and stamps it on
   `Session.dataset_config_dir`; every downstream dataset-file loader
   (node overlay, starting prompts, origin prompt, sweep dir) reads that
   resolved dir — none recompute a repo-relative `datasets/{name}/` path.
   So an ingested tenant dataset is first-class to the whole loop, not
-  just to the mint that created it.
+  just to the mint that created it. That seam answers *which bytes on disk*.
+  The **effective-config** seam is
+  `application/pipeline_resolve.py::resolve_pipeline_for_campaign`, and it
+  answers *which values a campaign runs* — the dataset floor with the
+  campaign's frozen overrides, its cycle seed, the addressed candidate's
+  evolved delta and the connector's identity contributions layered over it,
+  each resolved value carrying the layer that won it. **The effective-config
+  seam consumes the dataset-file seam and never the reverse**; a surface
+  asking what a campaign runs and getting a dataset default back is the
+  scope error this split exists to make unsayable. One dataset file is
+  shared by every campaign built on it, so it is nobody's answer in
+  particular.
 - **Campaign** — one declared optimization effort: a dataset, a
   pipeline origin, context text, **and the optimizer prompts it
   runs under**. A **first-class entity** and a **cycle tree** — root
@@ -243,6 +254,17 @@ measurement store). The archive query API and the heatmap artifacts use these na
 `scope` param stops at dataset and adds `cycle` instead
 (`routers/datasets/leaderboard.py::HeatmapScope`), because a workspace-wide
 heatmap would compare samples that differ per dataset.
+
+**That ceiling is about MEASUREMENT queries, and only those.** A cell is
+comparable across campaigns because it is content-addressed, which is what
+makes the dataset the useful ceiling for a heatmap. **Configuration
+resolution is campaign-scoped and always was** — what a node runs is a fact
+about one campaign, seeded by a dataset it shares with every sibling
+campaign. The two are different `scope`s wearing one word, and collapsing
+them is what let a dataset default be served as a running campaign's config.
+A read answering "what does this run" is addressed by campaign
+(`GET /campaigns/{id}/pipeline`); a read answering "how did these score" is
+addressed by `HeatmapScope`. Neither ceiling constrains the other.
 
 ### The loop is embeddable, and that bounds what may sit in core
 
@@ -323,6 +345,17 @@ directly, cross-process. The closed inbound set is declared in
 [`specs/api-openapi.yaml`](specs/api-openapi.yaml), the closed outbound set in
 [`specs/events-asyncapi.yaml`](specs/events-asyncapi.yaml); **adding a kind updates the
 YAML first, in its own PR**. Permanent contract: [`adr/0001-m12-control-plane.md`](adr/0001-m12-control-plane.md).
+
+**A served GET is not a sixth kind, and this sentence exists so that is never re-litigated.**
+This kind is defined by MUTATION — a `CommandRecord`, an ack, a ledger append. A read that
+mutates nothing adds no ingress and no writer, so it needs no §0 amendment; it is Display's
+half that happens to answer on request rather than by projection. What a read still owes is
+the same declare-first discipline the commands owe: its path and response schema land in
+[`specs/api-openapi.yaml`](specs/api-openapi.yaml) before the handler, and its resolution
+lives in `application/` rather than in the router. That reads have never had a bucket is
+why several shipped undeclared — `specs/api-openapi.yaml` says so at its own head — and the
+recipe closing it is [`developer/adding-a-surface.md`](developer/adding-a-surface.md)
+§ A served read.
 
 #### 5 — Identity
 

@@ -86,7 +86,10 @@ invariants:
                       saying `running`, and it is a DISPLAY state: nothing writes it, it is not
                       a RunPhase member, and it must not become one. `gate` is excluded from
                       the test, because the origin gate legitimately heartbeats with zero
-                      progress until a human decides, and it already has a state that says so.'
+                      progress until a human decides, and it already has a state that says so.
+                      SIBLING: I9 applies this same rule — ONE server-owned answer, no
+                      client-side reconstruction — to "what config does this node run". Two
+                      questions, one discipline; they are a family, not a duplicated mechanism.'
   I7_failure_traceable: 'Every user-visible failure is IDENTIFIED, CLASSIFIED and TRACEABLE.
                       IDENTIFIED — the API stamps `error_id` on every error envelope and logs
                       it under the same handle (one seam, main.py::_error_response), so a
@@ -116,6 +119,31 @@ invariants:
                       `matched_parent_*` value "origin" states a comparison the run never made.
                       Two references may share a box only when BOTH are labelled — run_card is
                       the sanctioned case and says so at its own seam.'
+  I9_pipeline_resolution_server_owned: 'What config a node RUNS in a campaign has ONE
+                      server-owned answer: GET /campaigns/{id}/pipeline?at=<subject>, resolved by
+                      application/pipeline_resolve.py::resolve_pipeline_for_campaign. I6 is its
+                      sibling — same shape, different question — and neither is a second
+                      mechanism for the other. The browser never joins a VALUE from one store
+                      onto a SCHEMA from another. Every param carries a served `source` naming
+                      the layer that won it (dataset | campaign | seed | evolved | identity |
+                      unset), so a badge, a compact fold, a lock glyph or a
+                      "(current)" off-menu option derived from a client-side diff is the
+                      violation this invariant names — the ·evolved badge was exactly that, and
+                      fired on every param because a resolved config carries them all.
+                      A component must not take a prop that RE-ROUTES which store it reads;
+                      identity props (which campaign, which round) are fine, source props are
+                      not. That distinction is the whole bug: one panel answered
+                      upstage/solar-pro4:nitro on Dashboard and openai/gpt-oss-20b on Chat
+                      because its call sites disagreed about where to look, and a dataset file
+                      shared by five campaigns is nobody''s answer in particular.
+                      TWO BOUNDARIES, both deliberate. (1) A NEST is dataset-scoped until it
+                      SPAWNS: before any cell runs, an inner benchmark''s pipeline is topology
+                      and the dataset read is honest; once a cell has run it IS a whole inner
+                      campaign and the honest address is ?at=...;in=<hop>. Do not collapse them —
+                      the failure is silent, rendering a benchmark''s template under a heading
+                      naming a run that used something else. (2) This read is gated on
+                      load_owned and nothing else; a future demo-mode or shared-origin read is
+                      its OWN decision and does not inherit this one.'
 ```
 
 ## The two blocking gates

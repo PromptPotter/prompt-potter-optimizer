@@ -122,6 +122,36 @@ Identity scope rides the ledger path (tenant prefix on the per-cycle directory) 
 - **Inbound commands.** `docs/specs/api-openapi.yaml` (OpenAPI 3.1).
 - **Outbound events.** `docs/specs/events-asyncapi.yaml` (AsyncAPI 3.0).
 
+### Addendum — served reads (2026-09-08, not a supersession)
+
+This ADR is a **command** contract, and its read half was left implicit. That gap has cost
+something real: `GET /datasets/{name}/pipeline` and `GET /optimizer-pipeline` both shipped
+undeclared, and the first was addressed by the wrong entity for years of campaigns — a dataset
+default served as five different campaigns' running config. Writing the rule down here so the
+next read surface is not invented again.
+
+**A served GET is not a command and adds no I/O kind.** This contract's subject is mutation —
+`CommandRecord`, ack, ledger append. A read mutates nothing, so it needs no §0 amendment and no
+entry in the closed inbound set. What it inherits is everything else:
+
+- **It rides the existing resource, never a sidecar.** A read about a campaign is a GET in the
+  campaigns router, sharing `load_owned` / `StoresDep` / `decode_descend` — that IS the existing
+  channel, and Consequence 4 above (*no dual ingress*) is satisfied by it and would be violated
+  by a second pipeline endpoint outside that router. `GET /campaigns/{id}/config-map` is the
+  shipped precedent: a read-only server-authored projection of the frozen campaign config, every
+  row carrying its own `source`. Two projections of one manifest are not two channels — the same
+  argument Consequence 3 (*sole writer per surface*) makes for writers holds for readers.
+- **Declared before the handler**, same as a command kind, in the same file.
+- **Resolved in `application/`**, never composed in the router (ADR-0006).
+- **Scope is part of the contract.** A read names the entity it is a fact ABOUT and is addressed
+  by that entity's id. Getting this wrong does not fail — it answers plausibly and wrongly.
+
+Recipe: [`../developer/adding-a-surface.md`](../developer/adding-a-surface.md) § 9. Client-side
+obligation: [`../specs/frontend-surface-contract.md`](../specs/frontend-surface-contract.md) `I9`.
+The permitted-model set a read serves is consumed by the babysit gate in
+[`0005-delegated-principals-and-capability-scoping.md`](0005-delegated-principals-and-capability-scoping.md) — the served view and that gate
+must resolve from one source, or a steer taints or fails to taint wrongly.
+
 ### Profile gradient
 
 Each profile is a named, stable conformance level. Newer profiles compose with older ones. Once certified + on disk + tested + documented, a profile's guardrails promote to `docs/developer/` / `docs/operations/` and the checklist boxes flip below.

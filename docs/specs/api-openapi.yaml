@@ -5,8 +5,8 @@
 # handler lands in `promptpotter/presentation/api/routers/commands.py`.
 #
 # THIS FILE IS NOT THE SERVED SURFACE, and never was. It owns the command
-# contract plus six reads; the app serves ~35 more endpoints (all of /auth,
-# /backends, /evidence, /optimizer-pipeline, /workspace/storage*, the
+# contract plus nine reads; the app serves ~30 more endpoints (all of /auth,
+# /backends, /evidence, /workspace/storage*, the
 # SSE stream, the file reads). Those are described by the generated companion
 # `openapi.generated.json` — reality, emitted from the FastAPI app by
 # `scripts/build_openapi.py` and gated in CI. Read that one to learn what the
@@ -23,7 +23,19 @@
 #
 # DECLARED != WIRED. Because this file is schema-first, a declared operation may
 # have no handler yet. Those carry `x-status: declared-not-wired`; a POST to one
-# 404s `command_kind_unknown`. The wired set is `commands.py::_WIRED_KINDS` plus
+# 404s `command_kind_unknown`. The key is documentation, not machine-read, and
+# absence means WIRED — so it is written only when it says something: the second
+# value is `wired-scheduled-for-removal`, a live route whose consumers are being
+# migrated off it (today: `GET /datasets/{name}/pipeline`). Declaring a route
+# that is about to go makes its removal a visible diff instead of a silence.
+#
+# READS HAD NO BUCKET, and that is why several shipped undeclared. §0's five I/O
+# kinds define Control-remote as MUTATION, so a GET adds no kind and needed no
+# amendment — but it owes the same declare-before-handler discipline a command
+# owes. The recipe is `docs/developer/adding-a-surface.md` § 9; the two reads
+# added to this file in that arc (`/datasets/{name}/pipeline`,
+# `/optimizer-pipeline`) were both already live and undeclared when it started.
+# The wired set is `commands.py::_WIRED_KINDS` plus
 # the four typed routes (edit-draft-campaign, resolve-origin, start-checkin,
 # replace-dataset). Check it before promising a UI button — chat-foundation.md
 # once advertised `endorse-candidate` as live on the strength of this file alone.
@@ -1333,6 +1345,70 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
+  /campaigns/{campaign_id}/pipeline:
+    get:
+      operationId: getCampaignPipeline
+      summary: What this campaign's pipeline RESOLVES TO at one searchpoint.
+      description: |
+        The one server-owned answer to "what config does this node run" — the
+        sole source for every config row, model chip and provenance badge
+        (`frontend-surface-contract.md::I9`). Five layers, merged
+        last-writer-wins by `application/pipeline_resolve.py`: dataset overlay <
+        the campaign's FROZEN `pipeline_overrides` < cycle seed < the addressed
+        candidate's sparse `pipeline_params_override` < identity contributions,
+        which are unoverridable. Each param's `source` is the layer that won it,
+        stamped BY the merge. A check-in campaign resolves through the same
+        call. A one-shot read beside `dashboard.json` polling, which is its
+        invalidation signal, not its transport (`roadmap.md` § Hard ordering).
+      tags: [campaigns]
+      x-status: declared-not-wired
+      parameters:
+        - name: campaign_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 128
+        - name: at
+          in: query
+          required: false
+          description: |
+            Which searchpoint to resolve, in the ONE subject grammar
+            (`application/evidence.py::parse_subject`): `campaign:<id>`,
+            `course:<id>/<cycle>/<label>`, `candidate:<id>/<cycle>/<cand_id>`,
+            each optionally suffixed `;in=<hop chain>` for an L4 inner point.
+            Omitted defaults to `campaign:<campaign_id>`. `;lens=` and
+            `;samples=` are REFUSED with 400: a scoring mask cannot change what
+            config a point ran. An `at` naming another campaign is 400 too.
+          schema:
+            type: string
+            maxLength: 512
+      responses:
+        '200':
+          description: The resolved pipeline at the addressed searchpoint.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignPipelineResponse'
+        '400':
+          description: |
+            Malformed `at`, a scoring mask on a configuration read, or an `at`
+            naming a campaign other than the path's.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: |
+            No such campaign, or cross-tenant. Ownership-gated by `load_owned`
+            and nothing else — 404 rather than 403, so a probe cannot enumerate
+            other tenants' campaign ids.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
   /campaigns/{campaign_id}/cycles/{cycle_id}/dashboard:
     get:
       operationId: getCycleDashboard
@@ -1976,6 +2052,57 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
+  /datasets/{name}/pipeline:
+    get:
+      operationId: getDatasetPipeline
+      summary: A DATASET's declared pipeline — the setup editor's read. Being removed.
+      description: |
+        What a dataset DECLARES — node chain, connector, catalogue, maximum
+        tunable surface: a fact about a target, not about anyone running it.
+        It was read as the running config of whichever campaign was selected,
+        which one shared file cannot answer. Successor:
+        `GET /campaigns/{id}/pipeline`; deleted once every consumer moves.
+      tags: [datasets]
+      x-status: wired-scheduled-for-removal
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+      responses:
+        '200':
+          description: The dataset's parsed pipeline, config schema and capabilities.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '404':
+          description: No such dataset, or it declares no `pipeline.yaml`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /optimizer-pipeline:
+    get:
+      operationId: getOptimizerPipeline
+      summary: The optimizer's OWN manifest — install content, no campaign scope.
+      description: |
+        `promptpotter/assets/optimizer/pipeline.yaml` parsed: the loop's own
+        nodes, their config schema and output contracts. One operator-owned
+        file per install, no per-campaign overlay — the one pipeline read where
+        a single answer for everyone is correct.
+      tags: [campaigns]
+      responses:
+        '200':
+          description: The optimizer manifest's view, config schema and output schemas.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
   /datasets/{name}/draft:
     post:
       operationId: draftFromExistingDataset
@@ -2279,9 +2406,17 @@ components:
         writer `projections/live_dashboard/render.py`) and
         `rounds/round_NNNN.json::candidate_scores[]` (historical, writer
         `domain/results.py::ScoredCandidate`, served via the generic file route).
-        The webapp joins `resolved_pipeline_params` values onto the static
-        `node_config_schema` rows from the pipeline endpoint (`lib/derivations`);
-        the "·evolved" badge is that client-side diff — no served flag.
+        The webapp USED TO join `resolved_pipeline_params` values onto static
+        `node_config_schema` rows fetched from the DATASET pipeline endpoint,
+        and the "·evolved" badge was that client-side diff. Both are retired by
+        `GET /campaigns/{id}/pipeline`, which serves value and `source` on one
+        row: the diff fired on every param (a resolved config carries them all)
+        and the schema it diffed against belonged to the dataset, not the
+        campaign. This carrier stays exactly as it is — it is the round
+        document's own shape — but it is no longer a thing the browser assembles
+        a config view out of. Its `resolved_pipeline_params` is now the
+        REGRESSION CHECK for that endpoint: the two must be equal for any
+        addressed candidate.
       properties:
         candidate_id:
           type: string
@@ -3487,6 +3622,105 @@ components:
         moderated: { type: boolean, nullable: true }
         fetched_at: { type: string }
 
+    ParamSource:
+      type: string
+      enum: [dataset, campaign, seed, evolved, identity, unset]
+      description: |
+        WHICH LAYER set a resolved param's value — stamped BY the merge (last
+        writer wins), never diffed against it. A member is admitted with its
+        producer; a campaign read has no `backend` layer, since its schema is
+        parsed off the same `pipeline.yaml` the dataset overlay is read from.
+        `dataset` the slug's `nodes.{n}.config`; `campaign` the frozen
+        `pipeline_overrides`, and a check-in draft's overlay (a draft IS the
+        pre-committed config); `seed` a cycle seed; `evolved` the candidate's
+        sparse `pipeline_params_override`; `identity` connector + judge
+        contributions, unoverridable, so a surface never offers to edit one;
+        `unset` declared with no value at any layer — never attributed to a
+        layer that did not write it.
+
+    NodeConfigParam:
+      type: object
+      required: [key, kind, value, source, options, movable_by, optimizer_locked, held]
+      description: |
+        One config row: what it IS, what it may become, and who set it.
+      properties:
+        key: { type: string }
+        kind:
+          type: string
+          enum: [model, enum, number, bool, string, prompt, nested]
+          description: |
+            The surface that owns this param. The five widget kinds are
+            config-editor rows; `prompt` and `nested` are listed and carry no
+            widget, and a `prompt` param carries no value.
+        value:
+          description: The RESOLVED value at the addressed searchpoint, never the declared default.
+        source: { $ref: '#/components/schemas/ParamSource' }
+        options:
+          type: array
+          items: {}
+          description: |
+            The MENU. For a model row the catalogue UNION each node's permitted
+            set UNION the value carried, so a running value is never off its
+            own menu.
+        movable_by:
+          type: array
+          items: { type: string }
+          description: Who may move this axis now (`l1`, `l2`); EMPTY is the only true lock.
+        optimizer_locked:
+          type: boolean
+          description: Never an axis — model/provider, a confound guard.
+        held:
+          type: boolean
+          description: The dataset offered it; this campaign closed it.
+        description: { type: string }
+
+    CampaignPipelineResponse:
+      type: object
+      required:
+        [campaign_id, cycle_id, dataset_name, connector, backend_type,
+         node_config_schema, node_output_schema, model_capabilities, params]
+      description: One campaign's resolved pipeline at one searchpoint — the answer, not the parts.
+      properties:
+        campaign_id: { type: string }
+        cycle_id:
+          type: [string, 'null']
+          description: The hop actually resolved; null for a campaign-level read.
+        dataset_name: { type: string }
+        connector: { type: string }
+        backend_type:
+          type: string
+          description: The campaign's FROZEN connector kind, never re-derived from its dataset dir.
+        view:
+          type: [object, 'null']
+          additionalProperties: true
+          description: The graph render (nodes + edges); null when none is declared.
+        node_config_schema:
+          type: object
+          additionalProperties:
+            type: array
+            items: { $ref: '#/components/schemas/NodeConfigParam' }
+          description: Every param each node carries, keyed by node id — spelled as on the other two doors.
+        node_output_schema:
+          type: object
+          additionalProperties: true
+        model_capabilities:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/ModelCapability' }
+          description: Resolved over the model MENU, not the dataset's catalogue alone.
+        params:
+          type: object
+          additionalProperties: true
+          description: |
+            The resolved config as the engine holds it, prompt stripped — the
+            SAME bytes a round document carries as `resolved_pipeline_params`,
+            which makes that field this endpoint's check.
+        nests:
+          type: [object, 'null']
+          additionalProperties: true
+          description: |
+            The inner pipeline this chain nests, if any — the L4 drill-in. A
+            ran cell IS a whole inner campaign, addressed `?at=…;in=<hop>`.
+
     OptimizationOverrides:
       type: object
       additionalProperties: false
@@ -3756,12 +3990,19 @@ components:
           type: [object, 'null']
           additionalProperties: true
           description: |
+            RETIRED, with `node_config_schema` and `node_output_schema` below —
+            these three are boundary-added here and are the second door onto a
+            question that now has one: `GET /campaigns/{id}/pipeline`. Their
+            reason for existing was that a pre-commit check-in has no
+            `datasets/{slug}/` dir to fetch, so the node editor would hang on
+            "Loading node…". That reason dissolves once the address is a
+            campaign id rather than a dataset name — and a check-in campaign,
+            with its cycle, exists on disk from the first ingest action. The
+            draft wire keeps its authoring fields and stops being a pipeline
+            source.
+
             The draft's parsed pipeline render — the graph `view` (nodes + edges)
-            the ingest node editor draws. Boundary-added (the same parse
-            `GET /datasets/{name}/pipeline` runs for a committed dataset), but
-            computed from the draft so a pre-commit check-in — which has no
-            `datasets/{slug}/` dir to fetch — still renders its node editor instead
-            of hanging on "Loading node…". Null when the pipeline declares no view.
+            the ingest node editor draws. Null when the pipeline declares no view.
         node_config_schema:
           type: object
           additionalProperties: true

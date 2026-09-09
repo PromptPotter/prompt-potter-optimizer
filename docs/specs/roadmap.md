@@ -8,7 +8,7 @@
 
 ## Hard ordering (violate → rebuild)
 
-- **Build every new webapp data panel on `dashboard.json` polling + the SSE ledger-tail.** That pair is the design, not an interim seam awaiting a cutover; there is no `live-state` endpoint to wait for.
+- **Build every new webapp data panel on `dashboard.json` polling + the SSE ledger-tail.** That pair is the design, not an interim seam awaiting a cutover; there is no `live-state` endpoint to wait for. **One exemption, and its shape is the rule: a ONE-SHOT TOPOLOGY read may sit beside the poll when the poll is its INVALIDATION signal rather than its transport.** `GET /campaigns/{id}/pipeline` is the only one — a pipeline resolution cannot change without a new cycle or a new searchpoint, and `dashboard.json` announces both. A panel whose content changes *while nothing else does* fails that test and rides the poll.
 - **BYO per-user API keys — now the load-bearing half, and unbuilt.** Signup is open and each account is metered against `FREE_TIER_SPEND_CAP_USD` + `FREE_TIER_TOKEN_CAP` (lifetime, `quota.py::lifetime_ceilings`), so the host key is bounded — but a user who spends their ceiling has **nowhere to go**. That is the liability now, not the unbounded spend it replaced. Lane A2.
 - **HTTP-edge abuse protection is now due.** Cloudflare edge + the per-account ceiling + per-user `JobRegistry` quotas bound the public surface; with the approval queue gone, app-level rate-limiting (C6) is the remaining gap — nothing bounds the NUMBER of accounts, only what each one may spend.
 
@@ -39,7 +39,7 @@ Sequenced into lanes by dependency, not milestone number. **Front priority = Lan
 | C2b | **Judged + turn-structured scoring** — an LLM-as-judge as a measured observation, and the per-step ruler it opens | judges, the grading call path and the `retrieve → ground → answer` schema all SHIPPED (`promptpotter/judges/`); open: the per-step ruler (see § Judged and turn-structured scoring) |
 | C3 | L4 closure — the recursion + the L4 campaign + `proxy_lift_corr ≥ 0.6` re-validation | Open: the bounded cheap default config, and the `proxy_lift_corr` gate — itself gated on the panel being able to resolve one optimizer prompt from another — [`l4-outer-loop.md`](l4-outer-loop.md) § Open |
 | C4 | Cross-user measurement panel (after P3) | pending (see § Ingest + chat-first web) |
-| C5 | MCP server mode (= **agent-tool parity**, see § Agent-tool parity) · user-editable `pipeline.yaml` in UI | pending |
+| C5 | MCP server mode (= **agent-tool parity**, see § Agent-tool parity) · user-editable `pipeline.yaml` in UI | pending — the editable half is gated on the served campaign pipeline resolution (`architecture.md` §0, two resolution seams): editing a value the surface cannot correctly READ is how the wrong scope gets written back |
 | C6 | Public-service hardening (Docker, metrics, rate-limit, billing) — `/health` shipped; **pull rate-limit/metrics forward if the beta opens past the allowlist** | pending |
 | C7 | Non-prompt targets + evolutionary operators · **agent harnesses** (§ Evolving agent harnesses) · multimodal · research extensions | pending — after v1 |
 | C8 | **Mask abstraction** — backend organizing structure (alternative-criterion + transferability); M1 = scoring-function-swap divergence + minimal visual clues, then migrate every divergence trigger onto it | M1 + abort + the scoring write side shipped (see § Lineage mask) |
@@ -83,6 +83,8 @@ Three invariants outlive the build: it reuses the `checkin/2` node (never a sepa
 Four nouns map to OIDC: Install=`iss`, User=`sub` (`user_id=f"{iss}:{sub}"`, SCIM 2.0 Core names verbatim), Project=`tenant_id` claim, Campaign=cycle 1:1.
 
 **The committed artifact is a Dataset, not a campaign:** 4 content-hashed files at `projects/{tenant}/datasets/{slug}/` (`cache.json` rows, `pipeline.yaml` overlay, `task_description.md`, `prompts/default.yaml`) compose into `JobSearchPoint.content_hash`; the sibling `campaign.json` is NOT in the hash. Identical datasets → identical `cycle_{target_hash[:12]}` + a shared `measurements/`, so cross-tenant pooling is free.
+
+**That hash is dataset-scoped BY DESIGN; pipeline resolution is campaign-scoped. Do not collapse them.** The hash exists so two tenants running the same target pool their paid cells — it answers *are these the same measurement*. What a node runs answers *what is this campaign doing*, and five campaigns sharing one `pipeline.yaml` each run a different model. The moment the dataset file stops carrying concrete `nodes.*.config` (that config moves to the campaign), the hash covers the dataset's shape and the campaign covers its values — which is the split that was always meant, now spelled.
 
 ### Connectors + L4 inner-cycle execution
 - **Connector contract** — owned by [`../../promptpotter/connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md); a third party registers one through the `promptpotter.connectors` entry-point group, and no plugin may shadow a built-in.

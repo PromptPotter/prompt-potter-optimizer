@@ -26,6 +26,7 @@ tests. Add new ones the same way — never as a `test_structure` scan.
 | An optimizer node | [§6](#6-an-optimizer-node) | Import-time: `validate_template()` at prompt load |
 | A CLI verb | [§7](#7-a-cli-verb) | Import-time: the `COMMANDS` ↔ `parser_verbs` assert |
 | A control-plane command kind | [§8](#8-a-control-plane-command-kind) | Import-time: three asserts over `ALL_DISPATCHED_KINDS` — cap, payload model, **and the CLI verb** |
+| A served READ (a GET) | [§9](#9-a-served-read) | `gate.py --only openapi` / `--only ts-types`, but **only once the route carries a `response_model`** — a read without one is invisible to both, which is how several shipped undeclared |
 | A measurement field | [developer README §4](README.md#4-cross-run-memory) | **Arm-time where a connector declares the key** (`Connector.required_observation_keys`), otherwise nothing — it is dropped at `sample_measurement.py::measure_sample` in silence. Declare it on `domain/scoring.py::QueryMeasurement` / `PipelineData`; a `pipeline_data` key also needs `_INFRA_KEYS` or a dataset `observation_mapping`, plus the compaction asserts beside those types |
 
 ---
@@ -357,6 +358,34 @@ Then declare it on the wire: `docs/specs/api-openapi.yaml`, *before* the handler
 (root `CLAUDE.md` § Pre-flight gate). The router needs nothing — `_WIRED_KINDS` is
 `ALL_DISPATCHED_KINDS` minus the typed routes, so a new kind is wired by default and staying
 *unwired* is what has to be written down.
+
+---
+
+## 9. A served read
+
+A new `GET`. **Not a Control-remote command and not a sixth I/O kind** — that kind is defined by
+MUTATION, so a read adds no ingress and no writer (`architecture.md` §0 — Control-remote). Reads
+having had no bucket is exactly why several shipped undeclared, `api-openapi.yaml` says so at its
+own head, and this recipe is the fix.
+
+**Nothing here is caught by an import-time assert.** Steps 2–4 are what make a read
+machine-checked at all; skip them and every gate stays green over a surface nobody declared.
+
+| Step | Do | Why it is not optional |
+|---|---|---|
+| 1 | **Name the scope the read is a fact ABOUT**, and address it by that entity's id | A read keyed on the wrong entity is not a bug you find later — it answers *plausibly and wrongly*, which is how a dataset default was served as five different campaigns' running config |
+| 2 | **Declare path + response schema in `docs/specs/api-openapi.yaml`, before the handler** | Root `CLAUDE.md` § Pre-flight gate. That file has **no enforcer** for reads, so this one is a review act — the only step on the page nothing can catch |
+| 3 | **Resolve in `application/`, never in the router** | ADR-0006 (`cli/` + `embedded_run.py` must reach it) and `presentation/CLAUDE.md` § Out-of-bounds. A router that composes an answer is how one file came to have two parsers |
+| 4 | **Give the route a `response_model` and register it in `scripts/build_ts_types.py::EXPORTED_MODELS`** | Now `--only openapi` and `--only ts-types` cover it, and `webapp/CLAUDE.md` § A wire shape is GENERATED keeps its hand-write escape closed |
+| 5 | **Serve provenance for anything the client could otherwise infer** | A closed set belongs on the server (`webapp/CLAUDE.md`). Every value the browser has to *diff* to explain becomes a client twin that drifts — the `·evolved` badge was one, and it fired on every param |
+| 6 | **Add the row to `webapp/CLAUDE.md` § Display-data sources** | A data class with no row is a data class with no owner, and the gap fills itself with stores |
+| 7 | **Run it and look at the panel** | §3's rule, and it binds hardest here: a served field that is declared, typed and never *written* renders as nothing, and no check that could exist would see it |
+
+**Reads and the polling rule.** `roadmap.md` § Hard ordering requires new webapp data panels to
+ride `dashboard.json` + the SSE tail. A GET is allowed beside that pair only when it is
+**one-shot topology** — its answer cannot change unless something the poll already announces
+changes, so the poll is its *invalidation signal* rather than its transport. Anything that
+changes on its own schedule belongs on the poll.
 
 ---
 
