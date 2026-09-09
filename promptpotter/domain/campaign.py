@@ -25,6 +25,9 @@ class Campaign(StrictModel):
     root_content_hash: str = ""
     optimizer_prompt_hash: str = ""
     backend_id: str = ""
+    # Connector KIND, FROZEN at mint: a campaign OUTLIVES its dataset dir, so re-pointing a slug
+    # must not re-kind a campaign that already measured under the old one.
+    backend_type: str = ""
     owner_user_id: str = "default"
     # VISIBILITY only — the authoring phase is NOT here. `.runtime/checkin.flag` on the root cycle
     # owns it (`runtime_flags.py::is_checkin`), which is also what `derive_run_phase` serves.

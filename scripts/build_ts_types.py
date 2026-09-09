@@ -108,6 +108,7 @@ from promptpotter.presentation.api.routers.active import (
     MachineHolder,
     MachineQueueEntry,
     MachineStatusResponse,
+    OptimizerPipelineResponse,
     SpawnedBy,
 )
 from promptpotter.presentation.api.routers.auth import (
@@ -278,6 +279,10 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     MachineHolder,
     MachineQueueEntry,
     MachineStatusResponse,
+    # The optimizer's own manifest. Generated rather than hand-written in `components/workflow/
+    # types.ts`, which said so in its own comment: the route returned a bare dict, so there was no
+    # `response_model` to generate it from.
+    OptimizerPipelineResponse,
     # --- dataset + origin registries (the "New campaign" pickers) ---
     DatasetIndexEntry,
     DatasetIndexResponse,

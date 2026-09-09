@@ -188,6 +188,13 @@ world is a strict containment hierarchy:
   scope error this split exists to make unsayable. One dataset file is
   shared by every campaign built on it, so it is nobody's answer in
   particular.
+  **`nodes.*.config` is therefore the SEED a new campaign starts from, never
+  the answer for one that has already started** — the campaign layer above it
+  is what makes an answer campaign-specific. **Moving those keys out of the
+  file was considered and REJECTED, so do not re-propose it:** a census of the
+  shipped datasets found the block dominated by connector plumbing beside a
+  handful of campaign choices, with no partition derivable from anything
+  already named. A seed costs nothing once the layer above it is populated.
 - **Campaign** — one declared optimization effort: a dataset, a
   pipeline origin, context text, **and the optimizer prompts it
   runs under**. A **first-class entity** and a **cycle tree** — root

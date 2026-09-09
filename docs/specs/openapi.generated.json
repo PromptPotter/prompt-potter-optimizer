@@ -549,7 +549,7 @@
           },
           "backend_type": {
             "default": "",
-            "description": "Connector KIND of the campaign's dataset ('termnorm' / 'promptpotter' / …), read off `{dataset}/pipeline.yaml::backend_type`. The webapp's ONE test for a self-optimizing (L4) campaign — it renders the 'inner loops' disclosure and the pp-self panel variants on it. Empty when the dataset config is gone (a campaign outlives its dataset dir); callers treat empty as 'not self-optimizing'.",
+            "description": "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN on the manifest at mint. The webapp's ONE test for a self-optimizing (L4) campaign — it renders the 'inner loops' disclosure and the pp-self panel variants on it. It no longer goes stale when the dataset is re-pointed, and no longer empties when the dataset dir is deleted: a campaign outlives its dataset dir, and what it RAN is a fact about the campaign. Empty only on a manifest `restamp` has not reached.",
             "title": "Backend Type",
             "type": "string"
           },
@@ -805,7 +805,7 @@
           },
           "backend_type": {
             "default": "",
-            "description": "Connector KIND of the campaign's dataset ('termnorm' / 'promptpotter' / …), read off `{dataset}/pipeline.yaml::backend_type`. The webapp's ONE test for a self-optimizing (L4) campaign — it renders the 'inner loops' disclosure and the pp-self panel variants on it. Empty when the dataset config is gone (a campaign outlives its dataset dir); callers treat empty as 'not self-optimizing'.",
+            "description": "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN on the manifest at mint. The webapp's ONE test for a self-optimizing (L4) campaign — it renders the 'inner loops' disclosure and the pp-self panel variants on it. It no longer goes stale when the dataset is re-pointed, and no longer empties when the dataset dir is deleted: a campaign outlives its dataset dir, and what it RAN is a fact about the campaign. Empty only on a manifest `restamp` has not reached.",
             "title": "Backend Type",
             "type": "string"
           },
@@ -3829,6 +3829,74 @@
           }
         },
         "title": "NodeOutputSchema",
+        "type": "object"
+      },
+      "OptimizerPipelineResponse": {
+        "additionalProperties": false,
+        "description": "What the OPTIMIZER runs — the manifest's peer of ``GET /campaigns/{id}/pipeline``. The raw\nmanifest keys are not served: ``nodes`` was a second, untyped spelling of ``node_config_schema``.",
+        "properties": {
+          "model_capabilities": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ModelCapability"
+            },
+            "description": "Optimizer-LOCKED is not unpriced: the model is fixed, but which effort rungs it accepts and what a round costs are the facts every other node's rows need too",
+            "title": "Model Capabilities",
+            "type": "object"
+          },
+          "node_config_schema": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/NodeConfigParam"
+              },
+              "type": "array"
+            },
+            "description": "Per-node typed config rows, so the node detail renders the optimizer's own knobs through the canonical config element rather than a chip and a JSON dump",
+            "title": "Node Config Schema",
+            "type": "object"
+          },
+          "node_output_schema": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/NodeOutputSchema"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Node Output Schema",
+            "type": "object"
+          },
+          "resolved_prompts": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "description": "The prompt each node STARTS from, keyed `{node}/{version}` — the floor under a searchpoint carrying no evolved delta for that node",
+            "title": "Resolved Prompts",
+            "type": "object"
+          },
+          "view": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PipelineView"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The graph topology — the same shape a campaign pipeline serves"
+          }
+        },
+        "required": [
+          "view",
+          "node_config_schema",
+          "node_output_schema",
+          "model_capabilities",
+          "resolved_prompts"
+        ],
+        "title": "OptimizerPipelineResponse",
         "type": "object"
       },
       "OrderConfound": {
@@ -7633,16 +7701,14 @@
     },
     "/api/v1/optimizer-pipeline": {
       "get": {
-        "description": "Bundled ``promptpotter/assets/optimizer/pipeline.yaml`` + its generated\n``resolved_schemas.json`` sibling — nodes + pipelines + ``view``\ntopology, plus the per-node typed config surface (``node_config_schema`` /\n``node_output_schema``) so the canvas node-detail renders the optimizer's own\nknobs (model / provider / reasoning_effort / temperature / …) through the same\ncanonical config element the steer panel uses, not a hand-rolled chip + JSON\ndump. Read-only: the install-global ``_optimizer`` pipeline is operator-owned — a\nhand-edit, never a fork and never a write path from here (``evidence``\nnames a winner and writes nothing); model/provider are always optimizer-locked.",
+        "description": "Bundled ``promptpotter/assets/optimizer/pipeline.yaml`` + its generated\n``resolved_schemas.json`` sibling — the ``view`` topology plus the per-node typed config\nsurface, so the canvas node-detail renders the optimizer's own knobs (model / provider /\nreasoning_effort / temperature / …) through the same canonical config element the steer panel\nuses. Read-only: the install-global ``_optimizer`` pipeline is operator-owned — a hand-edit,\nnever a fork and never a write path from here (``evidence`` names a winner and writes\nnothing); model/provider are always optimizer-locked.",
         "operationId": "get_optimizer_pipeline_api_v1_optimizer_pipeline_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Optimizer Pipeline Api V1 Optimizer Pipeline Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/OptimizerPipelineResponse"
                 }
               }
             },

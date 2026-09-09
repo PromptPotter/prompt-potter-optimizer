@@ -18,6 +18,7 @@ from promptpotter.domain.l1_layout import (
     validate_l1_layout,
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint, PromptTemplate
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.store.io import read_json, read_yaml
@@ -110,13 +111,17 @@ def optimizer_manifest() -> dict[str, Any]:
     edits to change the optimizer's model, and a process that cached it at import reported the old one
     as live."""
     path = optimizer_pipeline_path()
+    return _manifest_at(path, _manifest_stamp(path))
+
+
+def _manifest_stamp(path: Path) -> int:
+    """The mtime both mtime-keyed readers key on. A vanished manifest is the reader's error to
+    raise, not this line's — it falls through on a stamp no real file can hold, so no cache can
+    answer for a file that is gone."""
     try:
-        stamp = path.stat().st_mtime_ns
+        return path.stat().st_mtime_ns
     except OSError:
-        # A vanished manifest is the reader's error to raise, not this line's — fall through on a
-        # stamp no real file can hold so the cache cannot answer for a file that is gone.
-        stamp = -1
-    return _manifest_at(path, stamp)
+        return -1
 
 
 @functools.lru_cache(maxsize=2)
@@ -145,35 +150,22 @@ def _resolved_key(family: str, version: Any) -> str:
     return f"{family}/{version}" if version is not None else family
 
 
-@functools.lru_cache(maxsize=1)
 def get_optimizer_schema() -> PipelineSchema:
-    """The schema registry is a sibling file because it is generated, not authored; this is the only
-    place the two halves meet."""
-    from promptpotter.domain.pipeline_parsing import parse_resolved_schema
-    from promptpotter.domain.pipeline_schema import PipelineNode
+    """The optimizer's own manifest as a schema — ONE parse, shared with ``/optimizer-pipeline``,
+    keyed on the manifest's mtime like :func:`optimizer_manifest` so a hand-edit reaches the engine
+    and not only the browser. ``nodes`` is the ``pipelines.default`` CHAIN; read ``config_nodes``
+    for what the manifest declares."""
+    path = optimizer_pipeline_path()
+    return _optimizer_schema_at(path, _manifest_stamp(path))
 
-    data = optimizer_manifest()
-    resolved_schemas = optimizer_resolved_schemas()
 
-    nodes: list[PipelineNode] = []
-    for name, node_data in data.get("nodes", {}).items():
-        nc = node_data.get("config", {})
-        kwargs: dict[str, Any] = {
-            "name": name,
-            "current_config": nc,
-            "param_keys": set(node_data.get("optimizer", {}).get("param_keys", [])),
-        }
-        if sf := nc.get("schema_family"):
-            key = _resolved_key(sf, nc.get("schema_version"))
-            if key in resolved_schemas:
-                kwargs["output_schema"] = parse_resolved_schema(resolved_schemas[key])
-        nodes.append(PipelineNode(**kwargs))
-
-    return PipelineSchema(
-        name=data.get("name", ""),
-        version=data.get("version", ""),
-        nodes=nodes,
-    )
+@functools.lru_cache(maxsize=2)
+def _optimizer_schema_at(path: Path, mtime_ns: int) -> PipelineSchema:
+    """Two slots for the same population :func:`_manifest_at` sizes for: the shipped manifest and
+    one tenant shadow. Same key, so neither can answer for bytes the other has moved past."""
+    payload = dict(_manifest_at(path, mtime_ns))
+    payload["resolved_schemas"] = optimizer_resolved_schemas()
+    return parse_pipeline_response(payload)
 
 
 def optimizer_node_config(node: str) -> dict[str, Any]:

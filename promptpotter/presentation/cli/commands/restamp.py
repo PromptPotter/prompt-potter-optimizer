@@ -9,11 +9,13 @@ from promptpotter.application.restamp import (
     backfill_inner_facts,
     check_round_documents,
     compact_cycle_ledgers,
+    lift_campaign_pipeline_config,
     rekey_overlap_results,
     rename_round_trend,
     reproject_cycle_indexes,
     restamp_campaign_configs,
     shrink_measurement_runs,
+    stamp_campaign_backend_type,
     stamp_election_bias,
     stamp_election_objective,
 )
@@ -24,6 +26,12 @@ __all__ = ["cmd_restamp"]
 
 async def cmd_restamp(args: argparse.Namespace) -> CommandResult:
     apply = bool(getattr(args, "apply", False))
+    # BEFORE the config re-stamp: that pass prunes the same document to `Campaign.model_fields`,
+    # and a manifest read twice in one invocation should be read in its final shape the second time.
+    kinds = stamp_campaign_backend_type(apply=apply)
+    # Also before the config re-stamp, and for a second reason: it WRITES into
+    # `campaign.json::config`, which that pass then prunes and re-freezes as a delta.
+    configs = lift_campaign_pipeline_config(apply=apply)
     counts = restamp_campaign_configs(apply=apply)
     ledgers = compact_cycle_ledgers(apply=apply)
     runs = shrink_measurement_runs(apply=apply)
@@ -70,10 +78,25 @@ async def cmd_restamp(args: argparse.Namespace) -> CommandResult:
         f"disk and stay absent. Peak lift and round budget are never backfilled — no surviving "
         f"record reproduces them exactly. "
         f"Round trend: {trend['trend_keys_moved']} key(s) {'moved' if apply else 'to move'} off "
-        f"the retired `trajectory` spelling, which a resume would otherwise read as `healthy`."
+        f"the retired `trajectory` spelling, which a resume would otherwise read as `healthy`. "
+        f"Connector kind: backend_type {verb} onto {kinds['backend_types_stamped']} campaign "
+        f"manifest(s) so a campaign says what it RAN rather than what its dataset file says today "
+        f"({kinds['backend_types_current']} already frozen, {kinds['backend_types_orphaned']} whose "
+        f"dataset dir is gone and which nothing on disk can answer for). "
+        f"Node config: {'lifted' if apply else 'would lift'} onto "
+        f"{configs['pipeline_configs_lifted']} campaign(s) — "
+        f"{configs['pipeline_configs_from_rounds']} off round 0, the config they were MEASURED "
+        f"under, {configs['pipeline_configs_from_dataset']} off the dataset file because they "
+        f"never ran. Until a campaign carries its own, an edit to the shared "
+        f"`pipeline.yaml` silently re-answers for it "
+        f"({configs['pipeline_configs_current']} already did; "
+        f"{configs['pipeline_configs_identity_unknown']} skipped because their connector's "
+        f"identity keys cannot be read on this box — re-run where its extra is installed)."
     )
     return CommandResult(
         data={
+            **kinds,
+            **configs,
             **counts,
             **ledgers,
             **runs,

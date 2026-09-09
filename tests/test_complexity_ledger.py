@@ -145,7 +145,10 @@ LEDGER_BASELINE = {
     # +1: a schema copy answers for itself — `model_copy` skips `model_post_init`, and a cached
     # index let L1 propose and the gate admit models the mint had closed. Silent misspend on an
     # axis the operator shut. (test_integrity § 4)
-    "test_functions": 159,
+    # +1: a reused origin seeds exactly the config it ran — `overlay_from_campaign_config` must
+    # invert `split_overlay`, and `param_keys: []` is a real, falsy declaration. What the pair
+    # loses is a setting the new campaign runs without, unreported. (test_integrity § 4)
+    "test_functions": 160,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -153,7 +156,9 @@ LEDGER_BASELINE = {
     # before; the four surfaces that each re-derived it read this instead.
     # +1: `NodeConfigParam.source` — which layer won a param, which is what makes the served value
     # readable as an answer rather than a number the browser has to attribute itself.
-    "served_fields": 562,
+    # +5: `OptimizerPipelineResponse` — served all along behind a bare dict, so the browser held a
+    # hand-written copy of it. Declaring the shape is what deletes the copy, not a new surface.
+    "served_fields": 567,
 }
 
 

@@ -932,12 +932,13 @@ export interface CampaignSummary {
   root_cycle_id: string;
   /** Backend this campaign optimizes against */
   backend_id: string;
-  /** Connector KIND of the campaign's dataset ('termnorm' / 'promptpotter' / …),
-   * read off `{dataset}/pipeline.yaml::backend_type`. The webapp's ONE test
-   * for a self-optimizing (L4) campaign — it renders the 'inner loops'
-   * disclosure and the pp-self panel variants on it. Empty when the dataset
-   * config is gone (a campaign outlives its dataset dir); callers treat empty
-   * as 'not self-optimizing'. */
+  /** Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …),
+   * FROZEN on the manifest at mint. The webapp's ONE test for a self-
+   * optimizing (L4) campaign — it renders the 'inner loops' disclosure and
+   * the pp-self panel variants on it. It no longer goes stale when the
+   * dataset is re-pointed, and no longer empties when the dataset dir is
+   * deleted: a campaign outlives its dataset dir, and what it RAN is a fact
+   * about the campaign. Empty only on a manifest `restamp` has not reached. */
   backend_type: string;
   /** UserId of the operator who minted the campaign */
   owner_user_id: string;
@@ -1586,6 +1587,24 @@ export interface MachineStatusResponse {
   queue: MachineQueueEntry[];
 }
 
+/** What the OPTIMIZER runs — the manifest's peer of ``GET /campaigns/{id}/pipeline``. The raw */
+export interface OptimizerPipelineResponse {
+  /** The graph topology — the same shape a campaign pipeline serves */
+  view: PipelineView | null;
+  /** Per-node typed config rows, so the node detail renders the optimizer's own
+   * knobs through the canonical config element rather than a chip and a JSON
+   * dump */
+  node_config_schema: Record<string, NodeConfigParam[]>;
+  node_output_schema: Record<string, NodeOutputSchema | null>;
+  /** Optimizer-LOCKED is not unpriced: the model is fixed, but which effort rungs
+   * it accepts and what a round costs are the facts every other node's rows
+   * need too */
+  model_capabilities: Record<string, ModelCapability>;
+  /** The prompt each node STARTS from, keyed `{node}/{version}` — the floor under a
+   * searchpoint carrying no evolved delta for that node */
+  resolved_prompts: Record<string, Record<string, unknown>>;
+}
+
 /** One row in the dataset registry — backs the Dashboard ``New campaign`` view. */
 export interface DatasetIndexEntry {
   /** Slug used as the path segment under `datasets/`. */
@@ -1715,12 +1734,13 @@ export interface CampaignDetailResponse {
   root_cycle_id: string;
   /** Backend this campaign optimizes against */
   backend_id: string;
-  /** Connector KIND of the campaign's dataset ('termnorm' / 'promptpotter' / …),
-   * read off `{dataset}/pipeline.yaml::backend_type`. The webapp's ONE test
-   * for a self-optimizing (L4) campaign — it renders the 'inner loops'
-   * disclosure and the pp-self panel variants on it. Empty when the dataset
-   * config is gone (a campaign outlives its dataset dir); callers treat empty
-   * as 'not self-optimizing'. */
+  /** Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …),
+   * FROZEN on the manifest at mint. The webapp's ONE test for a self-
+   * optimizing (L4) campaign — it renders the 'inner loops' disclosure and
+   * the pp-self panel variants on it. It no longer goes stale when the
+   * dataset is re-pointed, and no longer empties when the dataset dir is
+   * deleted: a campaign outlives its dataset dir, and what it RAN is a fact
+   * about the campaign. Empty only on a manifest `restamp` has not reached. */
   backend_type: string;
   /** UserId of the operator who minted the campaign */
   owner_user_id: string;

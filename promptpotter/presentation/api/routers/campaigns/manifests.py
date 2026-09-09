@@ -28,8 +28,7 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
-from promptpotter.infrastructure.store.stores import Stores, descend_store
+from promptpotter.infrastructure.store.stores import descend_store
 from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
@@ -58,11 +57,12 @@ class CampaignSummary(StrictModel):
     backend_type: str = Field(
         default="",
         description=(
-            "Connector KIND of the campaign's dataset ('termnorm' / 'promptpotter' / …), read off "
-            "`{dataset}/pipeline.yaml::backend_type`. The webapp's ONE test for a self-optimizing "
-            "(L4) campaign — it renders the 'inner loops' disclosure and the pp-self panel "
-            "variants on it. Empty when the dataset config is gone (a campaign outlives its "
-            "dataset dir); callers treat empty as 'not self-optimizing'."
+            "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN "
+            "on the manifest at mint. The webapp's ONE test for a self-optimizing (L4) campaign — "
+            "it renders the 'inner loops' disclosure and the pp-self panel variants on it. It no "
+            "longer goes stale when the dataset is re-pointed, and no longer empties when the "
+            "dataset dir is deleted: a campaign outlives its dataset dir, and what it RAN is a "
+            "fact about the campaign. Empty only on a manifest `restamp` has not reached."
         ),
     )
     owner_user_id: str = Field(
@@ -93,15 +93,7 @@ class CampaignDetailResponse(CampaignSummary):
     config: dict[str, Any] = Field(description="Frozen CampaignConfig snapshot for this campaign")
 
 
-def _backend_type(stores: Stores, dataset_name: str, memo: dict[str, str]) -> str:
-    """Memo over ``backend_type_of_dataset`` — the listing endpoint answers it once per DATASET,
-    not once per campaign, since a workspace holds many campaigns per dataset."""
-    if dataset_name not in memo:
-        memo[dataset_name] = backend_type_of_dataset(stores, dataset_name)
-    return memo[dataset_name]
-
-
-def _campaign_summary(campaign: Campaign, backend_type: str) -> CampaignSummary:
+def _campaign_summary(campaign: Campaign) -> CampaignSummary:
     return CampaignSummary(
         campaign_id=campaign.campaign_id,
         dataset_name=campaign.dataset_name,
@@ -109,7 +101,7 @@ def _campaign_summary(campaign: Campaign, backend_type: str) -> CampaignSummary:
         created_at=campaign.created_at,
         root_cycle_id=campaign.root_cycle_id,
         backend_id=campaign.backend_id,
-        backend_type=backend_type,
+        backend_type=campaign.backend_type,
         owner_user_id=campaign.owner_user_id,
         lifecycle_status=campaign.lifecycle_status,
         lifecycle_changed_at=campaign.lifecycle_changed_at,
@@ -219,11 +211,8 @@ def list_campaigns(
     owner = str(leaf.identity.user_id)
     campaigns = leaf.campaigns.list_campaigns(dataset, lifecycle=lifecycle, owner_user_id=owner)
     campaigns.sort(key=lambda c: c.created_at, reverse=True)
-    memo: dict[str, str] = {}
     return CampaignListResponse(
-        campaigns=[
-            _campaign_summary(c, _backend_type(leaf, c.dataset_name, memo)) for c in campaigns
-        ],
+        campaigns=[_campaign_summary(c) for c in campaigns],
         total=len(campaigns),
     )
 
@@ -272,7 +261,7 @@ def get_campaign(stores: StoresDep, campaign_id: str) -> CampaignDetailResponse:
         created_at=campaign.created_at,
         root_cycle_id=campaign.root_cycle_id,
         backend_id=campaign.backend_id,
-        backend_type=_backend_type(stores, campaign.dataset_name, {}),
+        backend_type=campaign.backend_type,
         owner_user_id=campaign.owner_user_id,
         lifecycle_status=campaign.lifecycle_status,
         lifecycle_changed_at=campaign.lifecycle_changed_at,

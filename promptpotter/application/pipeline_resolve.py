@@ -24,7 +24,7 @@ from promptpotter.application.datasets.prompts import (
 from promptpotter.config.settings import (
     PROMPT_STRING_FIELDS,
 )
-from promptpotter.connectors import CONNECTORS
+from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
@@ -383,6 +383,19 @@ def _evolved_overlay(stores: Stores, at: SubjectSpec) -> dict[str, Any]:
     return {}
 
 
+def _config_floor(campaign: Campaign, dataset_dir: Path | None) -> CampaignConfig:
+    """The base the frozen delta layers onto, in falling preference: the dataset template, the
+    snapshot itself, the connector's defaults. There is no blank ``CampaignConfig`` to fall to —
+    ``optimization.degradation_threshold`` is required — and a campaign outlives its dataset dir."""
+    template = dataset_campaign_path(dataset_dir) if dataset_dir else None
+    if template is not None and template.is_file():
+        return load_dataset_campaign_config(template)
+    if campaign.config:
+        return load_campaign_config(campaign.config)
+    defaults = CONNECTORS[campaign.backend_type or DEFAULT_CONNECTOR].default_optimization
+    return load_campaign_config({"optimization": dict(defaults)})
+
+
 def resolve_pipeline_for_campaign(
     stores: Stores,
     campaign: Campaign,
@@ -403,14 +416,7 @@ def resolve_pipeline_for_campaign(
     raw = read_yaml_optional(dataset_pipeline_path(dataset_dir)) if dataset_dir else None
     schema = parse_pipeline_response(raw or {"nodes": {}, "pipelines": {"default": []}})
 
-    # A campaign whose dataset dir is gone has no LIVE template to inherit from, and the frozen
-    # snapshot is the whole answer. `CampaignConfig()` does not construct — `optimization` is
-    # required — so the empty template is built through the loader rather than the constructor.
-    live = (
-        load_dataset_campaign_config(dataset_campaign_path(dataset_dir))
-        if dataset_dir and dataset_campaign_path(dataset_dir).is_file()
-        else load_campaign_config({"optimization": {}})
-    )
+    live = _config_floor(campaign, dataset_dir)
     hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=at.cycle_id or campaign.root_cycle_id)
     seed = stores.campaigns.read_cycle_seed(hop) if at.cycle_id else None
     cfg = apply_inherited_overlay(live, campaign.config or {}, seed)
@@ -446,7 +452,8 @@ def resolve_pipeline_for_campaign(
         cycle_id=hop.cycle_id,
         dataset_name=campaign.dataset_name,
         connector=str((raw or {}).get("backend_name") or campaign.dataset_name),
-        backend_type=str((raw or {}).get("backend_type") or ""),
+        # The campaign's FROZEN kind — one `pipeline.yaml` serves every campaign on the slug.
+        backend_type=campaign.backend_type,
         params=params,
         node_config_schema=filtered.node_config_schema(
             values={n: c for n, c in params.items() if isinstance(c, dict)},

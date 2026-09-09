@@ -73,32 +73,6 @@ it.
   scratch. Whether they should share machinery has never been asked, only asserted — and the L2↔L4
   hunt found one real collision underneath it.
 
-- **One manifest, TWO parsers, two different `PipelineSchema`s — so no file answers "where did this
-  row on screen come from".** `dispatch/llm_call/prompts.py::get_optimizer_schema` hand-builds
-  `PipelineNode`s out of three keys (`name`, `current_config`, `param_keys`, plus the resolved output
-  schema), while `routers/active.py::get_optimizer_pipeline` runs
-  `domain/pipeline_parsing.py::parse_pipeline_response` over the SAME
-  `assets/optimizer/pipeline.yaml` and gets the whole node — `param_allowed_values`, `param_types`,
-  `wire_type`, `node_role` — plus `available_models`, `declared_nodes` and `view`. The engine and the
-  browser therefore read different declarations off one file, and tracing a rendered param means
-  visiting both before you know which one drew it: a dead `reasoning_effort` on the `l1_score`
-  MEASUREMENT node rendered as a padlocked five-rung enum, because only the browser's parser reads the
-  menus and only the browser's `nodeReach` grades a node by them. Action: give `get_optimizer_schema`
-  the three lines active.py already uses. **Not a swap** — `parse_pipeline_response` sets `nodes` to the
-  `pipelines.default` CHAIN where the hand parser puts every declared node in it, so
-  `initialization/loop_start.py`'s reasoning-floor preflight (the repo's one HARD pre-spend block) must
-  move to `config_nodes` in the same commit or it silently stops checking `l2_context` / `l3_plan` /
-  `checkin`. Same subject, second half: `get_optimizer_schema` is `lru_cache(maxsize=1)` while
-  `optimizer_manifest` is keyed on mtime *precisely so* a hand-edit needs no restart — so the engine
-  already answers from a stale manifest the browser has moved past. Third consequence, and the one
-  that grew teeth: `parse_pipeline_response` now REFUSES an undeclared node kind and a gateway
-  carrying config (`domain/pipeline_schema.py::NodeKind`), and the hand parser bypasses all of it —
-  so the optimizer's own manifest is validated for the browser and not for the engine. **Re-test:** pin
-  `l1_critique.max_tokens` under its `_MODEL_PROFILES` floor and run `python -m promptpotter new
-  justlogic-d234` to the INIT preflight — it must still HARD-block. Then compare
-  `get_optimizer_schema()` node-by-node against `parse_pipeline_response(optimizer_manifest())`; an
-  empty diff means someone collapsed them and this entry is stale.
-
 - **FIVE node kinds spell one concept — "runs a model".** `domain/pipeline_schema.py::NodeKind`
   closed the vocabulary and named the families, which is what makes the redundancy countable rather
   than merely suspected: `llm` (1 site, written by `presentation/teleprompter.py` and actually a

@@ -1199,6 +1199,32 @@ def test_a_schema_copy_answers_for_itself_not_for_the_schema_it_was_copied_from(
     assert schema.filter_to_steps(["a"]).get_node("b") is None
 
 
+def test_a_reused_origin_seeds_exactly_the_config_it_ran() -> None:
+    """`overlay_from_campaign_config` must invert `split_overlay`: the seeded draft freezes back
+    through it at Start, so anything the pair loses is a setting the new campaign runs without,
+    unreported. `param_keys: []` is the trap — every axis closed, and falsy."""
+    from promptpotter.application.campaign_config import load_campaign_config
+    from promptpotter.application.jobs.launcher.draft_build import (
+        overlay_from_campaign_config,
+        split_overlay,
+    )
+    from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
+
+    config = load_campaign_config(
+        {
+            "optimization": dict(CONNECTORS[DEFAULT_CONNECTOR].default_optimization),
+            "pipeline_overrides": {"llm_only": {"model": "upstage/solar-pro4:nitro"}},
+            "optimizer_narrowing": {
+                "llm_only": {"param_keys": [], "param_allowed_values": {"model": ["upstage/x"]}}
+            },
+        }
+    )
+    overrides, narrowing = split_overlay(overlay_from_campaign_config(config))
+    assert overrides == config.pipeline_overrides
+    assert narrowing == config.optimizer_narrowing
+    assert narrowing["llm_only"].param_keys == []
+
+
 # 5. The dispatch frame — what a node is shown, within what budget
 
 

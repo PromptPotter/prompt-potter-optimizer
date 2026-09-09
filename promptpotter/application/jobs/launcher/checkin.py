@@ -66,7 +66,9 @@ def create_checkin_campaign(
     the same rule four times and leaves the fifth unguarded; `mint-campaign` already answers to
     `campaign.create` at the dispatcher, so a second door onto the same act answers to it too."""
     require_capability(stores.identity, CAMPAIGN_CREATE_CAP, subject="check-in mint")
-    _session_id, campaign_id, cycle_id = mint_checkin_skeleton(stores, slug=draft.slug)
+    _session_id, campaign_id, cycle_id = mint_checkin_skeleton(
+        stores, slug=draft.slug, backend_type=draft.connector
+    )
     stores.checkin.write_bank(
         campaign_id, bank_items, source_file=source_file or draft.source_file, headers=headers
     )

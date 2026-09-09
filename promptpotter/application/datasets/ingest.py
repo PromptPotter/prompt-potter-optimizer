@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter import connectors
+from promptpotter.application.campaign_config import load_campaign_config
 from promptpotter.application.datasets.authored import read_authored_dataset
 from promptpotter.application.datasets.csv_ingest import (
     IngestError,
@@ -32,7 +33,9 @@ from promptpotter.application.datasets.prompts import (
 )
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.connectors import DEFAULT_CONNECTOR
+from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.origin_provenance import Provenance
+from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.infrastructure.backend import build_backend_client
 from promptpotter.infrastructure.llm.capabilities import refresh_model_capabilities
 from promptpotter.infrastructure.store.layout import validate_dataset_name
@@ -160,10 +163,14 @@ def draft_from_dataset(
     dataset_name: str,
     overrides: dict[str, Any] | None = None,
     backend_nodes: dict[str, Any] | None = None,
+    origin_campaign: Campaign | None = None,
 ) -> DraftCampaign:
     """Build a fully-confirmed draft straight from an authored dataset's files, then mint a check-in. The
-    node config rides through as ``pipeline_overlay``, PRESERVING the backend model/provider."""
+    node config rides through as ``pipeline_overlay``, PRESERVING the backend model/provider.
+    ``origin_campaign`` anchors an origin REUSE: its frozen config layers over the dataset file's
+    nodes, the order a run resolves in, so the draft opens on what that origin ran."""
     from promptpotter.application.jobs.launcher.checkin import create_checkin_campaign
+    from promptpotter.application.jobs.launcher.draft_build import overlay_from_campaign_config
 
     items = resolve_dataset_items(stores, dataset_name)
     rows: list[dict[str, str]] = [
@@ -198,6 +205,13 @@ def draft_from_dataset(
     max_rounds = authored_rounds if authored_rounds is not None else DEFAULT_MAX_ROUNDS
     connector = authored.backend_type or DEFAULT_CONNECTOR
     pipeline_overlay = authored.pipeline_nodes
+    if origin_campaign is not None:
+        # A merge, not a replacement: the origin's config is sparse, and the dataset still owns
+        # every node it never touched.
+        pipeline_overlay = merge_node_blocks(
+            pipeline_overlay,
+            overlay_from_campaign_config(load_campaign_config(origin_campaign.config)),
+        )
 
     # The authored dataset's own starting prompt rides through as the draft's
     # ``origin_prompt_fields`` (its six string fields + few-shot), so committing a

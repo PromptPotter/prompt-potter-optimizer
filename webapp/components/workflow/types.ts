@@ -2,14 +2,12 @@
 // vocabulary every graph surface reads. The graph shapes themselves are re-exported from
 // the generated wire types, never mirrored here.
 
-import type {
-  ModelCapability,
-  NodeConfigParam,
-  NodeOutputSchema,
+export type {
+  OptimizerPipelineResponse as PipelineDoc,
   PipelineView,
+  PipelineViewEdge,
+  PipelineViewNode,
 } from "@/lib/api";
-
-export type { PipelineView, PipelineViewEdge, PipelineViewNode } from "@/lib/api";
 
 // ONE record per node kind. Its three projections — the chip label, the sentence under a
 // node's header, and the CSS suffix — are one closed set; hold them apart and a caller
@@ -53,28 +51,6 @@ export function nodeSubLabel(kind: string, model: string | null, loading: boolea
   if (kind === "measurement") return nodeKind(kind).label;
   if (model) return model;
   return loading ? "…" : "idle";
-}
-
-// Hand-written, and says so (`webapp/CLAUDE.md` § A wire shape is GENERATED): the
-// `/optimizer-pipeline` route returns a bare dict, so there is no `response_model` to
-// generate this envelope from. Its `view` half IS generated.
-export interface PipelineDoc {
-  view?: PipelineView;
-  nodes?: Record<string, { type?: string; config?: Record<string, unknown>; model?: string }>;
-  // Per-node typed config surface (model / provider / reasoning_effort / …), so the node
-  // detail renders the optimizer's own knobs through the canonical config element.
-  // Read-only there: the optimizer's own pipeline is edited by hand.
-  node_config_schema?: Record<string, NodeConfigParam[]>;
-  node_output_schema?: Record<string, NodeOutputSchema | null>;
-  // What each model on those rows accepts and costs. Optimizer-LOCKED is not unpriced: the model
-  // is fixed, but which effort rungs it takes and what a round of it costs are the same facts the
-  // rows need — and this is the surface on which a dead `reasoning_effort` was first read.
-  model_capabilities?: Record<string, ModelCapability>;
-  // The prompt each optimizer node STARTS from, keyed `"{node}/{version}"` — a node
-  // declaring several prompts carries one entry per version. It is the floor under a
-  // searchpoint that carries no evolved delta for that node, without which the detail
-  // renders empty boxes. Read it through `nodeOriginPrompt`, never by spelling the key.
-  resolved_prompts?: Record<string, Record<string, unknown>>;
 }
 
 // One node block as written by AuditTrailView._handle_llm_call

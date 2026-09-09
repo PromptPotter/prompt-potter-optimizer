@@ -12,6 +12,7 @@ from promptpotter.domain.results import HeadlineMetric
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellScorer
 from promptpotter.infrastructure.backend import BackendClient
+from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.io import validate_path_component
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.session_pointer import mint_session_id, save_active_pointer
@@ -258,6 +259,7 @@ def auto_mint_session(
             root_content_hash=target_hash,
             optimizer_prompt_hash=optimizer_hash,
             backend_id=session.backend_id,
+            backend_type=backend_type_of_dataset(session.store, dataset_name),
             owner_user_id=str(session.identity.user_id),
             lifecycle_status="active",
             lifecycle_changed_at=now,
@@ -296,9 +298,11 @@ def auto_mint_session(
     return session_id, hop.campaign_id, root_cycle
 
 
-def mint_checkin_skeleton(stores: Stores, *, slug: str) -> tuple[str, str, str]:
+def mint_checkin_skeleton(stores: Stores, *, slug: str, backend_type: str) -> tuple[str, str, str]:
     """Mint a disk-backed campaign in the ``checkin`` lifecycle. It does NOT claim the active pointer — a
-    not-yet-run check-in following it snaps a watching workspace out of the authoring flow."""
+    not-yet-run check-in following it snaps a watching workspace out of the authoring flow.
+    ``backend_type`` is a required parameter, not read off the dataset: an ingest mints the
+    skeleton before the slug has a ``pipeline.yaml``, so only the caller's draft knows it."""
     from promptpotter.application.runner.campaign_ids import mint_campaign_id, mint_checkin_cycle_id
     from promptpotter.config.settings import APP_VERSION
     from promptpotter.domain.campaign import Campaign
@@ -316,6 +320,7 @@ def mint_checkin_skeleton(stores: Stores, *, slug: str) -> tuple[str, str, str]:
             root_cycle_id=cycle_id,
             root_content_hash="",
             backend_id="",
+            backend_type=backend_type,
             owner_user_id=str(stores.identity.user_id),
             lifecycle_changed_at=now,
             config={},
@@ -387,6 +392,10 @@ def finalize_checkin_to_active(
             "root_content_hash": target_hash,
             "optimizer_prompt_hash": combined_optimizer_prompt_hash(),
             "backend_id": session.backend_id,
+            # Re-read rather than trusted from the skeleton: the check-in wrote the slug's
+            # `pipeline.yaml` between the two, and the operator may have picked a different
+            # connector in the meantime. This is the mint that freezes it for good.
+            "backend_type": backend_type_of_dataset(session.store, session.dataset_name or ""),
             "config": freeze_campaign_config(campaign_config),
         },
     )

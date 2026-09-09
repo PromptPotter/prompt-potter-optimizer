@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter import connectors
-from promptpotter.application.campaign_config import freeze_campaign_config, load_campaign_config
+from promptpotter.application.campaign_config import (
+    CampaignConfig,
+    freeze_campaign_config,
+    load_campaign_config,
+)
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     merge_pipeline_overlay,
@@ -88,6 +92,29 @@ def split_overlay(
                 param_allowed_values=optimizer.get("param_allowed_values", {}),
             )
     return overrides, narrowing
+
+
+def overlay_from_campaign_config(config: CampaignConfig) -> dict[str, Any]:
+    """The INVERSE of :func:`split_overlay`: a frozen campaign's own config back as a node overlay,
+    so a reused origin seeds what it RAN rather than what the shared dataset file says today. The
+    seeded draft freezes back through `split_overlay` at Start, so the pair must lose nothing."""
+    overlay: dict[str, Any] = {}
+    for node, block in config.pipeline_overrides.items():
+        if isinstance(block, dict) and block:
+            overlay.setdefault(node, {})["config"] = dict(block)
+    for node, narrowing in config.optimizer_narrowing.items():
+        optimizer: dict[str, Any] = {}
+        # `param_keys` is None-able and `[]` is a real answer (every axis closed), so the test is
+        # `is not None` — `or` would drop a campaign that deliberately closed the whole node.
+        if narrowing.param_keys is not None:
+            optimizer["param_keys"] = list(narrowing.param_keys)
+        if narrowing.param_allowed_values:
+            optimizer["param_allowed_values"] = {
+                k: list(v) for k, v in narrowing.param_allowed_values.items()
+            }
+        if optimizer:
+            overlay.setdefault(node, {})["optimizer"] = optimizer
+    return overlay
 
 
 def draft_active_steps(draft: DraftCampaign) -> list[str]:

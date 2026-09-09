@@ -11,12 +11,17 @@ from pydantic import Field
 
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+    get_optimizer_schema,
     optimizer_manifest,
-    optimizer_resolved_schemas,
 )
 from promptpotter.application.optimization.dispatch.schemas import L2_NODE_AXES
 from promptpotter.domain.phases import RunPhase
-from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+from promptpotter.domain.pipeline_schema import (
+    ModelCapability,
+    NodeConfigParam,
+    NodeOutputSchema,
+    PipelineView,
+)
 from promptpotter.domain.run_records import MintKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.capabilities import resolve_schema_menu
@@ -296,44 +301,52 @@ def get_machine_status(identity: IdentityDep, jobs: JobRegistryDep) -> MachineSt
     )
 
 
-@active_router.get("/optimizer-pipeline", tags=["Optimizer"])
-def get_optimizer_pipeline(stores: StoresDep) -> dict[str, Any]:
+class OptimizerPipelineResponse(StrictModel):
+    """What the OPTIMIZER runs — the manifest's peer of ``GET /campaigns/{id}/pipeline``. The raw
+    manifest keys are not served: ``nodes`` was a second, untyped spelling of ``node_config_schema``."""
+
+    view: PipelineView | None = Field(
+        description="The graph topology — the same shape a campaign pipeline serves"
+    )
+    node_config_schema: dict[str, list[NodeConfigParam]] = Field(
+        description="Per-node typed config rows, so the node detail renders the optimizer's own "
+        "knobs through the canonical config element rather than a chip and a JSON dump"
+    )
+    node_output_schema: dict[str, NodeOutputSchema | None]
+    model_capabilities: dict[str, ModelCapability] = Field(
+        description="Optimizer-LOCKED is not unpriced: the model is fixed, but which effort rungs "
+        "it accepts and what a round costs are the facts every other node's rows need too"
+    )
+    resolved_prompts: dict[str, dict[str, Any]] = Field(
+        description="The prompt each node STARTS from, keyed `{node}/{version}` — the floor under "
+        "a searchpoint carrying no evolved delta for that node"
+    )
+
+
+@active_router.get(
+    "/optimizer-pipeline", tags=["Optimizer"], response_model=OptimizerPipelineResponse
+)
+def get_optimizer_pipeline(stores: StoresDep) -> OptimizerPipelineResponse:
     """Bundled ``promptpotter/assets/optimizer/pipeline.yaml`` + its generated
-    ``resolved_schemas.json`` sibling — nodes + pipelines + ``view``
-    topology, plus the per-node typed config surface (``node_config_schema`` /
-    ``node_output_schema``) so the canvas node-detail renders the optimizer's own
-    knobs (model / provider / reasoning_effort / temperature / …) through the same
-    canonical config element the steer panel uses, not a hand-rolled chip + JSON
-    dump. Read-only: the install-global ``_optimizer`` pipeline is operator-owned — a
-    hand-edit, never a fork and never a write path from here (``evidence``
-    names a winner and writes nothing); model/provider are always optimizer-locked."""
-    # The manifest is already parsed + cached one layer down; re-reading the file here
-    # was a second opinion on the same bytes. Copied because the response is mutated below.
-    pipeline: dict[str, Any] = dict(optimizer_manifest())
-    pipeline["resolved_schemas"] = optimizer_resolved_schemas()
-    # The manifest's own `pipelines` block, unflattened: `PipelineSchema.config_nodes` is
-    # what reaches the nodes no round runs, for this door and the other two alike, so the
-    # block stays free to shape the graph.
-    schema = parse_pipeline_response(pipeline)
-    pipeline["view"] = schema.view.model_dump(by_alias=True) if schema.view else None
-    # This is the OPTIMIZER's own manifest, so it is the one route that names L2's axes.
-    pipeline["node_config_schema"] = {
-        node: [p.model_dump() for p in params]
-        for node, params in schema.node_config_schema(L2_NODE_AXES).items()
-    }
-    pipeline["node_output_schema"] = {
-        node: (out.model_dump() if out is not None else None)
-        for node, out in schema.node_output_schemas().items()
-    }
-    # Optimizer-LOCKED is not the same as unpriced: the model is fixed, but which effort rungs it
-    # actually accepts and what a round of it costs are the same facts every other node's rows need.
-    # Per tenant, because the hand-authored override that corrects a wrong catalogue lives in their
-    # workspace — which is what makes ``StoresDep`` load-bearing here rather than decoration.
-    pipeline["model_capabilities"] = {
-        m: c.model_dump()
-        for m, c in resolve_schema_menu(schema, workspace=Path(stores.base_dir)).items()
-    }
-    return pipeline
+    ``resolved_schemas.json`` sibling — the ``view`` topology plus the per-node typed config
+    surface, so the canvas node-detail renders the optimizer's own knobs (model / provider /
+    reasoning_effort / temperature / …) through the same canonical config element the steer panel
+    uses. Read-only: the install-global ``_optimizer`` pipeline is operator-owned — a hand-edit,
+    never a fork and never a write path from here (``evidence`` names a winner and writes
+    nothing); model/provider are always optimizer-locked."""
+    # The engine's own parse: a second one here had the browser and the engine disagree on menus.
+    schema = get_optimizer_schema()
+    prompts = optimizer_manifest().get("resolved_prompts") or {}
+    return OptimizerPipelineResponse(
+        view=schema.view,
+        # This is the OPTIMIZER's own manifest, so it is the one route that names L2's axes.
+        node_config_schema=schema.node_config_schema(L2_NODE_AXES),
+        node_output_schema=schema.node_output_schemas(),
+        # Per tenant, because the hand-authored override that corrects a wrong catalogue lives in
+        # their workspace — which is what makes ``StoresDep`` load-bearing here, not decoration.
+        model_capabilities=resolve_schema_menu(schema, workspace=Path(stores.base_dir)),
+        resolved_prompts={str(k): dict(v) for k, v in prompts.items()},
+    )
 
 
 __all__ = [

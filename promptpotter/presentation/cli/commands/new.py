@@ -305,7 +305,11 @@ async def _commit_task_framing(
     # The check-in's own campaign is where the decomposition bills — the same skeleton the web
     # ingest mints, and the reason one exists: "the origin isn't authored yet, so there is no
     # content hash to address it by".
-    _sid, campaign_id, cycle_id = mint_checkin_skeleton(session.store, slug=dataset_name)
+    _sid, campaign_id, cycle_id = mint_checkin_skeleton(
+        session.store,
+        slug=dataset_name,
+        backend_type=backend_type_of_dataset(session.store, dataset_name),
+    )
     result = await decompose_prompt_fields(
         override,
         campaign_id=campaign_id,

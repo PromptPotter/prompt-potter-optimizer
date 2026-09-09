@@ -34,7 +34,6 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.campaign_store.store import origin_accuracy_of
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
-    backend_type_of_dataset,
     dataset_pipeline_path,
     is_dataset_dir,
     list_readable_datasets,
@@ -263,8 +262,13 @@ async def draft_from_origin(origin_id: str, stores: StoresDep) -> dict[str, Any]
         dataset_dir=dataset_dir,
         dataset_name=match.dataset_name,
         overrides=overrides,
-        backend_nodes=await fetch_backend_nodes(
-            backend_type_of_dataset(stores, match.dataset_name)
-        ),
+        # The ORIGIN's own connector, off its campaign manifest — not the dataset file's answer
+        # today. Reusing an origin means reusing what it ran, and a slug re-pointed at another
+        # connector since would otherwise hand the new draft a different backend's node set.
+        backend_nodes=await fetch_backend_nodes(match.backend_type),
+        # …and its own node CONFIG, for the same reason and by the same rule. The campaign is
+        # handed over whole rather than unpacked here: which of its layers seeds a draft is an
+        # application decision, and this router's job is to name the origin.
+        origin_campaign=match,
     )
     return draft_wire(draft, stores.base_dir)
