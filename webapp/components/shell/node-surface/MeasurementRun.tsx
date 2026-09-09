@@ -350,7 +350,7 @@ export function MeasurementRun({
                   <NodeSurface
                     node={null}
                     point={g.spec}
-                    configSeed={g.spec.pipeline_overlay}
+                    overlay={g.spec.pipeline_overlay}
                     schema={cv.nodeConfigSchema}
                     outputSchema={cv.nodeOutputSchema}
                     mode="values"

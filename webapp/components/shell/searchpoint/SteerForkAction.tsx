@@ -21,6 +21,7 @@ export function SteerForkAction({
   dash,
   parentIsLive,
   schema,
+  isSingleNode,
   outputSchema,
 }: {
   candidate: SelectedCandidate;
@@ -34,6 +35,8 @@ export function SteerForkAction({
   dash: DashboardSnapshot | null;
   parentIsLive: boolean;
   schema: Record<string, NodeConfigParam[]> | null;
+  // Served beside `schema`, by the same read. See `NodeConfigEditor`.
+  isSingleNode: boolean;
   outputSchema: Record<string, NodeOutputSchema | null> | null;
 }) {
   const [open, setOpen] = useState(false);
@@ -80,6 +83,7 @@ export function SteerForkAction({
             path={path}
             dash={dash}
             schema={schema}
+            isSingleNode={isSingleNode}
             outputSchema={outputSchema}
             parentIsLive={parentIsLive}
             onDone={() => setOpen(false)}

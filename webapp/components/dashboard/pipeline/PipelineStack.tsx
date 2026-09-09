@@ -5,7 +5,7 @@ import { useConnector } from "@/lib/hooks/useConnector";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useNestedPipelines } from "@/lib/hooks/useNestedPipelines";
 import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
-import type { NodeConfigParam } from "@/lib/api";
+import type { NodeReach } from "@/lib/api";
 import type { NodeScope } from "@/lib/SelectionContext";
 import type { PipelineView } from "@/components/workflow";
 import type { PipelineStatus } from "@/lib/types";
@@ -34,7 +34,8 @@ interface Layer {
   view: PipelineView | null;
   status: PipelineStatus;
   connector: string | null;
-  schema: Record<string, NodeConfigParam[]> | null;
+  // Served by whichever read produced this level's node rows — every level takes its own.
+  reach: Record<string, NodeReach> | null;
   scope: NodeScope | null;
   nestsNode: string | null;
   activeNode: string | null;
@@ -83,7 +84,7 @@ export function PipelineStack({ datasetName, samplesOpen, onToggleSamples }: Pro
       view: optimizer?.view ?? null,
       status: optimizer ? "ok" : "loading",
       connector: "PromptPotter",
-      schema: optimizer?.node_config_schema ?? null,
+      reach: optimizer?.reach ?? null,
       scope: "optimizer",
       nestsNode: measurementNode(optimizer ?? null),
       // The one level `active_node` speaks for.
@@ -96,7 +97,7 @@ export function PipelineStack({ datasetName, samplesOpen, onToggleSamples }: Pro
       view: cv.view,
       status: cv.pipelineStatus,
       connector: cv.connector,
-      schema: cv.nodeConfigSchema,
+      reach: cv.reach,
       scope: "target",
       nestsNode: cv.nests?.node ?? null,
       activeNode,
@@ -108,7 +109,7 @@ export function PipelineStack({ datasetName, samplesOpen, onToggleSamples }: Pro
       view: l.view,
       status: l.status,
       connector: l.connector,
-      schema: l.schema,
+      reach: l.reach,
       // Read-only: no detail panel is scoped to another dataset's namespace, and an id
       // collision here would light a node that is not running.
       scope: null,
@@ -152,7 +153,7 @@ export function PipelineStack({ datasetName, samplesOpen, onToggleSamples }: Pro
         view={l.view}
         status={l.status}
         connector={l.connector}
-        schema={l.schema}
+        reach={l.reach}
         scope={l.scope}
         nestsNode={l.nestsNode}
         activeNode={l.activeNode}

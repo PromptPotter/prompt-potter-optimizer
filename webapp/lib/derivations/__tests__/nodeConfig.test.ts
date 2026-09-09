@@ -4,10 +4,9 @@ import {
   configRows,
   effortLadder,
   nodeOverlayPatch,
-  nodeReach,
   overlayEdits,
   overlaySetsModelOutsideAllowed,
-  permittedModelsFromNarrowing,
+  permittedModels,
   seedOverlayFromRows,
   type ConfigRow,
 } from "../nodeConfig";
@@ -150,6 +149,7 @@ const schema: Record<string, NodeConfigParam[]> = {
       movable_by: ["l1"],
       held: false,
       source: "dataset",
+      permitted: null,
     },
     {
       key: "reasoning_effort",
@@ -161,6 +161,7 @@ const schema: Record<string, NodeConfigParam[]> = {
       movable_by: ["l1"],
       held: false,
       source: "dataset",
+      permitted: null,
     },
     {
       key: "temperature",
@@ -172,6 +173,7 @@ const schema: Record<string, NodeConfigParam[]> = {
       movable_by: ["l1"],
       held: false,
       source: "dataset",
+      permitted: null,
     },
     {
       key: "max_tokens",
@@ -183,9 +185,71 @@ const schema: Record<string, NodeConfigParam[]> = {
       movable_by: ["l1"],
       held: false,
       source: "dataset",
+      permitted: null,
     },
   ],
 };
+
+// The half that decides what the OPTIMIZER may do with this campaign. Every field is served, and
+// the overlay argument is not read at all — deriving `locked` from a client-held `param_keys`
+// answered off whichever overlay the call site passed, so a campaign that narrowed further than
+// its dataset rendered as wide open and the operator confirmed a search space that was not theirs.
+describe("configRows (search-space mode)", () => {
+  const param = (over: Partial<NodeConfigParam> & { key: string }): NodeConfigParam => ({
+    value: null,
+    kind: "number",
+    options: [],
+    description: "",
+    optimizer_locked: false,
+    movable_by: [],
+    held: false,
+    source: "campaign",
+    permitted: null,
+    ...over,
+  });
+
+  it("takes lock, value and permitted set from the SERVED row, ignoring the overlay", () => {
+    const served = {
+      n: [
+        param({ key: "temperature", value: 0.4, movable_by: ["l1"] }),
+        param({ key: "max_tokens", value: 900 }),
+      ],
+    };
+    // An overlay that contradicts every one of them. It must change nothing.
+    const lie = { n: { config: { temperature: 9 }, optimizer: { param_keys: ["max_tokens"] } } };
+    const rows = configRows(served, lie, "search-space", "n");
+    const byKey = Object.fromEntries(rows.map((r) => [r.key, r]));
+    expect(byKey.temperature?.value).toBe("0.4");
+    expect(byKey.temperature?.locked).toBe(false);
+    expect(byKey.max_tokens?.locked).toBe(true);
+  });
+
+  it("a row's menu is `options` and its ticks are `permitted` — null means they are the same", () => {
+    const rows = configRows(
+      {
+        n: [
+          param({ key: "effort", kind: "enum", options: ["a", "b", "c"], permitted: ["a"] }),
+          param({ key: "fmt", kind: "enum", options: ["x", "y"] }),
+        ],
+      },
+      {},
+      "search-space",
+      "n",
+    );
+    const byKey = Object.fromEntries(rows.map((r) => [r.key, r]));
+    // Narrowed: the menu keeps every value, so unticking stays reversible.
+    expect(byKey.effort?.options).toEqual(["a", "b", "c"]);
+    expect(byKey.effort?.allowed).toEqual(["a"]);
+    // Un-narrowed: `null` is NOT `[]`, and reading it as "nothing permitted" would empty the axis.
+    expect(byKey.fmt?.allowed).toEqual(["x", "y"]);
+  });
+
+  it("value and baseValue start equal, so an untouched row emits nothing", () => {
+    const rows = configRows({ n: [param({ key: "temperature", value: 0.4 })] }, {}, "search-space");
+    const patch = nodeOverlayPatch({}, "n", rows);
+    expect((patch.pipeline_overlay!.n as Record<string, unknown>).config).toBeUndefined();
+  });
+});
 
 describe("configRows (values mode)", () => {
   it("exposes the full config surface — model included with its options", () => {
@@ -284,96 +348,6 @@ describe("overlayEdits + applyFlatEdits", () => {
   });
 });
 
-// The reading the picture draws. The denominator is what is OPENABLE — nearly every param,
-// since opening an axis is adding its key to `param_keys`. Only `provider` and `route_order` sit
-// outside; `model` is an ordinary axis and counts.
-describe("nodeReach", () => {
-  const param = (over: Partial<NodeConfigParam> & { key: string }): NodeConfigParam => ({
-    value: null,
-    kind: "number",
-    options: [],
-    description: "",
-    optimizer_locked: false,
-    movable_by: [],
-    held: false,
-    source: "dataset",
-    ...over,
-  });
-
-  it("is null for a node the schema has not loaded — never a lock", () => {
-    expect(nodeReach(null, "llm_only")).toBeNull();
-    expect(nodeReach({}, "llm_only")).toBeNull();
-  });
-
-  it("config nothing searches is LOCKED, not exempt — it could be opened", () => {
-    const r = nodeReach({ n: [param({ key: "output_format" }), param({ key: "max_tokens" })] }, "n");
-    expect(r).toMatchObject({ state: "locked", open: 0, openable: 2, held: false });
-  });
-
-  it("a narrowed axis is locked AND held — the tooltip's only difference", () => {
-    const r = nodeReach({ n: [param({ key: "temperature", held: true })] }, "n");
-    expect(r).toMatchObject({ state: "locked", open: 0, openable: 1, held: true });
-  });
-
-  it("the cost levers alone leave nothing to lock", () => {
-    const r = nodeReach(
-      {
-        n: [
-          param({ key: "provider", kind: "string", optimizer_locked: true }),
-          param({ key: "route_order", kind: "string", optimizer_locked: true }),
-        ],
-      },
-      "n",
-    );
-    expect(r).toMatchObject({ state: "nothing", open: 0, openable: 0 });
-  });
-
-  it("a model row COUNTS — it is an axis, shut or open like any other", () => {
-    const shut = nodeReach({ n: [param({ key: "model", kind: "model" })] }, "n");
-    expect(shut).toMatchObject({ state: "locked", open: 0, openable: 1 });
-    const open = nodeReach(
-      { n: [param({ key: "model", kind: "model", movable_by: ["l1"] })] },
-      "n",
-    );
-    expect(open).toMatchObject({ state: "open", open: 1, openable: 1, agents: ["l1"] });
-  });
-
-  it("every openable axis searched reads as open, and forbidden keys do not dilute it", () => {
-    const r = nodeReach(
-      {
-        n: [
-          param({ key: "provider", kind: "string", optimizer_locked: true }),
-          param({ key: "instruction", kind: "prompt", movable_by: ["l1"] }),
-        ],
-      },
-      "n",
-    );
-    expect(r).toMatchObject({ state: "open", open: 1, openable: 1, agents: ["l1"] });
-  });
-
-  it("some open, some shut reads as partial and names its agents", () => {
-    const r = nodeReach(
-      {
-        n: [
-          param({ key: "instruction", kind: "prompt", movable_by: ["l1"] }),
-          param({ key: "temperature", held: true }),
-        ],
-      },
-      "n",
-    );
-    expect(r).toMatchObject({ state: "partial", open: 1, openable: 2, agents: ["l1"], held: true });
-  });
-
-  it("an axis only escalation reaches is still reach", () => {
-    const r = nodeReach(
-      { l1_generate: [param({ key: "temperature", movable_by: ["l2"] })] },
-      "l1_generate",
-    );
-    expect(r).toMatchObject({ state: "open", open: 1, openable: 1, agents: ["l2"] });
-  });
-});
-
-
 // Mirrors the Python truth table (`domain/pipeline_overlay.py`): the client warning and the server
 // babysit gate must agree. The permitted set is per NODE now — one campaign-wide list was the
 // second spelling of what `param_allowed_values["model"]` already said.
@@ -399,19 +373,45 @@ describe("overlaySetsModelOutsideAllowed", () => {
     expect(out({ steps: ["a", "b"], l1_generate: oss.l1_generate }, permitted)).toBe(false));
 });
 
-describe("permittedModelsFromNarrowing", () => {
-  it("reads the per-node model list off a frozen narrowing", () => {
-    expect(
-      permittedModelsFromNarrowing({
-        l1_generate: { param_allowed_values: { model: ["a", "b"], reasoning_effort: ["low"] } },
-        l2_context: { param_keys: ["temperature"] },
-      }),
-    ).toEqual({ l1_generate: ["a", "b"] });
+// Feeds the predicate above, so its `null`-is-not-`[]` reading is what decides whether an
+// un-narrowed node taints every steer or none.
+describe("permittedModels", () => {
+  const modelRow = (over: Partial<NodeConfigParam>): NodeConfigParam[] => [
+    {
+      key: "model",
+      value: null,
+      kind: "model",
+      options: ["a", "b"],
+      description: "",
+      optimizer_locked: false,
+      movable_by: [],
+      held: false,
+      source: "campaign",
+      permitted: null,
+      ...over,
+    },
+  ];
+
+  it("takes the served permitted set where the gate is narrower than the menu", () => {
+    expect(permittedModels({ l1_generate: modelRow({ permitted: ["a"] }) })).toEqual({
+      l1_generate: ["a"],
+    });
   });
 
-  it("is empty for anything that is not a narrowing", () => {
-    expect(permittedModelsFromNarrowing(null)).toEqual({});
-    expect(permittedModelsFromNarrowing("nope")).toEqual({});
+  it("falls to `options` on null — which is the menu BEING the permitted set", () => {
+    expect(permittedModels({ l1_generate: modelRow({}) })).toEqual({ l1_generate: ["a", "b"] });
+  });
+
+  it("keeps an EMPTY permitted set empty — nothing may be picked is not the same as null", () => {
+    expect(permittedModels({ l1_generate: modelRow({ permitted: [] }) })).toEqual({
+      l1_generate: [],
+    });
+  });
+
+  it("names only nodes that carry a model row at all", () => {
+    expect(permittedModels({ scorer: [] })).toEqual({});
+    expect(permittedModels(null)).toEqual({});
+    expect(permittedModels(undefined)).toEqual({});
   });
 });
 

@@ -15,12 +15,11 @@ import { interiorNodes, searchPoint } from "@/lib/derivations";
 // Chat components verbatim rather than maintaining a second renderer; the only
 // new piece is the `LLM only ↔ Research + Match` selector.
 //
-// Data rides the draft wire — `draft.pipeline_view` + node schemas, fed into a
-// `StaticConnectorProvider` (no fetch). The draft is always a check-in here (fresh
-// upload OR reuse-origin), and a fresh upload has no committed `datasets/{slug}/`
-// yet — so the draft carries its own pipeline render (byte-identical to what Start
-// commits), which lets the node editor render before commit instead of hanging on
-// "Loading node…". The toggle writes `draft.pipeline_steps`, which commit +
+// Data rides the draft wire into a `StaticConnectorProvider` — a TRANSPORT of the served
+// resolution, not a second source: `draft_wire` calls `resolve_pipeline_for_draft`, the check-in
+// arm of the resolver `GET /campaigns/{id}/pipeline` serves. It arrives on the response rather
+// than being fetched because every draft mutation returns a fresh one, so fetching would put a
+// round-trip on each commit-on-blur edit. The toggle writes `draft.pipeline_steps`, which commit +
 // `draft_active_steps` read.
 
 const LLM_ONLY: string[] = ["llm_only"];
@@ -45,8 +44,15 @@ export function PipelineSetupSection({
       view: draft.pipeline_view,
       nodeConfigSchema: draft.node_config_schema,
       nodeOutputSchema: draft.node_output_schema,
+      reach: draft.reach,
     }),
-    [draft.connector, draft.pipeline_view, draft.node_config_schema, draft.node_output_schema],
+    [
+      draft.connector,
+      draft.pipeline_view,
+      draft.node_config_schema,
+      draft.node_output_schema,
+      draft.reach,
+    ],
   );
   return (
     <StaticConnectorProvider fields={fields}>
@@ -64,6 +70,12 @@ function PipelineSetupInner({
 }) {
   const cv = useConnector();
   const { node: selected, setSelectionForNode } = useSelection();
+  // The two documents the DRAFT owns, and nothing else — the panel's config rows come from the
+  // served resolution like everywhere else. Memoized so the panel's props stay stable.
+  const authoring = useMemo(
+    () => ({ overlay: draft.pipeline_overlay, promptFields: draft.origin_prompt_fields }),
+    [draft.pipeline_overlay, draft.origin_prompt_fields],
+  );
 
   // Research+Match preset = the committed pipeline's nodes (stable during setup).
   // `llm_only` isn't in a committed Research+Match view, so its preset is fixed.
@@ -142,7 +154,8 @@ function PipelineSetupInner({
             <NodeSurface
               node={llmNode}
               point={searchPoint(draft.origin_prompt_fields, draft.pipeline_overlay)}
-              configSeed={draft.pipeline_overlay}
+              overlay={draft.pipeline_overlay}
+              isSingleNode={draft.is_single_node}
               schema={cv.nodeConfigSchema}
               outputSchema={cv.nodeOutputSchema}
               mode="search-space"
@@ -159,7 +172,7 @@ function PipelineSetupInner({
             view={cv.view}
             status={cv.pipelineStatus}
             connector={cv.connector}
-            schema={cv.nodeConfigSchema}
+            reach={cv.reach}
             scope="target"
             nestsNode={null}
             activeNode={null}
@@ -169,7 +182,7 @@ function PipelineSetupInner({
           {showDetail && selected ? (
             <NodeDetail
               node={selected}
-              draft={draft}
+              authoring={authoring}
               onClose={() => setSelectionForNode(null)}
               onPromptApply={onApply}
             />

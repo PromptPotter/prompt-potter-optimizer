@@ -51,7 +51,15 @@ import {
 export function NodeConfigEditor(props: {
   mode: ConfigMode;
   schema: Record<string, NodeConfigParam[]> | null;
-  seedOverlay: Record<string, unknown>;
+  // The node-config document being edited. Its ROLE differs by mode, which is why each editor
+  // below receives it under its own name: search-space MERGES a patch onto it and reads no row
+  // from it (`patchBase`), values SEEDS its rows from it (`valuesSeed`).
+  overlay: Record<string, unknown>;
+  // search-space only: whether the ACTIVE chain is one node, SERVED. A single-node pipeline is
+  // unlockable — locking its lone node leaves the optimizer nothing to tune — and the browser
+  // could only count the config rows, which cover every DECLARED node. A check-in declares its
+  // connector's whole pipeline and runs one step, so counting drew locks the engine ignores.
+  isSingleNode?: boolean;
   node?: string;
   readOnly?: boolean;
   // values mode only: when false, a model the origin does not permit is held read-only —
@@ -79,9 +87,9 @@ export function NodeConfigEditor(props: {
   onChange?: (overlay: Record<string, Record<string, unknown>>) => void;
 }) {
   return props.mode === "search-space" ? (
-    <SearchSpaceEditor {...props} />
+    <SearchSpaceEditor {...props} patchBase={props.overlay} />
   ) : (
-    <ValuesEditor {...props} />
+    <ValuesEditor {...props} valuesSeed={props.overlay} />
   );
 }
 
@@ -125,7 +133,8 @@ function axisMenu(row: ConfigRow, caps: ModelCapability | undefined) {
 // guarded reset) only when the viewed node changes.
 function SearchSpaceEditor({
   schema,
-  seedOverlay,
+  patchBase,
+  isSingleNode = false,
   node,
   readOnly = false,
   modelCapabilities,
@@ -133,7 +142,11 @@ function SearchSpaceEditor({
   onNarrowing,
 }: {
   schema: Record<string, NodeConfigParam[]> | null;
-  seedOverlay: Record<string, unknown>;
+  // The overlay a patch is MERGED ONTO, never a source the rows are read from — `DraftPatch`
+  // replaces `pipeline_overlay` whole, so an emission that did not carry the other nodes would
+  // erase them. Every row above comes from `schema`, which is served.
+  patchBase: Record<string, unknown>;
+  isSingleNode?: boolean;
   node?: string;
   readOnly?: boolean;
   modelCapabilities?: Record<string, ModelCapability>;
@@ -143,28 +156,26 @@ function SearchSpaceEditor({
   const nodeId = node ?? "";
   const [prevNode, setPrevNode] = useState(nodeId);
   const [rows, setRows] = useState<ConfigRow[]>(() =>
-    configRows(schema, seedOverlay, "search-space", nodeId),
+    configRows(schema, {}, "search-space", nodeId),
   );
   if (nodeId !== prevNode) {
     setPrevNode(nodeId);
-    setRows(configRows(schema, seedOverlay, "search-space", nodeId));
+    setRows(configRows(schema, {}, "search-space", nodeId));
   }
 
   if (rows.length === 0) return <EmptyConfig />;
 
-  // A single-node pipeline (one node in the served config schema) is UNLOCKABLE:
-  // locking its lone node would leave the optimizer with nothing to tune. Mirrors
-  // PipelineSchema.is_single_node. The lock is an OPTIMIZER-search-space concept,
-  // independent of this connector node — so for a single node the lock affordance
-  // is suppressed entirely (master + per-param); the operator still sets origin
-  // values and narrows the permitted sets.
-  const singleNode = schema != null && Object.keys(schema).length <= 1;
+  // A single-node pipeline is UNLOCKABLE: locking its lone node would leave the optimizer with
+  // nothing to tune. The lock is an OPTIMIZER-search-space concept, independent of this connector
+  // node — so for a single node the affordance is suppressed entirely (master + per-param); the
+  // operator still sets origin values and narrows the permitted sets.
+  const singleNode = isSingleNode;
 
   // Both channels fire, each only where the host owns it. Sending the narrowing to a host that
   // asked for a whole patch — or a patch to one that asked for the narrowing — is the unwrapping
   // this pair exists to delete.
   const persist = (next: ConfigRow[]) => {
-    onApply?.(nodeOverlayPatch(seedOverlay, nodeId, next));
+    onApply?.(nodeOverlayPatch(patchBase, nodeId, next));
     onNarrowing?.(nodeNarrowing(next));
   };
   const update = (i: number, patch: Partial<ConfigRow>) => {
@@ -353,7 +364,7 @@ function ModelCard({ caps }: { caps: ModelCapability }) {
 // the whole-pipeline seed (draft preview, steer fork). Symmetric with SearchSpaceEditor.
 function ValuesEditor({
   schema,
-  seedOverlay,
+  valuesSeed,
   node,
   readOnly = false,
   babysitEditable = true,
@@ -362,7 +373,7 @@ function ValuesEditor({
   onChange,
 }: {
   schema: Record<string, NodeConfigParam[]> | null;
-  seedOverlay: Record<string, unknown>;
+  valuesSeed: Record<string, unknown>;
   node?: string;
   readOnly?: boolean;
   babysitEditable?: boolean;
@@ -371,8 +382,8 @@ function ValuesEditor({
   onChange?: (overlay: Record<string, Record<string, unknown>>) => void;
 }) {
   const rows = useMemo(
-    () => configRows(schema, seedOverlay, "values", node),
-    [schema, seedOverlay, node],
+    () => configRows(schema, valuesSeed, "values", node),
+    [schema, valuesSeed, node],
   );
   const [edits, setEdits] = useState<Record<string, string>>({});
   // Render-phase guarded reset (webapp/CLAUDE.md § State reset on prop change):
@@ -380,7 +391,7 @@ function ValuesEditor({
   // in SteerForkPanel (useRoundFile) — `{}` first, then the candidate's resolved
   // config — so an edit made before it lands must not keep masking the freshly
   // seeded `r.value` below.
-  const sig = `${node ?? ""}|${JSON.stringify(seedOverlay)}`;
+  const sig = `${node ?? ""}|${JSON.stringify(valuesSeed)}`;
   const [prevSig, setPrevSig] = useState(sig);
   if (sig !== prevSig) {
     setPrevSig(sig);

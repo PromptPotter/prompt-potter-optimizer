@@ -286,7 +286,7 @@ function ConfigBox({
           <NodeSurface
             node={null}
             point={{ origin_prompt_fields: cfg.promptFields, pipeline_overlay: {} }}
-            configSeed={cfg.config}
+            overlay={cfg.config}
             schema={schema}
             outputSchema={outputSchema}
             mode="values"

@@ -96,7 +96,7 @@ export function OptimizerCard({ pipeline }: Props) {
           view={view}
           status={pipeline ? "ok" : "loading"}
           connector={null}
-          schema={pipeline?.node_config_schema ?? null}
+          reach={pipeline?.reach ?? null}
           scope="optimizer"
           // The card draws ONE level, so there is nothing to zoom into — but `l1_score`
           // still runs the whole campaign pipeline, and saying so is the frame's job.

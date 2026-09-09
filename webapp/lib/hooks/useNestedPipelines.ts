@@ -9,6 +9,7 @@ import type {
   DatasetPipelineResponse,
   NestedPipelineRef,
   NodeConfigParam,
+  NodeReach,
   PipelineView,
 } from "@/lib/api";
 import type { PipelineStatus } from "@/lib/types";
@@ -18,6 +19,9 @@ export interface NestedLayer {
   connector: string | null;
   view: PipelineView | null;
   schema: Record<string, NodeConfigParam[]> | null;
+  // Summed off those rows by the same read that served them. Null while the level is only a
+  // pointer — unknown, which is what an unread node must draw as.
+  reach: Record<string, NodeReach> | null;
   // This layer's own nesting node, served, so a renderer never looks ahead to the next
   // layer to know whether to draw a handle.
   nestsNode: string | null;
@@ -83,6 +87,7 @@ export function useNestedPipelines(
           connector: resp?.connector ?? null,
           view: resp?.view ?? null,
           schema: resp?.node_config_schema ?? null,
+          reach: resp?.reach ?? null,
           nestsNode: onward?.node ?? null,
           status: "ok",
         });
@@ -111,6 +116,7 @@ export function useNestedPipelines(
         connector: null,
         view: null,
         schema: null,
+        reach: null,
         nestsNode: null,
         status: "loading",
       },

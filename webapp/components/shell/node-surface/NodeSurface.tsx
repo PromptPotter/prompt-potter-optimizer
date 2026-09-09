@@ -18,7 +18,8 @@ import { NodeConfigEditor } from "./NodeConfigEditor";
 export function NodeSurface({
   node,
   point,
-  configSeed,
+  overlay,
+  isSingleNode,
   schema,
   outputSchema,
   label,
@@ -34,11 +35,13 @@ export function NodeSurface({
   node: PipelineViewNode | null;
   // The searchpoint whose prompt fields are shown/edited.
   point: CandidateSearchPoint;
-  // The overlay seeding the config editor — the draft optimizer overlay in
-  // search-space mode (`{}` on read-only inspection), the candidate's evolved
-  // values in values mode. Distinct from `point.pipeline_overlay` (the prompt's
-  // searchpoint) so search-space inspection isn't seeded by a values overlay.
-  configSeed: Record<string, unknown>;
+  // The node-config document the editor works on — the draft's optimizer overlay in
+  // search-space mode (which MERGES onto it and reads its rows from the served schema), the
+  // candidate's evolved values in values mode (which seeds its rows from it). Distinct from
+  // `point.pipeline_overlay`, the prompt's searchpoint.
+  overlay: Record<string, unknown>;
+  // search-space only: served, never counted here. See `NodeConfigEditor`.
+  isSingleNode?: boolean;
   schema: Record<string, NodeConfigParam[]> | null;
   outputSchema: Record<string, NodeOutputSchema | null> | null;
   // WHICH searchpoint is on screen ("best", "most recent", …). Rendered here because
@@ -89,7 +92,8 @@ export function NodeSurface({
         mode={mode}
         schema={schema}
         node={node?.id}
-        seedOverlay={configSeed}
+        overlay={overlay}
+        isSingleNode={isSingleNode}
         babysitEditable={babysitEditable}
         readOnly={configReadOnly}
         compact={compact}

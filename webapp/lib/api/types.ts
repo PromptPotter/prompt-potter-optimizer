@@ -61,6 +61,7 @@ export type {
   ModelCapability,
   NodeConfigParam,
   NodeOutputSchema,
+  NodeReach,
   OptimizerPipelineResponse,
   PipelineView,
   PipelineViewEdge,

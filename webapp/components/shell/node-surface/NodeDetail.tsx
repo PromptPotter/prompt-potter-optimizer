@@ -1,5 +1,5 @@
 "use client";
-import type { DraftCampaignWire, DraftPatch } from "@/lib/api";
+import type { DraftPatch } from "@/lib/api";
 import type { SelectedNode } from "@/lib/SelectionContext";
 import { cx } from "@/lib/cx";
 import type { NodeBlock } from "@/lib/types";
@@ -48,26 +48,41 @@ import { L1Variants, variantsOf } from "./L1Variants";
 // (the Optimizer card's toolbar on Dashboard, the hero frame on Chat), so this panel
 // showing a second one would be two controls for one axis.
 
+// The origin being AUTHORED — present only while this panel sits on the check-in surface.
+//
+// **Its presence is the MODE, and its fields are documents, never a store.** It used to be the
+// whole `DraftCampaignWire`, and a non-null one both parked the searchpoint fetch AND re-routed
+// where config was read from — so the same panel answered from a different place depending on
+// which call site mounted it, which is the shape `frontend-surface-contract.md::I9` forbids. Both
+// fields below are things the draft OWNS and nothing else holds: the overlay a config patch is
+// merged onto, and the prompt being written. Config ROWS come from `useConnector()` in both
+// modes, because a check-in resolves through the same server resolver a running campaign does.
+export interface NodeAuthoring {
+  overlay: Record<string, unknown>;
+  promptFields: Record<string, unknown>;
+}
+
 interface Props {
   node: SelectedNode;
-  // The active draft while a campaign is being set up; null otherwise. Target scope
-  // only — the optimizer's own pipeline is one operator-owned file with no draft.
-  draft: DraftCampaignWire | null;
+  // Target scope only — the optimizer's own pipeline is one operator-owned file, authored by
+  // hand and never through this panel.
+  authoring?: NodeAuthoring;
   onClose: () => void;
   // Setup only: makes the target LLM node's prompt editable (persists via this patch).
   onPromptApply?: (patch: DraftPatch) => void;
 }
 
-export function NodeDetail({ node: selected, draft, onClose, onPromptApply }: Props) {
+export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }: Props) {
   const { id, scope } = selected;
   const isOptimizer = scope === "optimizer";
 
   const cv = useConnector();
   const { dash, isLive, dashRound: liveRound } = useDashboard();
   // Both gated by argument rather than by an early return — a hook may not be
-  // conditional, and the parked side must not spend its round-trip either.
+  // conditional, and the parked side must not spend its round-trip either. Authoring parks the
+  // searchpoint read because an origin still being written has measured nothing to read.
   const { doc: optimizer, loading: pipelineLoading } = useOptimizerPipeline(isOptimizer);
-  const observe = useObserveSearchPoint(id, !isOptimizer && !draft);
+  const observe = useObserveSearchPoint(id, !isOptimizer && !authoring);
 
   const view = isOptimizer ? optimizer?.view : cv.view;
   const node = interiorNodes(view).find((n) => n.id === id) ?? null;
@@ -112,11 +127,11 @@ export function NodeDetail({ node: selected, draft, onClose, onPromptApply }: Pr
   const identity = { id, scope, label: node?.label ?? id, kind: servedKind };
   const program = isOptimizer
     ? { ...identity, prompt_fields: origin?.fields ?? {} }
-    : draft
+    : authoring
       ? {
           ...identity,
-          resolved_pipeline_params: draft.pipeline_overlay,
-          prompt_fields: draft.origin_prompt_fields,
+          resolved_pipeline_params: authoring.overlay,
+          prompt_fields: authoring.promptFields,
         }
       : observe.cfg
         ? {
@@ -186,7 +201,8 @@ export function NodeDetail({ node: selected, draft, onClose, onPromptApply }: Pr
         ) : (
           <TargetProgram
             node={node}
-            draft={draft}
+            authoring={authoring}
+            isSingleNode={cv.isSingleNode}
             observe={observe}
             schema={schema}
             outputSchema={outputSchema}
@@ -241,7 +257,7 @@ function OptimizerProgram({
       <NodeSurface
         node={node}
         point={{ origin_prompt_fields: origin?.fields ?? {}, pipeline_overlay: {} }}
-        configSeed={{}}
+        overlay={{}}
         schema={schema}
         outputSchema={outputSchema}
         modelCapabilities={modelCapabilities}
@@ -262,7 +278,8 @@ function OptimizerProgram({
 // surface — it picks WHICH searchpoint the box shows; the box renders exactly one.
 function TargetProgram({
   node,
-  draft,
+  authoring,
+  isSingleNode,
   observe,
   schema,
   outputSchema,
@@ -271,7 +288,8 @@ function TargetProgram({
   onPromptApply,
 }: {
   node: Parameters<typeof NodeSurface>[0]["node"];
-  draft: DraftCampaignWire | null;
+  authoring?: NodeAuthoring;
+  isSingleNode: boolean;
   observe: ReturnType<typeof useObserveSearchPoint>;
   schema: Parameters<typeof NodeSurface>[0]["schema"];
   outputSchema: Parameters<typeof NodeSurface>[0]["outputSchema"];
@@ -279,22 +297,22 @@ function TargetProgram({
   isLive: boolean;
   onPromptApply?: (patch: DraftPatch) => void;
 }) {
-  // Two draft lifecycles, one call: AUTHORING a concrete node opens the search-space
-  // lock/allow editor over the draft overlay; the draft WHOLE is the origin being authored,
-  // and no server-resolved config exists pre-mint, so it gets no callback — which IS
-  // read-only.
-  if (draft) {
-    const authoring = node != null;
+  // Two authoring lifecycles, one call: a CONCRETE node opens the search-space lock/allow editor
+  // over the draft's overlay; the origin WHOLE has no node to scope to, so it renders its values
+  // read-only — which is what withholding the callback means.
+  if (authoring) {
+    const scoped = node != null;
     return (
       <NodeSurface
-        node={authoring ? node : null}
-        point={{ origin_prompt_fields: draft.origin_prompt_fields, pipeline_overlay: {} }}
-        configSeed={authoring ? draft.pipeline_overlay : {}}
+        node={scoped ? node : null}
+        point={{ origin_prompt_fields: authoring.promptFields, pipeline_overlay: {} }}
+        overlay={scoped ? authoring.overlay : {}}
+        isSingleNode={isSingleNode}
         schema={schema}
         outputSchema={outputSchema}
         modelCapabilities={modelCapabilities}
-        mode={authoring ? "search-space" : "values"}
-        onApply={authoring ? onPromptApply : undefined}
+        mode={scoped ? "search-space" : "values"}
+        onApply={scoped ? onPromptApply : undefined}
       />
     );
   }
@@ -321,7 +339,7 @@ function TargetProgram({
           <NodeSurface
             node={node}
             point={{ origin_prompt_fields: observe.cfg.promptFields, pipeline_overlay: {} }}
-            configSeed={observe.cfg.config}
+            overlay={observe.cfg.config}
             schema={schema}
             outputSchema={outputSchema}
             modelCapabilities={modelCapabilities}

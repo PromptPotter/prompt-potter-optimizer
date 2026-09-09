@@ -81,61 +81,6 @@ export function isWidgetParam(p: { kind: string }): boolean {
   return WIDGET_KINDS.has(p.kind);
 }
 
-// WHERE THE SEARCH REACHES on one node — the single reading the picture and the config rows
-// both take, so a glyph on the graph and the 🔒 beside a param cannot disagree.
-//
-// A lock is (axis, AGENT), never an axis alone. The server says who may move each param
-// (`movable_by`); this counts. The denominator is the DECLARED axes — params that are open, or
-// that were open and this campaign closed (`held`) — never the whole param list: `model`,
-// `provider` and plain configuration are not axes, and counting them draws every plumbing node
-// as locked.
-export interface NodeReach {
-  /** Axes some agent may move right now. */
-  open: number;
-  /** Every axis that COULD be opened — the open ones plus the shut ones. */
-  openable: number;
-  /** Which agents reach this node at all, in `MOVABLE_AGENTS` order. */
-  agents: string[];
-  /** Some shut axis was shut by a NARROWING, not merely left closed by the dataset. */
-  held: boolean;
-  // `nothing` is the only state with no lock: every param here is `model`/`provider`, or the
-  // node carries none — nothing that could ever be opened, so nothing to draw shut.
-  state: "open" | "partial" | "locked" | "nothing";
-}
-
-// `null` is UNKNOWN — the schema has not loaded, or this node is absent from it. Distinct from
-// `nothing`, and never drawn as a lock: an unread node depicted as shut is a claim nobody made.
-//
-// The denominator is what is OPENABLE, and that is nearly every param: adding a key to a node's
-// `param_keys` is what opens an axis, so a config param no agent moves is shut, not exempt.
-// Only `PARAM_FORBIDDEN_KEYS` (`optimizer_locked` — model and provider, held so a comparison
-// isn't confounded) is outside the question, and it wears its own badge rather than a padlock.
-export function nodeReach(
-  schema: Record<string, NodeConfigParam[]> | null,
-  node: string,
-): NodeReach | null {
-  const params = schema?.[node];
-  if (params == null) return null;
-  const openable = params.filter((p) => !p.optimizer_locked);
-  const open = openable.filter((p) => p.movable_by.length > 0);
-  const agents = [...new Set(open.flatMap((p) => p.movable_by))];
-  const state =
-    openable.length === 0
-      ? "nothing"
-      : open.length === 0
-        ? "locked"
-        : open.length === openable.length
-          ? "open"
-          : "partial";
-  return {
-    open: open.length,
-    openable: openable.length,
-    agents,
-    held: openable.some((p) => p.held),
-    state,
-  };
-}
-
 /** The ladder a `reasoning_effort` row actually offers, once a model is picked.
  *
  *  **The MODEL's answer replaces the NODE's**, rather than narrowing it: a node's declared list is
@@ -173,16 +118,21 @@ export function overlaySetsModelOutsideAllowed(
   return false;
 }
 
-/** The per-node permitted model sets, read off a campaign's frozen `config.optimizer_narrowing`.
- *  The ONE derivation, so the warning above and the server's gate cannot disagree. */
-export function permittedModelsFromNarrowing(
-  narrowing: unknown,
+/** The per-node permitted model sets, read off the SERVED rows — `permitted` when the gate accepts
+ *  something narrower than the menu, and `options` when it does not. That `null` is not `[]` is the
+ *  whole distinction: `[]` says nothing may be picked, while `null` says `options` IS the permitted
+ *  set (`domain/pipeline_schema.py::NodeConfigParam.permitted`).
+ *
+ *  It used to be derived from a SECOND read — the campaign's frozen `config.optimizer_narrowing`
+ *  off `GET /campaigns/{id}` — which answers for the mint and not for the searchpoint being
+ *  steered, so a fork or a cycle seed that moved the set steered against the wrong one. */
+export function permittedModels(
+  schema: Record<string, NodeConfigParam[]> | null | undefined,
 ): Record<string, readonly string[]> {
   const out: Record<string, readonly string[]> = {};
-  if (!narrowing || typeof narrowing !== "object") return out;
-  for (const [node, block] of Object.entries(narrowing as Record<string, unknown>)) {
-    const models = asObj(asObj(block).param_allowed_values).model;
-    if (Array.isArray(models)) out[node] = models.map(String);
+  for (const [node, params] of Object.entries(schema ?? {})) {
+    const row = params.find((p) => p.key === "model");
+    if (row) out[node] = row.permitted ?? row.options;
   }
   return out;
 }
@@ -210,14 +160,24 @@ function coerce(kind: string, raw: string): unknown {
   return raw;
 }
 
-// Build rows from the served schema + seed overlay. `mode` selects how the
-// overlay seeds each row: search-space reads `nodes.{n}.{config, optimizer}`
-// (lock/allow/origin-value); values reads the flat `{node:{param:value}}` delta.
-// `node` scopes to one node (search-space, per-node); omit for whole-pipeline
-// (values).
+// Build rows from the served schema. `node` scopes to one node (search-space, per-node); omit for
+// whole-pipeline (values).
+//
+// **`valuesSeed` is read in `values` mode ONLY, and that asymmetry is the point.** A search-space
+// row's value, lock and permitted set are all SERVED now — `value` is the resolved answer,
+// `movable_by` already reflects the narrowing the resolution applied, and `permitted` is the
+// gate's own set beside the full menu in `options`. Deriving those three from a client-held
+// overlay re-answered, in the browser, a question the server's merge had already settled, and it
+// answered differently: it read `param_keys` off whichever overlay the call site passed, so a
+// campaign that narrowed further than its dataset rendered as wide open
+// (`frontend-surface-contract.md::I9`).
+//
+// `values` mode still takes one, because a fork's seed is a sparse delta that exists nowhere else
+// until it is confirmed — `fromCandidate` is what keeps an inherited-but-untouched param out of
+// the emission.
 export function configRows(
   schema: Record<string, NodeConfigParam[]> | null,
-  overlay: Record<string, unknown>,
+  valuesSeed: Record<string, unknown>,
   mode: ConfigMode,
   node?: string,
 ): ConfigRow[] {
@@ -227,33 +187,23 @@ export function configRows(
     node != null ? (scoped ? [[node, scoped]] : []) : Object.entries(schema);
   const rows: ConfigRow[] = [];
   for (const [n, params] of entries) {
-    const nodeOv = asObj(overlay[n]);
-    const cfg = asObj(nodeOv.config);
-    const opt = nodeOv.optimizer as
-      | { param_keys?: string[]; param_allowed_values?: Record<string, string[]> }
-      | undefined;
-    const overlayKeys = opt?.param_keys;
-    const overlayAllowed = opt?.param_allowed_values ?? {};
+    const nodeSeed = asObj(valuesSeed[n]);
     for (const p of params) {
       if (!isWidgetParam(p)) continue;
       const baseValue = p.value == null ? "" : String(p.value);
-      const narrowed = overlayAllowed[p.key];
+      // `permitted` is `null` when it does not differ from the menu — NOT `[]`, which says
+      // nothing may be picked at all. `??` is what keeps those two apart.
+      const permitted = p.permitted ?? p.options;
       if (mode === "search-space") {
-        // Every param inherits the overlay's open-set, or — unset — whether any agent reaches it
-        // today. `model` is no exception now: it is an axis wherever its node opened one.
-        const locked =
-          overlayKeys !== undefined
-            ? !overlayKeys.includes(p.key)
-            : p.movable_by.length === 0;
         rows.push({
           node: n,
           key: p.key,
           kind: p.kind,
           options: p.options,
-          value: p.key in cfg ? String(cfg[p.key]) : baseValue,
+          value: baseValue,
           baseValue,
-          locked,
-          allowed: narrowed ?? p.options,
+          locked: p.movable_by.length === 0,
+          allowed: permitted,
           fromCandidate: false,
           optimizerLocked: p.optimizer_locked,
           movableBy: p.movable_by,
@@ -261,10 +211,10 @@ export function configRows(
           description: p.description,
         });
       } else {
-        // values: the seed overlay is the flat fork delta — `nodeOv[key]` is the
-        // value directly (no `config`/`optimizer` nesting).
-        const fromCandidate = p.key in nodeOv;
-        const seedVal = fromCandidate ? nodeOv[p.key] : p.value;
+        // values: the seed is the flat fork delta — `nodeSeed[key]` is the value
+        // directly (no `config`/`optimizer` nesting).
+        const fromCandidate = p.key in nodeSeed;
+        const seedVal = fromCandidate ? nodeSeed[p.key] : p.value;
         rows.push({
           node: n,
           key: p.key,
@@ -273,6 +223,9 @@ export function configRows(
           value: seedVal == null ? "" : String(seedVal),
           baseValue,
           locked: false,
+          // The whole MENU, not the permitted subset: a babysit-capable operator may steer a fork
+          // outside it deliberately, taking the grade-C taint. `SteerForkPanel` warns off
+          // `permittedModels` instead — restricting here would delete the act.
           allowed: p.options,
           fromCandidate,
           optimizerLocked: p.optimizer_locked,

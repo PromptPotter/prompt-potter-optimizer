@@ -69,7 +69,7 @@ export function SearchpointDrillIn({
         <NodeSurface
           node={null}
           point={{ origin_prompt_fields: cfg.promptFields, pipeline_overlay: {} }}
-          configSeed={overlay ?? cfg.config}
+          overlay={overlay ?? cfg.config}
           schema={schema}
           outputSchema={outputSchema}
           // No `label`. NodeSurface prints one "because nothing else on screen names it", which is

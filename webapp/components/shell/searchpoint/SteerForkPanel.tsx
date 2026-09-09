@@ -20,11 +20,9 @@ import {
   configOverridesFromDefaults,
   isWidgetParam,
   overlaySetsModelOutsideAllowed,
-  permittedModelsFromNarrowing,
+  permittedModels as permittedModelsOf,
   searchPoint,
 } from "@/lib/derivations";
-import { useFetch } from "@/lib/hooks/useFetch";
-import { fetchCampaignDetail } from "@/lib/api";
 import type { SelectedCandidate } from "@/lib/types";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 import { NodeConfigEditor } from "@/components/shell/node-surface/NodeConfigEditor";
@@ -58,6 +56,7 @@ export function SteerForkPanel({
   dash,
   parentIsLive,
   schema,
+  isSingleNode,
   outputSchema,
   onDone,
   onCancel,
@@ -79,6 +78,7 @@ export function SteerForkPanel({
   // connector view answers for whichever campaign is being VIEWED, which would seed these editors
   // from the wrong pipeline for any point outside it.
   schema: Record<string, NodeConfigParam[]> | null;
+  isSingleNode: boolean;
   outputSchema: Record<string, NodeOutputSchema | null> | null;
   onDone: () => void;
   onCancel: () => void;
@@ -101,15 +101,10 @@ export function SteerForkPanel({
   const permissionNodes = Object.entries(schema ?? {})
     .filter(([, params]) => params.some(isWidgetParam))
     .map(([nodeId]) => nodeId);
-  // The origin's per-node permitted model sets, read off the frozen
-  // `config.optimizer_narrowing` — the ONE permitted set, already served whole. A node absent
-  // from it permits nothing, the restrictive default, so ANY model steer there taints —
+  // The per-node permitted model sets, off the SAME served rows this panel edits. A node absent
+  // from them permits nothing, the restrictive default, so ANY model steer there taints —
   // matching the server gate (`overlay_sets_model_outside_allowed`).
-  const { data: detail } = useFetch(
-    campaignId ? (signal) => fetchCampaignDetail(campaignId, signal) : null,
-    [campaignId],
-  );
-  const permittedModels = permittedModelsFromNarrowing(detail?.config.optimizer_narrowing);
+  const permittedModels = permittedModelsOf(schema);
   // Whether the acting operator may steer to an un-permitted model at all. That is the
   // ADR-0005 babysit act, gated server-side on
   // `campaign.babysit` (404 without); the client reflects it so a principal who lacks
@@ -220,7 +215,7 @@ export function SteerForkPanel({
       <NodeSurface
         node={null}
         point={searchPoint(seedPrompt, overlay)}
-        configSeed={overlay}
+        overlay={overlay}
         schema={schema}
         outputSchema={outputSchema}
         mode="values"
@@ -254,7 +249,8 @@ export function SteerForkPanel({
               mode="search-space"
               schema={schema}
               node={nodeId}
-              seedOverlay={{}}
+              overlay={{}}
+              isSingleNode={isSingleNode}
               onNarrowing={(n) => {
                 editedNarrowing.current = { ...editedNarrowing.current, [nodeId]: n };
               }}

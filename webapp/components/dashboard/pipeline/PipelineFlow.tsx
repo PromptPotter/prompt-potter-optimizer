@@ -6,7 +6,7 @@ import {
   type PipelineView,
   type PipelineViewNode,
 } from "@/components/workflow";
-import type { NodeConfigParam } from "@/lib/api";
+import type { NodeReach } from "@/lib/api";
 import type { NodeScope } from "@/lib/SelectionContext";
 import type { PipelineStatus } from "@/lib/types";
 import { useDashboard } from "@/lib/hooks/useDashboard";
@@ -17,7 +17,6 @@ import {
   interiorNodes,
   layoutGrid,
   liveObserveConfig,
-  nodeReach,
 } from "@/lib/derivations";
 import { TERMS } from "@/lib/terms";
 import { cx } from "@/lib/cx";
@@ -128,7 +127,10 @@ interface BoxProps {
   connector: string | null;
   activeNode: string | null;
   isLive: boolean;
-  schema: Record<string, NodeConfigParam[]> | null;
+  // WHERE THE SEARCH REACHES, per node — SERVED off the node-config rows, never summed
+  // here. A node absent from the map is UNKNOWN, which is not `nothing`: an unread node drawn
+  // as shut is a claim nobody made.
+  reach: Record<string, NodeReach> | null;
   // Which namespace a node click writes. Null makes every node inert — a level whose
   // detail panel does not exist must not offer a click that opens nothing.
   scope: NodeScope | null;
@@ -153,7 +155,7 @@ function PipelineBox({
   connector,
   activeNode,
   isLive,
-  schema,
+  reach: reachByNode,
   scope,
   nest,
   compact,
@@ -297,18 +299,20 @@ function PipelineBox({
   // One node is not a graph: draw the node and its resolved model, no strip.
   const sole = interior.length === 1 ? interior[0] : undefined;
   // Off the searchpoint, not `current_round.nodes`, which carries optimizer calls only.
+  //
+  // ONE source. This is only ever rendered while `calling`, and in that window the engine's own
+  // record of the call is the answer — a served resolution delivered by the poll rather than by
+  // the pipeline route. It used to fall back to the served config ROW when the live value had not
+  // landed yet, which is the two-store stitch `webapp/CLAUDE.md` § Display-data sources forbids,
+  // and the fallback could only ever be WRONG: the row answers for the campaign root, so a round
+  // that evolved the model showed the origin's for the gap between the call starting and the
+  // config landing. `?? "running"` below is the honest reading of that gap.
   const liveCfg = sole ? liveObserveConfig(dash)?.config[sole.id] : null;
   const liveModel =
     liveCfg && typeof liveCfg === "object"
       ? (liveCfg as Record<string, unknown>).model
       : null;
-  const staticModel = sole ? schema?.[sole.id]?.find((p) => p.key === "model")?.value : null;
-  const soleModel =
-    typeof liveModel === "string" && liveModel
-      ? liveModel
-      : typeof staticModel === "string" && staticModel
-        ? staticModel
-        : null;
+  const soleModel = typeof liveModel === "string" && liveModel ? liveModel : null;
   if (sole) {
     const isSelected = isSel(sole.id);
     const soleNest = nestAt(sole.id);
@@ -417,7 +421,7 @@ function PipelineBox({
           // Ring and padlock COMPOSE on a partial node: it is searched AND partly shut, and
           // those are two facts rather than a choice between two glyphs.
           const nests = nestAt(n.id);
-          const reach = nodeReach(schema, n.id);
+          const reach = reachByNode?.[n.id] ?? null;
           // Drawn on a nesting node too: the badge sits BESIDE the glyph, so "this runs a
           // pipeline" and "its own axes are shut" never compete for one mark — two facts, two
           // marks. A measurement node declares no axis at all and takes the bare dot.
@@ -569,7 +573,10 @@ export interface PipelineFlowProps {
   view: PipelineView | null;
   status: PipelineStatus;
   connector: string | null;
-  schema: Record<string, NodeConfigParam[]> | null;
+  // WHERE THE SEARCH REACHES, per node — SERVED off the node-config rows, never summed
+  // here. A node absent from the map is UNKNOWN, which is not `nothing`: an unread node drawn
+  // as shut is a claim nobody made.
+  reach: Record<string, NodeReach> | null;
   scope: NodeScope | null;
   nestsNode: string | null;
   activeNode: string | null;
@@ -637,7 +644,7 @@ export function PipelineFlow({
   view,
   status,
   connector,
-  schema,
+  reach,
   scope,
   nestsNode,
   activeNode,
@@ -660,7 +667,7 @@ export function PipelineFlow({
         connector={connector}
         activeNode={activeNode}
         isLive={isLive}
-        schema={schema}
+        reach={reach}
         scope={scope}
         // The frame follows the served id; only the ZOOM follows the level being drawn.
         nest={nestsNode ? { node: nestsNode, onIsolate: nest?.onIsolate ?? null } : null}

@@ -5,7 +5,12 @@
 // (`PipelineView`). That edge points the wrong way and is tolerated in exactly one file so a
 // reader can see the whole of it at once rather than finding it mid-request-helper.
 
-import type { ModelCapability, NodeConfigParam, NodeOutputSchema } from "./types";
+import type {
+  ModelCapability,
+  NodeConfigParam,
+  NodeOutputSchema,
+  NodeReach,
+} from "./types";
 import type { PipelineView } from "@/components/workflow";
 
 // M13 chat-first dataset ingest: upload + mint a durable `checkin` campaign (`draft_id` IS the
@@ -78,13 +83,18 @@ export interface DraftCampaignWire {
   // below and nowhere else; a second permission projection beside it could only disagree.
   active_steps: string[];
   // The draft's parsed pipeline render — graph `view` + per-node config/output
-  // schema, the SAME shape `GET /datasets/{name}/pipeline` serves for a committed
-  // dataset, but computed from the draft (a pre-commit check-in has no
-  // `datasets/{slug}/` dir). The ingest node editor renders from these directly,
-  // so it never fetches by slug (which would 404 and hang on "Loading node…").
+  // schema + the reach summed over those rows, the SAME shapes
+  // `GET /campaigns/{id}/pipeline` serves for a committed campaign, but computed from the
+  // draft (a pre-commit check-in has no `datasets/{slug}/` dir). The ingest node editor
+  // renders from these directly, so it never fetches by slug (which would 404 and hang on
+  // "Loading node…").
   pipeline_view: PipelineView | null;
   node_config_schema: Record<string, NodeConfigParam[]>;
   node_output_schema: Record<string, NodeOutputSchema | null>;
+  reach: Record<string, NodeReach>;
+  // Whether the ACTIVE chain is one node. Served for the same reason `reach` is: the browser can
+  // only count DECLARED nodes, and a check-in declares its connector's whole pipeline.
+  is_single_node: boolean;
   // WHERE the schema above came from, because an empty axis set has two very different
   // causes. `backend` = the service's own declaration was read at check-in, so
   // `movable_by` is authoritative. `local` = an in-process connector, whose manifest IS

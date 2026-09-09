@@ -60,7 +60,7 @@ export function OptimizerSetupSection() {
         view={view}
         status={doc ? "ok" : error ? "error" : "loading"}
         connector="PromptPotter"
-        schema={schema}
+        reach={doc?.reach ?? null}
         scope="optimizer"
         nestsNode={measurementNode(doc)}
         activeNode={null}
@@ -69,7 +69,7 @@ export function OptimizerSetupSection() {
       />
 
       {shown ? (
-        <NodeDetail node={shown} draft={null} onClose={() => setSelectionForNode(null)} />
+        <NodeDetail node={shown} onClose={() => setSelectionForNode(null)} />
       ) : null}
     </section>
   );

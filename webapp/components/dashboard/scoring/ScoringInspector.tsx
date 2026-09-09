@@ -106,6 +106,7 @@ export function ScoringInspector({ selected, onClose }: Props) {
             dash={dash}
             parentIsLive={cv.isLive}
             schema={cv.nodeConfigSchema}
+            isSingleNode={cv.isSingleNode}
             outputSchema={cv.nodeOutputSchema}
           />
         }

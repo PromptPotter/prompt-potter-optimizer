@@ -33,7 +33,7 @@ import type {
   LineageNode,
   SubjectReading,
 } from "@/lib/api";
-import { fetchDatasetPipeline } from "@/lib/api";
+import { fetchCampaignPipeline } from "@/lib/api";
 import { candidateSubject, readingPath } from "@/lib/api/reads";
 import { SteerForkAction } from "@/components/shell/searchpoint/SteerForkAction";
 import {
@@ -75,11 +75,6 @@ import {
   type ScenarioEdits,
 } from "./config-edit";
 import { CopyButton, SegmentedControl } from "@/components/ui";
-
-// Every address at or above one, leaf first — the walk a "nearest enclosing X" question takes.
-function prefixes(path: CyclePath): CyclePath[] {
-  return path.map((_, i) => path.slice(0, path.length - i));
-}
 
 const KIND_WORD: Record<SubjectReading["kind"], string> = {
   campaign: "origin",
@@ -257,16 +252,23 @@ function ChannelCard({
   // off the channel: `dataset_name` is a course scalar and blank on a candidate, and an L4 inner
   // searchpoint runs a different dataset than the outer channel that opened its sandbox — so the
   // channel's name would seed the editor from the wrong pipeline entirely.
-  const datasetName = useMemo(() => {
-    for (const hops of pickedPath ? prefixes(pickedPath) : []) {
-      const name = index.get(encodeCyclePath(hops))?.course?.dataset_name;
-      if (name) return name;
-    }
-    return reading?.dataset_name ?? "";
-  }, [index, pickedPath, reading?.dataset_name]);
+  // The picked point's own resolved pipeline, addressed as the point — never by dataset name.
+  //
+  // It used to walk up for the nearest course's `dataset_name` and fetch that dataset's file,
+  // which is the defect this arc exists for: one `pipeline.yaml` is shared by every campaign on
+  // the slug, so on a Compare tab holding five channels of one dataset it drew the same config
+  // under all of them. `candidateSubject` carries the sandbox chain in `;in=`, so an L4 inner
+  // searchpoint resolves against its own campaign rather than needing the name walk at all.
+  const at = useMemo(
+    () => (pickedPath && selected ? candidateSubject(pickedPath, selected.id) : ""),
+    [pickedPath, selected],
+  );
+  const pickedCampaign = pickedPath?.at(-1)?.campaignId ?? "";
   const { data: pipeline } = useFetch(
-    datasetName ? (s: AbortSignal) => fetchDatasetPipeline(datasetName, s) : null,
-    [datasetName],
+    pickedCampaign && at
+      ? (s: AbortSignal) => fetchCampaignPipeline(pickedCampaign, at, s)
+      : null,
+    [pickedCampaign, at],
   );
   // The point's own round, on its own course: how many arms stood, and where this one sat among
   // them. Both come off the tree, which is the only thing that knows a round's shape.
@@ -568,6 +570,7 @@ function ChannelCard({
                         // the only source this tab could honestly have.
                         dash={null}
                         schema={pipeline.node_config_schema}
+                        isSingleNode={pipeline.is_single_node}
                         outputSchema={pipeline.node_output_schema}
                         parentIsLive={
                           index.get(encodeCyclePath(pickedPath))?.course?.run_phase === "running"

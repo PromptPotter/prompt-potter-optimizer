@@ -26,6 +26,8 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
     raw_task_description: "",
     schema_source: "backend",
     model_capabilities: {},
+    reach: {},
+    is_single_node: false,
     pipeline_overlay: {},
     headers: ["input", "gt"],
     column_query: "",

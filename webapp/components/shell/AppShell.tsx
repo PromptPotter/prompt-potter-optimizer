@@ -324,16 +324,22 @@ function AppShellInner() {
     bannerHint = activeError ?? cyclesError ?? "";
   }
 
+  // ONE test for "is this cycle still authoring its origin", off the served `run_phase`. It was
+  // spelled twice — here and in the tab-redirect below — and a second spelling of a served field
+  // is how two surfaces come to disagree about which pane a campaign should draw.
+  const isCheckin = useCallback(
+    (campaign: string, cycle: string | null) =>
+      cycles.some(
+        (c) => c.campaign_id === campaign && c.cycle_id === cycle && c.run_phase === "checkin",
+      ),
+    [cycles],
+  );
+
   // The selected cycle's run phase, read off the cycle list. A `checkin` campaign
   // has no dashboard.json (it hasn't run), so rendering the dashboard/chat/verify
   // panes over it would dead-end on "warming". Instead we show the re-open
   // authoring surface — the honest affordance (frontend-surface-contract.md).
-  const selectedCheckin =
-    !!campaignId &&
-    cycles.some(
-      (c) =>
-        c.campaign_id === campaignId && c.cycle_id === cycleId && c.run_phase === "checkin",
-    );
+  const selectedCheckin = !!campaignId && isCheckin(campaignId, cycleId);
   // The check-in authoring surface lives on the CHAT tab — its home. Scoping the
   // takeover here (rather than overriding every tab) keeps Dashboard/Verify and the
   // "New campaign" button reachable, so a selected check-in never traps navigation.
@@ -385,13 +391,7 @@ function AppShellInner() {
           // past authoring), so a descended path never redirects.
           if (path.length > 1) return;
           const hop = path[0]!;
-          const checkin = cycles.some(
-            (c) =>
-              c.campaign_id === hop.campaignId &&
-              c.cycle_id === hop.cycleId &&
-              c.run_phase === "checkin",
-          );
-          if (checkin) openView("chat");
+          if (isCheckin(hop.campaignId, hop.cycleId)) openView("chat");
         }}
         onNewCycle={() => {
           // Two doors onto one thread, picked by the view in front of the operator: already on

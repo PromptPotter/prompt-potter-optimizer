@@ -26,6 +26,7 @@ import type {
   NestedPipelineRef,
   NodeConfigParam,
   NodeOutputSchema,
+  NodeReach,
 } from "@/lib/api";
 import type { NodeDataLike, PipelineView } from "@/components/workflow";
 
@@ -59,9 +60,17 @@ export interface ConnectorView {
   health: BackendHealthResponse | null;
   // The FULL operator-editable config surface per node (model/temperature/
   // thinking/max_tokens/provider) the steer + read-only node-detail panels
-  // render, from `GET /datasets/{name}/pipeline`. Null until the dataset overlay
-  // resolves (or in demo, where there's no real dataset).
+  // render, from `GET /campaigns/{id}/pipeline?at=` — each row carrying the value
+  // this campaign runs and the LAYER that set it. Null until it resolves.
   nodeConfigSchema: Record<string, NodeConfigParam[]> | null;
+  // Where the search reaches on each node, summed server-side off those same rows.
+  // Null is UNKNOWN — an unread node must not draw as shut.
+  reach: Record<string, NodeReach> | null;
+  // Whether the ACTIVE chain is one node — served, because the browser could only count the
+  // config rows, which cover every DECLARED node. A check-in declares its connector's whole
+  // pipeline and runs one step of it, so the two answers differ there, and the lock affordance
+  // is suppressed on exactly the pipeline that has nothing left to tune if you use it.
+  isSingleNode: boolean;
   // The per-node structured-output contract (read-only), shown beside the config
   // so the operator sees the whole node. Same fetch.
   nodeOutputSchema: Record<string, NodeOutputSchema | null> | null;

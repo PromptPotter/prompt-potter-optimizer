@@ -59,11 +59,7 @@ export function NowTriad({ pipeline }: Props) {
       {/* Either scope: the panel is the node's, not the tab's. A target node picked
           on the chat hero stays open when the operator crosses to Dashboard. */}
       {node && (
-        <NodeDetail
-          node={node}
-          draft={null}
-          onClose={() => setSelectionForNode(null)}
-        />
+        <NodeDetail node={node} onClose={() => setSelectionForNode(null)} />
       )}
     </>
   );

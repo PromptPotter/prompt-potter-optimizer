@@ -4,7 +4,7 @@
 // (`docs/specs/chat-foundation.md`). Out of scope for any "hide non-functional controls" sweep —
 // that sweep is why this note exists. Milestone text inside them is exempt from the
 // "no M-milestone references on operator surfaces" gate; other operator surfaces are not.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useHardSamples } from "@/lib/hard-samples";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
@@ -129,6 +129,18 @@ export function ChatPane({ checkinCampaignId }: Props) {
       : null,
     leafCampaignId,
   );
+  // The two documents the draft owns. `NodeDetail` takes these rather than the wire itself, so
+  // the panel cannot read config from a place the served resolution did not answer for.
+  const authoring = useMemo(
+    () =>
+      previewDraft
+        ? {
+            overlay: previewDraft.pipeline_overlay,
+            promptFields: previewDraft.origin_prompt_fields,
+          }
+        : undefined,
+    [previewDraft],
+  );
   // Auto-open once per mount as soon as a cycle is bound — saves the operator
   // one click on page reload. The ref guard means that if the user manually
   // closes the drawer and the cycle later changes (or a new cycle is bound),
@@ -165,7 +177,7 @@ export function ChatPane({ checkinCampaignId }: Props) {
         {selectedNode && (
           <NodeDetail
             node={selectedNode}
-            draft={previewDraft}
+            authoring={authoring}
             onClose={() => setSelectionForNode(null)}
           />
         )}

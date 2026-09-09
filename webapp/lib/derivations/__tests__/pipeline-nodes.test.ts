@@ -6,7 +6,7 @@ import type { PipelineDoc } from "@/components/workflow";
 // LAST slash, which is the whole of what can go wrong here: a plain `startsWith` makes
 // `l1_score` a prefix of nothing but `l1_generate` a prefix of `l1_generate_extra`, and
 // a lexical version sort answers `"10"` before `"2"`.
-// The envelope's other four fields are REQUIRED, not optional — the server sends all five on
+// The envelope's other fields are REQUIRED, not optional — the server sends every one of them on
 // every response — so the fixture supplies them empty rather than the type admitting a partial
 // body no route can produce.
 const doc = (resolved_prompts: Record<string, Record<string, unknown>>): PipelineDoc => ({
@@ -15,6 +15,7 @@ const doc = (resolved_prompts: Record<string, Record<string, unknown>>): Pipelin
   node_config_schema: {},
   node_output_schema: {},
   model_capabilities: {},
+  reach: {},
 });
 
 describe("nodeOriginPrompt", () => {
