@@ -69,6 +69,8 @@ A fix at N sites is the model serving the wrong shape — realign it and let the
 
 Six *situational* guardrails against recurring AI blind spots. The trigger and the rule are here; the evidence behind each is [`docs/developer/conventions.md`](docs/developer/conventions.md) § Reasoning doctrine.
 
+**Standing spend authorization: VERIFICATION up to ~$0.30 needs no approval** — a probe, an A/B, a `seed-screen`, a re-measure. Run it and report the number. Above that, and for anything minting a cycle (`new` / `resume` / any `promptpotter-self` run), ask. The same bound decides whether cheap undone work is reported or simply done.
+
 - **the operator bounded ANY budget axis** → `<one-budget>`: a limit on one axis binds **all** of them, both directions — "don't spend more" bounds the clock, "we don't have five hours" bounds the dollars. Price a proposal in the axis they named *and* the ones they didn't; trading one for another is an increase, asked for explicitly. When the budget binds, get more from measurements already paid for.
 - **slow / costly / token-heavy LLM call, OR adding anything to a prompt** → `<simplify-the-problem>`: tighten the prompt so the model doesn't *need* the tokens — the timeout, cap and provider are safety rails, not the fix. **Length is a quality tax, not only a bill**, so this fires before anything is slow. Attribute a real payload per block before diagnosing, and count the response JSON Schema: it is prompt text.
 - **labelling a change "refactor" / LOC work** → `<surface-ledger>`: run `complexity_ledger`; a pass *called* refactor must move the total **down**. The ratchet asserts EQUALITY, so every move costs a baseline edit and a written reason.
