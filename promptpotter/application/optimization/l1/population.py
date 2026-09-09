@@ -100,6 +100,7 @@ def parse_population(
                 rf_outcome = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run(
                     pipeline_params_override,
                     opt_sp=opt_sp,
+                    pipeline_params=merged_pp,
                 )
                 if rf_outcome is not None:
                     failures.extend(rf_outcome.evidence["failures"])

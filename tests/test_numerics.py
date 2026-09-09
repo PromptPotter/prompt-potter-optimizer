@@ -2788,6 +2788,67 @@ def test_parse_population_flags_dropped_optimizer_prompt_port():
     ]
 
 
+def test_an_axis_is_bounded_by_the_model_that_would_run_it_not_by_the_yaml() -> None:
+    """A node's value list is a default authored before anyone knew which model would run there,
+    so the model's answer REPLACES it — widening as often as narrowing. A campaign's own narrowing
+    is the exception and intersects, since an operator's closing may not be handed back.
+
+    Every arm here is silent and paid for. An unoffered rung reaching the wire buys an HTTP 400
+    that costs the candidate its whole panel; a rung wrongly withheld deletes a real search
+    position and the round still elects. The over-narrowed case is why the answer is three-state:
+    read falsy, an axis with nothing legal left becomes an unbounded one."""
+    from promptpotter.application.optimization.validators.l1_strict import validate_overrides
+    from promptpotter.domain.pipeline_schema import ModelCapability, NodeSearchNarrowing
+
+    def _caps(efforts: list[str] | None) -> ModelCapability:
+        return ModelCapability(
+            model="m", reasoning_efforts=efforts, reasoning_note="", source="openrouter"
+        )
+
+    def _schema(*, offers: list[str] | None, narrowed: bool) -> PipelineSchema:
+        return PipelineSchema(
+            name="t",
+            nodes=[
+                PipelineNode(
+                    name="llm_only",
+                    node_type=NodeType.NONE,
+                    param_keys={"reasoning_effort"},
+                    param_types={"reasoning_effort": "string"},
+                    param_allowed_values={"reasoning_effort": ["none", "low"]},
+                    param_values_narrowed={"reasoning_effort"} if narrowed else set(),
+                    current_config={"model": "m"},
+                )
+            ],
+            model_capabilities={} if offers is None else {"m": _caps(offers)},
+        )
+
+    def _reasons(schema: PipelineSchema, rung: str) -> list[str]:
+        failures = validate_overrides({"llm_only": {"reasoning_effort": rung}}, schema)
+        return [f.reason for f in failures]
+
+    model_takes_more = _schema(offers=["low", "medium", "high"], narrowed=False)
+    # WIDER is the point: `medium` is legal on this model and no dataset declared it.
+    assert _reasons(model_takes_more, "medium") == []
+    # And the model's refusal binds even where the node declared the rung — a different reason,
+    # because the healing move is the model rather than the value.
+    assert _reasons(model_takes_more, "none") == ["not_accepted_by_model"]
+
+    # A campaign closed the axis down to `none`, which this model then refuses. Nothing legal
+    # remains, and EVERY rung must be refused — read falsy, an empty space passes them all. The
+    # model may not hand back `low`, which the operator took away, and the operator may not keep
+    # `none`, which the endpoint rejects; the two reasons say which side struck each.
+    over_narrowed = _schema(offers=["low", "medium"], narrowed=True).narrow(
+        {"llm_only": NodeSearchNarrowing(param_allowed_values={"reasoning_effort": ["none"]})}
+    )
+    assert _reasons(over_narrowed, "none") == ["not_accepted_by_model"]
+    assert _reasons(over_narrowed, "low") == ["not_in_param_allowed_values"]
+
+    # UNKNOWN never subtracts: with no capability the node's own list stands, untouched.
+    unknown = _schema(offers=None, narrowed=False)
+    assert _reasons(unknown, "none") == []
+    assert _reasons(unknown, "medium") == ["not_in_param_allowed_values"]
+
+
 def test_classify_result_routes_structural_warning_to_fatal() -> None:
     """One source of truth, two consumers: a warning the backend **source-stamped**
     ``kind=structural`` is a deterministic-for-config failure, so PoBB elimination must

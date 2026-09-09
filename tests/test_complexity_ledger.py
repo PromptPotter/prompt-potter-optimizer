@@ -54,7 +54,12 @@ LEDGER_BASELINE = {
     # cache, with no way to say which layer answered. It pays for itself immediately — the node
     # ladder and the model's are different sets, and conflating them let a campaign search
     # `reasoning_effort` on a model that does not take the parameter at all.
-    "modules": 341,
+    # +2: `application/probe_reasoning.py` + its `cli/commands/probe_reasoning.py` shell — the verb
+    # that FILLS the evidence table above. Without it `_MODEL_PROFILES` is a hand-list against a
+    # catalogue of hundreds, which is the shape that goes stale and then answers wrongly; the whole
+    # reason the table may narrow a search axis is that a human can cheaply re-measure it. It runs
+    # through `get_llm_client().chat`, not a raw request, so it reports what this repo SENDS.
+    "modules": 343,
     "init_files": 49,
     # +1: `judges/__init__.py` — flagged for the same reason `connectors/__init__.py` is, and by
     # the same text test: a registry module has both an `__all__` and imports. Named rather than
@@ -166,7 +171,13 @@ LEDGER_BASELINE = {
     # +1: a measured point is served the identity it RAN under — identity is recomputed per read,
     # right on the run path and wrong on a finished one, so a moved instrument was served beside a
     # run that used another. Silent, and it was 8 live mismatches. (§ 4)
-    "test_functions": 166,
+    # +1: an axis is bounded by the model that would RUN it. The ENGINE's resolve had no guard —
+    # the only test of the rule was a vitest over the browser's MENU derivation, which is a
+    # different question and stays. Both directions here are silent and paid: an unoffered rung
+    # buys a 400 that costs the candidate its whole panel, a wrongly withheld one deletes a search
+    # position and the round still elects. The empty case is why: read falsy, an axis with nothing
+    # legal becomes an unbounded one. (§ 9)
+    "test_functions": 167,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -186,7 +197,12 @@ LEDGER_BASELINE = {
     # confirm. Read by `permittedModels`, which replaces `permittedModelsFromNarrowing`.
     # +1: `CampaignPipelineResponse.is_single_node` — a SEARCH-SPACE fact, not a step count, so no
     # surface guesses it by counting. Read by `useConnector`; the client `singleNode` goes with it.
-    "served_fields": 578,
+    # +1: `ModelCapability.indistinct_efforts` — rungs MEASURED to produce the same call on this
+    # model, THREE-STATE, so `None` unprobed and `[]` probed-all-distinct stay apart. It is what
+    # lets the offered ladder be every rung minus only what an endpoint REFUSES: an axis keeps every
+    # legal value, and the sameness is reported instead of being enforced by deletion. It cannot
+    # ride `reasoning_note` — prose no surface can branch on is not a state.
+    "served_fields": 579,
 }
 
 

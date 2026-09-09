@@ -3651,6 +3651,20 @@
             "title": "Fetched At",
             "type": "string"
           },
+          "indistinct_efforts": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Indistinct Efforts"
+          },
           "input_usd_per_mtok": {
             "anyOf": [
               {

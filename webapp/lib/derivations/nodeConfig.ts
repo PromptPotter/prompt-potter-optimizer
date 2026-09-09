@@ -81,16 +81,17 @@ export function isWidgetParam(p: { kind: string }): boolean {
   return WIDGET_KINDS.has(p.kind);
 }
 
-/** The ladder a `reasoning_effort` row actually offers, once a model is picked.
+/** The ladder a `reasoning_effort` row offers on the MENU, once a model is picked.
  *
- *  **The MODEL's answer replaces the NODE's**, rather than narrowing it: a node's declared list is
- *  a default authored before anyone knew which model would run there, so a node offering three
- *  rungs on a model that takes five was hiding two real search positions. Unknown — the model is
- *  absent from the catalogue snapshot, or none was fetched — falls back to the node's list
- *  untouched, because an absent answer rendered as "no" silently deletes a search axis.
+ *  **Display only — this is not the engine's resolve, and must not become it.** `param_options`
+ *  intersects a campaign's narrowing; this unions the model's answer into the menu instead, and
+ *  the row's TICKS (`allowed` ← served `permitted`) stay the operator's own declaration, because
+ *  those are what `nodeNarrowing` emits back. A rung ticked here and refused by the model renders
+ *  ticked AND struck (`axisMenu::inert`) — two facts the operator can act on separately, where
+ *  pre-multiplying them would let a repaint save the model's refusals as the campaign's choice.
  *
- *  This picks between two SERVED lists on a served null and computes nothing (`webapp/CLAUDE.md`
- *  § Scoring authority): both the ladder and the reason for it come down resolved. */
+ *  Unknown — the model is absent from the catalogue snapshot, or none was fetched — falls back to
+ *  the node's list untouched, because an absent answer rendered as "no" deletes a search axis. */
 export function effortLadder(row: ConfigRow, caps: ModelCapability | undefined): string[] {
   if (row.key !== "reasoning_effort") return row.options;
   return caps?.reasoning_efforts ?? row.options;

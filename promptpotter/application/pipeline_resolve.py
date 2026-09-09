@@ -254,6 +254,7 @@ def _resolve_active_schema(
     exclude: list[str],
     narrowing: dict[str, NodeSearchNarrowing],
     dataset_dir: Path | None,
+    workspace: Path | None = None,
 ) -> tuple[list[str], PipelineSchema]:
     """``steps`` is two shapes under one word: here the BACKEND's ``list[dict]`` from ``GET
     /pipeline``, on ``pipeline_params`` the reserved ``list[str]`` of active node names."""
@@ -277,6 +278,12 @@ def _resolve_active_schema(
     # snapshot may only narrow it.
     if narrowing:
         filtered = filtered.narrow(narrowing)
+    # LAST, over the narrowed schema, so `selectable_models` reads the nodes as the run holds them.
+    # This is what puts the model's answer in front of the SEARCH and not just the screen.
+    if workspace is not None:
+        filtered = filtered.model_copy(
+            update={"model_capabilities": resolve_schema_menu(filtered, workspace=workspace)}
+        )
     return active, filtered
 
 
@@ -629,6 +636,7 @@ def configure_and_apply_pipeline(
         exclude=exclude,
         narrowing=campaign_config.optimizer_narrowing,
         dataset_dir=dataset_dir,
+        workspace=session.store.base_dir,
     )
 
     # The dataset→effective node-config merge (sparse `{steps}` base + dataset overlay +

@@ -15,6 +15,28 @@ Single canonical view of the model + reasoning_effort + max_tokens defaults ship
 
 **The floor default for a new dataset** is `openai/gpt-oss-20b:nitro @ low` via OpenRouter — cheapest, fastest, and it leaves L1 headroom.
 
+**What a dataset DECLARES is not what the axis SEARCHES.** `PipelineSchema.param_options` replaces these defaults with the model's own answer at run time — widening as often as narrowing — while a CAMPAIGN narrowing intersects instead, so an operator's closing still binds (`promptpotter/infrastructure/CLAUDE.md` § LLM client owns both halves). The columns above are the starting point in the literal sense: they say what the file asks for, never what the endpoint takes. Two consequences a reader of this table has to hold:
+
+- **`reasoning_effort: none` is HTTP 400 on both `openai/gpt-oss-*` models** — *"Reasoning is mandatory for this endpoint and cannot be disabled."* Declaring it as a searchable value hands L1 a configuration that cannot be sent; `registry._MODEL_PROFILES` carries the refusal, so the rung is no longer offered.
+- **A rung is a setting, not a dial.** No model measured so far orders its ladder monotonically — `medium` costs more than `high` on every one — so a candidate that moves one rung has changed the call, never scaled it.
+
+## What the endpoints answered
+
+Measured 2026-09-08/09 against the live endpoints with `probe-reasoning <model>`: one terse-answer prompt, reasoning tokens read off `completion_tokens_details`, flat and nested `reasoning_effort` spellings alike. Re-measure rather than trust this table — it is the provenance behind `registry._MODEL_PROFILES`, which is what the code reads.
+
+| model | unset | `none` | minimal / low / medium / high | what the profile records |
+|---|---|---|---|---|
+| `openai/gpt-oss-20b` | 351 | **HTTP 400** | 89 / 75 / 549 / 135 | refuses `none`; rungs distinct (7.3× spread) |
+| `openai/gpt-oss-120b` | 336 | **HTTP 400** | 79 / 45 / 528 / 405 | refuses `none`; rungs distinct (11.7× spread) |
+| `qwen/qwen3.7-flash` | 1506 | 0 | 1595 / 2765 / 2169 / 2309 | rungs INDISTINCT — scatter around the default |
+| `qwen/qwen3.8-flash` | 2853 | 0 | unmeasured | nothing to narrow, so it carries no row |
+| `inclusionai/ling-3.0-flash` | 818 | 0 | 2350 / 2497 / 1486 / 1262 | rungs INDISTINCT; `low` overran a 3000-token cap |
+| `deepseek/deepseek-v4-flash` | ~4k (tail 11.4k) | unmeasured | unmeasured | `min_max_tokens=8000` only |
+
+The three flash models carry no `reasoning_effort` in the catalogue and honour `none` regardless, which is why the offered ladder cannot be derived from the parameter list. **An indistinct ladder is not narrowed** — every rung stays searchable and the finding is served as a caveat, so a round stops paying cells to separate two spellings of one call.
+
+**The `min_max_tokens` floors** are first estimates from observed `reasoning_budget_exhausted` failures: 8000 catches the egregious case (`l1_critique` at 4000 → 0 content) without flagging the working nodes (`l2_context`/`l3_plan` at 8000, `checkin` at 10000, `l1_generate` at 12000).
+
 ## The Groq output ceiling
 
 Groq enforces a per-model output ceiling — ~2048 tokens on `gpt-oss-20b` — and reasoning-trace tokens are charged against that same budget on `openai/gpt-oss-*`. With `reasoning_effort: medium` on a hard BBEH puzzle the model burns 8000+ chars of internal reasoning and runs out of budget before any visible content emerges: `finish_reason=length`, empty content, `classify_result()` stamps `llm_only:reasoning_budget_exhausted`, the result is deprecated and retried, which trips the same trap again.

@@ -72,6 +72,7 @@ AGENT_KWARG_KEYS = frozenset(
         "max_turns",
         "temperature",
         "reasoning_effort",
+        "top_p",
         "parser_name",
         "enable_summarize",
         "interleaved_thinking",

@@ -20,7 +20,7 @@ from promptpotter.domain.l1_layout import NODE_LAYOUTS
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, OptSearchPoint, PromptTemplate
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import SCHEMA_OWNED_FIELDS, PipelineSchema
-from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
+from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, WHO_ANSWERS_KEYS
 from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
 
 __all__ = [
@@ -94,7 +94,6 @@ def validate_overrides(
                 )
             )
             continue
-        node_allowed = node.param_allowed_values
         node_types = node.param_types
         node_emittable = emittable.get(node_name, set())
         for param, value in node_params.items():
@@ -134,27 +133,29 @@ def validate_overrides(
                     )
                 )
                 continue
-            if param == "model":
-                # Per NODE, and it fires on an EMPTY permitted set too: no value space means
-                # no model may be proposed here. A `None` is "leave it unset", the same
-                # reading the declared-type arm above takes.
-                permitted = pipeline_schema.model_options(node)
-                if value is not None and value not in permitted:
-                    failures.append(
-                        ValidationFailure(
-                            axis=f"{node_name}.model",
-                            value=str(value),
-                            allowed=permitted,
-                            reason="not_in_available_models",
-                        )
-                    )
-            elif (allowed := node_allowed.get(param)) and value not in allowed:
+            # Judged against the model THIS candidate would run on — its own proposal where it
+            # moved one, else the inherited pick, because the two axes move together. `allowed is
+            # not None`, never truthiness: `[]` is a declared axis with nothing legal left.
+            proposed = node_params.get("model")
+            allowed = pipeline_schema.param_options(
+                node, param, model=proposed if isinstance(proposed, str) else None
+            )
+            if allowed is not None and value is not None and value not in allowed:
+                # Three facts, three reasons: no such model, a value the node never declared, and
+                # one the node declared that this model will not take.
+                declared = node.param_allowed_values.get(param) or ()
                 failures.append(
                     ValidationFailure(
                         axis=f"{node_name}.{param}",
                         value=str(value),
                         allowed=list(allowed),
-                        reason="not_in_param_allowed_values",
+                        reason=(
+                            "not_in_available_models"
+                            if param == "model"
+                            else "not_accepted_by_model"
+                            if value in declared
+                            else "not_in_param_allowed_values"
+                        ),
                     )
                 )
     return failures
@@ -224,22 +225,36 @@ def _check_l1_config_in_runtime_failures(
     source_output: Mapping[str, Any],
     *,
     opt_sp: OptSearchPoint | None = None,
+    pipeline_params: Mapping[str, Any] | None = None,
     **_: Any,
 ) -> ValidatorOutcome | None:
     """Sibling-fork inheritance populates ``runtime_failures`` from prior cycles' terminal wounds,
-    so this fires even on round 1 of a fresh fork."""
+    so this fires even on round 1 of a fresh fork.
+
+    A wound convicts a ``(responder, param, value)``, never a value on its own — keyed on the value
+    alone it strikes legal cells out of the search, since one endpoint's 400 says nothing about the
+    next model's. ``WHO_ANSWERS_KEYS`` is the responder identity the wound PANEL already filters on
+    (``injections/wounds.py``), so enforcement and prose convict the same thing."""
     if not source_output or opt_sp is None:
         return None
     failures_list = list(opt_sp.memory.wounds.runtime_failures)
     if not failures_list:
         return None
+    merged = pipeline_params or {}
     out_failures: list[ValidationFailure] = []
     for node_name, node_params in source_output.items():
         if not isinstance(node_params, dict):
             continue
+        inherited = merged.get(node_name)
+        effective = dict(inherited) if isinstance(inherited, dict) else {}
+        effective.update(node_params)
         for param, value in node_params.items():
             for rf in failures_list:
                 obs_cfg = rf.observed_config or {}
+                if not all(
+                    obs_cfg.get(k) == effective.get(k) for k in WHO_ANSWERS_KEYS if k in obs_cfg
+                ):
+                    continue
                 if param in obs_cfg and obs_cfg[param] == value:
                     out_failures.append(
                         ValidationFailure(

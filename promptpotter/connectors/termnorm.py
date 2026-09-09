@@ -283,10 +283,11 @@ CONNECTOR = Connector(
     # GET /pipeline default (which would silently pick the heavy groq/120b). This
     # seed is copied verbatim into the new dataset's file by ``merge_pipeline_overlay``,
     # so the dataset owns ``openrouter/gpt-oss-20b`` explicitly, visible on disk.
-    # Conservative reasoning rail rides alongside: origin floor ``low`` + an allowed
-    # set with ``medium``/``high`` crossed out, so the optimizer can never escalate
-    # ``reasoning_effort`` campaign-wide on a tenant's untuned first run. Operator
-    # widens model or reasoning via the check-in's ``backend.node_config``.
+    # The origin floor ``low`` is the tenant's cost rail. The rung list beside it is a
+    # DEFAULT, so ``PipelineSchema.param_options`` replaces it wherever the model has
+    # answered — only a check-in narrowing intersects. It bounds the axis on a workspace
+    # with no capability snapshot yet, which is why it excludes ``none``: that rung is
+    # HTTP 400 on this model, so declaring it would hand L1 an unsendable configuration.
     default_node_config={
         "llm_only": {
             "config": {
@@ -295,7 +296,7 @@ CONNECTOR = Connector(
                 "reasoning_effort": "low",
                 "temperature": 0.0,
             },
-            "optimizer": {"param_allowed_values": {"reasoning_effort": ["none", "default", "low"]}},
+            "optimizer": {"param_allowed_values": {"reasoning_effort": ["default", "low"]}},
         },
     },
 )

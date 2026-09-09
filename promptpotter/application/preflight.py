@@ -179,7 +179,7 @@ def check_model_reasoning_floors(
         if not model or max_tokens is None:
             continue
         profile = model_profile(str(model))
-        if profile is None or not profile.is_reasoning:
+        if profile is None:
             continue
         if int(max_tokens) < profile.min_max_tokens:
             violations.append(

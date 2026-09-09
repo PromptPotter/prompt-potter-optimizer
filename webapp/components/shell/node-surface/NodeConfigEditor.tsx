@@ -38,9 +38,10 @@ import {
 //     the ONE permitted model set, which is both what the optimizer may pick and what a
 //     human fork may steer to un-tainted.
 //
-// The PICKED MODEL qualifies the reasoning ladder — REPLACING what the node declared, since a
-// node's list is a default authored before anyone knew which model would run there. Its
-// metadata card renders under the model row, so a stale or misconfigured pick is visible.
+// The PICKED MODEL qualifies the reasoning ladder on the MENU — a node's list is a default
+// authored before anyone knew which model would run there. It qualifies the MENU only: the ticks
+// stay the campaign's own declaration, because the editor emits those back. Its metadata card
+// renders under the model row, so a stale or misconfigured pick is visible.
 //
 // **A CHANNEL THE HOST DOES NOT PASS IS A CONTROL THAT DOES NOT DRAW** (`NodeSurface`'s rule,
 // applied per fact rather than per editor). Search-space carries two independent ones: `onApply`
@@ -112,9 +113,12 @@ function EmptyConfig() {
  *
  *  `inert` = the picked MODEL refuses it, and only where the model actually answered — an UNKNOWN
  *  capability must never strike a rung, which is the rule the whole capability layer exists for.
- *  `userAdded` = neither the node nor the model offered it, so the operator typed it. That is why
- *  `available_models` is served as the ADMIN's catalogue alone: folding an operator's additions
- *  into it would erase the only difference this reads. */
+ *  **Ticked AND struck is the intersection the engine will apply** (`param_options`), shown as the
+ *  two facts it is: what the operator asked for, and what the endpoint will take. Folding them
+ *  into one set here is what would let a repaint emit the model's refusals as the campaign's own
+ *  narrowing. `userAdded` = neither the node nor the model offered it, so the operator typed it.
+ *  That is why `available_models` is served as the ADMIN's catalogue alone: folding an operator's
+ *  additions into it would erase the only difference this reads. */
 function axisMenu(row: ConfigRow, caps: ModelCapability | undefined) {
   const ladder = effortLadder(row, caps);
   const rest = [...new Set([...ladder, ...row.allowed])].filter((v) => v !== row.value);

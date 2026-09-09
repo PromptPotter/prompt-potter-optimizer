@@ -567,6 +567,23 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
 
+    p_probe = sub.add_parser(
+        "probe-reasoning",
+        help="Debug diagnostic (NOT a loop feature): ask ONE model which reasoning rungs it "
+        "honours and print the `registry._MODEL_PROFILES` row the readings support. A "
+        "catalogue publishes that `reasoning_effort` EXISTS and never which values it takes, "
+        "so this is the only way that table gets filled. ~6 cheap calls of real spend; writes "
+        "nothing, and the loop never invokes it.",
+    )
+    p_probe.add_argument(
+        "model", help="Model id, e.g. openai/gpt-oss-20b (a :nitro suffix is fine)"
+    )
+    p_probe.add_argument(
+        "--provider",
+        default="openrouter",
+        help="Which gateway answers (default: openrouter).",
+    )
+
     p_pause = sub.add_parser(
         "pause",
         help="Ask a running cycle to stop at its next checkpoint (resumable by `resume`). "

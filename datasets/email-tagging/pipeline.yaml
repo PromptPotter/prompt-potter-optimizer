@@ -34,7 +34,6 @@ nodes:
         - answer_format
       param_allowed_values:
         reasoning_effort:
-          - none
           - default
           - low
       observation_name: llm_only

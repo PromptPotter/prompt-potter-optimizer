@@ -29,50 +29,53 @@ class ProviderSpec:
 
 @dataclass(frozen=True)
 class ModelProfile:
-    """Static facts about one model's serving behaviour. A REASONING model spends output budget on hidden tokens before emitting content, so
-    ``max_tokens`` below ``min_max_tokens`` returns nothing — the floor turns that paid-for silence into a preflight block."""
+    """What we MEASURED about one model's serving behaviour. A row IS the claim that this model
+    reasons — ``model_profile`` answers ``None`` for anything unprofiled, so an unknown model is
+    never assumed to reason and can block no run."""
 
-    is_reasoning: bool
+    # Below this floor a reasoning model spends its whole output budget thinking and emits nothing;
+    # `preflight.check_model_reasoning_floors` turns that paid-for silence into a block.
     min_max_tokens: int = 0
-    notes: str = ""
+    # Rungs the endpoint REFUSES — the only thing that narrows the offered ladder, since no
+    # catalogue publishes a value set. Applied in `capabilities.py`.
+    refuses_efforts: frozenset[str] = frozenset()
+    # Rungs measured to produce the SAME call — never subtracted, only reported. THREE-STATE, and
+    # the middle one is the trap: `None` is unprobed, `frozenset()` is probed and all distinct.
+    indistinct_efforts: frozenset[str] | None = None
 
 
-# Per-model profiles, keyed by the normalized ``org/model`` id (routing suffix like
-# ``:nitro`` stripped). ONLY the models we run today — extend as we add models. The floors
-# are first estimates from observed ``reasoning_budget_exhausted`` failures, meant to be
-# refined as we measure more; the per-model + per-provider quirks they encode are the prose
-# in ``docs/operations/dataset-reasoning-matrix.md`` given a code home. A floor of 8000
-# catches the egregious case (l1_critique @ 4000 → 0 content) without flagging the working
-# nodes (l2_context/l3_plan @ 8000, checkin @ 10000, l1_generate @ 12000); the complementary
-# lever for a reasoning model is keeping ``reasoning_effort`` low so reasoning stays bounded.
+# Per-model profiles, keyed by the normalized ``org/model`` id — ONLY the models we run today, and
+# a model absent here simply gets no measured layer. Fill one with `probe-reasoning <model>`.
+# What each measurement means per dataset: ``docs/operations/dataset-reasoning-matrix.md``.
 _MODEL_PROFILES: dict[str, ModelProfile] = {
-    "deepseek/deepseek-v4-flash": ModelProfile(
-        is_reasoning=True,
-        min_max_tokens=8000,
-        notes="Emits ~4k reasoning tokens before content (median 4.5k measured, tail 11.4k); a "
-        "4k cap returned 0 content on l1_critique. The FLOOR is what this profile knows — which "
-        "reasoning_effort distils better is not, and was never measured; the manifest sets that "
-        "per node. Budget the tail, not the median: effort moves output ~27% per two steps.",
-    ),
+    "deepseek/deepseek-v4-flash": ModelProfile(min_max_tokens=8000),
     "openai/gpt-oss-20b": ModelProfile(
-        is_reasoning=True,
         min_max_tokens=8000,
-        notes="Groq route enforces a ~2048-tok output ceiling that COUNTS reasoning tokens — "
-        "keep reasoning_effort<=low; a numeric max_tokens is a per-cycle override, not a default.",
+        refuses_efforts=frozenset({"none"}),
+        indistinct_efforts=frozenset(),
     ),
     "openai/gpt-oss-120b": ModelProfile(
-        is_reasoning=True,
         min_max_tokens=8000,
-        notes="Over-reasons on long optimizer prompts and returns empty content; keep effort low.",
+        refuses_efforts=frozenset({"none"}),
+        indistinct_efforts=frozenset(),
+    ),
+    "qwen/qwen3.7-flash": ModelProfile(
+        indistinct_efforts=frozenset({"minimal", "low", "medium", "high"})
+    ),
+    "inclusionai/ling-3.0-flash": ModelProfile(
+        indistinct_efforts=frozenset({"minimal", "low", "medium", "high"})
     ),
 }
 
 
+def normalize_model_id(model: str) -> str:
+    """A model's IDENTITY, without the routing suffix — ``:nitro`` picks a HOST, and every host of
+    one model takes the same parameters."""
+    return model.split(":", 1)[0].strip().lower()
+
+
 def model_profile(model: str) -> ModelProfile | None:
-    """Profile for a model string, normalizing the id and stripping a routing suffix. ``None`` when unprofiled — an unknown
-    model is never ASSUMED to be a reasoning model, so it cannot block a run."""
-    base = model.split(":", 1)[0].strip().lower()
-    return _MODEL_PROFILES.get(base)
+    return _MODEL_PROFILES.get(normalize_model_id(model))
 
 
 _OPENAI_COMPAT_SPECS: dict[str, ProviderSpec] = {

@@ -160,11 +160,9 @@ def build_l1_response_schema(
     # (PARAM_FORBIDDEN_KEYS), so those locks stay structural: the LLM cannot emit a key
     # the schema never declares, and they need no per-round rejection.
     #
-    # `model` DOES arrive here when its node opened it, and its enum is the node's
-    # permitted set (`PipelineSchema.model_options`). The enum is the whole guard —
-    # emitting `model` as an unbounded string would let the LLM invent a model id — so
-    # a node whose permitted set is EMPTY gets no `model` property at all rather than a
-    # bare `{"type": "string"}`.
+    # `model` arrives here like any other axis — `param_options` answers for all of them, so this
+    # loop carries no per-param special case. The enum is the whole guard (an unbounded `model`
+    # string would let the LLM invent an id), which is why an EMPTY space emits no property.
     for node_name, keys in pipeline_schema.node_param_keys().items():
         node = pipeline_schema.get_node(node_name)
         if node is None:
@@ -176,13 +174,12 @@ def build_l1_response_schema(
         nested = {p for p in keys if node.param_types.get(p) in NESTED_PARAM_TYPES}
         param_props: dict[str, dict[str, Any]] = {}
         for param in sorted(keys - nested):
-            if param == "model":
-                permitted = pipeline_schema.model_options(node)
-                if permitted:
-                    param_props[param] = {"type": "string", "enum": permitted}
-                continue
-            allowed = node.param_allowed_values.get(param)
+            allowed = pipeline_schema.param_options(node, param)
             declared_type = node.param_types.get(param)
+            # `[]` (declared, nothing legal) is not `None` (no space declared): the first emits no
+            # property, never a bare string the LLM fills with something the endpoint rejects.
+            if allowed is not None and not allowed:
+                continue
             if allowed:
                 param_props[param] = {"type": "string", "enum": list(allowed)}
             elif declared_type:

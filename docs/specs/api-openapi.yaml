@@ -3586,10 +3586,10 @@ components:
       required: [model, reasoning_efforts, reasoning_note, source]
       description: |
         What ONE model accepts and costs, resolved server-side through the operator's
-        hand-authored `model_capabilities.yaml`, then the per-tenant provider snapshot, then
-        unknown. Every card field is optional and a surface renders only what is present — the
-        catalogue is a third party's claim, so a field it drops must shorten the card rather
-        than blank it.
+        hand-authored `model_capabilities.yaml`, then our own MEASUREMENT of the live endpoint,
+        then the per-tenant provider snapshot, then unknown. Every card field is optional and a
+        surface renders only what is present — the catalogue is a third party's claim, so a field
+        it drops must shorten the card rather than blank it.
       properties:
         model: { type: string }
         reasoning_efforts:
@@ -3608,6 +3608,24 @@ components:
             Why the ladder reads as it does — populated in EVERY arm (unknown, no effort knob,
             operator override, full ladder). A reason that appears only sometimes is a state
             nothing can report.
+        unsupported_params:
+          type: array
+          nullable: true
+          items: { type: string }
+          description: |
+            Of the keys we actually put on the wire (`openai_compat.PROVIDER_REQUEST_PARAMS`),
+            which this model does not accept. `null` is UNKNOWN, never "accepts everything";
+            `[]` is the real "takes them all". Scoped to what we send, because a catalogue has
+            no opinion on a backend's own knobs and marking one would be a confident wrong answer.
+        indistinct_efforts:
+          type: array
+          nullable: true
+          items: { type: string }
+          description: |
+            Rungs MEASURED to produce the same call on this model — legal, still offered, and not
+            a difference. Never subtracted from `reasoning_efforts`: an axis keeps every value it
+            can legally take, and this is the reading that stops two spellings of one call being
+            scored as two arms. `null` is UNMEASURED, `[]` measured-and-all-distinct.
         source:
           type: string
           enum: [override, openrouter, unknown]

@@ -36,6 +36,9 @@ COMMANDS = {
     "noise-floor": "promptpotter.presentation.cli.commands.noise_floor:cmd_noise_floor",
     "seed-screen": "promptpotter.presentation.cli.commands.seed_screen:cmd_seed_screen",
     "evidence": "promptpotter.presentation.cli.commands.evidence:cmd_evidence",
+    "probe-reasoning": (
+        "promptpotter.presentation.cli.commands.probe_reasoning:cmd_probe_reasoning"
+    ),
     "archive": "promptpotter.presentation.cli.commands.lifecycle:cmd_archive",
     "delete": "promptpotter.presentation.cli.commands.lifecycle:cmd_delete",
     "unarchive": "promptpotter.presentation.cli.commands.lifecycle:cmd_unarchive",

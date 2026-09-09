@@ -25,6 +25,7 @@ from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.backend import BackendClient, build_backend_client
+from promptpotter.infrastructure.llm.capabilities import ensure_model_capabilities
 from promptpotter.infrastructure.store.archive_views import maintain_measurement_index
 from promptpotter.infrastructure.store.dataset_access import (
     dataset_panel_rows,
@@ -327,6 +328,9 @@ async def init_services(
     # isolates — held on the event loop it blocks every other cell in the group and every
     # heartbeat keeping them alive.
     await asyncio.to_thread(maintain_measurement_index, stores)
+
+    # The run is an entry point that spends, so it ensures its own snapshot — age-gated, non-fatal.
+    await ensure_model_capabilities(Path(stores.base_dir))
 
     dataset_config_dir = readable_dataset_dir(stores, dataset_name)
     backend_type = _read_backend_type(dataset_config_dir, dataset_name)

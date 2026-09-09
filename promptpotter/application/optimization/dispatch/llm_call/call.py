@@ -213,6 +213,7 @@ async def llm_call(
             seed=merged.get("seed"),
             max_tokens=merged.get("max_tokens"),
             reasoning_effort=merged.get("reasoning_effort"),
+            top_p=merged.get("top_p"),
             route_order=merged.get("route_order"),
         )
         replayed = _replay(context.cache, cache_key, label=label)
@@ -320,6 +321,7 @@ async def llm_call(
                         response_model=response_model,
                         response_schema=response_schema,
                         reasoning_effort=merged.get("reasoning_effort"),
+                        top_p=merged.get("top_p"),
                         seed=merged.get("seed"),
                         **route_kwargs,
                     )

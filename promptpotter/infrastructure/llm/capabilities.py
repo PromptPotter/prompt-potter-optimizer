@@ -1,21 +1,27 @@
-"""What a MODEL accepts and costs — resolved in three layers, hand-authored first, so a wrong or
+"""What a MODEL accepts and costs — resolved in four layers, hand-authored first, so a wrong or
 missing fetch is always correctable without a code change.
 
 Distinct from ``registry._MODEL_PROFILES``, deliberately, and the split is what keeps either
-usable. That table holds facts WE measured (a reasoning model's ``max_tokens`` floor, observed
-from real ``reasoning_budget_exhausted`` failures) and it belongs in code because it is evidence.
-This holds facts the PROVIDER declares, which go stale on their schedule rather than ours and
-cannot be shipped in a release. Merging them would make one file both evidence and cache.
+usable. That table holds facts WE measured against the live endpoint — a reasoning model's
+``max_tokens`` floor, which effort rungs it refuses or cannot distinguish — and it belongs in code
+because it is evidence. This holds facts the PROVIDER declares, which go stale on their schedule
+rather than ours and cannot be shipped in a release. Merging them would make one file both
+evidence and cache.
 
 The layers, highest first:
 
 1. ``model_capabilities.yaml`` in the tenant's own workspace — HAND-AUTHORED, and the reason the
    whole thing is safe to build on a third party's metadata. A locally-hosted model appears in no
    catalogue at all; a provider's list can simply be wrong. Either is one file away from fixed.
-2. ``.cache/model_capabilities.json`` in the same workspace — the fetched snapshot. Per TENANT
+2. ``registry._MODEL_PROFILES`` — what WE measured against the live endpoint, which narrows the
+   fetched ladder below but can never widen it. The catalogue reports that ``reasoning_effort``
+   exists and never which values it takes, so a model carrying the parameter can still 400 on one
+   (``openai/gpt-oss-20b`` on ``none``). Composed here, not merged: the tables stay apart, and
+   ``reasoning_note`` says which layer narrowed the answer.
+3. ``.cache/model_capabilities.json`` in the same workspace — the fetched snapshot. Per TENANT
    rather than per install: which models an operator asks about is their business, and a shared
    cache would pool that across accounts.
-3. Nothing — ``reasoning_efforts=None``, which every caller must render as UNKNOWN and never as
+4. Nothing — ``reasoning_efforts=None``, which every caller must render as UNKNOWN and never as
    unsupported. An absent answer that reads as "no" silently deletes a real search axis.
 
 The snapshot stores the provider's fields RAW and derives at resolve time. A derived cache
@@ -28,10 +34,13 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.pipeline_schema import ModelCapability, PipelineSchema
+from promptpotter.infrastructure.llm.openai_compat import PROVIDER_REQUEST_PARAMS
+from promptpotter.infrastructure.llm.registry import model_profile, normalize_model_id
 from promptpotter.infrastructure.store.io import (
     read_json_tolerant,
     read_yaml_optional,
@@ -58,32 +67,18 @@ the optimizer manifest's ``$PROMPTPOTTER_HOME`` shadow. Shape, and every key opt
 
 _CACHE_REL = Path(".cache") / "model_capabilities.json"
 
-# The effort ladder is only OFFERED by a model that takes the parameter. OpenRouter reports the
-# parameter's presence, not its value set — `reasoning_effort` in `supported_parameters` means the
-# ladder is live, `reasoning` alone means the model reasons but takes no effort knob (measured:
-# `qwen/qwen3.7-flash` has `reasoning` + `include_reasoning` and no `reasoning_effort`, while
-# `openai/gpt-oss-20b` carries all three). Reading `reasoning` as the ladder is the mistake this
-# constant exists to prevent.
+# PROVENANCE ONLY — this bounds nothing. The catalogue reports the parameter's presence, never its
+# value set, and presence predicts acceptance in neither direction: `qwen/qwen3.7-flash` carries no
+# `reasoning_effort` and honours every rung, `openai/gpt-oss-20b` carries it and 400s on `none`.
 _EFFORT_PARAM = "reasoning_effort"
 
-# What a model taking no effort parameter still accepts, because these two are OURS: the node
-# config uses them to mean "send nothing" and "send the provider default", so neither reaches the
-# wire as an effort value. Every other rung does.
-_NON_PROVIDER_EFFORTS: frozenset[str] = frozenset({"none", "default"})
-
 STANDARD_EFFORT_LADDER: tuple[str, ...] = ("none", "default", "low", "medium", "high")
-"""The rungs a model taking ``reasoning_effort`` is offered — OURS, not a provider's: the
-catalogue reports that the parameter exists and never its value set, so this is the ladder we
-send. It REPLACES whatever a node declared rather than intersecting with it, because the node's
-list is a default authored before anyone knew which model would run there.
+"""The rungs EVERY model is offered — OURS, not a provider's, since no catalogue publishes a value
+set. Narrowed only by measured ``refuses_efforts``. It REPLACES whatever a node declared, because
+the node's list is a default authored before anyone knew which model would run there; a CAMPAIGN's
+narrowing intersects instead (``PipelineSchema.param_options``).
 ``assets/optimizer/pipeline.yaml`` lists exactly these five; a YAML cannot import a constant, so
 that file cites this one by name."""
-
-
-def _normalize(model: str) -> str:
-    """The routing suffix is not part of a model's identity — ``:nitro`` picks a HOST, and every
-    host of one model takes the same parameters. Mirrors ``registry.model_profile``."""
-    return model.split(":", 1)[0].strip().lower()
 
 
 def _override_path(workspace: Path) -> Path:
@@ -134,11 +129,11 @@ def _card(model: str, entry: dict[str, Any], fetched_at: str) -> dict[str, Any]:
 
 
 def resolve_model_capabilities(model: str, *, workspace: Path) -> ModelCapability:
-    """The three-layer read for ONE model.
+    """The four-layer read for ONE model.
 
     Returns the ladder this model OFFERS, which is a fact about the model and not about any node.
     A caller holding a node's declared ladder uses it only where the answer is ``None``."""
-    key = _normalize(model)
+    key = normalize_model_id(model)
 
     override = read_yaml_optional(_override_path(workspace)) or {}
     entry = override.get(key) if isinstance(override, dict) else None
@@ -173,8 +168,6 @@ def resolve_model_capabilities(model: str, *, workspace: Path) -> ModelCapabilit
             source="unknown",
         )
 
-    from promptpotter.infrastructure.llm.openai_compat import PROVIDER_REQUEST_PARAMS
-
     raw_params = record.get("supported_parameters")
     # The GENERAL answer, computed once here so no surface re-derives it: of the keys we would
     # actually send, which does this model not accept. Only where the catalogue DECLARED a list —
@@ -187,17 +180,34 @@ def resolve_model_capabilities(model: str, *, workspace: Path) -> ModelCapabilit
     else:
         params = []
         unsupported = None
-    takes_effort = _EFFORT_PARAM in params
+    offered = list(STANDARD_EFFORT_LADDER)
+    note = (
+        "Catalogue lists reasoning_effort."
+        if _EFFORT_PARAM in params
+        else "Catalogue lists no reasoning_effort — which does not mean the rungs are inert here."
+    )
+
+    # Measurement outranks the catalogue; only the operator override (above) outranks measurement.
+    # A composition, not a merge — the tables stay apart and the note says which layer narrowed.
+    profile = model_profile(model)
+    indistinct: list[str] | None = None
+    if profile is not None:
+        if refused := profile.refuses_efforts & set(offered):
+            offered = [rung for rung in offered if rung not in refused]
+            note += f" Measured to REFUSE {', '.join(sorted(refused))}, so not offered."
+        # NOT subtracted — an indistinct rung is legal and stays in the axis; what it is not is a
+        # difference. Absence carries through as absence: a profile that never probed the rungs
+        # answers UNKNOWN, where `[]` would claim they were measured and found distinct.
+        if profile.indistinct_efforts is not None:
+            indistinct = sorted(profile.indistinct_efforts & set(offered))
+            if indistinct:
+                note += f" Measured INDISTINCT from each other: {', '.join(indistinct)}."
+
     return ModelCapability(
         model=model,
-        reasoning_efforts=(
-            list(STANDARD_EFFORT_LADDER) if takes_effort else sorted(_NON_PROVIDER_EFFORTS)
-        ),
-        reasoning_note=(
-            "Takes reasoning_effort — the full ladder is live."
-            if takes_effort
-            else "Takes no reasoning_effort parameter, so only the two rungs that send nothing."
-        ),
+        reasoning_efforts=offered,
+        reasoning_note=note,
+        indistinct_efforts=indistinct,
         source="openrouter",
         unsupported_params=unsupported,
         **_card(model, record, str(cached.get("fetched_at") or "")),
@@ -226,6 +236,28 @@ def resolve_schema_menu(
     rendered blank, silently, on the surface where the spend is committed. Spelled once, so the
     next door to open cannot re-derive it wrongly."""
     return resolve_menu(schema.selectable_models(), workspace=workspace)
+
+
+async def ensure_model_capabilities(
+    workspace: Path, *, max_age_days: float = 7.0, timeout: float = 15.0
+) -> int:
+    """Fetch the snapshot if this workspace has none or has a stale one. Returns models stored, 0
+    when nothing was written — including the healthy "already fresh" case, which is not a failure.
+
+    Every entry point that can SPEND calls this, not just the HTTP ingest routes: without a
+    snapshot every model resolves ``source="unknown"``, which this module's contract makes the
+    reader render as UNKNOWN, and the whole resolve goes inert. Non-fatal — the fetch is one
+    unauthenticated GET, and a failed one keeps whatever snapshot already stands."""
+    cached = read_json_tolerant(_cache_path(workspace), default={}) or {}
+    fetched = cached.get("fetched_at") if isinstance(cached, dict) else None
+    if isinstance(fetched, str) and fetched:
+        try:
+            age = datetime.now(UTC) - datetime.fromisoformat(fetched)
+        except ValueError:
+            age = None
+        if age is not None and age < timedelta(days=max_age_days):
+            return 0
+    return await refresh_model_capabilities(workspace, timeout=timeout)
 
 
 async def refresh_model_capabilities(workspace: Path, *, timeout: float = 15.0) -> int:
@@ -260,7 +292,7 @@ async def refresh_model_capabilities(workspace: Path, *, timeout: float = 15.0) 
         if not isinstance(mid, str):
             continue
         params = entry.get("supported_parameters")
-        models[_normalize(mid)] = {
+        models[normalize_model_id(mid)] = {
             "supported_parameters": [str(p) for p in params] if isinstance(params, list) else [],
             "name": entry.get("name"),
             "context_length": entry.get("context_length"),
@@ -278,6 +310,7 @@ __all__ = [
     "CAPABILITY_FILE",
     "MODELS_URL",
     "STANDARD_EFFORT_LADDER",
+    "ensure_model_capabilities",
     "refresh_model_capabilities",
     "resolve_menu",
     "resolve_model_capabilities",

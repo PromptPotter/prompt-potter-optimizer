@@ -277,6 +277,9 @@ class PipelineNode(StrictModel):
     # offered it" (nobody acted) and "the operator held it at mint" (someone did, and could
     # have chosen otherwise). Only the second is a lock, and only the second is worth a click.
     param_keys_held: set[str] = Field(default_factory=set)
+    # Params a CAMPAIGN spoke for, as against a dataset default — indistinguishable once `narrow()`
+    # merges both into `param_allowed_values`, and a model's ladder replaces one but not the other.
+    param_values_narrowed: set[str] = Field(default_factory=set)
     param_descriptions: dict[str, str] = Field(default_factory=dict)
     param_allowed_values: dict[str, list[str]] = Field(default_factory=dict)
     # JSON-schema type per param — drives structured-output constraint + validate_overrides
@@ -455,6 +458,10 @@ class ModelCapability(StrictModel):
     # `reasoning_efforts`, because striking a row on an absent answer deletes a real setting.
     # `[]` is the real "takes everything we send".
     unsupported_params: list[str] | None = None
+    # Rungs measured to produce the SAME call here. `None` UNMEASURED, `[]` measured-all-distinct —
+    # the same absent-answer arm as above. Never subtracted from `reasoning_efforts`: an axis keeps
+    # every value it can legally take, and a caveat is not a filter.
+    indistinct_efforts: list[str] | None = None
     # Which layer answered: "override" (operator-authored), "openrouter" (fetched snapshot),
     # "unknown". Shown so a narrowed list can say whose claim it is.
     source: str
@@ -466,6 +473,17 @@ class ModelCapability(StrictModel):
     modality: str = ""
     moderated: bool | None = None
     fetched_at: str = ""
+
+
+CAPABILITY_ANSWERED_PARAMS: frozenset[str] = frozenset({"reasoning_effort"})
+"""Params a :class:`ModelCapability` answers FOR — one member per answer field it carries. The
+assert below pins that pairing: a param named here with no answer field empties its axis in
+silence."""
+
+_MODEL_ANSWER_FIELDS: frozenset[str] = frozenset(
+    f.removesuffix("s") for f in ModelCapability.model_fields if f.endswith("_efforts")
+)
+assert CAPABILITY_ANSWERED_PARAMS.issubset(_MODEL_ANSWER_FIELDS)
 
 
 class NodeSearchNarrowing(StrictModel):
@@ -502,6 +520,10 @@ class PipelineSchema(StrictModel):
     declared_nodes: list[PipelineNode] = Field(default_factory=list)
     available_models: list[str] = Field(default_factory=list)
     view: PipelineView | None = None
+    # What each selectable model answers for its own knobs (`infrastructure/llm/capabilities.py`),
+    # read through `param_options`. Rides the schema and NOT the identity — `sp_hash` folds node
+    # configs — so a refreshed snapshot re-keys nothing. Empty is UNKNOWN, never "accepts nothing".
+    model_capabilities: dict[str, ModelCapability] = Field(default_factory=dict)
 
     # DERIVED ON READ, never cached at init: `narrow()` and `filter_to_steps()` build with
     # `model_copy`, which skips `model_post_init`, so a cached index answered with pre-copy nodes.
@@ -553,15 +575,68 @@ class PipelineSchema(StrictModel):
 
     def model_options(self, node: "PipelineNode") -> list[str]:
         """The PERMITTED model set for one node — its own ``param_allowed_values["model"]`` when
-        declared, else the pipeline's ``available_models`` catalogue.
+        declared, else the pipeline's ``available_models`` catalogue. PREFERS where
+        :meth:`selectable_models` unions; the contrast is argued there. The search path reaches it
+        through :meth:`param_options`, never directly.
 
-        The single answer to "which models may run here", shared by the L1 wire schema (whose enum
-        this bounds), ``validate_overrides`` (which rejects against it) and the param catalogue the
-        optimizer prompt renders. **Empty is a real answer** — no catalogue and no declaration
-        means the axis has no value space, and a caller must then emit nothing rather than an
-        unbounded string the LLM would fill with an invented model id."""
+        **Empty is a real answer** — no catalogue and no declaration means the axis has no value
+        space, and a caller must emit nothing rather than an unbounded string the LLM would fill
+        with an invented model id."""
         declared = node.param_allowed_values.get("model")
         return list(declared) if declared else list(self.available_models)
+
+    def param_options(
+        self, node: "PipelineNode", param: str, *, model: str | None = None
+    ) -> list[str] | None:
+        """The permitted VALUE SET for ONE axis — ``model`` included, which is why no caller
+        branches on the param name. Which layer answers: ``infrastructure/CLAUDE.md``.
+
+        Three answers, and no caller may collapse two: ``None`` is no declared space, ``[]`` is
+        declared with nothing legal left, a list is the space. Falsy-testing the first two together
+        turns an over-narrowed axis into an unbounded one.
+
+        *model* overrides the node's current pick, because the two axes move together: a candidate
+        proposing a model and a rung at once is judged against the model it would run on."""
+        if param == "model":
+            # Delegated, not duplicated — `model_options` owns the catalogue-vs-declaration PREFER
+            # rule, and :meth:`node_config_schema` reads it for the served `permitted` set.
+            return self.model_options(node)
+        declared = list(node.param_allowed_values.get(param) or ()) or None
+        answered = self._answering(node, param, model)
+        offered = answered.reasoning_efforts if answered else None
+        if offered is None:
+            return declared
+        # A campaign closing is an ADR-0005-gated act: the model may still strike a rung it refuses,
+        # never hand back one the operator took away. Only a dataset default is replaced outright.
+        if param in node.param_values_narrowed and declared is not None:
+            return [rung for rung in offered if rung in set(declared)]
+        return list(offered)
+
+    def param_indistinct(self, node: "PipelineNode", param: str) -> list[str]:
+        """Values MEASURED to produce the same call on the node's current model — legal and
+        offered, so this narrows nothing and is only ever reported. Two candidates separated by one
+        of these are one configuration measured twice.
+
+        Empty covers "nothing measured" and "all distinct" alike: a caller does the same with
+        each."""
+        answered = self._answering(node, param, None)
+        if answered is None or not answered.indistinct_efforts:
+            return []
+        offered = set(self.param_options(node, param) or ())
+        return [v for v in answered.indistinct_efforts if v in offered]
+
+    def _answering(
+        self, node: "PipelineNode", param: str, model: str | None
+    ) -> "ModelCapability | None":
+        """The capability speaking for this ``(node, param)``, or ``None``. Shared by
+        :meth:`param_options` and :meth:`param_indistinct` so the two cannot disagree about which
+        model answers."""
+        if param not in CAPABILITY_ANSWERED_PARAMS or not self.model_capabilities:
+            return None
+        picked = model if model is not None else node.current_config.get("model")
+        if not isinstance(picked, str) or not picked:
+            return None
+        return self.model_capabilities.get(picked)
 
     def selectable_models(self) -> list[str]:
         """Every model a surface here can put on screen — the catalogue UNION each node's own
@@ -644,6 +719,11 @@ class PipelineSchema(StrictModel):
                     kind, options = "model", list(model_menu or self.available_models)
                     permitted = self.model_options(n) if self.model_options(n) != options else None
                 elif key in n.param_allowed_values:
+                    # `permitted` is what THIS CAMPAIGN declared, and never the model-resolved
+                    # space, because it is also what the editor emits back as the narrowing
+                    # (`nodeConfig.ts::nodeNarrowing`). Resolving it here would let a repaint
+                    # bake one model's refusals into the operator's own declaration — and an
+                    # axis resolving to nothing would come back as a closed one.
                     kind = "enum"
                     narrowed = list(n.param_allowed_values[key])
                     wide = (
@@ -773,6 +853,11 @@ class PipelineSchema(StrictModel):
                             # must not forget what an earlier one closed.
                             "param_keys_held": n.param_keys_held | (n.param_keys - keys),
                             "param_allowed_values": allowed,
+                            # Accumulated like the keys above; `param_options` reads it so a
+                            # model's ladder cannot reopen what a campaign deliberately closed.
+                            "param_values_narrowed": (
+                                n.param_values_narrowed | set(nv.param_allowed_values)
+                            ),
                         }
                     )
                 )

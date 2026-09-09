@@ -415,13 +415,16 @@ describe("permittedModels", () => {
   });
 });
 
-// The MODEL's ladder replaces the NODE's, and an unknown model must never subtract a rung.
+// The model's ladder joins the MENU and never the ticks, and an unknown model subtracts nothing.
+// The engine's intersection is `param_options` (pinned in `tests/test_numerics.py`); folding it in
+// here would emit one model's refusals back as the campaign's own narrowing.
 describe("effortLadder", () => {
   const caps = (over: Partial<ModelCapability>): ModelCapability => ({
     model: "m",
     reasoning_efforts: null,
     reasoning_note: "",
     unsupported_params: null,
+    indistinct_efforts: null,
     source: "unknown",
     display_name: "",
     context_length: null,
@@ -440,8 +443,9 @@ describe("effortLadder", () => {
   });
 
   it("replaces the node's list — WIDER is the point, not only narrower", () => {
-    expect(effortLadder(effort, caps({ reasoning_efforts: ["none", "low", "medium", "high"] })))
-      .toEqual(["none", "low", "medium", "high"]);
+    expect(
+      effortLadder(effort, caps({ reasoning_efforts: ["none", "low", "medium", "high"] })),
+    ).toEqual(["none", "low", "medium", "high"]);
   });
 
   it("falls back to the node's list when the model is UNKNOWN", () => {

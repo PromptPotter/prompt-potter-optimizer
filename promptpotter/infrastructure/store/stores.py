@@ -51,6 +51,7 @@ def hash_call(
     seed: int | None = None,
     max_tokens: int | None = None,
     reasoning_effort: str | None = None,
+    top_p: float | None = None,
     route_order: list[str] | None = None,
 ) -> str:
     """The key covers EVERY input that can change the answer, and nothing else.
@@ -85,6 +86,10 @@ def hash_call(
     }
     if route_order:
         payload["route_order"] = route_order
+    # Conditional for the same reason as `route_order` above: an unconditional `null` re-keys
+    # every banked reply to record that a lever nobody pulled was not pulled.
+    if top_p is not None:
+        payload["top_p"] = top_p
     blob = json.dumps(payload, sort_keys=True)
     return hashlib.sha256(blob.encode()).hexdigest()[:HASH_TRUNCATE]
 

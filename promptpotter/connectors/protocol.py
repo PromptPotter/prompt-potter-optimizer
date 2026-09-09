@@ -205,10 +205,10 @@ class Connector:
     constraints) merged onto the backend's live ``GET /pipeline`` schema (the
     overlay's ``config``/``optimizer`` sub-blocks shallow-merge, so a partial
     clamp narrows the backend schema rather than clobbering it). TermNorm uses
-    this to clamp ``llm_only.reasoning_effort`` — origin floor ``low`` plus a
-    ``param_allowed_values`` set with ``medium``/``high`` crossed out, so the
-    optimizer can never escalate reasoning campaign-wide (a cost rail, not just
-    an origin). Empty mapping means "no seed; the backend schema stands."
+    this to seed ``llm_only.reasoning_effort`` at ``low``. A seeded
+    ``param_allowed_values`` is a DEFAULT, so ``PipelineSchema.param_options``
+    replaces it wherever the model has answered — a cost rail has to be a check-in
+    narrowing, which intersects. Empty mapping means "no seed; the backend schema stands."
     Draft ``pipeline_overlay`` (operator edits) layers on top of this."""
 
     available_models: tuple[str, ...] = ()

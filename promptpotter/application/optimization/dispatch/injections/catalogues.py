@@ -60,20 +60,31 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> list[Item]:
         if not node or not params:
             continue
         descs = node.param_descriptions
-        enums = node.param_allowed_values
         bits: list[str] = []
         for p in sorted(params):
-            allowed = schema.model_options(node) if p == "model" else enums.get(p)
+            allowed = schema.param_options(node, p)
+            # `[]` is a declared axis with nothing legal left, and the wire schema emits no
+            # property for it — so listing it here would advertise a mutation L1 cannot make.
+            if allowed is not None and not allowed:
+                continue
             if allowed:
                 shown = list(allowed)[:AXES_ENUM_PREVIEW]
                 preview = ", ".join(str(x) for x in shown)
                 if len(allowed) > AXES_ENUM_PREVIEW:
                     preview += f", … (+{len(allowed) - AXES_ENUM_PREVIEW})"
+                # Indistinct rungs stay on the menu; L1 is told that moving between them is not a
+                # mutation, or a variant re-measures the configuration it started from.
+                if same := schema.param_indistinct(node, p):
+                    preview += f"; {'='.join(same)} identical here"
                 bits.append(f"{p} [{preview}]")
             elif desc := descs.get(p):
                 bits.append(f"{p} ({desc[:40]})")
             else:
                 bits.append(p)
+        # Every axis skipped leaves the node with nothing to offer, and a bare `name:` in the
+        # menu reads as an axis whose values went missing rather than as a node with none.
+        if not bits:
+            continue
         lines.append(f"  {node_name}: {', '.join(bits)}")
         if SCHEMA_DESCRIPTIONS_PARAM in params:
             lines.extend(_schema_description_block(node))

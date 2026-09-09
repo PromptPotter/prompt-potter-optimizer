@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, ValidationError
 
+from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.llm.base import LLMClientBase
 from promptpotter.infrastructure.llm.json_parse import (
@@ -115,8 +116,19 @@ def _failure_diagnostics(response: ChatCompletion, first: TokenAccount) -> dict[
 # `scrape_timeout`, …) belongs to the BACKEND, and no model catalogue has an opinion on it —
 # marking one of those would be a confident wrong answer.
 PROVIDER_REQUEST_PARAMS: frozenset[str] = frozenset(
-    {"temperature", "max_tokens", "reasoning_effort", "seed", "response_format"}
+    {"temperature", "max_tokens", "reasoning_effort", "seed", "response_format", "top_p"}
 )
+
+# Every tunable AXIS must be a key we actually send. The reverse does not hold — `seed` and
+# `response_format` ride the wire without being search axes — but an axis outside this set is one
+# the optimizer can open, search and never move: every value produces an identical call, and the
+# round still scores the difference. An assert rather than a comment because nothing else fails.
+assert PARAM_SCOPE_KEYS <= PROVIDER_REQUEST_PARAMS
+
+PROVIDER_DEFAULT_EFFORT = "default"
+"""The rung that OMITS the field — ours, and the only one. Every other rung is a value the provider
+defines, ``none`` included, which means reasoning genuinely OFF rather than absent. Declared beside
+the sender because it is a wire fact: stated anywhere else, it goes out as a literal string."""
 
 
 class OpenAICompatibleClient(LLMClientBase):
@@ -170,6 +182,7 @@ class OpenAICompatibleClient(LLMClientBase):
         response_model: type[BaseModel] | None = None,
         response_schema: dict[str, Any] | None = None,
         reasoning_effort: str | None = None,
+        top_p: float | None = None,
         seed: int | None = None,
         route_order: list[str] | None = None,
         **kwargs: Any,
@@ -185,13 +198,16 @@ class OpenAICompatibleClient(LLMClientBase):
             request_params["max_tokens"] = max_tokens
         # Bounded reasoning is a survival guard (the openrouter/gpt-oss optimizer nodes blow the
         # call deadline at unbounded effort); the OpenAI-compatible field is top-level. Omitted
-        # when unset so a provider that doesn't accept it never sees a null.
-        if reasoning_effort is not None:
+        # when unset so a provider that doesn't accept it never sees a null — and on
+        # `PROVIDER_DEFAULT_EFFORT`, the rung that MEANS omission.
+        if reasoning_effort is not None and reasoning_effort != PROVIDER_DEFAULT_EFFORT:
             request_params["reasoning_effort"] = reasoning_effort
         # Temperature 0 pins the distribution, not the draw — without a seed the provider is
         # still free to sample differently on identical input. Omitted when unset, same as above.
         if seed is not None:
             request_params["seed"] = seed
+        if top_p is not None:
+            request_params["top_p"] = top_p
         # Ask for the cost + cache breakdown rather than hoping it rides along. Via `extra_body`
         # because `create()` takes named params only: a bare `usage=` is a TypeError in the SDK,
         # never a request the provider gets to answer.
@@ -233,6 +249,13 @@ class OpenAICompatibleClient(LLMClientBase):
                 },
             }
 
+        # `extra_body` MERGES; everything else overrides. A blind update let a caller passing
+        # `extra_body=` replace the one built above wholesale, silently dropping `usage` (the cost
+        # and cache breakdown every ledger row is priced from) and `provider` (the route pin a
+        # prefix cache depends on) — two facts nothing downstream can tell were never asked for.
+        if caller_extra := kwargs.pop("extra_body", None):
+            merged = {**extra_body, **caller_extra}
+            request_params["extra_body"] = merged
         request_params.update(kwargs)
 
         # Fail-fast on un-fittable TPM; otherwise block until inside the rolling window.
@@ -480,4 +503,4 @@ class OpenAICompatibleClient(LLMClientBase):
         )
 
 
-__all__ = ["OpenAICompatibleClient"]
+__all__ = ["PROVIDER_DEFAULT_EFFORT", "PROVIDER_REQUEST_PARAMS", "OpenAICompatibleClient"]

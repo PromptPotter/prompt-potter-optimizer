@@ -9,6 +9,7 @@ from promptpotter.config.settings import settings
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.llm.base import LLMClientBase
 from promptpotter.infrastructure.llm.json_parse import parse_response_content
+from promptpotter.infrastructure.llm.openai_compat import PROVIDER_REQUEST_PARAMS
 from promptpotter.infrastructure.llm.rate_limit import (
     ANTHROPIC_RPM_HEADER,
     ANTHROPIC_TPM_HEADER,
@@ -22,6 +23,13 @@ if TYPE_CHECKING:
     from anthropic import AsyncAnthropic
 
 logger = logging.getLogger(__name__)
+
+# Request fields the OpenAI-compat client puts on the wire that have no Anthropic equivalent.
+# Derived from that set rather than hand-listed, minus the ones this client does send, so a key
+# added to `chat` over there cannot quietly become a silent no-op over here.
+_UNSENDABLE_HERE: frozenset[str] = (
+    PROVIDER_REQUEST_PARAMS - {"temperature", "max_tokens", "response_format", "top_p"}
+) | {"route_order"}
 
 
 class AnthropicClient(LLMClientBase):
@@ -56,6 +64,7 @@ class AnthropicClient(LLMClientBase):
         max_tokens: int | None = None,
         response_model: type[BaseModel] | None = None,
         response_schema: dict[str, Any] | None = None,
+        top_p: float | None = None,
         **kwargs: Any,
     ) -> LLMResponse:
         # Anthropic has no wire ``response_format``: JSON is contractual via the prompt;
@@ -70,6 +79,15 @@ class AnthropicClient(LLMClientBase):
                 "AnthropicClient: response schema is parsed client-side and never sent — "
                 "field order and `description` strings reach no model on this provider. "
                 "Schema-axis optimization against Anthropic measures nothing."
+            )
+        # A search axis that EVAPORATES is worse than one that refuses: taken into `**kwargs` it
+        # reaches no wire, the round still scores, and the difference is credited to a mutation
+        # nothing carried.
+        if unsent := sorted(k for k in kwargs if k in _UNSENDABLE_HERE):
+            raise ValueError(
+                f"AnthropicClient cannot send {', '.join(unsent)} — these are OpenAI-compat "
+                "request fields with no Anthropic equivalent. Close the axis on the node "
+                "(`optimizer.param_keys`) rather than letting it read as searched."
             )
         client = self._ensure_client()
 
@@ -93,6 +111,8 @@ class AnthropicClient(LLMClientBase):
         }
         if system_message:
             request_params["system"] = system_message
+        if top_p is not None:
+            request_params["top_p"] = top_p
 
         # Reserve against the number we are ABOUT TO SEND, not the caller's raw one. With
         # `max_tokens=None` the request asks for 8192 while the reservation asked for
