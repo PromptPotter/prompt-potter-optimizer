@@ -164,7 +164,7 @@ class CandidatesGeneratedView:
 @dataclass(frozen=True)
 class ScoreEntry:
     label: str
-    accuracy: float
+    accuracy: float | None
     composite_fitness: float | None
     total: int
     mean_fitness_ci_lo: float | None
@@ -327,7 +327,7 @@ class DigestStatusView:
 class RoundDigestView:
     round: int
     label: str
-    accuracy: float
+    accuracy: float | None
     improved: bool
     total: int
     composite_fitness: float

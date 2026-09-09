@@ -213,7 +213,10 @@ class ScoredCandidate(StrictModel):
     candidate_id: str
     label: str
     changes_description: str = ""
-    accuracy: float
+    # ``None`` is UNSCOREABLE and is not ``0.0``: a candidate that ran and produced nothing usable
+    # scored zero, one whose every row errored was never read. ``composite_fitness`` beside it
+    # keeps its floor, so this moves no election — only what a surface may report.
+    accuracy: float | None
     composite_fitness: float
     total: int
     evaluators: dict[str, float] = Field(default_factory=dict)
@@ -649,7 +652,9 @@ class RoundResult(StrictModel):
     # in-memory repair): absent, never 0, which is a real offset naming the cycle's first record.
     at_offset: int | None = None
     label: str
-    accuracy: float
+    # ``None`` where the round measured nothing readable — see ``ScoredCandidate.accuracy``. Not
+    # defaulted: a MISSING key must fail rather than quietly become a rate.
+    accuracy: float | None
     composite_fitness: float = 0.0
     total: int
     improved: bool

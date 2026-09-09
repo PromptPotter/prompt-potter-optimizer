@@ -162,9 +162,11 @@ class LiveDisplay(DerivedView):
     def origin_acc(self) -> float:
         return self._core.origin_acc
 
-    def set_origin(self, fresh: float) -> None:
+    def set_origin(self, fresh: float | None) -> None:
         """Post-origin rewire — the headline scalars ONLY. It does not seed a row: round 0 arrives through ``on_round_complete``
         like every round, and a synthetic one put the origin in the table twice and shifted every later round number."""
+        if fresh is None:
+            return
         self._core.origin_acc = fresh
         self._core.best_acc = max(self._core.best_acc, fresh)
 

@@ -207,7 +207,7 @@ class EscalationFSM:
         improved: bool,
         compared: bool,
         separable: bool | None,
-        current_accuracy: float,
+        current_accuracy: float | None,
         l1_patience: int,
         lives: LivesConfig | None = None,
         axes_with_positive_yield: int | None = None,

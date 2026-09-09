@@ -39,8 +39,10 @@ class EvolutionRow:
     alone."""
 
     round: int = 0
-    accuracy: float = 0.0
-    delta: float = 0.0
+    # ``None`` where the round measured nothing readable, and ``delta`` is ``None`` with it: a gap
+    # in the series is not a flat stretch of it.
+    accuracy: float | None = None
+    delta: float | None = None
     degraded: int = 0
     n_candidates: int = 0
     elected: bool = False

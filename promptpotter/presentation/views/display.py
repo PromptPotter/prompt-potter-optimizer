@@ -223,7 +223,7 @@ def _scoreboard(
         # A row whose matched floor genuinely scored 0.0 keeps its 0.0 — `or` cannot tell
         # that from absence.
         row_parent = s.matched_parent_accuracy
-        delta = acc - row_parent if row_parent is not None else None
+        delta = acc - row_parent if row_parent is not None and acc is not None else None
         delta_str = f"{delta:+.1%}" if delta is not None and abs(delta) >= 0.001 else "---"
         aborted = s.escalation_aborted
         if aborted:

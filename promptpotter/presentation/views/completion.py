@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import html
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from promptpotter.domain.phases import StopReason
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
@@ -42,9 +42,10 @@ def render_completion(
 
     # The best round is derived here rather than taken as an argument: every caller computed the
     # same `max` over `result.rounds`, and one of them keyed it off a `model_dump()` dict.
-    best = max(result.rounds, key=lambda r: r.accuracy, default=None)
+    measured = [r for r in result.rounds if r.accuracy is not None]
+    best = max(measured, key=lambda r: cast("float", r.accuracy), default=None)
     headline = f"Rounds       {result.n_l1_rounds:<15d}"
-    if best is not None:
+    if best is not None and best.accuracy is not None:
         headline += f"Best         {best.accuracy:.1%} (round {best.round})"
     fields: list[str] = [headline, f"Stop reason  {result.stop_reason}"]
     if paused:

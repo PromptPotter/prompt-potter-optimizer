@@ -115,8 +115,10 @@ def compute_composite_fitness(
     if not scoreable:
         # No measurement — an operator skip at query 0/N, a round whose every sample was excluded,
         # or one that errored throughout — has no fitness. Record the 0.0 floor (``total`` is
-        # already 0, the no-evidence marker election reads).
-        base = {**base, "accuracy": 0.0} if not results else base
+        # already 0, the no-evidence marker election reads). The floor is the COMPOSITE's alone:
+        # `accuracy` stays whatever `compute_accuracy` answered, which is `None` where nothing was
+        # measured, so the elected quantity keeps its floor while the reported rate never claims a
+        # 0% nobody read.
         composite_fitness = 0.0
     else:
         # The SAME denominator ``accuracy`` is read against, so the two cannot describe different

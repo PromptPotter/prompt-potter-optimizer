@@ -121,7 +121,7 @@ def build_round_summary(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> R
     selection = _measurement_order(rr.all_candidate_results)
     return RoundSummary(
         round=rr.round,
-        accuracy=float(rr.accuracy),
+        accuracy=rr.accuracy,
         composite_fitness=float(rr.composite_fitness),
         ability=rr.ability,
         improved=None if rr.round == 0 else rr.improved,

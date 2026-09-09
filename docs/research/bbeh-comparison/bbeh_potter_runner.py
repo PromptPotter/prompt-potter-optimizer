@@ -176,8 +176,10 @@ async def run_bbeh_campaign(
                 "sp_budget_ttest": campaign_config.sp_budget_ttest,
                 "model_id": target_model,
                 "n_train": len(train_pool),
-                "train_accuracy": round(train_acc, 4),
-                "origin_train_accuracy": round(origin_train_acc, 4),
+                "train_accuracy": round(train_acc, 4) if train_acc is not None else None,
+                "origin_train_accuracy": (
+                    round(origin_train_acc, 4) if origin_train_acc is not None else None
+                ),
                 "rounds": cycle_result.n_l1_rounds,
                 "methodology": (
                     "Single global prompt optimized on the pooled per-task train halves of "

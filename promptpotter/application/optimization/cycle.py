@@ -356,10 +356,13 @@ class CycleRoundState:
     they are round 0's, read off ``Cycle.origin_round``."""
 
     current_sp: JobSearchPoint | None = None
-    current_accuracy: float = 0.0
+    # The high-water is taken on ``composite_fitness``; these two only record the rate of whichever
+    # round won it, so ``None`` here is unmeasured and enters no comparison. The composite pair
+    # stays ``float`` — the stall ladder's PERSISTED ``l2_/l3_*_at_entry`` counters read it.
+    current_accuracy: float | None = None
     current_composite_fitness: float = 0.0
     current_results: list[dict[str, Any]] = field(default_factory=list)
-    best_accuracy: float = 0.0
+    best_accuracy: float | None = None
     best_composite_fitness: float = 0.0
     best_round: int = 0
     best_sp: JobSearchPoint | None = None

@@ -151,9 +151,11 @@ async def _run(args: argparse.Namespace) -> int:
         on_status=print,
     )
     report = origin.report
+    origin_acc = report.accuracy
     print(
-        f"[smoke] origin: {report.accuracy:.3f} "
-        f"({round(report.accuracy * report.total)}/{report.total})",
+        f"[smoke] origin: {origin_acc:.3f} ({round(origin_acc * report.total)}/{report.total})"
+        if origin_acc is not None
+        else "[smoke] origin: not measured (no scoreable row)",
         flush=True,
     )
 

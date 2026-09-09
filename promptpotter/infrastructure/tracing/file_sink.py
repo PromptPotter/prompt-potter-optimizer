@@ -208,7 +208,8 @@ class FileSink:
             tags=["campaign", "optimization_loop"],
         )
         self._campaign_traces[event.campaign_id] = trace_id
-        self._write_score(trace_id, "origin_accuracy", event.origin_accuracy)
+        if event.origin_accuracy is not None:
+            self._write_score(trace_id, "origin_accuracy", event.origin_accuracy)
         self._log_event(
             {
                 "event": "campaign_start",
@@ -331,7 +332,8 @@ class FileSink:
                     },
                     meta_extra,
                 )
-            self._write_score(trace_id, "accuracy", event.accuracy)
+            if event.accuracy is not None:
+                self._write_score(trace_id, "accuracy", event.accuracy)
 
         log_entry: dict[str, Any] = {
             "event": "round_complete",

@@ -36,6 +36,7 @@ from promptpotter.domain.l4.proxies import (
 )
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_schema import stable_hash
+from promptpotter.domain.rendering import fmt_pct
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.llm.rate_limit import set_throttle_stall_sink
 from promptpotter.infrastructure.llm.telemetry import emit_token_usage
@@ -295,7 +296,7 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
                 scored,
                 key=lambda c: (
                     c.accuracy - c.matched_parent_accuracy
-                    if c.matched_parent_accuracy is not None
+                    if c.matched_parent_accuracy is not None and c.accuracy is not None
                     else float("-inf"),
                     c.composite_fitness,
                 ),
@@ -311,7 +312,7 @@ def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
                 else " (stopped before it covered the origin's samples, so nothing to compare)"
             )
             parts.append(
-                f"tried {top.label} (acc {top.accuracy:.3f}{versus}{theta}): "
+                f"tried {top.label} (acc {fmt_pct(top.accuracy, '{:.3f}')}{versus}{theta}): "
                 f"{_clip(top.changes_description, 100)}"
             )
         else:

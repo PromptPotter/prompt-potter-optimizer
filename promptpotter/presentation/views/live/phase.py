@@ -7,7 +7,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.connectors.protocol import MeasuredUnit, unit_count
-from promptpotter.domain.rendering import display_fitness, display_rank_key
+from promptpotter.domain.rendering import display_fitness, display_rank_key, fmt_pct
 from promptpotter.domain.results import is_round_winner, overlap_series
 from promptpotter.presentation.views.display import (
     BOLD,
@@ -132,7 +132,7 @@ def render_round_stats(
             # Was `hits: 12/20`. The integer pair is the small readability cost of
             # dropping a scalar that meant nothing on a graded scorer; the percentage
             # is the same number the round reports everywhere else.
-            f"accuracy: {accuracy:.1%} of {unit_count(total, unit)}{suffix}  |  evaluated: "
+            f"accuracy: {fmt_pct(accuracy)} of {unit_count(total, unit)}{suffix}  |  evaluated: "
             f"{round_result.candidates_scored} candidates"
         )
     )

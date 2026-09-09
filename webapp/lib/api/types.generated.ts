@@ -109,7 +109,7 @@ export interface DashboardSample {
 export interface RoundSummaryCandidate {
   label: string;
   candidate_id: string;
-  accuracy: number;
+  accuracy: number | null;
   composite_fitness: number;
   invalid: boolean;
   scored_samples: number;
@@ -181,7 +181,7 @@ export interface OverlapReading {
 /** Display row for `dashboard.json::rounds[]` — webapp's completed-round source. */
 export interface RoundSummary {
   round: number;
-  accuracy: number;
+  accuracy: number | null;
   composite_fitness: number;
   ability: AbilityReading | null;
   improved: boolean | null;
@@ -293,7 +293,7 @@ export interface ScoredCandidate {
   candidate_id: string;
   label: string;
   changes_description: string;
-  accuracy: number;
+  accuracy: number | null;
   composite_fitness: number;
   total: number;
   evaluators: Record<string, number>;
@@ -434,7 +434,7 @@ export interface RoundResult {
   round: number;
   at_offset: number | null;
   label: string;
-  accuracy: number;
+  accuracy: number | null;
   composite_fitness: number;
   total: number;
   improved: boolean;

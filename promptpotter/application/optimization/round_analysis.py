@@ -159,7 +159,9 @@ def _evolution(rounds: list[RoundResult]) -> tuple[list[EvolutionRow], list[str]
     max_plateau = 0
     prev_acc: float | None = None
     for r in rounds:
-        delta = (r.accuracy - prev_acc) if prev_acc is not None else 0.0
+        # Between two MEASURED rounds only. An unreadable round breaks the series rather than
+        # contributing a 0.0 delta, which the plateau counter below would read as a flat round.
+        delta = (r.accuracy - prev_acc) if prev_acc is not None and r.accuracy is not None else None
         rows.append(
             EvolutionRow(
                 round=r.round,
@@ -170,7 +172,7 @@ def _evolution(rounds: list[RoundResult]) -> tuple[list[EvolutionRow], list[str]
                 elected=bool(r.improved),
             )
         )
-        plateau_run = plateau_run + 1 if abs(delta) < _PLATEAU_DELTA else 0
+        plateau_run = plateau_run + 1 if delta is not None and abs(delta) < _PLATEAU_DELTA else 0
         max_plateau = max(max_plateau, plateau_run)
         prev_acc = r.accuracy
 

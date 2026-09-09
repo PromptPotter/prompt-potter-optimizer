@@ -21,7 +21,7 @@ from promptpotter.application.optimization.validators.l1_behavior import (
 from promptpotter.application.optimization.validators.l2_behavior import run_all_l2_checks
 from promptpotter.domain.escalation_signals import exploration_budget
 from promptpotter.domain.phases import StopReason
-from promptpotter.domain.rendering import format_l1_critique_for_prompt
+from promptpotter.domain.rendering import fmt_pct, format_l1_critique_for_prompt
 from promptpotter.domain.results import (
     DegradationHealth,
     RoundResult,
@@ -295,7 +295,7 @@ def _render_round(
     ]
     if not is_peek:
         parts += [
-            f"- accuracy: {round_data.accuracy:.1%}",
+            f"- accuracy: {fmt_pct(round_data.accuracy)}",
             f"- composite_fitness: `{round_data.composite_fitness:.4f}`",
             f"- improved: **{'yes' if round_data.improved else 'no'}**",
         ]
@@ -397,7 +397,7 @@ def _score_cells(c: ScoredCandidate | None, winner_id: str) -> str:
         else "—"
     )
     won = "✓" if is_round_winner(c.candidate_id, winner_id) else "·"
-    return f"`{c.composite_fitness:.4f}` | {c.accuracy:.1%} | {theta} | {lift} | {won}"
+    return f"`{c.composite_fitness:.4f}` | {fmt_pct(c.accuracy)} | {theta} | {lift} | {won}"
 
 
 def _fmt_evidence_cell(raw: object) -> str:

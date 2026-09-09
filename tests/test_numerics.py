@@ -342,10 +342,24 @@ def test_an_unmeasured_term_is_never_scored_as_zero() -> None:
     # 0/N (or an all-excluded round) hands ``compute_composite_fitness`` no rows. It records the
     # 0.0 floor with ``total`` 0 — the no-evidence marker that keeps the candidate out of winner
     # election — rather than run the fail-loud scorer and halt the whole cycle.
+    #
+    # The floor is the COMPOSITE's alone. ``accuracy`` beside it stays absent, because the two
+    # answer different questions: one is the elected quantity and needs a value to be ordered
+    # against, the other is a RATE and a rate over nothing is not 0%.
     empty = compute_composite_fitness([], _single_node_schema(), opt_sp=None)
     assert empty["composite_fitness"] == 0.0
-    assert empty["accuracy"] == 0.0
+    assert empty["accuracy"] is None
     assert empty["total"] == 0
+
+    # The same split, one step in: a candidate whose every row ERRORED has no rate either. It is
+    # the arm that matters, because it is reachable — an L4 cell is a whole inner campaign, and
+    # one that times out throughout used to report itself as having driven the inner loop to 0%.
+    errored = _result_min("ERROR", "a") | {"error": "boom", "error_category": "UNKNOWN"}
+    del errored["fitness"], errored["hit"]
+    all_errored = compute_composite_fitness([errored], _single_node_schema(), opt_sp=None)
+    assert all_errored["accuracy"] is None
+    assert all_errored["composite_fitness"] == 0.0
+    assert all_errored["total"] == 0
 
 
 def test_a_labelless_round_reports_absence_not_zero() -> None:

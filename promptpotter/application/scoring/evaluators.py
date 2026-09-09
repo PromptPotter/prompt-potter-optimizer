@@ -50,15 +50,26 @@ __all__ = [
 
 def compute_accuracy(*, results: list[QueryMeasurement], **_: Any) -> float | None:
     """Mean fitness over SCOREABLE rows. A DEPRECATED row carries no verdict and an ERRORED one
-    never happened; the latter surfaces via ``compute_error_rate``."""
+    never happened; the latter surfaces via ``compute_error_rate``.
+
+    **With no scoreable row left, what the OTHER rows were decides between a verdict and an
+    absence.** A deprecated row was measured and thrown out — a candidate that ran and produced
+    nothing usable, which is an honest 0.0. A row that errored never happened, so a candidate whose
+    every row errored has no rate at all: scoring it 0.0 invents the worst possible measurement out
+    of no measurement, and at L4, where a cell is a whole inner campaign, that reads as "drove the
+    inner loop maximally DOWN". The composite keeps its 0.0 floor either way — that one is the
+    elected quantity and ``total == 0`` is the marker beside it — but the reported RATE may not."""
     # Lazy: scoring → optimization circular.
-    from promptpotter.application.optimization.pobb.classification import scoreable_rows
+    from promptpotter.application.optimization.pobb.classification import (
+        is_deprecated,
+        scoreable_rows,
+    )
 
     if not results:
         return None
     scoreable = scoreable_rows(results)
     if not scoreable:
-        return 0.0
+        return 0.0 if any(is_deprecated(r) for r in results) else None
     return sum(r.get("fitness", 0.0) for r in scoreable) / len(scoreable)
 
 

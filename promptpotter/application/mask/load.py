@@ -138,8 +138,8 @@ def _candidates(
 def _parent(
     round_file: dict[str, Any],
     samples: frozenset[int] | None,
-    carried: tuple[dict[str, float], float],
-) -> tuple[dict[str, float], float]:
+    carried: tuple[dict[str, float], float | None],
+) -> tuple[dict[str, float], float | None]:
     """The bar this round's arms were held to, read under the same mask they were.
 
     Unmasked it is *carried* — round ``N-1``'s elected winner, whose stored evaluators ARE the
@@ -159,7 +159,7 @@ def _parent(
         return carried
     rows = [r for r in (round_file.get("parent_results") or []) if r.get("sample_id") in samples]
     if not rows or not carried[0]:
-        return ({}, 0.0)
+        return ({}, None)
     # The snapshot supplies the schema/opt_sp-bound names, the rows the derivable ones — the same
     # merge `_candidates` makes, because the parent IS one of those candidates one round back and
     # only the cell-dependent half of its namespace moves with the subset.
@@ -170,7 +170,7 @@ def _parent(
 def _mask_candidate(
     sc: ScoredCandidate,
     evaluators: dict[str, float],
-    accuracy: float,
+    accuracy: float | None,
     n_scored: int,
     rows: list[dict[str, Any]],
     winner_label: str,
@@ -256,7 +256,7 @@ def load_mask_record(
     # of the prior round; when it holds (no candidate winner) it carries unchanged. The
     # winner's evaluators live on its candidate_scores row, NOT the (often-empty) top-level
     # round ``evaluators`` field.
-    winner_at: dict[tuple[str, int], tuple[dict[str, float], float]] = {}
+    winner_at: dict[tuple[str, int], tuple[dict[str, float], float | None]] = {}
     # The known-outcomes pool threads the SAME way the parent does — inherited across the
     # fork edge from the branch point, then folded round by round. Each round is handed the
     # pool as it stood BEFORE it ran, which is what the live election saw (`Cycle.absorb_round`
@@ -265,7 +265,7 @@ def load_mask_record(
     cycles: list[MaskCycle] = []
     for cid in order:
         parent, from_round = edges.get(cid, (None, None))
-        carried: tuple[dict[str, float], float] = ({}, 0.0)
+        carried: tuple[dict[str, float], float | None] = ({}, None)
         pool: list[dict[str, Any]] = []
         if parent is not None and from_round is not None:
             carried = winner_at.get((parent, from_round), carried)

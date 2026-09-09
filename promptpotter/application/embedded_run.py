@@ -29,6 +29,7 @@ from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.application.runner.origin_gate import submit_gate_decision
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.settings import DEFAULT_BACKEND_ID, DEFAULT_BACKEND_URL
+from promptpotter.domain.rendering import fmt_pct
 from promptpotter.domain.results import CycleResult
 
 if TYPE_CHECKING:
@@ -127,7 +128,7 @@ async def mint_and_score_origin(
         display.set_origin(origin.report.accuracy)
     if on_status is not None:
         on_status(
-            f"Evaluation data: {len(dataset)} queries  |  Origin: {origin.report.accuracy:.1%}"
+            f"Evaluation data: {len(dataset)} queries  |  Origin: {fmt_pct(origin.report.accuracy)}"
         )
     return observers, dataset, origin
 

@@ -102,8 +102,11 @@ def _compute_round_1_verdict(
 
 def first_round_at_threshold(rounds: list[RoundResult], threshold: float) -> int | None:
     """First round whose accuracy clears *threshold* — ``rounds_to_95``'s one
-    definition, shared with the ``index.json::final`` writer."""
-    return next((r.round for r in rounds if r.accuracy >= threshold), None)
+    definition, shared with the ``index.json::final`` writer. A round that measured nothing
+    readable clears nothing."""
+    return next(
+        (r.round for r in rounds if r.accuracy is not None and r.accuracy >= threshold), None
+    )
 
 
 def _mean_yield_rate(rounds: list[RoundResult]) -> float | None:

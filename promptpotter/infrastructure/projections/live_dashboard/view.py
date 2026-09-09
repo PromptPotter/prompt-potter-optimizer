@@ -253,7 +253,10 @@ class LiveDashboardView(DerivedView):
             round_num=self.state.round,
             # Origin anchor seeds from round 0 if it's already on disk (resume);
             # otherwise apply_phase sets it at INIT:exit. Origin is just round 0.
-            origin_acc=next((r.accuracy for r in self.state.rounds if r.round == 0), 0.0),
+            origin_acc=next(
+                (r.accuracy for r in self.state.rounds if r.round == 0 and r.accuracy is not None),
+                0.0,
+            ),
             # The core's own running MAX, seeded from the resumed high-water. 0.0 is the
             # identity element of that max, not a reported number — `s.best` stays `None`
             # until a round settles, and only it reaches the browser.

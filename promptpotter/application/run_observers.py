@@ -65,7 +65,7 @@ def build_campaign_emitter(
     session: Session,
     campaign_config: CampaignConfig,
     *,
-    origin_accuracy: float,
+    origin_accuracy: float | None,
     resumed_from_round: int | None = None,
     recorder: AuditTrailView | None = None,
     seed_from_cycle_id: str | None = None,
@@ -272,7 +272,7 @@ class RunCallbacks:
                 payload={
                     "round_result": {
                         "round": round_result.round,
-                        "accuracy": float(round_result.accuracy),
+                        "accuracy": round_result.accuracy,
                         "composite_fitness": float(round_result.composite_fitness),
                     },
                     "l1_stall_count": l1_stall_count,
@@ -519,7 +519,7 @@ def build_run_observers(
     dataset: list[Sample],
     display: LiveDisplay | None = None,
     resumed_from_round: int | None = None,
-    origin_accuracy: float = 0.0,
+    origin_accuracy: float | None = None,
     fork: ForkInfo | None = None,
 ) -> RunObservers:
     """Open the ledger; build + bind every observer. A fork inherits the parent's ledger at its current

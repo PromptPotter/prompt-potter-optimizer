@@ -124,7 +124,7 @@ async def run_round_loop(
             round_checks = session.scoring.degradation_checks
 
             logger.debug(
-                "Round %d (clean=%d/%d, acc=%.3f, stall=%d/%d)",
+                "Round %d (clean=%d/%d, acc=%s, stall=%d/%d)",
                 round_num,
                 clean_rounds,
                 max_rounds,
@@ -215,7 +215,14 @@ async def run_round_loop(
             round_num += 1
             clean_rounds += 1
 
-            if halt_at_accuracy is not None and cycle.tracking.best_accuracy >= halt_at_accuracy:
+            # An UNMEASURED best never hits the target: a cycle whose rounds came back unreadable
+            # has not reached the operator's bar, it has failed to read one.
+            best_acc = cycle.tracking.best_accuracy
+            if (
+                halt_at_accuracy is not None
+                and best_acc is not None
+                and best_acc >= halt_at_accuracy
+            ):
                 return StopReason.TARGET_HIT, None
             budget_stop = budget_gate.tripped()
             if budget_stop is not None:

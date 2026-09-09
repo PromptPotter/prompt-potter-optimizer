@@ -189,7 +189,7 @@ class RoundSummaryCandidate(DashboardCandidate):
     flows to both halves and `_SUMMARY_INCLUDE` keeps picking it up."""
 
     candidate_id: str
-    accuracy: float
+    accuracy: float | None
     composite_fitness: float
     expected_samples: int
     is_winner: bool
@@ -202,7 +202,9 @@ class RoundSummary(StrictModel):
     model_config = ConfigDict(frozen=True)
 
     round: int
-    accuracy: float
+    # ``None`` where the round measured nothing readable, so the chart draws a GAP rather
+    # than a point at zero (`ScoredCandidate.accuracy`).
+    accuracy: float | None
     composite_fitness: float
     # The cross-round-comparable series and the scale that makes it one: ability on the cycle's
     # fixed δ ruler, subset-invariant where `accuracy`/`composite_fitness` above are

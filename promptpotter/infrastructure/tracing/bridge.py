@@ -208,7 +208,7 @@ class ObservabilityBridge:
         backend_id: str | None,
         *,
         config_snapshot: dict[str, Any],
-        origin_accuracy: float,
+        origin_accuracy: float | None,
         dataset: Sequence[Sample | dict[str, Any]],
         tracing_campaign_id: str,
         campaign_id: str,

@@ -4,7 +4,7 @@ import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, overload
 
 from promptpotter.config.settings import NO_RESULT, PROMPT_STRING_FIELDS
 from promptpotter.domain.results import CritiqueReadout
@@ -20,10 +20,28 @@ if TYPE_CHECKING:
 from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
 
 
-def display_fitness(composite_fitness: float | None, accuracy: float) -> float:
+@overload
+def display_fitness(composite_fitness: float | None, accuracy: float) -> float: ...
+@overload
+def display_fitness(composite_fitness: float | None, accuracy: float | None) -> float | None: ...
+def display_fitness(composite_fitness: float | None, accuracy: float | None) -> float | None:
     """THE composite-or-accuracy rule, one implementation: an honest ``0.0`` is a real score, so
-    only genuine absence degrades to ``accuracy``. Every display and ranking site routes here."""
+    only genuine absence degrades to ``accuracy``. Every display and ranking site routes here.
+
+    ``None`` out only when BOTH are absent — an unscoreable candidate has no number rather than a
+    low one. Overloaded so a caller that has already established a real accuracy keeps a ``float``
+    and needs no cast: the two arms are a fact about the input, not something to re-assert."""
     return composite_fitness if composite_fitness is not None else accuracy
+
+
+def fmt_pct(x: float | None, spec: str = "{:.1%}") -> str:
+    """``—`` for a measurement that was never taken. Rendering absence as ``0.0%`` is the one
+    reading an operator cannot recover from: it looks like a campaign whose origin scored nothing,
+    which is the shape of a broken pipeline rather than of a cycle that never got there.
+
+    Every rate a surface prints routes here, because ``accuracy`` is nullable at the source and an
+    f-string's format spec is the one place the type checker cannot follow the value to."""
+    return "—" if x is None else spec.format(x)
 
 
 PrefixState = Literal["discounted", "cold", "unreported", "replayed"]
@@ -59,7 +77,7 @@ DisplayRankKey = tuple[bool, bool, float, float, float]
 
 def display_rank_key(
     composite_fitness: float | None,
-    accuracy: float,
+    accuracy: float | None,
     theta: float | None = None,
     *,
     is_winner: bool = False,
@@ -75,6 +93,9 @@ def display_rank_key(
     ⚠️ A mask lens must keep passing two arguments (``mask/verdicts.py``). It exists to show a
     DIFFERENT ordering under a masked formula, and pinning the active-formula winner to rank 1
     there would leave it unable to disagree."""
+    # An UNSCOREABLE arm is no score, not a low one, so it sorts to the bottom on the device a
+    # missing θ uses — it must never outrank a candidate that was actually read.
+    shown = display_fitness(composite_fitness, accuracy)
     return (
         is_winner,
         # A rate the operator CUT SHORT never outranks one measured on the whole panel: the round
@@ -82,8 +103,8 @@ def display_rank_key(
         # smaller sample of the same thing.
         not is_partial,
         theta if theta is not None else -math.inf,
-        display_fitness(composite_fitness, accuracy),
-        accuracy,
+        shown if shown is not None else -math.inf,
+        accuracy if accuracy is not None else -math.inf,
     )
 
 
@@ -377,6 +398,7 @@ __all__ = [
     "display_fitness",
     "display_rank_key",
     "extract_display_answer",
+    "fmt_pct",
     "format_l1_critique_for_prompt",
     "prefix_reading",
     "terminal_node",

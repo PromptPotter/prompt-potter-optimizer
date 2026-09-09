@@ -18,7 +18,9 @@ class EscalationInputs:
     when the corresponding derived state exists (e.g. AxisIndex initialised); rules must handle None.
     """
 
-    current_accuracy: float
+    # ``None`` = the round measured nothing readable. A rule comparing it must say so: an
+    # absent rate satisfies no threshold, least of all the perfect-accuracy stop below.
+    current_accuracy: float | None
     l1_stall_count: int
     l1_patience: int
     # None until AxisIndex is initialised; runner populates from `cycle.axes.with_positive_yield()`.
@@ -64,7 +66,7 @@ class EscalationRule:
 DEFAULT_ESCALATION_RULES: list[EscalationRule] = [
     EscalationRule(
         name="perfect_accuracy",
-        when=lambda s: s.current_accuracy >= 1.0,
+        when=lambda s: s.current_accuracy is not None and s.current_accuracy >= 1.0,
         fire=NextAction.STOP_PERFECT,
         priority=100,
     ),

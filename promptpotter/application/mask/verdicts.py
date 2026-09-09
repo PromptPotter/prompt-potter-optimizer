@@ -29,7 +29,7 @@ def masked_election(
     rnd: MaskRound,
     criterion: RoundScorer | str | None,
     parent_evaluators: Mapping[str, float],
-    parent_accuracy: float,
+    parent_accuracy: float | None,
 ) -> MaskedElection:
     """The one-round ranking every mask consumer shares — the divergence verdict against the
     RECORDED parent, the scenario spine against the counterfactual one it threaded forward. Both
@@ -40,7 +40,7 @@ def masked_election(
     ``display_rank_key`` over the masked aggregate.
     """
 
-    def _key(evaluators: Mapping[str, float], accuracy: float) -> DisplayRankKey | None:
+    def _key(evaluators: Mapping[str, float], accuracy: float | None) -> DisplayRankKey | None:
         # A candidate/parent whose stored namespace can't satisfy this mask's formula —
         # it references a schema-bound evaluator absent from those values — is
         # *unscorable under the mask*, not a crash. ``value_with_mask_applied`` owns

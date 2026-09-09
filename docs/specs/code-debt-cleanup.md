@@ -171,49 +171,6 @@ it.
   REACHES on the RIGHT, load-bearing column = what is SHARED with campaigns outside the selection,
   because an `sp_hash` is not owned by a campaign.
 
-**Behavior change (needs explicit sign-off, not a blind swap) — absent-vs-zero in the scoring spine:**
-- **All-errored candidate scores `accuracy = 0.0`, not the honest `None`** —
-  `application/scoring/evaluators.py::compute_accuracy` already returns `None` for an EMPTY result
-  set, so the type is `float | None` and only the ARM is wrong: it still returns 0.0 when the set is
-  non-empty and nothing in it is scoreable. For all-deprecated that IS the verdict, but for
-  all-errored it fabricates one. The honest `None` must propagate:
-  `ScoredCandidate.accuracy` / `RoundResult.accuracy` → `float | None`, `compute_composite_fitness`
-  handling a missing `accuracy` term without `ScoringTermMissingError` in `_running_scores` (an
-  "unscoreable candidate" state, the outer sibling of `InnerCycleUnscoreableError`),
-  `display_fitness` double-None, dashboard + `types.generated.ts` + chart null handling,
-  `best_round_on_shared_cells` / `_apply_best` null-safety. **Smaller than filed:** its sibling
-  `rescore_results` stamps errored rows `fitness = 0.0` citing `compute_accuracy`, which actually
-  EXCLUDES them, and `_mean_fitness_by_cell` reads an absent key identically — so no cited reader
-  depends on the stamp. Audit every unguarded `r["fitness"]` subscript; note the stamp makes a row's
-  shape depend on replay (a freshly measured error row has no `fitness` key at all).
-  **The producer is one line and the propagation is not — attempted and reverted rather than
-  half-landed.** Splitting the arm (`0.0` only where a row was DEPRECATED, `None` where every
-  non-scoreable row errored) is three lines and the suite stays GREEN, because nothing exercises an
-  all-errored candidate — so landing it alone turns a fabricated 0.0 into a `ValidationError` at
-  `l1/population.py`'s single `ScoredCandidate` construction, on the L4 path where all-errored cells
-  actually happen. Typing that one field then names ten files' worth of seams, and they are
-  DECISIONS rather than casts: `display_rank_key` (where an unscoreable candidate ranks),
-  `mask/load.py::_mask_candidate`, `views/ingress.py::ScoreEntry`, `CycleRoundState`'s pair below,
-  `resume_and_fork/repair.py`, `runner/inner/spawn.py` (a `None - float` on the L4 lift), and the
-  three that take an ORIGIN accuracy — `ObservabilityBridge.start_campaign`, `build_run_observers`,
-  `LiveDisplay.set_origin` — which ask what a campaign whose origin never scored even IS.
-  `RoundResult.accuracy` is a second pass on top of that, then the wire and the charts.
-  **Re-test:** make the producer edit and run `mypy promptpotter` — the list it prints IS the arc's
-  width, and it is measured rather than estimated.
-- **`optimization/cycle.py::CycleRoundState`'s accuracy/composite pair belongs to THIS entry, not to
-  a bounded `or 0.0` sweep** — re-scoped 2026-09-02 by counting: `current_accuracy` /
-  `current_composite_fitness` / `best_composite_fitness` reach 55 sites, including the escalation
-  FSM's PERSISTED `l2_/l3_best_composite_fitness_at_entry` counters, so nulling them is a
-  stall-ladder behaviour change and an on-disk shape change at once. `live_dashboard/state.py` moved
-  its own copy of the pair to `| None`, which is the fixed twin — it does not make the tracker
-  bounded. Blocker: the same sign-off as above; land them together or not at all.
-
-  *(The bounded half of `or 0.0` SHIPPED — `views/ingress.py`, `review_md.py` →
-  `l1/stats.py::_top_lifts`, `CycleResult` / `PromptExport.origin_composite_fitness`, and
-  `output.py`'s two digest views. `mask/record.py::MaskCandidate.accuracy` was STRUCK: its 0.0 is a
-  placeholder on a row every reader skips on the empty-`evaluators` guard beside it, so nulling it
-  would type-infect `display_rank_key` for no reachable gain.)*
-
 **Live L1 round (operator-gated):**
 - **`*_override → *_updates` L1 delta-key rename.** `prompt_fields_override` /
   `task_context_override` / `pipeline_params_override` / `pp_override` are merges, not replacements,

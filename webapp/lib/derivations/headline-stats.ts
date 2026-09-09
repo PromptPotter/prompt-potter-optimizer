@@ -117,8 +117,10 @@ export function headlineStats(dash: DashboardSnapshot | null): HeadlineStats {
 
 export interface FitnessTrend {
   // Per-round measured accuracy, ascending. `theta` is the subset-invariant peer beside it,
-  // `null` on any round read while the ruler was still cold.
-  points: { round: number; composite: number; theta: number | null; n: number | null }[];
+  // `null` on any round read while the ruler was still cold. `composite` is `null` on a round
+  // that measured nothing readable — the chart draws a GAP there, because a point at 0 is a
+  // measurement claiming the prompt scored nothing rather than one that was never read.
+  points: { round: number; composite: number | null; theta: number | null; n: number | null }[];
   // Running-best composite, index-aligned with `points`.
   best: number[];
 }
@@ -160,7 +162,9 @@ export function fitnessTrend(
   const best: number[] = [];
   let runningBest = 0;
   for (const p of points) {
-    runningBest = Math.max(runningBest, p.composite);
+    // An unread round cannot raise the running best, and must not lower it either: the line
+    // holds flat across the gap the points series draws.
+    if (p.composite != null) runningBest = Math.max(runningBest, p.composite);
     best.push(runningBest);
   }
   // Anchor the terminal point to the SERVED `dash.best` (the engine's own fold,

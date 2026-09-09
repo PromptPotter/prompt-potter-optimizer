@@ -39,7 +39,7 @@ class DatasetRegistered:
 class CampaignStart:
     campaign_id: str
     config: dict[str, Any]
-    origin_accuracy: float
+    origin_accuracy: float | None
     session_id: str | None = None
 
 
@@ -112,7 +112,7 @@ class DatasetRun:
 class RoundEnd:
     campaign_id: str
     round_num: int
-    accuracy: float
+    accuracy: float | None
     total: int
     improved: bool
     winner_lineage_id: str

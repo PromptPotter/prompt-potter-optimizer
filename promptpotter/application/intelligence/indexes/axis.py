@@ -454,7 +454,7 @@ class AxisIndex:
                 continue
             # An absence is not a measurement: a row that recorded no accuracy must not
             # enter the leaderboard as a 0% run (the rule `noise_floor.py` already states).
-            if "accuracy" not in scores:
+            if scores.get("accuracy") is None:
                 continue
             accuracy = float(scores["accuracy"])
             run_id = entry.get("run_id", "")

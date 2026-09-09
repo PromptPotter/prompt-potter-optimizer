@@ -115,11 +115,12 @@ class LangfuseSink:
             self._trace_ids[event.campaign_id] = cloud_id
             if event.session_id:
                 self._session_ids[event.campaign_id] = event.session_id
-            self._lf.create_score(
-                trace_id=cloud_id,
-                name="origin_accuracy",
-                value=event.origin_accuracy,
-            )
+            if event.origin_accuracy is not None:
+                self._lf.create_score(
+                    trace_id=cloud_id,
+                    name="origin_accuracy",
+                    value=event.origin_accuracy,
+                )
             self._persist()
 
     def on_dataset_registered(self, event: DatasetRegistered) -> None:
@@ -254,12 +255,13 @@ class LangfuseSink:
                 },
                 metadata=round_meta,
             )
-        self._lf.create_score(
-            trace_id=trace_id,
-            name=f"accuracy_round_{event.round_num}",
-            value=event.accuracy,
-            comment=f"Round {event.round_num}: {'improved' if event.improved else 'no change'}",
-        )
+        if event.accuracy is not None:
+            self._lf.create_score(
+                trace_id=trace_id,
+                name=f"accuracy_round_{event.round_num}",
+                value=event.accuracy,
+                comment=f"Round {event.round_num}: {'improved' if event.improved else 'no change'}",
+            )
         # Emit one Langfuse score per evaluator value. Each evaluator's name
         # is suffixed with the round number so the cloud UI shows them as a
         # per-round time series.
