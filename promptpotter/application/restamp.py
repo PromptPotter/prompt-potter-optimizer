@@ -30,7 +30,6 @@ from promptpotter.application.archive_maintenance import (
     workspace_trees,
 )
 from promptpotter.application.campaign_config import CampaignConfig, freeze_campaign_config
-from promptpotter.application.pipeline_resolve import JUDGE_INSTRUMENT_KEY
 from promptpotter.application.run_observers import QUERY_PREVIEW_CHARS
 from promptpotter.application.views.view_models import (
     L2RefineExitView,
@@ -38,7 +37,6 @@ from promptpotter.application.views.view_models import (
     ViewContext,
 )
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
-from promptpotter.connectors import CONNECTORS
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
@@ -47,37 +45,26 @@ from promptpotter.domain.results import DiagnosticRunRecord, RoundResult
 from promptpotter.domain.run_records import CycleRecord
 from promptpotter.domain.scoring import ledger_sample_view
 from promptpotter.domain.spend import TOKEN_KIND_BUCKET
-from promptpotter.infrastructure.runtime_flags import derive_run_phase, is_checkin
+from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.campaign_store.store import reproject_round_index
-from promptpotter.infrastructure.store.dataset_access import (
-    backend_type_of_dataset,
-    dataset_pipeline_path,
-    readable_dataset_dir,
-)
 from promptpotter.infrastructure.store.io import (
     read_json_optional,
     read_json_tolerant,
-    read_yaml_optional,
     write_json,
     write_yaml,
 )
 from promptpotter.infrastructure.store.layout import ROUND_GLOB, CycleLayout
-from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.store.user_store import User
 from promptpotter.shared.errors import graceful
-from promptpotter.shared.identity import default_identity
 
 __all__ = [
     "backfill_inner_facts",
     "check_round_documents",
     "compact_cycle_ledgers",
-    "lift_campaign_pipeline_config",
-    "rename_campaign_pipeline_overlay",
     "rename_round_trend",
     "reproject_cycle_indexes",
     "restamp_campaign_configs",
     "shrink_measurement_runs",
-    "stamp_campaign_backend_type",
     "stamp_election_bias",
 ]
 
@@ -955,249 +942,6 @@ def rekey_overlap_results(*, apply: bool) -> dict[str, int]:
         "overlap_rows_rekeyed": rekeyed,
         "overlap_rows_dropped": dropped,
         "overlap_documents": touched,
-    }
-
-
-# --- (10) the connector kind a campaign had to re-derive from a file it does not own ----------
-
-
-def _tenant_stores(tenant_dir: pathlib.Path) -> Stores | None:
-    """A store rooted at ONE tenant tree, so a pass resolves datasets through ``readable_dataset_dir``
-    rather than re-deriving the ladder. ``None`` for a dir whose name is no tenant slug."""
-    try:
-        identity = default_identity(tenant_id=tenant_dir.name, user_id=tenant_dir.name)
-    except ValueError:
-        return None
-    return build_stores(identity, projects_root=tenant_dir.parent)
-
-
-def _connector_kind(doc: dict[str, Any], stores: Stores | None, slug: str) -> str:
-    """Frozen on the manifest, else read off the dataset — so no pass silently depends on
-    :func:`stamp_campaign_backend_type` having run first in the same invocation."""
-    return str(doc.get("backend_type") or "") or (
-        backend_type_of_dataset(stores, slug) if stores is not None and slug else ""
-    )
-
-
-def stamp_campaign_backend_type(*, apply: bool) -> dict[str, int]:
-    """Freeze ``Campaign.backend_type`` onto every manifest minted before the field existed, off
-    the dataset file every reader took it from — a RECOVERY the module docstring sanctions. A
-    campaign whose dataset dir is already gone is left empty, never guessed. Idempotent."""
-    stamped = orphaned = current = unreadable = 0
-    stores_by_tenant: dict[pathlib.Path, Stores | None] = {}
-    for tree in workspace_trees(DEFAULT_PROJECTS_ROOT):
-        for path in sorted(tree.glob("*/campaigns/*/campaign.json")):
-            with graceful(f"stamp backend_type {path}"):
-                doc = read_json_tolerant(path)
-                if not isinstance(doc, dict):
-                    unreadable += 1
-                    continue
-                if doc.get("backend_type"):
-                    current += 1
-                    continue
-                tenant_dir = path.parents[2]
-                if tenant_dir not in stores_by_tenant:
-                    stores_by_tenant[tenant_dir] = _tenant_stores(tenant_dir)
-                stores = stores_by_tenant[tenant_dir]
-                slug = str(doc.get("dataset_name") or "")
-                kind = _connector_kind(doc, stores, slug)
-                if not kind:
-                    orphaned += 1
-                    continue
-                doc["backend_type"] = kind
-                stamped += 1
-                if apply:
-                    write_json(path, doc)
-
-    verb = "stamped" if apply else "would stamp"
-    print(f"\nCampaign connector kind — {verb} backend_type onto {stamped} manifest(s)")
-    print(f"  {current:>6} already frozen")
-    print(f"  {orphaned:>6} dataset dir gone — left empty, nothing on disk records what they ran")
-    if unreadable:
-        print(f"  {unreadable:>6} unreadable manifest(s)")
-    if not apply and stamped:
-        print("\nDry run. Re-run with --apply to rewrite.")
-    return {
-        "backend_types_stamped": stamped,
-        "backend_types_current": current,
-        "backend_types_orphaned": orphaned,
-    }
-
-
-# --- (11) the campaign delta, under the name every other layer already used -------------------
-
-
-def rename_campaign_pipeline_overlay(*, apply: bool) -> dict[str, int]:
-    """Move ``campaign.json::config.pipeline_overrides`` onto ``pipeline_overlay``. A RENAME, so
-    pruning cannot do it: ``CampaignConfig`` forbids extras and :func:`restamp_campaign_configs`
-    would drop the key WITH its values — so ``cmd_restamp`` runs this first."""
-    moved = both = 0
-    for tree in workspace_trees(DEFAULT_PROJECTS_ROOT):
-        for path in sorted(tree.glob("*/campaigns/*/campaign.json")):
-            with graceful(f"rename pipeline_overlay {path}"):
-                doc = read_json_tolerant(path)
-                config = doc.get("config") if isinstance(doc, dict) else None
-                if not isinstance(config, dict) or "pipeline_overrides" not in config:
-                    continue
-                stale = config.pop("pipeline_overrides")
-                # A document carrying BOTH was written by the new code and re-read by the old;
-                # the live spelling is the one to keep, exactly as `rename_round_trend` decides it.
-                if "pipeline_overlay" in config:
-                    both += 1
-                else:
-                    config["pipeline_overlay"] = stale
-                moved += 1
-                if apply:
-                    write_json(path, doc)
-
-    verb = "moved" if apply else "would move"
-    print(
-        f"\nCampaign delta — {verb} pipeline_overrides -> pipeline_overlay on {moved} manifest(s)"
-    )
-    if both:
-        print(f"  {both:>6} already carried the new spelling; the stale key was dropped")
-    if not apply and moved:
-        print("\nDry run. Re-run with --apply to rewrite.")
-    return {"pipeline_overlay_renamed": moved}
-
-
-# --- (12) the node config a campaign ran, still living in a file five campaigns share ---------
-
-
-def _ran_config(campaign_dir: pathlib.Path, root_cycle_id: str) -> dict[str, Any]:
-    """What round 0 RECORDED this campaign running: its origin candidate carries no evolved delta,
-    so ``resolved_pipeline_params`` there is the starting config, from the one record no later
-    edit reaches. ``{}`` when the campaign never ran a round."""
-    doc = read_json_tolerant(campaign_dir / "cycles" / root_cycle_id / "rounds" / "round_0000.json")
-    if not isinstance(doc, dict):
-        return {}
-    for cand in doc.get("candidate_scores") or []:
-        params = cand.get("resolved_pipeline_params") if isinstance(cand, dict) else None
-        if isinstance(params, dict) and params:
-            return params
-    return {}
-
-
-def _identity_owned_keys(connector_name: str, dataset_dir: pathlib.Path | None) -> set[str] | None:
-    """Config keys the IDENTITY layer computes, derived from its two producers, which a campaign
-    must never carry — the layer overwrites them on every read. ``None`` when this box cannot say
-    (an uninstalled extra, an ungenerated panel), and the caller SKIPS rather than guesses."""
-    owned = {JUDGE_INSTRUMENT_KEY}
-    connector = CONNECTORS.get(connector_name)
-    if connector is None or connector.identity_config is None:
-        return owned
-    if dataset_dir is None:
-        return None
-    try:
-        for block in connector.identity_config(dataset_dir).values():
-            owned |= set(block)
-    except Exception as exc:
-        # Bare on purpose: a connector is an extension point and may raise anything; the answer
-        # is "unknown" either way, reported not swallowed.
-        print(f"  SKIP  {connector_name} identity keys unknown: {type(exc).__name__}: {exc}")
-        return None
-    return owned
-
-
-def lift_campaign_pipeline_config(*, apply: bool) -> dict[str, int]:
-    """Freeze each campaign's node config onto the campaign, out of the dataset file it shares —
-    from round 0 where one ran, else from the file, which is still honest for a campaign that never
-    did. A non-empty ``pipeline_overlay`` is left alone; identity-owned keys and ``steps`` are never
-    lifted. A campaign still in CHECK-IN gets the OPPOSITE treatment and its overlay is REMOVED: it
-    ran nothing, its config is the draft's, and Start folds that on anyway."""
-    lifted = from_rounds = from_dataset = current = empty = unknown = provisional = 0
-    stores_by_tenant: dict[pathlib.Path, Stores | None] = {}
-    for tree in workspace_trees(DEFAULT_PROJECTS_ROOT):
-        for path in sorted(tree.glob("*/campaigns/*/campaign.json")):
-            with graceful(f"lift pipeline config {path}"):
-                doc = read_json_tolerant(path)
-                if not isinstance(doc, dict):
-                    continue
-                config = doc.get("config")
-                config = config if isinstance(config, dict) else {}
-                if is_checkin(path.parent / "cycles" / str(doc.get("root_cycle_id") or "")):
-                    if not config.pop("pipeline_overlay", None):
-                        continue
-                    doc["config"] = config
-                    provisional += 1
-                    if apply:
-                        write_json(path, doc)
-                    continue
-                if config.get("pipeline_overlay"):
-                    current += 1
-                    continue
-
-                tenant_dir = path.parents[2]
-                if tenant_dir not in stores_by_tenant:
-                    stores_by_tenant[tenant_dir] = _tenant_stores(tenant_dir)
-                stores = stores_by_tenant[tenant_dir]
-                slug = str(doc.get("dataset_name") or "")
-                dataset_dir: pathlib.Path | None = None
-                if stores is not None and slug:
-                    with graceful(f"resolve dataset {slug}"):
-                        dataset_dir = readable_dataset_dir(stores, slug)
-
-                ran = _ran_config(path.parent, str(doc.get("root_cycle_id") or ""))
-                measured = bool(ran)
-                if not measured:
-                    raw = (
-                        read_yaml_optional(dataset_pipeline_path(dataset_dir))
-                        if dataset_dir
-                        else None
-                    )
-                    ran = {
-                        node: block["config"]
-                        for node, block in ((raw or {}).get("nodes") or {}).items()
-                        if isinstance(block, dict) and isinstance(block.get("config"), dict)
-                    }
-
-                owned = _identity_owned_keys(_connector_kind(doc, stores, slug), dataset_dir)
-                if owned is None:
-                    unknown += 1
-                    continue
-                overrides = {
-                    node: kept
-                    for node, block in ran.items()
-                    if node != "steps"
-                    and isinstance(block, dict)
-                    and (kept := {k: v for k, v in block.items() if k not in owned})
-                }
-                if not overrides:
-                    empty += 1
-                    continue
-
-                config["pipeline_overlay"] = overrides
-                doc["config"] = config
-                lifted += 1
-                # Counted HERE, not where the source was chosen: a campaign skipped for unknown
-                # identity keys, or one whose config was entirely identity-owned, was read from a
-                # source but never lifted — and the two tallies have to sum to `lifted` or the
-                # line lies about what the pass did.
-                from_rounds += measured
-                from_dataset += not measured
-                if apply:
-                    write_json(path, doc)
-
-    verb = "lifted" if apply else "would lift"
-    print(f"\nCampaign node config — {verb} onto {lifted} campaign(s)")
-    print(f"  {from_rounds:>6} from round 0, the config that campaign was MEASURED under")
-    print(f"  {from_dataset:>6} from the dataset file — never ran, so it has no record of its own")
-    print(f"  {current:>6} already carry their own `pipeline_overlay`")
-    print(f"  {empty:>6} have no node config anywhere to lift")
-    print(f"  {unknown:>6} skipped — their connector's identity keys cannot be read on this box")
-    dropped = "dropped from" if apply else "would drop from"
-    print(
-        f"  {provisional:>6} {dropped} a CHECK-IN — its draft owns the node config, not this file"
-    )
-    if not apply and (lifted or provisional):
-        print("\nDry run. Re-run with --apply to rewrite.")
-    return {
-        "pipeline_configs_lifted": lifted,
-        "pipeline_configs_from_rounds": from_rounds,
-        "pipeline_configs_from_dataset": from_dataset,
-        "pipeline_configs_current": current,
-        "pipeline_configs_identity_unknown": unknown,
-        "pipeline_configs_provisional_dropped": provisional,
     }
 
 
