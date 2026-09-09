@@ -131,6 +131,16 @@ LEDGER_BASELINE = {
     # says where a measurement comes from, a judge says a grader is a measurement and never a
     # formula term — and that rule is what stops six re-derivation sites re-billing the archive.
     "claude_md": 8,
+    # SIX by charter (`tests/CLAUDE.md` § What each file is for). This row never rises: a test
+    # rides an existing file's existing section, or it is not written.
+    "test_files": 6,
+    # A function is admitted through the three axes — behaviour-coupled, silent, unrecoverable —
+    # and a raise here names the invariant and the axis that was hardest to clear.
+    "test_functions": 157,
+    # Every property the generated contract offers the browser. A field with no reader is the
+    # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
+    # ever read, and nothing counted them until here.
+    "served_fields": 551,
 }
 
 

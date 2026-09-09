@@ -4,6 +4,7 @@ Outside the layer tree because it counts every layer: inside one, an import woul
 
 from __future__ import annotations
 
+import json
 import types
 import typing
 from pathlib import Path
@@ -23,6 +24,35 @@ assert _PACKAGE_ROOT.name == "promptpotter", f"ledger root is not the package: {
 # built, so a developer who has cut a release once carries ``datasets/CLAUDE.md`` inside
 # the package and the ratchet goes red on a file nobody wrote.
 _ASSETS_ROOT = _PACKAGE_ROOT / "assets"
+
+# The suite beside the package. `tests/CLAUDE.md` fixes it at six files and admits a function
+# only through three axes, and a rule that is prose alone is the mechanism of organic growth —
+# four files landed in one arc against it. A raise costs the same written reason as any other
+# row: name the invariant and the axis it clears.
+_TESTS_ROOT = _PACKAGE_ROOT.parent / "tests"
+
+
+def _test_files() -> list[Path]:
+    return sorted(_TESTS_ROOT.glob("test_*.py"))
+
+
+def _count_test_functions(files: list[Path]) -> int:
+    return sum(
+        line.startswith(("def test_", "async def test_"))
+        for f in files
+        for line in f.read_text(encoding="utf-8").splitlines()
+    )
+
+
+# What the browser is OFFERED — every property of every schema in the generated contract, so the
+# roster is the app's own answer and not a hand-kept list. An unread field costs a baseline edit
+# like any other: writing one is a line, finding its reader is a grep, so it is added silently.
+_CONTRACT = _PACKAGE_ROOT.parent / "docs" / "specs" / "openapi.generated.json"
+
+
+def _count_served_fields() -> int:
+    schemas = json.loads(_CONTRACT.read_text(encoding="utf-8"))["components"]["schemas"]
+    return sum(len(s.get("properties", {})) for s in schemas.values())
 
 
 def _package_files(pattern: str) -> list[Path]:
@@ -216,6 +246,9 @@ def compute_ledger() -> dict[str, int]:
         "injections": len(INJECTIONS),
         "escalation_rules": len(DEFAULT_ESCALATION_RULES),
         "claude_md": len(_package_files("CLAUDE.md")),
+        "test_files": len(test_files := _test_files()),
+        "test_functions": _count_test_functions(test_files),
+        "served_fields": _count_served_fields(),
     }
 
 

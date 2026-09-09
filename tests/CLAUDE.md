@@ -65,7 +65,8 @@ the thing they validate, never as a repo-wide structure scan.
 
 Answer the three axes in order. The first "no" ends it. If all three are yes, it rides an
 existing file's existing section by adding a function — **never a new file**, and never a new
-section invented to house it.
+section invented to house it. Both counts are ledger rows (`test_files`, `test_functions`), so the
+function costs a baseline edit naming its invariant, and a file goes red.
 
 ## Mock strategy
 
