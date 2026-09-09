@@ -79,14 +79,15 @@ the browser's generated type names the field it reads while nothing writes one t
 (`_detached_after`) and the conditional-GET validator reads it from there rather than restating
 it — a 304 computed off a second copy outlives the answer it stands for.
 
-**Seeding from that file may not be able to fail the run.** `resolve_resume_state` is the one
-reader that turns `dashboard.json` back into state, and the model is `extra="forbid"` — so a file
-an earlier build wrote fails on the one field that has since moved. Uncaught, that took down the
-resume whose whole job was to not lose the cycle, and then took down `write_launch_stop` as it
-tried to stamp why. The prior state is dropped WHOLE and loudly, never salvaged field by field: a
-partial read is a compatibility shim, the ledger is the truth, and everything this file carries on
-top of it is re-derived forward. The SSE snapshot already answers the same question the same way —
-`dashboard_unreadable` is a served reason, not an exception.
+**Seeding from that file may not be able to fail the run, and now nothing seeds from it.**
+`resolve_resume_state` folds the seed cycle's LEDGER; it read `dashboard.json` until doing so made
+a projection an input to itself, and a file an earlier build wrote — the model is `extra="forbid"` —
+took down the resume whose whole job was to not lose the cycle, then took down `write_launch_stop`
+as it tried to stamp why. So no field on this model is on-disk shape anyone must migrate. What
+survives for the readers that DO parse the file is the handling rule: the prior state is dropped
+WHOLE and loudly, never salvaged field by field — a partial read is a compatibility shim, the
+ledger is the truth, and everything this file carries on top of it is re-derived forward. The SSE
+snapshot answers exactly that way: `dashboard_unreadable` is a served reason, not an exception.
 
 `DerivedView.on_record` (`projections/base.py`) owns the dispatch, and that file's header states how. **Subscribers MUST NOT write campaign artifacts beyond their declared allowlist** — it fails loud, since an out-of-allowlist write shows up in the file tree ([`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
 

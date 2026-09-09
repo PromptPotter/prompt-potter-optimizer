@@ -246,7 +246,6 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
     },
     // The same fold under a second key — empty here, since the fixture bills nothing.
     spend_by_round: {},
-    in_flight: null,
     backfill_log: [],
     current_round: currentRound(),
     error: null,

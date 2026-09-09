@@ -58,7 +58,6 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackfillLogEntry,
     CurrentRound,
     DashboardError,
-    InFlightCall,
     LiveDashboardState,
     LoopWarning,
     RunLimits,
@@ -246,6 +245,10 @@ class LiveDashboardView(DerivedView):
         # Sticky LLM-call mirror for ``current_round.nodes`` — owned here, not on the
         # audit-trail, which records the same event independently into its round flush.
         self._sticky_llm_calls: dict[str, dict[str, Any]] = dict(initial_llm_nodes or {})
+        # ``(call_id, node)`` of the optimizer call in progress — view-private, because the ONE
+        # thing it decides is which node ``_active_node`` lights. It was a served field for a
+        # reader that never arrived.
+        self._in_flight: tuple[str, str] | None = None
         self._core = LiveStateCore(
             round_num=self.state.round,
             # Origin anchor seeds from round 0 if it's already on disk (resume);
@@ -786,16 +789,10 @@ class LiveDashboardView(DerivedView):
         return self.state.spend.total_tokens_used
 
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
-        """Publishes the in-flight optimizer call — the multi-minute blind spot during a
-        reasoning-heavy critique, where no other record fires."""
-        self.state.in_flight = InFlightCall(
-            call_id=record.call_id,
-            node=record.node,
-            model=record.model,
-            round=record.round,
-            candidate_idx=record.candidate_idx,
-            started_at_ms=record.started_at_ms,
-        )
+        """Lights the node of the optimizer call in progress — the multi-minute blind spot during a
+        reasoning-heavy critique, where no other record fires. Reaches the browser as
+        ``active_node``, which is why the persist still fires here."""
+        self._in_flight = (record.call_id, record.node)
         self._schedule_persist()
 
     def _handle_llm_call(self, record: LLMCallRecord) -> None:
@@ -805,9 +802,8 @@ class LiveDashboardView(DerivedView):
             **build_node_block(record),
             "round": self.state.round,
         }
-        in_flight = self.state.in_flight
-        if in_flight is not None and record.call_id and in_flight.call_id == record.call_id:
-            self.state.in_flight = None
+        if self._in_flight is not None and record.call_id and self._in_flight[0] == record.call_id:
+            self._in_flight = None
         self._schedule_persist()
 
     def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
@@ -898,9 +894,8 @@ class LiveDashboardView(DerivedView):
         """Which optimizer node is working. The in-flight LLM call names its node and wins;
         otherwise the phase does, which is what keeps a node lit across the gap between two
         calls in one phase."""
-        in_flight = self.state.in_flight
-        if in_flight is not None:
-            return in_flight.node
+        if self._in_flight is not None:
+            return self._in_flight[1]
         return _STATE_TO_NODE[self.state.state]
 
     def _current_round_nodes(self) -> dict[str, dict[str, Any]]:

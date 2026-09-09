@@ -21,7 +21,6 @@ __all__ = [
     "BackfillLogEntry",
     "CurrentRound",
     "DashboardError",
-    "InFlightCall",
     "LiveDashboardState",
     "LoopWarning",
     "PobbBlock",
@@ -91,18 +90,6 @@ class DashboardError(StrictModel):
     kind: str
     message: str
     stop_reason: str
-
-
-class InFlightCall(StrictModel):
-    """``state.in_flight`` — the optimizer LLM call currently in progress.
-    Set on ``LLMCallStartRecord``, cleared on the paired ``LLMCallRecord``; ``None`` between calls."""
-
-    call_id: str
-    node: str
-    model: str | None = None
-    round: int | None = None
-    candidate_idx: int | None = None
-    started_at_ms: int
 
 
 class RunLimits(StrictModel):
@@ -297,8 +284,6 @@ class LiveDashboardState(StrictModel):
     # reconciles against `spend`.
     spend_by_round: dict[str, SpendRollup] = Field(default_factory=dict)
 
-    in_flight: InFlightCall | None = None
-
     backfill_log: list[BackfillLogEntry] = Field(default_factory=list)
 
     current_round: CurrentRound = Field(default_factory=CurrentRound)
@@ -350,7 +335,6 @@ class LiveDashboardState(StrictModel):
             "declared_phase": RunPhase.RUNNING,
             "stop_reason": None,
             "error": None,
-            "in_flight": None,
             "current_round": CurrentRound(),
             "current_query_payload": None,
             "current_sample_id": None,

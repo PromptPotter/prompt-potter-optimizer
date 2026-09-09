@@ -10,7 +10,6 @@ from promptpotter.shared import (
     extract_boxed_number,
     extract_gsm8k_number,
     extract_last_bold,
-    sigmoid,
     text_list_rank,
 )
 
@@ -63,33 +62,12 @@ def _exact_match(predicted: str, ground_truth: str) -> float:
     return 1.0 if p == g else 0.0
 
 
-def _relu(x: float) -> float:
-    return max(0.0, float(x))
-
-
-def _hockeystick(x: float, threshold: float, slope: float = 1.0) -> float:
-    return max(0.0, (float(x) - float(threshold)) * float(slope))
-
-
-def _smoothstep(x: float, edge0: float, edge1: float) -> float:
-    e0 = float(edge0)
-    e1 = float(edge1)
-    if e1 == e0:
-        return 0.0 if float(x) < e0 else 1.0
-    t = max(0.0, min(1.0, (float(x) - e0) / (e1 - e0)))
-    return t * t * (3 - 2 * t)
-
-
 SCORING_FUNCTIONS: dict[str, Callable[..., Any]] = {
     "rr": _rr,
     "gsm8k_match": _gsm8k_match,
     "aime_match": _aime_match,
     "exact_match": _exact_match,
     "list_rr": _list_rr,
-    "relu": _relu,
-    "hockeystick": _hockeystick,
-    "sigmoid": sigmoid,
-    "smoothstep": _smoothstep,
 }
 
 

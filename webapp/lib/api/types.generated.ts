@@ -555,16 +555,6 @@ export interface RunLimits {
   lives_cap: number | null;
 }
 
-/** ``state.in_flight`` — the optimizer LLM call currently in progress. */
-export interface InFlightCall {
-  call_id: string;
-  node: string;
-  model: string | null;
-  round: number | null;
-  candidate_idx: number | null;
-  started_at_ms: number;
-}
-
 /** One paired-PoBB backfill event appended by ``LiveDashboardView._append_backfill``. */
 export interface BackfillLogEntry {
   round: number;
@@ -638,7 +628,6 @@ export interface LiveDashboardState {
   run_limits: RunLimits | null;
   spend: SpendRollup;
   spend_by_round: Record<string, SpendRollup>;
-  in_flight: InFlightCall | null;
   backfill_log: BackfillLogEntry[];
   current_round: CurrentRound;
   error: DashboardError | null;
@@ -1848,12 +1837,8 @@ export interface ConfigEstimandGroup {
 export interface ConfigCoupling {
   /** Coupling id */
   name: string;
-  /** Dotted knob paths the coupling relates */
-  knobs: string[];
   /** Short display names for those knobs */
   labels: string[];
-  /** The shared estimand the knobs co-determine */
-  estimand: string;
   /** The relationship rule, plain language */
   relation: string;
   /** What goes wrong when the combination is violated */

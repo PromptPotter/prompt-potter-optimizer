@@ -80,6 +80,7 @@ Configured per dataset via `campaign.yaml::scoring`:
 
 - **Builtins:** the `_SAFE_BUILTINS` map in that module — arithmetic and `math` only. Nothing else from `__builtins__`.
 - **Evaluators:** any registered name, per-sample or per-round. `all_evaluators()` (`application/scoring/evaluators.py`) is the PACKAGE registry, `evaluators_meta()` its served projection; a campaign's own `judge` (§3) is addressable by its judge name too, and is deliberately not in that registry — a grader belongs to one campaign, not to the process. Names are stable and implementations may change — read the registry, not a list here.
+- **Matchers:** `SCORING_FUNCTIONS` (`application/scoring/formula/matchers.py`), splatted into the same namespace, so a formula calls one exactly like an evaluator. This is the LABEL arm — it reads answer prose and decides HIT/MISS (`exact_match`, `gsm8k_match`, …), which is why a `per_sample` formula almost always names one. Read the map; it holds what a campaign can actually reach, and nothing is kept in it for a caller that does not exist.
 
 Constants, name lookups, arithmetic operators (`+ - * / % **`) addressable. **Calls outside the registry are rejected at compile time** (enforced, not convention).
 
@@ -287,3 +288,4 @@ Sibling cycles (forks, diag, sweeps) live flat under `cycles/` alongside the roo
 - **Prompt templates** at `promptpotter/assets/optimizer/pipeline.yaml::resolved_prompts` — data, intentionally tunable. Forks may edit; we may also edit on any release.
 - **Test helpers** (`tests/factories.py`, `tests/conftest.py`).
 - **The `webapp/` layout.** The webapp + control plane ship and serve users; internal component layout stays free to move.
+- **The REST API and the events stream**, specified though they are (`docs/specs/api-openapi.yaml`, `events-asyncapi.yaml`). They carry **no inbound credential**: `presentation/api/middleware/oidc.py` derives identity from a browser SESSION COOKIE and nothing else — no bearer token, no API key anywhere on the inbound path — so a third party reaches them only by running the server with `PROMPTPOTTER_AUTH=off`, i.e. with no auth at all. That makes this a same-origin browser surface plus a local no-auth mode, not an integration surface, and saying so is the honest state: per-endpoint guarantees would promise something it cannot yet keep. (The one bearer token the repo holds runs PP→TermNorm — outbound, the other direction.)

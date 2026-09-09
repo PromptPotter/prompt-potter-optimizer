@@ -1010,19 +1010,6 @@
             "title": "Consequence",
             "type": "string"
           },
-          "estimand": {
-            "description": "The shared estimand the knobs co-determine",
-            "title": "Estimand",
-            "type": "string"
-          },
-          "knobs": {
-            "description": "Dotted knob paths the coupling relates",
-            "items": {
-              "type": "string"
-            },
-            "title": "Knobs",
-            "type": "array"
-          },
           "labels": {
             "description": "Short display names for those knobs",
             "items": {
@@ -1049,9 +1036,7 @@
         },
         "required": [
           "name",
-          "knobs",
           "labels",
-          "estimand",
           "relation",
           "consequence",
           "severity",

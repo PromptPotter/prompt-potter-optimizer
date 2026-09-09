@@ -950,6 +950,14 @@ CONNECTOR = Connector(
     # The "samples" ARE the tasks declared there — read from the dataset config dir at init.
     experiment_file=TASKS_FILE,
     default_pipeline=(AGENT_NODE,),
+    # No `default_node_config`, and that is a REFUSAL rather than an omission. The harbor datasets
+    # repeat their `prompt_info` + `optimizer` blocks verbatim, and folding them here does not
+    # deduplicate anything: this field is an INGEST SEED written into a fresh dataset's own
+    # `pipeline.yaml` (`protocol.py`), never something a run inherits — for an `in_process`
+    # connector `_resolve_pipeline_schema` parses the dataset file ALONE. A harbor dataset cannot
+    # be ingested either (`datasets/ingest.py` refuses a connector declaring an `experiment_file`
+    # and carrying no labels), so a seed here reaches nothing. What a measurement declares must not
+    # ship, and change, independently of the measurement.
     # No `node_types`: that roster exists to raise INPUT DEPENDENCIES (a `candidate_source` node
     # wants a candidate library dropped in place). An agent node wants nothing but its task.
 )

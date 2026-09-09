@@ -48,7 +48,6 @@ export type {
   BackendWarning,
   BackfillLogEntry,
   DashboardError,
-  InFlightCall,
   LineageDivergence,
   LineageNode,
   LiveDashboardState,

@@ -206,7 +206,11 @@ LEDGER_BASELINE = {
     # lets the offered ladder be every rung minus only what an endpoint REFUSES: an axis keeps every
     # legal value, and the sameness is reported instead of being enforced by deletion. It cannot
     # ride `reasoning_note` — prose no surface can branch on is not a state.
-    "served_fields": 579,
+    # -2: `ConfigCoupling.knobs` and `.estimand` — served to every config-map reader and opened by
+    # none. `labels` is the display projection of the same walk and IS read, so the dotted paths
+    # beside it were the raw form of a thing already answered; `estimand` is the grouping key the
+    # panel never groups by. Dropping them narrows what a browser can start depending on.
+    "served_fields": 577,
 }
 
 

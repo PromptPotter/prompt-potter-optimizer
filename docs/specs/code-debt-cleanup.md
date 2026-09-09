@@ -141,16 +141,6 @@ it.
   cannot clobber each other. **Re-test:** author a throwaway connector needing per-run state
   without reading `harbor.py`; if it reaches for a ContextVar, the entry stands.
 
-- **`harbor-tbench-regex-log` and `spreadsheetbench-s10` duplicate 23 `pipeline.yaml` lines over
-  30 chars** — node type, `prompt_info`, `param_keys`, the `env_reward` mapping and every comment
-  explaining why; they differ only in model, description and `max_turns`.
-  `Connector.default_pipeline` / `default_node_config` exist for exactly this and none of the
-  three harbor datasets uses them. The predicted trigger has now half-fired: the third
-  (`sealqa-longseal-12`) is NOT the copy-paste this entry expected — it shares 10 lines with the
-  first and 11 with the second, 29 of its 39 being its own — so the drift surface is the original
-  PAIR, not the count. **Re-test:** intersect those two files' lines over 30 chars; under 23 means
-  someone split them. A fourth dataset says nothing this one did not already answer.
-
 
 ## Blocked — named blocker
 
@@ -194,9 +184,22 @@ it.
   `best_round_on_shared_cells` / `_apply_best` null-safety. **Smaller than filed:** its sibling
   `rescore_results` stamps errored rows `fitness = 0.0` citing `compute_accuracy`, which actually
   EXCLUDES them, and `_mean_fitness_by_cell` reads an absent key identically — so no cited reader
-  depends on the stamp. Start from the audit that implies: every unguarded `r["fitness"]` subscript.
-  Note the stamp makes a row's shape depend on replay (a freshly measured error row has no `fitness`
-  key at all).
+  depends on the stamp. Audit every unguarded `r["fitness"]` subscript; note the stamp makes a row's
+  shape depend on replay (a freshly measured error row has no `fitness` key at all).
+  **The producer is one line and the propagation is not — attempted and reverted rather than
+  half-landed.** Splitting the arm (`0.0` only where a row was DEPRECATED, `None` where every
+  non-scoreable row errored) is three lines and the suite stays GREEN, because nothing exercises an
+  all-errored candidate — so landing it alone turns a fabricated 0.0 into a `ValidationError` at
+  `l1/population.py`'s single `ScoredCandidate` construction, on the L4 path where all-errored cells
+  actually happen. Typing that one field then names ten files' worth of seams, and they are
+  DECISIONS rather than casts: `display_rank_key` (where an unscoreable candidate ranks),
+  `mask/load.py::_mask_candidate`, `views/ingress.py::ScoreEntry`, `CycleRoundState`'s pair below,
+  `resume_and_fork/repair.py`, `runner/inner/spawn.py` (a `None - float` on the L4 lift), and the
+  three that take an ORIGIN accuracy — `ObservabilityBridge.start_campaign`, `build_run_observers`,
+  `LiveDisplay.set_origin` — which ask what a campaign whose origin never scored even IS.
+  `RoundResult.accuracy` is a second pass on top of that, then the wire and the charts.
+  **Re-test:** make the producer edit and run `mypy promptpotter` — the list it prints IS the arc's
+  width, and it is measured rather than estimated.
 - **`optimization/cycle.py::CycleRoundState`'s accuracy/composite pair belongs to THIS entry, not to
   a bounded `or 0.0` sweep** — re-scoped 2026-09-02 by counting: `current_accuracy` /
   `current_composite_fitness` / `best_composite_fitness` reach 55 sites, including the escalation
@@ -264,11 +267,11 @@ longer "is a feature allowed" but "does the preprint need it", and these do not:
   third-party caller reaches it only by running the server with `PROMPTPOTTER_AUTH=off`, i.e. with no
   auth at all. (The one bearer token the repo has,
   [`backend-integration.md`](../operations/backend-integration.md) § Connection security, runs
-  PP→TermNorm — outbound, the other direction — so this gap is unowned.) Action: **document what is
-  true before promising anything** — the surface is same-origin browser-session plus a local auth-off
-  mode, and `developer/stable-api.md` lists it in neither §1–§7 nor §8, so it is implicitly internal
-  today. Worked `submit → poll → fetch` examples and per-endpoint stability guarantees wait on the
-  credential, which is a new capability. Blocker: that capability.
+  PP→TermNorm — outbound, the other direction — so this gap is unowned.) What is TRUE is now said out
+  loud — [`developer/stable-api.md`](../developer/stable-api.md) § 8 names the surface rather than
+  leaving it implicitly internal. What remains is the credential itself, and the worked
+  `submit → poll → fetch` examples and per-endpoint guarantees that wait on it. Blocker: that
+  capability.
 - **Nothing probes whether a route implements `response_format` before a run spends money** — an
   unsupporting model is discovered by paying for it (HTTP 405 outright, or empty content plus a
   burned schema-repair re-prompt). Same shape: swapping a model means hand-editing two

@@ -335,9 +335,7 @@ class ConfigEstimandGroup(StrictModel):
 
 class ConfigCoupling(StrictModel):
     name: str = Field(description="Coupling id")
-    knobs: list[str] = Field(description="Dotted knob paths the coupling relates")
     labels: list[str] = Field(description="Short display names for those knobs")
-    estimand: str = Field(description="The shared estimand the knobs co-determine")
     relation: str = Field(description="The relationship rule, plain language")
     consequence: str = Field(description="What goes wrong when the combination is violated")
     severity: str = Field(
@@ -403,9 +401,7 @@ def get_campaign_config_map(stores: StoresDep, campaign_id: str) -> ConfigMapRes
     couplings = [
         ConfigCoupling(
             name=c.name,
-            knobs=list(c.knobs),
             labels=[knob_label(k) for k in c.knobs],
-            estimand=c.estimand.value,
             relation=c.relation,
             consequence=c.consequence,
             severity=c.severity,

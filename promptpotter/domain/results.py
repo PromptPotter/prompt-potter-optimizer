@@ -879,6 +879,12 @@ class CycleResult(StrictModel):
     # Index-aligned with the two above: a round that did not move the parent did not sharpen the
     # reading of it either. The WITHIN-cell precision an L4 panel needs to tell estimation noise
     # from between-cell heterogeneity. Precision only — never a penalty term.
+    #
+    # `origin_level_se` has NO production reader BY DESIGN — do not delete it as dead. It is the
+    # term `l4/proxies.py::mean_parent_level_se` must not fold in (the origin cancels in
+    # `variant - origin`, and counting it twice once read out as "100% noise"), and supplying it is
+    # what makes that negative control discriminating in `test_numerics.py`. Delete the field and
+    # the guarantee stops being proven and starts being merely unreachable.
     origin_level_se: float | None = None
     round_parent_level_ses: list[float] = Field(default_factory=list)
     # The denominator the L4 law averages over, and it must come from the config rather than
