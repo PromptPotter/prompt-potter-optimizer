@@ -762,6 +762,7 @@ export interface NodeConfigParam {
   optimizer_locked: boolean;
   movable_by: string[];
   held: boolean;
+  source: 'dataset' | 'campaign' | 'seed' | 'evolved' | 'identity' | 'unset';
 }
 
 /** Resolved output schema for a TARGET pipeline node — the structured output the */

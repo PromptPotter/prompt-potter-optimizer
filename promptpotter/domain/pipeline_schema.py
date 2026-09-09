@@ -2,9 +2,9 @@ import enum
 import hashlib
 import json
 from collections.abc import Iterable, Mapping
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import ConfigDict, Field, PrivateAttr
+from pydantic import ConfigDict, Field
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
@@ -318,6 +318,12 @@ class PipelineNode(StrictModel):
         )
 
 
+ParamSource = Literal["dataset", "campaign", "seed", "evolved", "identity", "unset"]
+"""WHICH LAYER set a resolved param's value, stamped BY the merge (last writer wins), never diffed
+against it. Each member is described beside its producer in ``api-openapi.yaml::ParamSource``;
+``identity`` is unoverridable, so no surface may offer to edit it."""
+
+
 class NodeConfigParam(StrictModel):
     """One param a node carries — the COMPLETE per-node list, which is what lets a reader sum
     `movable_by` into the node's whole search space.
@@ -352,6 +358,9 @@ class NodeConfigParam(StrictModel):
     optimizer_locked: bool = False
     movable_by: list[str] = Field(default_factory=list)
     held: bool = False
+    # "unset" on a DATASET-scoped read, which has no campaign to attribute to; a campaign read
+    # stamps every row from the merge that produced it.
+    source: ParamSource = "unset"
 
 
 class ModelCapability(StrictModel):
@@ -432,21 +441,16 @@ class PipelineSchema(StrictModel):
     available_models: list[str] = Field(default_factory=list)
     view: PipelineView | None = None
 
-    _node_map: dict[str, "PipelineNode"] = PrivateAttr(default_factory=dict)
-    _observation_keys: frozenset[str] = PrivateAttr(default_factory=frozenset)
+    # DERIVED ON READ, never cached at init: `narrow()` and `filter_to_steps()` build with
+    # `model_copy`, which skips `model_post_init`, so a cached index answered with pre-copy nodes.
 
-    def model_post_init(self, __context: Any) -> None:
+    @property
+    def _node_map(self) -> dict[str, "PipelineNode"]:
         # Indexed over DECLARED nodes: "is there a node called X" and "what type is its
         # param" are questions about the manifest, not about this round's chain — an
         # escalation node resolving to None merges its nested params shallow and loses
         # every sibling key.
-        self._node_map = {n.name: n for n in (self.declared_nodes or self.nodes)}
-        self._observation_keys = frozenset(
-            m.pipeline_key
-            for n in self.nodes
-            if n.observation_name and n.observation_mappings
-            for m in n.observation_mappings
-        )
+        return {n.name: n for n in (self.declared_nodes or self.nodes)}
 
     @property
     def active_steps(self) -> tuple[str, ...]:
@@ -466,7 +470,12 @@ class PipelineSchema(StrictModel):
 
     @property
     def observation_keys(self) -> frozenset[str]:
-        return self._observation_keys
+        return frozenset(
+            m.pipeline_key
+            for n in self.nodes
+            if n.observation_name and n.observation_mappings
+            for m in n.observation_mappings
+        )
 
     def to_pipeline_params(self) -> dict[str, Any]:
         """The WIRE base only. The origin cycle id does NOT derive from it — ``build_origin_cycle_id``
@@ -519,7 +528,12 @@ class PipelineSchema(StrictModel):
         return sorted(models)
 
     def node_config_schema(
-        self, l2_axes: dict[str, set[str]] | None = None
+        self,
+        l2_axes: dict[str, set[str]] | None = None,
+        *,
+        values: Mapping[str, Mapping[str, object]] | None = None,
+        sources: Mapping[str, Mapping[str, ParamSource]] | None = None,
+        model_menu: list[str] | None = None,
     ) -> dict[str, list[NodeConfigParam]]:
         """COMPLETE by contract, so a reader answers "may anything move here?" by summing
         ``movable_by``. A param dropped here is invisible to every caller — filter downstream.
@@ -528,7 +542,11 @@ class PipelineSchema(StrictModel):
         whether it is the optimizer's own manifest or a target pipeline, so the one route that
         serves the manifest passes it (``routers/active.py``) and everyone else passes nothing.
         Its source is ``dispatch/schemas.py::L2_NODE_AXES`` — the same table L2's own override
-        parsing reads, so the picture and the parser cannot disagree about L2's reach."""
+        parsing reads, so the picture and the parser cannot disagree about L2's reach.
+
+        *values* / *sources* / *model_menu* are a CAMPAIGN read's answer written over the schema's
+        own: the resolved value per param, the layer that won it, and the model row's menu as a
+        union so narrowing is never a one-way ratchet. Absent, a row carries the declaration."""
         # A model row is synthesized on the carrier only when no node OWNS a model —
         # otherwise the native row (justlogic's `llm_only.model`) is authoritative.
         model_declared = any(
@@ -538,6 +556,8 @@ class PipelineSchema(StrictModel):
         out: dict[str, list[NodeConfigParam]] = {}
         for n in self.config_nodes:
             params: list[NodeConfigParam] = []
+            resolved = (values or {}).get(n.name, n.current_config)
+            stamped = (sources or {}).get(n.name, {})
             # `param_keys_held` joins the union: an axis the operator closed whose value was
             # never written to `current_config` (`max_tokens`, declared and unset) otherwise
             # leaves the surface entirely — the one row that most needed to say it was held.
@@ -554,7 +574,7 @@ class PipelineSchema(StrictModel):
                     # would be a one-way ratchet the operator could not undo. And a value the
                     # operator TYPED is exactly one this list does not carry, which is the only
                     # thing that lets a surface mark it as theirs rather than the admin's.
-                    kind, options = "model", list(self.available_models)
+                    kind, options = "model", list(model_menu or self.available_models)
                 elif key in n.param_allowed_values:
                     kind, options = "enum", list(n.param_allowed_values[key])
                 else:
@@ -578,12 +598,13 @@ class PipelineSchema(StrictModel):
                 params.append(
                     NodeConfigParam(
                         key=key,
-                        value=n.current_config.get(key),
+                        value=resolved.get(key, n.current_config.get(key)),
                         kind=kind,
                         options=options,
                         description=n.param_descriptions.get(key, ""),
                         optimizer_locked=forbidden,
                         movable_by=movable,
+                        source=stamped.get(key, "unset"),
                         # A forbidden key is never HELD, however it left `param_keys`: nobody
                         # closed an axis — there was none to close, and saying otherwise puts a
                         # padlock on a cost lever.
@@ -599,11 +620,12 @@ class PipelineSchema(StrictModel):
                 params.append(
                     NodeConfigParam(
                         key="model",
-                        value=n.current_config.get("model"),
+                        value=resolved.get("model", n.current_config.get("model")),
                         kind="model",
-                        options=list(self.available_models),
+                        options=list(model_menu or self.available_models),
                         description="Optimizer model for this node — install-global by "
                         "default, operator-steerable on a fork.",
+                        source=stamped.get("model", "unset"),
                     )
                 )
             out[n.name] = params
@@ -744,6 +766,7 @@ __all__ = [
     "NodePromptInfo",
     "NodeType",
     "ObservationMapping",
+    "ParamSource",
     "PipelineDependency",
     "PipelineNode",
     "PipelineSchema",

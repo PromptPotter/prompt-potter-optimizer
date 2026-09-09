@@ -1361,7 +1361,6 @@ paths:
         call. A one-shot read beside `dashboard.json` polling, which is its
         invalidation signal, not its transport (`roadmap.md` § Hard ordering).
       tags: [campaigns]
-      x-status: declared-not-wired
       parameters:
         - name: campaign_id
           in: path

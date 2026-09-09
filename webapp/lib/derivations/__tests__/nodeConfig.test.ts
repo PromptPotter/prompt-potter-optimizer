@@ -136,6 +136,8 @@ describe("nodeOverlayPatch (search-space emit)", () => {
 // The server `node_config_schema` for an llm_only node: model (this node opens it, so it is a
 // real axis with `available_models` as its menu), reasoning_effort (enum), temperature (number),
 // max_tokens (number, declared but unset).
+//
+// `source` is SERVED now (`GET /campaigns/{id}/pipeline`).
 const schema: Record<string, NodeConfigParam[]> = {
   llm_only: [
     {
@@ -147,6 +149,7 @@ const schema: Record<string, NodeConfigParam[]> = {
       optimizer_locked: false,
       movable_by: ["l1"],
       held: false,
+      source: "dataset",
     },
     {
       key: "reasoning_effort",
@@ -157,6 +160,7 @@ const schema: Record<string, NodeConfigParam[]> = {
       optimizer_locked: false,
       movable_by: ["l1"],
       held: false,
+      source: "dataset",
     },
     {
       key: "temperature",
@@ -167,6 +171,7 @@ const schema: Record<string, NodeConfigParam[]> = {
       optimizer_locked: false,
       movable_by: ["l1"],
       held: false,
+      source: "dataset",
     },
     {
       key: "max_tokens",
@@ -177,6 +182,7 @@ const schema: Record<string, NodeConfigParam[]> = {
       optimizer_locked: false,
       movable_by: ["l1"],
       held: false,
+      source: "dataset",
     },
   ],
 };
@@ -290,6 +296,7 @@ describe("nodeReach", () => {
     optimizer_locked: false,
     movable_by: [],
     held: false,
+    source: "dataset",
     ...over,
   });
 

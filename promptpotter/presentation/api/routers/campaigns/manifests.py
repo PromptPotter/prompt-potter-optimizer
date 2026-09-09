@@ -14,12 +14,17 @@ from promptpotter.application.campaign_config import (
     estimand_doc,
     knob_label,
 )
+from promptpotter.application.evidence import SubjectSpec, parse_subject
 from promptpotter.application.jobs.launcher.checkin import load_checkin_draft
 from promptpotter.application.jobs.launcher.draft_build import draft_wire
 from promptpotter.application.knobs import (
     COUPLINGS,
     check_couplings,
     resolve_knob_states,
+)
+from promptpotter.application.pipeline_resolve import (
+    CampaignPipelineResponse,
+    resolve_pipeline_for_campaign,
 )
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.strict_model import StrictModel
@@ -275,6 +280,50 @@ def get_campaign(stores: StoresDep, campaign_id: str) -> CampaignDetailResponse:
         root_content_hash=campaign.root_content_hash,
         config=campaign.config,
     )
+
+
+@campaigns_router.get("/campaigns/{campaign_id}/pipeline", response_model=CampaignPipelineResponse)
+def get_campaign_pipeline(
+    stores: StoresDep,
+    campaign_id: str,
+    at: str = Query(
+        default="",
+        description="Searchpoint subject (`parse_subject` grammar); defaults to the campaign root",
+    ),
+) -> CampaignPipelineResponse:
+    """What this campaign RUNS — the one server-owned answer (`frontend-surface-contract.md::I9`).
+    Ownership-gated by `load_owned`, 404 on cross-tenant: this body carries the operator's own
+    model choices."""
+    campaign = stores.campaigns.load_owned(campaign_id, str(stores.identity.user_id))
+    if campaign is None:
+        raise NotFoundError(f"Campaign not found: {campaign_id}")
+    return resolve_pipeline_for_campaign(
+        stores, campaign, at=_pipeline_subject(at, campaign_id), workspace=stores.base_dir
+    )
+
+
+def _pipeline_subject(at: str, campaign_id: str) -> SubjectSpec:
+    """One grammar (`parse_subject`), narrowed by two refusals: a scoring mask cannot change what
+    config a point RAN, and an `at` naming another campaign than the path is two subjects."""
+    if not at:
+        return SubjectSpec("campaign", campaign_id)
+    try:
+        spec = parse_subject(at)
+    except ValueError as exc:
+        raise PayloadInvalidError(str(exc), code="payload_invalid") from exc
+    if spec.lens or spec.samples:
+        raise PayloadInvalidError(
+            f"Subject {at!r} carries a scoring mask, and a mask cannot change what config a "
+            "point RAN. Drop `lens=` / `samples=` — this read is configuration, not scoring.",
+            code="payload_invalid",
+        )
+    if spec.campaign_id != campaign_id:
+        raise PayloadInvalidError(
+            f"Subject {at!r} addresses campaign {spec.campaign_id!r} but the path names "
+            f"{campaign_id!r} — one request, one subject.",
+            code="payload_invalid",
+        )
+    return spec
 
 
 class ConfigKnob(StrictModel):

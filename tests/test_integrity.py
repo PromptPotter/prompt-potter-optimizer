@@ -495,6 +495,29 @@ def test_a_judge_never_grades_a_cell_that_has_no_answer() -> None:
     assert calls == [], f"a cell with no answer was billed a grading: {calls}"
 
 
+def test_the_provenance_sink_cannot_move_the_merge_it_observes(tmp_path: Path) -> None:
+    """`resolve_pipeline_config_params` is hashed into the origin cycle id and the archive key.
+    The display sink a served read attaches must leave those bytes untouched, or asking a panel
+    "what does this run" re-keys the campaign it asked about."""
+    from promptpotter.application.pipeline_resolve import resolve_pipeline_config_params
+
+    schema = parse_pipeline_response(
+        {"nodes": {"llm_only": {"type": "generation"}}, "pipelines": {"default": ["llm_only"]}}
+    )
+    write_yaml(
+        tmp_path / "pipeline.yaml",
+        {"nodes": {"llm_only": {"config": {"model": "dataset-model", "temperature": 0.7}}}},
+    )
+    overlay = {"llm_only": {"model": "campaign-model"}}
+    sink: dict[str, dict[str, str]] = {}
+    plain = resolve_pipeline_config_params(["llm_only"], overlay, tmp_path, schema)
+    observed = resolve_pipeline_config_params(
+        ["llm_only"], overlay, tmp_path, schema, provenance=sink
+    )
+    assert plain == observed
+    assert sink["llm_only"] == {"model": "campaign", "temperature": "dataset"}
+
+
 # 2. Replay eligibility — which banked row may be served back
 
 
@@ -1155,6 +1178,25 @@ def test_nested_param_override_accumulates_instead_of_reverting_its_parent() -> 
         schema,
     )
     assert plain == {"l1_generate": {"persona": "z", "instruction": "y"}}
+
+
+def test_a_schema_copy_answers_for_itself_not_for_the_schema_it_was_copied_from() -> None:
+    """`narrow` and `filter_to_steps` build with `model_copy`, which skips `model_post_init` — an
+    index cached there kept `model_options` serving the admin catalogue on a campaign that had
+    closed it, so L1 proposed and the gate admitted models the mint excluded."""
+    from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
+
+    schema = parse_pipeline_response(
+        {
+            "nodes": {"a": {"type": "generation"}, "b": {"type": "generation"}},
+            "pipelines": {"default": ["a", "b"]},
+        }
+    )
+    narrowed = schema.narrow({"a": NodeSearchNarrowing(param_allowed_values={"model": ["only"]})})
+    node = narrowed.get_node("a")
+    assert node is not None and narrowed.model_options(node) == ["only"]
+    assert "model" not in cast(Any, schema.get_node("a")).param_allowed_values
+    assert schema.filter_to_steps(["a"]).get_node("b") is None
 
 
 # 5. The dispatch frame — what a node is shown, within what budget

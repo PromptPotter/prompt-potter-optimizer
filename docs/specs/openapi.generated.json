@@ -650,6 +650,93 @@
         "title": "CampaignListResponse",
         "type": "object"
       },
+      "CampaignPipelineResponse": {
+        "additionalProperties": false,
+        "description": "One campaign's pipeline at one searchpoint — the body of ``GET /campaigns/{id}/pipeline``.\nThe peer of ``readable_dataset_dir`` one question up: that seam answers which bytes are on disk,\nthis one which values a campaign runs (``architecture.md`` §0, two resolution seams).",
+        "properties": {
+          "backend_type": {
+            "title": "Backend Type",
+            "type": "string"
+          },
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "connector": {
+            "title": "Connector",
+            "type": "string"
+          },
+          "cycle_id": {
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "dataset_name": {
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "model_capabilities": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ModelCapability"
+            },
+            "title": "Model Capabilities",
+            "type": "object"
+          },
+          "node_config_schema": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/NodeConfigParam"
+              },
+              "type": "array"
+            },
+            "title": "Node Config Schema",
+            "type": "object"
+          },
+          "node_output_schema": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/NodeOutputSchema"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Node Output Schema",
+            "type": "object"
+          },
+          "params": {
+            "additionalProperties": true,
+            "description": "Resolved config as the engine holds it — the bytes a round document carries as `resolved_pipeline_params`, which makes that field this endpoint's check",
+            "title": "Params",
+            "type": "object"
+          },
+          "view": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PipelineView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "campaign_id",
+          "cycle_id",
+          "dataset_name",
+          "connector",
+          "backend_type",
+          "params",
+          "node_config_schema",
+          "view",
+          "node_output_schema",
+          "model_capabilities"
+        ],
+        "title": "CampaignPipelineResponse",
+        "type": "object"
+      },
       "CampaignStorageResponse": {
         "additionalProperties": false,
         "properties": {
@@ -3693,6 +3780,19 @@
             "title": "Options",
             "type": "array"
           },
+          "source": {
+            "default": "unset",
+            "enum": [
+              "dataset",
+              "campaign",
+              "seed",
+              "evolved",
+              "identity",
+              "unset"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
           "value": {
             "title": "Value"
           }
@@ -6149,6 +6249,61 @@
           }
         },
         "summary": "Get Lineage Tree",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/pipeline": {
+      "get": {
+        "description": "What this campaign RUNS — the one server-owned answer (`frontend-surface-contract.md::I9`).\nOwnership-gated by `load_owned`, 404 on cross-tenant: this body carries the operator's own\nmodel choices.",
+        "operationId": "get_campaign_pipeline_api_v1_campaigns__campaign_id__pipeline_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Searchpoint subject (`parse_subject` grammar); defaults to the campaign root",
+            "in": "query",
+            "name": "at",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Searchpoint subject (`parse_subject` grammar); defaults to the campaign root",
+              "title": "At",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignPipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Campaign Pipeline",
         "tags": [
           "Campaigns"
         ]

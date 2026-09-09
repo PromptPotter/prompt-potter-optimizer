@@ -105,7 +105,10 @@ LEDGER_BASELINE = {
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
     # reason. Narrowing it would make this the one evaluator the shared call site cannot invoke.
-    "any_params": 51,
+    # -1: `pipeline_schema.py::PipelineSchema.model_post_init(self, __context: Any)` is GONE — it
+    # cached `_node_map` at init and pydantic skips it on `model_copy`, so a narrowed schema
+    # answered with pre-copy nodes. Derived on read now. A real subtraction, not a re-annotation.
+    "any_params": 50,
     # +1: `results.py::is_floor_pinned(rows: Sequence[Mapping[str, Any]])`, the same signature as
     # `measured_cells` and `is_answer_collapsed` beside it — a round row read off disk is a plain
     # mapping, so a narrower annotation here would be a claim the callers cannot honour.
@@ -136,11 +139,21 @@ LEDGER_BASELINE = {
     "test_files": 6,
     # A function is admitted through the three axes — behaviour-coupled, silent, unrecoverable —
     # and a raise here names the invariant and the axis that was hardest to clear.
-    "test_functions": 157,
+    # +1: the provenance sink must not move the merge it observes — `resolve_pipeline_config_params`
+    # is hashed into the origin cycle id, so a served read that perturbed it re-keys the campaign.
+    # Silent, and it orphans every banked row. (test_integrity § 1)
+    # +1: a schema copy answers for itself — `model_copy` skips `model_post_init`, and a cached
+    # index let L1 propose and the gate admit models the mint had closed. Silent misspend on an
+    # axis the operator shut. (test_integrity § 4)
+    "test_functions": 159,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
-    "served_fields": 551,
+    # +10: `CampaignPipelineResponse` — one campaign's resolved pipeline, which no schema answered
+    # before; the four surfaces that each re-derived it read this instead.
+    # +1: `NodeConfigParam.source` — which layer won a param, which is what makes the served value
+    # readable as an answer rather than a number the browser has to attribute itself.
+    "served_fields": 562,
 }
 
 

@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, MutableMapping
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.campaign_config import CampaignConfig
+from pydantic import Field
+
+from promptpotter.application.campaign_config import (
+    CampaignConfig,
+    apply_inherited_overlay,
+    load_campaign_config,
+)
+from promptpotter.application.datasets.authored import (
+    dataset_campaign_path,
+    load_dataset_campaign_config,
+)
 from promptpotter.application.datasets.prompts import (
     dataset_declared_nodes,
     has_dataset_prompts,
@@ -15,16 +25,35 @@ from promptpotter.config.settings import (
     PROMPT_STRING_FIELDS,
 )
 from promptpotter.connectors import CONNECTORS
-from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
-from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
+from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+from promptpotter.domain.pipeline_schema import (
+    ModelCapability,
+    NodeConfigParam,
+    NodeOutputSchema,
+    NodeSearchNarrowing,
+    ParamSource,
+    PipelineView,
+)
+from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.llm.capabilities import resolve_schema_menu
+from promptpotter.infrastructure.store.dataset_access import (
+    DatasetAccessError,
+    dataset_pipeline_path,
+    readable_dataset_dir,
+)
 from promptpotter.infrastructure.store.io import read_yaml_optional
+from promptpotter.infrastructure.store.stores import descend_store
 from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from promptpotter.application.evidence import SubjectSpec
     from promptpotter.application.initialization.session import Session
+    from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.infrastructure.store.stores import Stores
     from promptpotter.judges.protocol import JudgeSpec
 
 logger = logging.getLogger(__name__)
@@ -37,10 +66,12 @@ neither a tunable — nothing may put either in `param_keys`."""
 
 
 __all__ = [
+    "CampaignPipelineResponse",
     "apply_node_overlay",
     "configure_and_apply_pipeline",
     "missing_template_vars",
     "resolve_pipeline_config_params",
+    "resolve_pipeline_for_campaign",
     "resolved_dataset_name",
 ]
 
@@ -49,14 +80,20 @@ def apply_node_overlay(
     base: dict[str, Any],
     overlay: Mapping[str, Any],
     schema: PipelineSchema | None,
+    *,
+    source: ParamSource | None = None,
+    provenance: MutableMapping[str, dict[str, ParamSource]] | None = None,
 ) -> dict[str, Any]:
     """The ONE per-node overlay merge. Depth is bounded by the DECLARATION (``param_types: object``
-    merges one level deeper, so a sibling entry a parent earned survives), never by sniffing types."""
+    merges one level deeper, so a sibling entry a parent earned survives), never by sniffing types.
+    ``provenance`` stamps ``source`` on every ``(node, param)`` written; layers apply last-writer-wins,
+    so the final stamp IS the winning layer. The merge is on the identity path and ignores both."""
     merged = dict(base)
     for node, cfg in overlay.items():
         existing = merged.get(node)
         if not (isinstance(existing, dict) and isinstance(cfg, dict)):
             merged[node] = cfg
+            _stamp(provenance, source, node, cfg)
             continue
         node_obj = schema.get_node(node) if schema else None
         param_types = node_obj.param_types if node_obj else {}
@@ -70,7 +107,21 @@ def apply_node_overlay(
             ):
                 node_cfg[param] = {**prior, **incoming}
         merged[node] = node_cfg
+        _stamp(provenance, source, node, cfg)
     return merged
+
+
+def _stamp(
+    provenance: MutableMapping[str, dict[str, ParamSource]] | None,
+    source: ParamSource | None,
+    node: str,
+    cfg: object,
+) -> None:
+    """Param granularity, never a sub-key: an ``object`` merge writes sub-keys from two layers into
+    one dict, and the config surface has no sub-key row to report that on."""
+    if provenance is None or source is None or not isinstance(cfg, dict):
+        return
+    provenance.setdefault(node, {}).update(dict.fromkeys(cfg, source))
 
 
 def resolve_pipeline_config_params(
@@ -79,9 +130,12 @@ def resolve_pipeline_config_params(
     dataset_dir: Path | None,
     schema: PipelineSchema,
     judges: Mapping[str, JudgeSpec] | None = None,
+    *,
+    provenance: MutableMapping[str, dict[str, ParamSource]] | None = None,
 ) -> dict[str, Any]:
     """The SINGLE definition of which node config a cycle id and a measurement key hash — shared
-    with ``GET /origins``, so the prospective origin and the real one cannot diverge."""
+    with ``GET /origins``, so the prospective origin and the real one cannot diverge.
+    ``provenance`` is the display sink of :func:`apply_node_overlay`."""
 
     pipeline_params: dict[str, Any] = {"steps": list(active)}
     if dataset_dir is not None:
@@ -92,7 +146,9 @@ def resolve_pipeline_config_params(
             for node, cfg in load_dataset_node_overlay(dataset_dir).items()
             if node in active
         }
-        pipeline_params = apply_node_overlay(pipeline_params, dataset_overlay, schema)
+        pipeline_params = apply_node_overlay(
+            pipeline_params, dataset_overlay, schema, source="dataset", provenance=provenance
+        )
     # Campaign overrides layer on top (override > dataset); non-dict / inactive-node
     # entries are dropped here with an operator-visible log, then the survivors merge.
     valid_overrides: dict[str, Any] = {}
@@ -110,18 +166,21 @@ def resolve_pipeline_config_params(
                 key,
                 value,
             )
-    pipeline_params = apply_node_overlay(pipeline_params, valid_overrides, schema)
-    # Identity contributions — LAST, never overridable: per-node entries that are part of what a
-    # measurement was taken UNDER but that no operator wrote into a node config. ONE channel with
-    # two contributors (the connector, and the judges); a second overlay pass beside this one would
-    # be a second place a fact can enter the archive key.
+    pipeline_params = apply_node_overlay(
+        pipeline_params, valid_overrides, schema, source="campaign", provenance=provenance
+    )
+    # Identity contributions LAST and unoverridable: what a measurement was taken UNDER that no
+    # operator wrote — the connector's and the judges', ONE channel, or a second place a fact can
+    # enter the archive key.
     identity = {
         node: cfg
         for node, cfg in _identity_contributions(dataset_dir, judges, active).items()
         if node in active
     }
     if identity:
-        pipeline_params = apply_node_overlay(pipeline_params, identity, schema)
+        pipeline_params = apply_node_overlay(
+            pipeline_params, identity, schema, source="identity", provenance=provenance
+        )
     return pipeline_params
 
 
@@ -281,6 +340,123 @@ def resolved_dataset_name(session: Session, campaign_config: CampaignConfig) -> 
     """One rule, one place: this feeds the same identity as the mint seam's ``Campaign.dataset_name``,
     so a divergence renames campaigns and files measurements under a name nothing looks up."""
     return campaign_config.dataset_name or session.dataset_name or ""
+
+
+class CampaignPipelineResponse(StrictModel):
+    """One campaign's pipeline at one searchpoint — the body of ``GET /campaigns/{id}/pipeline``.
+    The peer of ``readable_dataset_dir`` one question up: that seam answers which bytes are on disk,
+    this one which values a campaign runs (``architecture.md`` §0, two resolution seams)."""
+
+    campaign_id: str
+    cycle_id: str
+    dataset_name: str
+    connector: str
+    backend_type: str
+    params: dict[str, Any] = Field(
+        description="Resolved config as the engine holds it — the bytes a round document carries "
+        "as `resolved_pipeline_params`, which makes that field this endpoint's check"
+    )
+    node_config_schema: dict[str, list[NodeConfigParam]]
+    view: PipelineView | None
+    node_output_schema: dict[str, NodeOutputSchema | None]
+    model_capabilities: dict[str, ModelCapability]
+
+
+def _evolved_overlay(stores: Stores, at: SubjectSpec) -> dict[str, Any]:
+    """The addressed candidate's OWN sparse delta, or ``{}``. ``pipeline_params_override``, never
+    ``resolved_pipeline_params`` — that one is the COMPLETE running config, and read as a delta
+    it stamps every param ``evolved`` on every candidate."""
+    if at.kind != "candidate" or not at.cycle_id:
+        return {}
+    store = descend_store(stores, at.inside) if at.inside else stores
+    hop = CycleHop(campaign_id=at.campaign_id, cycle_id=at.cycle_id)
+    index = store.campaigns.load(hop) or {}
+    # Newest round first: a candidate id is unique, but scanning down means a re-measured point
+    # answers from the document that measured it last.
+    for round_num in reversed(range(int(index.get("n_rounds") or 0) + 1)):
+        doc = store.campaigns.load_round_file(hop, round_num)
+        if doc is None:
+            continue
+        for cand in doc.candidate_scores:
+            if cand.candidate_id == at.candidate_id:
+                return dict(cand.pipeline_params_override or {})
+    return {}
+
+
+def resolve_pipeline_for_campaign(
+    stores: Stores,
+    campaign: Campaign,
+    *,
+    at: SubjectSpec,
+    workspace: Path | None = None,
+) -> CampaignPipelineResponse:
+    """The ONE campaign-scoped resolution. Five layers through the one merge, each stamping its
+    provenance: ``dataset`` < ``campaign`` (the FROZEN snapshot) < ``seed`` < ``evolved`` <
+    ``identity``. The campaign layer is the point: a dataset file is shared by every campaign on it."""
+    dataset_dir: Path | None
+    try:
+        dataset_dir = readable_dataset_dir(stores, campaign.dataset_name)
+    except DatasetAccessError:
+        # A campaign outlives its dataset dir: the frozen snapshot is then the whole config.
+        dataset_dir = None
+
+    raw = read_yaml_optional(dataset_pipeline_path(dataset_dir)) if dataset_dir else None
+    schema = parse_pipeline_response(raw or {"nodes": {}, "pipelines": {"default": []}})
+
+    # A campaign whose dataset dir is gone has no LIVE template to inherit from, and the frozen
+    # snapshot is the whole answer. `CampaignConfig()` does not construct — `optimization` is
+    # required — so the empty template is built through the loader rather than the constructor.
+    live = (
+        load_dataset_campaign_config(dataset_campaign_path(dataset_dir))
+        if dataset_dir and dataset_campaign_path(dataset_dir).is_file()
+        else load_campaign_config({"optimization": {}})
+    )
+    hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=at.cycle_id or campaign.root_cycle_id)
+    seed = stores.campaigns.read_cycle_seed(hop) if at.cycle_id else None
+    cfg = apply_inherited_overlay(live, campaign.config or {}, seed)
+
+    active, filtered = _resolve_active_schema(
+        schema,
+        exclude=list(cfg.exclude_nodes),
+        narrowing=cfg.optimizer_narrowing,
+        dataset_dir=dataset_dir,
+    )
+
+    provenance: dict[str, dict[str, ParamSource]] = {}
+    params = resolve_pipeline_config_params(
+        active,
+        cfg.pipeline_overrides,
+        dataset_dir,
+        filtered,
+        judges=cfg.judges,
+        provenance=provenance,
+    )
+    if seed is not None and seed.pipeline_overlay:
+        params = apply_node_overlay(
+            params, seed.pipeline_overlay, filtered, source="seed", provenance=provenance
+        )
+    evolved = _evolved_overlay(stores, at)
+    if evolved:
+        params = apply_node_overlay(
+            params, evolved, filtered, source="evolved", provenance=provenance
+        )
+
+    return CampaignPipelineResponse(
+        campaign_id=campaign.campaign_id,
+        cycle_id=hop.cycle_id,
+        dataset_name=campaign.dataset_name,
+        connector=str((raw or {}).get("backend_name") or campaign.dataset_name),
+        backend_type=str((raw or {}).get("backend_type") or ""),
+        params=params,
+        node_config_schema=filtered.node_config_schema(
+            values={n: c for n, c in params.items() if isinstance(c, dict)},
+            sources=provenance,
+            model_menu=filtered.selectable_models(),
+        ),
+        view=filtered.view,
+        node_output_schema=filtered.node_output_schemas(),
+        model_capabilities=resolve_schema_menu(filtered, workspace=workspace),
+    )
 
 
 def configure_and_apply_pipeline(
