@@ -21,14 +21,17 @@ from promptpotter.application.datasets.prompts import (
     load_dataset_node_overlay,
     load_node_prompt,
 )
+from promptpotter.application.runner.inner.tasks import inner_tasks_path, load_inner_tasks
 from promptpotter.config.settings import (
     PROMPT_STRING_FIELDS,
 )
 from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     ModelCapability,
+    NestedPipelineRef,
     NodeConfigParam,
     NodeOutputSchema,
     NodeSearchNarrowing,
@@ -43,7 +46,6 @@ from promptpotter.infrastructure.store.dataset_access import (
     readable_dataset_dir,
 )
 from promptpotter.infrastructure.store.io import read_yaml_optional
-from promptpotter.infrastructure.store.stores import descend_store
 from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
@@ -126,7 +128,7 @@ def _stamp(
 
 def resolve_pipeline_config_params(
     active: list[str],
-    pipeline_overrides: Mapping[str, Any],
+    campaign_overlay: Mapping[str, Any],
     dataset_dir: Path | None,
     schema: PipelineSchema,
     judges: Mapping[str, JudgeSpec] | None = None,
@@ -149,10 +151,10 @@ def resolve_pipeline_config_params(
         pipeline_params = apply_node_overlay(
             pipeline_params, dataset_overlay, schema, source="dataset", provenance=provenance
         )
-    # Campaign overrides layer on top (override > dataset); non-dict / inactive-node
+    # The campaign's overlay layers on top (campaign > dataset); non-dict / inactive-node
     # entries are dropped here with an operator-visible log, then the survivors merge.
     valid_overrides: dict[str, Any] = {}
-    for key, value in pipeline_overrides.items():
+    for key, value in campaign_overlay.items():
         if isinstance(value, dict) and key in active:
             valid_overrides[key] = value
         elif isinstance(value, dict):
@@ -360,27 +362,42 @@ class CampaignPipelineResponse(StrictModel):
     view: PipelineView | None
     node_output_schema: dict[str, NodeOutputSchema | None]
     model_capabilities: dict[str, ModelCapability]
+    nests: NestedPipelineRef | None = Field(
+        description="The inner pipeline this chain nests, if any — the L4 drill-in, on this read"
+    )
 
 
 def _evolved_overlay(stores: Stores, at: SubjectSpec) -> dict[str, Any]:
     """The addressed candidate's OWN sparse delta, or ``{}``. ``pipeline_params_override``, never
     ``resolved_pipeline_params`` — that one is the COMPLETE running config, and read as a delta
-    it stamps every param ``evolved`` on every candidate."""
+    it stamps every param ``evolved`` on every candidate. ``stores`` is already the leaf the caller
+    descended to; descending ``at.inside`` again would go two hops for a one-hop address."""
     if at.kind != "candidate" or not at.cycle_id:
         return {}
-    store = descend_store(stores, at.inside) if at.inside else stores
     hop = CycleHop(campaign_id=at.campaign_id, cycle_id=at.cycle_id)
-    index = store.campaigns.load(hop) or {}
+    index = stores.campaigns.load(hop) or {}
     # Newest round first: a candidate id is unique, but scanning down means a re-measured point
     # answers from the document that measured it last.
     for round_num in reversed(range(int(index.get("n_rounds") or 0) + 1)):
-        doc = store.campaigns.load_round_file(hop, round_num)
+        doc = stores.campaigns.load_round_file(hop, round_num)
         if doc is None:
             continue
         for cand in doc.candidate_scores:
             if cand.candidate_id == at.candidate_id:
                 return dict(cand.pipeline_params_override or {})
     return {}
+
+
+def nested_pipeline_ref(dataset_dir: Path, view: PipelineView | None) -> NestedPipelineRef | None:
+    """Owning an ``inner_tasks.yaml`` IS what makes a dataset outer (``runner/inner/tasks.py``);
+    no name test recognises one. Here because both read doors need it and neither imports a router."""
+    try:
+        panel = load_inner_tasks(inner_tasks_path(dataset_dir))
+    except InnerCycleUnscoreableError:
+        # A read-only view must not raise where the runner would.
+        return None
+    node = next((n for n in (view.nodes if view else []) if n.kind == "measurement"), None)
+    return NestedPipelineRef(node=node.id, dataset=panel.inner_benchmark) if node else None
 
 
 def _config_floor(campaign: Campaign, dataset_dir: Path | None) -> CampaignConfig:
@@ -405,12 +422,13 @@ def resolve_pipeline_for_campaign(
 ) -> CampaignPipelineResponse:
     """The ONE campaign-scoped resolution. Five layers through the one merge, each stamping its
     provenance: ``dataset`` < ``campaign`` (the FROZEN snapshot) < ``seed`` < ``evolved`` <
-    ``identity``. The campaign layer is the point: a dataset file is shared by every campaign on it."""
+    ``identity``. ``stores`` must already be the store *campaign* lives in: for an L4 inner
+    searchpoint the caller descends ``at.inside`` first, so manifest and rounds come off one tree."""
     dataset_dir: Path | None
     try:
         dataset_dir = readable_dataset_dir(stores, campaign.dataset_name)
     except DatasetAccessError:
-        # A campaign outlives its dataset dir: the frozen snapshot is then the whole config.
+        # A campaign outlives its dataset dir; `_config_floor` below says what answers instead.
         dataset_dir = None
 
     raw = read_yaml_optional(dataset_pipeline_path(dataset_dir)) if dataset_dir else None
@@ -431,7 +449,7 @@ def resolve_pipeline_for_campaign(
     provenance: dict[str, dict[str, ParamSource]] = {}
     params = resolve_pipeline_config_params(
         active,
-        cfg.pipeline_overrides,
+        cfg.pipeline_overlay,
         dataset_dir,
         filtered,
         judges=cfg.judges,
@@ -463,6 +481,7 @@ def resolve_pipeline_for_campaign(
         view=filtered.view,
         node_output_schema=filtered.node_output_schemas(),
         model_capabilities=resolve_schema_menu(filtered, workspace=workspace),
+        nests=nested_pipeline_ref(dataset_dir, filtered.view) if dataset_dir else None,
     )
 
 
@@ -492,7 +511,7 @@ def configure_and_apply_pipeline(
     # (`build_origin_cycle_id` hashes these merged params). Starting prompts land on top below.
     pipeline_params = resolve_pipeline_config_params(
         active,
-        campaign_config.pipeline_overrides,
+        campaign_config.pipeline_overlay,
         dataset_dir,
         filtered,
         judges=campaign_config.judges,

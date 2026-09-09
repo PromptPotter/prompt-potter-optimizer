@@ -297,7 +297,7 @@ def inner_instrument_config(
         opt_update["n_variants"] = spec.n_variants
     if spec.lives is not None:
         opt_update["lives"] = spec.lives
-    po: dict[str, Any] = {k: dict(v) for k, v in (base.pipeline_overrides or {}).items()}
+    po: dict[str, Any] = {k: dict(v) for k, v in (base.pipeline_overlay or {}).items()}
     node = dict(po.get(llm_node, {}))
     node["seed"] = spec.seed
     if spec.inner_model:
@@ -310,7 +310,7 @@ def inner_instrument_config(
             "sp_budget_ttest": min(spec.n_samples, n_scored),
             "sp_budget_origin": n_scored,
             "optimization": base.optimization.model_copy(update=opt_update),
-            "pipeline_overrides": po,
+            "pipeline_overlay": po,
         }
     )
 

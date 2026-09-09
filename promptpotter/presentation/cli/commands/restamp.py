@@ -11,6 +11,7 @@ from promptpotter.application.restamp import (
     compact_cycle_ledgers,
     lift_campaign_pipeline_config,
     rekey_overlap_results,
+    rename_campaign_pipeline_overlay,
     rename_round_trend,
     reproject_cycle_indexes,
     restamp_campaign_configs,
@@ -26,6 +27,9 @@ __all__ = ["cmd_restamp"]
 
 async def cmd_restamp(args: argparse.Namespace) -> CommandResult:
     apply = bool(getattr(args, "apply", False))
+    # FIRST of all: the prune below drops a key `CampaignConfig` no longer declares, and this
+    # rename is the only thing that carries the values across before it can.
+    renamed = rename_campaign_pipeline_overlay(apply=apply)
     # BEFORE the config re-stamp: that pass prunes the same document to `Campaign.model_fields`,
     # and a manifest read twice in one invocation should be read in its final shape the second time.
     kinds = stamp_campaign_backend_type(apply=apply)
@@ -91,10 +95,15 @@ async def cmd_restamp(args: argparse.Namespace) -> CommandResult:
         f"`pipeline.yaml` silently re-answers for it "
         f"({configs['pipeline_configs_current']} already did; "
         f"{configs['pipeline_configs_identity_unknown']} skipped because their connector's "
-        f"identity keys cannot be read on this box — re-run where its extra is installed)."
+        f"identity keys cannot be read on this box — re-run where its extra is installed). "
+        f"Campaign delta: pipeline_overrides -> pipeline_overlay on "
+        f"{renamed['pipeline_overlay_renamed']} manifest(s), one name for the per-node delta at "
+        f"every layer that carries one. Without this the prune above would drop the key WITH its "
+        f"values, silently un-setting every model and temperature a campaign held."
     )
     return CommandResult(
         data={
+            **renamed,
             **kinds,
             **configs,
             **counts,

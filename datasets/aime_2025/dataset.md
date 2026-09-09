@@ -12,7 +12,7 @@ so it serves as a head-to-head citation point, never as a population-grade insta
 
 ## Why `max_tokens` is overridden here
 
-`campaign.yaml::pipeline_overrides.llm_only` raises the cap — the one dataset that does. AIME-depth
+`campaign.yaml::pipeline_overlay.llm_only` raises the cap — the one dataset that does. AIME-depth
 reasoning chains hit the provider's default output ceiling and return `finish_reason=length`, and
 the failure is not spread evenly: the *same* handful of problems truncate across every candidate
 (sample #8 parabola, #10 piecewise linear, #6 twelve-letter combinatorics). Left capped, those rows

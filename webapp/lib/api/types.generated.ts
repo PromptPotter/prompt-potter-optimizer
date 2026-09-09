@@ -958,6 +958,24 @@ export interface CampaignListResponse {
   total: number;
 }
 
+/** One campaign's pipeline at one searchpoint — the body of ``GET /campaigns/{id}/pipeline``. */
+export interface CampaignPipelineResponse {
+  campaign_id: string;
+  cycle_id: string;
+  dataset_name: string;
+  connector: string;
+  backend_type: string;
+  /** Resolved config as the engine holds it — the bytes a round document carries as
+   * `resolved_pipeline_params`, which makes that field this endpoint's check */
+  params: Record<string, unknown>;
+  node_config_schema: Record<string, NodeConfigParam[]>;
+  view: PipelineView | null;
+  node_output_schema: Record<string, NodeOutputSchema | null>;
+  model_capabilities: Record<string, ModelCapability>;
+  /** The inner pipeline this chain nests, if any — the L4 drill-in, on this read */
+  nests: NestedPipelineRef | null;
+}
+
 /** Where one occurrence of an edit was measured on disk. */
 export interface EffectProvenance {
   campaign_id: string;

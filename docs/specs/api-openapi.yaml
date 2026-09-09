@@ -1354,7 +1354,7 @@ paths:
         sole source for every config row, model chip and provenance badge
         (`frontend-surface-contract.md::I9`). Five layers, merged
         last-writer-wins by `application/pipeline_resolve.py`: dataset overlay <
-        the campaign's FROZEN `pipeline_overrides` < cycle seed < the addressed
+        the campaign's FROZEN `pipeline_overlay` < cycle seed < the addressed
         candidate's sparse `pipeline_params_override` < identity contributions,
         which are unoverridable. Each param's `source` is the layer that won it,
         stamped BY the merge. A check-in campaign resolves through the same
@@ -3630,7 +3630,7 @@ components:
         producer; a campaign read has no `backend` layer, since its schema is
         parsed off the same `pipeline.yaml` the dataset overlay is read from.
         `dataset` the slug's `nodes.{n}.config`; `campaign` the frozen
-        `pipeline_overrides`, and a check-in draft's overlay (a draft IS the
+        `pipeline_overlay`, and a check-in draft's overlay (a draft IS the
         pre-committed config); `seed` a cycle seed; `evolved` the candidate's
         sparse `pipeline_params_override`; `identity` connector + judge
         contributions, unoverridable, so a surface never offers to edit one;

@@ -200,7 +200,7 @@ model, caps). BBEH only: `notebooks/bbeh_potter.ipynb::build_campaign_config()` 
 [`docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md).
 The `pipeline.yaml` `model` field is a live operator knob (Groq daily-volume swaps 120b → 20b), not
 a fixed default. `max_tokens` is never set numerically in node configs — provider ceiling applies;
-override per-cycle via `campaign.yaml::pipeline_overrides`.
+override per-cycle via `campaign.yaml::pipeline_overlay`.
 
 Read them. Don't propose parameter tweaks unbidden, don't classify data volume, don't offer
 leaderboard picks.

@@ -72,6 +72,7 @@ __all__ = [
     "check_round_documents",
     "compact_cycle_ledgers",
     "lift_campaign_pipeline_config",
+    "rename_campaign_pipeline_overlay",
     "rename_round_trend",
     "reproject_cycle_indexes",
     "restamp_campaign_configs",
@@ -1023,7 +1024,44 @@ def stamp_campaign_backend_type(*, apply: bool) -> dict[str, int]:
     }
 
 
-# --- (11) the node config a campaign ran, still living in a file five campaigns share ---------
+# --- (11) the campaign delta, under the name every other layer already used -------------------
+
+
+def rename_campaign_pipeline_overlay(*, apply: bool) -> dict[str, int]:
+    """Move ``campaign.json::config.pipeline_overrides`` onto ``pipeline_overlay``. A RENAME, so
+    pruning cannot do it: ``CampaignConfig`` forbids extras and :func:`restamp_campaign_configs`
+    would drop the key WITH its values — so ``cmd_restamp`` runs this first."""
+    moved = both = 0
+    for tree in workspace_trees(DEFAULT_PROJECTS_ROOT):
+        for path in sorted(tree.glob("*/campaigns/*/campaign.json")):
+            with graceful(f"rename pipeline_overlay {path}"):
+                doc = read_json_tolerant(path)
+                config = doc.get("config") if isinstance(doc, dict) else None
+                if not isinstance(config, dict) or "pipeline_overrides" not in config:
+                    continue
+                stale = config.pop("pipeline_overrides")
+                # A document carrying BOTH was written by the new code and re-read by the old;
+                # the live spelling is the one to keep, exactly as `rename_round_trend` decides it.
+                if "pipeline_overlay" in config:
+                    both += 1
+                else:
+                    config["pipeline_overlay"] = stale
+                moved += 1
+                if apply:
+                    write_json(path, doc)
+
+    verb = "moved" if apply else "would move"
+    print(
+        f"\nCampaign delta — {verb} pipeline_overrides -> pipeline_overlay on {moved} manifest(s)"
+    )
+    if both:
+        print(f"  {both:>6} already carried the new spelling; the stale key was dropped")
+    if not apply and moved:
+        print("\nDry run. Re-run with --apply to rewrite.")
+    return {"pipeline_overlay_renamed": moved}
+
+
+# --- (12) the node config a campaign ran, still living in a file five campaigns share ---------
 
 
 def _ran_config(campaign_dir: pathlib.Path, root_cycle_id: str) -> dict[str, Any]:
@@ -1064,7 +1102,7 @@ def _identity_owned_keys(connector_name: str, dataset_dir: pathlib.Path | None) 
 def lift_campaign_pipeline_config(*, apply: bool) -> dict[str, int]:
     """Freeze each campaign's node config onto the campaign, out of the dataset file it shares —
     from round 0 where one ran, else from the file, which is still honest for a campaign that
-    never did. A non-empty ``pipeline_overrides`` is left alone; identity-owned keys and ``steps``
+    never did. A non-empty ``pipeline_overlay`` is left alone; identity-owned keys and ``steps``
     are never lifted."""
     lifted = from_rounds = from_dataset = current = empty = unknown = 0
     stores_by_tenant: dict[pathlib.Path, Stores | None] = {}
@@ -1076,7 +1114,7 @@ def lift_campaign_pipeline_config(*, apply: bool) -> dict[str, int]:
                     continue
                 config = doc.get("config")
                 config = config if isinstance(config, dict) else {}
-                if config.get("pipeline_overrides"):
+                if config.get("pipeline_overlay"):
                     current += 1
                     continue
 
@@ -1119,7 +1157,7 @@ def lift_campaign_pipeline_config(*, apply: bool) -> dict[str, int]:
                     empty += 1
                     continue
 
-                config["pipeline_overrides"] = overrides
+                config["pipeline_overlay"] = overrides
                 doc["config"] = config
                 lifted += 1
                 # Counted HERE, not where the source was chosen: a campaign skipped for unknown
@@ -1135,7 +1173,7 @@ def lift_campaign_pipeline_config(*, apply: bool) -> dict[str, int]:
     print(f"\nCampaign node config — {verb} onto {lifted} campaign(s)")
     print(f"  {from_rounds:>6} from round 0, the config that campaign was MEASURED under")
     print(f"  {from_dataset:>6} from the dataset file — never ran, so it has no record of its own")
-    print(f"  {current:>6} already carry their own `pipeline_overrides`")
+    print(f"  {current:>6} already carry their own `pipeline_overlay`")
     print(f"  {empty:>6} have no node config anywhere to lift")
     print(f"  {unknown:>6} skipped — their connector's identity keys cannot be read on this box")
     if not apply and lifted:

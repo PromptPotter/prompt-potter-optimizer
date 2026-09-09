@@ -26,7 +26,7 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 **What to try:**
 - Swap the `model` field in the relevant `datasets/<name>/pipeline.yaml` to `openai/gpt-oss-20b` and keep iterating. Flip back to `120b` for benchmarks.
 - Each dataset's `reasoning_effort` default is tuned to keep both models clear of Groq's per-model output ceiling — `bbeh` ships `reasoning_effort: low` so `20b` doesn't burn its reasoning budget.
-- `max_tokens` is **never** set as a numeric default in any dataset's `pipeline.yaml` — provider ceiling applies. Raise it per-cycle via `campaign.yaml::pipeline_overrides`.
+- `max_tokens` is **never** set as a numeric default in any dataset's `pipeline.yaml` — provider ceiling applies. Raise it per-cycle via `campaign.yaml::pipeline_overlay`.
 - Target-layer model lives in `datasets/<name>/pipeline.yaml::llm_only.config` (set `provider` explicitly — e.g. `openrouter`); the optimizer-layer model is install-global in `promptpotter/assets/optimizer/pipeline.yaml` (per optimizer node). They're independent.
 - Full per-dataset matrix: [`docs/operations/dataset-reasoning-matrix.md`](../operations/dataset-reasoning-matrix.md).
 

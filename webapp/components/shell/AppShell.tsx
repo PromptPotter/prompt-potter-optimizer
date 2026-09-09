@@ -1,7 +1,7 @@
 "use client";
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import dynamic from "next/dynamic";
-import { fetchCycleFile } from "@/lib/api";
+import { fetchCycleFile, subjectKey } from "@/lib/api";
 import { postPauseCycle } from "@/lib/api/commands";
 import { CycleStreamProvider } from "@/lib/poll";
 import { ConnectorProvider } from "@/lib/hooks/useConnector";
@@ -170,6 +170,18 @@ function AppShellInner() {
     viewedPath,
     datasetName,
   );
+  // The connector context follows that same VIEWED LEAF, addressed as one served subject. The
+  // sandbox chain is the hops ABOVE the leaf (`subjectKey`'s own rule), so an L4 inner run
+  // resolves its OWN pipeline rather than the outer campaign's — the silent failure
+  // `frontend-surface-contract.md::I9` names at the L4 boundary.
+  const leafHop = viewedPath?.length ? viewedPath[viewedPath.length - 1] : null;
+  const connectorAt = useMemo(
+    () =>
+      leafHop && viewedPath
+        ? subjectKey("course", [leafHop.campaignId, leafHop.cycleId], viewedPath.slice(0, -1))
+        : null,
+    [leafHop, viewedPath],
+  );
   // The per-campaign view is ON THE ADDRESS (`lib/address.ts`), so the workspace holds it and a
   // reload or copied link restores the pane rather than dropping the operator on Chat.
   // Which of the two PHONE screens is showing. `false` = the campaign screen, the public landing
@@ -337,7 +349,7 @@ function AppShellInner() {
         rather than re-fetching. Sits inside SelectionProvider, whose `sampleSet` is one
         of the masks it composes. */}
     <LineageProvider campaignId={campaignId} cycleId={cycleId}>
-    <ConnectorProvider datasetName={leafDatasetName}>
+    <ConnectorProvider campaignId={leafHop?.campaignId ?? null} at={connectorAt}>
     {/* The roster for the unit in view + the scope and ranking that pick it. Here
         rather than in the chat tab because its consumers sit on two different
         branches of that tab — the hero's heat-map and the run card's table. */}

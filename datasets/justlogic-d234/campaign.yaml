@@ -21,7 +21,7 @@ campaign_config:
     per_cell: max(0.0, min(1.0, fitness * 1546.0 / (1546.0 + 0.5 * max(0.0, tokens - 1546.0))))
   sp_budget_ttest: 34
   exclude_nodes: []
-  pipeline_overrides: {}
+  pipeline_overlay: {}
   dataset_split:
     test: 1500
   optimization:

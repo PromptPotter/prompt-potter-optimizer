@@ -12,11 +12,11 @@ from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     load_dataset_campaign_config,
 )
-from promptpotter.application.runner.inner.tasks import inner_tasks_path, load_inner_tasks
-from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
+from promptpotter.application.pipeline_resolve import nested_pipeline_ref
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     ModelCapability,
+    NestedPipelineRef,
     NodeConfigParam,
     NodeOutputSchema,
     PipelineView,
@@ -85,15 +85,6 @@ def list_datasets(stores: StoresDep) -> DatasetIndexResponse:
     )
 
 
-class NestedPipelineRef(StrictModel):
-    """Which node of THIS pipeline runs another whole pipeline, and whose. Both halves are
-    derived from ``inner_tasks.yaml``, never declared a second time. Null on an ordinary
-    dataset."""
-
-    node: str = Field(description="Node id in this pipeline whose measurement runs `dataset`.")
-    dataset: str = Field(description="Slug of the pipeline that node runs; fetch it the same way.")
-
-
 class DatasetPipelineResponse(StrictModel):
     """Target pipeline view for a dataset overlay. `view` drives the webapp chat-pane hero;
     `pipeline` is the full parsed schema for consumers needing per-node config; `connector` is
@@ -128,18 +119,6 @@ class DatasetPipelineResponse(StrictModel):
     # provider drops, what one Mtok costs — and a row rendered before its capabilities land is a
     # row asserting a setting that may not exist. Empty is UNKNOWN, never "supports nothing".
     model_capabilities: dict[str, ModelCapability]
-
-
-def _nested_pipeline(dataset_dir: Path, view: PipelineView | None) -> NestedPipelineRef | None:
-    """Owning an ``inner_tasks.yaml`` IS what makes a dataset outer (``runner/inner/tasks.py``);
-    no name test recognises one. The node is the schema's own measurement node."""
-    try:
-        panel = load_inner_tasks(inner_tasks_path(dataset_dir))
-    except InnerCycleUnscoreableError:
-        # A read-only view must not raise where the runner would.
-        return None
-    node = next((n for n in (view.nodes if view else []) if n.kind == "measurement"), None)
-    return NestedPipelineRef(node=node.id, dataset=panel.inner_benchmark) if node else None
 
 
 @datasets_router.get("/{name}/pipeline", response_model=DatasetPipelineResponse)
@@ -177,7 +156,7 @@ def get_dataset_pipeline(name: str, stores: StoresDep) -> DatasetPipelineRespons
         view=schema.view,
         node_config_schema=schema.node_config_schema(),
         node_output_schema=schema.node_output_schemas(),
-        nests=_nested_pipeline(dataset_dir, schema.view),
+        nests=nested_pipeline_ref(dataset_dir, schema.view),
         model_capabilities=resolve_schema_menu(schema, workspace=Path(stores.base_dir)),
     )
 

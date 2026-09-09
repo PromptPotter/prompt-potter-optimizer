@@ -3,7 +3,7 @@ campaign_config:
   scoring: rr(ground_truth_rank)
   sp_budget_ttest: 20
   exclude_nodes: []
-  pipeline_overrides:
+  pipeline_overlay:
     web_search:
       max_sites: 10
       num_results: 20

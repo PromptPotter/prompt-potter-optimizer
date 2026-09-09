@@ -61,7 +61,7 @@ def _build_config(
         "scoring": _infer_scoring(dataset),
         "sp_budget_ttest": samples,
         "exclude_nodes": [],
-        "pipeline_overrides": {},
+        "pipeline_overlay": {},
         "optimization": {
             "l1_patience": patience,
             "max_rounds": rounds,

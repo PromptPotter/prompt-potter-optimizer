@@ -3,7 +3,7 @@ campaign_config:
   scoring: exact_match(predicted, ground_truth)
   sp_budget_ttest: 5
   exclude_nodes: []
-  pipeline_overrides: {}
+  pipeline_overlay: {}
   optimization:
     l1_patience: 1
     max_rounds: 1

@@ -87,6 +87,7 @@ export type {
   BackendHealthResponse,
   BackendResponse,
   CampaignDetailResponse,
+  CampaignPipelineResponse,
   CampaignStorageResponse,
   ConfigCoupling,
   ConfigEstimandGroup,

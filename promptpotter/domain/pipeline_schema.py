@@ -363,6 +363,19 @@ class NodeConfigParam(StrictModel):
     source: ParamSource = "unset"
 
 
+class NestedPipelineRef(StrictModel):
+    """Which node of THIS pipeline runs another whole pipeline, and whose. Both halves are
+    derived from ``inner_tasks.yaml``, never declared a second time. Null on an ordinary dataset.
+
+    Here rather than in the router that used to declare it, because the CAMPAIGN resolution has to
+    carry it too and ``application/`` cannot import ``presentation/``. Its derivation lives beside
+    the resolution (``application/pipeline_resolve.py::nested_pipeline_ref``), which is what makes
+    the shape reachable from both doors without either owning the other."""
+
+    node: str = Field(description="Node id in this pipeline whose measurement runs `dataset`.")
+    dataset: str = Field(description="Slug of the pipeline that node runs; fetch it the same way.")
+
+
 class ModelCapability(StrictModel):
     """What ONE model accepts and costs — resolved server-side, served per model id.
 
@@ -760,6 +773,7 @@ __all__ = [
     "CANDIDATE_LIBRARY_FILE",
     "MOVABLE_AGENTS",
     "THINKING_KINDS",
+    "NestedPipelineRef",
     "NodeConfigParam",
     "NodeKind",
     "NodeOutputSchema",

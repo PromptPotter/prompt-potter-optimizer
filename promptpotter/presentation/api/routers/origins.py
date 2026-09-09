@@ -146,7 +146,7 @@ def _dataset_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) -> 
         if not active:
             return None
         base_pp = resolve_pipeline_config_params(
-            active, cfg.pipeline_overrides, dataset_dir, schema, judges=cfg.judges
+            active, cfg.pipeline_overlay, dataset_dir, schema, judges=cfg.judges
         )
         opt_sp = resolve_origin_opt_search_point(
             prompt_node_names=schema.prompt_node_names(),
@@ -262,13 +262,10 @@ async def draft_from_origin(origin_id: str, stores: StoresDep) -> dict[str, Any]
         dataset_dir=dataset_dir,
         dataset_name=match.dataset_name,
         overrides=overrides,
-        # The ORIGIN's own connector, off its campaign manifest — not the dataset file's answer
-        # today. Reusing an origin means reusing what it ran, and a slug re-pointed at another
-        # connector since would otherwise hand the new draft a different backend's node set.
+        # The ORIGIN's own connector and config, off its manifest — reuse means reusing what it
+        # RAN, not what the shared dataset file says today. The campaign goes over whole: which of
+        # its layers seeds a draft is an application decision.
         backend_nodes=await fetch_backend_nodes(match.backend_type),
-        # …and its own node CONFIG, for the same reason and by the same rule. The campaign is
-        # handed over whole rather than unpacked here: which of its layers seeds a draft is an
-        # application decision, and this router's job is to name the origin.
         origin_campaign=match,
     )
     return draft_wire(draft, stores.base_dir)

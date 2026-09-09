@@ -158,7 +158,9 @@ LEDGER_BASELINE = {
     # readable as an answer rather than a number the browser has to attribute itself.
     # +5: `OptimizerPipelineResponse` — served all along behind a bare dict, so the browser held a
     # hand-written copy of it. Declaring the shape is what deletes the copy, not a new surface.
-    "served_fields": 567,
+    # +1: `CampaignPipelineResponse.nests` — the L4 drill-in, read by `useConnector` and opened by
+    # `useNestedPipelines`. It rides this read because a nest is a fact about the chain, not a hop.
+    "served_fields": 568,
 }
 
 

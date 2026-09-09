@@ -41,6 +41,7 @@ from promptpotter.application.evidence import (
     WinnerChainPoint,
 )
 from promptpotter.application.evidence_metrics import MetricSpec
+from promptpotter.application.pipeline_resolve import CampaignPipelineResponse
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import (
     DashboardCandidate,
@@ -61,6 +62,7 @@ from promptpotter.domain.opt_search_point import (
 )
 from promptpotter.domain.pipeline_schema import (
     ModelCapability,
+    NestedPipelineRef,
     NodeConfigParam,
     NodeOutputSchema,
     NodeSearchNarrowing,
@@ -151,7 +153,6 @@ from promptpotter.presentation.api.routers.datasets.index import (
     DatasetIndexEntry,
     DatasetIndexResponse,
     DatasetPipelineResponse,
-    NestedPipelineRef,
 )
 from promptpotter.presentation.api.routers.datasets.leaderboard import (
     DatasetItem,
@@ -227,6 +228,8 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     # --- campaigns/manifests router ---
     CampaignSummary,
     CampaignListResponse,
+    # What ONE campaign runs at one searchpoint (`frontend-surface-contract.md::I9`).
+    CampaignPipelineResponse,
     # --- cross-subject evidence (application/evidence) — nested types first ---
     EffectProvenance,
     EditSpread,

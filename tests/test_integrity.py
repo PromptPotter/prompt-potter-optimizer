@@ -1213,14 +1213,14 @@ def test_a_reused_origin_seeds_exactly_the_config_it_ran() -> None:
     config = load_campaign_config(
         {
             "optimization": dict(CONNECTORS[DEFAULT_CONNECTOR].default_optimization),
-            "pipeline_overrides": {"llm_only": {"model": "upstage/solar-pro4:nitro"}},
+            "pipeline_overlay": {"llm_only": {"model": "upstage/solar-pro4:nitro"}},
             "optimizer_narrowing": {
                 "llm_only": {"param_keys": [], "param_allowed_values": {"model": ["upstage/x"]}}
             },
         }
     )
     overrides, narrowing = split_overlay(overlay_from_campaign_config(config))
-    assert overrides == config.pipeline_overrides
+    assert overrides == config.pipeline_overlay
     assert narrowing == config.optimizer_narrowing
     assert narrowing["llm_only"].param_keys == []
 

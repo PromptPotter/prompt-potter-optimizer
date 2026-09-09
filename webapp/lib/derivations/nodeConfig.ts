@@ -5,7 +5,7 @@
 //
 //   - search-space → `nodeOverlayPatch` → the draft `pipeline_overlay`
 //     (`nodes.{n}.{config, optimizer}`); at mint the backend splits it into the
-//     per-campaign `pipeline_overrides` (config values) + `optimizer_narrowing`
+//     per-campaign `pipeline_overlay` (config values) + `optimizer_narrowing`
 //     (the param-lock / allowed-values subset). See `launcher.split_overlay`.
 //   - values → `seedOverlayFromRows` → the flat `{node:{param:value}}` overlay
 //     that `OperatorForkOverride.pipeline_overlay` merges onto

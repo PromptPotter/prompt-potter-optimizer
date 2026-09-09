@@ -20,9 +20,11 @@ import type {
   BackendResponse,
   CampaignDetailResponse,
   CampaignListResponse,
+  CampaignPipelineResponse,
   CampaignStorageResponse,
   ConfigMapResponse,
   DatasetPipelineResponse,
+  OptimizerPipelineResponse,
   CyclesResponse,
   DatasetIndexEntry,
   DatasetIndexResponse,
@@ -105,8 +107,24 @@ export function fetchOrigins(signal?: AbortSignal): Promise<OriginListResponse> 
   return jget<OriginListResponse>(`${API}/origins`, signal);
 }
 
-export function fetchPipeline(signal?: AbortSignal): Promise<unknown> {
-  return jget(`${API}/optimizer-pipeline`, signal);
+export function fetchPipeline(signal?: AbortSignal): Promise<OptimizerPipelineResponse> {
+  return jget<OptimizerPipelineResponse>(`${API}/optimizer-pipeline`, signal);
+}
+
+// What ONE campaign runs, at one searchpoint — the single server-owned answer for every config
+// row, model chip, lock glyph and reach ring (`frontend-surface-contract.md::I9`). `at` takes the
+// `parse_subject` grammar and defaults to the campaign root; a scoring mask (`lens=` / `samples=`)
+// is refused, because a mask cannot change what config a point RAN.
+export function fetchCampaignPipeline(
+  campaignId: string,
+  at?: string | null,
+  signal?: AbortSignal,
+): Promise<CampaignPipelineResponse> {
+  const q = at ? `?at=${encodeURIComponent(at)}` : "";
+  return jget<CampaignPipelineResponse>(
+    `${API}/campaigns/${encodeURIComponent(campaignId)}/pipeline${q}`,
+    signal,
+  );
 }
 
 // Target connector pipeline for a dataset. One-shot — topology is bound at

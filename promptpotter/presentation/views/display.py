@@ -309,15 +309,15 @@ def _step_tag(step_name: str | None) -> str:
 __all__ = [
     "fmt_ci",
     "fmt_pvalue",
-    "render_pipeline_overrides",
+    "render_pipeline_overlay",
 ]
 
 
-def render_pipeline_overrides(
+def render_pipeline_overlay(
     pipeline_params: dict[str, Any] | None,
     pipeline_schema: PipelineSchema | None = None,
 ) -> str:
-    """Render ``pipeline_params`` as a copy-paste-ready ``pipeline_overrides`` block. With a schema, only
+    """Render ``pipeline_params`` as a copy-paste-ready ``pipeline_overlay`` block. With a schema, only
     each node's ``param_keys`` are shown; a node absent from the schema falls back to every pair."""
     if not pipeline_params:
         return ""
@@ -339,9 +339,9 @@ def render_pipeline_overrides(
 
     rule = "─" * 60
     parts = [
-        "  Copy-paste pipeline_overrides:",
+        "  Copy-paste pipeline_overlay:",
         f"  {rule}",
-        '  "pipeline_overrides": {',
+        '  "pipeline_overlay": {',
     ]
     for node_name, params in node_entries:
         parts.append(f'      "{node_name}": {{')

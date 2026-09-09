@@ -474,7 +474,9 @@ class CampaignConfig(StrictModel):
     exclude_nodes: Annotated[list[str], Knob(Scope.DATA, Estimand.SEARCH)] = Field(
         default_factory=list
     )
-    pipeline_overrides: Annotated[dict[str, Any], Knob(Scope.DATA, Estimand.SEARCH)] = Field(
+    # ONE name for the per-node delta at every layer that carries one: this campaign's, a check-in
+    # draft's (`DraftCampaign.pipeline_overlay`) and a cycle seed's.
+    pipeline_overlay: Annotated[dict[str, Any], Knob(Scope.DATA, Estimand.SEARCH)] = Field(
         default_factory=dict
     )
     optimizer_narrowing: Annotated[
@@ -562,7 +564,7 @@ def apply_inherited_overlay(
     frozen_config: dict[str, Any],
     seed: CycleSeed | None,
 ) -> CampaignConfig:
-    """Resume/fork rebuild from the LIVE dataset, which holds neither ``pipeline_overrides`` nor
+    """Resume/fork rebuild from the LIVE dataset, which holds neither ``pipeline_overlay`` nor
     ``optimizer_narrowing`` — read off the snapshot DICT, so one renamed leaf cannot block a resume."""
     frozen_narrowing = {
         node: NodeSearchNarrowing.model_validate(raw)
@@ -571,14 +573,14 @@ def apply_inherited_overlay(
     narrowing = {**config.optimizer_narrowing, **frozen_narrowing}
     if seed is not None:
         narrowing.update(seed.optimizer_narrowing)
-    frozen_overrides: dict[str, Any] = frozen_config.get("pipeline_overrides") or {}
+    frozen_overlay: dict[str, Any] = frozen_config.get("pipeline_overlay") or {}
     # The frozen snapshot wins over the live dataset file, which is a mint-time SEED — so the
     # runner's grade-C stamp reads the SAME permitted model set the fork-cycle cap-gate reads off
     # `campaign.config`, and the two cannot disagree. That is why `frozen_narrowing` is merged
     # SECOND above, and the seed's own declaration last of all.
     return config.model_copy(
         update={
-            "pipeline_overrides": {**config.pipeline_overrides, **frozen_overrides},
+            "pipeline_overlay": {**config.pipeline_overlay, **frozen_overlay},
             "optimizer_narrowing": narrowing,
         }
     )

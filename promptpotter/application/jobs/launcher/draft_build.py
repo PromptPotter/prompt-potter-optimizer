@@ -99,7 +99,7 @@ def overlay_from_campaign_config(config: CampaignConfig) -> dict[str, Any]:
     so a reused origin seeds what it RAN rather than what the shared dataset file says today. The
     seeded draft freezes back through `split_overlay` at Start, so the pair must lose nothing."""
     overlay: dict[str, Any] = {}
-    for node, block in config.pipeline_overrides.items():
+    for node, block in config.pipeline_overlay.items():
         if isinstance(block, dict) and block:
             overlay.setdefault(node, {})["config"] = dict(block)
     for node, narrowing in config.optimizer_narrowing.items():

@@ -283,12 +283,14 @@ def get_campaign_pipeline(
     """What this campaign RUNS — the one server-owned answer (`frontend-surface-contract.md::I9`).
     Ownership-gated by `load_owned`, 404 on cross-tenant: this body carries the operator's own
     model choices."""
-    campaign = stores.campaigns.load_owned(campaign_id, str(stores.identity.user_id))
+    spec = _pipeline_subject(at, campaign_id)
+    # An L4 inner searchpoint's MANIFEST lives in the sandbox `;in=` names; read from the tenant
+    # tree, the OUTER campaign of the same id answered for it.
+    leaf = descend_store(stores, spec.inside) if spec.inside else stores
+    campaign = leaf.campaigns.load_owned(campaign_id, str(leaf.identity.user_id))
     if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
-    return resolve_pipeline_for_campaign(
-        stores, campaign, at=_pipeline_subject(at, campaign_id), workspace=stores.base_dir
-    )
+    return resolve_pipeline_for_campaign(leaf, campaign, at=spec, workspace=leaf.base_dir)
 
 
 def _pipeline_subject(at: str, campaign_id: str) -> SubjectSpec:

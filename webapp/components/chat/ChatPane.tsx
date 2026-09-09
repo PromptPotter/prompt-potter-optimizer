@@ -11,7 +11,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { useIngest } from "@/lib/ingest-flow";
 import { IngestConversation } from "@/components/ingest/IngestConversation";
 import { hasLiveProducer } from "@/lib/run-phase";
-import { isSelfOptimization, runSummary } from "@/lib/derivations";
+import { draftForCampaign, isSelfOptimization, runSummary } from "@/lib/derivations";
 import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
 import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 import { PipelineStack } from "@/components/dashboard/pipeline/PipelineStack";
@@ -121,11 +121,14 @@ export function ChatPane({ checkinCampaignId }: Props) {
   const { node: selectedNode, setSelectionForNode } = useSelection();
   // While a campaign is being set up, the connector preview shows the DRAFT's
   // searchpoint (not the prior cycle / origin). Carries through awaiting-context
-  // and ready — the two phases that hold a draft.
-  const previewDraft =
+  // and ready — the two phases that hold a draft — and ONLY for the campaign that
+  // draft is (`draftForCampaign`): the ingest thread outlives a sidebar selection.
+  const previewDraft = draftForCampaign(
     ingest.phase.stage === "ready" || ingest.phase.stage === "awaiting-context"
       ? ingest.phase.draft
-      : null;
+      : null,
+    leafCampaignId,
+  );
   // Auto-open once per mount as soon as a cycle is bound — saves the operator
   // one click on page reload. The ref guard means that if the user manually
   // closes the drawer and the cycle later changes (or a new cycle is bound),

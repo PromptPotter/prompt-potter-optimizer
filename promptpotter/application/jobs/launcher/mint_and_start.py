@@ -135,7 +135,7 @@ def build_cycle_config(
         overrides, narrowing = split_overlay(pipeline_overlay)
         campaign_config = campaign_config.model_copy(
             update={
-                "pipeline_overrides": {**campaign_config.pipeline_overrides, **overrides},
+                "pipeline_overlay": {**campaign_config.pipeline_overlay, **overrides},
                 "optimizer_narrowing": {**campaign_config.optimizer_narrowing, **narrowing},
             }
         )

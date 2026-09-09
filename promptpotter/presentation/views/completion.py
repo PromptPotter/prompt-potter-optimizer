@@ -15,7 +15,7 @@ from promptpotter.presentation.views.display import (
     RESET,
     YELLOW,
     _dbox_block,
-    render_pipeline_overrides,
+    render_pipeline_overlay,
 )
 
 if TYPE_CHECKING:
@@ -61,9 +61,9 @@ def render_completion(
         fields.append(f"Langfuse     {trace_url}")
 
     out = ["", _dbox_block(title, *fields)]
-    if overrides_block := render_pipeline_overrides(result.winner_pipeline_params, pipeline_schema):
+    if overlay_block := render_pipeline_overlay(result.winner_pipeline_params, pipeline_schema):
         out.append("")
-        out.append(overrides_block)
+        out.append(overlay_block)
     return "\n".join(out)
 
 
