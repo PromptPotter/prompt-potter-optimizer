@@ -2,10 +2,15 @@
 EVERY on-disk kind, and :data:`_SURFACES` is where that obligation is discharged — as a ROW.
 
 PRUNING never touches a round document: a row repairs by pruning to ``model_fields``, which
-cannot restore a renamed field's value, so a repair there would be silently wrong. A migration that
-RECOVERS a value from a surviving record may write one — :func:`backfill_inner_facts` does. Which
-drift is fatal, and why that is correct, is owned by ``domain/CLAUDE.md`` § Tolerance is scoped by
-what a payload is FOR.
+cannot restore a renamed field's value, so a repair there would be silently wrong. Which drift is
+fatal, and why that is correct, is owned by ``domain/CLAUDE.md`` § Tolerance is scoped by what a
+payload is FOR.
+
+**Nothing here carries OLD data forward.** Every pass is a recurring obligation over what the
+engine writes TODAY — prune to the current model, reclaim bytes, re-derive a projection, report
+what will not load. A one-time backfill for a shape that has since changed is backward
+compatibility, which this repo does not keep: change the shape and delete or restamp the data to
+fit it.
 
 It DOES prune a LEDGER record (:func:`_prune_record`, inside the compaction pass), for the opposite
 reason: that reader is tolerant by SKIP rather than by default, so a stale key costs the whole
@@ -39,18 +44,14 @@ from promptpotter.application.views.view_models import (
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
 from promptpotter.domain.phases import CampaignPhase, RunPhase
 from promptpotter.domain.results import DiagnosticRunRecord, RoundResult
 from promptpotter.domain.run_records import CycleRecord
 from promptpotter.domain.scoring import ledger_sample_view
-from promptpotter.domain.spend import TOKEN_KIND_BUCKET
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.campaign_store.store import reproject_round_index
 from promptpotter.infrastructure.store.io import (
     read_json_optional,
-    read_json_tolerant,
-    write_json,
     write_yaml,
 )
 from promptpotter.infrastructure.store.layout import ROUND_GLOB, CycleLayout
@@ -58,14 +59,11 @@ from promptpotter.infrastructure.store.user_store import User
 from promptpotter.shared.errors import graceful
 
 __all__ = [
-    "backfill_inner_facts",
     "check_round_documents",
     "compact_cycle_ledgers",
-    "rename_round_trend",
     "reproject_cycle_indexes",
     "restamp_campaign_configs",
     "shrink_measurement_runs",
-    "stamp_election_bias",
 ]
 
 
@@ -541,279 +539,7 @@ def reproject_cycle_indexes(*, apply: bool) -> dict[str, int]:
     return {"cycle_indexes": len(by_cycle), "cycle_indexes_reprojected": touched}
 
 
-# --- (5) the election bias a replayed round reads off its own decision record ----------------
-
-
-def stamp_election_bias(*, apply: bool) -> dict[str, int]:
-    """Write ``parent_bias`` onto every ``round_winner`` decision that predates the field.
-
-    ``_replay_round_winner`` reads it rather than re-deriving it — the bias is a function of the
-    round HISTORY a replay does not hold — so the key must be present on every record, and a
-    read-time default for the ones lacking it is the back-compat this repo does not do. 0.0 is not
-    a guess: an election that ran before the correction subtracted nothing, so it IS the bias that
-    round was decided under, and writing it down is what makes the replay reproduce the decision
-    instead of re-deciding it."""
-    stamped = touched = 0
-    for ledger_path in iter_cycle_ledgers(DEFAULT_PROJECTS_ROOT):
-        lines = ledger_path.read_text(encoding="utf-8").splitlines()
-        out: list[str] = []
-        dirty = False
-        for line in lines:
-            rec = json.loads(line) if line.strip() else None
-            ref = rec.get("inputs_ref") if isinstance(rec, dict) else None
-            if isinstance(ref, dict) and "coverage_floor" in ref and "parent_bias" not in ref:
-                ref["parent_bias"] = 0.0
-                line = json.dumps(rec, ensure_ascii=False)
-                stamped += 1
-                dirty = True
-            out.append(line)
-        if dirty:
-            touched += 1
-            if apply:
-                ledger_path.write_text("\n".join(out) + "\n", encoding="utf-8")
-
-    verb = "stamped" if apply else "would stamp"
-    print(f"\nElection bias — {verb} parent_bias onto {stamped} decision(s) in {touched} ledger(s)")
-    if not apply and stamped:
-        print("\nDry run. Re-run with --apply to rewrite.")
-    return {"elections_stamped": stamped, "election_ledgers": touched}
-
-
-def stamp_election_objective(*, apply: bool) -> dict[str, int]:
-    """Write ``objective`` onto every recorded ``parent_cells`` row that predates it.
-
-    ``elect_round_winner`` fits θ through ``exploration.py::graded_response``, which RAISES on a
-    row carrying no ``objective``, so a record lacking it cannot be replayed at all — and `resume`
-    surfaces that raise as a DIVERGENCE, offering the fork that abandons the line.
-
-    NOT a guess, and not derived: the round document's ``parent_results`` is the SAME list
-    ``winner.py`` projected these cells from, in the same constructor call, so the join on
-    ``sample_id`` recovers the exact number the election graded. A cell the document cannot answer
-    is LEFT ABSENT — it still raises, which is the honest outcome for a row nothing ever stamped.
-    """
-    stamped = touched = orphaned = 0
-    for ledger_path in iter_cycle_ledgers(DEFAULT_PROJECTS_ROOT):
-        rounds_dir = ledger_path.parents[1] / "rounds"
-        lines = ledger_path.read_text(encoding="utf-8").splitlines()
-        out: list[str] = []
-        dirty = False
-        for line in lines:
-            parsed = json.loads(line) if line.strip() else None
-            rec: dict[str, Any] = parsed if isinstance(parsed, dict) else {}
-            data = rec.get("data")
-            cells = data.get("parent_cells") if isinstance(data, dict) else None
-            if isinstance(cells, list) and any(
-                isinstance(c, dict) and "objective" not in c for c in cells
-            ):
-                doc = read_json_tolerant(rounds_dir / f"round_{int(rec['round']):04d}.json", {})
-                graded = {
-                    r.get("sample_id"): r
-                    for r in (doc.get("parent_results") or [])
-                    if isinstance(r, dict)
-                }
-                filled = 0
-                for cell in cells:
-                    src = graded.get(cell.get("sample_id")) if isinstance(cell, dict) else None
-                    if isinstance(cell, dict) and isinstance(src, dict) and "objective" in src:
-                        cell["objective"] = src["objective"]
-                        filled += 1
-                    else:
-                        orphaned += 1
-                # A cycle whose documents carry no `parent_results` recovers nothing, and
-                # re-serialising its ledger to write the same bytes back is a rewrite that
-                # buys an operator no repair and one more chance to lose the file.
-                if filled:
-                    line = json.dumps(rec, ensure_ascii=False)
-                    stamped += filled
-                    dirty = True
-            out.append(line)
-        if dirty:
-            touched += 1
-            if apply:
-                ledger_path.write_text("\n".join(out) + "\n", encoding="utf-8")
-
-    verb = "stamped" if apply else "would stamp"
-    print(f"\nElection grade — {verb} objective onto {stamped} cell(s) in {touched} ledger(s)")
-    if not apply and stamped:
-        print("\nDry run. Re-run with --apply to rewrite.")
-    return {
-        "election_cells_graded": stamped,
-        "election_grade_ledgers": touched,
-        "election_cells_ungraded": orphaned,
-    }
-
-
-# --- (6) the L4 seed facts that reached the row as prose and nothing else --------------------
-
-
-def _inner_cycle_index() -> dict[tuple[str, str, int, str], pathlib.Path]:
-    """``{(outer campaign, outer cycle, round, task) -> inner cycle dir}``.
-
-    The pointer between an outer cell and the inner campaign that produced it lives on the INNER
-    side — ``index.json::spawned_by``, written by ``runner/inner/spawn.py`` — so building this
-    index is the only join back. Sandboxes are a SIBLING tree of the workspace, which
-    :func:`workspace_trees` already knows and a ``*``-per-level glob silently misses."""
-    index: dict[tuple[str, str, int, str], pathlib.Path] = {}
-    for tree in workspace_trees(DEFAULT_PROJECTS_ROOT):
-        for cycle_dir in sorted(tree.glob("*/campaigns/*/cycles/*")):
-            spawned = (read_json_tolerant(cycle_dir / "index.json", {}) or {}).get("spawned_by")
-            if not isinstance(spawned, dict) or not spawned.get("task"):
-                continue
-            key = (
-                str(spawned.get("outer_campaign_id") or ""),
-                str(spawned.get("outer_cycle_id") or ""),
-                int(spawned.get("round") or 0),
-                str(spawned["task"]),
-            )
-            index[key] = cycle_dir
-    return index
-
-
-def _facts_from_inner_cycle(cycle_dir: pathlib.Path) -> dict[str, Any]:
-    """What the seed's OWN campaign still says about itself, at full precision.
-
-    Read from the inner cycle rather than from the outer row's ``reasoning_trace`` sentence, which
-    prints its levels at 2dp. Only the fields checked against that sentence cell-by-cell are
-    written: ``rounds[].ability.theta`` reproduces the narrated origin and ending exactly on
-    every cell on disk, but its PEAK and its length do not — so it is the parent frontier at the
-    endpoints and something else in between, and ``inner_peak_lift`` / ``inner_round_budget`` are
-    left ABSENT rather than filled from a series that disagrees. ``inner_unworked_s`` is absent for
-    a harder reason: only the spawner holding the cell's deadline ever measured it, and no file
-    records it. All three fill in on the next live run; none is ever zeroed to look complete.
-    """
-    dash = read_json_tolerant(cycle_dir / "dashboard.json", {}) or {}
-    index = read_json_tolerant(cycle_dir / "index.json", {}) or {}
-    levels = [
-        a["theta"]
-        for r in (dash.get("rounds") or [])
-        if isinstance(r, dict) and isinstance(a := r.get("ability"), dict)
-    ]
-    if len(levels) < 2:
-        return {}
-    spend = dash.get("spend")
-    spend = spend if isinstance(spend, dict) else {}
-    # Off the declared bucket roster, so a new spend kind is counted here the day it lands
-    # rather than the day someone notices this list is short.
-    buckets = [spend.get(name) for name in TOKEN_KIND_BUCKET.values()]
-    tokens = sum(
-        int(b.get(k) or 0)
-        for b in buckets
-        if isinstance(b, dict)
-        for k in ("input_tokens", "output_tokens")
-    )
-    facts: dict[str, Any] = {
-        "inner_origin_level": float(levels[0]),
-        "inner_final_lift": float(levels[-1]) - float(levels[0]),
-        "inner_rounds_ran": max(int(index.get("n_rounds") or 0) - 1, 0),
-        "inner_stop_reason": str(index.get("stop_reason") or ""),
-        "inner_campaign_id": cycle_dir.parent.parent.name,
-    }
-    if isinstance(spend.get("total_used_usd"), int | float):
-        facts["inner_spend_usd"] = float(spend["total_used_usd"])
-    if tokens:
-        facts["inner_tokens"] = tokens
-    return facts
-
-
-def _backfill_round_document(
-    path: pathlib.Path, index: dict[tuple[str, str, int, str], pathlib.Path], *, apply: bool
-) -> tuple[int, int]:
-    """``(rows filled, rows whose inner campaign is no longer on disk)``."""
-    doc = read_json_tolerant(path, {})
-    if not isinstance(doc, dict):
-        return (0, 0)
-    campaign_id, cycle_id = path.parents[3].name, path.parents[1].name
-    round_num = int(doc.get("round") or 0)
-    filled = orphaned = 0
-    for rows in (doc.get("all_candidate_results") or {}).values():
-        for row in rows if isinstance(rows, list) else []:
-            pd = row.get("pipeline_data") if isinstance(row, dict) else None
-            # Idempotent, and a live full-precision value is never overwritten by this.
-            if not isinstance(pd, dict) or "inner_final_lift" in pd:
-                continue
-            if not isinstance(pd.get(OUTER_PROXY_KEYS[0]), int | float):
-                continue  # not an inner-campaign cell at all
-            cycle_dir = index.get((campaign_id, cycle_id, round_num, str(row.get("query") or "")))
-            facts = _facts_from_inner_cycle(cycle_dir) if cycle_dir is not None else {}
-            if not facts:
-                orphaned += 1
-                continue
-            pd.update(facts)
-            filled += 1
-    if filled and apply:
-        write_json(path, doc)
-    return (filled, orphaned)
-
-
-def backfill_inner_facts(*, apply: bool) -> dict[str, int]:
-    """Lift each seed's own origin, ending, round count, stop reason and spend off the inner
-    campaign that produced it and onto the outer row, for cells measured before
-    ``InnerCellFacts`` carried them as numbers.
-
-    ROUND DOCUMENTS only, deliberately. The measurement archive is content-addressed —
-    ``(dataset_name, node_configs, sample_id)`` — and carries no campaign or cycle, so an archived
-    row cannot be joined to the inner campaign that produced it. A cell REPLAYED from the archive
-    in a future run therefore arrives without these fields until it is genuinely re-run; absent,
-    which every surface already reports honestly, rather than guessed."""
-    index = _inner_cycle_index()
-    filled = orphaned = 0
-    for path in _iter_round_documents():
-        with graceful(f"backfill {path}"):
-            got, lost = _backfill_round_document(path, index, apply=apply)
-            filled += got
-            orphaned += lost
-    return {"inner_rows_filled": filled, "inner_rows_orphaned": orphaned}
-
-
-# --- (7) the diagnostics key a rename left behind on the round documents ---------------------
-
-
-def rename_round_trend(*, apply: bool) -> dict[str, int]:
-    """Move ``diagnostics.trajectory`` onto ``diagnostics.trend`` on every banked round document.
-
-    A rename that ships without one of these is the recurring shape, and this field's version of
-    it is the quiet kind. ``RoundDiagnostics`` is a stdlib dataclass reached through
-    ``RoundResult``, so the old key does not raise on load — it is dropped, and ``trend`` reads
-    its DEFAULT. The default is ``"healthy"``. A resumed cycle rebuilds ``cycle.rounds`` from
-    these documents and ``dispatch/facade.py`` hands the newest one's diagnostics to the TREND
-    panel, so a run that had plateaued or hit a ceiling resumes telling the optimizer it is
-    climbing — no error, no log line, and the panel reads exactly as it does when true.
-
-    Pruning cannot do this (it drops the stale key and its value together); this recovers the
-    value from the record that still holds it, which is what the module docstring sanctions.
-    """
-    moved = touched = 0
-    for path in _iter_round_documents():
-        with graceful(f"rename trend {path}"):
-            doc = read_json_tolerant(path, {})
-            diag = doc.get("diagnostics") if isinstance(doc, dict) else None
-            if not isinstance(diag, dict):
-                continue
-            dirty = False
-            for old, new in (
-                ("trajectory", "trend"),
-                ("trajectory_description", "trend_description"),
-            ):
-                if old in diag:
-                    # A document carrying BOTH was written by the new code and re-read by the
-                    # old; the live spelling is the one to keep.
-                    diag.setdefault(new, diag[old])
-                    del diag[old]
-                    dirty = True
-                    moved += 1
-            if dirty:
-                touched += 1
-                if apply:
-                    write_json(path, doc)
-
-    verb = "moved" if apply else "would move"
-    print(f"\nRound trend — {verb} {moved} key(s) across {touched} round document(s)")
-    if not apply and moved:
-        print("\nDry run. Re-run with --apply to rewrite.")
-    return {"trend_keys_moved": moved, "trend_documents": touched}
-
-
-# --- (8) the run-level pipeline config re-stored on every measurement row --------------------
+# --- (5) the run-level pipeline config re-stored on every measurement row --------------------
 
 
 def _iter_measurement_runs() -> list[pathlib.Path]:
@@ -899,49 +625,6 @@ def shrink_measurement_runs(*, apply: bool) -> dict[str, int]:
         "runs_shrunk": touched,
         "run_bytes_saved": total_before - total_after,
         "archive_writers": 0,
-    }
-
-
-# --- (9) the overlap rows a flat list cannot attribute ---------------------------------------
-
-
-def rekey_overlap_results(*, apply: bool) -> dict[str, int]:
-    """Key ``RoundResult.overlap_results`` by the individual each row MEASURED.
-
-    A flat list names nobody, so a document carrying one does not load at all. It can only ever
-    have held the round's own winner's cells, and ``OverlapReading.members`` already names that
-    arm last — adoption order, C0 first. Rows no document can attribute that way are DROPPED
-    rather than guessed onto a member: they are report-only, and the archive still holds them, so
-    the next election re-buys them on a cache hit.
-    """
-    rekeyed = dropped = touched = 0
-    for path in _iter_round_documents():
-        with graceful(f"rekey overlap {path}"):
-            doc = read_json_tolerant(path, {})
-            rows = doc.get("overlap_results") if isinstance(doc, dict) else None
-            if not isinstance(rows, list):
-                continue
-            reading = doc.get("overlap")
-            members = reading.get("members") if isinstance(reading, dict) else None
-            winner = members[-1].get("candidate_id") if members else None
-            if rows and winner:
-                doc["overlap_results"] = {winner: rows}
-                rekeyed += len(rows)
-            else:
-                doc["overlap_results"] = {}
-                dropped += len(rows)
-            touched += 1
-            if apply:
-                write_json(path, doc)
-
-    verb = "rekeyed" if apply else "would rekey"
-    print(f"\nOverlap rows — {verb} {rekeyed} row(s) across {touched} round document(s)")
-    if not apply and touched:
-        print("\nDry run. Re-run with --apply to rewrite.")
-    return {
-        "overlap_rows_rekeyed": rekeyed,
-        "overlap_rows_dropped": dropped,
-        "overlap_documents": touched,
     }
 
 

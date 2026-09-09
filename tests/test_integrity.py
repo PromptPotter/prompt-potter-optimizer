@@ -2797,3 +2797,31 @@ def test_the_parent_rescore_ticks_the_run_without_minting_a_candidate(tmp_path: 
     scored(0, 26, 1)
     assert view.state.total_queries_scored == 2
     assert len(view._buffer.candidates[0]["samples"]) == 1
+
+
+def test_backend_row_names_the_endpoint_the_run_actually_reached(built_stores: Any) -> None:
+    """Every measurement a run banks is attributed to the row `init_services` resolved, and nothing
+    downstream re-reads the URL to check. So the id a caller asks for is a PREFERENCE the endpoint
+    outranks in both directions — an endpoint already registered answers under its own id, and an id
+    held by a DIFFERENT endpoint never absorbs this one."""
+    from promptpotter.application.initialization.wiring import _resolve_backend_id
+    from promptpotter.domain.backend import BackendConnection
+
+    built_stores.backends.register(
+        BackendConnection(
+            id="box", name="n", backend_type="termnorm", base_url="http://10.0.0.5:8000"
+        )
+    )
+
+    # Same endpoint under another name: one physical endpoint keeps one row.
+    resolved = _resolve_backend_id(built_stores, "local", "http://10.0.0.5:8000/", "termnorm", "n")
+    assert resolved == "box"
+    assert len(built_stores.backends.list_all()) == 1
+
+    # A new endpoint whose requested id is taken gets its own row, naming its own URL — the
+    # arm that used to pass an existence check and hand the run someone else's base_url.
+    minted = _resolve_backend_id(built_stores, "box", "http://127.0.0.1:8000", "termnorm", "n")
+    assert minted != "box"
+    row = built_stores.backends.get(minted)
+    assert row is not None
+    assert row.base_url == "http://127.0.0.1:8000"

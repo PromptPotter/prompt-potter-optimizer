@@ -63,15 +63,30 @@ it.
   `shell/RemoteControl.tsx` mints `abilityDelta / usedUsd` as a headline `θ/$` KPI chip. All three
   need **serving**, not deleting, so each wants a backend field first.
 
+- **The same seam, the other direction: a browser predicate whose server twin never returns its
+  verdict — and it has been closed once already, wrongly.**
+  `webapp/lib/derivations/nodeConfig.ts::overlaySetsModelOutsideAllowed` mirrors
+  `domain/pipeline_overlay.py::overlay_sets_model_outside_allowed` rule for rule (a provider edit
+  always taints; a model must sit in the node's permitted set; an absent node sanctions nothing) and
+  drives `SteerForkPanel`'s pre-confirm warning. It was struck as fixed when the predicate's INPUT
+  became server-authored — the served per-node `permitted` set — but the ask was the VERDICT, and the
+  server reaches it only inside `fork-cycle` dispatch, where it 404s rather than answers. So deleting
+  the client copy costs the operator the warning entirely; what is owed is a dry-run on the fork
+  preview. **Re-test:** grep the served surface for a `steers_disallowed_model` field — while none is
+  served, the browser copy is load-bearing and must not be struck again.
+
 - **Holistic reframes — larger chunks, noted so they aren't mistaken for done; don't slip one into a
-  release.** (1) **Tooltip/overlay consolidation:** ~86 of the webapp's ~170 DOM `title=` attributes
-  are teaching prose the browser renders as an unstyled, unselectable blob that dies on touch.
-  Migrate **by string source, not by file** — `lib/terms.ts::TERMS` first, then the `VerifyPane` /
+  release.** (1) **Tooltip/overlay consolidation:** most of the webapp's DOM `title=` attributes are
+  teaching prose the browser renders as an unstyled, unselectable blob that dies on touch. Migrate
+  **by string source, not by file** — `lib/terms.ts::TERMS` first, then the `VerifyPane` /
   `RoundFileView` header glossaries; leave the `title={same truncated string}` sites, where
-  HoverCard is strictly worse. (2) **Never examined, and the one with real reach:**
-  `application/optimization/CLAUDE.md` asserts L2/L3/L4 are one family, yet each is built from
-  scratch. Whether they should share machinery has never been asked, only asserted — and the L2↔L4
-  hunt found one real collision underneath it.
+  HoverCard is strictly worse. **Re-test:** `grep -rn "title={TERMS\[" webapp --include=*.tsx | wc -l`
+  — while it reads 0, nothing has migrated. (2) **Whether L4 should reach the escalation machinery.**
+  Not "each is built from scratch" — L2 and L3 already share `dispatch/`, `escalation/`, `cycle.py`
+  and `OPTIMIZER_RESPONSE_MODELS`, and `application/optimization/CLAUDE.md` already splits the
+  conceptual family from the structural one, which leaves only L4 outside, at the connector seam.
+  So the question is not whether three strangers should converge; it is whether the recursion
+  belongs inside the ladder it recurses on. That one has never been asked.
 
 - **FIVE node kinds spell one concept — "runs a model".** `domain/pipeline_schema.py::NodeKind`
   closed the vocabulary and named the families, which is what makes the redundancy countable rather
@@ -136,6 +151,7 @@ it.
   PAIR, not the count. **Re-test:** intersect those two files' lines over 30 chars; under 23 means
   someone split them. A fourth dataset says nothing this one did not already answer.
 
+
 ## Blocked — named blocker
 
 **Archive hygiene — the corpus it was sized against is gone again:**
@@ -166,9 +182,11 @@ it.
   because an `sp_hash` is not owned by a campaign.
 
 **Behavior change (needs explicit sign-off, not a blind swap) — absent-vs-zero in the scoring spine:**
-- **All-errored candidate scores `accuracy = 0.0`, not the honest `None`** — `compute_accuracy`
-  (evaluators.py) returns 0.0 when no scoreable row exists; for all-deprecated that IS the verdict,
-  but for all-errored it fabricates one. The honest `None` must propagate:
+- **All-errored candidate scores `accuracy = 0.0`, not the honest `None`** —
+  `application/scoring/evaluators.py::compute_accuracy` already returns `None` for an EMPTY result
+  set, so the type is `float | None` and only the ARM is wrong: it still returns 0.0 when the set is
+  non-empty and nothing in it is scoreable. For all-deprecated that IS the verdict, but for
+  all-errored it fabricates one. The honest `None` must propagate:
   `ScoredCandidate.accuracy` / `RoundResult.accuracy` → `float | None`, `compute_composite_fitness`
   handling a missing `accuracy` term without `ScoringTermMissingError` in `_running_scores` (an
   "unscoreable candidate" state, the outer sibling of `InnerCycleUnscoreableError`),
@@ -202,17 +220,6 @@ it.
   source of truth — the LLM contract auto-propagates). Full site map: grep `*_override`. **Blocker:**
   invalidates on-disk cycles (round-file key + optimizer structured-output contract) — verify against
   a FRESH cycle that completes round 1, not a resume.
-
-**Security posture / migration:**
-- **Backend-registration dedup** — `webapp/lib/hooks/useConnector.ts`'s client-side `distinct` /
-  `seenEndpoints` collapse is a back-compat shim for per-dataset `BackendConnection` rows minted
-  before the `wiring.py` one-row-per-`(base_url, backend_type)` fix. NOT a row-delete: a 3-step
-  migration — (1) rewrite each campaign's `campaign.yaml::backend_id` to the canonical `local` (8
-  stale ids across 82 campaigns, all → the same `127.0.0.1:8000` endpoint); (2) collapse the
-  duplicate rows (needs a new `BackendStore.remove`); (3) make every re-wire path reuse the canonical
-  id. Then delete the loop. Also: `wiring.py`'s `not backend_id` reuse block should guard on
-  `existing.base_url == backend_url` (mint a distinct id on mismatch). Blocker: write + operator-run
-  the idempotent migration on their data first — the loop is load-bearing until then.
 
 **Cross-repo (TermNorm sibling at `OfficeAddinApps/TermNorm-excel/backend-api`):**
 - **The TermNorm `/version` endpoint** is what remains genuinely owed on that side; this repo then
@@ -283,43 +290,6 @@ longer "is a feature allowed" but "does the preprint need it", and these do not:
   `.claude/skills/potter-run/SKILL.md`, `test_numerics.py`, `test_integrity.py`. Action: rename
   writer→reader in one commit. Blocker: it is an on-disk config key under operator-curated
   `datasets/` — the rename is the operator's call, not a sweep's.
-
-**Declared, no reader — each blocked on a served-surface decision, not on finding out:**
-- **`manifests.py::ConfigCoupling.estimand` and `.knobs`** ride `openapi.generated.json` +
-  `types.generated.ts`, and the one consumer (`ConfigMapPanel.tsx`) renders
-  `severity`/`labels`/`relation`/`consequence`/`active`/`name` and neither of these; no CLI reader
-  either (`check_couplings` takes `Coupling` objects direct). Action: drop from the response model.
-  Blocker: deleting a served field is a wire decision.
-- **`domain/results.py::CycleResult.origin_level_se`** — the L4 reader its own field comment names
-  explicitly refuses it (`l4/proxies.py::mean_parent_level_se`: *"`origin_level` is deliberately
-  absent … folding it into each side counts it twice"*). Blocker, and it is thinner than filed: it
-  rides `cycle_result_command`'s `model_dump()` into CLI `--json`, but it is in neither
-  `openapi.generated.json` nor `types.generated.ts` and no doc enumerates that key set — so this is a
-  policy call about undocumented `--json` keys, not a documented consumer.
-- **`dashboard.json::in_flight` (`live_dashboard/state.py::InFlightCall`)** is served on every poll
-  and read by nothing — the whole webapp names it only in `types.generated.ts` and a test fixture
-  (`max_cells_in_flight` is a different field, and is read). Its L4 twin is the other half of one
-  decision: `live_dashboard/view.py::_handle_llm_call_progress` discards the record whole, so the
-  inner-campaign `detail` that `runner/inner/spawn.py::_inner_detail` mints ("inner rX/Y · Δθ…")
-  reaches the chat/ray `inner-progress` chip and never the outer dashboard — and an inner campaign
-  sets no `in_flight` at all, since `spawn.py` fires the heartbeat directly rather than through
-  `llm_call`. So serving `detail` here would still render nothing. Action: decide whether the outer
-  dashboard shows inner progress at all — if yes, one served field and one reader; if no,
-  `in_flight` goes. Blocker: adding or deleting a served field is a wire decision, and the chat feed
-  already answers the operator's question.
-- **`scoring/formula/matchers.py::SCORING_FUNCTIONS["relu"]`, `["smoothstep"]` and `["sigmoid"]`** —
-  three, not two. No `campaign.yaml`, fixture or test uses any of them, and no doc names
-  `SCORING_FUNCTIONS` or tabulates the DSL vocabulary, so an operator cannot discover them. Their
-  neighbours all land. Action: document the DSL or drop the three. Blocker: it is an operator-facing
-  DSL — reach is a product call.
-
-**Round documents no prune can repair:**
-- **Some fail to load with `health.first_error: extra_forbidden`** — a renamed field, and pruning
-  cannot restore a renamed field's VALUE, so the verb names them and never rewrites them. Fix is
-  the model or a migration of its own; until then `restamp`'s cycle-index re-projection skips
-  those cycles.
-- **Re-test: `python -m promptpotter restamp`** — its "Round documents — N checked, M load" line;
-  equal counts close this.
 
 **Needs a live run, not a decision:**
 - **`_rebank_on_branch`'s re-bank has never been observed** — fixed to take each corrected round

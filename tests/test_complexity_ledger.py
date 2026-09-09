@@ -177,7 +177,11 @@ LEDGER_BASELINE = {
     # buys a 400 that costs the candidate its whole panel, a wrongly withheld one deletes a search
     # position and the round still elects. The empty case is why: read falsy, an axis with nothing
     # legal becomes an unbounded one. (§ 9)
-    "test_functions": 167,
+    # +1: a run's backend row names the endpoint it actually REACHED — the resolver checked only
+    # that an id existed, so a `local` row pointing elsewhere absorbed the run and every measurement
+    # it banked was attributed to a backend nobody pointed it at. Silent in both directions, and no
+    # re-run re-attributes what is already on disk. (test_integrity § 8)
+    "test_functions": 168,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

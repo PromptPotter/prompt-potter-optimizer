@@ -126,7 +126,7 @@ async def verify_candidate(
     source_candidate_id = cand_score.candidate_id
 
     session = await init_services(
-        backend_id=campaign.backend_id or campaign.dataset_name,
+        backend_id=campaign.backend_id,
         dataset_name=campaign.dataset_name,
         identity=identity,
         stores=stores,

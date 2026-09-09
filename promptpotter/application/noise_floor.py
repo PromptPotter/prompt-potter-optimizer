@@ -76,7 +76,7 @@ async def measure_noise_floor(
     opt_sp = OptSearchPoint.from_prompt_fields(round_file.prompt_fields)
 
     session = await init_services(
-        backend_id=campaign.backend_id or campaign.dataset_name,
+        backend_id=campaign.backend_id,
         dataset_name=campaign.dataset_name,
         identity=identity,
         stores=stores,

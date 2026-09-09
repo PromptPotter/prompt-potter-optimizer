@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -303,6 +304,38 @@ def _load_dataset_into_session(
     status(f"Dataset: {dataset_name} ({len(items)} samples)")
 
 
+def _resolve_backend_id(
+    stores: Stores,
+    requested: str,
+    backend_url: str,
+    backend_type: str,
+    name: str,
+) -> str:
+    """One physical endpoint = one ``BackendConnection``, and the id a caller asks for is a
+    PREFERENCE the endpoint outranks. Both directions were wrong when only existence was checked:
+    an endpoint already registered got a second row under the requested id, and an id already
+    taken by a DIFFERENT endpoint silently absorbed the run, attributing every measurement to a
+    backend nobody pointed it at. Neither is recoverable after the fact — the row is what names
+    the URL."""
+    norm = backend_url.rstrip("/")
+    for b in stores.backends.list_all():
+        if b.base_url.rstrip("/") == norm and b.backend_type == backend_type:
+            return b.id
+    backend_id = requested or DEFAULT_BACKEND_ID
+    if stores.backends.get(backend_id) is not None:
+        slug = re.sub(r"[^A-Za-z0-9._-]+", "-", norm.split("://", 1)[-1]).strip("-")
+        backend_id = f"{backend_type}-{slug}"
+    stores.backends.register(
+        BackendConnection(
+            id=backend_id,
+            name=name,
+            backend_type=backend_type,
+            base_url=backend_url,
+        )
+    )
+    return backend_id
+
+
 async def init_services(
     dataset_name: str,
     backend_url: str = DEFAULT_BACKEND_URL,
@@ -347,32 +380,9 @@ async def init_services(
     _verify_required_observation_keys(pipeline_schema, connector, dataset_name)
     await _verify_connector_revision(client, connector)
 
-    # One physical endpoint = one BackendConnection. With no explicit
-    # --backend-id, REUSE an existing registration for this (base_url,
-    # backend_type) instead of minting a fresh per-dataset backend — the old
-    # `dataset_name` fallback spawned one "termnorm" row per dataset, polluting
-    # the "Other backends" list. Fall back to DEFAULT_BACKEND_ID only when this
-    # endpoint is genuinely new.
-    if not backend_id:
-        norm = backend_url.rstrip("/")
-        existing = next(
-            (
-                b
-                for b in stores.backends.list_all()
-                if b.base_url.rstrip("/") == norm and b.backend_type == backend_type
-            ),
-            None,
-        )
-        backend_id = existing.id if existing else DEFAULT_BACKEND_ID
-    if not stores.backends.get(backend_id):
-        stores.backends.register(
-            BackendConnection(
-                id=backend_id,
-                name=pipeline_schema.name,
-                backend_type=backend_type,
-                base_url=backend_url,
-            )
-        )
+    backend_id = _resolve_backend_id(
+        stores, backend_id, backend_url, backend_type, pipeline_schema.name
+    )
 
     from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
