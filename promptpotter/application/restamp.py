@@ -47,7 +47,7 @@ from promptpotter.domain.results import DiagnosticRunRecord, RoundResult
 from promptpotter.domain.run_records import CycleRecord
 from promptpotter.domain.scoring import ledger_sample_view
 from promptpotter.domain.spend import TOKEN_KIND_BUCKET
-from promptpotter.infrastructure.runtime_flags import derive_run_phase
+from promptpotter.infrastructure.runtime_flags import derive_run_phase, is_checkin
 from promptpotter.infrastructure.store.campaign_store.store import reproject_round_index
 from promptpotter.infrastructure.store.dataset_access import (
     backend_type_of_dataset,
@@ -1101,10 +1101,11 @@ def _identity_owned_keys(connector_name: str, dataset_dir: pathlib.Path | None) 
 
 def lift_campaign_pipeline_config(*, apply: bool) -> dict[str, int]:
     """Freeze each campaign's node config onto the campaign, out of the dataset file it shares —
-    from round 0 where one ran, else from the file, which is still honest for a campaign that
-    never did. A non-empty ``pipeline_overlay`` is left alone; identity-owned keys and ``steps``
-    are never lifted."""
-    lifted = from_rounds = from_dataset = current = empty = unknown = 0
+    from round 0 where one ran, else from the file, which is still honest for a campaign that never
+    did. A non-empty ``pipeline_overlay`` is left alone; identity-owned keys and ``steps`` are never
+    lifted. A campaign still in CHECK-IN gets the OPPOSITE treatment and its overlay is REMOVED: it
+    ran nothing, its config is the draft's, and Start folds that on anyway."""
+    lifted = from_rounds = from_dataset = current = empty = unknown = provisional = 0
     stores_by_tenant: dict[pathlib.Path, Stores | None] = {}
     for tree in workspace_trees(DEFAULT_PROJECTS_ROOT):
         for path in sorted(tree.glob("*/campaigns/*/campaign.json")):
@@ -1114,6 +1115,14 @@ def lift_campaign_pipeline_config(*, apply: bool) -> dict[str, int]:
                     continue
                 config = doc.get("config")
                 config = config if isinstance(config, dict) else {}
+                if is_checkin(path.parent / "cycles" / str(doc.get("root_cycle_id") or "")):
+                    if not config.pop("pipeline_overlay", None):
+                        continue
+                    doc["config"] = config
+                    provisional += 1
+                    if apply:
+                        write_json(path, doc)
+                    continue
                 if config.get("pipeline_overlay"):
                     current += 1
                     continue
@@ -1176,7 +1185,11 @@ def lift_campaign_pipeline_config(*, apply: bool) -> dict[str, int]:
     print(f"  {current:>6} already carry their own `pipeline_overlay`")
     print(f"  {empty:>6} have no node config anywhere to lift")
     print(f"  {unknown:>6} skipped — their connector's identity keys cannot be read on this box")
-    if not apply and lifted:
+    dropped = "dropped from" if apply else "would drop from"
+    print(
+        f"  {provisional:>6} {dropped} a CHECK-IN — its draft owns the node config, not this file"
+    )
+    if not apply and (lifted or provisional):
         print("\nDry run. Re-run with --apply to rewrite.")
     return {
         "pipeline_configs_lifted": lifted,
@@ -1184,6 +1197,7 @@ def lift_campaign_pipeline_config(*, apply: bool) -> dict[str, int]:
         "pipeline_configs_from_dataset": from_dataset,
         "pipeline_configs_current": current,
         "pipeline_configs_identity_unknown": unknown,
+        "pipeline_configs_provisional_dropped": provisional,
     }
 
 
