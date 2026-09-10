@@ -987,6 +987,12 @@ class LiveDashboardView(DerivedView):
         s.sample_lookahead = effective_lookahead(
             read_sample_lookahead(self.cycle_dir), s.max_cells_in_flight
         )
+        # Both inputs are already served and already settled by here — the fold is one division,
+        # and it is here so that no reader performs it against a different poll of either.
+        used = s.spend.total_used_usd
+        s.ability_delta_per_usd = (
+            None if s.ability_delta is None or used <= 0 else round(s.ability_delta / used, 4)
+        )
         s.wallclock_serialized_at = utcnow_iso()
         # The typed model IS the on-disk shape, and `extra="forbid"` rejects an undeclared
         # attribute at the mutation site — so a field can neither silently vanish nor appear

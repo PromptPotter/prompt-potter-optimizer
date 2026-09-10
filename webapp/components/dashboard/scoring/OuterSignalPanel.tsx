@@ -22,14 +22,12 @@ function fmt(n: number): string {
   return (n >= 0 ? "+" : "") + n.toFixed(3);
 }
 
-// The arm the round's verdict is about: its winner, else its best-scoring one. Mirrors the rule
-// the projection uses for `panel_precision`, so the two stacks below describe one arm per round.
+// The arm the round's verdict is about — SERVED (`round_summary.py::_leading_arm`), the same one
+// `panel_precision` is measured on, so the two stacks below cannot describe different arms. The
+// argmax over `composite_fitness` that stood here could not apply the election's own admission
+// rule, so on a HELD round it drew a lift interval attributed to a collapsed arm.
 function leadingArm(r: RoundSummary): RoundSummaryCandidate | null {
-  if (!r.candidates.length) return null;
-  return (
-    r.candidates.find((c) => c.is_winner) ??
-    r.candidates.reduce((a, b) => (b.composite_fitness > a.composite_fitness ? b : a))
-  );
+  return r.candidates.find((c) => c.is_leading) ?? null;
 }
 
 type Lift = { round: number; lift: number; lo: number; hi: number; label: string };

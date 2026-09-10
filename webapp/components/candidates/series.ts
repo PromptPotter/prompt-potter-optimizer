@@ -209,7 +209,10 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     },
     applies: (c) => c.showCache,
     // The served INTEGERS, never the share: the height is geometry, the counts are the
-    // measurement, and only the measurement gets written down.
+    // measurement, and only the measurement gets written down. Filed three times as a
+    // browser-computed number and refused each time — the test is whether the operator READS a
+    // number this layer made, and a bar's height on a shared 0–1 axis is the axis's own unit
+    // conversion. Serving `cached_share` would be a third field derivable from the two beside it.
     tip: (v, c) =>
       v.cached_samples == null || v.n_samples == null
         ? "cached: —"

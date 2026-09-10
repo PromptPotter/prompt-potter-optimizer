@@ -191,12 +191,10 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
   // Headline KPIs. `abilityDelta` is SERVED and is in LOGITS, so it renders as θ and never as
   // a percent — the two are different bases, not different renderings. Lift over origin leads
   // because it is the meaningful number; absolute best rides as secondary context.
-  const { best, abilityDelta } = headlineStats(dash);
+  const { best, abilityDelta, abilityDeltaPerUsd } = headlineStats(dash);
   const deltaTheta =
     abilityDelta != null ? `θ ${abilityDelta >= 0 ? "+" : ""}${abilityDelta.toFixed(2)}` : "—";
-  const deltaPerSpend =
-    abilityDelta != null && usedUsd != null && usedUsd > 0 ? abilityDelta / usedUsd : null;
-  const effChip = deltaPerSpend != null ? `${deltaPerSpend.toFixed(2)} θ/$` : "—";
+  const effChip = abilityDeltaPerUsd != null ? `${abilityDeltaPerUsd.toFixed(2)} θ/$` : "—";
   const etaChip = etaToBudget(usedUsd, budgetUsd, cycleStartedAt);
   // The candidate currently being scored ("C3.2"). `dash.candidate` is "C3.2/4"
   // and goes stale between rounds, so surface it only while the active node is

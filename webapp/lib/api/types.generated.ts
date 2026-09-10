@@ -132,6 +132,7 @@ export interface RoundSummaryCandidate {
   matched_parent_lift_ci_lo: number | null;
   matched_parent_lift_ci_hi: number | null;
   is_winner: boolean;
+  is_leading: boolean;
 }
 
 /** Context-aware degradation verdict for a round (origin included), computed */
@@ -603,6 +604,7 @@ export interface LiveDashboardState {
   best: number | null;
   current_acc: number | null;
   ability_delta: number | null;
+  ability_delta_per_usd: number | null;
   composite_fitness_formula: string | null;
   composite_fitness_weights: Record<string, number> | null;
   headline_metric: 'accuracy' | 'composite' | 'ability';

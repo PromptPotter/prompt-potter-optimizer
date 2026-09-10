@@ -112,8 +112,10 @@ export const EMPTY_PERSISTED: PersistedState = {
 
 // Mean fitness → hue. 1 = cool green (always solved), 0.5 = neutral grey
 // (mixed), 0 = warm red (never solved). Rows with zero measurements skip
-// the style.
-function fitnessStyle(fitness: number): CSSProperties {
+// the style. Exported because the mini heat strip shades the SAME served number: it
+// thresholded its own browser-side mean at 0.5, which on a graded scorer coloured a
+// sample one way in the strip and another in the row directly beneath it.
+export function fitnessStyle(fitness: number): CSSProperties {
   const hue = 5 + fitness * 125;
   const alpha = 0.18 + Math.abs(fitness - 0.5) * 0.4;
   return { background: `hsla(${hue},70%,45%,${alpha.toFixed(3)})` };

@@ -6,7 +6,7 @@ import { useHardSamples } from "@/lib/hard-samples";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { HardSamplesTable } from "./HardSamplesTable";
 import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory";
-import { type HeatDot } from "./columns";
+import { fitnessStyle, type HeatDot } from "./columns";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
 // Fold in live mid-round measurements that haven't landed in the archive yet — the served
@@ -146,14 +146,20 @@ export function HardSamplesHeatmap() {
             title={`${summary} — click to ${heatExpanded ? "collapse" : "expand"} · drag to resize`}
           >
             <span className="hs-heat-mini" aria-hidden="true">
+              {/* The SERVED per-sample mean, shaded by the table's own `fitnessStyle` — one
+                  colour rule for the strip and the row beneath it. It folded `perSample` down
+                  and thresholded at 0.5 instead, which is neither `HIT_THRESHOLD` nor a
+                  gradient: two arms of a graded scorer landed on one flat colour, and the merged
+                  live tail (0/1 endpoints) skewed the mean it was thresholding. */}
               {datasetItems.map((it) => {
-                const ms = perSample.get(it.sample_id);
-                let cls: "hit" | "miss" | "none" = "none";
-                if (ms && ms.length > 0) {
-                  const mean = ms.reduce((k, m) => k + m.fitness, 0) / ms.length;
-                  cls = mean >= 0.5 ? "hit" : "miss";
-                }
-                return <span key={it.sample_id} className={`hs-heat-mini-cell ${cls}`} />;
+                const mean = archivePerSample.get(it.sample_id)?.mean_fitness ?? null;
+                return (
+                  <span
+                    key={it.sample_id}
+                    className="hs-heat-mini-cell"
+                    style={mean == null ? undefined : fitnessStyle(mean)}
+                  />
+                );
               })}
             </span>
           </button>

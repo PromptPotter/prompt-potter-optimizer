@@ -193,6 +193,13 @@ class RoundSummaryCandidate(DashboardCandidate):
     composite_fitness: float
     expected_samples: int
     is_winner: bool
+    # The arm this round's READING is taken off, and the same one `RoundSummary.panel_precision`
+    # is measured on (`round_summary.py::_leading_arm`). Distinct from `is_winner`, which says the
+    # election CROWNED it: a held round crowns nothing and its reading still comes off one arm.
+    # Served because the tie-break a reader would reach for — argmax on `composite_fitness` —
+    # cannot apply `is_electable`, so it hangs the lift interval off a collapsed arm the election
+    # refused. `False` on every row of round 0, which holds no election.
+    is_leading: bool = False
 
 
 class RoundSummary(StrictModel):

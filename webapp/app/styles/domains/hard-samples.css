@@ -50,9 +50,9 @@
 /* 4 px tiles; auto-fill so dragging the button on either axis reflows how
    many tiles are visible without ever changing tile size. */
 .hs-heat-mini{display:grid;grid-template-columns:repeat(auto-fill,4px);grid-auto-rows:4px;gap:1px;align-content:start}
+/* Unmeasured is the base; a measured cell takes its hue inline from `columns.ts::fitnessStyle`,
+   the same shade the table row beneath it wears. */
 .hs-heat-mini-cell{width:4px;height:4px;border-radius:1px;background:var(--color-background-tertiary)}
-.hs-heat-mini-cell.hit{background:var(--color-success)}
-.hs-heat-mini-cell.miss{background:var(--color-danger)}
 /* Expanded wrap — full-bleed breakout from the 980 px hero. Left gutter
    tracks where a 1280 px centred block would sit (the operator's preferred
    distance); the right edge runs to a 24 px viewport gutter. */

@@ -10,17 +10,22 @@ from typing import Any
 from pydantic import ValidationError
 
 from promptpotter.domain.dashboard_rows import RoundSummary, RoundSummaryCandidate
-from promptpotter.domain.l4.proxies import PanelPrecision, panel_precision
-from promptpotter.domain.results import RoundResult, is_electable, is_round_winner
+from promptpotter.domain.l4.proxies import panel_precision
+from promptpotter.domain.results import (
+    RoundResult,
+    ScoredCandidate,
+    is_electable,
+    is_round_winner,
+)
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout
 
 logger = logging.getLogger(__name__)
 
 # The ``ScoredCandidate`` fields each display model copies verbatim — its own field list
-# minus the derived ``is_winner``. Deriving from ``model_fields`` keeps the copy set in
+# minus the derived flags below. Deriving from ``model_fields`` keeps the copy set in
 # lockstep with the model definition (add a field there, it flows here automatically).
-_SUMMARY_INCLUDE = set(RoundSummaryCandidate.model_fields) - {"is_winner"}
+_SUMMARY_INCLUDE = set(RoundSummaryCandidate.model_fields) - {"is_winner", "is_leading"}
 
 
 def origin_rows_from_disk(cycle_dir: Path) -> list[dict[str, Any]]:
@@ -82,11 +87,14 @@ def _measurement_order(acr: dict[str, list[dict[str, Any]]]) -> list[int]:
     return out
 
 
-def _panel_precision(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> PanelPrecision | None:
-    """Read off ONE arm — the round's winner, else its best-scoring electable one."""
-    # Every arm ran the same cells, so any measures the same instrument; picking the arm the reader
-    # is already looking at keeps the precision attached to the interval it explains. `is_electable`
-    # is the election's own admission rule, so a collapsed arm cannot supply the round's reading.
+def _leading_arm(rr: RoundResult) -> ScoredCandidate | None:
+    """The ONE arm a round's reading is taken off — its winner, else its best-scoring electable one.
+
+    Every arm ran the same cells, so any measures the same instrument; picking the arm the reader is
+    already looking at keeps the precision and the lift interval attached to what they explain.
+    ``is_electable`` is the election's own admission rule, so a collapsed arm cannot supply the
+    round's reading — and that is the half a browser-side argmax over ``composite_fitness`` cannot
+    apply, which is why the flag is SERVED rather than left to be re-derived."""
     if rr.round == 0:
         return None
     electable = [
@@ -96,11 +104,10 @@ def _panel_precision(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> Pane
     ]
     if not electable:
         return None
-    subject = next(
+    return next(
         (c for c in electable if is_round_winner(c.candidate_id, rr.winner_id)),
         max(electable, key=lambda c: c.composite_fitness),
     )
-    return panel_precision(rr.all_candidate_results.get(subject.candidate_id, []), origin_rows)
 
 
 def build_round_summary(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> RoundSummary:
@@ -111,10 +118,12 @@ def build_round_summary(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> R
     # is the target model's OWN field list minus those: a field added to the target can't be
     # silently forgotten here (it just flows), and a field the source lacks fails loud at
     # construction. One field-list, spelled at the model.
+    leading = _leading_arm(rr)
     candidates = [
         RoundSummaryCandidate(
             **c.model_dump(include=_SUMMARY_INCLUDE),
             is_winner=is_round_winner(c.candidate_id, rr.winner_id),
+            is_leading=leading is not None and c.candidate_id == leading.candidate_id,
         )
         for c in rr.candidate_scores
     ]
@@ -131,7 +140,13 @@ def build_round_summary(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> R
         selection=selection,
         health=rr.health,
         overlap=rr.overlap,
-        panel_precision=_panel_precision(rr, origin_rows),
+        panel_precision=(
+            None
+            if leading is None
+            else panel_precision(
+                rr.all_candidate_results.get(leading.candidate_id, []), origin_rows
+            )
+        ),
     )
 
 

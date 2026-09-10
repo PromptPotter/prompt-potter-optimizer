@@ -95,6 +95,9 @@ export interface HeadlineStats {
   // draw minus the fullest one and read `+19%` off a cycle whose ability never moved. Ability
   // is the only cross-round-comparable series (see `RoundSummary.ability`).
   abilityDelta: number | null;
+  // That lift per dollar spent, SERVED (`ability_delta_per_usd`). Its two inputs land on
+  // different events, so dividing them here would divide two polls; `null` until both exist.
+  abilityDeltaPerUsd: number | null;
 }
 
 function finite(v: unknown): number | null {
@@ -112,7 +115,7 @@ export function headlineStats(dash: DashboardSnapshot | null): HeadlineStats {
   const round0 = (dash?.rounds ?? []).find((r) => r.round === 0);
   const origin = round0 ? finite(round0.accuracy) : null;
   const abilityDelta = finite(dash?.ability_delta);
-  return { best, origin, abilityDelta };
+  return { best, origin, abilityDelta, abilityDeltaPerUsd: finite(dash?.ability_delta_per_usd) };
 }
 
 export interface FitnessTrend {

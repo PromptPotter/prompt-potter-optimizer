@@ -206,6 +206,12 @@ class LiveDashboardState(StrictModel):
     # settled with an ability. Accuracy cannot answer this: under ``per_round_resubset`` each
     # round draws a fresh subset, so a max over rounds selects the luckiest draw.
     ability_delta: float | None = None
+    # That lift priced in what it cost — logits per dollar, the headline efficiency chip. Settled
+    # in ``compose`` rather than at either input's write, because the two move on different events
+    # (θ at a round close, spend on every call) and a browser dividing them is dividing two polls.
+    # ``None`` until both a lift and a non-zero spend exist; a run with no spend has no rate, and
+    # reporting one for it would put an infinity on the strip.
+    ability_delta_per_usd: float | None = None
     composite_fitness_formula: str | None = None
     # The same formula as ``{evaluator: coefficient}``, where it IS a weighted sum — what the mask
     # editor's per-evaluator weights seed from. ``None`` says the formula cannot carry them and the
