@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Any, Literal
@@ -33,6 +34,7 @@ __all__ = [
     "freeze_campaign_config",
     "knob_label",
     "load_campaign_config",
+    "merge_config_layers",
 ]
 
 
@@ -553,10 +555,30 @@ def load_campaign_config(raw: dict[str, Any] | CampaignConfig) -> CampaignConfig
     return CampaignConfig.model_validate(raw)
 
 
+def merge_config_layers(base: dict[str, Any], over: Mapping[str, Any]) -> dict[str, Any]:
+    """Depth-first, so overriding one knob under ``optimization`` keeps its siblings. A shallow
+    ``{**base, **over}`` replaces the whole sub-block, which is how a harness meaning to set
+    ``max_rounds`` silently dropped every other loop knob the dataset declared."""
+    out = dict(base)
+    for key, value in over.items():
+        current = out.get(key)
+        out[key] = (
+            merge_config_layers(current, value)
+            if isinstance(current, dict) and isinstance(value, Mapping)
+            else value
+        )
+    return out
+
+
 def freeze_campaign_config(config: CampaignConfig) -> dict[str, Any]:
     """Sole writer of the snapshot's shape, and it persists only the DELTA from defaults, so a knob
     nobody set cannot make it unloadable. A set-then-renamed knob is re-stamped, never shimmed."""
     return config.model_dump(mode="json", exclude_defaults=True)
+
+
+# The snapshot fields that MERGE with the live file rather than replace it, because the file holds
+# no version of them to replace — every other frozen key is the campaign's word over the file's.
+_MERGED_INHERITED_FIELDS = frozenset({"pipeline_overlay", "optimizer_narrowing"})
 
 
 def apply_inherited_overlay(
@@ -564,8 +586,11 @@ def apply_inherited_overlay(
     frozen_config: dict[str, Any],
     seed: CycleSeed | None,
 ) -> CampaignConfig:
-    """Resume/fork rebuild from the LIVE dataset, which holds neither ``pipeline_overlay`` nor
-    ``optimizer_narrowing`` — read off the snapshot DICT, so one renamed leaf cannot block a resume."""
+    """The campaign's own DECLARATION over the LIVE dataset file. Resume/fork rebuild from the file
+    so declaration edits stay drift-detected, then the snapshot wins wherever it SPOKE — it is the
+    delta from defaults (:func:`freeze_campaign_config`), so a knob nobody set keeps coming from
+    the file and an operator edit still reaches a resume. Read off the snapshot DICT, so one
+    renamed leaf cannot block a resume."""
     frozen_narrowing = {
         node: NodeSearchNarrowing.model_validate(raw)
         for node, raw in (frozen_config.get("optimizer_narrowing") or {}).items()
@@ -578,6 +603,15 @@ def apply_inherited_overlay(
     # runner's grade-C stamp reads the SAME permitted model set the fork-cycle cap-gate reads off
     # `campaign.config`, and the two cannot disagree. That is why `frozen_narrowing` is merged
     # SECOND above, and the seed's own declaration last of all.
+    #
+    # Everything ELSE the campaign froze — its loop ceilings above all. Only the two fields above
+    # MERGE rather than replace, so they are the two lifted out here and the rest re-validates as
+    # one layer. Without this a `--config` (or any mint-time declaration) reached `campaign.json`
+    # and not the loop: the run enforced the dataset file's `max_rounds` and `spend_budget_usd`
+    # while every surface reading the campaign showed the operator's.
+    rest = {k: v for k, v in frozen_config.items() if k not in _MERGED_INHERITED_FIELDS}
+    if rest:
+        config = load_campaign_config(merge_config_layers(config.model_dump(mode="json"), rest))
     return config.model_copy(
         update={
             "pipeline_overlay": {**config.pipeline_overlay, **frozen_overlay},

@@ -391,6 +391,29 @@ def test_steered_fork_seed_narrowing_overrides_campaign_locks_per_node() -> None
     assert merged.optimizer_narrowing["retriever"].param_keys == ["top_k"]
 
 
+def test_frozen_campaign_config_ceilings_survive_the_live_dataset_file() -> None:
+    """The campaign's own snapshot decides what it RUNS, not the dataset template beside it.
+
+    Carrying only `pipeline_overlay` + `optimizer_narrowing` off the snapshot is what let a
+    mint-time `--config` reach `campaign.json` and never the loop: `run_limits` armed the
+    file's ceilings while every surface reading the campaign showed the operator's. The
+    snapshot is the delta from defaults, so a knob it never named still comes off the file.
+    """
+    from promptpotter.application.campaign_config import (
+        apply_inherited_overlay,
+        load_campaign_config,
+    )
+
+    live = load_campaign_config({"optimization": {**_OPT, "max_rounds": 5, "n_variants": 7}})
+    frozen = {"optimization": {"max_rounds": 12, "spend_budget_usd": 0.3}}
+    merged = apply_inherited_overlay(live, frozen, None)
+
+    assert merged.optimization.max_rounds == 12
+    assert merged.optimization.spend_budget_usd == 0.3
+    # Named by neither: the sibling knob under the same block survives the merge.
+    assert merged.optimization.n_variants == 7
+
+
 def test_lives_resume_fold_matches_live_observe() -> None:
     """Resume-integrity: the banked-lives ("hearts") count rebuilt from the ledger's
     ``improved`` sequence (``EscalationFSM.fold``) must equal the live in-run count

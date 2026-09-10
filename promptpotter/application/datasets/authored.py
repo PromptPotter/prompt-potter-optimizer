@@ -11,7 +11,7 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
-from promptpotter.application.campaign_config import CampaignConfig
+from promptpotter.application.campaign_config import CampaignConfig, merge_config_layers
 from promptpotter.application.campaign_config import (
     load_campaign_config as validate_campaign_config,
 )
@@ -80,21 +80,6 @@ def read_campaign_config_file(path: Path) -> dict[str, Any]:
     return result
 
 
-def _deep_merge(base: dict[str, Any], over: Mapping[str, Any]) -> dict[str, Any]:
-    """Depth-first, so overriding one knob under ``optimization`` keeps its siblings. A shallow
-    ``{**base, **over}`` replaces the whole sub-block, which is how a harness meaning to set
-    ``max_rounds`` silently dropped every other loop knob the dataset declared."""
-    out = dict(base)
-    for key, value in over.items():
-        current = out.get(key)
-        out[key] = (
-            _deep_merge(current, value)
-            if isinstance(current, dict) and isinstance(value, Mapping)
-            else value
-        )
-    return out
-
-
 def load_dataset_campaign_config(
     path: Path, *, overrides: Mapping[str, Any] | None = None
 ) -> CampaignConfig:
@@ -107,7 +92,7 @@ def load_dataset_campaign_config(
     """
     try:
         raw = read_campaign_config_file(path)
-        return validate_campaign_config(_deep_merge(raw, overrides) if overrides else raw)
+        return validate_campaign_config(merge_config_layers(raw, overrides) if overrides else raw)
     except ValidationError as exc:
         reason = "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
         raise StoredConfigInvalidError(path=str(path), reason=reason) from exc

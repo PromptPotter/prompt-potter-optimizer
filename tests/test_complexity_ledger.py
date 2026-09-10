@@ -181,7 +181,13 @@ LEDGER_BASELINE = {
     # that an id existed, so a `local` row pointing elsewhere absorbed the run and every measurement
     # it banked was attributed to a backend nobody pointed it at. Silent in both directions, and no
     # re-run re-attributes what is already on disk. (test_integrity § 8)
-    "test_functions": 168,
+    # +1: a campaign's FROZEN config decides what it runs. `apply_inherited_overlay` carried two
+    # fields off the snapshot and rebuilt the rest from the dataset template, so a mint-time
+    # ceiling landed in `campaign.json` and never in `run_limits` — the loop enforced one number
+    # while every surface reading the campaign showed another. Silent by construction: both
+    # numbers are real, and only a run that outlives the file's ceiling tells them apart.
+    # (test_resume § the frozen-ceiling case)
+    "test_functions": 169,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

@@ -163,9 +163,20 @@ def build_l1_response_schema(
     # `model` arrives here like any other axis — `param_options` answers for all of them, so this
     # loop carries no per-param special case. The enum is the whole guard (an unbounded `model`
     # string would let the LLM invent an id), which is why an EMPTY space emits no property.
+    #
+    # Intersected with the nodes the GRAPH reaches, which is the same rule the two slots below
+    # state — never offer a slot L1 cannot act on. Not `active_steps`: `default` is the round, not
+    # the tunable set, and an escalation node sitting off the chain (`l2_context`, `l3_plan`) is
+    # exactly what L4 exists to tune. The set that is genuinely unreachable is the one
+    # `derive_pipeline_view` already refuses to draw — "a node named by NO pipeline is not in the
+    # flow at all" — which on a backend declaring a large roster behind a short chain is most of
+    # the schema: TermNorm declares eight nodes, a `[llm_only]` dataset can reach one, and the
+    # seven it cannot were 66% of the bytes L1 read every round to emit `{}` into. No view means
+    # no projection to narrow by, never "narrow to nothing".
+    reachable = {n.id for n in pipeline_schema.view.nodes} if pipeline_schema.view else None
     for node_name, keys in pipeline_schema.node_param_keys().items():
         node = pipeline_schema.get_node(node_name)
-        if node is None:
+        if node is None or (reachable is not None and node_name not in reachable):
             continue
         # Scalars first, then the nested params, each alphabetical. Field ORDER is what
         # this schema teaches (`docs/concepts/structured-output.md`), so the two groups
