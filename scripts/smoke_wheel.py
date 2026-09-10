@@ -21,9 +21,34 @@ additionally demands the dashboard — set it for a release wheel, never for a `
 
 from __future__ import annotations
 
+import json
 import os
+import socket
+import subprocess
 import sys
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
+
+
+def _free_port() -> int:
+    """A port the OS just confirmed is free, rather than a constant that collides with whatever
+    else the runner happens to be serving."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+def _get(url: str) -> tuple[int, bytes, str]:
+    """Status, body and content-type. An ``HTTPError`` is an ANSWER here, not a failure — a 404 from
+    a static mount that resolved to nothing and a 500 from a router are precisely what this asks
+    about, and urllib raises on both."""
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            return resp.status, resp.read(), resp.headers.get("content-type", "")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read(), exc.headers.get("content-type", "")
 
 
 def main() -> int:
@@ -113,6 +138,67 @@ def main() -> int:
         assert any(getattr(r, "name", None) == "webapp" for r in app.routes), (
             "index.html is present but nothing mounted it at /"
         )
+
+    # 6. It SERVES. Everything above only IMPORTS the app, so a router that 500s on its first
+    #    call, a dependency that cannot build a store under the wheel's paths, and a static mount
+    #    resolving to nothing all ship green. Run the uvicorn a deploy runs
+    #    (`deploy-linux/install-service.sh`) rather than an in-process ASGI client: the lifespan —
+    #    identity bundle, banner, reaper sweep — is half of what has never been exercised here.
+    port = _free_port()
+    base = f"http://127.0.0.1:{port}"
+    server = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "promptpotter.main:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--log-level",
+            "warning",
+        ]
+    )
+    try:
+        # Poll the exit code beside the socket: a crash during startup is a process that is gone,
+        # and waiting the full deadline to call that "no answer" hides the traceback that says why.
+        status, body = 0, b""
+        deadline = time.monotonic() + 90.0
+        while time.monotonic() < deadline:
+            assert server.poll() is None, f"server exited during startup, rc={server.returncode}"
+            try:
+                status, body, _ = _get(f"{base}/api/v1/health")
+                break
+            except OSError:
+                time.sleep(0.25)
+        else:
+            raise AssertionError(f"nothing answered at {base}/api/v1/health within 90s")
+        assert status == 200, f"health answered {status}: {body[:300]!r}"
+        assert json.loads(body).get("status") == "healthy", f"health body: {body[:300]!r}"
+
+        # One read all the way through the dependency chain — resolve the identity, build `Stores`
+        # at DEFAULT_PROJECTS_ROOT, list a workspace that holds nothing yet. The EMPTY answer is
+        # the one worth having: a first user's install is in exactly this state.
+        status, body, _ = _get(f"{base}/api/v1/campaigns")
+        assert status == 200, f"GET /api/v1/campaigns answered {status}: {body[:300]!r}"
+        listing = json.loads(body)
+        assert "campaigns" in listing, f"campaign listing off-contract: {body[:300]!r}"
+
+        # The dashboard is a MOUNT, and a mount answering 404 at its own root is indistinguishable
+        # from a naked API until something asks over HTTP. Same opt-in as section 5.
+        if os.environ.get("PROMPTPOTTER_SMOKE_EXPECT_WEBAPP") == "1":
+            status, body, content_type = _get(f"{base}/")
+            assert status == 200, f"dashboard root answered {status}: {body[:300]!r}"
+            assert "text/html" in content_type, f"dashboard root served {content_type!r}"
+            assert b"<html" in body.lower(), f"dashboard root body: {body[:300]!r}"
+    finally:
+        server.terminate()
+        try:
+            server.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            server.kill()
+            server.wait(timeout=10)
 
     print(f"wheel smoke OK — package {paths.PACKAGE_ROOT}, user data {home_path}")
     return 0
