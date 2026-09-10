@@ -14,11 +14,21 @@ from promptpotter.application.views.view_models import (
     RoundDigestView,
     SweepSummaryView,
 )
+from promptpotter.domain.phases import STOP_REASON_INFO, StopReason, StopReasonInfo
 from promptpotter.domain.rendering import fmt_pct as _fmt_pct
 from promptpotter.domain.rendering import prefix_reading
 from promptpotter.domain.results import overlap_series
 from promptpotter.domain.spend import TOKEN_KIND_BUCKET, TokenAccount
 from promptpotter.shared.composite import render_composite_fitness_block
+
+
+def _stop_info(stop_reason: str) -> StopReasonInfo | None:
+    """The reason's row, or ``None`` where the string names no reason — a running cycle writes
+    ``"(running)"`` here, and a digest is rendered for those too."""
+    try:
+        return STOP_REASON_INFO[StopReason(stop_reason)]
+    except ValueError:
+        return None
 
 
 def _json_block(label: str, value: Any) -> list[str]:
@@ -201,6 +211,11 @@ def to_markdown(view: LogMdView) -> str:
         "",
         f"- status: **{status.status}**",
         f"- stop reason: `{status.stop_reason}`",
+        *(
+            [f"- next: {info.next_step}"]
+            if (info := _stop_info(status.stop_reason)) and info.next_step
+            else []
+        ),
         f"- origin: {_fmt_pct(status.origin_accuracy)}",
         (
             f"- best: {_fmt_pct(status.best_accuracy)}"

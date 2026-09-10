@@ -135,12 +135,16 @@ class StopOutcome(enum.StrEnum):
 
 class StopReasonInfo(NamedTuple):
     """``halts_mid_round`` means the round left on disk is PARTIAL — read as complete, its fitness
-    is a handful of samples passing for the whole bank. No defaults: a new reason states both."""
+    is a handful of samples passing for the whole bank. ``next_step`` is the imperative the operator
+    acts on, SERVED rather than composed per surface — an ended cycle is read on four of them, and
+    four authors is four chances to advise differently. ``""`` states that nothing is owed; it is
+    never a surface's licence to write its own. No defaults: a new reason states all five."""
 
     label: str
     outcome: StopOutcome
     halts_mid_round: bool
     has_traceback: bool
+    next_step: str
 
 
 # The single source of truth mapping each terminal reason to its operator-facing
@@ -155,46 +159,84 @@ class StopReasonInfo(NamedTuple):
 #     `close_round`, escalation's ABORT/REBASED ride the post-round transition seam,
 #     ORIGIN_GATE runs once round 0 is scored, BACKEND_UNREACHABLE reads a CLOSED round's
 #     verdict, and DIVERGED is decided at resume before any round starts.
+#
+# `next_step` is filled ONLY where the verb cannot be read off the label. "Fix the backend, then
+# resume" is the reason restated, not advice; the four below each name a flag, a threshold or a
+# reading the label does not carry.
 STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
-    StopReason.PERFECT: StopReasonInfo("Perfect score", StopOutcome.SUCCESS, False, False),
-    StopReason.TARGET_HIT: StopReasonInfo("Target reached", StopOutcome.SUCCESS, False, False),
-    StopReason.MAX_ROUNDS: StopReasonInfo("Max rounds", StopOutcome.SUCCESS, False, False),
-    StopReason.LIVES_EXHAUSTED: StopReasonInfo("Out of lives", StopOutcome.SUCCESS, False, False),
-    StopReason.HARD_CAP: StopReasonInfo("Round cap", StopOutcome.SUCCESS, False, False),
-    StopReason.SWEEP_COMPLETE: StopReasonInfo("Sweep complete", StopOutcome.SUCCESS, False, False),
+    StopReason.PERFECT: StopReasonInfo(
+        "Perfect score",
+        StopOutcome.SUCCESS,
+        False,
+        False,
+        "`verify` the winner on more cells — this is one round's panel, not the dataset.",
+    ),
+    StopReason.MAX_ROUNDS: StopReasonInfo(
+        "Max rounds",
+        StopOutcome.SUCCESS,
+        False,
+        False,
+        "Raise `max_rounds` and `resume` if the curve was still moving; else read `review.md`.",
+    ),
+    StopReason.TARGET_HIT: StopReasonInfo("Target reached", StopOutcome.SUCCESS, False, False, ""),
+    StopReason.LIVES_EXHAUSTED: StopReasonInfo(
+        "Out of lives", StopOutcome.SUCCESS, False, False, ""
+    ),
+    StopReason.HARD_CAP: StopReasonInfo("Round cap", StopOutcome.SUCCESS, False, False, ""),
+    StopReason.SWEEP_COMPLETE: StopReasonInfo(
+        "Sweep complete", StopOutcome.SUCCESS, False, False, ""
+    ),
     StopReason.DIAG_COMPLETE: StopReasonInfo(
-        "Diagnostic complete", StopOutcome.SUCCESS, False, False
+        "Diagnostic complete", StopOutcome.SUCCESS, False, False, ""
     ),
     StopReason.L3_PATIENCE: StopReasonInfo(
-        "Converged (L3 patience)", StopOutcome.SUCCESS, False, False
+        "Converged (L3 patience)", StopOutcome.SUCCESS, False, False, ""
     ),
-    StopReason.REBASED: StopReasonInfo("Rebased to fork", StopOutcome.SUCCESS, False, False),
-    StopReason.PAUSED: StopReasonInfo("Paused", StopOutcome.PAUSED, True, False),
-    StopReason.ABORT: StopReasonInfo("Escalation abort", StopOutcome.HALTED, False, False),
-    # The two the private or-chain missed: the budget gate stops INSIDE the sample loop.
+    StopReason.REBASED: StopReasonInfo("Rebased to fork", StopOutcome.SUCCESS, False, False, ""),
+    StopReason.PAUSED: StopReasonInfo(
+        "Paused", StopOutcome.PAUSED, True, False, "`resume` picks it up at the next checkpoint."
+    ),
+    StopReason.ABORT: StopReasonInfo("Escalation abort", StopOutcome.HALTED, False, False, ""),
+    # The two the private or-chain missed: the budget gate stops INSIDE the sample loop. The
+    # counter is CUMULATIVE across resume, so a new ceiling must clear what is already spent —
+    # the one fact neither label carries and every operator gets wrong once.
     StopReason.SPEND_BUDGET: StopReasonInfo(
-        "Spend budget reached", StopOutcome.HALTED, True, False
+        "Spend budget reached",
+        StopOutcome.HALTED,
+        True,
+        False,
+        "`set-budget --max-usd <above what is already spent>` then `resume`.",
     ),
     StopReason.TOKEN_BUDGET: StopReasonInfo(
-        "Token budget reached", StopOutcome.HALTED, True, False
+        "Token budget reached",
+        StopOutcome.HALTED,
+        True,
+        False,
+        "`set-budget --max-tokens <above what is already spent>` then `resume`.",
     ),
     StopReason.ORIGIN_GATE: StopReasonInfo(
-        "Origin gate (unhealthy origin)", StopOutcome.HALTED, False, False
+        "Origin gate (unhealthy origin)", StopOutcome.HALTED, False, False, ""
     ),
     StopReason.BACKEND_UNREACHABLE: StopReasonInfo(
-        "Backend unreachable", StopOutcome.HALTED, False, False
+        "Backend unreachable", StopOutcome.HALTED, False, False, ""
     ),
-    StopReason.CRASHED: StopReasonInfo("Crashed", StopOutcome.FAILED, True, True),
+    StopReason.CRASHED: StopReasonInfo("Crashed", StopOutcome.FAILED, True, True, ""),
     # Written by the REAPER straight onto index.json — the producer is already gone, so
     # `_finalize_run` never runs and never reads this row. True is the honest value: a
     # vanished process died at an arbitrary point, so whatever round was open is partial.
     StopReason.PRODUCER_VANISHED: StopReasonInfo(
-        "Producer vanished", StopOutcome.FAILED, True, False
+        "Producer vanished", StopOutcome.FAILED, True, False, ""
     ),
-    StopReason.RENDER_ERROR: StopReasonInfo("Render error", StopOutcome.FAILED, True, True),
-    StopReason.DIVERGED: StopReasonInfo("Diverged", StopOutcome.FAILED, False, False),
+    StopReason.RENDER_ERROR: StopReasonInfo("Render error", StopOutcome.FAILED, True, True, ""),
+    StopReason.DIVERGED: StopReasonInfo(
+        "Diverged",
+        StopOutcome.FAILED,
+        False,
+        False,
+        "`resume --fork-on-divergence` to branch here, or revert the config edit to continue.",
+    ),
     StopReason.OPTIMIZER_TIMEOUT: StopReasonInfo(
-        "Optimizer timeout", StopOutcome.FAILED, True, False
+        "Optimizer timeout", StopOutcome.FAILED, True, False, ""
     ),
 }
 

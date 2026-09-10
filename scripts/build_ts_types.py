@@ -466,18 +466,31 @@ def _emit_non_activity_kinds() -> str:
 
 
 def _emit_stop_reason_labels() -> str:
-    """Emit ``STOP_REASON_INFO`` (domain/phases.py) as a TS label const — the
-    single label source, mirrored to the webapp without hand-maintained drift."""
+    """Emit ``STOP_REASON_INFO`` (domain/phases.py) as TS consts — the single label AND next-step
+    source, mirrored to the webapp without hand-maintained drift. Both ride the mirror rather than
+    ``dashboard.json`` because they are properties of the REASON, not of a cycle; serving them per
+    poll would ship the same twenty strings every two seconds. ``""`` next steps are omitted."""
     from promptpotter.domain.phases import STOP_REASON_INFO
 
     rows = "\n".join(
         f"  {reason.value!r}: {info.label!r}," for reason, info in STOP_REASON_INFO.items()
+    )
+    steps = "\n".join(
+        f"  {reason.value!r}: {info.next_step!r},"
+        for reason, info in STOP_REASON_INFO.items()
+        if info.next_step
     )
     return (
         "// Operator-facing label per terminal reason (StopReason). Mirror of\n"
         "// domain/phases.py::STOP_REASON_INFO — the single label source.\n"
         "export const STOP_REASON_LABELS: Record<string, string> = {\n"
         f"{rows}\n"
+        "};\n\n"
+        "// What the operator does now, per terminal reason — the same table's `next_step`, so the\n"
+        "// browser advises exactly what the terminal, log.md and review.md advise. A reason absent\n"
+        "// here states that nothing is owed; it is not a gap.\n"
+        "export const STOP_REASON_NEXT_STEPS: Record<string, string> = {\n"
+        f"{steps}\n"
         "};"
     )
 

@@ -7,7 +7,7 @@ import html
 import json
 from typing import TYPE_CHECKING, cast
 
-from promptpotter.domain.phases import StopReason
+from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 from promptpotter.presentation.views.display import (
     BOLD,
@@ -48,8 +48,11 @@ def render_completion(
     if best is not None and best.accuracy is not None:
         headline += f"Best         {best.accuracy:.1%} (round {best.round})"
     fields: list[str] = [headline, f"Stop reason  {result.stop_reason}"]
-    if paused:
-        fields.append("Resume: python -m promptpotter resume")
+    # The reason's OWN next step, off the one table, so the terminal advises what `log.md`,
+    # `review.md` and the browser advise. It replaces a hard-coded PAUSED line that was the only
+    # advice any ending carried; `""` is a stated answer and prints nothing.
+    if (info := STOP_REASON_INFO.get(StopReason(result.stop_reason))) and info.next_step:
+        fields.append(f"Next         {info.next_step}")
     if dataset_name:
         fields.append(f"Dataset      {dataset_name}")
     if campaign_id:

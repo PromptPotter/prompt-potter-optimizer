@@ -673,3 +673,6 @@
 .run-summary-title{font-size:var(--text-sm);font-weight:600;color:var(--color-text-primary)}
 .run-summary-line{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary)}
 .run-summary-changes{margin:0;font-size:var(--text-sm);line-height:1.5;color:var(--color-text-secondary)}
+/* What the ending says to do next — served, never composed here (`run-phase.ts`). Quieter than
+   the title and above the changes prose, because it is the one line a reader acts on. */
+.run-summary-next{margin:0;font-size:var(--text-sm);line-height:1.5;color:var(--color-text-secondary)}

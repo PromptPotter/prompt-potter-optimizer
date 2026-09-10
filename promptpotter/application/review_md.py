@@ -20,7 +20,7 @@ from promptpotter.application.optimization.validators.l1_behavior import (
 )
 from promptpotter.application.optimization.validators.l2_behavior import run_all_l2_checks
 from promptpotter.domain.escalation_signals import exploration_budget
-from promptpotter.domain.phases import StopReason
+from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
 from promptpotter.domain.rendering import fmt_pct, format_l1_critique_for_prompt
 from promptpotter.domain.results import (
     DegradationHealth,
@@ -186,6 +186,15 @@ def _halt_info(index: dict[str, Any], rounds: list[RoundResult]) -> dict[str, st
     return {"tag": "terminate_proposal", "node": "", "action": "", "terminated": terminated}
 
 
+def _stop_next_step(index: dict[str, Any]) -> str:
+    """What the cycle's own stop reason says to do now, off the one table. ``""`` where the cycle
+    is still running, the reason is unknown, or the reason states that nothing is owed."""
+    try:
+        return STOP_REASON_INFO[StopReason((index.get("stop_reason") or "").strip())].next_step
+    except ValueError:
+        return ""
+
+
 def _render_header(
     index: dict[str, Any], final: dict[str, Any], stats: L1Stats, halt: dict[str, str] | None
 ) -> list[str]:
@@ -203,6 +212,11 @@ def _render_header(
         if halt["action"]:
             parts.append(">")
             parts.append(f"> {halt['action']}")
+        parts.append("")
+    # Beside the halt block, not inside it: `_halt_info` answers only for a cycle that ended BADLY,
+    # and the endings that most need a next step are the ones it calls clean.
+    if next_step := _stop_next_step(index):
+        parts.append(f"> **NEXT** — {next_step}")
         parts.append("")
     hashes = final.get("prompt_hashes") or {}
     if hashes:

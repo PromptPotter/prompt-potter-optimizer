@@ -1,5 +1,5 @@
 import type { DashboardState, RunPhase } from "@/lib/api/types.generated";
-import { STOP_REASON_LABELS } from "@/lib/api/types.generated";
+import { STOP_REASON_LABELS, STOP_REASON_NEXT_STEPS } from "@/lib/api/types.generated";
 
 // One display mapping for the run-state vocabulary (RunPhase), read off the
 // single `run_phase` field the backend computes. Replaces the old
@@ -127,6 +127,13 @@ export function runPhaseLabel(
   }
   if (isRunPhase(runPhase) && runPhase !== "terminal") return RUN_PHASE_LABEL[runPhase];
   return runPhase || "—";
+}
+
+// What the operator does now, for a cycle that ENDED — the generated mirror of the same table's
+// `next_step`, so the browser advises what the terminal, `log.md` and `review.md` advise. `""`
+// where nothing is owed and while running. Never compose a sentence here; it is served, not derived.
+export function stopReasonNextStep(reason: string | null | undefined): string {
+  return (reason && STOP_REASON_NEXT_STEPS[reason]) || "";
 }
 
 // Short, human label for the fine-grained activity phase (`dashboard.json::state`),

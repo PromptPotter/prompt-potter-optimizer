@@ -78,15 +78,12 @@ max — ask before exceeding.
 | `evidence` | Read any set of campaigns together: roster, comparability, replicates, the variance split, resolving power, and (behind `--ranking`) which edits beat their own origin. Zero spend, writes nothing. |
 | `compact-archive <mode>` | Reclaim the measurement archive: `compact` moves the fields nothing reads out of candidate runs into a gzip store beside them, `restore` puts them back, `purge-cold` deletes that store. Dry-run by default; `--dataset` scopes it. `origin` / `round_parent` runs are never touched. **`purge-cold --apply` is the one irreversible verb in this table** — the rows it drops are paid LLM spend. Refuses outright while any cycle can still append. |
 
-**A budget halt is not the end of a run — it is two verbs.** `SPEND_BUDGET` / `TOKEN_BUDGET` mean
-the cycle hit *its own declared ceiling*, not that the work is done. Only `spend_budget_usd` is
-armed by default, so a campaign that declared nothing stops on dollars — `token_budget` is `None`
-until set. Continue with `set-budget --max-usd <higher>` then `resume` — the ceiling is composed
-over the config at the next launch and the wallet still bounds it, so a raise sticks. Two things
-to check before assuming it worked: the ceiling is clamped against the account allowance, so read
-the ARMED value back off `dashboard.json::run_limits` rather than trusting the number you sent;
-and the counter is CUMULATIVE across resume, so the new ceiling must exceed the total already
-spent, not the work remaining.
+**Every ending now states its own next verb** (`STOP_REASON_INFO::next_step`), so read the run's
+readout rather than a ladder here. What it cannot tell you is the two ways a raise silently fails:
+the ceiling is clamped against the account allowance, so read the ARMED value back off
+`dashboard.json::run_limits` rather than trusting the number you sent; and the counter is
+CUMULATIVE across resume, so the new ceiling must exceed the total already spent, not the work
+remaining. Only `spend_budget_usd` is armed by default — `token_budget` is `None` until set.
 
 Flags come from `datasets/{name}/dataset.md § Init Flags`, verbatim — never guessed. `new`
 overwrites the tenant pointer; `resume` is the happy path and needs no flags. Stop with Ctrl+C:
@@ -151,8 +148,9 @@ Where a loader assigns `sample_id` each display line carries `#NNN` right after 
 
 Finished cycle: `campaigns/<id>/log.md` (campaign digest, heatmap, final winner) and
 `cycles/<id>/index.json` (`best_accuracy`, `best_round`, `origin_accuracy`, `final.winner_*`,
-`final.stop_reason` — its display label and outcome class come from the one
-`STOP_REASON_INFO` table, `promptpotter/domain/phases.py`).
+`final.stop_reason` — its label, outcome class and the operator's NEXT STEP all come from the one
+`STOP_REASON_INFO` table, `promptpotter/domain/phases.py`, so the terminal, `log.md`, `review.md`
+and the browser all say the same thing; don't compose a different one here).
 
 ### A held round is not proof the candidate failed — check the other estimator
 

@@ -25,6 +25,7 @@ import {
 } from "@/lib/derivations";
 import type { RoundResult } from "@/lib/types";
 import { PROMPT_STRING_FIELDS } from "@/lib/prompt-fields";
+import { runPhaseLabel, stopReasonNextStep } from "@/lib/run-phase";
 import { fmtPct0, fmtUsd } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { CopyButton, HoverCard, SegmentedControl } from "@/components/ui";
@@ -508,8 +509,13 @@ export function RunSummaryItem({ summary }: { summary: RunSummary }) {
   return (
     <div className="chat-msg ai run-summary-item" role="note">
       <span className="run-summary-title">
-        Run finished{summary.stopReason ? ` · ${summary.stopReason}` : ""}
+        Run finished
+        {summary.stopReason ? ` · ${runPhaseLabel("terminal", summary.stopReason)}` : ""}
       </span>
+      {/* What to do about it, off the served table. A reason owing nothing renders no line. */}
+      {stopReasonNextStep(summary.stopReason) ? (
+        <p className="run-summary-next">{stopReasonNextStep(summary.stopReason)}</p>
+      ) : null}
       {/* Same vocabulary as the live card it replaces: the percent pair leads and θ
           does not appear. A log line has no hover to hide jargon behind, so the one
           number a reader can act on is the only one it prints. `abilityDelta` stays
