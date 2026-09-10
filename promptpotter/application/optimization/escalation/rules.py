@@ -18,11 +18,14 @@ class EscalationInputs:
     when the corresponding derived state exists (e.g. AxisIndex initialised); rules must handle None.
     """
 
-    # ``None`` = the round measured nothing readable. A rule comparing it must say so: an
-    # absent rate satisfies no threshold, least of all the perfect-accuracy stop below.
-    current_accuracy: float | None
+    # The number the round was WON on — ``composite_fitness``, the same float the high-water
+    # ratchet and the stall ladder read. ``None`` satisfies no threshold.
+    current_objective: float | None
     l1_stall_count: int
     l1_patience: int
+    # Could this round's arms be told apart? ``None`` is "unreadable either way", which is not
+    # "read and told nothing apart".
+    separable: bool | None = None
     # None until AxisIndex is initialised; runner populates from `cycle.axes.with_positive_yield()`.
     axes_with_positive_yield: int | None = None
     # A candidate this round dropped a mandatory backend placeholder (e.g. {{combined_text}}).
@@ -55,7 +58,11 @@ class EscalationRule:
     priority: int = 0
 
 
-# perfect_accuracy preempts so a perfect-fit round terminates instead of firing L2;
+# objective_exhausted preempts so a round with nothing left to win terminates instead of firing L2.
+#   It reads the OBJECTIVE because that is what elects a round: where the objective prices tokens,
+#   100% correct at 3x the tokens is no ceiling and the search still has somewhere to go. And a
+#   ceiling only counts if the round RESOLVED — unresolved falls through to the patience rules,
+#   which is what an unresolved round is;
 # l1_generate_unusable preempts patience — l1_generate's output is structurally unusable this
 #   round (a dropped mandatory placeholder OR zero parseable candidates), a fault no amount of
 #   patience fixes because the identical optimizer prompt reproduces it; heal L2 now;
@@ -65,8 +72,10 @@ class EscalationRule:
 # l1_patience=0 collapses "fire L2 every round" via the l1_to_l2 fall-through.
 DEFAULT_ESCALATION_RULES: list[EscalationRule] = [
     EscalationRule(
-        name="perfect_accuracy",
-        when=lambda s: s.current_accuracy is not None and s.current_accuracy >= 1.0,
+        name="objective_exhausted",
+        when=lambda s: (
+            s.current_objective is not None and s.current_objective >= 1.0 and s.separable is True
+        ),
         fire=NextAction.STOP_PERFECT,
         priority=100,
     ),

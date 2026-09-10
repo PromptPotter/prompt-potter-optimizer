@@ -46,10 +46,12 @@ def measurement(
 ) -> dict[str, Any]:
     """One measured cell, stamped the way ``rescore_results`` leaves one.
 
-    ``objective`` defaults to ``fitness`` — that IS the identity wherever a campaign declares no
-    ``per_cell`` formula — and stamping both is what keeps these rows readable by
-    ``graded_response``, which RAISES on a row carrying neither rather than reading the absence
-    as a 0.0. Pass it separately only to make the two differ.
+    ``objective`` defaults to a value that DIVERGES from ``fitness``. The identity is real — a
+    campaign declaring no ``per_cell`` formula gets ``objective == fitness`` — but a fixture built
+    on it makes every confusion between correctness and the composite green, because a site reading
+    the wrong float is then indistinguishable from one reading the right float. Pass
+    ``objective=fitness`` where a test MEANS them equal. Stamping both also keeps rows readable by
+    ``graded_response``, which RAISES on a row carrying neither rather than reading 0.0.
 
     ``fitness=None`` builds the other row shape: a real error row (``_error_result``) carries no
     grade at all, and the coverage floor and the θ fit are both about that ABSENCE rather than
@@ -62,7 +64,7 @@ def measurement(
         "sample_id": sample_id,
         "hit": fitness > 0.5,
         "fitness": fitness,
-        "objective": fitness if objective is None else objective,
+        "objective": round(fitness * 0.6, 6) if objective is None else objective,
         **extra,
     }
 
