@@ -14,8 +14,17 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
+from promptpotter.application.jobs.reaper import sweep_dead_cycles
+from promptpotter.config.first_run import ensure_api_key
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.config.settings import settings
 from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
+from promptpotter.infrastructure.store.layout import tenant_workspace
+from promptpotter.infrastructure.store.session_pointer import active_pointer_exists
+from promptpotter.presentation.api.middleware.command_dispatcher import RunLimitsPayload
+from promptpotter.presentation.cli.commands._shared import identity_from_args, set_verbose
 from promptpotter.presentation.cli.parsers import build_parser, parser_verbs
+from promptpotter.shared.errors import PotterError, RequestTooLargeError
 
 __all__ = ["main"]
 
@@ -83,6 +92,7 @@ CLI_VERB_FOR_KIND: dict[str, str | None] = {
     "cleanup-empty-cycles": "cleanup-empty-cycles",
     "skip-searchpoint": "skip-searchpoint",
     "step-cycle": "step-cycle",
+    "verify-candidate": "verify",
     "pause-cycle": "pause",
     "change-spend-budget": "set-budget",
     "set-campaign-label": "rename",
@@ -122,8 +132,6 @@ def _validate_run_limits(args: argparse.Namespace) -> None:
     """Refuse a launch ceiling the wire would refuse, before anything is minted."""
     from pydantic import ValidationError
 
-    from promptpotter.presentation.api.middleware.command_dispatcher import RunLimitsPayload
-
     try:
         RunLimitsPayload(
             halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
@@ -136,8 +144,6 @@ def _validate_run_limits(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    from promptpotter.presentation.cli.commands._shared import set_verbose
-    from promptpotter.shared.errors import PotterError, RequestTooLargeError
 
     parser = _PARSER
     args = parser.parse_args()
@@ -149,12 +155,6 @@ def main() -> None:
     # First-run guard: if no active session exists, print a friendly landing
     # instead of letting resume fail with a confusing error.
     if args.command is None:
-        from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
-        from promptpotter.config.settings import settings
-        from promptpotter.infrastructure.store.layout import tenant_workspace
-        from promptpotter.infrastructure.store.session_pointer import active_pointer_exists
-        from promptpotter.presentation.cli.commands._shared import identity_from_args
-
         identity = identity_from_args(args)
         if not active_pointer_exists(tenant_workspace(DEFAULT_PROJECTS_ROOT, identity.tenant_id)):
             print(
@@ -181,14 +181,10 @@ def main() -> None:
     # can stamp a cycle its own SIGKILL just ended, and a second mechanism that only covers
     # the graceful case would answer the same question twice. Ctrl+C already saves through
     # the loop's own checkpoint.
-    from promptpotter.application.jobs.reaper import sweep_dead_cycles
-    from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 
     sweep_dead_cycles(DEFAULT_PROJECTS_ROOT)
 
     if args.command in ("new", "resume"):
-        from promptpotter.config.first_run import ensure_api_key
-
         # The launch ceilings through the SAME bounds the wire enforces. argparse types them and
         # bounds neither, so `--halt-at 1.5` was accepted and then never fired.
         _validate_run_limits(args)

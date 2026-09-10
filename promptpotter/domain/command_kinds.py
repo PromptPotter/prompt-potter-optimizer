@@ -31,6 +31,7 @@ CycleScopedKind = Literal[
     "change-spend-budget",
     "start-run",
     "step-cycle",
+    "verify-candidate",
 ]
 WorkspaceScopedKind = Literal[
     "register-backend",

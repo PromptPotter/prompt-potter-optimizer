@@ -383,6 +383,49 @@ paths:
         '409': { $ref: '#/components/responses/VersionConflict' }
         '422': { $ref: '#/components/responses/PayloadInvalid' }
 
+  /commands/verify-candidate:
+    post:
+      operationId: verifyCandidate
+      summary: Re-score one candidate on additional, never-measured cells.
+      description: |
+        The question a round's own panel cannot answer: a rate is read on the cells the
+        acquisition bought that round, so a headline — 100% most of all — is a claim about a
+        panel, not about the dataset. This re-scores one candidate on cells it has never seen
+        and writes the verdict to `diagnostics/runs/`. Not a cycle, fork or sweep: no ledger
+        event on the cycle's own round series, no round id.
+
+        **`samples` omitted is the answer, not an absence.** The count derives from the
+        per-candidate round budget lifted by the rounds run since this cycle's last
+        verification, capped by what is still unmeasured — so the bill stays on the scale the
+        campaign already set, and a million-row dataset does not make one click a million cells.
+        A larger explicit count is refused (422) naming the budget.
+
+        Spends, so it sits at `campaign.run` rather than with the step verbs. The loop fires the
+        same application function by itself when a round reads 100%
+        (`application/verify.py::verify_on_saturation`), bounded in cadence as well as cells.
+      tags: [cycle-control]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ExpectedVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: verify-candidate }
+                    payload: { $ref: '#/components/schemas/VerifyCandidatePayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '409': { $ref: '#/components/responses/VersionConflict' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
   /commands/rewind-to-round:
     post:
       operationId: rewindToRound
@@ -3026,6 +3069,30 @@ components:
               maximum: 100
               default: 1
               description: Rounds to advance before auto-pausing.
+
+    VerifyCandidatePayload:
+      allOf:
+        - $ref: '#/components/schemas/CycleRef'
+        - type: object
+          additionalProperties: false
+          required: [label]
+          properties:
+            label:
+              type: string
+              pattern: '^C\d+(\.\d+)?$'
+              minLength: 2
+              maxLength: 32
+              description: >-
+                Candidate label as persisted on the round file — `C0` for the origin,
+                `C{round}.{n}` (1-indexed within the round) otherwise.
+            samples:
+              type: integer
+              minimum: 1
+              maximum: 10000
+              nullable: true
+              description: >-
+                Additional cells to score. OMIT for the derived budget, which is the
+                intended use; an explicit count above it is refused 422.
 
     RewindToRoundPayload:
       allOf:

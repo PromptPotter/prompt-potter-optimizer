@@ -15,6 +15,7 @@ import { useConnector } from "@/lib/hooks/useConnector";
 import { useRoundCandidates } from "@/lib/hooks/useRoundCandidates";
 import { SearchpointDrillIn } from "@/components/shell/searchpoint/SearchpointDrillIn";
 import { SteerForkAction } from "@/components/shell/searchpoint/SteerForkAction";
+import { VerifyAction } from "@/components/shell/searchpoint/VerifyAction";
 
 interface Props {
   selected: SelectedCandidate | null;
@@ -101,16 +102,19 @@ export function ScoringInspector({ selected, onClose }: Props) {
           // The VIEWED address, so an L4 inner searchpoint is refused rather than forked at the
           // outer cycle by a coincidental id — the guard is the action's, and it used to exist
           // only on the Compare side of the same click.
-          <SteerForkAction
-            candidate={selected}
-            path={viewedPath}
-            dash={dash}
-            parentIsLive={cv.isLive}
-            schema={cv.nodeConfigSchema}
-            schemaStatus={cv.pipelineStatus}
-            isSingleNode={cv.isSingleNode}
-            outputSchema={cv.nodeOutputSchema}
-          />
+          <>
+            <VerifyAction candidate={selected} path={viewedPath} />
+            <SteerForkAction
+              candidate={selected}
+              path={viewedPath}
+              dash={dash}
+              parentIsLive={cv.isLive}
+              schema={cv.nodeConfigSchema}
+              schemaStatus={cv.pipelineStatus}
+              isSingleNode={cv.isSingleNode}
+              outputSchema={cv.nodeOutputSchema}
+            />
+          </>
         }
       />
     </section>

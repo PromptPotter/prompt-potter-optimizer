@@ -1,18 +1,37 @@
-"""Re-score one campaign candidate on N ADDITIONAL samples. Not a cycle, fork or sweep: no ledger event, no round id,
-and persistence lands in the workspace ``diagnostics/`` tree only."""
+"""Re-score one campaign candidate on N ADDITIONAL samples. Not a cycle, fork or sweep: no round
+id, and the verdict lands in the workspace ``diagnostics/`` tree. Its SPEND is the exception and
+joins the campaign's ledger in the ``diagnostic`` bucket — inside every ceiling, banked apart."""
 
 from __future__ import annotations
 
 import logging
 import random
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.application.campaign_config import (
+    load_campaign_config as validate_campaign_config,
+)
+from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring
+from promptpotter.application.initialization.wiring import init_services
+from promptpotter.application.optimization.l1.population import merge_pipeline_params
+from promptpotter.application.runner.termination import BudgetGate
+from promptpotter.application.scoring.formula import rescore_results
+from promptpotter.application.scoring.metrics import compute_composite_fitness
+from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.rendering import display_fitness
-from promptpotter.domain.results import DiagnosticRunRecord
+from promptpotter.domain.results import DiagnosticRunRecord, parse_candidate_label
+from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.telemetry import (
+    active_cycle_ledger,
+    diagnostic_spend,
+    reset_cycle_ledger,
+    set_cycle_ledger,
+)
 from promptpotter.infrastructure.store import archive_views
 from promptpotter.shared.clock import utcnow_iso
 
@@ -24,7 +43,66 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["VerifyError", "verify_candidate"]
+__all__ = [
+    "VerifyError",
+    "derive_verify_samples",
+    "rounds_since_verified",
+    "verify_candidate",
+    "verify_on_saturation",
+]
+
+
+# A verify is a TEMPORARY LIFT of the per-candidate round budget, and the lift is how long the
+# cycle has gone unchecked. The base keeps the bill on the scale the operator already set; the cap
+# is what makes firing one automatically safe, so a 200-round campaign asks for five rounds' worth
+# of cells and not 200. Five, because past a handful of rounds' cells the binding constraint stops
+# being the noise and starts being the wallet.
+_VERIFY_LIFT_CAP = 5
+
+
+def derive_verify_samples(
+    *, round_cell_budget: int, rounds_unverified: int, unmeasured: int
+) -> int:
+    """How many NEW cells one verify buys. See ``_VERIFY_LIFT_CAP`` above for the model."""
+    lift = min(max(rounds_unverified, 1), _VERIFY_LIFT_CAP)
+    return max(0, min(round_cell_budget * lift, unmeasured))
+
+
+def rounds_since_verified(
+    records: Sequence[DiagnosticRunRecord], *, cycle_id: str, round_num: int
+) -> int:
+    """Rounds this CYCLE has run since any of its candidates was last verified; never verified
+    reads as ``round_num``. Scoped to the cycle because a fork inherits its parent's measurements
+    but not its assurance — the branch is a different search from the point it left."""
+    verified_at = [
+        parse_candidate_label(r.source_label)[0]
+        for r in records
+        if r.source_cycle == cycle_id and r.source_label
+    ]
+    return round_num - max(verified_at) if verified_at else round_num
+
+
+@contextmanager
+def _diagnostic_trace(stores: Stores, hop: CycleHop) -> Iterator[None]:
+    """A verify's spend joins the campaign's OWN trace, in the ``diagnostic`` bucket.
+
+    Inside every ceiling, always: the bucket is folded into ``SpendRollup``'s totals like any other
+    (``TOKEN_KIND_BUCKET``), so the budget gate sees this money. It is banked APART because it
+    answers a question about the search rather than advancing it — folded into ``backend``, an
+    operator reads re-measuring a candidate as the cost of finding one.
+
+    The ledger is opened only when none is bound. In the loop and behind the API one already is
+    (the round's, and the dispatcher's), and a second handle on one file is a second appender."""
+    if active_cycle_ledger() is not None:
+        with diagnostic_spend():
+            yield
+        return
+    token = set_cycle_ledger(CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop))))
+    try:
+        with diagnostic_spend():
+            yield
+    finally:
+        reset_cycle_ledger(token)
 
 
 class VerifyError(Exception):
@@ -66,21 +144,12 @@ async def verify_candidate(
     round_num: int,
     cand_idx: int,
     label: str,
-    samples: int,
+    samples: int | None,
     seed: int | None,
     log: Callable[[str], None] | None = None,
 ) -> VerifyOutcome:
     """Re-score one candidate on *samples* UNMEASURED samples. Raises :class:`VerifyError` when it cannot be resolved off
     disk."""
-    from promptpotter.application.campaign_config import (
-        load_campaign_config as validate_campaign_config,
-    )
-    from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring
-    from promptpotter.application.initialization.wiring import init_services
-    from promptpotter.application.optimization.l1.population import merge_pipeline_params
-    from promptpotter.application.scoring.formula import rescore_results
-    from promptpotter.application.scoring.metrics import compute_composite_fitness
-    from promptpotter.application.scoring.search_point_scorer import score_search_point
 
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None:
@@ -160,8 +229,24 @@ async def verify_candidate(
     if not unmeasured:
         return VerifyOutcome(dataset_name=campaign.dataset_name, already_measured=len(measured_ids))
 
+    budget = derive_verify_samples(
+        round_cell_budget=campaign_config.sp_budget_round,
+        rounds_unverified=rounds_since_verified(
+            stores.diagnostic_runs.list(campaign.dataset_name),
+            cycle_id=hop.cycle_id,
+            round_num=round_num,
+        ),
+        unmeasured=len(unmeasured),
+    )
+    if samples is not None and samples > budget:
+        raise VerifyError(
+            f"--samples {samples} is above this candidate's verify budget of {budget} "
+            f"({campaign_config.sp_budget_round} cells per candidate per round, lifted by the "
+            f"rounds run since the last verification, capped at {len(unmeasured)} unmeasured). "
+            f"Pass {budget} or fewer, or verify again after more rounds."
+        )
     rng = random.Random(seed)
-    n_to_pick = min(int(samples), len(unmeasured))
+    n_to_pick = budget if samples is None else min(samples, len(unmeasured))
     picked = rng.sample(unmeasured, n_to_pick)
 
     logger.info(
@@ -172,20 +257,21 @@ async def verify_candidate(
         n_to_pick,
         len(measured_ids),
     )
-    await score_search_point(
-        jsp,
-        picked,
-        session,
-        label="verify",
-        # `verify` replays a RECORDED config against fresh samples; the optimizer state that
-        # produced it is not in scope here, and the workspace side it is compared against
-        # (`compute_composite_fitness` below) has none either.
-        opt_sp=None,
-        measured=None,
-        on_sample_scored=lambda *_a, **_k: None,
-        on_sample_starting=lambda *_a, **_k: None,
-        source=f"verify:{hop.campaign_id}:{label}",
-    )
+    with _diagnostic_trace(stores, hop):
+        await score_search_point(
+            jsp,
+            picked,
+            session,
+            label="verify",
+            # `verify` replays a RECORDED config against fresh samples; the optimizer state that
+            # produced it is not in scope here, and the workspace side it is compared against
+            # (`compute_composite_fitness` below) has none either.
+            opt_sp=None,
+            measured=None,
+            on_sample_scored=lambda *_a, **_k: None,
+            on_sample_starting=lambda *_a, **_k: None,
+            source=f"verify:{hop.campaign_id}:{label}",
+        )
 
     # Workspace aggregate: archive rows matching this candidate's node-configs, deduped per sample (latest wins).
     workspace_measurements = archive_views.measurements_for_config(
@@ -231,7 +317,7 @@ async def verify_candidate(
         source_label=label,
         source_candidate_id=source_candidate_id,
         config_hash=config_hash[:12],
-        samples_requested=int(samples),
+        samples_requested=budget if samples is None else samples,
         samples_added=samples_added,
         workspace_n=workspace_n,
         workspace_accuracy=workspace_accuracy,
@@ -250,3 +336,56 @@ async def verify_candidate(
         record=record,
         cache_replays=cache_replays,
     )
+
+
+async def verify_on_saturation(
+    *,
+    stores: Stores,
+    identity: IdentityContext,
+    hop: CycleHop,
+    round_num: int,
+    accuracy: float | None,
+    winner_label: str | None,
+    budget: BudgetGate,
+    log: Callable[[str], None] | None = None,
+) -> VerifyOutcome | None:
+    """A round that reads 100% gets checked, automatically, on cells it has never seen — the one
+    question a round's own panel cannot answer, and until now one only an operator at a terminal
+    could ask.
+
+    ``derive_verify_samples`` bounds the cells; the ``_VERIFY_LIFT_CAP`` gate below bounds the
+    CADENCE, so a cycle sitting at 100% for twenty rounds pays for four checks and not twenty. The
+    gate reads records that PERSIST, which is also what makes a resumed round decline to repeat its
+    own earlier check. Never fatal: a ``VerifyError`` means the candidate would not resolve off disk
+    (C0, or a pruned candidate cache), which is a reason to say nothing, not to end a healthy run.
+
+    ``budget`` is the SAME ceiling the round loop halts on, and it is required rather than optional
+    because this is the loop spending, not an operator: a discretionary check that could start on an
+    exhausted budget would make ``max_usd`` mean whatever the checks happened to cost. The loop's own
+    ceiling is consulted at the next round boundary, which is AFTER this runs.
+    """
+    if accuracy is None or accuracy < 1.0 or not winner_label:
+        return None
+    if budget.tripped() is not None:
+        return None
+    mine = [r for r in stores.diagnostic_runs.list() if r.source_cycle == hop.cycle_id]
+    since = rounds_since_verified(mine, cycle_id=hop.cycle_id, round_num=round_num)
+    if mine and since < _VERIFY_LIFT_CAP:
+        return None
+    say = log or (lambda *_a, **_k: None)
+    try:
+        cand_round, cand_idx = parse_candidate_label(winner_label)
+        return await verify_candidate(
+            stores=stores,
+            identity=identity,
+            hop=hop,
+            round_num=cand_round,
+            cand_idx=cand_idx,
+            label=winner_label,
+            samples=None,
+            seed=None,
+            log=log,
+        )
+    except (VerifyError, ValueError) as exc:
+        say(f"verify skipped for {winner_label}: {exc}")
+        return None

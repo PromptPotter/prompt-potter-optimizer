@@ -164,11 +164,14 @@ class TokenAccount(StrictModel):
         return self.cache_read / self.input
 
 
-TokenUsageKind = Literal["optimizer", "backend", "judge"]
+TokenUsageKind = Literal["optimizer", "backend", "judge", "diagnostic"]
 """Who spent it, and therefore which bucket it lands in. ``judge`` is a third arm rather than a
 flavour of either: folded into ``loop`` an operator reads grading cost as optimizer cost, folded
 into ``backend`` as the measured system's (``judges/CLAUDE.md`` § Scoring, never the optimizer
-loop)."""
+loop). ``diagnostic`` is what a `verify` / `ab` / `noise-floor` spends — it answers a question ABOUT
+the search rather than advancing it, so folding it into `backend` would report re-measuring a
+candidate as the cost of finding one. It is a bucket and not an exemption: a diagnostic is inside
+every ceiling, always, because the loop can fire one itself."""
 
 
 class SpendBucket(StrictModel):
@@ -199,13 +202,15 @@ class SpendBucket(StrictModel):
 
 
 class SpendRollup(StrictModel):
-    """A cycle's spend: the three buckets, and the totals every consumer reads off them.
+    """A cycle's spend: the four buckets, and the totals every consumer reads off them.
     ``total_used_usd`` is the BILL a budget caps; ``total_incurred_usd`` prices cache hits too."""
 
     backend: SpendBucket = Field(default_factory=SpendBucket)
     loop: SpendBucket = Field(default_factory=SpendBucket)
     # Scoring's own LLM spend, kept apart from `loop` — see `TokenUsageKind`.
     judge: SpendBucket = Field(default_factory=SpendBucket)
+    # Spend that asked a question ABOUT the search — see `TokenUsageKind`.
+    diagnostic: SpendBucket = Field(default_factory=SpendBucket)
     total_used_usd: float = 0.0
     total_incurred_usd: float = 0.0
     # Cumulative BILLED tokens across every bucket — the token halt probe's source. Cache hits are
@@ -237,6 +242,7 @@ TOKEN_KIND_BUCKET: dict[TokenUsageKind, str] = {
     "optimizer": "loop",
     "backend": "backend",
     "judge": "judge",
+    "diagnostic": "diagnostic",
 }
 """Which :class:`SpendRollup` bucket each :data:`TokenUsageKind` lands in — declared once.
 

@@ -7,6 +7,7 @@ import logging
 
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.initialization.session import Session
+from promptpotter.application.intelligence.indexes.axis import NOISE_THRESHOLD
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.escalation.firing import escalate_l2
 from promptpotter.application.optimization.escalation.state import NextAction
@@ -19,6 +20,9 @@ from promptpotter.application.output import (
     write_review_md,
 )
 from promptpotter.application.run_observers import RunCallbacks
+from promptpotter.application.runner.termination import BudgetGate
+from promptpotter.application.verify import verify_on_saturation
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import (
@@ -164,7 +168,6 @@ def count_positive_yield_axes(cycle: Cycle) -> int | None:
     """Axes with effect_size above the AxisIndex noise floor; ``None`` pre-first-round (no AxisIndex yet)."""
     if cycle.axes is None:
         return None
-    from promptpotter.application.intelligence.indexes.axis import NOISE_THRESHOLD
 
     return sum(1 for r in cycle.axes.axis_rankings() if r.effect_size > NOISE_THRESHOLD)
 
@@ -202,6 +205,7 @@ async def post_round(
     config: CampaignConfig,
     session: Session,
     cb: RunCallbacks,
+    budget_gate: BudgetGate,
     *,
     is_final_round: bool = False,
 ) -> None:
@@ -231,7 +235,8 @@ async def post_round(
         improved=round_result.improved,
         compared=round_result.electable_count > 0,
         separable=round_result.separable,
-        current_accuracy=cycle.tracking.current_accuracy,
+        # The round was elected on the composite, so the stop that ends the campaign asks it too.
+        current_objective=cycle.tracking.current_composite_fitness,
         l1_patience=config.optimization.l1_patience,
         lives=config.optimization.lives,
         axes_with_positive_yield=axes_with_positive_yield,
@@ -241,6 +246,19 @@ async def post_round(
     )
 
     await close_round(cycle, round_result, round_num, session, cb)
+
+    # After close_round and before the stop below, so a perfect round that also ends the campaign
+    # still gets its check. Bounded and never fatal — the model is in ``verify_on_saturation``.
+    await verify_on_saturation(
+        stores=session.store,
+        identity=session.identity,
+        hop=CycleHop(campaign_id=session.campaign_id, cycle_id=session.state.cycle_id),
+        round_num=round_num,
+        accuracy=round_result.accuracy,
+        winner_label=round_result.winner_label,
+        budget=budget_gate,
+        log=logger.info,
+    )
 
     if event.stop_reason is not None:
         raise StopLoop(event.stop_reason)

@@ -4,6 +4,8 @@ ledger, read from a ContextVar. No process global, no wrapper: call site to ledg
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -35,6 +37,28 @@ def set_cycle_ledger(ledger: CycleEventLog | None) -> Token[CycleEventLog | None
 
 def reset_cycle_ledger(token: Token[CycleEventLog | None]) -> None:
     _CYCLE_LEDGER.reset(token)
+
+
+def active_cycle_ledger() -> CycleEventLog | None:
+    """The ledger already bound, if any. Asked by a caller that would otherwise OPEN one — a second
+    handle on the same file is a second appender, and ``append`` is not crash-atomic."""
+    return _CYCLE_LEDGER.get()
+
+
+_DIAGNOSTIC_SPEND: ContextVar[bool] = ContextVar("diagnostic_spend", default=False)
+
+
+@contextmanager
+def diagnostic_spend() -> Iterator[None]:
+    """Every call emitted inside this block banks as ``diagnostic`` whatever it would otherwise
+    have been. Bound around a diagnostic verb rather than passed to each emit site, because the
+    call sites are the ordinary scoring path — a `verify` re-scores through exactly the code a
+    round does, and what makes the spend diagnostic is the QUESTION being asked, not the call."""
+    token = _DIAGNOSTIC_SPEND.set(True)
+    try:
+        yield
+    finally:
+        _DIAGNOSTIC_SPEND.reset(token)
 
 
 def set_current_round(round_num: int | None) -> Token[int | None]:
@@ -78,7 +102,7 @@ def emit_token_usage(
     would zero every account's history. ``cache_read=None`` lands as ``0`` here."""
     _append_record(
         TokenUsageRecord(
-            kind=kind,
+            kind="diagnostic" if _DIAGNOSTIC_SPEND.get() else kind,
             node=node,
             model=model,
             provider=provider,
@@ -169,6 +193,8 @@ def emit_round_warning(
 
 
 __all__ = [
+    "active_cycle_ledger",
+    "diagnostic_spend",
     "emit_command",
     "emit_command_ack",
     "emit_error_record",

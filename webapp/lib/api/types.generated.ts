@@ -503,11 +503,12 @@ export interface SpendBucket {
   incurred_unpriced_tokens: number;
 }
 
-/** A cycle's spend: the three buckets, and the totals every consumer reads off them. */
+/** A cycle's spend: the four buckets, and the totals every consumer reads off them. */
 export interface SpendRollup {
   backend: SpendBucket;
   loop: SpendBucket;
   judge: SpendBucket;
+  diagnostic: SpendBucket;
   total_used_usd: number;
   total_incurred_usd: number;
   total_tokens_used: number;
@@ -1908,7 +1909,7 @@ export type RunPhase = 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 
 export type DashboardState = 'init' | 'origin' | 'scoring' | 'between_samples' | 'between_candidates' | 'l1_generate' | 'l2_refining' | 'l3_replanning' | 'escalation' | 'stopped';
 
 // Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).
-export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-spend-budget' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-campaign-label' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign';
+export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-spend-budget' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-campaign-label' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign' | 'verify-candidate';
 
 // Kinds no activity item is ever made of — the ray drops them and the translator
 // returns null. Complement of domain/projection_envelope.py::RENDERS_AS_ACTIVITY.
@@ -1918,8 +1919,8 @@ export type NonActivityKind = 'decision' | 'election' | 'ruler' | 'spend_tombsto
 // domain/phases.py::STOP_REASON_INFO — the single label source.
 export const STOP_REASON_LABELS: Record<string, string> = {
   'perfect_score': 'Perfect score',
-  'target_hit': 'Target reached',
   'max_rounds': 'Max rounds',
+  'target_hit': 'Target reached',
   'lives_exhausted': 'Out of lives',
   'hard_cap_reached': 'Round cap',
   'sweep_complete': 'Sweep complete',
@@ -1937,6 +1938,18 @@ export const STOP_REASON_LABELS: Record<string, string> = {
   'render_error': 'Render error',
   'diverged': 'Diverged',
   'optimizer_timeout': 'Optimizer timeout',
+};
+
+// What the operator does now, per terminal reason — the same table's `next_step`, so the
+// browser advises exactly what the terminal, log.md and review.md advise. A reason absent
+// here states that nothing is owed; it is not a gap.
+export const STOP_REASON_NEXT_STEPS: Record<string, string> = {
+  'perfect_score': "`verify` the winner on more cells — this is one round's panel, not the dataset.",
+  'max_rounds': 'Raise `max_rounds` and `resume` if the curve was still moving; else read `review.md`.',
+  'paused': '`resume` picks it up at the next checkpoint.',
+  'spend_budget': '`set-budget --max-usd <above what is already spent>` then `resume`.',
+  'token_budget': '`set-budget --max-tokens <above what is already spent>` then `resume`.',
+  'diverged': '`resume --fork-on-divergence` to branch here, or revert the config edit to continue.',
 };
 
 // Abort-lens variant -> operator label, in picklist order. Mirror of

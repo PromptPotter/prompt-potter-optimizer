@@ -180,6 +180,21 @@ export async function postSkipSearchpoint(
 ): Promise<CommandAcceptedBody> {
   return postCommand("skip-searchpoint", { campaign_id: campaignId, cycle_id: cycleId });
 }
+// Re-score one candidate on cells it has never been measured on. No `samples` parameter by
+// design: the count is derived server-side (`verify.py::derive_verify_samples`), so no client can
+// turn one click on a million-row dataset into a million-cell bill. Per
+// `api-openapi.yaml::verifyCandidate`.
+export async function postVerifyCandidate(
+  campaignId: string,
+  cycleId: string,
+  label: string,
+): Promise<CommandAcceptedBody> {
+  return postCommand("verify-candidate", {
+    campaign_id: campaignId,
+    cycle_id: cycleId,
+    label,
+  });
+}
 // Set how many of a candidate's samples the scoring walk holds in flight; `cells: 1` disarms,
 // so it is a cancel rather than a second verb. The request is sent unclamped and the walk
 // clamps it to the backend's ceiling (`dashboard.json::max_cells_in_flight`). It also ends on

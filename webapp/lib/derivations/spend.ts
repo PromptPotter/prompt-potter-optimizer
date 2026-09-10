@@ -19,10 +19,14 @@ import { cacheShare, prefixReading, type PrefixReading } from "./token-account";
 // not trying to be: that one is a mapping walked for TOTALITY (a new bucket cannot be dropped from
 // a fold), this one is a reading order (backend is ~95% of a campaign's spend, so leading with the
 // optimizer's fraction of a cent buries the number). Both must stay total over the same three.
+// Hand-authored, and therefore the one place a new server-side bucket goes MISSING: the total is
+// served and needs no edit here, but this list is what the breakdown walks, so an unlisted bucket
+// renders as a gap between the rows and the total nobody can account for.
 export const SPEND_BUCKETS = [
   { key: "backend", label: "Backend" },
   { key: "loop", label: "Loop" },
   { key: "judge", label: "Judge" },
+  { key: "diagnostic", label: "Diagnostic" },
 ] as const satisfies readonly { key: keyof SpendRollup; label: string }[];
 
 export interface SpendView {

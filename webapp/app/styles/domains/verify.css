@@ -35,3 +35,16 @@
 .verify-bar-workspace{position:absolute;top:0;left:0;bottom:0;background:var(--color-danger);opacity:0.85}
 .verify-bar-workspace.held{background:var(--color-success)}
 
+
+/* The Verify affordance's aftermath, not its button (`shell/searchpoint/VerifyAction.tsx`) —
+   shared by the accepted check and the refused one, sized like the refusal beside it. */
+.verify-action-note {
+  margin: var(--space-8) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  max-width: 78ch;
+}
+.verify-action-note.error {
+  color: var(--color-danger);
+}

@@ -15,6 +15,7 @@ from promptpotter.domain.escalation_signals import (
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import stable_hash
+from promptpotter.domain.rendering import display_rank_key
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.run_records import ErrorRecord
@@ -61,6 +62,7 @@ __all__ = [
     "overlap_series",
     "parent_key",
     "parent_line",
+    "parse_candidate_label",
     "unscoreable_cells",
 ]
 
@@ -134,6 +136,26 @@ def candidate_label(round_num: int, idx: int) -> str:
     if round_num == 0:
         return "C0"
     return f"C{round_num}.{idx + 1}"
+
+
+def parse_candidate_label(label: str) -> tuple[int, int]:
+    """``candidate_label``'s inverse: ``C0`` -> ``(0, 0)``, ``C{round}.{n}`` -> ``(round, n - 1)``
+    (labels are 1-indexed, the on-disk candidate list is 0-indexed). Raises ``ValueError``: the
+    shell with a user in front of it decides what a bad label costs, and this layer has none."""
+    if label == "C0":
+        return 0, 0
+    round_part, _, idx_part = label[1:].partition(".")
+    if not label.startswith("C") or not idx_part:
+        raise ValueError(f"bad candidate label {label!r}; expected C0 or C{{round}}.{{n}}.")
+    try:
+        round_num, idx_one_based = int(round_part), int(idx_part)
+    except ValueError:
+        raise ValueError(
+            f"bad candidate label {label!r}; expected C0 or C{{round}}.{{n}}."
+        ) from None
+    if idx_one_based < 1:
+        raise ValueError(f"candidate index in {label!r} must be >= 1.")
+    return round_num, idx_one_based - 1
 
 
 def overlap_row(overlap: OverlapReading | None) -> dict[str, float | None]:
@@ -827,8 +849,6 @@ class RoundResult(StrictModel):
         hand-built twin could. On a warm round rank 1 IS the winner, by construction; on a cold
         one no row carries a θ and the order falls back to the composite it always had.
         """
-        from promptpotter.domain.rendering import display_rank_key
-
         winner_id = self.winner_id
         ranked = sorted(
             self.candidate_scores,
@@ -856,6 +876,16 @@ class RoundResult(StrictModel):
         ``prompt_fields``. Empty only when no candidate was crowned — then no row is a winner."""
         lineage = self.prompt_fields.get("lineage")
         return str(lineage.get("id", "")) if isinstance(lineage, dict) else ""
+
+    @property
+    def winner_label(self) -> str | None:
+        """The winner's ``C{round}.{n}`` — the address every surface names a candidate by.
+        ``None`` when no candidate was crowned."""
+        winner_id = self.winner_id
+        return next(
+            (c.label for c in self.candidate_scores if is_round_winner(c.candidate_id, winner_id)),
+            None,
+        )
 
 
 class CycleResult(StrictModel):

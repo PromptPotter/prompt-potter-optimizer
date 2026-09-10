@@ -7,8 +7,10 @@ import argparse
 import logging
 
 from promptpotter.application.verify import VerifyError, verify_candidate
+from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.results import parse_candidate_label
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
@@ -21,33 +23,18 @@ from promptpotter.presentation.cli.commands._shared import (
 logger = logging.getLogger("promptpotter.presentation.cli")
 
 
-def _parse_label(label: str) -> tuple[int, int]:
-    """``C0`` ⇒ ``(0, 0)`` (origin); ``C{round}.{n}`` ⇒ ``(round, n-1)`` (labels 1-indexed, on-disk 0-indexed)."""
-    if label == "C0":
-        return 0, 0
-    if not label.startswith("C") or "." not in label:
-        raise SystemExit(f"ERROR: bad candidate label {label!r}; expected C0 or C{{round}}.{{n}}.")
-    round_part, idx_part = label[1:].split(".", 1)
-    try:
-        round_num = int(round_part)
-        idx_one_based = int(idx_part)
-    except ValueError as exc:
-        raise SystemExit(f"ERROR: bad candidate label {label!r}: {exc}") from None
-    if idx_one_based < 1:
-        raise SystemExit(f"ERROR: candidate index in {label!r} must be ≥ 1.")
-    return round_num, idx_one_based - 1
-
-
 async def cmd_verify(args: argparse.Namespace) -> CommandResult:
     """Re-score a campaign candidate on N additional samples; persist the workspace verdict."""
-    from promptpotter.config.logging import setup_logging
 
     setup_logging(style="full" if get_verbose() else "cli")
     identity = identity_from_args(args)
     stores = build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
     campaign_id = resolve_campaign(stores, args.campaign)
     cycle_id = resolve_cycle(stores, campaign_id, args.cycle)
-    round_num, cand_idx = _parse_label(args.label)
+    try:
+        round_num, cand_idx = parse_candidate_label(args.label)
+    except ValueError as exc:
+        raise SystemExit(f"ERROR: {exc}") from None
 
     try:
         outcome = await verify_candidate(

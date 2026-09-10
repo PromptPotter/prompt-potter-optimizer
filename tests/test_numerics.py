@@ -142,8 +142,8 @@ def _eval_result(
         "ground_truth": ground_truth,
         "hit": hit,
         "fitness": score,
-        # Both halves, as ``rescore_results`` stamps them: the composite means ``objective``, and
-        # these fixtures declare no ``per_cell``, where it is the same float as ``fitness``.
+        # Both halves, as ``rescore_results`` stamps them. Equality is PINNED here, not inherited:
+        # `factories.measurement` diverges the two on purpose, and these rows mean them equal.
         "objective": score,
         "error": error,
         "pipeline_data": pd,
@@ -3029,6 +3029,85 @@ def test_a_theta_stall_verdict_must_clear_its_own_error() -> None:
     assert EscalationFSM._improved(0.7, 0.6, None, None, 0.20) == (True, "composite")
 
 
+def test_the_campaign_ends_only_where_the_objective_is_spent_and_the_round_resolved() -> None:
+    """The one stop the loop fires with no human in the way, so what it reads has to be worth
+    ending a campaign on. It read `accuracy >= 1.0` — a bystander field. A round is ELECTED on the
+    composite, and where that composite prices tokens, 100% correct at 3x the tokens is not a
+    ceiling: there is still somewhere to go, and stopping there is the loop refusing the objective
+    it was given. It is also a mean over whatever the acquisition bought, so it can read 1.00 on a
+    round whose own arms cannot be told apart — `swiss-invoices-eval__b1b4f5` round 9, 1.00 over 20
+    cells at p=0.33, `separable: false`, ended at 27% of budget, `index.json` then naming round 8
+    its best. Silent by construction: `perfect_score` is a SUCCESS outcome and every number
+    renders."""
+    from promptpotter.application.optimization.escalation.state import EscalationFSM, NextAction
+
+    def outcome(objective: float, separable: bool | None) -> NextAction:
+        return (
+            EscalationFSM()
+            .observe_round(
+                improved=True,
+                compared=True,
+                separable=separable,
+                current_objective=objective,
+                l1_patience=3,
+            )
+            .next_action
+        )
+
+    # Round 9 as it ran: at the ceiling, and resolved nothing.
+    assert outcome(1.0, False) == NextAction.CONTINUE
+    # Unreadable is not "read and told nothing apart", and neither ends a campaign.
+    assert outcome(1.0, None) == NextAction.CONTINUE
+    # The same round scored under a cost-aware objective (A = its own C0 median tokens): 100%
+    # accuracy, 1,943 tokens, .507. Accuracy has nothing left to win and the objective has plenty.
+    assert outcome(0.507, True) == NextAction.CONTINUE
+    # Spent on every declared term, on a round that resolved — the one shape worth stopping for.
+    assert outcome(1.0, True) == NextAction.STOP_PERFECT
+
+
+def test_a_verify_is_bounded_by_the_budget_the_campaign_already_set() -> None:
+    """The loop fires a verify by itself when a round reads 100%, so its size cannot be a constant
+    somebody picked. It is a temporary LIFT of the cells already attributed to each candidate:
+    commensurate with what the campaign spends per round, larger the longer it has gone unchecked,
+    and capped on both sides — which is the whole reason it is safe to fire without a human.
+
+    The failure this pins is silent and expensive: `--samples` defaulted to 20, so one click bought
+    whatever was typed, and an AUTOMATIC verify with no cap would buy it every perfect round."""
+    from types import SimpleNamespace
+
+    from promptpotter.application.verify import derive_verify_samples, rounds_since_verified
+
+    def n(lift: int, unmeasured: int = 10_000) -> int:
+        return derive_verify_samples(
+            round_cell_budget=20, rounds_unverified=lift, unmeasured=unmeasured
+        )
+
+    # Checked last round earns one round's worth; nine rounds unchecked earns five, not nine —
+    # past a handful of rounds' cells the binding constraint is the wallet, not the noise.
+    assert n(1) == 20
+    assert n(9) == 100
+    # The dataset never sets the size: a million unmeasured rows buy the same lifted budget.
+    assert n(99, unmeasured=1_000_000) == 100
+    # ...but it is a hard ceiling downward — you cannot score cells that do not exist.
+    assert n(9, unmeasured=7) == 7
+    assert n(9, unmeasured=0) == 0
+    # A same-round re-ask still reads one round of lift, never zero: that is what stops a derived
+    # verify of NO cells from being run and reported as a verdict.
+    assert n(0) == 20
+
+    def rec(cycle: str, label: str) -> Any:
+        return SimpleNamespace(source_cycle=cycle, source_label=label)
+
+    # Never verified: the WHOLE campaign has run unchecked, the state that earns the most.
+    assert rounds_since_verified([], cycle_id="c1", round_num=9) == 9
+    assert rounds_since_verified([rec("c1", "C3.2")], cycle_id="c1", round_num=9) == 6
+    # A fork inherits its parent's measurements but not its assurance — the branch is a different
+    # search from the point it left, so a sibling's verification is not this cycle's.
+    assert rounds_since_verified([rec("other", "C8.1")], cycle_id="c1", round_num=9) == 9
+    # The origin is round 0, so a cycle verified only at C0 is unchecked for every round since.
+    assert rounds_since_verified([rec("c1", "C0")], cycle_id="c1", round_num=4) == 4
+
+
 def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
     # The upstream half of the bug above, and it is what actually failed: a cache hit emitted NO
     # token-usage record at all, so a replayed inner cycle reported zero cost and the L4 divisor
@@ -3107,6 +3186,26 @@ def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
     assert by_round["3"].backend.used_usd == pytest.approx(0.01)
     assert by_round["3"].backend.cache_read_tokens == 600
     assert by_round["0"].backend.used_usd == 0.0, "round 3's spend must not leak into round 0"
+    assert sum(r.total_used_usd for r in by_round.values()) == pytest.approx(spend.total_used_usd)
+
+    # A diagnostic (`verify`) banks APART and still inside the bill. Both halves are load-bearing
+    # and fail silently in opposite directions: folded into `backend`, an operator reads
+    # re-measuring a candidate as the cost of finding one; left out of the fold, it is spend no
+    # ceiling can see — and the loop fires one itself, so nobody would be at a terminal to notice.
+    view._handle_token_usage(
+        TokenUsageRecord(
+            kind="diagnostic",
+            node="verify",
+            model="openai/gpt-oss-120b",
+            input_tokens=200,
+            output_tokens=100,
+            cost_usd=0.005,
+            round=3,
+        )
+    )
+    assert by_round["3"].diagnostic.used_usd == pytest.approx(0.005)
+    assert by_round["3"].backend.used_usd == pytest.approx(0.01), "a verify is not backend spend"
+    assert view.spend_total_used_usd == pytest.approx(0.035)
     assert sum(r.total_used_usd for r in by_round.values()) == pytest.approx(spend.total_used_usd)
 
 

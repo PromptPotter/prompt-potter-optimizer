@@ -23,14 +23,29 @@ from promptpotter.application.datasets.dataset_replace import (
     NothingToReplaceError,
     version_and_repoint,
 )
+from promptpotter.application.datasets.draft_campaign import load_checkin_draft
 from promptpotter.application.datasets.draft_patch import (
     EditDraftPatch,
     apply_draft_patch,
     plan_draft_patch,
 )
+from promptpotter.application.datasets.origin_readiness import origin_delta, origin_projection
+from promptpotter.application.datasets.origin_resolve import resolve_origin_turn
+from promptpotter.application.jobs.launcher.admission import launch
+from promptpotter.application.jobs.launcher.checkin import save_checkin_draft
+from promptpotter.application.jobs.launcher.draft_build import draft_wire
+from promptpotter.application.jobs.launcher.mint_and_start import (
+    mint_campaign_command,
+    start_run_command,
+)
 from promptpotter.application.jobs.quota import clamp_budget_change, hold_ceiling
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
+    cleanup_stub_fork_if_empty,
+    mint_operator_fork,
+)
 from promptpotter.application.runner.origin_gate import GateDecision, submit_gate_decision
+from promptpotter.application.verify import verify_candidate
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.command_kinds import (
@@ -46,6 +61,7 @@ from promptpotter.domain.pipeline_overlay import (
     overlay_sets_model_outside_allowed,
     permitted_models_from_narrowing,
 )
+from promptpotter.domain.results import parse_candidate_label
 from promptpotter.domain.run_records import CommandAckRecord, CommandRecord, CycleSeed
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -60,6 +76,7 @@ from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     inner_sandboxes_dir,
     root_cycle_id,
+    validate_dataset_name,
 )
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import Stores
@@ -164,6 +181,9 @@ CAP_FOR_KIND: dict[str, str] = {
     "pause-cycle": CAMPAIGN_STEP_CAP,
     "origin-gate-decision": CAMPAIGN_STEP_CAP,
     "step-cycle": CAMPAIGN_STEP_CAP,
+    # A verify SPENDS — it scores real cells against the backend — so it sits with the verbs that
+    # buy measurement, not with the step verbs that only move a cycle already paid for.
+    "verify-candidate": CAMPAIGN_RUN_CAP,
     "start-run": CAMPAIGN_RUN_CAP,
     "fork-cycle": CAMPAIGN_RUN_CAP,
     "start-checkin": CAMPAIGN_RUN_CAP,
@@ -322,6 +342,17 @@ class StepCyclePayload(CyclePayload):
     rounds: WireInt = Field(default=1, ge=1, le=100)
 
 
+class VerifyCandidatePayload(CyclePayload):
+    """``samples`` omitted is the ANSWER, not an absence: the count is derived from the
+    per-candidate round budget and the rounds run since this cycle's last verification
+    (``application/verify.py::derive_verify_samples``). A larger explicit count is refused,
+    naming the budget — which is what keeps one click on a million-row dataset from being a
+    million-cell bill."""
+
+    label: str = Field(min_length=2, max_length=32, pattern=r"^C\d+(\.\d+)?$")
+    samples: WireInt | None = Field(default=None, ge=1, le=10_000)
+
+
 class LifecyclePayload(CampaignPayload):
     reason: str = Field(default="", max_length=512)
     # Only meaningful for `delete-campaign`; harmless on the other two.
@@ -348,7 +379,6 @@ class ReplaceDatasetPayload(CommandPayload):
 
     @model_validator(mode="after")
     def _slug_is_a_dataset_name(self) -> ReplaceDatasetPayload:
-        from promptpotter.infrastructure.store.layout import validate_dataset_name
 
         validate_dataset_name(self.slug)
         return self
@@ -364,7 +394,6 @@ class CompactArchivePayload(CommandPayload):
 
     @model_validator(mode="after")
     def _dataset_is_a_dataset_name(self) -> CompactArchivePayload:
-        from promptpotter.infrastructure.store.layout import validate_dataset_name
 
         if self.dataset is not None:
             validate_dataset_name(self.dataset)
@@ -407,7 +436,6 @@ class MintCampaignPayload(CommandPayload):
     def _name_is_a_dataset_name(self) -> MintCampaignPayload:
         """Deciding what a name IS belongs to ``validate_dataset_name`` — a pattern of its own here
         is a second rule that can disagree with the slug ingest mints off a filename."""
-        from promptpotter.infrastructure.store.layout import validate_dataset_name
 
         validate_dataset_name(self.dataset_name)
         return self
@@ -427,6 +455,7 @@ PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {
     "change-spend-budget": ChangeSpendBudgetPayload,
     "start-run": StartRunPayload,
     "step-cycle": StepCyclePayload,
+    "verify-candidate": VerifyCandidatePayload,
     "archive-campaign": LifecyclePayload,
     "delete-campaign": LifecyclePayload,
     "unarchive-campaign": LifecyclePayload,
@@ -601,10 +630,6 @@ class CommandDispatcher:
 
         root_dir = self._stores.campaigns.cycle_dir(campaign.root_hop)
         root_ledger = CycleEventLog.open(CycleDir(root_dir))
-
-        from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
-            cleanup_stub_fork_if_empty,
-        )
 
         def _apply() -> None:
             deleted, reason = cleanup_stub_fork_if_empty(
@@ -816,11 +841,24 @@ class CommandDispatcher:
         # Every launch this dispatcher starts runs the campaign's own dataset; the queue entry has
         # to name it, and this is the one place the manifest is already open.
         dataset_name = campaign.dataset_name if campaign else ""
-        if isinstance(payload, ForkCyclePayload):
-            from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
-                mint_operator_fork,
-            )
+        if isinstance(payload, VerifyCandidatePayload):
 
+            async def _apply_verify() -> None:
+                # The one application function the CLI also calls, so both raise the same record.
+                cand_round, cand_idx = parse_candidate_label(payload.label)
+                await verify_candidate(
+                    stores=self._stores,
+                    identity=self._stores.identity,
+                    hop=hop,
+                    round_num=cand_round,
+                    cand_idx=cand_idx,
+                    label=payload.label,
+                    samples=payload.samples,
+                    seed=None,
+                )
+
+            return _apply_verify
+        if isinstance(payload, ForkCyclePayload):
             seed = _parse_cycle_seed(payload.seed)
             # Steering the model OUTSIDE what the node permits (nothing declared = nothing
             # sanctioned) is the ADR-0005 §4 babysit action, a distinct cap above the
@@ -1060,8 +1098,6 @@ class CommandDispatcher:
         """The 202 returns once the manifest + root cycle index are written — or, when the box is
         full, the moment the launch takes its place in line and the mint moves behind the wait. The
         webapp discovers the new ids by polling ``/api/v1/active`` either way."""
-        from promptpotter.application.jobs.launcher.admission import launch
-        from promptpotter.application.jobs.launcher.mint_and_start import mint_campaign_command
 
         registry = self._require_job_registry()
         # Campaign-from-origin rides the check-in path, not this workspace verb, so there is no
@@ -1097,8 +1133,6 @@ class CommandDispatcher:
         ``dataset_name`` comes from the campaign the dispatcher already loaded: the queue entry has
         to name what it will run from the moment it joins, and re-reading the manifest here would
         be a second answer to a question one caller up already has."""
-        from promptpotter.application.jobs.launcher.admission import launch
-        from promptpotter.application.jobs.launcher.mint_and_start import start_run_command
 
         registry = self._require_job_registry()
         # Quota / Launch / BackendUnreachable are PotterErrors mapped centrally
@@ -1148,9 +1182,6 @@ class CommandDispatcher:
     def _cleanup_failed_fork(self, parent_hop: CycleHop, new_cycle_id: str) -> None:
         """Undo a fork whose launch never started. Best-effort and never masks the launch failure —
         the operator has to be told why the fork was refused, not why the tidy-up went wrong."""
-        from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
-            cleanup_stub_fork_if_empty,
-        )
 
         try:
             deleted, reason = cleanup_stub_fork_if_empty(
@@ -1169,9 +1200,6 @@ class CommandDispatcher:
             )
 
     def _apply_cleanup_empty(self, hop: CycleHop) -> None:
-        from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
-            cleanup_stub_fork_if_empty,
-        )
 
         root_id = root_cycle_id(hop.cycle_id)
         _, active_cmp, active_cid = read_active_pointer(self._stores.base_dir)
@@ -1237,7 +1265,6 @@ class CommandDispatcher:
 
 
 def _reread_draft(stores: Stores, draft_id: str) -> Any:
-    from promptpotter.application.datasets.draft_campaign import load_checkin_draft
 
     draft = load_checkin_draft(stores, draft_id)
     if draft is None:
@@ -1248,7 +1275,6 @@ def _reread_draft(stores: Stores, draft_id: str) -> Any:
 def reread_draft_wire(stores: Stores, draft_id: str) -> dict[str, Any]:
     """The post-mutation draft, re-read from ``draft.json`` — the response body for a deduped
     ``Idempotency-Key`` retry, whose first attempt already persisted it."""
-    from promptpotter.application.jobs.launcher.draft_build import draft_wire
 
     return draft_wire(_reread_draft(stores, draft_id), stores.base_dir)
 
@@ -1256,7 +1282,6 @@ def reread_draft_wire(stores: Stores, draft_id: str) -> dict[str, Any]:
 def origin_effect(stores: Stores, draft_id: str, before: dict[str, Any]) -> dict[str, Any]:
     """What the applier MOVED in the origin, diffed against its pre-apply projection. Recorded on
     the ack because the command payload states only what was ASKED for."""
-    from promptpotter.application.datasets.origin_readiness import origin_delta, origin_projection
 
     return origin_delta(before, origin_projection(_reread_draft(stores, draft_id)))
 
@@ -1271,9 +1296,6 @@ async def dispatch_draft_patch(
     """The single write path behind ``edit-draft-campaign``. The candidate-library ingresses and
     the CLI's ``--set`` derive their patch and then ride this, so an origin edit is a
     ``CommandRecord`` whatever the ingress looked like."""
-    from promptpotter.application.datasets.origin_readiness import origin_projection
-    from promptpotter.application.jobs.launcher.checkin import save_checkin_draft
-    from promptpotter.application.jobs.launcher.draft_build import draft_wire
 
     draft = _reread_draft(stores, draft_id)
     plan = plan_draft_patch(stores, draft, patch)
@@ -1305,9 +1327,6 @@ async def dispatch_origin_resolution(
 ) -> dict[str, Any]:
     """One origin-resolver turn, recorded. Calling ``resolve_origin_turn`` bare puts the turn on no
     ledger AND re-spends the LLM call that ``on_replay`` serves from ``cache.json``."""
-    from promptpotter.application.datasets.origin_readiness import origin_projection
-    from promptpotter.application.datasets.origin_resolve import resolve_origin_turn
-    from promptpotter.application.jobs.launcher.draft_build import draft_wire
 
     draft = _reread_draft(stores, draft_id)
 

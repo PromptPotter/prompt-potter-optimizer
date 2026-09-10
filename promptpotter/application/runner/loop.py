@@ -205,6 +205,7 @@ async def run_round_loop(
                 config,
                 session,
                 cb,
+                budget_gate,
                 is_final_round=is_final_round,
             )
             # A round that was mostly backend-down isn't a measurement — halt instead

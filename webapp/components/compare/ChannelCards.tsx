@@ -36,6 +36,7 @@ import type {
 import { fetchCampaignPipeline } from "@/lib/api";
 import { candidateSubject, readingPath } from "@/lib/api/reads";
 import { SteerForkAction } from "@/components/shell/searchpoint/SteerForkAction";
+import { VerifyAction } from "@/components/shell/searchpoint/VerifyAction";
 import {
   Forest,
   type CladogramChannel,
@@ -573,6 +574,11 @@ function ChannelCard({
                 actions={
                   selected &&
                   pickedPath && (
+                    <>
+                    <VerifyAction
+                      candidate={selectedCandidateOf(selected, pickedPath.at(-1)?.cycleId ?? "")}
+                      path={pickedPath}
+                    />
                     <SteerForkAction
                       candidate={selectedCandidateOf(selected, pickedPath.at(-1)?.cycleId ?? "")}
                       path={pickedPath}
@@ -588,6 +594,7 @@ function ChannelCard({
                         index.get(encodeCyclePath(pickedPath))?.course?.run_phase === "running"
                       }
                     />
+                    </>
                   )
                 }
               />

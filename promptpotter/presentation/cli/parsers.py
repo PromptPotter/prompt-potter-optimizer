@@ -247,10 +247,11 @@ def _add_verify_args(p_verify: argparse.ArgumentParser) -> None:
         "--samples",
         dest="samples",
         type=int,
-        default=20,
-        help="Number of additional samples to score (default 20). The adaptive "
-        "queue mechanism skips samples this candidate has already been measured "
-        "on across the cross-cycle archive.",
+        default=None,
+        help="Number of additional samples to score. Default: DERIVED — the per-candidate "
+        "round budget, lifted by the rounds run since this cycle's last verification and "
+        "capped by what is still unmeasured. A larger explicit count is REFUSED, naming the "
+        "budget. Samples this candidate already has in the cross-cycle archive are skipped.",
     )
     p_verify.add_argument(
         "--seed",
