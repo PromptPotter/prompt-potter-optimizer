@@ -4,6 +4,46 @@ All notable changes to this project will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.14] — 2026-09-10
+
+> Until now PromptPotter tuned one prompt and read one answer. It can now optimize a **multi-turn conversation** and a **tool-calling agent**: the prompt goes into a container, the agent works the task, and the task's own checker scores it — with each step scored separately instead of one number for the whole run. The rest matters mostly when you are choosing *between* setups: `evidence` reads any two variables as a grid, so "which model is actually faster here" is one question instead of launching each point by hand, and the optimizer now only tries settings the model in that slot will accept. 82 commits since `v0.8.13`.
+
+### Added
+
+- **Optimize an agent, not just a prompt.** One trial is one measured cell: the candidate's prompt is written into the container as `SKILL.md`, the agent runs, and the task's own verifier writes the score. A cell can equally be a multi-turn conversation, with the connector declaring where the answer lives rather than core guessing it from a sentinel. Three benchmarks ship to run on — spreadsheets, terminal work, and long-document Q&A.
+- **A conversation is graded step by step, and grading is bought once.** An LLM judge is a measurement banked beside the answer, not a term inside the scoring formula that every re-score pays for again. Each step banks its own number, so *did it find the evidence* and *did it answer* stop being one figure, and a step that crashed no longer scores better than an honest wrong answer.
+- **A screening panel is an ordinary campaign.** `axes:` generates the full product as normal campaign cells, so every method that reads a campaign reads a screen too; `sweep_batch` is deprecated — it could not vary dataset and did not balance. `evidence --grid row,col` serves any two of those variables as a pooled grid, and across five banked campaigns it caught `agent.model` aliased exactly by `dataset`, so "the slow model" was really the slow dataset.
+- **Lock and unlock what the optimizer may change, from the panel.** Each knob on a node shows its permitted values as ticks; ticking one pins the axis, and the padlock is drawn from that rather than from a separate flag claiming it. The same control appears everywhere it is needed, instead of two editors a screen apart contradicting each other about one axis. Which model runs, and whether a node sends its output schema at all, are both ordinary axes now.
+- **Several campaigns at once.** One queue, tenant-fair, least-served next. A full machine puts you in line rather than refusing you.
+- **`probe-reasoning <model>`** — ask an endpoint which reasoning levels it actually honours. Six cheap calls, writes nothing.
+- **A phone layout.** Tabs become a bottom bar, the run controls dock, and the chat renders small, because on a phone the conversation is the subject.
+- **A perfect round is checked.** A round that scores 100% re-tests its winner on cells it has never seen — the one round whose number nothing questioned.
+
+### Changed
+
+- **Judges stopped re-reading the haystack.** Every judge was sent the question *plus every document the model had to read*, three times per answer, for evidence no rubric consults. Over one benchmark's 254 rows: **35,370,387 characters of judge input where 93,114 would do**.
+- **The optimizer only proposes settings the model will accept.** A node's options used to come from a config file written before anyone knew which model would run there, so the search held the wrong list. The model answers now, a refused value costs nothing instead of costing a candidate its whole panel, and a value space of one leaves the menu entirely (eleven dead axes across the shipped datasets).
+- **The browser stopped computing what the server already knows.** Five numbers moved server-side. One of them mattered: a browser-side argmax cannot apply the election's eligibility rule, so a held round drew a lift interval for an arm the election had already refused.
+- **The route is pinned so a provider's prefix cache can hold.** A throughput sort was re-ranking per call and putting most optimizer calls on an endpoint that never caches.
+- **Every account re-accepts the terms** — the consent record pointed at legal pages that had not been published.
+
+### Fixed
+
+- **A score was flattering itself.** A cell re-measured inside one round reached the ability fit as two independent observations, so every error bar shrank and candidates were eliminated on confidence the run never earned. Silent, and always in the pleasing direction.
+- **Absence was being written to disk in the shape of failure.** A cell nobody attempted, a cell with no label, a candidate that never got read — each was scored `0`, so one rate-limit hiccup could read as "98% of this round returned nothing, the pipeline may be broken". Absence now renders as a gap, never as a zero.
+- **A campaign did not own what it ran.** Settings lived in one file every campaign on that dataset shared, so an edit rewrote runs that had already finished — one had its turn limit cut from 10 to 4 the day after a run at 10. A campaign now freezes its settings at start.
+- **The quickstart could not reach a first result.** `pip install` then `new <file>.csv` preflights a backend the front page never told anyone to start, so a clean machine refused.
+- Plus roughly twenty smaller corrections across scoring, display, resume and the dataset preview — each one a number that read wrong on screen or a surface that answered from stale state.
+
+### Technical Details
+
+- **82 commits since `v0.8.13`** (2026-09-02 → 2026-09-10): 36 features, 15 fixes, 13 refactors, 10 docs, 6 chore, 2 test.
+- **BREAKING — start clean.** No shims: cycles written under the old keys stop loading. The three merging slots are renamed to say that they merge (`pipeline_overlay`, `prompt_fields_updates`, `task_context_updates`), `sp_budget_ttest` → `sp_budget_round`, `allowed_models` is gone, `accuracy` is nullable, `Sample.ground_truth` is `str | None`, and `inner_campaign_id` is now the cell's treatment. The content-addressed archive replays by `sample_id`, so nothing is re-paid.
+- **`harbor` is its own extra**, out of `[all]`: Python ≥3.12 plus a container runtime, pinned `>=0.22,<0.23`. Harbor's provider key stays in Harbor's environment — no credential bridge.
+- **CI now starts the app it ships.** The wheel smoke reached the API only through `app.openapi()`, so a 500 in a router or a dead static mount shipped green.
+- **`mlflow` → `mlflow-skinny`, tornado 6.5.8.** Full mlflow's `cryptography<50` pin was the one thing holding us below the version that closes GHSA-g6cj-pr64-35w5. Both Dependabot highs clear.
+- `pyproject.toml` → 0.8.14; `APP_VERSION` derives from it and `uv.lock` records it.
+
 ## [0.8.13] — 2026-09-02
 
 > Compare is a surface you click: tick any campaigns, walk each genealogy, move a card onto any searchpoint on the way — one drill-in where there were four. Which cells a comparison rests on is yours to pick, and picking a set moves the `overlap` bars alone. Underneath, the δ ruler was being fit on absences read as zeros, so a θ means what it says again. 43 commits since `v0.8.12`.
