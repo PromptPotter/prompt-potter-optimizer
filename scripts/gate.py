@@ -16,6 +16,10 @@ Two properties the shape buys, neither of them speed:
   so the ~3.5s ``uv run`` toll is paid once for the whole gate instead of once
   per tool, and the independent checks run concurrently.
 
+One kind is not in the default run: ``--release`` selects the advisory checks, which
+need the network and answer a question only a release asks. They live here anyway, so
+the desk and ``publish.yml`` read one declaration rather than two.
+
 Success is one line — a check prints only when it fails (or under
 ``GITHUB_ACTIONS``, where the per-check timing is the point).
 """
@@ -308,10 +312,86 @@ def _lockfile(_: Sel) -> Outcome:
     return 0, ""
 
 
+# A release is where the dependency posture stops being ours: the wheel carries the dashboard
+# bundle, and a published version can be neither recalled nor re-uploaded. Both checks below
+# reach the network, which is why they are their own kind — but neither may SKIP when it cannot
+# answer. A guard that reports nothing instead of nothing-to-report is how v0.8.14 shipped a day
+# before six advisories surfaced against the lock it had already frozen.
+_SEVERITY_ORDER = ("critical", "high", "medium", "low")
+_ALERT_FIELDS = (
+    r'.[] | "\(.security_advisory.severity)\t\(.dependency.package.ecosystem)/'
+    r'\(.dependency.package.name)\t\(.security_advisory.ghsa_id)\t\(.dependency.manifest_path)"'
+)
+
+
+def _npm_audit(_: Sel) -> Outcome:
+    """The dashboard lock against npm's advisory database.
+
+    ``--package-lock-only`` reads the lock rather than an install, so this answers before
+    ``npm ci`` and judges the file that is actually frozen into the release. ``--audit-level``
+    sets the EXIT CODE only — the report still lists every severity, so a moderate is seen
+    here and blocks nothing, while ``_advisories`` is the exhaustive half.
+    """
+    return _run(_node("npm", "audit", "--package-lock-only", "--audit-level=high"), _WEBAPP)
+
+
+def _advisories(_: Sel) -> Outcome:
+    """Every open Dependabot alert on the repository — both ecosystems, dismissals honoured.
+
+    Dismissal is why this reads GitHub rather than scanning: ``diskcache``
+    (GHSA-w8v5-vhqr-4h9v) is unpatched upstream and reachable only through the ``dspy`` extra,
+    so it is dismissed rather than fixed, and a local scanner would need an allowlist free to
+    drift from the one the Security tab already holds. ``publish.yml`` runs ``--only
+    npm-audit`` instead of this: a workflow's GITHUB_TOKEN is not documented to read Dependabot
+    alerts, so enforcing it there is a PAT away — never a silent pass.
+    """
+    gh = shutil.which("gh")
+    if not gh:
+        return 1, (
+            "`gh` is not on PATH, so the open advisories cannot be read — and a guard that "
+            "cannot answer is not a guard.\nInstall the GitHub CLI, or read them on the "
+            "repository's Security tab before cutting the release."
+        )
+    rc, out = _run(
+        [
+            gh,
+            "api",
+            "repos/{owner}/{repo}/dependabot/alerts?state=open",
+            "--paginate",
+            "-q",
+            _ALERT_FIELDS,
+        ],
+        _REPO,
+    )
+    if rc:
+        return rc, out or "gh could not read this repository's Dependabot alerts."
+    alerts = sorted(
+        (line for line in out.splitlines() if line.strip()),
+        key=lambda line: (
+            _SEVERITY_ORDER.index(sev)
+            if (sev := line.split("\t")[0]) in _SEVERITY_ORDER
+            else len(_SEVERITY_ORDER)
+        ),
+    )
+    if not alerts:
+        return 0, ""
+    rows = [line.split("\t") for line in alerts]
+    # Trailing 0: the last column is the manifest path, and padding it only trails whitespace.
+    widths = [*(max(len(row[i]) for row in rows) for i in range(len(rows[0]) - 1)), 0]
+    return 1, (
+        f"{len(alerts)} open Dependabot alert(s) — fix or dismiss each before cutting a "
+        "release:\n"
+        + "\n".join(
+            "  " + "  ".join(cell.ljust(w) for cell, w in zip(row, widths, strict=True))
+            for row in rows
+        )
+    )
+
+
 @dataclass(frozen=True)
 class Check:
     name: str
-    kind: str  # "py" — CI's `check` job; "web" — its `webapp` job
+    kind: str  # "py" — CI's `check` job; "web" — its `webapp` job; "release" — publish.yml
     run: Callable[[Sel], Outcome]
     staged: bool = False  # in the pre-commit fast set
     after: str = ""  # a check this one reads the output of — see `_chains`
@@ -399,6 +479,10 @@ CHECKS: tuple[Check, ...] = (
             _node("npm", "run", "build"), _WEBAPP, DEPLOY_BUILD="1", GATE_JOBS=str(_SLICE)
         ),
     ),
+    # Neither is `staged`, and neither runs by default: the everyday gate stays offline and the
+    # pre-commit hook pays for nothing it cannot use. `--release` is what asks for them.
+    Check("npm-audit", "release", _npm_audit),
+    Check("advisories", "release", _advisories),
 )
 
 
@@ -487,12 +571,18 @@ def main() -> int:
         "--web", action="store_true", help="only the webapp half (CI's `webapp` job)"
     )
     parser.add_argument(
+        "--release",
+        action="store_true",
+        help="the pre-release advisory checks (network-bound; never in the default run)",
+    )
+    parser.add_argument(
         "--staged", action="store_true", help="the pre-commit fast set, scoped to staged files"
     )
     parser.add_argument("--only", metavar="NAME", help="one check by name")
     args = parser.parse_args()
 
-    kinds = {k for k, on in (("py", args.py), ("web", args.web)) if on} or {"py", "web"}
+    selected = (("py", args.py), ("web", args.web), ("release", args.release))
+    kinds = {k for k, on in selected if on} or {"py", "web"}
     checks = [c for c in CHECKS if c.kind in kinds and (c.staged or not args.staged)]
     if args.only:
         checks = [c for c in CHECKS if c.name == args.only]

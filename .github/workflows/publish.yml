@@ -29,6 +29,22 @@ jobs:
             exit 1
           fi
 
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+
+      # Second, and still before anything is built: the wheel carries the dashboard bundle, so
+      # a known-vulnerable dependency in `webapp/package-lock.json` ships INSIDE the release —
+      # and a published version can be neither recalled nor re-uploaded. Reads the lock, not an
+      # install, so it answers before `npm ci` below. The exhaustive half — every open
+      # Dependabot alert, both ecosystems, dismissals honoured — is `gate.py --release` at the
+      # desk: a workflow's GITHUB_TOKEN is not documented to read Dependabot alerts, so that
+      # one is a PAT away rather than a check that passes here by failing to look.
+      - name: No high-severity advisories in the dashboard lock
+        run: python3 scripts/gate.py --only npm-audit
+
       - name: Install uv
         uses: astral-sh/setup-uv@v8.2.0
         with:
@@ -42,12 +58,6 @@ jobs:
       # of the artifact being published rather than of a branch that once passed.
       - name: Gate
         run: uv run python scripts/gate.py --py
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: webapp/package-lock.json
 
       - name: Build the dashboard
         run: npm ci && npm run build:deploy

@@ -86,6 +86,7 @@ Six *situational* guardrails against recurring AI blind spots. The trigger and t
 # LLM call. `gate.py` re-execs to dodge this; the CLI cannot, or it would break the Ctrl+C pause contract.
 pip install -e ".[all,dev]"                                  # add `,benchmarks` ONLY to fetch a public bank — opt-in, third-party surface
 python scripts/gate.py                                       # EVERY check CI runs, one invocation, nothing masking anything; re-execs itself into the locked env, so the verdict never depends on which python you had. --py / --web to halve it, --only NAME for the one check that owns what you touched
+python scripts/gate.py --release                             # BEFORE cutting a release: the dashboard lock against npm's advisory DB + every open Dependabot alert (both ecosystems, dismissals honoured). Network-bound, so never in the default run; `publish.yml` enforces the npm half
 git config core.hooksPath .githooks                           # one-time per clone: `gate.py --staged`, the same list scoped to what you staged
 python -m promptpotter new <name>                            # fresh: mint campaign+root cycle from datasets/<name>/, run from round 0
 python -m promptpotter new <file.csv> --set task_description=…  # fresh from RAW file: ingest → resolve origin check-in → run

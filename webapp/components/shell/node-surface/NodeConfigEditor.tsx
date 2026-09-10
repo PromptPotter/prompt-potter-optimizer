@@ -152,10 +152,11 @@ export function NodeConfigEditor(props: {
     persist(next, marks);
   };
 
-  // Which of the two facts this host owns — and a single-node pipeline is UNLOCKABLE besides,
-  // since holding its lone node would leave the optimizer nothing to tune.
+  // Which of the two facts this host owns. A single-node pipeline is UNLOCKABLE besides, since
+  // holding its lone node would leave the optimizer nothing to tune — but its axes still narrow:
+  // a tick is a permitted set, not a hold.
   const narrowChannel = Boolean(onApply || onNarrowing);
-  const canNarrow = narrowChannel && !isSingleNode;
+  const canLock = narrowChannel && !isSingleNode;
   const canSetValue = Boolean(onApply || onChange);
 
   const freeValued = rows.filter((r) => r.kind !== "model" && r.kind !== "enum");
@@ -206,7 +207,7 @@ export function NodeConfigEditor(props: {
               // `undefined` here means the catalogue said nothing and the row claims nothing.
               ignoredBy={caps?.unsupported_params?.includes(r.key) ? pickedModel : undefined}
               readOnly={readOnly || (!babysitEditable && r.neverAxis === "cost_lever")}
-              onToggleLock={canNarrow ? () => update(i, { locked: !r.locked }) : undefined}
+              onToggleLock={canLock ? () => update(i, { locked: !r.locked }) : undefined}
               onValue={canSetValue ? (v) => update(i, { value: v }) : undefined}
             />
           );
@@ -233,15 +234,15 @@ export function NodeConfigEditor(props: {
               <ValueList
                 name={r.key}
                 values={values}
-                checked={canNarrow ? r.allowed : undefined}
+                checked={narrowChannel ? r.allowed : undefined}
                 inert={[...inert, ...barred]}
                 userAdded={userAdded}
                 note={axisNote(r, caps, pickedModel)}
                 readOnly={readOnly}
                 addPlaceholder={r.kind === "model" ? "another model id…" : "another value…"}
                 onPick={canSetValue ? (v) => update(i, { value: v }) : undefined}
-                onToggle={canNarrow ? (v) => toggle(i, v) : undefined}
-                onAdd={canNarrow ? (v) => add(i, v) : undefined}
+                onToggle={narrowChannel ? (v) => toggle(i, v) : undefined}
+                onAdd={narrowChannel ? (v) => add(i, v) : undefined}
               />
               {r.kind === "model" && caps ? <ModelCard caps={caps} /> : null}
             </span>
@@ -249,7 +250,7 @@ export function NodeConfigEditor(props: {
         );
       })}
 
-      {canNarrow && freeValued.length > 0 ? (
+      {canLock && freeValued.length > 0 ? (
         <div className="config-row config-node-row">
           <span className="config-label">Tuning</span>
           <button
