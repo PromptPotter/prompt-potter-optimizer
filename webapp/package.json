@@ -15,7 +15,7 @@
     "@tanstack/react-virtual": "^3.13.26",
     "chart.js": "^4.5.1",
     "marked": "^18.0.3",
-    "next": "16.3.1",
+    "next": "16.3.3",
     "react": "19.2.4",
     "react-chartjs-2": "^5.3.1",
     "react-dom": "19.2.4"
@@ -35,6 +35,6 @@
     "eslint-config-next": "16.2.7",
     "jsdom": "^29.1.1",
     "typescript": "^5",
-    "vitest": "^4.1.8"
+    "vitest": "^5.0.0"
   }
 }
