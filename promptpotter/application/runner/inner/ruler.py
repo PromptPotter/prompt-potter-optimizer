@@ -13,9 +13,16 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from promptpotter.application.datasets.authored import dataset_cell_scorer
-from promptpotter.application.runner.inner.spawn import inner_spawn_context, set_inner_rulers
+from promptpotter.application.intelligence.exploration import extend_ruler
+from promptpotter.application.intelligence.hard_sample_archive import build_archive_observations
+from promptpotter.application.optimization.cycle import _calibrate_delta_ruler
+from promptpotter.application.runner.inner.spawn_context import (
+    inner_spawn_context,
+    set_inner_rulers,
+)
 from promptpotter.application.runner.inner.tasks import inner_tasks_path, load_inner_tasks
 from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
+from promptpotter.shared.errors import RulerCoverageError
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -55,12 +62,6 @@ def _fit_or_extend(
 ) -> DeltaRuler | None:
     """This dataset's scale, grown onto everything the archive now carries. ``None`` while the
     bank is too thin to identify one — legitimate, and it re-attempts at the next boundary."""
-    from promptpotter.application.intelligence.exploration import extend_ruler
-    from promptpotter.application.intelligence.hard_sample_archive import (
-        build_archive_observations,
-    )
-    from promptpotter.application.optimization.cycle import _calibrate_delta_ruler
-    from promptpotter.shared.errors import RulerCoverageError
 
     # No `origin_sp_hash`: the outer origin is not an arm on THIS dataset, and the fit wants every
     # arm equally.

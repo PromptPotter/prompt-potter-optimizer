@@ -11,6 +11,7 @@ from pydantic import ConfigDict, Field, ValidationError, model_validator
 
 from promptpotter.application.campaign_config import CampaignConfig, LivesConfig
 from promptpotter.config.settings import DEFAULT_ORIGIN_BUDGET
+from promptpotter.connectors import CONNECTORS
 from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import read_yaml_optional
@@ -18,7 +19,7 @@ from promptpotter.infrastructure.store.io import read_yaml_optional
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from promptpotter.application.runner.inner.spawn import InnerSpawnContext
+    from promptpotter.application.runner.inner.spawn_context import InnerSpawnContext
 
 
 class InnerBenchmarkConfig(StrictModel):
@@ -221,7 +222,6 @@ assert set(InnerTaskSpec.model_fields) >= _DEPTH_FIELDS
 def inner_tasks_path(dataset_dir: Path) -> Path:
     """The dataset's inner-task panel. ONE spelling, so the is-this-L4 probe and the loader cannot drift
     apart — a drift that skips the observation contract rather than raising."""
-    from promptpotter.connectors import CONNECTORS
 
     return dataset_dir / CONNECTORS["promptpotter"].experiment_file
 

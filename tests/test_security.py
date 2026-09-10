@@ -236,7 +236,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
     shape of the code that achieves it.
     """
     from promptpotter.application.optimization.dispatch.llm_call import heartbeat as heartbeat_mod
-    from promptpotter.application.runner.inner import spawn
+    from promptpotter.application.runner.inner import spawn, spawn_context
     from promptpotter.domain.results import CycleResult
     from promptpotter.infrastructure.llm import telemetry as llm_telemetry
     from promptpotter.infrastructure.store.io import write_json
@@ -304,8 +304,8 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
             "tasks": [{"id": "justlogic-d234/seed-0", "inner_dataset_seed": 0}],
         },
     )
-    spawn._INNER_SPAWN.set(
-        spawn.InnerSpawnContext(
+    spawn_context._INNER_SPAWN.set(
+        spawn_context.InnerSpawnContext(
             inner_sandbox_root=tmp_path,
             dataset_config_dir=tmp_path,
             identity=None,  # type: ignore[arg-type]  # the stubbed inner run never reads it

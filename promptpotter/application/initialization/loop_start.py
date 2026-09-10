@@ -5,9 +5,29 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.initialization.session import Session
+from promptpotter.application.initialization.session import Session, open_cycle_ledger
+from promptpotter.application.intelligence.indexes.axis import AxisIndex
+from promptpotter.application.optimization.cycle import Cycle
+from promptpotter.application.optimization.dispatch.llm_call.prompts import get_optimizer_schema
+from promptpotter.application.optimization.escalation.state import EscalationFSM
+from promptpotter.application.optimization.pobb.checks import build_degradation_checks
+from promptpotter.application.optimization.resume_and_fork.resume import (
+    resume_with_divergence_check,
+)
+from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
+from promptpotter.application.preflight import check_model_reasoning_floors, run_preflight_checks
+from promptpotter.application.runner.campaign_ids import cycle_config_identity
+from promptpotter.application.runner.inner.spawn_context import retarget_inner_spawn
+from promptpotter.application.scoring.evaluators import resolve_cell_formula
+from promptpotter.application.scoring.formula import compile_scorer, split_scoring_block
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.phases import CampaignPhase, emit_phase
 from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.scoring import all_verifier_graded
+from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
+from promptpotter.judges import build_evaluators
+from promptpotter.shared.errors import graceful
+from promptpotter.shared.statistics import warm_stats_backend
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -42,7 +62,6 @@ def init_cycle(
 ) -> tuple[str | None, int]:
     """Resolve the cycle for run init. A genuinely-absent cycle starts fresh; a present-but-BROKEN one (corrupt index,
     disk fault, bad ``--from``) propagates — swallowing it would silently re-spend the campaign from scratch."""
-    from promptpotter.application.runner.campaign_ids import cycle_config_identity
 
     if not session.backend_id:
         return None, 1
@@ -98,8 +117,6 @@ def populate_session_scoring(
     That precondition is what lets the compiler refuse a label-comparing formula here: ``session.samples``
     is populated by the end of ``init_services``, so the bank's own declaration is available before a
     single cell is spent."""
-    from promptpotter.application.scoring.formula import compile_scorer
-    from promptpotter.domain.scoring import all_verifier_graded
 
     session.state.obs = obs
     session.source = source
@@ -115,7 +132,6 @@ def populate_session_scoring(
     # (`arm_diagnostic_scoring`) — so one line arms grading reuse on every entry point, and a
     # bad spec fails here rather than on the first cell. Required and assigned unconditionally:
     # `{}` declares none, and never means "keep what was armed before".
-    from promptpotter.judges import build_evaluators
 
     session.scoring.judges = build_evaluators(judge_specs, cache=session.store.judge_reuse)
 
@@ -136,8 +152,6 @@ def arm_diagnostic_scoring(
     ``source`` is required here though :func:`populate_session_scoring` defaults it. ``ab`` was the
     one caller that omitted it, so its replays stamped the session ``optimization_loop`` — the
     provenance of the run being replayed rather than of the replay."""
-    from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
-    from promptpotter.application.scoring.formula import split_scoring_block
 
     pipeline_params = configure_and_apply_pipeline(
         session, campaign_config, log=log or (lambda *_a, **_k: None)
@@ -163,14 +177,6 @@ async def _emit_preflight_and_init_session(
     session: Session,
     origin: CampaignOrigin,
 ) -> None:
-    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-        get_optimizer_schema,
-    )
-    from promptpotter.application.preflight import (
-        check_model_reasoning_floors,
-        run_preflight_checks,
-    )
-    from promptpotter.domain.phases import CampaignPhase, emit_phase
 
     target_node_configs = list(node_config_items(session.pipeline_params))
     target_models = tuple(str(v["model"]) for _, v in target_node_configs if v.get("model"))
@@ -224,7 +230,6 @@ def _build_and_start_cycle(
     cycle_id: str | None,
     resume_from_round_override: int | None,
 ) -> tuple[Cycle, str | None, int]:
-    from promptpotter.application.optimization.cycle import Cycle
 
     if origin.resolved_origin is None:
         raise ValueError("origin.resolved_origin is required; run origin scoring first.")
@@ -268,7 +273,6 @@ def _start_observability_and_scoring(
     scoring_cell_formula: str | None,
     scorer_id: str,
 ) -> tuple[str, ObservabilityBridge | None]:
-    from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 
     tracing_campaign_id = resolved_cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
     obs = ObservabilityBridge.start_campaign(
@@ -304,10 +308,6 @@ async def _apply_resume_fork(
     no_divergence_check: bool,
     fork_on_divergence: bool,
 ) -> tuple[str | None, int]:
-    from promptpotter.application.optimization.escalation.state import EscalationFSM
-    from promptpotter.application.optimization.resume_and_fork.resume import (
-        resume_with_divergence_check,
-    )
 
     # =1 is fresh (origin only); real resumes are >=2 (>=1 L1 round on disk).
     if resumed_from_round > 1 and resolved_cycle_id:
@@ -345,12 +345,6 @@ def _finalize_loop_state(
     tracing_campaign_id: str,
     resumed_from_round: int,
 ) -> None:
-    from promptpotter.application.initialization.session import open_cycle_ledger
-    from promptpotter.application.intelligence.indexes.axis import AxisIndex
-    from promptpotter.application.optimization.pobb.checks import (
-        build_degradation_checks,
-    )
-    from promptpotter.domain.phases import CampaignPhase, emit_phase
 
     cycle.axes = AxisIndex.ensure_for(
         session.store,
@@ -376,9 +370,6 @@ def _finalize_loop_state(
     # Stamped at init rather than only into `index.json::final`: that block exists only once the
     # cycle STOPS, and a RUNNING cycle's `log.md` must still name the formula its numbers carry.
     if session.state.cycle_id:
-        from promptpotter.application.scoring.evaluators import resolve_cell_formula
-        from promptpotter.shared.errors import graceful
-
         with graceful("round-formula stamp failed"):
             session.store.campaigns.update(
                 session.hop,
@@ -417,7 +408,6 @@ async def init_optimization_loop(
     session: Session,
     started_at: str,
 ) -> Cycle:
-    from promptpotter.shared.statistics import warm_stats_backend
 
     warm_stats_backend()
 
@@ -458,7 +448,6 @@ async def init_optimization_loop(
     # The cycle id is FINAL here — a resume fork retargets it above, and the spawn context was
     # published before any of that resolved (a child may recurse before this point). Local
     # import: `runner.inner.spawn` reaches back into this package for `Session`.
-    from promptpotter.application.runner.inner.spawn import retarget_inner_spawn
 
     retarget_inner_spawn(session)
 

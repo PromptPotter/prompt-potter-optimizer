@@ -8,6 +8,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from promptpotter.application.campaign_config import (
+    load_campaign_config as validate_campaign_config,
+)
+from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring
+from promptpotter.application.initialization.wiring import init_services
+from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
+from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.rendering import display_fitness
@@ -45,13 +52,6 @@ async def measure_noise_floor(
 ) -> NoiseFloorOutcome:
     """Re-score the cached round-0 origin *k* times with ``force_fresh`` and report the spread. On a pp-self cycle the
     origin's backend IS the recursion, so this reads the inner noise floor. ``k``× real spend, never loop-triggered."""
-    from promptpotter.application.campaign_config import (
-        load_campaign_config as validate_campaign_config,
-    )
-    from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring
-    from promptpotter.application.initialization.wiring import init_services
-    from promptpotter.application.runner.inner.spawn import publish_inner_spawn_context
-    from promptpotter.application.scoring.search_point_scorer import score_search_point
 
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None:

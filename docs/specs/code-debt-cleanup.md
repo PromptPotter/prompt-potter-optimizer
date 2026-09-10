@@ -28,6 +28,51 @@ it.
 
 ## Open — multi-arc, no blocker
 
+- **A registry that COMPLETES itself at import time is the last cause of the import knot** — and it
+  is a backbone shape, not three local accidents. 330 → 52 (the habit, swept 2026-09-10) → 23 (the
+  `spawn_context` boundary move plus `entry`). Of the 23, eight are deliberate and stay:
+  `complexity_ledger` (7, "outside the layer tree because it counts every layer") and
+  `escalation/state` ↔ `rules` (1). **The other 15 are all one pattern, at three sites** —
+  `connectors/__init__.py::_load()` (12), `dispatch/injections/registry.py`'s renderer walk (2, and
+  the 1 in `llm_call/prompts.py` that cannot reach `INJECTIONS` because of it), and
+  `judges/__init__.py::_load()` (0).
+  **The predicate that decides which sites bite: a registered member that reaches back UP into a
+  layer which imports the registry.** `judges` registers leaves, so its identical `_load()` costs
+  nothing — the pattern is only dangerous where a member is heavy. `connectors/promptpotter` drives
+  the whole application; `injections/layer_state` imports the prompt loader. Both then close a loop
+  on a half-initialised package, and every module wanting only a TYPE off
+  `connectors.protocol` (13 of them: `MeasuredUnit`, `BackendUnreachableError`, `unit_count`) pays
+  the whole registry to get it.
+  **The fix separates registration from completion.** Registration by import must stay eager — it
+  is the `@signal` / `CONNECTOR` side effect, and walking beats a hand-listed tuple. What does not
+  have to be eager is BUILDING and VALIDATING the table: make each accessor `@functools.cache`d and
+  the cycles open, because the heavy member is imported on first use rather than at module import.
+  The property both files defend in prose — a half-wired connector must not reach a campaign — is
+  then kept by calling the accessors once from an explicit startup step (`init_services`), which is
+  strictly better: the eagerness becomes a declared step instead of an import-order accident.
+  Sequencing note: this does not remove the need to decide whether `protocol.py` still belongs
+  under an `__init__` that does work, and `runner/inner/tasks` genuinely wants `CONNECTORS`.
+  **Re-test:** `.venv/Scripts/python.exe -m promptpotter.complexity_ledger | grep deferred` —
+  while it reads 23, the knot stands; the ledger row is the ratchet and cannot drift back up.
+
+- **Pointed out, NOT investigated — each needs a look before it is a claim.** Filed together
+  because they were all passed while working on something else, and none has been measured.
+  (1) **The winner's prompt duplicates itself.** By round 8 of `swiss-invoices-eval__b1b4f5` the
+  winner's `problem_description` carried three literal copies of *"Raw invoice text is provided
+  directly as the input column."* and two of another sentence — both are
+  `upstream_context`/`downstream_context`, already injected, being re-absorbed by L1's rewrite one
+  copy per round (0 repeats through round 5, 3 by round 8). Mechanical, not semantic, and a real
+  part of that cycle's 3.2x token growth. (2) **`domain/results.py::RoundResult.scoreboard` is a
+  display projection living on the data model** — a `@computed_field` returning `ScoreboardRow`s,
+  which is what made `results` reach into `rendering` at all. (3) **`domain/results.py:523`
+  (floor-pinned) reads `objective`** — under a formula that SUBTRACTS cost rather than scaling,
+  a correct-but-expensive arm could read as "0.0 on every cell", which is a caveat about a
+  degenerate reading claiming the arm got everything wrong. Harmless under the house formula, which
+  clamps at `fitness`. (4) **`halt_at_accuracy` is threaded through ~14 call sites** as a
+  pass-through parameter across CLI, REST, launcher and runner.
+  **Re-test:** each is a fresh measurement; none carries a verdict yet, so do not act on one
+  without re-deriving it.
+
 - **No BROWSER is ever opened in CI**, so a whole class of first-user breakage ships green.
   `scripts/smoke_wheel.py` now serves the wheel over a real socket, but nothing navigates a route:
   there is no Playwright suite anywhere, and

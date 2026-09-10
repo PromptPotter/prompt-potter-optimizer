@@ -59,7 +59,11 @@ LEDGER_BASELINE = {
     # catalogue of hundreds, which is the shape that goes stale and then answers wrongly; the whole
     # reason the table may narrow a search axis is that a human can cheaply re-measure it. It runs
     # through `get_llm_client().chat`, not a raw request, so it reports what this repo SENDS.
-    "modules": 343,
+    # +1: `runner/inner/spawn_context.py`. One module bought 24 deferred imports, because the two
+    # halves it separates point opposite ways: publishing an inner-spawn context is something the
+    # ordinary runner does on its way past, while RUNNING an inner campaign reaches back down into
+    # that runner. Sharing one file made `entry <-> spawn` mutual and `seed_screen` a third leg.
+    "modules": 344,
     "init_files": 49,
     # +1: `judges/__init__.py` — flagged for the same reason `connectors/__init__.py` is, and by
     # the same text test: a registry module has both an `__all__` and imports. Named rather than
@@ -133,6 +137,23 @@ LEDGER_BASELINE = {
     "prompt_string_fields": 6,
     "injections": 32,
     "escalation_rules": 6,
+    # DEBT, and the only row here whose whole purpose is to fall. A function-local import of our
+    # own package is habit, and the habit is the defect: unmarked, it cannot be told from a
+    # load-bearing one, so nobody can hoist safely or add one knowingly. The three reasons people
+    # reach for, and the measurement that killed each: `conventions.md` § Code shape.
+    # -262: the sweep. What remained was 52 across 8 files, every one a RUNTIME cycle participant.
+    # -16 -8: the `spawn_context` split (see `modules` above) — one boundary move, and the two
+    # biggest knots fell together, which is what a boundary being in the wrong place looks like.
+    # -5: `runner/entry`, which was only ever entangled through `spawn`.
+    # Of the 23 left, 8 are deliberate: `complexity_ledger`'s own 7 (it counts every layer, so it
+    # may import none at module scope) and `escalation/state` (1, documented there). The other 15
+    # are ONE backbone shape at three sites — a registry that COMPLETES itself at import time, so a
+    # registered member reaching back up closes a loop on a half-initialised package. Filed in
+    # `code-debt-cleanup.md` with the fix (separate registration from completion) and with the
+    # predicate for which sites bite. Count cycles with care: an `if TYPE_CHECKING:` import sits in the
+    # module body and reads as top-level to an AST walk, which made three "pairs" that were never
+    # runtime edges. The files whose cycle is invisible until the build breaks say so at the import.
+    "deferred_imports": 23,
     # +1: `judges/CLAUDE.md` — the per-layer contract for a new top-level package, indexed from
     # `promptpotter/CLAUDE.md` like every other. It earns a page rather than a section in
     # `connectors/CLAUDE.md` because its load-bearing rule is the OPPOSITE concern: a connector
@@ -210,7 +231,13 @@ LEDGER_BASELINE = {
     # the run NO_RESULT, a mechanical zero the loop would charge to the idea under test. Pairs
     # with the byte-identical claim for an unmoved node: the fold runs before the content hash,
     # so a resolved default written here would re-key the whole archive. (test_integrity § 4)
-    "test_functions": 174,
+    # +1: the one stop the loop fires with no human in the way read `accuracy`, not the number a
+    # round is won on, so it ended campaigns whose objective still had somewhere to go — and did it
+    # silently, because `perfect_score` is a SUCCESS outcome and every number renders.
+    # +1: a verify's SIZE, now that the loop fires one by itself and the count is no longer a
+    # number a human typed. Behaviour-coupled and silent the same way: a wrong size still produces
+    # a verdict, just an unaffordable or an empty one. (test_numerics § 10)
+    "test_functions": 176,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

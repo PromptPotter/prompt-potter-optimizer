@@ -14,8 +14,15 @@ from typing import Any
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.initialization.loop_start import init_optimization_loop
 from promptpotter.application.initialization.session import Session
+from promptpotter.application.intelligence.exploration import parent_level_trajectory
 from promptpotter.application.optimization.cycle import Cycle
+from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+    compute_optimizer_prompt_hashes,
+    load_optimizer_set_overrides,
+    set_optimizer_prompt_overrides,
+)
 from promptpotter.application.optimization.escalation.firing import apply_fork_payload_to_opt_sp
+from promptpotter.application.optimization.l1.stats import HEADLINE_ACC, first_round_at_threshold
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     _mint_fork,
     cleanup_stub_fork_if_empty,
@@ -33,12 +40,13 @@ from promptpotter.application.run_observers import (
 )
 from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.application.runner.inner.ruler import refresh_inner_rulers
-from promptpotter.application.runner.inner.spawn import publish_inner_spawn_context
+from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.runner.round import flush_pending_decisions
 from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.scoring.formula import split_scoring_block
+from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import PromptExport, build_prompt_export
 from promptpotter.domain.phases import STOP_REASON_INFO, RunPhase, StopOutcome, StopReason
@@ -433,8 +441,6 @@ def _build_cycle_result(
     """Assemble the terminal :class:`CycleResult`; ``cycle is None`` is the init-crash fallback. Both
     ``winner_*`` read ``best_sp``, since ``cycle.opt_sp`` is overwritten every round."""
     best_sp = cycle.tracking.best_sp if cycle is not None else None
-    from promptpotter.application.intelligence.exploration import parent_level_trajectory
-
     # Round 0 is the reference the whole result is differenced against, carried beside it as
     # ``origin_accuracy`` / ``origin_level``. Counting it as a search result would credit the
     # outer loop with the floor it started from.
@@ -501,8 +507,6 @@ def _export_artifact(
     artifact whose whole point is a fitness with provenance may not carry an unmeasured one."""
     if winner is None:
         return None
-    from promptpotter.config.settings import APP_VERSION
-
     # `campaign.json` is the one owner of both — every other surface derives from it, and a
     # second copy here would be one more thing to re-sync.
     campaign = session.store.campaigns.load_campaign(session.campaign_id)
@@ -781,11 +785,6 @@ async def run_optimization(
     # so an outer binding and the inner mutations of the cycles it spawns never collide. An
     # empty set is a no-op and must NOT clear an inner runner's already-bound mutations.
     if campaign_config.optimization.optimizer_set:
-        from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-            load_optimizer_set_overrides,
-            set_optimizer_prompt_overrides,
-        )
-
         set_optimizer_prompt_overrides(
             load_optimizer_set_overrides(campaign_config.optimization.optimizer_set)
         )
@@ -887,13 +886,6 @@ def _finalize_run(
         # The precise terminal reason, with no lossy collapse to "completed" — the
         # operator-facing label and outcome derive from STOP_REASON_INFO, never per surface.
         cycle_status = str(stop_reason)
-        from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-            compute_optimizer_prompt_hashes,
-        )
-        from promptpotter.application.optimization.l1.stats import (
-            HEADLINE_ACC,
-            first_round_at_threshold,
-        )
 
         rounds = cycle_result.rounds
         rounds_to_95 = first_round_at_threshold(rounds, HEADLINE_ACC)

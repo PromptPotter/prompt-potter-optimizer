@@ -5,21 +5,34 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import contextvars
 import logging
 import time
-from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.dispatch.llm_call.prompts import resolved_overrides
+from promptpotter.application.campaign_config import load_campaign_config
+from promptpotter.application.datasets.authored import (
+    dataset_campaign_path,
+    read_campaign_config_file,
+)
+from promptpotter.application.initialization.wiring import init_services
+from promptpotter.application.jobs.mint import prepare_fresh_cycle, resolve_cycle_plan
+from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
+from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+    resolved_overrides,
+    set_optimizer_prompt_overrides,
+)
+from promptpotter.application.run_observers import build_run_observers
+from promptpotter.application.runner.entry import RunMode, run_optimization
+from promptpotter.application.runner.inner.spawn_context import (
+    InnerSpawnContext,
+    inner_spawn_context,
+)
 from promptpotter.application.runner.inner.tasks import (
     InnerTaskSpec,
     inner_instrument_config,
-    inner_tasks_path,
-    load_inner_tasks,
     resolve_inner_task,
 )
 from promptpotter.application.seed_screen import class_floor, draw_bank
@@ -37,27 +50,36 @@ from promptpotter.domain.l4.proxies import (
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.rendering import fmt_pct
+from promptpotter.domain.results import candidate_label
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.llm.rate_limit import set_throttle_stall_sink
-from promptpotter.infrastructure.llm.telemetry import emit_token_usage
+from promptpotter.infrastructure.llm.telemetry import (
+    _CURRENT_ROUND,
+    _CYCLE_LEDGER,
+    emit_token_usage,
+)
+from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.account_spend import (
     ZERO_SPEND,
     BilledSpend,
     billed_spend,
     forwarded_mark,
 )
+from promptpotter.infrastructure.store.archive_views import capture_evidence_epoch
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import read_json_optional, write_json
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
-    inner_sandbox_dir,
     sandbox_owner_path,
     tenant_workspace,
 )
+from promptpotter.infrastructure.store.session_pointer import save_active_pointer
+from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.shared.errors import graceful
 from promptpotter.shared.instrument import (
     MAX_INSTRUMENT_DEPTH,
     MeasurementRole,
+    enter_instrument_mode,
     instrument_depth,
     measured_candidate,
 )
@@ -66,9 +88,7 @@ if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.results import CycleResult
-    from promptpotter.domain.ruler import DeltaRuler
     from promptpotter.domain.sample import Sample
-    from promptpotter.shared.identity import IdentityContext
 
 logger = logging.getLogger(__name__)
 
@@ -93,84 +113,9 @@ class _UnworkedTime:
     announced: bool = False
 
 
-@dataclass(frozen=True)
-class InnerSpawnContext:
-    """``shared_root`` stays the REAL workspace root so every ``layout.py::SHARED_CACHE_DIRS`` tree
-    remains tenant-global: sandboxing them re-scored every inner origin, injecting more noise than
-    the lift."""
-
-    inner_sandbox_root: Path
-    dataset_config_dir: Path
-    identity: IdentityContext
-    shared_root: Path
-    spawn_campaign_id: str
-    spawn_cycle_id: str
-    asking_cycle_id: str
-    # The δ scale each inner dataset's cells read on, refreshed at every outer round boundary by
-    # `ruler.py`. Empty until one can be identified, which is the cold path a cell self-fits.
-    rulers: Mapping[str, DeltaRuler] = field(default_factory=dict)
-
-
-_INNER_SPAWN: contextvars.ContextVar[InnerSpawnContext | None] = contextvars.ContextVar(
-    "promptpotter_inner_spawn", default=None
-)
-
-
-def publish_inner_spawn_context(session: Session, campaign_config: CampaignConfig) -> None:
-    cycle_id = session.state.cycle_id
-    dataset_dir = session.dataset_config_dir
-    if not cycle_id or dataset_dir is None or not session.campaign_id:
-        return
-    # Anchored on ``shared_root`` (the REAL workspace root, invariant across depth), never this
-    # store's ``projects_root``, which inside a sandbox already IS the sandbox.
-    shared_root = session.store.shared_root
-    inner_root = inner_sandbox_dir(
-        shared_root,
-        session.store.tenant_id,
-        CycleHop(campaign_id=session.campaign_id, cycle_id=cycle_id),
-    )
-    _verify_outer_panel_contract(session, campaign_config, Path(dataset_dir))
-    _INNER_SPAWN.set(
-        InnerSpawnContext(
-            inner_sandbox_root=inner_root,
-            dataset_config_dir=Path(dataset_dir),
-            identity=session.store.identity,
-            shared_root=shared_root,
-            spawn_campaign_id=session.campaign_id,
-            spawn_cycle_id=cycle_id,
-            asking_cycle_id=cycle_id,
-        )
-    )
-
-
-def inner_spawn_context() -> InnerSpawnContext | None:
-    """What this task will spawn inner cells under, or ``None`` outside a campaign that spawns."""
-    return _INNER_SPAWN.get()
-
-
-def set_inner_rulers(ctx: InnerSpawnContext) -> None:
-    """Publish a context carrying refreshed δ scales — ``ruler.py``'s half of the round boundary."""
-    _INNER_SPAWN.set(ctx)
-
-
-def retarget_inner_spawn(session: Session) -> None:
-    ctx = _INNER_SPAWN.get()
-    cycle_id = session.state.cycle_id
-    if ctx is None or not cycle_id or ctx.asking_cycle_id == cycle_id:
-        return
-    _INNER_SPAWN.set(replace(ctx, asking_cycle_id=cycle_id))
-    logger.info(
-        "inner spawn provenance now names %s; sandbox stays owned by %s",
-        cycle_id,
-        ctx.spawn_cycle_id,
-    )
-
-
 def _spawn_provenance(ctx: InnerSpawnContext, round_num: int | None, query: str) -> dict[str, Any]:
     """A work-item is (candidate × ``task``), not a candidate — the panel runs every task per
     candidate, so ``task`` is the only thing telling one candidate's spawns apart."""
-    from promptpotter.domain.results import candidate_label
-    from promptpotter.shared.instrument import measured_candidate
 
     cand = measured_candidate()
     return {
@@ -192,29 +137,6 @@ def _spawn_provenance(ctx: InnerSpawnContext, round_num: int | None, query: str)
         "role": cand.role.value if cand else None,
         "task": query,
     }
-
-
-def _verify_outer_panel_contract(
-    session: Session, campaign_config: CampaignConfig, dataset_dir: Path
-) -> None:
-    """The panel census. The observation-key half of this check is now
-    ``Connector.required_observation_keys``, verified for every connector at ``init_services``."""
-    panel_path = inner_tasks_path(dataset_dir)
-    if not panel_path.is_file():
-        return
-    # The panel (`inner_tasks.yaml`) and the round budget (`campaign.yaml::sp_budget_round`) are
-    # ONE declaration in two files. A budget BELOW the panel narrows it silently, and under
-    # `per_round_resubset` rounds then draw different cells — candidates compared on bases that
-    # never matched. `_check_sp_budget_vs_dataset` warns in the other direction only.
-    n_cells = len(load_inner_tasks(panel_path).tasks)
-    if campaign_config.sp_budget_round != n_cells:
-        raise ValueError(
-            f"{dataset_dir.name} declares a {n_cells}-cell inner panel "
-            f"({panel_path.name}) but budgets sp_budget_round="
-            f"{campaign_config.sp_budget_round} per round. The outer panel is a CENSUS, not "
-            "a sample: every candidate must run every cell or the comparison is not paired. "
-            "Set sp_budget_round to the cell count, or change the panel."
-        )
 
 
 def _clip(text: str, cap: int) -> str:
@@ -433,9 +355,6 @@ def _open_inner_campaign(
 ) -> int:
     """Continue unless something is LIVE on it — every terminal class resumes, reaped included.
     ``stop_reason_outcome`` governs scoring (``domain/l4/proxies.py``), never resumption."""
-    from promptpotter.application.jobs.mint import prepare_fresh_cycle, resolve_cycle_plan
-    from promptpotter.infrastructure.runtime_flags import derive_run_phase
-    from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 
     plan = resolve_cycle_plan(session, campaign_config, train_data)
     store = session.store.campaigns
@@ -489,23 +408,6 @@ async def _run_inner_campaign(
 ) -> CycleResult:
     """Runs in a FRESH task, so the per-task ContextVars are isolated. ``.spend`` is captured from
     live state rather than the sandbox's debounced ``dashboard.json``, which would race."""
-    # Lazy: `run_optimization` would be an import cycle — `entry.py` imports
-    # `publish_inner_spawn_context` from here.
-    from promptpotter.application.campaign_config import load_campaign_config
-    from promptpotter.application.datasets.authored import (
-        dataset_campaign_path,
-        read_campaign_config_file,
-    )
-    from promptpotter.application.initialization.wiring import init_services
-    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-        set_optimizer_prompt_overrides,
-    )
-    from promptpotter.application.run_observers import build_run_observers
-    from promptpotter.application.runner.entry import RunMode, run_optimization
-    from promptpotter.infrastructure.store.archive_views import capture_evidence_epoch
-    from promptpotter.infrastructure.store.stores import build_stores
-    from promptpotter.shared.instrument import enter_instrument_mode
-
     # Set in THIS task's context copy, so they cannot reach the outer's optimizer. The SPECIMEN
     # under test, not part of the instrument — the same channel carries a normal outer cycle's
     # own optimizer prompt SET, so it is not mode-gated.
@@ -652,7 +554,7 @@ async def _run_inner_campaign(
 async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Projects the three proxy metrics onto the ``{"data": {…}}`` shape ``measure_sample`` parses
     from an HTTP body, so the outer scorer reads an inner result identically to a remote one."""
-    ctx = _INNER_SPAWN.get()
+    ctx = inner_spawn_context()
     if ctx is None:
         raise RuntimeError(
             "promptpotter connector: no inner-spawn context published — "
@@ -703,8 +605,6 @@ async def _measure_inner_cell(
     # This runs in the OUTER task, so ``_CYCLE_LEDGER`` still holds the outer ledger. The
     # heartbeat below appends to it, because the inner campaign emits only to its OWN sandbox
     # ledger and the outer surfaces would read the silence as a vanished producer.
-    from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
-    from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, _CYCLE_LEDGER
 
     outer_ledger = _CYCLE_LEDGER.get()
     # Captured in the OUTER task and handed over explicitly: the inner task gets a COPY of this
@@ -885,4 +785,4 @@ async def _measure_inner_cell(
     return {"data": data}
 
 
-__all__ = ["InnerSpawnContext", "publish_inner_spawn_context", "run_inner_cycle"]
+__all__ = ["run_inner_cycle"]

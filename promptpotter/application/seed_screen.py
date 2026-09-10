@@ -17,7 +17,18 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.campaign_config import load_campaign_config
+from promptpotter.application.datasets.authored import (
+    dataset_campaign_path,
+    read_campaign_config_file,
+)
+from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring
+from promptpotter.application.initialization.wiring import init_services
+from promptpotter.application.optimization.task_context import committed_task_context
+from promptpotter.application.origin import resolve_origin_opt_search_point
+from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.scoring import is_hit, is_verifier_graded, modal_answer_share
+from promptpotter.infrastructure.store.io import write_json
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
@@ -206,18 +217,6 @@ async def screen_inner_seeds(
 ) -> SeedScreenOutcome:
     """Each reading REPORTS its own wall-clock and wire cost, so price a wide sweep off the last
     reading rather than a figure written here (``<one-budget>``) — a quoted rate goes stale."""
-    from promptpotter.application.campaign_config import load_campaign_config
-    from promptpotter.application.datasets.authored import (
-        dataset_campaign_path,
-        read_campaign_config_file,
-    )
-    from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring
-    from promptpotter.application.initialization.wiring import init_services
-    from promptpotter.application.optimization.task_context import committed_task_context
-    from promptpotter.application.origin import resolve_origin_opt_search_point
-    from promptpotter.application.scoring.search_point_scorer import score_search_point
-    from promptpotter.infrastructure.store.io import write_json
-
     log_fn = log or (lambda *_a, **_k: None)
     # Argument checks BEFORE anything is built: `parallel` is knowable at call time, and asking it
     # after `init_services` + `arm_diagnostic_scoring` spends a backend handshake to reject a
