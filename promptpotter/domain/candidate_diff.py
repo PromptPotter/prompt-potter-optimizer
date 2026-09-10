@@ -46,7 +46,7 @@ def parent_param_value(parent_cfg: dict[str, Any], param: str, proposed: Any) ->
 def candidate_delta(
     child_fields: dict[str, Any],
     parent_fields: dict[str, Any],
-    pp_override: dict[str, Any] | None,
+    pipeline_overlay: dict[str, Any] | None,
     parent_pp: dict[str, Any] | None,
 ) -> tuple[dict[str, Any], dict[tuple[str, str], Any]]:
     """The ONE delta definition: dedup hashes it and the ALREADY TRIED panel renders it, so a rule
@@ -59,7 +59,7 @@ def candidate_delta(
     parent = parent_pp or {}
     pp = {
         (n, p): v
-        for n, cfg in node_config_items(pp_override)
+        for n, cfg in node_config_items(pipeline_overlay)
         for p, v in cfg.items()
         if v != parent_param_value(parent.get(n) or {}, p, v)
     }
@@ -70,10 +70,10 @@ def variant_prose_written(variant: dict[str, Any]) -> dict[str, str]:
     """A prose mutation rides two different carriers depending on whether the campaign evolves a
     target prompt or a node's own template — reading one answers inverted on the other kind."""
     written: dict[str, str] = {}
-    for f, v in (variant.get("prompt_fields_override") or {}).items():
+    for f, v in (variant.get("prompt_fields_updates") or {}).items():
         if f in PROMPT_STRING_FIELDS:
             written[f] = str(v or "")
-    for n, cfg in node_config_items(variant.get("pipeline_params_override")):
+    for n, cfg in node_config_items(variant.get("pipeline_overlay")):
         for p, v in cfg.items():
             if p in PROMPT_STRING_FIELDS:
                 written[f"{n}.{p}"] = str(v or "")
@@ -200,12 +200,12 @@ def same_idea(a: frozenset[str], b: frozenset[str], *, threshold: float) -> bool
 def candidate_idea(
     child_fields: dict[str, Any],
     parent_fields: dict[str, Any],
-    pp_override: dict[str, Any] | None,
+    pipeline_overlay: dict[str, Any] | None,
     parent_pp: dict[str, Any] | None,
 ) -> frozenset[str]:
     """The parent is subtracted WHOLE, every prompt field: the task's own vocabulary lives across the
     fields this candidate did not change, and left in it convicts unrelated rewrites of repeating."""
-    pf, pp = candidate_delta(child_fields, parent_fields, pp_override, parent_pp)
+    pf, pp = candidate_delta(child_fields, parent_fields, pipeline_overlay, parent_pp)
     parent = parent_pp or {}
     written = idea_fingerprint([str(v) for v in pf.values() if v] + [str(v) for v in pp.values()])
     carried = idea_fingerprint(
@@ -243,7 +243,7 @@ def build_candidate_flat(parent: dict[str, str], candidate_meta: dict[str, Any])
     """Merge candidate overrides onto parent across the three disjoint keyspaces:
     ``node.param`` (pipeline_params), bare prompt fields, ``tc.<key>`` (task_context)."""
     flat = parent.copy()
-    if pp := candidate_meta.get("pipeline_params_override"):
+    if pp := candidate_meta.get("pipeline_overlay"):
         flat.update(flatten_sp_summary(pp))
     for field_name, value in (candidate_meta.get("prompt_fields") or {}).items():
         if value:

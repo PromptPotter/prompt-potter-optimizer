@@ -4,7 +4,7 @@
 # re-runs it, so the emptiness is sticky. Declared, it cannot fall through.
 #
 # `upstream_context` / `downstream_context` are deliberately absent: those two are L1's own
-# (`task_context_override`), and the other five are frozen operator evidence.
+# (`task_context_updates`), and the other five are frozen operator evidence.
 #
 # BUDGETED — 600 chars a field, 1500 across the five (`TaskDecomposition.check_budget`), because
 # every one of them renders VERBATIM into every optimizer prompt. So each field says one thing

@@ -202,18 +202,18 @@ def _verify_outer_panel_contract(
     panel_path = inner_tasks_path(dataset_dir)
     if not panel_path.is_file():
         return
-    # The panel (`inner_tasks.yaml`) and the round budget (`campaign.yaml::sp_budget_ttest`) are
+    # The panel (`inner_tasks.yaml`) and the round budget (`campaign.yaml::sp_budget_round`) are
     # ONE declaration in two files. A budget BELOW the panel narrows it silently, and under
     # `per_round_resubset` rounds then draw different cells — candidates compared on bases that
     # never matched. `_check_sp_budget_vs_dataset` warns in the other direction only.
     n_cells = len(load_inner_tasks(panel_path).tasks)
-    if campaign_config.sp_budget_ttest != n_cells:
+    if campaign_config.sp_budget_round != n_cells:
         raise ValueError(
             f"{dataset_dir.name} declares a {n_cells}-cell inner panel "
-            f"({panel_path.name}) but budgets sp_budget_ttest="
-            f"{campaign_config.sp_budget_ttest} per round. The outer panel is a CENSUS, not "
+            f"({panel_path.name}) but budgets sp_budget_round="
+            f"{campaign_config.sp_budget_round} per round. The outer panel is a CENSUS, not "
             "a sample: every candidate must run every cell or the comparison is not paired. "
-            "Set sp_budget_ttest to the cell count, or change the panel."
+            "Set sp_budget_round to the cell count, or change the panel."
         )
 
 

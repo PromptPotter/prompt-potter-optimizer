@@ -42,7 +42,7 @@ def build_campaign_config(
     *,
     max_rounds: int | None = None,
     n_variants: int | None = None,
-    sp_budget_ttest: int | None = None,
+    sp_budget_round: int | None = None,
 ) -> CampaignConfig:
     """Load ``datasets/bbeh/campaign.yaml`` and merge any non-None overrides on top.
 
@@ -58,8 +58,8 @@ def build_campaign_config(
         {k: v for k, v in {"max_rounds": max_rounds, "n_variants": n_variants}.items() if v}
     )
     overrides: dict[str, Any] = {"optimization": optimization}
-    if sp_budget_ttest is not None:
-        overrides["sp_budget_ttest"] = sp_budget_ttest
+    if sp_budget_round is not None:
+        overrides["sp_budget_round"] = sp_budget_round
     return load_dataset_campaign_config(_BBEH_CAMPAIGN_YAML, overrides=overrides)
 
 
@@ -71,7 +71,7 @@ async def run_bbeh_campaign(
     backend_url: str = "http://127.0.0.1:8000",
     max_rounds: int | None = None,
     n_variants: int | None = None,
-    sp_budget_ttest: int | None = None,
+    sp_budget_round: int | None = None,
 ) -> dict[str, Any] | None:
     """End-to-end BBEH run: origin -> optimize -> per-task test eval -> export.
 
@@ -93,7 +93,7 @@ async def run_bbeh_campaign(
         campaign_config = build_campaign_config(
             max_rounds=max_rounds,
             n_variants=n_variants,
-            sp_budget_ttest=sp_budget_ttest,
+            sp_budget_round=sp_budget_round,
         )
         pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=print)
         set_display_tags(session.pipeline_schema)
@@ -173,7 +173,7 @@ async def run_bbeh_campaign(
                 "optimizer": "promptpotter",
                 "max_rounds": opt_cfg.max_rounds,
                 "n_variants": opt_cfg.n_variants,
-                "sp_budget_ttest": campaign_config.sp_budget_ttest,
+                "sp_budget_round": campaign_config.sp_budget_round,
                 "model_id": target_model,
                 "n_train": len(train_pool),
                 "train_accuracy": round(train_acc, 4) if train_acc is not None else None,

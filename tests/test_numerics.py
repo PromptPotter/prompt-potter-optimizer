@@ -2769,11 +2769,11 @@ def test_parse_population_flags_dropped_optimizer_prompt_port():
     base_problem_description = base_optimizer_template("l1_generate").problem_description
     dropped = CandidateProposal(
         opt_sp=parent.mutate(),
-        pipeline_params_override={"l1_generate": {"problem_description": "Read the panels."}},
+        pipeline_overlay={"l1_generate": {"problem_description": "Read the panels."}},
     )
     intact = CandidateProposal(
         opt_sp=parent.mutate(),
-        pipeline_params_override={
+        pipeline_overlay={
             "l1_generate": {"problem_description": base_problem_description + " Be terse."}
         },
     )
@@ -3052,7 +3052,7 @@ def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
         session_id="s1",
         l1_patience=2,
         n_variants=2,
-        sp_budget_ttest=5,
+        sp_budget_round=5,
         headline_metric="accuracy",
     )
 

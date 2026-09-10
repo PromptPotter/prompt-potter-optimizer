@@ -346,7 +346,7 @@ def build_bundle(
             else "frozen"
         ),
         elimination_n_min=opt.elimination_n_min,
-        sp_budget_ttest=cycle.config.sp_budget_ttest,
+        sp_budget_round=cycle.config.sp_budget_round,
         max_rounds=opt.max_rounds,
         spend_budget_usd=opt.spend_budget_usd,
         spend_used_usd=spend_used() if spend_used is not None else None,

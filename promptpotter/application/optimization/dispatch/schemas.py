@@ -127,12 +127,12 @@ class VariantEvidenceGrounding(OptimizerResponseModel):
 
 
 class L1Variant(OptimizerResponseModel):
-    """One candidate variant. Each override slot's INNER shape is grafted at runtime from the active schema; the keys stay
+    """One candidate variant. Each delta slot's INNER shape is grafted at runtime from the active schema; the keys stay
     loose so a backend-specific node name never fails the parse. An all-empty variant re-asks instead of costing a slot."""
 
     # FIELD ORDER IS GENERATION ORDER — evidence precedes the decision it justifies, and the
     # decision is the MUTATION, not the prose about it. `changes_description` trails the three
-    # override slots so it can only ever REPORT a mutation already emitted. Ahead of them it was
+    # delta slots so it can only ever REPORT a mutation already emitted. Ahead of them it was
     # a promise the model could make and then break, and it did: the required set asked for a
     # name and a paragraph while marking the payload optional, so ~10% of live variants arrived
     # narrated-but-empty, each one a no-op candidate that dragged the round's diversity and
@@ -150,14 +150,14 @@ class L1Variant(OptimizerResponseModel):
     # instead of requesting it. Optional here for the reason `evidence_grounding` is — a provider
     # omitting it must not empty a round — and required on the wire, where duplicates are scored.
     targets_cluster: str = ""
-    pipeline_params_override: dict[str, dict[str, Any]] = Field(
+    pipeline_overlay: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
         description=(
             "Per-node tunables, shape {node_name: {param: value}}. Inner per-node "
             "properties are grafted from the active PipelineSchema at runtime."
         ),
     )
-    prompt_fields_override: dict[str, str] = Field(
+    prompt_fields_updates: dict[str, str] = Field(
         default_factory=dict,
         description=(
             "Top-level prompt-template fields; keys must be one of "
@@ -165,7 +165,7 @@ class L1Variant(OptimizerResponseModel):
             "thinking_style, answer_format}."
         ),
     )
-    task_context_override: dict[str, str] = Field(
+    task_context_updates: dict[str, str] = Field(
         default_factory=dict,
         description=(
             "Pipeline-context strings; keys must be one of {upstream_context, downstream_context}."
@@ -182,7 +182,7 @@ class L1Variant(OptimizerResponseModel):
         Field(max_length=VARIANT_PROSE_MAX)
     )
 
-    # The parent's CURRENT text per override key, bound per round onto the SUBCLASS
+    # The parent's CURRENT text per delta key, bound per round onto the SUBCLASS
     # `build_l1_response_model` mints. Empty on this base class, which is reached only where the
     # round has no parent text and no rename to apply — there a blank slot is still convicted,
     # and only a deliberate CLEAR becomes indistinguishable from a restatement.
@@ -197,15 +197,15 @@ class L1Variant(OptimizerResponseModel):
         # rides the schema-repair retry back to the model (`llm/openai_compat.py`), so the round
         # gets the arm instead of losing it.
         parent = type(self).parent_text
-        blank = not self.pipeline_params_override and not any(
+        blank = not self.pipeline_overlay and not any(
             value != parent.get(key, "")
-            for slot in (self.prompt_fields_override, self.task_context_override)
+            for slot in (self.prompt_fields_updates, self.task_context_updates)
             for key, value in slot.items()
         )
         if blank:
             raise ValueError(
-                "this variant mutates nothing: at least one of pipeline_params_override, "
-                "prompt_fields_override or task_context_override must carry a value that "
+                "this variant mutates nothing: at least one of pipeline_overlay, "
+                "prompt_fields_updates or task_context_updates must carry a value that "
                 "DIFFERS from the current prompt. Describing a change in changes_description "
                 "is not making one, and a key mapped to an empty string — or to what the field "
                 "already says — fills a slot without making a mutation. Emit the new text."
@@ -223,7 +223,7 @@ def build_l1_response_model(
     """``L1GenerateOutput`` validating through renamed wire keys. ``populate_by_name`` is left OFF deliberately: a model
     emitting the original key fails validation and self-penalises, rather than the rename silently half-applying.
 
-    ``parent_text`` is what each override key says on the parent RIGHT NOW, so
+    ``parent_text`` is what each delta key says on the parent RIGHT NOW, so
     ``_reject_empty_mutation`` measures a value rather than a container. REQUIRED, because it
     changes which variants that guard convicts — passing it is the caller declaring which parent
     this round is mutating away from, and a default would decide that from an absent argument."""

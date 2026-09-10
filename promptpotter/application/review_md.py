@@ -372,7 +372,7 @@ def _render_variants_table(
         parts.append("|---|---|---|---|")
         for i, v in enumerate(variants):
             changes = (v.get("changes_description") or "").replace("|", "\\|").strip()[:80]
-            axes = ", ".join(sorted((v.get("pipeline_params_override") or {}).keys()))
+            axes = ", ".join(sorted((v.get("pipeline_overlay") or {}).keys()))
             evidence = _fmt_evidence_cell(v.get("evidence_grounding"))
             parts.append(f"| `C{i + 1}` | {changes} | {axes} | {evidence} |")
     parts.append("")

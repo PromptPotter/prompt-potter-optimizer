@@ -63,7 +63,7 @@ async def execute_round(
         with graceful("RoundStart emit failed"):
             obs.emit(RoundStart(campaign_id=session.state.tracing_campaign_id, round_num=round_num))
 
-    # Narrow the train-split bank to ``sp_budget_ttest`` contested samples via the
+    # Narrow the train-split bank to ``sp_budget_round`` contested samples via the
     # adaptive queue mechanism. Origin + every candidate share this subset so PoBB compares
     # like-for-like.
     if not opt.mechanisms.selection.per_round_resubset or cycle.ruler is None:
@@ -73,7 +73,7 @@ async def execute_round(
         # would then be difficulty-blind and cross-round-incomparable, and freezing
         # concentrates measurements so the ruler warms + locks fastest. Once warm, the
         # branch below thaws to adaptive.
-        scoring_set = select_round_subset(scoring_pool, [], config.sp_budget_ttest)
+        scoring_set = select_round_subset(scoring_pool, [], config.sp_budget_round)
     else:
         # Archive obs are dataset-scoped + abort-residue-free → cross-cycle evidence.
         own = build_observations(cycle.rounds)
@@ -85,7 +85,7 @@ async def execute_round(
         scoring_set = select_round_subset(
             scoring_pool,
             observations,
-            config.sp_budget_ttest,
+            config.sp_budget_round,
             ruler=cycle.ruler,
             anchor_floor=opt.elimination_n_min,
             # The archive fits the θ scale; only THIS cycle's arms are in the race the panel has
@@ -230,7 +230,7 @@ async def execute_round(
     # The 1-to-1 series. Here and nowhere earlier: the election, the ruler extension and the
     # panel gate are all behind us, so no cell this buys can reach a decision this round made —
     # and the fields it writes sit outside `results` / `all_candidate_results`, which is where
-    # the NEXT round's acquisition and ruler read. Bounded by `sp_budget_ttest` on ONE
+    # the NEXT round's acquisition and ruler read. Bounded by `sp_budget_round` on ONE
     # searchpoint, and zero on a held round.
     await measure_overlap(cycle, round_result, scoring_pool)
 

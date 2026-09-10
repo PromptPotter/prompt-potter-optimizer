@@ -212,7 +212,7 @@ class CycleSlice:
     # itself is how a panel and `l1/execute.py` come to disagree about what chose the rows.
     subset_mode: str | None = None
     elimination_n_min: int | None = None
-    sp_budget_ttest: int | None = None
+    sp_budget_round: int | None = None
     max_rounds: int | None = None
     spend_budget_usd: float | None = None
     # A FLOOR while unpriced tokens are outstanding — `SpendRollup` says so, and a panel quoting

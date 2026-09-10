@@ -46,7 +46,7 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
     session = d["env"]
     schema = session.pipeline_schema
     opt = config.optimization
-    sample = config.sp_budget_ttest
+    sample = config.sp_budget_round
 
     ctx.max_rounds = opt.max_rounds or 0
     ctx.patience = opt.l1_patience
@@ -73,7 +73,7 @@ def _init_enter(d: dict[str, Any], ctx: ViewContext) -> InitEnterView:
         max_rounds=ctx.max_rounds,
         patience=ctx.patience,
         n_variants=opt.n_variants,
-        sp_budget_ttest=sample,
+        sp_budget_round=sample,
         dataset_size=len(dataset),
         model=optimizer_model(),
         composite_fitness_formula=full,

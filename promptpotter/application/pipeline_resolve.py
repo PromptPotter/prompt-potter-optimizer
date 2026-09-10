@@ -419,7 +419,7 @@ def _recorded_identity(
 
 def _evolved_overlay(stores: Stores, at: SubjectSpec) -> tuple[dict[str, Any], dict[str, Any]]:
     """The addressed candidate's OWN sparse delta and the COMPLETE config it was measured under,
-    off ONE document read. The delta is ``pipeline_params_override``, never
+    off ONE document read. The delta is ``pipeline_overlay``, never
     ``resolved_pipeline_params`` — read as a delta that stamps every param ``evolved`` on every
     candidate; the complete one is for identity alone. ``stores`` is already the leaf."""
     if at.kind != "candidate" or not at.cycle_id:
@@ -435,7 +435,7 @@ def _evolved_overlay(stores: Stores, at: SubjectSpec) -> tuple[dict[str, Any], d
         for cand in doc.candidate_scores:
             if cand.candidate_id == at.candidate_id:
                 return (
-                    dict(cand.pipeline_params_override or {}),
+                    dict(cand.pipeline_overlay or {}),
                     dict(cand.resolved_pipeline_params or {}),
                 )
     return {}, {}

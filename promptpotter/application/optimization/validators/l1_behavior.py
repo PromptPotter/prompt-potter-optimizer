@@ -62,7 +62,7 @@ def _variant_text_blob(variant: dict[str, Any]) -> str:
     override slot, so scanning the overrides alone leaves a one-sentence blob to match against."""
     parts = [str(variant.get("changes_description") or "")]
     parts.extend(variant_prose_written(variant).values())
-    for value in (variant.get("task_context_override") or {}).values():
+    for value in (variant.get("task_context_updates") or {}).values():
         parts.append(str(value or ""))
     return "\n".join(parts).lower()
 
@@ -127,7 +127,7 @@ def _check_param_scope_discipline(round_dict: dict[str, Any], ctx: ValidatorCont
 
     offenders: list[str] = []
     for i, v in enumerate(variants):
-        pp = v.get("pipeline_params_override") or {}
+        pp = v.get("pipeline_overlay") or {}
         if _touches_param_scope(pp):
             offenders.append(f"C{i + 1}")
     if offenders:
@@ -200,7 +200,7 @@ def _check_not_only_param_variants(
     round_dict: dict[str, Any], ctx: ValidatorContext
 ) -> CheckResult:
     """≥1 variant per round must mutate a prompt-field axis WHEREVER it rides — asking for
-    ``prompt_fields_override`` reads the carrier, which an L4 cycle structurally lacks."""
+    ``prompt_fields_updates`` reads the carrier, which an L4 cycle structurally lacks."""
     variants = extract_l1_variants(round_dict)
     if not variants:
         return CheckResult("not_only_param_variants", True, "no variants emitted")
@@ -374,10 +374,10 @@ def _cited_peaked_axis(
     variant: dict[str, Any], citation: str, field_name: str, ctx: ValidatorContext
 ) -> str | None:
     """Permissive on purpose — the axis name as a substring of the citation, or a key inside
-    ``pipeline_params_override``. Fires only when ``field_name == "axis_memory"``."""
+    ``pipeline_overlay``. Fires only when ``field_name == "axis_memory"``."""
     if not ctx.peaked_axes or field_name != "axis_memory":
         return None
-    pp = variant.get("pipeline_params_override") or {}
+    pp = variant.get("pipeline_overlay") or {}
     flat_pp_axes: set[str] = set()
     if isinstance(pp, dict):
         for node, params in pp.items():
@@ -408,10 +408,10 @@ def _has_peaked_rebut(variant: dict[str, Any], citation: str, ctx: ValidatorCont
     return any(sig in blob for sig in _REBUT_SIGNALS)
 
 
-def _touches_param_scope(pp_override: dict[str, Any]) -> bool:
-    if not isinstance(pp_override, dict):
+def _touches_param_scope(pipeline_overlay: dict[str, Any]) -> bool:
+    if not isinstance(pipeline_overlay, dict):
         return False
-    for key, value in pp_override.items():
+    for key, value in pipeline_overlay.items():
         if key in PARAM_SCOPE_KEYS:
             return True
         if isinstance(value, dict) and _touches_param_scope(value):

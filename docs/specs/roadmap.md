@@ -201,7 +201,7 @@ Parent selection — collapse `elect_round_winner`'s greedy promotion and `selec
 
 ## Captured — pending triage
 
-- **Origin panel that drifts on the δ ruler** — the panel every green bar is read on is the first `sp_budget_ttest` cells C0 answered, fixed for the life of the cycle (`domain/results.py::origin_panel`). The far-out version lets it swap a cell once the ruler has settled, drifting far slower than the acquisition subset the winners are decided on. Zero priority: the fixed panel is what makes the bars comparable, and drift can only cost that.
+- **Origin panel that drifts on the δ ruler** — the panel every green bar is read on is the first `sp_budget_round` cells C0 answered, fixed for the life of the cycle (`domain/results.py::origin_panel`). The far-out version lets it swap a cell once the ruler has settled, drifting far slower than the acquisition subset the winners are decided on. Zero priority: the fixed panel is what makes the bars comparable, and drift can only cost that.
 - **Export / copy from dashboard** — one-click copy of the winning prompt + state on the optimizer box. The artifact is § Application radius's; this is it behind a button.
 - **Origin check-in plain-language recap** — folded into the origin check-in flow; pending review.
 

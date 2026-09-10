@@ -26,7 +26,7 @@ PromptPotter's sequential elimination (Bayesian Posterior-of-Being-Best, ε=0.05
 | Runtime / cost metric | Scoring formula output |
 | Racing test | Bayesian Posterior-of-Being-Best (Russo 2016): joint Normal-CLT posterior over candidate accuracy, MC argmax, stop when `P(c is best) < ε` |
 | Sampling model | L1 generator (LLM) + L1-critique-guided L2/L3 |
-| Termination | `sp_budget_ttest` budget, convergence, or operator interrupt (Ctrl+C) |
+| Termination | `sp_budget_round` budget, convergence, or operator interrupt (Ctrl+C) |
 
 ### Lineage entry: Wilcoxon → PoBB transition
 

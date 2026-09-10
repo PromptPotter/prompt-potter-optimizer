@@ -41,7 +41,7 @@ def _schema_description_block(node: PipelineNode) -> list[str]:
     citable=False,
 )
 def _r_pipeline_param_catalogue(b: InjectionBundle) -> list[Item]:
-    """Pipeline-param menu (name + ≤4-value enum hint) — what L1 picks from for `pipeline_params_override`.
+    """Pipeline-param menu (name + ≤4-value enum hint) — what L1 picks from for `pipeline_overlay`.
     Symmetric with `l1_signal_catalogue` (the menu L2 picks from for L1's layout).
     """
     schema = b.pipeline_schema

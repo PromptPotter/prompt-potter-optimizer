@@ -298,7 +298,7 @@ export interface ScoredCandidate {
   composite_fitness: number;
   total: number;
   evaluators: Record<string, number>;
-  pipeline_params_override: Record<string, unknown> | null;
+  pipeline_overlay: Record<string, unknown> | null;
   resolved_pipeline_params: Record<string, unknown> | null;
   sp_hash: string;
   prompt_fields: Record<string, unknown>;
@@ -626,7 +626,7 @@ export interface LiveDashboardState {
   last_query_elapsed_s: number | null;
   wallclock_serialized_at: string | null;
   n_variants: number;
-  sp_budget_ttest: number;
+  sp_budget_round: number;
   run_limits: RunLimits | null;
   spend: SpendRollup;
   spend_by_round: Record<string, SpendRollup>;
@@ -997,7 +997,7 @@ export interface EditSpread {
   n_edits: number;
 }
 
-/** One unique candidate state — a ``pipeline_params_override`` — aggregated across every */
+/** One unique candidate state — a ``pipeline_overlay`` — aggregated across every */
 export interface RankedEdit {
   state_hash: string;
   label: string;

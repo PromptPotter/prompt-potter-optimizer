@@ -28,40 +28,19 @@ it.
 
 ## Open — multi-arc, no blocker
 
-- **Nothing in CI runs the app — no server is ever started and no browser is ever opened**, so a
-  whole class of first-user breakage ships green. `scripts/smoke_wheel.py` reaches the API through
-  `app.openapi()` and never issues an HTTP request, so a 500 inside a router or a static mount
-  resolving to nothing passes both wheel jobs; there is no Playwright suite anywhere, and
+- **No BROWSER is ever opened in CI**, so a whole class of first-user breakage ships green.
+  `scripts/smoke_wheel.py` now serves the wheel over a real socket, but nothing navigates a route:
+  there is no Playwright suite anywhere, and
   `webapp/components/onboarding/{AccessGate,ConsentGate,AllowanceSpent,WelcomeLockoutModal}.tsx` —
   the four surfaces a brand-new account meets before it sees anything else — have no test of any
-  kind. Vitest is jsdom units of primitives and pure derivations; nothing renders `app/page.tsx` or
-  navigates a route. Three arcs, and the first is worth more than the other two: (1) start uvicorn
-  from the built wheel and fetch `/` plus one API read; (2) a scripted browser walk of the
-  zero-campaign path, asserting console-clean; (3) coverage on the four onboarding components.
-  **Re-test:** `grep -rn "openapi()\|uvicorn" scripts/smoke_wheel.py` — if it still never starts a
-  server, arc 1 is open; `ls webapp/**/*.spec.ts webapp/e2e 2>/dev/null` empty means arcs 2–3 are.
+  kind. Vitest is jsdom units of primitives and pure derivations; nothing renders `app/page.tsx`.
+  Two arcs: (1) a scripted browser walk of the zero-campaign path, asserting console-clean; (2)
+  coverage on the four onboarding components.
+  **Re-test:** `ls webapp/**/*.spec.ts webapp/e2e 2>/dev/null` — empty means both are open.
 
 - **The mobile pass was verified at 375/1440 on chat/dashboard/files/verify only.** Unswept: 393,
   412, 768 and landscape; login, onboarding, l4, account modal, candidates, lineage. No Lighthouse
   number was recorded, so there is no before/after. Action: sweep + record one pass.
-
-- **THREE numbers are computed in the browser, against § Scoring authority** — each verified by
-  tracing, not suspected, and **every re-check has moved a target, so fix the aim before the code**:
-  the `cached_samples / n` division now lives in `candidates/series.ts` (it was in
-  `FitnessChart.tsx`, and before that was filed against `CandidatesCard.tsx`); the `θ/$` chip is
-  minted in `shell/RemoteControl.tsx`, NOT `chat/ChatPane.tsx`. **A fourth was struck, not fixed:**
-  the searchpoint drill-in never subtracted anything — it renders served `matchedParentAccuracy` and
-  served `matchedParentLift` with its interval. The rest: `HardSamplesHeatmap.tsx` folds per-sample
-  measurements into a mean and thresholds at **`>= 0.5`**, matching neither
-  `lib/fitness.ts::HIT_THRESHOLD = 1.0` nor `sample-walk.ts::sampleBucket`'s 0/1 boundaries — so the
-  mini heat strip and the table row beneath it can colour one sample differently on a graded scorer,
-  while served `series.mean_fitness` is already read by two sibling files and `archivePerSample` is
-  already a prop; `dashboard/scoring/OuterSignalPanel.tsx::leadingArm` falls back to a browser-side
-  argmax over `composite_fitness` where the engine elects on **θ**, disagreeing with
-  `forest-layout.ts::pickWinner` (deliberately no-fallback, its comment says why) exactly on HELD
-  rounds — so it can draw a lift interval attributed to an arm the round never crowned; and
-  `shell/RemoteControl.tsx` mints `abilityDelta / usedUsd` as a headline `θ/$` KPI chip. All three
-  need **serving**, not deleting, so each wants a backend field first.
 
 - **The same seam, the other direction: a browser predicate whose server twin never returns its
   verdict — and it has been closed once already, wrongly.**
@@ -86,7 +65,10 @@ it.
   and `OPTIMIZER_RESPONSE_MODELS`, and `application/optimization/CLAUDE.md` already splits the
   conceptual family from the structural one, which leaves only L4 outside, at the connector seam.
   So the question is not whether three strangers should converge; it is whether the recursion
-  belongs inside the ladder it recurses on. That one has never been asked.
+  belongs inside the ladder it recurses on. **Asked and DEFERRED by the operator**, on the ground
+  that it is structural while what M13 still needs is empirical — so this is held by decision, not
+  by nobody having looked. **Re-test:** the preprint ships (`.scratch/m13-preprint.md` carries the
+  stage state); until then, do not open it and do not re-file it as unasked.
 
 - **FIVE node kinds spell one concept — "runs a model".** `domain/pipeline_schema.py::NodeKind`
   closed the vocabulary and named the families, which is what makes the redundancy countable rather
@@ -96,8 +78,8 @@ it.
   containment, not a fix — the five stay declarable and a sixth is one connector away. Not a rename:
   `runs_llm` reads `GENERATION` *specifically* while `_derive_node_kind` treats all five alike, so
   collapsing them decides which nodes newly carry the model axis, and every `datasets/*/pipeline.yaml`
-  is operator-curated on-disk config (same standing as the `sp_budget_ttest` entry below — the
-  operator's call, not a sweep's). Action: settle whether the survivor is `generation` or `llm`,
+  is operator-curated on-disk config, so the survivor is the operator's call and not a sweep's.
+  Action: settle whether the survivor is `generation` or `llm`,
   then rewrite writer→reader in one commit. **Re-test:** `grep -rh "^    type: " datasets/*/pipeline.yaml
   promptpotter/assets/*/*/pipeline.yaml | sort | uniq -c` — fewer than five thinking spellings means
   someone started, and `NodeKind` names what is left.
@@ -171,16 +153,6 @@ it.
   REACHES on the RIGHT, load-bearing column = what is SHARED with campaigns outside the selection,
   because an `sp_hash` is not owned by a campaign.
 
-**Live L1 round (operator-gated):**
-- **`*_override → *_updates` L1 delta-key rename.** `prompt_fields_override` /
-  `task_context_override` / `pipeline_params_override` / `pp_override` are merges, not replacements,
-  but named "override". **Decision (settle first):** unify the pipeline delta to
-  **`pipeline_overlay`** everywhere (kills the short/long two-name tax); the prompt/context deltas
-  become `*_updates`. Rename writer→reader in one commit (`dispatch/schemas.py::L1Variant` is the
-  source of truth — the LLM contract auto-propagates). Full site map: grep `*_override`. **Blocker:**
-  invalidates on-disk cycles (round-file key + optimizer structured-output contract) — verify against
-  a FRESH cycle that completes round 1, not a resume.
-
 **Cross-repo (TermNorm sibling at `OfficeAddinApps/TermNorm-excel/backend-api`):**
 - **The TermNorm `/version` endpoint** is what remains genuinely owed on that side; this repo then
   bumps `termnorm.py::_EXPECTED_REVISION`. The per-request `model` beside it is now a nicety, not a
@@ -242,28 +214,20 @@ longer "is a feature allowed" but "does the preprint need it", and these do not:
   `TokenUsageRecord` has no unknown-count dimension, and the account gate leans on a count always
   being knowable.
 
-**A name that stopped describing what it names:**
-- **`sp_budget_ttest` names a t-test nothing has run since 2026-05-01.** Paired t-test → Wilcoxon
-  (`689d5dec`) → Bayesian PoBB (`3fbaf215`); the knob survived all three. Bigger than it reads: 81
-  sites, and it is a *served wire field* and a declared request-schema key, not only a config knob.
-  Live across `datasets/*/campaign.yaml`, `scripts/smoke_campaign.py`,
-  `.claude/skills/potter-run/SKILL.md`, `test_numerics.py`, `test_integrity.py`. Action: rename
-  writer→reader in one commit. Blocker: it is an on-disk config key under operator-curated
-  `datasets/` — the rename is the operator's call, not a sweep's.
-
 **Needs a live run, not a decision:**
 - **`_rebank_on_branch`'s re-bank has never been observed** — fixed to take each corrected round
   through the whole ingress, but the cycle it was measured on went with a store wipe, so the fix is
   reasoned, not seen. Repair a fork; confirm each corrected round carries its own `round:complete` on
   the branch.
 - **The `evolved` and `seed` provenance layers have never been stamped by real data.**
-  `pipeline_resolve.py::_evolved_overlay` reads a candidate's sparse `pipeline_params_override`
-  and the seed layer reads the cycle seed's `pipeline_overlay`; every candidate on this workspace
+  `pipeline_resolve.py::_evolved_overlay` reads the CANDIDATE's `pipeline_overlay` and the seed
+  layer the CYCLE SEED's — one field name, three carriers, distinguished by the `source` each
+  layer stamps (`campaign` / `seed` / `evolved`); every candidate on this workspace
   is prompt-only, so both feeds are dead here and only the merge primitive beneath them is
   covered (`tests/test_pipeline_resolve.py`). A campaign that actually MOVES a node param
   exercises both, and the trap they guard is documented at `_evolved_overlay`: reading
   `resolved_pipeline_params` instead would stamp every param `evolved` at once.
-  **Re-test:** `grep -rho '"pipeline_params_override": [^,}]*'
+  **Re-test:** `grep -rho '"pipeline_overlay": [^,}]*'
   .promptpotter/projects/*/campaigns/*/cycles/*/rounds/*.json | sort -u` — while the only
   distinct value is `null`, no live row has reached either layer.
 

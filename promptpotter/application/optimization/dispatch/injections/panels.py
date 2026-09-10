@@ -750,7 +750,7 @@ def _candidate_mutation(
 ) -> list[tuple[str, str]]:
     """Values are returned UNCLIPPED — the render clips for the eye, and clipping here starves any
     reader needing the whole value. The delta rule is the shared ``candidate_delta`` dedup hashes."""
-    pf, pp = candidate_delta(cand.prompt_fields, parent, cand.pipeline_params_override, parent_pp)
+    pf, pp = candidate_delta(cand.prompt_fields, parent, cand.pipeline_overlay, parent_pp)
     pp_nested: dict[str, Any] = {}
     for (node, param), value in pp.items():
         pp_nested.setdefault(node, {})[param] = value
@@ -821,9 +821,7 @@ def _r_mutation_memory(b: InjectionBundle) -> list[Item]:
             attempts.append(
                 (
                     f"{scored} · {'; '.join(mutation)}",
-                    candidate_idea(
-                        cand.prompt_fields, parent, cand.pipeline_params_override, parent_pp
-                    ),
+                    candidate_idea(cand.prompt_fields, parent, cand.pipeline_overlay, parent_pp),
                 )
             )
         if attempts:
@@ -1015,7 +1013,7 @@ def _r_sample_provenance(b: InjectionBundle) -> list[Item]:
     if not n:
         return []
     unit = b.measured_unit
-    budget = f" of a {cs.sp_budget_ttest}-{unit} budget" if cs.sp_budget_ttest else ""
+    budget = f" of a {cs.sp_budget_round}-{unit} budget" if cs.sp_budget_round else ""
     rows = [f"{unit_count(n, unit)} graded this round{budget}"]
     if cs.subset_mode == "adaptive":
         rows.append(

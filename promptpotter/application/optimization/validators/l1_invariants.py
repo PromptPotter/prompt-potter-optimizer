@@ -72,9 +72,7 @@ def lost_ideas(prior_rounds: Sequence[Any]) -> list[tuple[int, frozenset[str]]]:
                 cand.accuracy > cand.matched_parent_accuracy
             ):
                 continue
-            if fp := candidate_idea(
-                cand.prompt_fields, parent, cand.pipeline_params_override, parent_pp
-            ):
+            if fp := candidate_idea(cand.prompt_fields, parent, cand.pipeline_overlay, parent_pp):
                 out.append((rr.round, fp))
     return out
 
@@ -108,7 +106,7 @@ def detect_invariants(
         pf, pp = candidate_delta(
             {f: getattr(child, f) for f in PROMPT_STRING_FIELDS},
             {f: getattr(parent_opt_sp, f) for f in PROMPT_STRING_FIELDS},
-            cp.pipeline_params_override,
+            cp.pipeline_overlay,
             parent_pp,
         )
         pf_delta = tuple(pf.items())
@@ -151,7 +149,7 @@ def detect_invariants(
         fp = candidate_idea(
             {f: getattr(child, f) for f in PROMPT_STRING_FIELDS},
             {f: getattr(parent_opt_sp, f) for f in PROMPT_STRING_FIELDS},
-            cp.pipeline_params_override,
+            cp.pipeline_overlay,
             parent_pp,
         )
         echo = next(

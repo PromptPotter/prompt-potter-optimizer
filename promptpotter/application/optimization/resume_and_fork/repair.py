@@ -289,7 +289,7 @@ async def repair_incomplete_rounds(
             t.all_candidate_results[cs.candidate_id] = results
             t.candidate_scores[i] = build_score_report(
                 cand_osp,
-                cs.pipeline_params_override,
+                cs.pipeline_overlay,
                 scores,
                 results,
                 attempted,

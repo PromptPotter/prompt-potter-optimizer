@@ -427,7 +427,7 @@ async def prepare_scoring_context(
     # C0 announces itself exactly as an L1 candidate does — same call, same two emissions, so
     # round 0 carries a walk axis and a readable searchpoint like any other round. `n_priors=0`
     # is a fact rather than a default: C0 is the first arm, so nothing has been measured for
-    # PoBB to catch up on, and there is no `pp_override` because nothing proposed a delta.
+    # PoBB to catch up on, and there is no `pipeline_overlay` because nothing proposed a delta.
     if listener is not None:
         listener.announce_candidate(
             0,

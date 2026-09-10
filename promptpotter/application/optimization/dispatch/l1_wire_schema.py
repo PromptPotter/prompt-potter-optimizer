@@ -119,9 +119,9 @@ def _nested_param_property(node: PipelineNode, param: str) -> dict[str, Any] | N
 # Which panel shows the CURRENT value of each writable slot; a slot whose panel produced nothing is
 # withdrawn. Why that rule and what it cost before it existed: `optimization/CLAUDE.md` § L1.
 _SLOT_PANEL: dict[str, str] = {
-    "prompt_fields_override": "rendered_prompt",
-    "task_context_override": "task_context",
-    "pipeline_params_override": "pipeline_param_catalogue",
+    "prompt_fields_updates": "rendered_prompt",
+    "task_context_updates": "task_context",
+    "pipeline_overlay": "pipeline_param_catalogue",
 }
 
 
@@ -149,11 +149,11 @@ def build_l1_response_schema(
     variant_items = inlined["properties"]["variants"]["items"]
     variant_props = variant_items["properties"]
 
-    # 1. pipeline_params_override — per-node tunables.
-    pp_override = variant_props["pipeline_params_override"]
-    pp_override.setdefault("properties", {})
-    pp_override["additionalProperties"] = False
-    pp_properties = pp_override["properties"]
+    # 1. pipeline_overlay — per-node tunables.
+    pipeline_overlay = variant_props["pipeline_overlay"]
+    pipeline_overlay.setdefault("properties", {})
+    pipeline_overlay["additionalProperties"] = False
+    pp_properties = pipeline_overlay["properties"]
 
     # The emittable per-node param surface is `node_param_keys()` — the ONE source
     # the catalogue + validator share. It strips `provider`/`route_order`
@@ -216,18 +216,18 @@ def build_l1_response_schema(
     # The same rule, second condition (below, off `_SLOT_PANEL`): never offer a slot L1 cannot
     # OBSERVE.
     if pipeline_schema.prompt_node_names():
-        pf_override = variant_props["prompt_fields_override"]
-        pf_override["properties"] = {field: {"type": "string"} for field in PROMPT_STRING_FIELDS}
-        pf_override["additionalProperties"] = False
+        pf_updates = variant_props["prompt_fields_updates"]
+        pf_updates["properties"] = {field: {"type": "string"} for field in PROMPT_STRING_FIELDS}
+        pf_updates["additionalProperties"] = False
 
-        tc_override = variant_props["task_context_override"]
-        tc_override["properties"] = {
+        tc_updates = variant_props["task_context_updates"]
+        tc_updates["properties"] = {
             field: {"type": "string"} for field in sorted(TASK_CONTEXT_OVERRIDES)
         }
-        tc_override["additionalProperties"] = False
+        tc_updates["additionalProperties"] = False
     else:
-        del variant_props["prompt_fields_override"]
-        del variant_props["task_context_override"]
+        del variant_props["prompt_fields_updates"]
+        del variant_props["task_context_updates"]
 
     for slot, panel in _SLOT_PANEL.items():
         if panel in silent_panels:

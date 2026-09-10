@@ -277,7 +277,7 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
                     # number through. Overriding `scoring` composes evaluators on top of it.
                     "scoring": self.scoring,
                     "headline_metric": "accuracy",
-                    "sp_budget_ttest": self.loop.samples_per_round,
+                    "sp_budget_round": self.loop.samples_per_round,
                     "optimization": self.loop._optimization(),
                 }
             },

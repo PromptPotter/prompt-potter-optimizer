@@ -33,13 +33,13 @@ def _check_sp_budget_vs_dataset(
     config: CampaignConfig, dataset: list[Sample]
 ) -> PreflightWarning | None:
     # Only the PER-ROUND budget is checked against the bank. An origin budget above the
-    # bank is not a misconfiguration: `sp_budget_origin` defaults ABOVE `sp_budget_ttest`
+    # bank is not a misconfiguration: `sp_budget_origin` defaults ABOVE `sp_budget_round`
     # (DEFAULT_ORIGIN_BUDGET), `sample_dataset` is a prefix slice, and "score the origin
     # on everything there is" is exactly what a wide-origin default wants on a small bank.
     # Warning on it told every small-bank dataset to lower a knob nobody set, on every run.
-    # `sp_budget_ttest > bank` IS a real finding — it means the adaptive queue mechanism
+    # `sp_budget_round > bank` IS a real finding — it means the adaptive queue mechanism
     # has no bank to select from and every round re-scores the same full set.
-    n = config.sp_budget_ttest
+    n = config.sp_budget_round
     m = len(dataset)
     if m > 0 and n > m:
         return PreflightWarning(
@@ -48,7 +48,7 @@ def _check_sp_budget_vs_dataset(
             detail=(
                 f"The bank (full train split) has only {m} samples, so every round "
                 f"scores on all {m} and `select_round_subset` has nothing to select "
-                f"from — the adaptive queue mechanism is inert. Lower sp_budget_ttest "
+                f"from — the adaptive queue mechanism is inert. Lower sp_budget_round "
                 f"to below {m}, or grow the dataset."
             ),
         )
@@ -106,7 +106,7 @@ def _check_config_couplings(config: CampaignConfig) -> list[PreflightWarning]:
 def _check_task_context_present(framing: Mapping[str, Any] | None) -> PreflightWarning | None:
     """The operator's frozen framing is the SOLE source of l1_generate's ``task_intent`` slot, and
     an empty one renders as nothing at all — no header, no placeholder — so the slot falls back to
-    the static template and the wire schema drops ``task_context_override`` with it. Decidable
+    the static template and the wire schema drops ``task_context_updates`` with it. Decidable
     before a cell is bought, and afterwards visible only as ``review.md``'s ``_(empty)_``."""
     if has_framing(framing):
         return None

@@ -19,7 +19,7 @@ campaign_config:
     # `per_cell` rather than folding it into `per_sample`: a correct-but-expensive answer must stay
     # a HIT, or L1 is sent to repair reasoning that was right.
     per_cell: max(0.0, min(1.0, fitness * 1546.0 / (1546.0 + 0.5 * max(0.0, tokens - 1546.0))))
-  sp_budget_ttest: 34
+  sp_budget_round: 34
   exclude_nodes: []
   pipeline_overlay: {}
   dataset_split:

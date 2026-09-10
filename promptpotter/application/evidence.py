@@ -221,7 +221,7 @@ class EffectProvenance(StrictModel):
 
 
 class RankedEdit(StrictModel):
-    """One unique candidate state — a ``pipeline_params_override`` — aggregated across every
+    """One unique candidate state — a ``pipeline_overlay`` — aggregated across every
     occurrence in the selection. An L1 target-prompt edit on an ordinary campaign, an
     optimizer-prompt edit on the recursion; the arithmetic does not care which.
 
@@ -1137,7 +1137,7 @@ def _config_of(point: _ChainPoint) -> dict[str, str]:
     `build_candidate_flat` already owns: ``node.param`` from the RESOLVED config, then the bare
     prompt fields on top.
 
-    Resolved, never the sparse ``pipeline_params_override``: a delta is relative to a parent, and
+    Resolved, never the sparse ``pipeline_overlay``: a delta is relative to a parent, and
     two searchpoints from different campaigns share none — lined up on their deltas, a panel
     would show two lists with nothing in common and call it a comparison.
 
@@ -1739,7 +1739,7 @@ def _accumulate_round(
         cand_id = str(cand.get("candidate_id", ""))
         if not cand_id:
             continue
-        prompt_state = _coerce_state(cand.get("pipeline_params_override"))
+        prompt_state = _coerce_state(cand.get("pipeline_overlay"))
         state_hash = _state_hash(prompt_state)
         if state_hash == _ORIGIN_HASH:
             continue  # the no-op arm anchors others; it is not itself a ranked candidate

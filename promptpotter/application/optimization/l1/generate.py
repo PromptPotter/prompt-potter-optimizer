@@ -90,8 +90,8 @@ def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> l
             "label": candidate_label(round_num, i),
             "changes_description": cp.opt_sp.lineage.changes_description or "",
         }
-        if cp.pipeline_params_override:
-            summary["pipeline_params_override"] = cp.pipeline_params_override
+        if cp.pipeline_overlay:
+            summary["pipeline_overlay"] = cp.pipeline_overlay
         if prompt_fields:
             summary["prompt_fields"] = prompt_fields
         # Third L1 mutation slot — lets SP-diff render task_context-only candidates as a mutation,
@@ -266,9 +266,9 @@ async def l1_generate(
         # the one validation producer (``validate_overrides`` via ``parse_population``), which
         # records it as a non-fatal ``hallucinated_node`` wound (routed to l1_wounds), and
         # ``merge_pipeline_params`` strips it from the wire.
-        prompt_changes = dict(v.prompt_fields_override)
-        tc_changes = dict(v.task_context_override)
-        pipeline_params_override = v.pipeline_params_override
+        prompt_changes = dict(v.prompt_fields_updates)
+        tc_changes = dict(v.task_context_updates)
+        pipeline_overlay = v.pipeline_overlay
         # Override validation is deferred to parse_population — one producer of truth.
         evidence = _parse_evidence_grounding(v.evidence_grounding)
         child = opt_sp.mutate(
@@ -282,8 +282,8 @@ async def l1_generate(
         population.append(
             CandidateProposal(
                 opt_sp=child,
-                pipeline_params_override=pipeline_params_override,
-                prompt_fields_override=prompt_changes,
+                pipeline_overlay=pipeline_overlay,
+                prompt_fields_updates=prompt_changes,
             )
         )
 

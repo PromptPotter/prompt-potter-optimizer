@@ -129,7 +129,7 @@ async def score_population(
     dataset = [samples_by_id[sid] for sid in order]
 
     for idx, opt_sp_c in enumerate(population):
-        pipeline_params_override = proposals[idx].pipeline_params_override or None
+        pipeline_overlay = proposals[idx].pipeline_overlay or None
         # Single merge site: build the candidate's frozen searchpoint once and
         # share it with both consumers — the in-flight dashboard seed (resolved
         # config-only) and ``score_one_candidate`` (scoring + round-file report).
@@ -156,14 +156,14 @@ async def score_population(
             resolved_pipeline_params=candidate_sp.config_params,
             sample_order=order,
             n_priors=len(elim_check.priors_by_sample),
-            pp_override=pipeline_params_override,
+            pipeline_overlay=pipeline_overlay,
         )
 
         cr_result = await score_one_candidate(
             idx=idx,
             opt_sp_c=opt_sp_c,
             candidate_sp=candidate_sp,
-            pipeline_params_override=pipeline_params_override,
+            pipeline_overlay=pipeline_overlay,
             cycle=cycle,
             dataset=dataset,
             n_total=n,

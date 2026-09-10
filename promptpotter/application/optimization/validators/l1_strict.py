@@ -64,14 +64,14 @@ def _matches_declared_type(value: Any, declared: str) -> bool:
 
 
 def validate_overrides(
-    pipeline_params_override: dict[str, dict[str, Any]],
+    pipeline_overlay: dict[str, dict[str, Any]],
     pipeline_schema: PipelineSchema,
 ) -> list[ValidationFailure]:
     """The deterministic twin of the emitted schema's constraints: both layers run because not
     every provider enforces structured output with full fidelity."""
     failures: list[ValidationFailure] = []
     emittable = pipeline_schema.node_param_keys()
-    for node_name, node_params in pipeline_params_override.items():
+    for node_name, node_params in pipeline_overlay.items():
         if not isinstance(node_params, dict):
             continue
         node = pipeline_schema.get_node(node_name)
@@ -190,7 +190,7 @@ def _check_l1_prompt_blocks_in_library(
     prompt_block_catalogue: str = "guidance",
     **_: Any,
 ) -> ValidatorOutcome | None:
-    """Reads the round's ``prompt_fields_override`` — the DELTA, not the resulting OSP: the parent's
+    """Reads the round's ``prompt_fields_updates`` — the DELTA, not the resulting OSP: the parent's
     fields are the dataset's authored origin, so checking the merge rejects every round-1 candidate."""
     if prompt_block_catalogue != "restrict" or not source_output:
         return None

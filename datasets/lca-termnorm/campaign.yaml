@@ -1,7 +1,7 @@
 campaign_config:
   dataset_name: train
   scoring: rr(ground_truth_rank)
-  sp_budget_ttest: 20
+  sp_budget_round: 20
   exclude_nodes: []
   pipeline_overlay:
     web_search:

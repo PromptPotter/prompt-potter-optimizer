@@ -173,7 +173,7 @@ Symptom: round N+1 exhibits the exact failure round N's critique called out. Roo
 
 #### Surface-only changes — rephrasing without substantive intent
 
-Symptom: identical `pipeline_params_override`; only prompt text varies cosmetically; composite ≈ parent. Root cause: the template asks for "improvements" without forcing the candidate to declare its mutation surface. Edit: require `changes_description` to name the axis moved and the effect expected, grounded in `mutation_memory` or `axis_memory`.
+Symptom: identical `pipeline_overlay`; only prompt text varies cosmetically; composite ≈ parent. Root cause: the template asks for "improvements" without forcing the candidate to declare its mutation surface. Edit: require `changes_description` to name the axis moved and the effect expected, grounded in `mutation_memory` or `axis_memory`.
 
 #### Pipeline-params overreach — touching locked axes
 
@@ -218,7 +218,7 @@ the registry itself (`optimization/validators/l1_strict.py`) plus `validate_over
   check, restate, validate) — ≥ N/2 candidates carrying one → `theme_mode_collapse`. Nothing enforces
   either, and `idea_fingerprint` is blind to both (see § semantic restatement).
 - **Format integrity.** LaTeX escapes survive (`\boxed{N}`, not `oxed{N}`); no template placeholders
-  (`{x}`, `[insert]`, `<query>`) in prompt-field values; `pipeline_params_override` keys are real node
+  (`{x}`, `[insert]`, `<query>`) in prompt-field values; `pipeline_overlay` keys are real node
   `param_keys` (`L1_SCHEMA_COMPLIANCE` catches invalid ones).
 
 **Report violations as a checklist at the TOP of the reply, before any narrative** — the glyph makes it

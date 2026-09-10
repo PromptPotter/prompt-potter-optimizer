@@ -59,7 +59,7 @@ def _build_config(
     return {
         "dataset_name": dataset,
         "scoring": _infer_scoring(dataset),
-        "sp_budget_ttest": samples,
+        "sp_budget_round": samples,
         "exclude_nodes": [],
         "pipeline_overlay": {},
         "optimization": {
@@ -208,7 +208,7 @@ def _parse_args() -> argparse.Namespace:
         required=True,
         help="Dataset name any loader resolves (see loadable_dataset_names())",
     )
-    p.add_argument("--samples", type=int, default=5, help="Queries per candidate (sp_budget_ttest)")
+    p.add_argument("--samples", type=int, default=5, help="Queries per candidate (sp_budget_round)")
     p.add_argument("--variants", type=int, default=3, help="L1 candidates per round")
     p.add_argument("--rounds", type=int, default=1, help="max_rounds")
     p.add_argument("--patience", type=int, default=1, help="l1_patience (consecutive stalls)")

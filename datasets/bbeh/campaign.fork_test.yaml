@@ -1,7 +1,7 @@
 campaign_config:
   dataset_name: bbeh
   scoring: exact_match(predicted, ground_truth)
-  sp_budget_ttest: 5
+  sp_budget_round: 5
   exclude_nodes: []
   pipeline_overlay: {}
   optimization:

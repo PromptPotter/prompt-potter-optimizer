@@ -869,7 +869,7 @@ def test_earned_blocks_gate_on_credible_lift_and_task_fit() -> None:
     """The earned-block library must never feed the optimizer a noise-win or a cross-task block
     — both are wrong-content-forward with no error. Built from real ``ScoredCandidate.model_dump()``
     so it rides the SAME serialization a round file carries (the earlier fabricated
-    ``prompt_fields_override`` shape the model never emits made this test green while the feature
+    ``prompt_fields_updates`` shape the model never emits made this test green while the feature
     mined nothing): the changed reusable field is the candidate's RESOLVED ``prompt_fields`` diffed
     against the round's parent ``prompt_fields``, kept only when ``mean_fitness_ci_lo`` clears the
     matched parent, keyed by the run's answer-space signature so a logic block never reaches a
@@ -1050,7 +1050,7 @@ def test_emittable_params_are_declared_and_an_invented_one_is_rejected() -> None
     schema = _pipeline_schema("promptpotter-self")
     emitted = build_l1_response_schema(schema, citable_fields=())["properties"]["variants"][
         "items"
-    ]["properties"]["pipeline_params_override"]["properties"]
+    ]["properties"]["pipeline_overlay"]["properties"]
     for node, keys in schema.node_param_keys().items():
         assert set(emitted[node]["properties"]) <= keys, (
             f"{node}: the schema declares a key `validate_overrides` rejects as unknown_param"
@@ -1081,7 +1081,7 @@ def test_l1_is_offered_no_slot_whose_panel_it_never_saw() -> None:
 
     Live on `sealqa-longseal-12` r1, launched unframed so the `task_context` panel produced
     nothing: both variants named `answer_format` and `instruction` in their descriptions, emitted
-    `prompt_fields_override: {}`, and wrote `task_context_override` — whose two keys splice around
+    `prompt_fields_updates: {}`, and wrote `task_context_updates` — whose two keys splice around
     `problem_description`, neither field they named. The round scored two arms and every artifact
     that outlives it — the ledger, the SP diff table, `round_0001.json` — records the field the
     model named rather than the one it changed, so no later reader can attribute the result.
@@ -2766,7 +2766,7 @@ def test_the_parent_rescore_ticks_the_run_without_minting_a_candidate(tmp_path: 
         session_id="s",
         l1_patience=3,
         n_variants=2,
-        sp_budget_ttest=20,
+        sp_budget_round=20,
         headline_metric="composite",
     )
 

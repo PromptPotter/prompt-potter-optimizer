@@ -19,9 +19,9 @@ import { fmtValue } from "@/lib/format";
 interface Variant {
   evidence_grounding?: { field?: string; citation?: string } | null;
   targets_cluster?: string | null;
-  pipeline_params_override?: Record<string, unknown> | null;
-  prompt_fields_override?: Record<string, unknown> | null;
-  task_context_override?: Record<string, unknown> | null;
+  pipeline_overlay?: Record<string, unknown> | null;
+  prompt_fields_updates?: Record<string, unknown> | null;
+  task_context_updates?: Record<string, unknown> | null;
   changes_description?: string | null;
 }
 
@@ -108,9 +108,9 @@ export function L1Variants({ variants }: { variants: Variant[] }) {
         </div>
       )}
 
-      <Overrides title="Prompt changes" map={shown.prompt_fields_override} />
-      <Overrides title="Param changes" map={shown.pipeline_params_override} />
-      <Overrides title="Task context" map={shown.task_context_override} />
+      <Overrides title="Prompt changes" map={shown.prompt_fields_updates} />
+      <Overrides title="Param changes" map={shown.pipeline_overlay} />
+      <Overrides title="Task context" map={shown.task_context_updates} />
     </section>
   );
 }

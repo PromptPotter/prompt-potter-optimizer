@@ -25,7 +25,7 @@ const SHOWN_ELSEWHERE = new Set([
 ]);
 
 const KNOWN_ORDER = [
-  "origin_acc", "current_acc", "n_variants", "sp_budget_ttest",
+  "origin_acc", "current_acc", "n_variants", "sp_budget_round",
   "total_backend_calls", "error_count", "degraded_count", "backend_retry_count",
   "state_since", "stop_reason",
 ];

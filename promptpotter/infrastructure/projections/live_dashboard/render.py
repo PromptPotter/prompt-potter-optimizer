@@ -188,7 +188,7 @@ def build_l1_score_block(
                 "changes_description": (
                     cand.get("changes_description") or served.get("changes_description") or ""
                 ),
-                "pp_override": cand.get("pp_override"),
+                "pipeline_overlay": cand.get("pipeline_overlay"),
                 # The evolved prompt (OptSearchPoint.prompt_field_dict() shape).
                 # Live peer of round_NNNN.json::candidate_scores[].prompt_fields
                 # — `liveCandidateSearchPoint` reads it for steer-fork seeding.

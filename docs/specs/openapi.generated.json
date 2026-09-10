@@ -4365,7 +4365,7 @@
       },
       "RankedEdit": {
         "additionalProperties": false,
-        "description": "One unique candidate state — a ``pipeline_params_override`` — aggregated across every\noccurrence in the selection. An L1 target-prompt edit on an ordinary campaign, an\noptimizer-prompt edit on the recursion; the arithmetic does not care which.\n\nIt pools by EDIT IDENTITY, so it earns its keep where the same edit recurs across campaigns.\nThat is routine on the recursion and rarer elsewhere, where most rows will carry one campaign's\ncells and an interval to match.",
+        "description": "One unique candidate state — a ``pipeline_overlay`` — aggregated across every\noccurrence in the selection. An L1 target-prompt edit on an ordinary campaign, an\noptimizer-prompt edit on the recursion; the arithmetic does not care which.\n\nIt pools by EDIT IDENTITY, so it earns its keep where the same edit recurs across campaigns.\nThat is routine on the recursion and rarer elsewhere, where most rows will carry one campaign's\ncells and an interval to match.",
         "properties": {
           "anchor_effect": {
             "title": "Anchor Effect",

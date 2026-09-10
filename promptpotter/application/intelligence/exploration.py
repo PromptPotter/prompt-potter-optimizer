@@ -138,7 +138,7 @@ _EB_S0_SQ = 1.0
 # as collapse.
 _MAX_NEWTON_STEP = 1.0
 
-# Panel slots held for the cells δ is least sure of, out of `sp_budget_ttest`; `_with_ruler_learning`
+# Panel slots held for the cells δ is least sure of, out of `sp_budget_round`; `_with_ruler_learning`
 # states what each end costs. A first estimate off one ruler, worth re-fitting on a second dataset.
 _RULER_LEARNING_SLOTS = 4
 

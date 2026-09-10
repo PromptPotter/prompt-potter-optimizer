@@ -307,7 +307,7 @@ def inner_instrument_config(
     po[llm_node] = node
     return base.model_copy(
         update={
-            "sp_budget_ttest": min(spec.n_samples, n_scored),
+            "sp_budget_round": min(spec.n_samples, n_scored),
             "sp_budget_origin": n_scored,
             "optimization": base.optimization.model_copy(update=opt_update),
             "pipeline_overlay": po,

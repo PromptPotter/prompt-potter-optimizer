@@ -22,7 +22,7 @@ const L1_GENERATE: NodeOutputSchema = {
               anyOf: [{ $ref: "#/$defs/VariantEvidenceGrounding" }, { type: "null" }],
               default: null,
             },
-            prompt_fields_override: {
+            prompt_fields_updates: {
               type: "object",
               additionalProperties: { type: "string" },
               description: "Top-level prompt-template fields.",
@@ -70,7 +70,7 @@ describe("outputContract", () => {
       "variants.evidence_grounding",
       "variants.evidence_grounding.field",
       "variants.evidence_grounding.citation",
-      "variants.prompt_fields_override",
+      "variants.prompt_fields_updates",
       "variants.changes_description",
     ]);
   });
@@ -87,7 +87,7 @@ describe("outputContract", () => {
   it("carries the description and the machine limit the model is held to", () => {
     const rows = outputContract(L1_GENERATE);
     expect(rows.find((r) => r.key === "variants.changes_description")?.limit).toBe("≤320 chars");
-    expect(rows.find((r) => r.key === "variants.prompt_fields_override")?.description).toBe(
+    expect(rows.find((r) => r.key === "variants.prompt_fields_updates")?.description).toBe(
       "Top-level prompt-template fields.",
     );
     // Required by the element's OWN list, one level down — not the root's.

@@ -20,7 +20,7 @@ from promptpotter.shared import truncate
 from promptpotter.shared.composite import render_composite_fitness_oneliner
 
 
-def fmt_pp_override(pp: dict[str, Any] | None) -> str:
+def fmt_pipeline_overlay(pp: dict[str, Any] | None) -> str:
     """Render a nested pipeline_params override. A JOIN over the canonical ``flatten_sp_summary``, never a second implementation — the
     hand-rolled twin carried its own float formatter and flattened only one level."""
     return "  ".join(f"{k}: {v}" for k, v in flatten_sp_summary(pp).items())
@@ -35,11 +35,11 @@ def fmt_individual_header(
     label: str,
     total: int,
     changes_description: str,
-    pp_override: dict[str, Any] | None,
+    pipeline_overlay: dict[str, Any] | None,
 ) -> str:
     """``label`` is the candidate's ``C{round}.{n}``, so this header and the score box that closes
     the candidate name it identically — ``ind 2/2`` was a second vocabulary for one individual."""
-    body = fmt_pp_override(pp_override)
+    body = fmt_pipeline_overlay(pipeline_overlay)
     if not body and changes_description:
         body = truncate(changes_description.strip(), _HEADER_BODY_MAX)
     body = f"{DIM}parent re-eval{RESET}" if not body else f"{CYAN}{body}{RESET}"
@@ -63,7 +63,7 @@ def individual_summary_from_dict(
 
     Takes no parent: the comparison against it is SERVED (``matched_parent_*``), never differenced
     here. See the note on ``body_line`` below for why a view may not compute one."""
-    mutations = fmt_pp_override(scores.get("pipeline_params_override"))
+    mutations = fmt_pipeline_overlay(scores.get("pipeline_overlay"))
     mutations_chunk = f"{CYAN}{mutations}{RESET}  " if mutations else ""
 
     if scores.get("invalid"):

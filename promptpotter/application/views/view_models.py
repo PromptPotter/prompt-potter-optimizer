@@ -88,7 +88,7 @@ class InitEnterView:
     max_rounds: int = 0
     patience: int = 0
     n_variants: int = 0
-    sp_budget_ttest: int = 0
+    sp_budget_round: int = 0
     dataset_size: int = 0
     model: str = ""
     composite_fitness_formula: str | None = None

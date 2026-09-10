@@ -54,7 +54,7 @@ async def score_one_candidate(
     idx: int,
     opt_sp_c: OptSearchPoint,
     candidate_sp: JobSearchPoint,
-    pipeline_params_override: dict[str, Any] | None,
+    pipeline_overlay: dict[str, Any] | None,
     cycle: Cycle,
     dataset: list[Sample],
     n_total: int,
@@ -96,7 +96,7 @@ async def score_one_candidate(
             results=[],
             report=build_score_report(
                 opt_sp_c,
-                pipeline_params_override,
+                pipeline_overlay,
                 INVALID_SCORES,
                 [],
                 dataset,
@@ -150,7 +150,7 @@ async def score_one_candidate(
 
     report = build_score_report(
         opt_sp_c,
-        pipeline_params_override,
+        pipeline_overlay,
         scores,
         results,
         dataset,

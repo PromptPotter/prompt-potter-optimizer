@@ -207,7 +207,7 @@ class LiveDashboardView(DerivedView):
         session_id: str,
         l1_patience: int,
         n_variants: int,
-        sp_budget_ttest: int,
+        sp_budget_round: int,
         headline_metric: HeadlineMetric,
         langfuse_trace_url: str | None = None,
         resume_from: LiveDashboardState | None = None,
@@ -231,7 +231,7 @@ class LiveDashboardView(DerivedView):
             session_id=session_id,
             l1_patience=l1_patience,
             n_variants=n_variants,
-            sp_budget_ttest=sp_budget_ttest,
+            sp_budget_round=sp_budget_round,
             langfuse_trace_url=langfuse_trace_url,
             headline_metric=headline_metric,
         )
@@ -279,7 +279,7 @@ class LiveDashboardView(DerivedView):
         session_id: str,
         l1_patience: int,
         n_variants: int,
-        sp_budget_ttest: int,
+        sp_budget_round: int,
         headline_metric: HeadlineMetric,
         langfuse_trace_url: str | None = None,
         resumed_from_round: int | None = None,
@@ -315,7 +315,7 @@ class LiveDashboardView(DerivedView):
             session_id=session_id,
             l1_patience=l1_patience,
             n_variants=n_variants,
-            sp_budget_ttest=sp_budget_ttest,
+            sp_budget_round=sp_budget_round,
             headline_metric=headline_metric,
             langfuse_trace_url=langfuse_trace_url,
             resume_from=resume_from,
@@ -637,7 +637,7 @@ class LiveDashboardView(DerivedView):
                 ci,
                 ct,
                 payload.get("changes_description") or "",
-                payload.get("pp_override"),
+                payload.get("pipeline_overlay"),
                 payload.get("prompt_fields"),
                 payload.get("resolved_pipeline_params"),
             )
@@ -1050,7 +1050,7 @@ def fold_at(cut: Cut) -> LiveDashboardState:
         session_id="",
         l1_patience=0,
         n_variants=0,
-        sp_budget_ttest=0,
+        sp_budget_round=0,
         headline_metric="accuracy",
     )
     limit = None if cut.offset is None else cut.offset + 1

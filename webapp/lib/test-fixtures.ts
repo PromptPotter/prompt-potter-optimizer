@@ -98,7 +98,7 @@ export function scored(over: Partial<ScoredCandidate> = {}): ScoredCandidate {
     total: 0,
     evaluators: {},
     sp_hash: "",
-    pipeline_params_override: null,
+    pipeline_overlay: null,
     resolved_pipeline_params: null,
     prompt_fields: {},
     escalation_aborted: false,
@@ -234,7 +234,7 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
     last_query_elapsed_s: 0,
     wallclock_serialized_at: null,
     n_variants: 0,
-    sp_budget_ttest: 0,
+    sp_budget_round: 0,
     run_limits: null,
     spend: {
       backend: { used_usd: 0, input_tokens: 0, output_tokens: 0, reasoning_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, rate_known: false, model: null, unpriced_tokens: 0, incurred_usd: 0, incurred_unpriced_tokens: 0 },

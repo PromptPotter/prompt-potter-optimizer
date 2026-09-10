@@ -227,7 +227,7 @@ class OptimizationConfig(StrictModel):
             "Which optimizer prompt set this cycle uses. Empty (default) → the "
             "standard `promptpotter/assets/optimizer/` task-tuning loop. `self_optimizing` → the "
             "L4 outer set `promptpotter/assets/optimizer/sets/self_optimizing.yaml`, whose L1 emits per-node "
-            "edits to the INNER optimizer's own prompts (`pipeline_params_override`) "
+            "edits to the INNER optimizer's own prompts (`pipeline_overlay`) "
             "instead of tuning its own template. Applied per-cycle at the runner seam "
             "through the same per-node override channel the inner runner uses, so an "
             "outer cycle and the inner (default) cycles it spawns stay isolated "
@@ -451,7 +451,7 @@ class DatasetSplit(StrictModel):
 
 class CampaignConfig(StrictModel):
     dataset_name: Annotated[str, Knob(Scope.DATA, Estimand.SEARCH)] = Field("")
-    sp_budget_ttest: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
+    sp_budget_round: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
         20,
         description="Per-round eval budget — how many samples each candidate is "
         "scored on per round. The full train split is the bank; each round the "
@@ -462,8 +462,8 @@ class CampaignConfig(StrictModel):
         DEFAULT_ORIGIN_BUDGET,
         ge=1,
         description="Origin eval budget — how many bank samples the origin (C0) is "
-        "scored on at check-in. Explicit `null` ⇒ `sp_budget_ttest`. Defaults ABOVE "
-        "`sp_budget_ttest` because origin breadth is the one breadth that is nearly "
+        "scored on at check-in. Explicit `null` ⇒ `sp_budget_round`. Defaults ABOVE "
+        "`sp_budget_round` because origin breadth is the one breadth that is nearly "
         "free: θ_origin is the term EVERY delta subtracts, and its rows are "
         "content-addressed cache replayed into every candidate arm, fork and resume — "
         "paid once per config. Candidate breadth is paid per candidate, per round. "
@@ -544,7 +544,7 @@ class CampaignConfig(StrictModel):
     optimization: OptimizationConfig
 
     def origin_budget(self) -> int:
-        return self.sp_budget_origin or self.sp_budget_ttest
+        return self.sp_budget_origin or self.sp_budget_round
 
 
 def load_campaign_config(raw: dict[str, Any] | CampaignConfig) -> CampaignConfig:

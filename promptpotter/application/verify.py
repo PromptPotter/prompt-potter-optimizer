@@ -106,7 +106,7 @@ async def verify_candidate(
         )
     proposal = proposals[cand_idx]
     opt_sp = OptSearchPoint.model_validate(proposal["opt_sp"])
-    pp_override = proposal.get("pipeline_params_override") or {}
+    pipeline_overlay = proposal.get("pipeline_overlay") or {}
 
     round_file = stores.campaigns.load_round_file(hop, round_num)
     if round_file is None:
@@ -141,7 +141,9 @@ async def verify_candidate(
     )
 
     schema = session.pipeline_schema
-    effective_pipeline_params = merge_pipeline_params(pipeline_params, pp_override, schema) or {}
+    effective_pipeline_params = (
+        merge_pipeline_params(pipeline_params, pipeline_overlay, schema) or {}
+    )
     jsp = opt_sp.to_job_search_point(effective_pipeline_params, schema=schema)
     node_configs = schema.node_configs(effective_pipeline_params)
     predicate: dict[str, dict[str, Any]] = dict(node_configs)

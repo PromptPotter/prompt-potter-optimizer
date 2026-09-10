@@ -65,10 +65,10 @@ def samples_from_dicts(items: list[dict[str, Any]]) -> list[Sample]:
 
 def sample_dataset(dataset: list[Sample], sample_size: int) -> list[Sample]:
     """Top-``sample_size`` slice; the bank is already shuffled at creation, so no second RNG. A size above
-    the bank yields ALL of it — deliberate, and what ``sp_budget_origin`` above ``sp_budget_ttest`` needs."""
+    the bank yields ALL of it — deliberate, and what ``sp_budget_origin`` above ``sp_budget_round`` needs."""
     if sample_size <= 0:
-        # Both budgets land here (`sp_budget_ttest` per round, `origin_budget()` at C0), so
-        # the message names neither — it named `sp_budget_ttest` and sent anyone hitting it
+        # Both budgets land here (`sp_budget_round` per round, `origin_budget()` at C0), so
+        # the message names neither — it named `sp_budget_round` and sent anyone hitting it
         # off the origin path to the wrong knob.
         raise ValueError(f"eval budget must be > 0, got {sample_size}")
     return dataset[:sample_size]

@@ -55,16 +55,16 @@ class RoundBuffer:
         idx: int,
         total: int,
         changes_description: str,
-        pp_override: dict[str, Any] | None,
+        pipeline_overlay: dict[str, Any] | None,
         prompt_fields: dict[str, Any] | None,
         resolved_pipeline_params: dict[str, Any] | None,
     ) -> None:
-        """Seed a slot so CURRENT shows labelled pending rows before scoring lands. ``prompt_fields`` + ``pp_override`` are the
+        """Seed a slot so CURRENT shows labelled pending rows before scoring lands. ``prompt_fields`` + ``pipeline_overlay`` are the
         seed-able half the steer panel forks from — surfacing them live makes an in-flight candidate steerable."""
         entry = self.slot(idx, total)
         entry["total"] = total
         entry["changes_description"] = changes_description
-        entry["pp_override"] = pp_override
+        entry["pipeline_overlay"] = pipeline_overlay
         entry["prompt_fields"] = prompt_fields
         entry["resolved_pipeline_params"] = resolved_pipeline_params
 

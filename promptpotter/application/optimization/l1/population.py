@@ -77,20 +77,20 @@ def parse_population(
     opt_sp_list: list[OptSearchPoint] = []
     merged: list[dict[str, Any] | None] = []
     for cp in proposals:
-        pipeline_params_override = cp.pipeline_params_override
+        pipeline_overlay = cp.pipeline_overlay
         opt_sp = cp.opt_sp
-        merged_pp = merge_pipeline_params(pipeline_params, pipeline_params_override, schema)
+        merged_pp = merge_pipeline_params(pipeline_params, pipeline_overlay, schema)
         if schema:
             failures: list[ValidationFailure] = []
             block_outcome = L1_PROMPT_BLOCKS_IN_LIBRARY.run(
-                cp.prompt_fields_override,
+                cp.prompt_fields_updates,
                 prompt_block_catalogue=prompt_block_catalogue,
             )
             if block_outcome is not None:
                 failures.extend(block_outcome.evidence["failures"])
-            if pipeline_params_override:
+            if pipeline_overlay:
                 outcome = L1_SCHEMA_COMPLIANCE.run(
-                    pipeline_params_override,
+                    pipeline_overlay,
                     pipeline_schema=schema,
                 )
                 if outcome is not None:
@@ -98,7 +98,7 @@ def parse_population(
                 # Re-propose check: rejects (param, value) already in
                 # opt_sp.memory.wounds.runtime_failures; runs even when schema-compliance passes.
                 rf_outcome = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.run(
-                    pipeline_params_override,
+                    pipeline_overlay,
                     opt_sp=opt_sp,
                     pipeline_params=merged_pp,
                 )
@@ -109,10 +109,10 @@ def parse_population(
                 # prose proposed nothing. The gutting check takes the parent's params because the
                 # length it judges is a COMPARISON — the delta alone cannot say what it replaced.
                 for outcome in (
-                    L1_INNER_STEER_IS_LEGAL.run(pipeline_params_override),
-                    L1_INNER_LAYOUT_APPLIES.run(pipeline_params_override),
+                    L1_INNER_STEER_IS_LEGAL.run(pipeline_overlay),
+                    L1_INNER_LAYOUT_APPLIES.run(pipeline_overlay),
                     L1_PROMPT_FIELD_NOT_GUTTED.run(
-                        pipeline_params_override,
+                        pipeline_overlay,
                         pipeline_params=pipeline_params,
                     ),
                 ):
@@ -147,7 +147,7 @@ def parse_population(
 
 def build_score_report(
     opt_sp: OptSearchPoint,
-    pipeline_params_override: dict[str, Any] | None,
+    pipeline_overlay: dict[str, Any] | None,
     score_summary: dict[str, Any],
     query_results: list[Any],
     dataset: list[Any],
@@ -191,7 +191,7 @@ def build_score_report(
         candidate_id=opt_sp.lineage.id,
         label=label,
         changes_description=opt_sp.lineage.changes_description or "",
-        pipeline_params_override=pipeline_params_override,
+        pipeline_overlay=pipeline_overlay,
         resolved_pipeline_params=resolved_pipeline_params,
         sp_hash=sp_hash,
         prompt_fields=opt_sp.prompt_field_dict(),

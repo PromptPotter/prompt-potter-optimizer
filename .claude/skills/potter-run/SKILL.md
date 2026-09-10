@@ -194,7 +194,7 @@ wrong after reading both numbers, ask what the round measured, not which estimat
 ## Configs are the source of truth
 
 The skill carries no parallel default-ladder. `dataset.md` (entry point, init flags) ·
-`campaign.yaml` (max_rounds, n_variants, sp_budget_ttest, patiences) · `pipeline.yaml` (pipeline,
+`campaign.yaml` (max_rounds, n_variants, sp_budget_round, patiences) · `pipeline.yaml` (pipeline,
 model, caps). BBEH only: `notebooks/bbeh_potter.ipynb::build_campaign_config()` shadows
 `campaign.yaml` and wins. Per-dataset model + `reasoning_effort` + `max_tokens` defaults live in
 [`docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md).

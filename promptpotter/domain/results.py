@@ -220,17 +220,17 @@ class ScoredCandidate(StrictModel):
     composite_fitness: float
     total: int
     evaluators: dict[str, float] = Field(default_factory=dict)
-    pipeline_params_override: dict[str, Any] | None = None
+    pipeline_overlay: dict[str, Any] | None = None
     # Origin floor ⊕ this candidate's delta, served so the OBSERVE view reads the effective
     # config verbatim and never re-merges client-side. Distinct from the sparse
-    # ``pipeline_params_override`` above (the fork transport) — two data classes, not a stitch.
+    # ``pipeline_overlay`` above (the fork transport) — two data classes, not a stitch.
     resolved_pipeline_params: dict[str, Any] | None = None
     # THE join to the archive, stored there on every row as ``prompt_fields_id``. Stamped, never
     # recomputed downstream: it covers each node's rendered ``prompt`` and the field above has
     # that stripped, so a re-derivation addresses no row and nothing raises. ``""`` where no
     # schema was in scope (the unmeasured origin) or the searchpoint configures no node.
     sp_hash: str = ""
-    # Paired with ``pipeline_params_override``, the full searchpoint an operator selects to seed
+    # Paired with ``pipeline_overlay``, the full searchpoint an operator selects to seed
     # an operator-steered fork.
     prompt_fields: dict[str, Any] = Field(default_factory=dict)
     escalation_aborted: bool = False
@@ -402,8 +402,8 @@ class CandidateProposal(StrictModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     opt_sp: OptSearchPoint
-    pipeline_params_override: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    prompt_fields_override: dict[str, str] = Field(default_factory=dict)
+    pipeline_overlay: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    prompt_fields_updates: dict[str, str] = Field(default_factory=dict)
 
 
 class RoundParent(StrictModel):

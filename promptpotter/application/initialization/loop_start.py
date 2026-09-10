@@ -364,7 +364,7 @@ def _finalize_loop_state(
         # already stamped with it.
         cycle.persist_ruler()
     session.state.tracing_campaign_id = tracing_campaign_id
-    # Full train split = bank; per-round adaptive queue mechanism narrows to ``sp_budget_ttest``.
+    # Full train split = bank; per-round adaptive queue mechanism narrows to ``sp_budget_round``.
     session.scoring.scoring_set = list(dataset)
     session.scoring.degradation_checks = build_degradation_checks(config)
     session.state.resumed_from_round = resumed_from_round

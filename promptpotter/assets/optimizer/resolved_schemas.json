@@ -27,29 +27,29 @@
                 "title": "Targets Cluster",
                 "type": "string"
               },
-              "pipeline_params_override": {
+              "pipeline_overlay": {
                 "additionalProperties": {
                   "additionalProperties": true,
                   "type": "object"
                 },
                 "description": "Per-node tunables, shape {node_name: {param: value}}. Inner per-node properties are grafted from the active PipelineSchema at runtime.",
-                "title": "Pipeline Params Override",
+                "title": "Pipeline Overlay",
                 "type": "object"
               },
-              "prompt_fields_override": {
+              "prompt_fields_updates": {
                 "additionalProperties": {
                   "type": "string"
                 },
                 "description": "Top-level prompt-template fields; keys must be one of {persona, task_intent, problem_description, instruction, thinking_style, answer_format}.",
-                "title": "Prompt Fields Override",
+                "title": "Prompt Fields Updates",
                 "type": "object"
               },
-              "task_context_override": {
+              "task_context_updates": {
                 "additionalProperties": {
                   "type": "string"
                 },
                 "description": "Pipeline-context strings; keys must be one of {upstream_context, downstream_context}.",
-                "title": "Task Context Override",
+                "title": "Task Context Updates",
                 "type": "object"
               },
               "changes_description": {

@@ -318,7 +318,7 @@ class LiveDisplay(DerivedView):
             self.on_sample_scored(ci, payload.get("result") or {}, qi, qt)
         elif ev == "candidate_started":
             self.on_candidate_started(
-                ci, ct, payload.get("changes_description") or "", payload.get("pp_override")
+                ci, ct, payload.get("changes_description") or "", payload.get("pipeline_overlay")
             )
         elif ev == "candidate_scored":
             ctx = payload.get("phase_ctx")
@@ -489,14 +489,14 @@ class LiveDisplay(DerivedView):
         idx: int,
         total: int,
         changes_description: str,
-        pp_override: dict[str, Any] | None,
+        pipeline_overlay: dict[str, Any] | None,
     ) -> None:
         self._write(
             fmt_individual_header(
                 candidate_label(self._core.round_num, idx),
                 total,
                 changes_description,
-                pp_override,
+                pipeline_overlay,
             )
         )
 

@@ -143,7 +143,7 @@ PromptPotter's sequential elimination (Bayesian Posterior-of-Being-Best with an 
 | Runtime / cost metric | Scoring formula output |
 | Racing test | Bayesian Posterior-of-Being-Best (Russo 2016) — `elimination_p_best`; the model is owned by [`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) |
 | Sampling model | L1 generator (LLM) + L1-critique-guided L2/L3 |
-| Termination | `sp_budget_ttest` budget, convergence, or operator interrupt (Ctrl+C) |
+| Termination | `sp_budget_round` budget, convergence, or operator interrupt (Ctrl+C) |
 
 PoBB sits closest to OCBA (Chen 2000) and Top-Two Thompson Sampling (Russo 2016) — the Bayesian descendants of the racing tradition the AutoML lineage didn't initially include, but that the bandit BAI literature has spent two decades developing.
 

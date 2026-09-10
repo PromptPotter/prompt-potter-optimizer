@@ -776,7 +776,7 @@ paths:
     post:
       operationId: changeSampleBudget
       x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
-      summary: Adjust the per-round PoBB sample budget (`sp_budget_ttest`) mid-flight.
+      summary: Adjust the per-round PoBB sample budget (`sp_budget_round`) mid-flight.
       tags: [budget]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1355,7 +1355,7 @@ paths:
         (`frontend-surface-contract.md::I9`). Five layers, merged
         last-writer-wins by `application/pipeline_resolve.py`: dataset overlay <
         the campaign's FROZEN `pipeline_overlay` < cycle seed < the addressed
-        candidate's sparse `pipeline_params_override` < identity contributions,
+        candidate's sparse `pipeline_overlay` < identity contributions,
         which are unoverridable. Each param's `source` is the layer that won it,
         stamped BY the merge. A check-in campaign resolves through the same
         call. A one-shot read beside `dashboard.json` polling, which is its
@@ -2440,7 +2440,7 @@ components:
             The COMPLETE server-resolved, config-only params this candidate runs
             — origin floor ⊕ candidate delta, prompt stripped:
             `{node: {param: value}, steps: […]}`. Never re-merged client-side.
-        pipeline_params_override:
+        pipeline_overlay:
           type: object
           additionalProperties: true
           description: The sparse fork-transport delta. Round files only.
@@ -3481,10 +3481,10 @@ components:
       allOf:
         - $ref: '#/components/schemas/CycleRef'
         - type: object
-          required: [sp_budget_ttest]
+          required: [sp_budget_round]
           additionalProperties: false
           properties:
-            sp_budget_ttest:
+            sp_budget_round:
               type: integer
               minimum: 1
               description: |
@@ -3652,7 +3652,7 @@ components:
         `dataset` the slug's `nodes.{n}.config`; `campaign` the frozen
         `pipeline_overlay`, and a check-in draft's overlay (a draft IS the
         pre-committed config); `seed` a cycle seed; `evolved` the candidate's
-        sparse `pipeline_params_override`; `identity` connector + judge
+        sparse `pipeline_overlay`; `identity` connector + judge
         contributions, unoverridable, so a surface never offers to edit one;
         `unset` declared with no value at any layer — never attributed to a
         layer that did not write it.

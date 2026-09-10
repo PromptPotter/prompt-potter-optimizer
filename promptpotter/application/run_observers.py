@@ -81,7 +81,7 @@ def build_campaign_emitter(
         session_id=session.session_id,
         l1_patience=opt.l1_patience,
         n_variants=opt.n_variants,
-        sp_budget_ttest=campaign_config.sp_budget_ttest,
+        sp_budget_round=campaign_config.sp_budget_round,
         headline_metric=campaign_config.headline_metric,
         langfuse_trace_url=langfuse_trace_url,
         resumed_from_round=resumed_from_round,
@@ -310,11 +310,11 @@ class RunCallbacks:
         idx: int,
         total: int,
         changes_description: str,
-        pp_override: dict[str, Any] | None,
+        pipeline_overlay: dict[str, Any] | None,
         prompt_fields: dict[str, Any],
         resolved_pipeline_params: dict[str, Any] | None,
     ) -> None:
-        # `prompt_fields` + `pp_override` are the candidate's evolved searchpoint
+        # `prompt_fields` + `pipeline_overlay` are the candidate's evolved searchpoint
         # (the seed-able half), surfaced live so the steer panel can fork from a
         # still-in-flight candidate without the round file — the in-flight peer
         # of round_NNNN.json::candidate_scores. `resolved_pipeline_params` is the
@@ -326,7 +326,7 @@ class RunCallbacks:
             total,
             {
                 "changes_description": changes_description,
-                "pp_override": pp_override,
+                "pipeline_overlay": pipeline_overlay,
                 "prompt_fields": prompt_fields,
                 "resolved_pipeline_params": resolved_pipeline_params,
             },
@@ -342,7 +342,7 @@ class RunCallbacks:
         resolved_pipeline_params: dict[str, Any] | None,
         sample_order: Sequence[int],
         n_priors: int = 0,
-        pp_override: dict[str, Any] | None = None,
+        pipeline_overlay: dict[str, Any] | None = None,
     ) -> None:
         """Everything a reader needs BEFORE an arm walks: WHAT it is, and WHICH cells it will walk.
 
@@ -357,7 +357,7 @@ class RunCallbacks:
             idx,
             total,
             opt_sp.lineage.changes_description or "",
-            pp_override,
+            pipeline_overlay,
             opt_sp.prompt_field_dict(),
             resolved_pipeline_params,
         )

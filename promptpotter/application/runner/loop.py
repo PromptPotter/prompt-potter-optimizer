@@ -119,7 +119,7 @@ async def run_round_loop(
                 declare_run_phase(session, RunPhase.PAUSED)
                 return StopReason.PAUSED, None
 
-            # Full bank — execute_round's adaptive queue mechanism narrows it to sp_budget_ttest per round.
+            # Full bank — execute_round's adaptive queue mechanism narrows it to sp_budget_round per round.
             round_scoring_data = session.scoring.scoring_set
             round_checks = session.scoring.degradation_checks
 

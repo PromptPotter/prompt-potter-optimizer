@@ -267,7 +267,7 @@ class LiveDashboardState(StrictModel):
     wallclock_serialized_at: str | None = None
 
     n_variants: int
-    sp_budget_ttest: int
+    sp_budget_round: int
 
     # None until INIT:exit.
     run_limits: RunLimits | None = None
@@ -303,7 +303,7 @@ class LiveDashboardState(StrictModel):
     WIRING_FIELDS: ClassVar[tuple[str, ...]] = (
         "session_id",
         "n_variants",
-        "sp_budget_ttest",
+        "sp_budget_round",
         "headline_metric",
         "langfuse_trace_url",
         "max_cells_in_flight",
@@ -320,7 +320,7 @@ class LiveDashboardState(StrictModel):
         session_id: str,
         l1_patience: int,
         n_variants: int,
-        sp_budget_ttest: int,
+        sp_budget_round: int,
         langfuse_trace_url: str | None,
         headline_metric: HeadlineMetric,
     ) -> LiveDashboardState:
@@ -333,7 +333,7 @@ class LiveDashboardState(StrictModel):
             "langfuse_trace_url": langfuse_trace_url,
             "state_since": utcnow_iso(),
             "n_variants": n_variants,
-            "sp_budget_ttest": sp_budget_ttest,
+            "sp_budget_round": sp_budget_round,
             "patience": f"0/{l1_patience}",
             # Not carried from `prior` and not deferred to INIT:exit — round 0 runs before any
             # INIT event reaches the ledger, so waiting mis-headlines the whole origin pass.

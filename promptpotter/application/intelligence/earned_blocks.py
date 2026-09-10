@@ -83,7 +83,7 @@ def _accumulate(
     fit = _answer_space_signature(round_doc, dataset)
     # The round's own ``prompt_fields`` IS the parent every candidate in it was mutated from —
     # the same anchor ``mutation_memory`` diffs against. A ``ScoredCandidate`` persists its
-    # RESOLVED ``prompt_fields`` (never the L1 ``prompt_fields_override`` delta, which lives only
+    # RESOLVED ``prompt_fields`` (never the L1 ``prompt_fields_updates`` delta, which lives only
     # on the generate schema), so "what it changed" is candidate-vs-parent through the ONE shared
     # delta rule (:func:`candidate_delta`) — reading a key the serialized candidate never carries
     # mined nothing, silently, on every real run.

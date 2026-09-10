@@ -64,7 +64,7 @@ campaign_config:
   headline_metric: ability
   # = the panel size in inner_tasks.yaml. Above it the engine warns and the adaptive queue is
   # inert (there is nothing to select from); below it a variant is judged on a subset of cells.
-  sp_budget_ttest: 6
+  sp_budget_round: 6
   exclude_nodes: []
   pipeline_overlay: {}
   optimization:
