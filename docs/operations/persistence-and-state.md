@@ -57,6 +57,7 @@ Cheap L1 A/B sweeps ride `new --sweep-batch`, not a verb of their own.
         dashboard.json                 # live per-cycle telemetry (forks carry their own, seeded at the cut)
         index.json                     # phase, rounds, final block, parent_cycle_id (forks)
         export.json                    # the winner + its provenance, for a program that is not us
+        pipeline.resolved.yaml         # the declaration this cycle RUNS — backend under dataset overlay
         log.md  review.md              # per-cycle digests (derived — safe to recompute)
         rounds/round_NNNN.json         # serialized RoundResult; its opt_search_point is the resume SoT
         langfuse/  prompts/            # trace shadow; rendered optimizer prompts
@@ -94,6 +95,7 @@ Cheap L1 A/B sweeps ride `new --sweep-batch`, not a verb of their own.
 | `log.md` / `hard_samples.json` (campaign) | campaign dir | Campaign digest + campaign-scope hard-sample artifact (across all its cycles). |
 | `index.json` | per cycle | `pipeline_params`, `cycle_id`, `parent_cycle_id`/`sweep_batch_id` (branches), `rounds[]`, `final` block (winner + stop_reason). A branch's KIND is not stored — `layout.py::sibling_kind` parses it from the id. |
 | `export.json` | per cycle | The winning prompt by field name, the node config it ran under, and the provenance a consumer needs to trust the number (fitness under its named formula, n, lift + CI, θ, the rows' hash, the optimizer manifest). Written from the same call that stamps `index.json::final`; absent when no round ever closed. Contract: `domain/export.py`. |
+| `pipeline.resolved.yaml` | per cycle | The declaration this cycle RUNS — the live backend's, under the dataset overlay, as `wiring::_resolve_pipeline_schema` merged it. Written at `init_cycle` and REWRITTEN on every resume, because what the operator is owed is the space the next round will search. It exists because a campaign's committed dataset file deliberately snapshots values and not the backend's `param_keys` (`draft_campaign::merge_pipeline_overlay`), so the served read had every node's settings and none of its axes. Absent until a cycle starts, and the dataset file answers then — which is honest, since no backend has spoken to that campaign yet. |
 | `log.md` / `review.md` (cycle) | per cycle | Per-cycle digests. Derived views — safe to delete and recompute. |
 | `rounds/round_NNNN.json` | per cycle | Serialized `RoundResult` — the model IS the document (`save_round_file` persists `model_dump()`, `load_round_file` validates it back). Its `opt_search_point` field is the resume source of truth. |
 | `.runtime/ledger.jsonl` | per cycle | Append-only fact stream. Escalation firings ride a `PhaseRecord(phase="escalation", event="rule_fired")` — no separate signals stream. **It is also the only surface that says which optimizer node actually RAN, and what each dispatch panel cost it**: the `llm_call` record carries `prompt_chars` plus `injection_chars` / `injection_dropped` / `injection_silent` (`dispatch/facade.py`). The round document cannot answer either — its `optimizer_prompt_hashes` names every node on every round by construction. |

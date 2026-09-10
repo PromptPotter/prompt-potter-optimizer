@@ -50,6 +50,10 @@ def init_cycle(
     campaign_id = session.campaign_id
     resolved = cycle_id_override or cycle_config_identity(origin_jsp, dataset)
     hop = CycleHop(campaign_id=campaign_id, cycle_id=resolved)
+    # Re-written on a resume on purpose: the backend may have changed its axes since, and what the
+    # panel owes the operator is what the NEXT round will search, not what the first one did.
+    if session.pipeline_declaration:
+        store.write_resolved_pipeline(hop, session.pipeline_declaration)
     if resume_from_round_override is not None:
         store.rewind_to_round(hop, resume_from_round_override)
     existing = store.load(hop)

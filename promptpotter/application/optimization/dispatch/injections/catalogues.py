@@ -12,9 +12,16 @@ from promptpotter.application.optimization.dispatch.bundle import (
     Item,
     signal,
 )
+from promptpotter.application.scoring.formula.matchers import extraction_note_for_scoring
 from promptpotter.config.prompt_blocks import general_reasoning_blocks, prompt_blocks
 from promptpotter.domain.l1_layout import NODE_LAYOUTS
-from promptpotter.domain.pipeline_schema import SCHEMA_DESCRIPTIONS_PARAM, PipelineNode
+from promptpotter.domain.pipeline_schema import (
+    ANSWER_AS_JSON,
+    ANSWER_AS_TEXT,
+    SCHEMA_DESCRIPTIONS_PARAM,
+    SCHEMA_TOGGLE_PARAM,
+    PipelineNode,
+)
 
 
 def _schema_description_block(node: PipelineNode) -> list[str]:
@@ -30,6 +37,25 @@ def _schema_description_block(node: PipelineNode) -> list[str]:
     for field in out_schema.fields:
         prose = described.get(field)
         lines.append(f"      {field}: {prose}" if prose else f"      {field}: (undescribed)")
+    return lines
+
+
+def _schema_toggle_block(formula: str | None) -> list[str]:
+    """What the OTHER arm of the schema toggle costs. The enum preview says the two values exist
+    and nothing else, and `param_descriptions` renders only for an axis with NO value space — so a
+    precondition on an axis that has a menu reaches L1 through no channel but this.
+
+    The matcher's contract is quoted verbatim so both moves land in ONE variant: split across two
+    rounds, the first scores a mechanical zero and the loop charges structured output for an
+    answer nothing could read."""
+    note = extraction_note_for_scoring(formula or "")
+    lines = [
+        f"    {SCHEMA_TOGGLE_PARAM}={ANSWER_AS_TEXT} REMOVES the output schema from the call: "
+        f"{SCHEMA_DESCRIPTIONS_PARAM} then reaches nothing, and the answer has to be findable "
+        f"in prose. Rewrite answer_format in the SAME variant."
+    ]
+    if note:
+        lines.append(f"      the scorer reads: {note}")
     return lines
 
 
@@ -88,6 +114,10 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> list[Item]:
         lines.append(f"  {node_name}: {', '.join(bits)}")
         if SCHEMA_DESCRIPTIONS_PARAM in params:
             lines.extend(_schema_description_block(node))
+        # Only where the other arm is actually reachable: a node pinned to one value has no
+        # trade to explain, and printing the cost of a move nobody can make is prompt mass.
+        if ANSWER_AS_JSON in (schema.param_options(node, SCHEMA_TOGGLE_PARAM) or ()):
+            lines.extend(_schema_toggle_block(b.cycle_slice.composite_formula))
     return [Item("\n".join(lines))]
 
 

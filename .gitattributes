@@ -5,3 +5,11 @@
 
 # Shell scripts must stay LF — CRLF breaks the `#!` shebang on Linux deploy boxes.
 *.sh text eol=lf
+
+# ALWAYS diff source, whatever the content sniffer decides. One NUL byte — used as a key
+# separator inside a template literal — made git call a whole hook file binary, so it stat-lined
+# as `Bin 13089 -> 14743` and no reviewer ever saw the line that broke the app. `gate.py`'s
+# `undiffable` check refuses the byte; this makes the diff readable even when one gets in.
+*.py diff
+*.ts diff
+*.tsx diff

@@ -63,7 +63,7 @@ are the **backend's self-description**, stating its own topology for a human rea
 rule: a key PP does not *use* gets no model field, but the key still belongs in the file — and
 "required" on a connector's side means *a connector must publish it*, not *PP reads it*.
 
-Five decisions the models cannot state:
+The decisions the models cannot state:
 
 - **`backend_type` is required and is never a `PipelineSchema` field.** The parser drops it, so
   readers take it off the raw overlay. It picks the connector at init (`wiring._read_backend_type`
@@ -91,6 +91,15 @@ Five decisions the models cannot state:
 - **`output_schema` is not a node-level key.** An inline one is declared at `config.output_schema`,
   the same place the connector forwards it from, so there is one schema rather than a display copy
   beside a wire copy. It is locked against the optimizer (`SCHEMA_OWNED_FIELDS`).
+- **`response_format` is PromptPotter's axis, and a connector must not declare it.** Whether the
+  request carries a schema is decided here — PromptPotter composes the wire config — so the toggle
+  is synthesized onto every LLM node at parse time (`SCHEMA_TOGGLE_PARAM`) and resolved at the wire
+  seam: `json` sends `output_schema` + `answer_field`, `text` sends NEITHER. A node declaring the
+  key in its own `param_keys` makes two mechanisms for one thing, which is how TermNorm came to
+  offer an axis its `output_schema` silently outranked — every arm produced the identical call and
+  the round scored the difference anyway. What a connector owes instead is the READING: **a schema
+  on the wire means structured output, its absence means prose**, and `json` arriving with no
+  schema is a caller error to raise on, never one to guess a key out of.
 - **`param_allowed_values` drives three things at once** — L1's prompt guidance, the JSON-schema
   enum constraint on structured-output generation, and post-hoc `ValidationFailure` attachment in
   `validate_overrides`.

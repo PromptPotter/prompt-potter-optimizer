@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import logging
 from collections.abc import Callable, Mapping, MutableMapping
 from typing import TYPE_CHECKING, Any
@@ -36,8 +37,11 @@ from promptpotter.config.settings import (
 from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
-from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+from promptpotter.domain.pipeline_overlay import fold_output_contract, node_config_items
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response, parse_resolved_schema
 from promptpotter.domain.pipeline_schema import (
+    ANSWER_AS_TEXT,
+    SCHEMA_TOGGLE_PARAM,
     ModelCapability,
     NestedPipelineRef,
     NodeConfigParam,
@@ -453,6 +457,34 @@ def nested_pipeline_ref(dataset_dir: Path, view: PipelineView | None) -> NestedP
     return NestedPipelineRef(node=node.id, dataset=panel.inner_benchmark) if node else None
 
 
+def resolved_output_schemas(
+    schema: PipelineSchema, params: Mapping[str, Any]
+) -> dict[str, NodeOutputSchema | None]:
+    """The structured output each node ANSWERS UNDER at this searchpoint — never the one its file
+    declares.
+
+    ``output_schema_descriptions`` is always on (`docs/concepts/structured-output.md`), so L1 moves
+    the prose on any node shipping a schema. The WIRE folds it through ``fold_output_contract``, and
+    so must every reader — off the parsed DECLARATION a surface shows the prose the run replaced,
+    with nothing to say the two have parted. The same fold answers the other lever: a point that
+    chose ``response_format: text`` answers under NO schema, and ``None`` is that answer. A node
+    whose schema is inline resolves here for the same reason.
+    """
+    configs = dict(node_config_items(dict(params)))
+    folded = copy.deepcopy(configs)
+    fold_output_contract(folded, schema)
+    out: dict[str, NodeOutputSchema | None] = {}
+    for node, declared in schema.node_output_schemas().items():
+        if configs.get(node, {}).get(SCHEMA_TOGGLE_PARAM) == ANSWER_AS_TEXT:
+            out[node] = None
+            continue
+        js = folded.get(node, {}).get("output_schema")
+        out[node] = (
+            parse_resolved_schema({"json_schema": js}) if isinstance(js, dict) and js else declared
+        )
+    return out
+
+
 def _config_floor(campaign: Campaign, dataset_dir: Path | None) -> CampaignConfig:
     """The base the frozen delta layers onto, in falling preference: the dataset template, the
     snapshot itself, the connector's defaults. There is no blank ``CampaignConfig`` to fall to —
@@ -515,7 +547,7 @@ def resolve_pipeline_for_draft(
         params=params,
         node_config_schema=rows,
         view=filtered.view,
-        node_output_schema=filtered.node_output_schemas(),
+        node_output_schema=resolved_output_schemas(filtered, params),
         model_capabilities=resolve_schema_menu(filtered, workspace=workspace),
         reach=reach_map(rows),
         # A dataset dir is what declares an inner panel, and a check-in has none yet.
@@ -557,11 +589,19 @@ def resolve_pipeline_for_campaign(
         # A campaign outlives its dataset dir; `_config_floor` below says what answers instead.
         dataset_dir = None
 
-    raw = read_yaml_optional(dataset_pipeline_path(dataset_dir)) if dataset_dir else None
+    hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=at.cycle_id or campaign.root_cycle_id)
+    # WHAT THE ADDRESSED CYCLE RAN, in preference to what its dataset file says. The committed file
+    # carries values and no `param_keys` at all, because `merge_pipeline_overlay` deliberately
+    # refuses to freeze the backend's declaration at check-in — so read alone it serves every row
+    # `movable_by: []` and reports a live search space as nothing. The run records its own merge
+    # (`wiring::_resolve_pipeline_schema` → `init_cycle`); a campaign that never ran has no backend
+    # answer to give and falls to the file, which is then the honest one.
+    raw = stores.campaigns.read_resolved_pipeline(hop)
+    if raw is None and dataset_dir:
+        raw = read_yaml_optional(dataset_pipeline_path(dataset_dir))
     schema = parse_pipeline_response(raw or {"nodes": {}, "pipelines": {"default": []}})
 
     live = _config_floor(campaign, dataset_dir)
-    hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=at.cycle_id or campaign.root_cycle_id)
     seed = stores.campaigns.read_cycle_seed(hop) if at.cycle_id else None
     cfg = apply_inherited_overlay(live, campaign.config or {}, seed)
 
@@ -611,7 +651,7 @@ def resolve_pipeline_for_campaign(
         params=params,
         node_config_schema=rows,
         view=filtered.view,
-        node_output_schema=filtered.node_output_schemas(),
+        node_output_schema=resolved_output_schemas(filtered, params),
         model_capabilities=resolve_schema_menu(filtered, workspace=workspace),
         reach=reach_map(rows),
         # On this read so the L4 drill-in needs no second fetch to stitch against.

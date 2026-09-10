@@ -22,7 +22,7 @@ from promptpotter.domain.l1_layout import (
     L1Layout,
     default_l1_layout,
 )
-from promptpotter.domain.pipeline_overlay import fold_schema_descriptions
+from promptpotter.domain.pipeline_overlay import fold_output_contract
 from promptpotter.domain.search_point import SearchPoint, TaskDecomposition
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
@@ -321,10 +321,11 @@ class OptSearchPoint(PromptTemplate):
         if rendered and prompt_node:
             pp.setdefault(prompt_node, {})["prompt"] = rendered
 
-        # Fold the accumulated `output_schema_descriptions` into each node's real
-        # `output_schema` prose and drop the virtual key — the wire carries a valid schema.
+        # Resolve the structured-output contract onto the wire: fold the accumulated
+        # `output_schema_descriptions` into each node's real `output_schema` prose and drop the
+        # virtual key, and strip the contract entirely where this point chose to answer in text.
         # `schema` resolves the registry-declared case (`schema_family`, no inline schema).
-        fold_schema_descriptions(pp, schema)
+        fold_output_contract(pp, schema)
 
         pf: dict[str, Any] = {}
         if rendered and prompt_node:

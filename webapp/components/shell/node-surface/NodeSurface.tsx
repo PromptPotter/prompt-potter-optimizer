@@ -1,5 +1,7 @@
 "use client";
 import type { DraftPatch, ModelCapability, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
+import type { NodeSearchNarrowing } from "@/lib/api/types";
+import type { PipelineStatus } from "@/lib/types";
 import type { CandidateSearchPoint, ConfigMode } from "@/lib/derivations";
 import { outputContract } from "@/lib/derivations";
 import type { PipelineViewNode } from "@/components/workflow";
@@ -21,6 +23,7 @@ export function NodeSurface({
   overlay,
   isSingleNode,
   schema,
+  schemaStatus,
   outputSchema,
   label,
   mode,
@@ -30,6 +33,7 @@ export function NodeSurface({
   permittedModels,
   onApply,
   onConfigChange,
+  onNarrowing,
 }: {
   // A concrete pipeline node, or null for the whole-pipeline view.
   node: PipelineViewNode | null;
@@ -40,9 +44,12 @@ export function NodeSurface({
   // candidate's evolved values in values mode (which seeds its rows from it). Distinct from
   // `point.pipeline_overlay`, the prompt's searchpoint.
   overlay: Record<string, unknown>;
-  // search-space only: served, never counted here. See `NodeConfigEditor`.
+  // Served, never counted here. See `NodeConfigEditor`.
   isSingleNode?: boolean;
   schema: Record<string, NodeConfigParam[]> | null;
+  // How the read that produced `schema` went. Travels WITH it — without that, a read still in
+  // flight and a node with nothing to configure are one sentence downstream.
+  schemaStatus: PipelineStatus;
   outputSchema: Record<string, NodeOutputSchema | null> | null;
   // WHICH searchpoint is on screen ("best", "most recent", …). Rendered here because
   // nothing else on screen names it.
@@ -51,9 +58,9 @@ export function NodeSurface({
   // values mode: gates editing of optimizer-locked axes (model/provider) behind the
   // operator's `campaign.babysit` capability. Default (undefined) leaves them editable.
   babysitEditable?: boolean;
-  // Half-width host (the chat run card): params at their default fold away, prompt
-  // boxes shorten, the output contract collapses. It changes what is IN VIEW, never
-  // what exists — every part stays one disclosure away.
+  // Half-width host (the chat run card): denser config rows, shorter prompt boxes, the output
+  // contract behind a disclosure. It changes DENSITY, never membership — the config is what the
+  // panel is opened for, so no width is narrow enough to fold a param away.
   compact?: boolean;
   // What each model on the menu accepts and costs, keyed by model id — the reasoning ladder
   // and the metadata card. Absent = UNKNOWN, never a menu of unsupported models.
@@ -66,6 +73,9 @@ export function NodeSurface({
   // is no second flag for it, so no host can claim editable while passing no callback.
   onApply?: (patch: DraftPatch) => void;
   onConfigChange?: (overlay: Record<string, Record<string, unknown>>) => void;
+  // What the optimizer may MOVE from those values — a second CHANNEL on the one editor, never a
+  // second panel, or the same axis gets asked twice a screen apart.
+  onNarrowing?: (node: string, narrowing: NodeSearchNarrowing) => void;
 }) {
   const kind = node?.kind;
   // Prompt shows for `llm` nodes and for the whole-pipeline view (the single-LLM
@@ -91,6 +101,7 @@ export function NodeSurface({
       <NodeConfigEditor
         mode={mode}
         schema={schema}
+        schemaStatus={schemaStatus}
         node={node?.id}
         overlay={overlay}
         isSingleNode={isSingleNode}
@@ -101,6 +112,7 @@ export function NodeSurface({
         permittedModels={permittedModels}
         onApply={onApply}
         onChange={onConfigChange}
+        onNarrowing={onNarrowing}
       />
 
       {showPrompt ? (
@@ -128,20 +140,36 @@ export function NodeSurface({
 }
 
 // The structured output this node is contracted to return — every parameter, not just the
-// top-level keys. It lives in this file because the surface above renders config → prompt →
-// output as one unit, and a separate component is what lets one of the three drift into its own,
-// thinner reading of the same schema. `outputContract` flattens it; this only lays the rows out.
+// top-level keys. In this file because the surface above renders config → prompt → output as one
+// unit, and a separate component is what lets one of the three drift into a thinner reading of the
+// same schema. `outputContract` flattens it; this lays the rows out.
 //
-// Read-only by definition: the contract is a backend fact, not an operator knob.
+// RESOLVED at this searchpoint — descriptions folded in, nothing at all where the point answers in
+// text — which is why `resolved_output_schemas` exists. Read-only: `never_axis` fences the
+// OPTIMIZER off the schema and never the operator, so authoring one belongs in this tree and is
+// UNBUILT (`webapp/CLAUDE.md`), which is what pins `response_format` to text on a schema-less node.
 function OutputContract({
   schema,
 }: {
   schema: Record<string, NodeOutputSchema | null> | null;
 }) {
-  const nodes = Object.entries(schema ?? {})
+  const entries = Object.entries(schema ?? {});
+  const nodes = entries
     .map(([node, out]) => [node, outputContract(out)] as const)
     .filter(([, fields]) => fields.length > 0);
-  if (nodes.length === 0) return null;
+  // `null` is the read that has not landed — the config editor above already says so, and a second
+  // line repeating it is noise. An ANSWERED read with no schema is a fact ABOUT the node, so it
+  // gets a sentence: returning null there rendered "answers in free text" as nothing at all.
+  if (schema === null) return null;
+  if (nodes.length === 0) {
+    return (
+      <p className="config-hint">
+        {entries.length === 1
+          ? "No structured output — this node answers in free text, and the matcher reads the answer out of it."
+          : "No node here declares a structured output."}
+      </p>
+    );
+  }
 
   return (
     <div className="node-output-schema">

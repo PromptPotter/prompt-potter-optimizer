@@ -120,9 +120,12 @@ PROVIDER_REQUEST_PARAMS: frozenset[str] = frozenset(
 )
 
 # Every tunable AXIS must be a key we actually send. The reverse does not hold — `seed` and
-# `response_format` ride the wire without being search axes — but an axis outside this set is one
+# `response_format` ride the wire from HERE without being core search axes (a backend node may
+# still open `response_format` as one, and TermNorm does) — but an axis outside this set is one
 # the optimizer can open, search and never move: every value produces an identical call, and the
 # round still scores the difference. An assert rather than a comment because nothing else fails.
+# The same hazard with the MODEL refusing a key we do send is enforced in
+# `PipelineSchema._refused`, which leaves such an axis the one value it is running.
 assert PARAM_SCOPE_KEYS <= PROVIDER_REQUEST_PARAMS
 
 PROVIDER_DEFAULT_EFFORT = "default"

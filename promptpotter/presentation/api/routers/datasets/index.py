@@ -104,9 +104,10 @@ class DatasetPipelineResponse(StrictModel):
     view: PipelineView | None
     # Every param each node carries, keyed by node — COMPLETE (prompt + nested params
     # included, carrying no value), because `movable_by` is summed per node to answer
-    # "where does the search reach here". The config editor filters to the widget kinds;
-    # `optimizer_locked` marks what nobody may ever permute (model/provider) and `held`
-    # what THIS campaign closed — either of which the operator may still set on a fork.
+    # "where does the search reach here". The config editor draws all but the prompt fields;
+    # `never_axis` names the construction that forbids one (a cost lever, the output-schema
+    # contract) and `held` what THIS campaign closed — either of which the operator may still
+    # set on a fork.
     node_config_schema: dict[str, list[NodeConfigParam]]
     # That sum, done here rather than by the caller. This read answers for a DATASET, so its
     # reading is about topology — which is exactly what an unrun nested pipeline is, and the only

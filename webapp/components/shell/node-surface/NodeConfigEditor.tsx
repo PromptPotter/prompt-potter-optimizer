@@ -8,58 +8,53 @@ import {
   agentLabel,
   configRows,
   effortLadder,
+  flatConfigKey,
+  parseNested,
   nodeNarrowing,
   nodeOverlayPatch,
   seedOverlayFromRows,
   type ConfigMode,
   type ConfigRow,
 } from "@/lib/derivations";
+import type { PipelineStatus } from "@/lib/types";
 
-// The one node-config editor, mode-driven:
-//   - "search-space" (before mint): the operator declares where this origin STARTS and
-//     what the optimizer MAY MOVE. Per-node (`node` scopes it); persists the draft
-//     `pipeline_overlay` via `onApply`.
-//   - "values" (steer / inspect a fork): the concrete `{node:{param:value}}` the
-//     fork is seeded with. Whole-pipeline. Emits the sparse overlay via `onChange`.
+// THE node-config editor. One surface, every host — a check-in authoring an origin, a fork being
+// steered, a finished searchpoint being read. `mode` picks how a row is SEEDED and which value
+// transport it emits on (a draft merges a whole `pipeline_overlay`; a fork seeds a sparse
+// `{node:{param:value}}`), and it decides nothing the operator can see.
 //
-// **AN AXIS IS A VALUE SET, A PERMITTED SUBSET, AND A START VALUE — nothing else.** Both
-// facts the operator controls ride ONE `ui/ValueList`, for `model` and every enum alike: closed
-// it is one line, and clicking it drops the list OVER that line. The start value is POSITION 1
-// (clicking a value pulls it there, and that IS choosing it) and the ticks are the permitted
-// set. Three surfaces used to answer pieces of this separately — a model `<select>`, an
-// allow/deny chip strip, and an "Allowed models" panel at the foot of the pipeline block — and
-// the operator could not tell they were one question.
+// Two rules govern what draws, both owned by `webapp/CLAUDE.md`: an AXIS is one `ui/ValueList` —
+// value set, permitted subset, start value — so an enumerable row carries no padlock, `model`
+// included; and a ROW answers who may SEARCH it and what WIDGET can express it, never a third
+// question about whether the operator may set it.
 //
-// Two consequences follow, and neither is separately expressible any more:
-//   - **The lock is DERIVED.** One permitted value IS the pin, so an enumerable axis carries
-//     no padlock. 🔒 / 🔓 survives only where there is no set to narrow — number, string,
-//     bool — plus the node-level master lock over exactly those.
-//   - **`model` is an axis like any other.** It left `PARAM_FORBIDDEN_KEYS`; its ticks are
-//     the ONE permitted model set, which is both what the optimizer may pick and what a
-//     human fork may steer to un-tainted.
+// **A CHANNEL THE HOST DOES NOT PASS IS A CONTROL THAT DOES NOT DRAW** — per FACT, not per
+// callback, which is what lets one component serve every host. `onApply` owns both facts at once
+// (its patch carries `config` and `optimizer`), `onChange` the value alone, `onNarrowing` the
+// permission alone; none of the three and the rows are text. Test the FACT (`canSetValue`,
+// `narrowChannel`), never one callback: reading the tick column off `onNarrowing` would take it
+// from the check-in surface, which narrows through `onApply`. `readOnly` is the separate case of a
+// host that owns a channel and has it withheld.
 //
 // The PICKED MODEL qualifies the reasoning ladder on the MENU — a node's list is a default
-// authored before anyone knew which model would run there. It qualifies the MENU only: the ticks
-// stay the campaign's own declaration, because the editor emits those back. Its metadata card
-// renders under the model row, so a stale or misconfigured pick is visible.
-//
-// **A CHANNEL THE HOST DOES NOT PASS IS A CONTROL THAT DOES NOT DRAW** (`NodeSurface`'s rule,
-// applied per fact rather than per editor). Search-space carries two independent ones: `onApply`
-// owns where the origin STARTS, `onNarrowing` owns what the optimizer MAY DO. The steer fork
-// passes only the second — its values are steered above — and so gets ticks and padlocks over
-// plain text, with nothing on screen inviting a click that would be discarded. `readOnly` is the
-// separate case of a host that owns a channel and has it withheld.
+// authored before anyone knew which model would run there. On the MENU only: the ticks stay the
+// campaign's own declaration, because the editor emits those back.
 export function NodeConfigEditor(props: {
   mode: ConfigMode;
   schema: Record<string, NodeConfigParam[]> | null;
+  // How the read that produced `schema` WENT — required, and travelling beside it, because a null
+  // schema is four different facts and this surface used to assert the least likely one. Not read
+  // off the connector context here: two hosts resolve a schema from a different read (the
+  // optimizer manifest, a draft's own response), and a status taken from the context would then
+  // describe someone else's fetch.
+  schemaStatus: PipelineStatus;
   // The node-config document being edited. Its ROLE differs by mode, which is why each editor
   // below receives it under its own name: search-space MERGES a patch onto it and reads no row
   // from it (`patchBase`), values SEEDS its rows from it (`valuesSeed`).
   overlay: Record<string, unknown>;
-  // search-space only: whether the ACTIVE chain is one node, SERVED. A single-node pipeline is
-  // unlockable — locking its lone node leaves the optimizer nothing to tune — and the browser
-  // could only count the config rows, which cover every DECLARED node. A check-in declares its
-  // connector's whole pipeline and runs one step, so counting drew locks the engine ignores.
+  // Whether the ACTIVE chain is one node, SERVED — never counted here. The config rows cover
+  // every DECLARED node, and a check-in declares its connector's whole pipeline while running one
+  // step, so counting them drew locks the engine ignores.
   isSingleNode?: boolean;
   node?: string;
   readOnly?: boolean;
@@ -68,10 +63,8 @@ export function NodeConfigEditor(props: {
   // `campaign.babysit`. Default true keeps every other caller (draft setup, inspect)
   // unchanged; the steer form passes the operator's cap.
   babysitEditable?: boolean;
-  // values mode only: fold params still sitting at the pipeline default behind a
-  // disclosure, leaving the ones this searchpoint actually moved. For the half-width
-  // hosts (the chat run card) where the full table does not fit. Authoring
-  // (search-space) never compacts — a hidden lock is a lock nobody set.
+  // The half-width hosts' DENSITY (the chat run card, a measurement's run half). It tightens the
+  // grid and nothing else: `compact` is never a subset, or an unmoved searchpoint folds away.
   compact?: boolean;
   // What each model on the menu ACCEPTS and costs, keyed by model id. Qualifies the reasoning
   // row and backs the metadata card. Absent = nothing resolved, which every reader renders as
@@ -84,122 +77,95 @@ export function NodeConfigEditor(props: {
   // search-space only: this node's permission half alone, for a host whose values are set
   // elsewhere. Emitted alongside `onApply` where both are passed, so the draft origin cannot
   // drift from the narrowing it implies.
-  onNarrowing?: (narrowing: NodeSearchNarrowing) => void;
+  // Per NODE, because this editor can span the whole pipeline: the whole-pipeline host used to
+  // be a second panel that scoped itself one node at a time, and folding that back in without
+  // the node id would emit one narrowing mixing every node's axes.
+  onNarrowing?: (node: string, narrowing: NodeSearchNarrowing) => void;
   onChange?: (overlay: Record<string, Record<string, unknown>>) => void;
 }) {
-  return props.mode === "search-space" ? (
-    <SearchSpaceEditor {...props} patchBase={props.overlay} />
-  ) : (
-    <ValuesEditor {...props} valuesSeed={props.overlay} />
-  );
-}
-
-function EmptyConfig() {
-  return (
-    <div className="config-editor">
-      <small className="config-hint">This node declares no configurable params.</small>
-    </div>
-  );
-}
-
-/** The menu one axis offers, plus the two provenance facts about it — kept apart, because they
- *  answer different questions and a value can carry both.
- *
- *  `ladder` is the model's answer where it has one (`reasoning_effort`), the node's declared
- *  options otherwise. `values` unions in what is PERMITTED, so a value the operator ticked and
- *  something then refused stays on screen rather than vanishing with its permission still on the
- *  wire. The start value leads by prepend-and-filter, not by a comparator: "move one element to
- *  the front" is not a valid total order and sorts only accidentally stably.
- *
- *  `inert` = the picked MODEL refuses it, and only where the model actually answered — an UNKNOWN
- *  capability must never strike a rung, which is the rule the whole capability layer exists for.
- *  **Ticked AND struck is the intersection the engine will apply** (`param_options`), shown as the
- *  two facts it is: what the operator asked for, and what the endpoint will take. Folding them
- *  into one set here is what would let a repaint emit the model's refusals as the campaign's own
- *  narrowing. `userAdded` = neither the node nor the model offered it, so the operator typed it.
- *  That is why `available_models` is served as the ADMIN's catalogue alone: folding an operator's
- *  additions into it would erase the only difference this reads. */
-function axisMenu(row: ConfigRow, caps: ModelCapability | undefined) {
-  const ladder = effortLadder(row, caps);
-  const rest = [...new Set([...ladder, ...row.allowed])].filter((v) => v !== row.value);
-  const values = row.value ? [row.value, ...rest] : rest;
-  const offered = new Set([...row.options, ...ladder]);
-  const modelAnswered = row.key === "reasoning_effort" && caps?.reasoning_efforts != null;
-  return {
-    values,
-    inert: modelAnswered ? values.filter((v) => !ladder.includes(v)) : [],
-    userAdded: values.filter((v) => !offered.has(v)),
-  };
-}
-
-// search-space: a value list per enumerable axis, a padlock per free-valued one, the node
-// master lock. Local rows are the source of truth during an edit; reseed (the render-phase
-// guarded reset) only when the viewed node changes.
-function SearchSpaceEditor({
-  schema,
-  patchBase,
-  isSingleNode = false,
-  node,
-  readOnly = false,
-  modelCapabilities,
-  onApply,
-  onNarrowing,
-}: {
-  schema: Record<string, NodeConfigParam[]> | null;
-  // The overlay a patch is MERGED ONTO, never a source the rows are read from — `DraftPatch`
-  // replaces `pipeline_overlay` whole, so an emission that did not carry the other nodes would
-  // erase them. Every row above comes from `schema`, which is served.
-  patchBase: Record<string, unknown>;
-  isSingleNode?: boolean;
-  node?: string;
-  readOnly?: boolean;
-  modelCapabilities?: Record<string, ModelCapability>;
-  onApply?: (patch: DraftPatch) => void;
-  onNarrowing?: (narrowing: NodeSearchNarrowing) => void;
-}) {
+  const {
+    mode,
+    schema,
+    schemaStatus,
+    overlay,
+    isSingleNode = false,
+    node,
+    readOnly = false,
+    babysitEditable = true,
+    compact = false,
+    modelCapabilities,
+    permittedModels,
+    onApply,
+    onNarrowing,
+    onChange,
+  } = props;
   const nodeId = node ?? "";
-  const [prevNode, setPrevNode] = useState(nodeId);
-  const [rows, setRows] = useState<ConfigRow[]>(() =>
-    configRows(schema, {}, "search-space", nodeId),
+  // The rows as SERVED, kept beside the edited copy: `seedOverlayFromRows` needs the untouched
+  // seed to tell an operator's edit from an inherited value, and diffing the live rows against
+  // themselves cannot.
+  const base = useMemo(
+    () => configRows(schema, overlay, mode, node),
+    [schema, overlay, mode, node],
   );
-  if (nodeId !== prevNode) {
-    setPrevNode(nodeId);
-    setRows(configRows(schema, {}, "search-space", nodeId));
+  const [rows, setRows] = useState<ConfigRow[]>(base);
+  const [touched, setTouched] = useState<ReadonlySet<string>>(() => new Set());
+  // Render-phase guarded reset. The seed lands ASYNC in the steer fork (`useRoundFile`), so an
+  // edit made before it arrives must not keep masking the value it brings.
+  const [prevBase, setPrevBase] = useState(base);
+  if (base !== prevBase) {
+    setPrevBase(base);
+    setRows(base);
+    setTouched(new Set());
   }
 
-  if (rows.length === 0) return <EmptyConfig />;
+  if (rows.length === 0) {
+    return <EmptyConfig status={schemaStatus} schema={schema} node={node} />;
+  }
 
-  // A single-node pipeline is UNLOCKABLE: locking its lone node would leave the optimizer with
-  // nothing to tune. The lock is an OPTIMIZER-search-space concept, independent of this connector
-  // node — so for a single node the affordance is suppressed entirely (master + per-param); the
-  // operator still sets origin values and narrows the permitted sets.
-  const singleNode = isSingleNode;
-
-  // Both channels fire, each only where the host owns it. Sending the narrowing to a host that
-  // asked for a whole patch — or a patch to one that asked for the narrowing — is the unwrapping
-  // this pair exists to delete.
-  const persist = (next: ConfigRow[]) => {
-    onApply?.(nodeOverlayPatch(patchBase, nodeId, next));
-    onNarrowing?.(nodeNarrowing(next));
+  // Each emitter fires only where its host owns the channel, and the two VALUE transports are
+  // the only thing `mode` still decides: a draft merges a whole `pipeline_overlay`, a fork seeds
+  // a sparse `{node:{param:value}}`. Everything above this line is one surface.
+  const persist = (next: ConfigRow[], marks: ReadonlySet<string>) => {
+    onApply?.(nodeOverlayPatch(overlay, nodeId, next));
+    for (const n of new Set(next.map((r) => r.node))) {
+      onNarrowing?.(n, nodeNarrowing(next.filter((r) => r.node === n)));
+    }
+    onChange?.(
+      seedOverlayFromRows(
+        base,
+        Object.fromEntries(
+          next
+            .filter((r) => marks.has(flatConfigKey(r.node, r.key)))
+            .map((r) => [flatConfigKey(r.node, r.key), r.value]),
+        ),
+      ),
+    );
   };
   const update = (i: number, patch: Partial<ConfigRow>) => {
     const next = rows.map((r, j) => (j === i ? { ...r, ...patch } : r));
+    const marks =
+      patch.value === undefined
+        ? touched
+        : new Set([...touched, flatConfigKey(next[i]!.node, next[i]!.key)]);
     setRows(next);
-    persist(next);
+    setTouched(marks);
+    persist(next, marks);
   };
 
-  // The node-level master lock governs the FREE-VALUED params — the only ones `locked` still
-  // decides. An enumerable axis pins by being ticked down to one value, a different gesture that
-  // a master switch cannot express, so sweeping those too would set a state nobody chose.
+  // Which of the two facts this host owns — and a single-node pipeline is UNLOCKABLE besides,
+  // since holding its lone node would leave the optimizer nothing to tune.
+  const narrowChannel = Boolean(onApply || onNarrowing);
+  const canNarrow = narrowChannel && !isSingleNode;
+  const canSetValue = Boolean(onApply || onChange);
+
   const freeValued = rows.filter((r) => r.kind !== "model" && r.kind !== "enum");
   const nodeLocked = freeValued.length > 0 && freeValued.every((r) => r.locked);
   const toggleNodeLock = () => {
-    const v = !nodeLocked;
     const next = rows.map((r) =>
-      r.kind === "model" || r.kind === "enum" ? r : { ...r, locked: v },
+      r.kind === "model" || r.kind === "enum" ? r : { ...r, locked: !nodeLocked },
     );
     setRows(next);
-    persist(next);
+    persist(next, touched);
   };
 
   const toggle = (i: number, value: string) => {
@@ -228,43 +194,54 @@ function SearchSpaceEditor({
   const caps = modelCapabilities?.[pickedModel];
 
   return (
-    <div className="config-editor">
+    <div className={cx("config-editor", compact && "is-compact")}>
       {rows.map((r, i) => {
-        const enumerable = r.kind === "model" || r.kind === "enum";
-        if (!enumerable) {
+        if (r.kind !== "model" && r.kind !== "enum") {
           return (
             <ConfigRowView
-              key={r.key}
+              key={`${r.node}.${r.key}`}
               row={r}
-              readOnly={readOnly}
               // The general case of the struck rungs below: a key the picked model does not
               // accept. `unsupported_params` is the SERVED answer over what we actually send, so
               // `undefined` here means the catalogue said nothing and the row claims nothing.
               ignoredBy={caps?.unsupported_params?.includes(r.key) ? pickedModel : undefined}
-              onToggleLock={singleNode ? undefined : () => update(i, { locked: !r.locked })}
-              onValue={onApply ? (v) => update(i, { value: v }) : undefined}
+              readOnly={readOnly || (!babysitEditable && r.neverAxis === "cost_lever")}
+              onToggleLock={canNarrow ? () => update(i, { locked: !r.locked }) : undefined}
+              onValue={canSetValue ? (v) => update(i, { value: v }) : undefined}
             />
           );
         }
         const { values, inert, userAdded } = axisMenu(r, caps);
+        // Steering the model outside what the origin permits is the ADR-0005 babysit act. Without
+        // the cap those values are `inert` — the same channel a capability refusal uses, because
+        // to the operator they are one fact: offered by the axis, refused downstream.
+        const barred =
+          r.kind === "model" && !babysitEditable
+            ? values.filter((v) => !(permittedModels?.[r.node] ?? []).includes(v))
+            : [];
         return (
-          <div key={r.key} className="config-row">
+          <div key={`${r.node}.${r.key}`} className="config-row">
             <span className="config-label" title={r.description || undefined}>
               {r.key}
+              {r.fromCandidate ? (
+                <span className="config-evolved" title="Carried from this searchpoint">
+                  ·evolved
+                </span>
+              ) : null}
             </span>
             <span className="config-value">
               <ValueList
                 name={r.key}
                 values={values}
-                checked={r.allowed}
-                inert={inert}
+                checked={canNarrow ? r.allowed : undefined}
+                inert={[...inert, ...barred]}
                 userAdded={userAdded}
                 note={axisNote(r, caps, pickedModel)}
                 readOnly={readOnly}
                 addPlaceholder={r.kind === "model" ? "another model id…" : "another value…"}
-                onPick={onApply ? (v) => update(i, { value: v }) : undefined}
-                onToggle={(v) => toggle(i, v)}
-                onAdd={(v) => add(i, v)}
+                onPick={canSetValue ? (v) => update(i, { value: v }) : undefined}
+                onToggle={canNarrow ? (v) => toggle(i, v) : undefined}
+                onAdd={canNarrow ? (v) => add(i, v) : undefined}
               />
               {r.kind === "model" && caps ? <ModelCard caps={caps} /> : null}
             </span>
@@ -272,46 +249,102 @@ function SearchSpaceEditor({
         );
       })}
 
-      {singleNode ? (
+      {canNarrow && freeValued.length > 0 ? (
+        <div className="config-row config-node-row">
+          <span className="config-label">Tuning</span>
+          <button
+            type="button"
+            className={cx("config-lock", nodeLocked && "is-locked")}
+            onClick={toggleNodeLock}
+            disabled={readOnly}
+            aria-pressed={nodeLocked}
+            title={
+              nodeLocked
+                ? "Every free-valued param on this node is held at its origin value. Click to let the optimizer tune them."
+                : "The optimizer may tune the unlocked params above. Click to hold them at origin."
+            }
+          >
+            {nodeLocked ? "🔒 Params locked" : "🔓 Params open"}
+          </button>
+        </div>
+      ) : null}
+      {narrowChannel ? (
         <small className="config-hint">
-Click an axis to drop its list. The first value is where this origin starts —
-          click another to move it there; ☑ = permitted, and one value left pins the axis.
-          Single-node pipeline, so there is no whole-node lock: holding the only node would
-          leave nothing to tune.
+          Click an axis to drop its list. The first value is where this point starts — click
+          another to move it there; ☑ = what the optimizer may pick, and one value left pins the
+          axis.
+          {isSingleNode
+            ? " Single-node pipeline, so there is no whole-node lock: holding the only node would leave nothing to tune."
+            : " 🔒 / 🔓 = held / tunable, for the params that carry no value list."}
         </small>
-      ) : (
-        <>
-          {/* The whole-node tuning control sits BELOW the params it governs, not as a
-              header over them — locking is an optimizer-search-space lever on this
-              node, not a label on the connector pipeline. */}
-          {freeValued.length > 0 ? (
-            <div className="config-row config-node-row">
-              <span className="config-label">Tuning</span>
-              <button
-                type="button"
-                className={cx("config-lock", nodeLocked && "is-locked")}
-                onClick={toggleNodeLock}
-                disabled={readOnly}
-                aria-pressed={nodeLocked}
-                title={
-                  nodeLocked
-                    ? "Every free-valued param on this node is held at its origin value. Click to let the optimizer tune them."
-                    : "The optimizer may tune the unlocked params above. Click to hold them at origin."
-                }
-              >
-                {nodeLocked ? "🔒 Params locked" : "🔓 Params open"}
-              </button>
-            </div>
-          ) : null}
-          <small className="config-hint">
-Click an axis to drop its list. The first value is where this origin starts —
-            click another to move it there; ☑ = permitted, and one value left pins the axis.
-            🔒 / 🔓 = held / tunable, for the params that carry no value list.
-          </small>
-        </>
-      )}
+      ) : null}
     </div>
   );
+}
+
+// No rows is FOUR facts, and saying the last one whatever the truth is makes a read that never
+// landed report a node with nothing to configure. `frontend-surface-contract.md::I1`: resolve to
+// live, empty or error, never one of them wearing another's words.
+function EmptyConfig({
+  status,
+  schema,
+  node,
+}: {
+  status: PipelineStatus;
+  schema: Record<string, NodeConfigParam[]> | null;
+  node?: string;
+}) {
+  // Served and still empty: the node is absent from the resolution, or every param it has is a
+  // prompt field — the one kind these rows subtract. The WHOLE-PIPELINE hosts pass no node, so the
+  // second arm reads the flattened schema; scoped to `node` it would fall through and tell a
+  // prompt-only pipeline (pp-self) that its nodes declare nothing.
+  const scoped = node !== undefined && schema !== null ? schema[node] : undefined;
+  const declared = node !== undefined ? scoped : Object.values(schema ?? {}).flat();
+  const subject = node !== undefined ? "node" : "pipeline";
+  const said =
+    status === "loading"
+      ? "Resolving what this campaign runs…"
+      : status === "error"
+        ? "The campaign's pipeline could not be read, so what this node runs is unknown — not empty."
+        : status === "unbound"
+          ? "No campaign bound, so there is no resolved pipeline to read this node from."
+          : node !== undefined && schema !== null && scoped === undefined
+            ? `The served pipeline declares no node called ${node}.`
+            : declared && declared.length > 0
+              ? `Every param on this ${subject} is a prompt field — the prompt editor below is where they are.`
+              : `This ${subject} declares no params.`;
+  return (
+    <div className="config-editor">
+      <small className="config-hint">{said}</small>
+    </div>
+  );
+}
+
+/** The menu one axis offers, plus the two provenance facts about it — kept apart, because a value
+ *  can carry both.
+ *
+ *  `values` unions in what is PERMITTED, so a value the operator ticked and something then refused
+ *  stays on screen rather than vanishing with its permission still on the wire. The start value
+ *  leads by prepend-and-filter, not by a comparator: "move one element to the front" is not a
+ *  valid total order and sorts only accidentally stably.
+ *
+ *  `inert` = the picked MODEL refuses it, and only where the model actually answered — an UNKNOWN
+ *  capability must never strike a rung. **Ticked AND struck is the intersection the engine will
+ *  apply** (`param_options`), shown as the two facts it is: folding them here would let a repaint
+ *  emit the model's refusals as the campaign's own narrowing. `userAdded` = neither the node nor
+ *  the model offered it, so the operator typed it — which is why `available_models` is served as
+ *  the ADMIN's catalogue alone. */
+function axisMenu(row: ConfigRow, caps: ModelCapability | undefined) {
+  const ladder = effortLadder(row, caps);
+  const rest = [...new Set([...ladder, ...row.allowed])].filter((v) => v !== row.value);
+  const values = row.value ? [row.value, ...rest] : rest;
+  const offered = new Set([...row.options, ...ladder]);
+  const modelAnswered = row.key === "reasoning_effort" && caps?.reasoning_efforts != null;
+  return {
+    values,
+    inert: modelAnswered ? values.filter((v) => !ladder.includes(v)) : [],
+    userAdded: values.filter((v) => !offered.has(v)),
+  };
 }
 
 /** One served line under a value list: who the ticks license, and — on the reasoning row —
@@ -360,146 +393,38 @@ function ModelCard({ caps }: { caps: ModelCapability }) {
     </dl>
   );
 }
-
-// values: concrete fork values. Rows are pure-derived from schema + seed overlay
-// (both stable for the life of a steer); an `edits` string-map overlays operator
-// changes, and the sparse overlay is emitted on every edit. `node` scopes the rows
-// to one node (the OBSERVE-run drill-in shows the clicked node's config); omit for
-// the whole-pipeline seed (draft preview, steer fork). Symmetric with SearchSpaceEditor.
-function ValuesEditor({
-  schema,
-  valuesSeed,
-  node,
-  readOnly = false,
-  babysitEditable = true,
-  compact = false,
-  permittedModels,
-  onChange,
-}: {
-  schema: Record<string, NodeConfigParam[]> | null;
-  valuesSeed: Record<string, unknown>;
-  node?: string;
-  readOnly?: boolean;
-  babysitEditable?: boolean;
-  compact?: boolean;
-  permittedModels?: Record<string, readonly string[]>;
-  onChange?: (overlay: Record<string, Record<string, unknown>>) => void;
-}) {
-  const rows = useMemo(
-    () => configRows(schema, valuesSeed, "values", node),
-    [schema, valuesSeed, node],
-  );
-  const [edits, setEdits] = useState<Record<string, string>>({});
-  // Render-phase guarded reset (webapp/CLAUDE.md § State reset on prop change):
-  // when the seed changes the prior edits no longer apply. The seed loads ASYNC
-  // in SteerForkPanel (useRoundFile) — `{}` first, then the candidate's resolved
-  // config — so an edit made before it lands must not keep masking the freshly
-  // seeded `r.value` below.
-  const sig = `${node ?? ""}|${JSON.stringify(valuesSeed)}`;
-  const [prevSig, setPrevSig] = useState(sig);
-  if (sig !== prevSig) {
-    setPrevSig(sig);
-    setEdits({});
-  }
-
-  if (rows.length === 0) return <EmptyConfig />;
-
-  const set = (key: string, v: string) => {
-    const next = { ...edits, [key]: v };
-    setEdits(next);
-    onChange?.(seedOverlayFromRows(rows, next));
-  };
-
-  const renderRow = (r: ConfigRow) => {
-    const key = `${r.node}.${r.key}`;
-    const edit = edits[key];
-    const value = edit !== undefined ? edit : r.value;
-    // Steering the model OUTSIDE what the origin permits is the babysit act, and it taints the
-    // branch (grade C) on the backend. Without the cap the row still shows every model the menu
-    // carries — the un-permitted ones simply cannot be picked, which is a truer read than a row
-    // that looks editable and 404s on confirm.
-    const unpermitted =
-      r.kind === "model" && !babysitEditable ? (permittedModels?.[r.node] ?? []) : undefined;
-    return (
-      <ConfigRowView
-        key={key}
-        row={{ ...r, value }}
-        values
-        readOnly={readOnly || (!babysitEditable && r.optimizerLocked)}
-        permitted={unpermitted}
-        onValue={(v) => set(key, v)}
-      />
-    );
-  };
-
-  if (!compact) return <div className="config-editor">{rows.map(renderRow)}</div>;
-
-  // Compact: lead with the params this searchpoint MOVED. `value !== baseValue` is
-  // the same predicate `nodeOverlayPatch` writes an override on, so the two cannot
-  // disagree about what counts as moved — and it is not `fromCandidate`, which the
-  // OBSERVE path leaves true for nearly every row (the resolved config carries every
-  // param's running value, not a sparse delta). Nothing is hidden, only folded.
-  const moved = rows.filter((r) => r.value !== r.baseValue);
-  const atDefault = rows.filter((r) => r.value === r.baseValue);
-  return (
-    <div className="config-editor is-compact">
-      {moved.length > 0 ? (
-        moved.map(renderRow)
-      ) : (
-        <small className="config-hint">Every param is still at its pipeline default.</small>
-      )}
-      {atDefault.length > 0 ? (
-        <details className="config-rest">
-          <summary>{atDefault.length} more at default</summary>
-          {atDefault.map(renderRow)}
-        </details>
-      ) : null}
-    </div>
-  );
-}
-
-// One row of concrete config. Serves the values editor throughout, and the search-space editor
-// for its FREE-VALUED params alone — an enumerable axis there is a `ValueList` and takes none of
-// this chrome. `values` says which of the two is asking: it decides the badge (who searches this)
-// and whether a padlock is on offer at all.
+// One row of FREE-VALUED config — number, string, bool, nested. An enumerable axis is a
+// `ValueList` and takes none of this chrome, in every host alike.
 function ConfigRowView({
   row,
-  values = false,
   readOnly,
-  permitted,
   ignoredBy,
   onToggleLock,
   onValue,
 }: {
   row: ConfigRow;
-  values?: boolean;
   readOnly: boolean;
   // The picked model, when it does NOT accept this key — so the row says the value is dropped
   // rather than showing it as a live setting. Undefined = accepted, or the catalogue never said.
   ignoredBy?: string;
-  // values mode: the models this node permits. Options outside it are disabled — steering
-  // there is the babysit act and this principal lacks the cap. Undefined = no restriction.
-  permitted?: readonly string[];
   // Absent = this host does not set the padlock (a single-node pipeline, whose lone node cannot
   // be held) or the value (a permissions-only host). Each renders as what it is instead.
   onToggleLock?: () => void;
   onValue?: (v: string) => void;
 }) {
-  const isModel = row.kind === "model";
   return (
     <div className="config-row">
       <span className="config-label">
         {row.key}
-        {values && row.fromCandidate ? (
+        {row.fromCandidate ? (
           <span className="config-evolved" title="Carried from this searchpoint">
             ·evolved
           </span>
         ) : null}
-        {/* A setting the provider DROPS is the one thing a config row must not render as live:
-            the value sits there looking set, the model never receives it, and nothing anywhere
-            says so — which is how `reasoning_effort: low` read as a bound on a model that emitted
-            99% reasoning tokens. Wears the same badge as a held axis because it is the same fact
-            to a reader: not in play, reason in the title. */}
+        {/* A setting the provider DROPS must not render as live: the value sits there looking
+            set, the model never receives it, and nothing else says so. Wears the same badge as a
+            held axis, because to a reader it is the same fact — not in play, reason in the
+            title. */}
         {ignoredBy ? (
           <span
             className="config-optlocked"
@@ -508,18 +433,17 @@ function ConfigRowView({
             ⊘
           </span>
         ) : null}
-        {/* Two states on screen — the optimizer may move this axis, or it may not — because
-            that is the only question a row is read for. The three reasons it may not are three
-            different operator remedies, so they ride the title, read one row at a time. In
-            search-space the LockButton beside the row already answers it, so the badge would
-            only repeat it. */}
-        {values ? (
+        {/* Two states — the optimizer may move this axis, or it may not — as the 🔓 / 🔒 pair the
+            hint under this editor teaches. The reasons it may not are different operator remedies,
+            so they ride the title with the layer names, read one row at a time. Suppressed where a
+            LockButton draws beside the row: that IS the answer, and a badge repeats it. */}
+        {!onToggleLock ? (
           row.movableBy.length > 0 ? (
             <span
               className="config-optmovable"
               title={`Searched by ${row.movableBy.map(agentLabel).join(", ")}.`}
             >
-              {row.movableBy.join("+")}
+              🔓
             </span>
           ) : (
             <span className="config-optlocked" title={lockReason(row, readOnly)}>
@@ -533,29 +457,27 @@ function ConfigRowView({
           <LockButton locked={row.locked} readOnly={readOnly} onClick={onToggleLock} />
         ) : null}
         {!onValue ? (
-          // No value channel — a sibling surface sets this one. Text rather than a disabled
-          // input: a greyed box says "you may not", where the truth is "not here".
-          <span className="config-static">{row.value || "—"}</span>
-        ) : isModel || row.kind === "enum" ? (
-          <select
-            className="config-input"
+          // No value channel — a sibling surface sets this one, or the value is structured and
+          // nothing types it. Text rather than a disabled input: a greyed box says "you may not",
+          // where the truth is "not here". A nested value keeps its own line breaks, which is the
+          // difference between a readable schema and one long line of JSON.
+          <span className={cx("config-static", row.kind === "nested" && "is-structured")}>
+            {row.value || "—"}
+          </span>
+        ) : row.kind === "nested" ? (
+          // A box that can hold a structured value, and refuses a draft it cannot parse — the row
+          // keeps what was typed instead of emitting a string over an object. `parseNested` is the
+          // SAME question the emitter asks, so a box cannot accept what the emitter would drop.
+          <CommitInput
+            rows={6}
+            validate={(d) => parseNested(d) !== undefined}
+            className="config-input is-structured"
             value={row.value}
             disabled={readOnly}
-            aria-label={isModel ? "Model" : row.key}
-            onChange={(e) => onValue(e.target.value)}
-          >
-            {/* The value may sit outside the declared set (the candidate evolved
-                past it) — keep it selectable so the editor never rewrites it. */}
-            {!row.options.includes(row.value) && row.value !== "" ? (
-              <option value={row.value}>{row.value} (current)</option>
-            ) : null}
-            {row.options.map((m) => (
-              <option key={m} value={m} disabled={permitted !== undefined && !permitted.includes(m)}>
-                {m}
-                {permitted !== undefined && !permitted.includes(m) ? " (needs babysit)" : ""}
-              </option>
-            ))}
-          </select>
+            placeholder="inherit"
+            aria-label={row.key}
+            onCommit={onValue}
+          />
         ) : row.kind === "bool" ? (
           <input
             type="checkbox"
@@ -566,8 +488,7 @@ function ConfigRowView({
             onChange={(e) => onValue(e.target.checked ? "true" : "false")}
           />
         ) : (
-          // Commits on Enter or blur, never per keystroke. It only mutated a ref inside a modal
-          // once, so nobody saw it — but the same emission now strikes a searchpoint and
+          // Commits on Enter or blur, never per keystroke: this emission strikes a searchpoint and
           // everything descending from it off the Compare cladogram, and per-keystroke that
           // happens on `"1"` en route to `"12"`.
           <CommitInput
@@ -586,12 +507,19 @@ function ConfigRowView({
   );
 }
 
-// `optimizerLocked` (PARAM_FORBIDDEN_KEYS — `provider` and `route_order`) outranks `held` (the
-// campaign's own narrowing at mint): a cost lever stays a cost lever however the campaign
-// narrowed. `model` reaches neither arm any more — it is an ordinary axis, so it reads as held
-// or as unsearched like every other.
+// `neverAxis` outranks `held` (the campaign's own narrowing at mint): a key that could never be an
+// axis stays that however the campaign narrowed. Both of its reasons are SERVED — the browser
+// telling them apart by key name is what made every schema-owned row claim to be a cost lever.
+// `model` reaches neither arm: it is an ordinary axis and reads as held or unsearched like the
+// rest.
 function lockReason(row: ConfigRow, readOnly: boolean): string {
-  if (row.optimizerLocked) {
+  if (row.neverAxis === "schema_owned") {
+    // No optimizer may emit these keys (`SCHEMA_OWNED_FIELDS`) and no fork widens that. The
+    // OPERATOR sets it here like any other value: `never_axis` says who may SEARCH a key, never
+    // who may set it.
+    return "The structured-output contract — the shape this node answers in, and which slot carries the answer. No optimizer may search it; set it here to steer a fork onto a different contract.";
+  }
+  if (row.neverAxis === "cost_lever") {
     const held =
       "Never a search axis — the gateway and the route are cost levers set against a measured capture.";
     return readOnly

@@ -1,7 +1,7 @@
 /* Backend-node detail — the on-the-node config panel (replaces the old
    ConfigMenu gear). It renders the node as one read-only unit straight off the
-   server schema (NodeConfigEditor read-only + NodeOutputSchemaView +
-   PromptFieldsEditor), so the inspect-the-node surface reads identically to the
+   server schema — one `NodeSurface`, config → prompt → output, with no value
+   channel passed — so the inspect-the-node surface reads identically to the
    steer panel's editor. This file only adds what the dashboard context needs on
    top of that shared chrome: a width constraint (the hero is 980px wide), a
    close affordance, and the now-clickable single-node hero chip. */

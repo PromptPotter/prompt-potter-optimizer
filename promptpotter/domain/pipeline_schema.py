@@ -25,32 +25,30 @@ every axis movable and the field would say nothing. An outer optimizer (L4) need
 either — at that depth the inner loop IS a target pipeline and its axes are ``l1``'s, one level
 up. That is the recursion working; a per-depth agent name would be a second spelling of it."""
 
-# Structured-output schema fields owned by the output-schema view. TWO reasons to
-# fence them off:
-#   1. Display — excluded from the operator lock-editor config surface the same way
-#      prompt fields are: the schema is one concept shown ONCE as the "Structured
-#      output" tree (`NodeOutputSchemaView`) — `output_schema` is its content,
-#      `schema_family`/`schema_version` its registry identity. Surfacing them ALSO
-#      as config chips duplicates the structured output.
-#   2. Optimizer — they are STRUCTURAL, not tunables: the output schema is the
-#      pipeline's wire contract, and a mutated `output_schema` (e.g. an L1 variant
-#      that replaced it with a raw `{{format_string}}` template) breaks the backend
-#      ("Schema must contain 'properties'"). So `node_param_keys` strips them from
-#      the optimizer's emittable surface — UNCONDITIONALLY, unlike `schema_field_rename`,
-#      which has an ablation unlock; the schema contract never does.
-#      `answer_field` is the same structural contract by another name: it names WHICH
-#      slot of `output_schema` carries the answer, so a mutated one makes the executor
-#      destructure the wrong field and grade every sample against reasoning prose.
-SCHEMA_OWNED_FIELDS = frozenset(
-    {"output_schema", "schema_family", "schema_version", "answer_field"}
-)
+# The INLINE contract an LLM node answers under: the shape, and which slot in it IS the answer.
+# The pair, not the four below — `schema_family`/`schema_version` name a registry entry the
+# backend owns instead. The parser TYPES both (`output_schema` as `object`, so a fork's overlay
+# merges one level rather than replacing a schema wholesale).
+OUTPUT_SCHEMA_KEY = "output_schema"
+OUTPUT_CONTRACT_KEYS: tuple[str, str] = (OUTPUT_SCHEMA_KEY, "answer_field")
+
+# Structured-output fields fenced off from the OPTIMIZER — and from the optimizer alone. They are
+# STRUCTURAL: a mutated `output_schema` breaks the backend ("Schema must contain 'properties'"),
+# and a mutated `answer_field` makes the executor destructure the wrong slot and grade every
+# sample against reasoning prose. `node_param_keys` strips them UNCONDITIONALLY, unlike
+# `schema_field_rename`, which has an ablation unlock.
+#
+# **A search rule, never a display one.** The rows carry these, shut and saying why
+# (`never_axis`); only :data:`OUTPUT_SCHEMA_KEY` is subtracted there, because it is a tree and the
+# webapp's `NodeSurface.tsx::OutputContract` renders it as one.
+SCHEMA_OWNED_FIELDS = frozenset({*OUTPUT_CONTRACT_KEYS, "schema_family", "schema_version"})
 
 # The `param_types` values that make a param NESTED — a container the optimizer edits
 # one level deep rather than a scalar it replaces. Naming them once keeps the three
 # readers agreeing: `apply_node_overlay` (merge one level, siblings survive — `array`
 # replaces wholesale, since a merged ordering is meaningless), `node_config_schema`
-# (no scalar widget exists, so no widget), and `build_l1_response_schema` (the emitted
-# sub-schema, whose value space is the param's own, not the node's).
+# (a row read as text, since no scalar widget could edit one), and `build_l1_response_schema`
+# (the emitted sub-schema, whose value space is the param's own, not the node's).
 NESTED_PARAM_TYPES = frozenset({"object", "array"})
 
 # The one nested param a campaign must UNLOCK before its L1 may emit it
@@ -70,6 +68,39 @@ SCHEMA_RENAME_PARAM = "output_schema_field_names"
 # that node's own fields; emitted by `build_l1_response_schema`; folded into the wire schema
 # at `OptSearchPoint.to_job_search_point`. See `docs/concepts/structured-output.md`.
 SCHEMA_DESCRIPTIONS_PARAM = "output_schema_descriptions"
+
+# Whether the node uses its schema AT ALL — the one lever over the structured-output contract
+# that is not `SCHEMA_OWNED_FIELDS`. `json` sends the declared `output_schema` + `answer_field`;
+# `text` sends NEITHER, so the node answers in prose and the matcher's own contract
+# (`formula/matchers.py::EXTRACTION_NOTES`) reads the label out of it. UNSET is not a third
+# state: `schema_toggle_default` says what an unset node runs and the fold writes nothing, so a
+# configuration nobody moved keeps the hash it was measured under.
+SCHEMA_TOGGLE_PARAM = "response_format"
+ANSWER_AS_JSON = "json"
+ANSWER_AS_TEXT = "text"
+
+
+def schema_toggle_default(node: "PipelineNode") -> str:
+    """The ONE reading of an unset toggle — the fold and the served row both ask here, so the wire
+    and the panel cannot disagree about what "unset" meant."""
+    return ANSWER_AS_JSON if node.output_schema else ANSWER_AS_TEXT
+
+
+def declares_llm_run(
+    *,
+    name: str,
+    mappings: Iterable["ObservationMapping"],
+    wire_type: "NodeKind | None",
+    langfuse_type: str,
+) -> bool:
+    """The BROAD "this node runs an LLM" test. Free-standing because the parser must ask it BEFORE
+    the model is built; :attr:`PipelineNode.runs_llm` is the same question with one in hand."""
+    return (
+        name == "llm_only"
+        or any(m.is_llm for m in mappings)
+        or wire_type is NodeKind.GENERATION
+        or langfuse_type == "generation"
+    )
 
 
 def stable_hash(value: Any) -> str:
@@ -313,11 +344,11 @@ class PipelineNode(StrictModel):
     def runs_llm(self) -> bool:
         """The BROAD signal — mapping, ``generation`` wire type, or the ``llm_only`` sentinel. Model-axis
         carrier selection reads THIS: on ``is_llm`` a self-optimization pipeline resolves no carrier."""
-        return (
-            self.name == "llm_only"
-            or self.is_llm
-            or self.wire_type is NodeKind.GENERATION
-            or self.langfuse_type == "generation"
+        return declares_llm_run(
+            name=self.name,
+            mappings=self.observation_mappings,
+            wire_type=self.wire_type,
+            langfuse_type=self.langfuse_type,
         )
 
 
@@ -334,23 +365,27 @@ class NodeConfigParam(StrictModel):
 
     `kind` names the surface that OWNS the param: `model`/`enum` → a select,
     `number`/`bool`/`string` → a typed input, `prompt` → the prompt editor's (a
-    `PromptTemplate` decomposition field), `nested` → structured, no scalar widget
-    (`NESTED_PARAM_TYPES`). Only the first five are config-editor rows; the last two
-    are listed but not rendered. They are listed because dropping them made an
-    all-axes-shut sum answer "locked" for a node whose every axis is prose — do not
-    re-filter this list at the source.
+    `PromptTemplate` decomposition field), `nested` → structured, read as text and typed by
+    nobody (`NESTED_PARAM_TYPES`). Every kind but `prompt` is a config row; do not re-filter
+    this list at the source, and do not read `nested` as unrenderable — the schema-description
+    axis and L2's layout are both nested, and both are axes an operator may be shown.
 
     **A lock is (axis, AGENT), never an axis alone.** `movable_by` names the agents that may
     move this param right now — the vocabulary is `MOVABLE_AGENTS` — and the empty list is the
     only true lock: nobody may, and changing it costs a fork.
 
     Two fields say WHY a shut axis is shut, and the difference is the whole point:
-    `optimizer_locked` = never an axis (`PARAM_FORBIDDEN_KEYS` — `provider` and `route_order`,
-    cost levers set against a measured capture, nobody's decision); `held` = the dataset offered
-    it and this campaign closed it (`param_keys_held` — somebody's decision, and reversible).
-    Neither = plain configuration, never an axis at all. **`model` is in neither set**: it is an
-    ordinary axis whose openness is its node's own `param_keys` answer, and its permitted values
-    are `param_allowed_values["model"]` (see `PipelineSchema.model_options`)."""
+    `never_axis` = it could never be one, naming WHICH construction forbids it — `cost_lever`
+    (`PARAM_FORBIDDEN_KEYS`: `provider`, `route_order`, set against a measured capture) or
+    `schema_owned` (`SCHEMA_OWNED_FIELDS`: the structured-output contract, which the LLM cannot
+    emit a key of at all). `held` = the dataset offered it and this campaign closed it
+    (`param_keys_held` — somebody's decision, and reversible). Neither = plain configuration.
+    **`model` is in none of them**: it is an ordinary axis whose openness is its node's own
+    `param_keys` answer, and its permitted values are `param_allowed_values["model"]` (see
+    `PipelineSchema.model_options`).
+
+    A reason rather than a flag because the browser had to guess it from the key's name to say
+    anything, and every guess it could make was the cost-lever sentence."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -359,7 +394,7 @@ class NodeConfigParam(StrictModel):
     kind: str  # "model" | "enum" | "number" | "bool" | "string" | "prompt" | "nested"
     options: list[str] = Field(default_factory=list)
     description: str = ""
-    optimizer_locked: bool = False
+    never_axis: Literal["", "cost_lever", "schema_owned"] = ""
     movable_by: list[str] = Field(default_factory=list)
     held: bool = False
     # "unset" on a DATASET-scoped read, which has no campaign to attribute to; a campaign read
@@ -387,7 +422,7 @@ class NodeReach(StrictModel):
 
 def node_reach(params: list[NodeConfigParam]) -> NodeReach:
     """Take the node's OWN rows, so the picture and the count cannot disagree about one node."""
-    openable = [p for p in params if not p.optimizer_locked]
+    openable = [p for p in params if not p.never_axis]
     opened = [p for p in openable if p.movable_by]
     agents = sorted({a for p in opened for a in p.movable_by}, key=MOVABLE_AGENTS.index)
     state: Literal["open", "partial", "locked", "nothing"] = (
@@ -602,6 +637,17 @@ class PipelineSchema(StrictModel):
             # rule, and :meth:`node_config_schema` reads it for the served `permitted` set.
             return self.model_options(node)
         declared = list(node.param_allowed_values.get(param) or ()) or None
+        refused = self._refused(node, param, model)
+        if param == SCHEMA_TOGGLE_PARAM and declared is not None:
+            # Both bounds resolve after :meth:`narrow`, so no declaration can widen them back: no
+            # `output_schema` is nothing to switch TO, and a refused key cannot be asked for one.
+            # Named here rather than left to :meth:`_refused`, whose general rule ("the value it
+            # is running") reads an unset toggle as no legal value at all.
+            if refused is not None or node.output_schema is None:
+                return [ANSWER_AS_TEXT]
+            return declared
+        if refused is not None:
+            return refused
         answered = self._answering(node, param, model)
         offered = answered.reasoning_efforts if answered else None
         if offered is None:
@@ -611,6 +657,22 @@ class PipelineSchema(StrictModel):
         if param in node.param_values_narrowed and declared is not None:
             return [rung for rung in offered if rung in set(declared)]
         return list(offered)
+
+    def pinned(self, node: "PipelineNode", param: str) -> bool:
+        """Is this axis's value space a single value? Then every "mutation" of it emits the value
+        already there, so it is not something an agent can search: listed anyway it costs a
+        catalogue line and a wire-schema property every round, and spends a variant's one mutation
+        on a byte-identical call the round still scores. The browser derives the same rule for its
+        own controls (`webapp/CLAUDE.md`: one permitted value IS the pin), and asking it here is
+        what stops the two disagreeing about whether an axis is live.
+
+        Two neighbours are deliberately NOT pinned. ``None`` is no declared space at all — a
+        free-valued param, the one shape a search moves without a menu. And ``[]`` is an axis
+        narrowed until nothing is legal: the readers that ADVERTISE an axis already skip it, while
+        :func:`validate_overrides` must keep it, or a value arriving on it reports as an unknown
+        param instead of naming which side — the campaign or the model — struck it."""
+        options = self.param_options(node, param)
+        return options is not None and len(options) == 1
 
     def param_indistinct(self, node: "PipelineNode", param: str) -> list[str]:
         """Values MEASURED to produce the same call on the node's current model — legal and
@@ -625,18 +687,46 @@ class PipelineSchema(StrictModel):
         offered = set(self.param_options(node, param) or ())
         return [v for v in answered.indistinct_efforts if v in offered]
 
+    def _refused(self, node: "PipelineNode", param: str, model: str | None) -> list[str] | None:
+        """The space left when the picked model does not ACCEPT this key at all — its current value
+        alone, which is one value and therefore the pin. ``None`` = not refused, ask on.
+
+        A key outside the endpoint's `supported_parameters` is dropped on the way out, so every
+        value it could take produces a byte-identical call — and the round scores the difference
+        anyway, spending arms on an axis that reaches no wire. This is `openai_compat`'s own
+        warning about an axis outside ``PROVIDER_REQUEST_PARAMS`` ('open it, search it, never move
+        it'), applied to the case where the KEY is ours and the MODEL is the one refusing. It was
+        reported to the operator (the ⊘ badge) and never enforced on the search.
+
+        Unknown strikes nothing: ``unsupported_params is None`` is a catalogue that said nothing,
+        and reading an absent answer as "no" deletes a real axis — the rule the capability layer
+        exists for."""
+        caps = self._capability(node, model)
+        if caps is None or caps.unsupported_params is None:
+            return None
+        if param not in caps.unsupported_params:
+            return None
+        current = node.current_config.get(param)
+        return [str(current)] if isinstance(current, str | int | float | bool) else []
+
+    def _capability(self, node: "PipelineNode", model: str | None) -> "ModelCapability | None":
+        """The capability of the model that will RUN this node, whatever the param."""
+        if not self.model_capabilities:
+            return None
+        picked = model if model is not None else node.current_config.get("model")
+        if not isinstance(picked, str) or not picked:
+            return None
+        return self.model_capabilities.get(picked)
+
     def _answering(
         self, node: "PipelineNode", param: str, model: str | None
     ) -> "ModelCapability | None":
         """The capability speaking for this ``(node, param)``, or ``None``. Shared by
         :meth:`param_options` and :meth:`param_indistinct` so the two cannot disagree about which
         model answers."""
-        if param not in CAPABILITY_ANSWERED_PARAMS or not self.model_capabilities:
+        if param not in CAPABILITY_ANSWERED_PARAMS:
             return None
-        picked = model if model is not None else node.current_config.get("model")
-        if not isinstance(picked, str) or not picked:
-            return None
-        return self.model_capabilities.get(picked)
+        return self._capability(node, model)
 
     def selectable_models(self) -> list[str]:
         """Every model a surface here can put on screen — the catalogue UNION each node's own
@@ -703,9 +793,15 @@ class PipelineSchema(StrictModel):
             # leaves the surface entirely — the one row that most needed to say it was held.
             keys = n.param_keys | n.param_keys_held | set(n.current_config)
             declared_node = declared.get_node(n.name) if declared else None
-            for key in sorted(keys - SCHEMA_OWNED_FIELDS):
+            # The SCHEMA is a tree — names, types, enums, the prose under each field — and the
+            # webapp renders it as one beside these rows (`NodeSurface.tsx::OutputContract`).
+            # Authoring one belongs there, under the `response_format` toggle.
+            for key in sorted(keys - {OUTPUT_SCHEMA_KEY}):
                 options: list[str] = []
                 permitted: list[str] | None = None
+                # UNSET is a value the node RUNS, not one nobody chose — the fold writes nothing,
+                # so an empty row would report a JSON-answering node as answering in prose.
+                unset = schema_toggle_default(n) if key == SCHEMA_TOGGLE_PARAM else None
                 if key in _PROMPT_OWNED_FIELDS:
                     kind = "prompt"
                 elif n.param_types.get(key) in NESTED_PARAM_TYPES:
@@ -743,37 +839,47 @@ class PipelineSchema(StrictModel):
                         else "string"
                     )
                 # Who may move this axis, in ``MOVABLE_AGENTS`` order — one source per agent,
-                # so a member added to that tuple has to be given one here. `provider` and
-                # `route_order` are cost levers searched by nobody, so they short-circuit to the
-                # empty list; `model` does NOT — it is an ordinary axis and answers here exactly
-                # as the node's `param_keys` says. A config-only key (in current_config, not
-                # param_keys) admits neither agent: it is a setting, not an axis.
-                forbidden = key in PARAM_FORBIDDEN_KEYS
+                # so a member added to that tuple has to be given one here. The two constructions
+                # that can never be axes short-circuit to the empty list and SAY WHICH; `model`
+                # does NOT — it is an ordinary axis and answers here exactly as the node's
+                # `param_keys` says. A config-only key (in current_config, not param_keys) admits
+                # neither agent: it is a setting, not an axis.
+                never: Literal["", "cost_lever", "schema_owned"] = (
+                    "cost_lever"
+                    if key in PARAM_FORBIDDEN_KEYS
+                    else "schema_owned"
+                    if key in SCHEMA_OWNED_FIELDS
+                    else ""
+                )
                 reach = {"l1": n.param_keys, "l2": (l2_axes or {}).get(n.name, set())}
-                movable = [] if forbidden else [a for a in MOVABLE_AGENTS if key in reach[a]]
+                movable = (
+                    []
+                    if never or self.pinned(n, key)
+                    else [a for a in MOVABLE_AGENTS if key in reach[a]]
+                )
                 params.append(
                     NodeConfigParam(
                         key=key,
-                        value=resolved.get(key, n.current_config.get(key)),
+                        value=resolved.get(key, n.current_config.get(key, unset)),
                         kind=kind,
                         options=options,
                         permitted=permitted,
                         description=n.param_descriptions.get(key, ""),
-                        optimizer_locked=forbidden,
+                        never_axis=never,
                         movable_by=movable,
                         source=stamped.get(key, "unset"),
-                        # A forbidden key is never HELD, however it left `param_keys`: nobody
-                        # closed an axis — there was none to close, and saying otherwise puts a
-                        # padlock on a cost lever.
-                        held=not forbidden and key in n.param_keys_held,
+                        # A key that could never be an axis is never HELD, however it left
+                        # `param_keys`: nobody closed an axis — there was none to close, and
+                        # saying otherwise puts a padlock on a cost lever.
+                        held=not never and key in n.param_keys_held,
                     )
                 )
             if n.name == model_carrier and self.available_models:
                 # Synthesized carrier row: the node never DECLARED a model, so nothing here is an
                 # axis — plain configuration (`movable_by=[]`, `held=False`), operator-editable on
-                # a fork because the seed overlay outranks the dataset. Not `optimizer_locked`,
-                # which means "a cost lever nobody may search"; this is simply a key the node
-                # did not open.
+                # a fork because the seed overlay outranks the dataset. `never_axis` stays
+                # empty — that names a construction nobody may search; this is simply a key the
+                # node did not open.
                 params.append(
                     NodeConfigParam(
                         key="model",
@@ -913,7 +1019,8 @@ class PipelineSchema(StrictModel):
         """
         out: dict[str, set[str]] = {}
         for step in self.config_nodes:
-            keys = set(step.param_keys) - PARAM_FORBIDDEN_KEYS - SCHEMA_OWNED_FIELDS
+            declared = set(step.param_keys) - PARAM_FORBIDDEN_KEYS - SCHEMA_OWNED_FIELDS
+            keys = {k for k in declared if not self.pinned(step, k)}
             if keys:
                 out[step.name] = keys
         return out

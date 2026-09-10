@@ -8,6 +8,23 @@
 //   anything else   → unreachable                          → "down"
 
 import type { BackendHealthResponse } from "@/lib/api";
+import type { PipelineStatus } from "@/lib/types";
+
+/** How a pipeline READ went, in the fixed precedence every consumer owes it: unbound outranks in
+ *  flight, which outranks failed. Two surfaces resolve a schema OUTSIDE `ConnectorProvider` — the
+ *  Compare card and the optimizer manifest — and each spelling the precedence inline is how one
+ *  comes to report a read still in flight as a pipeline that does not exist
+ *  (`frontend-surface-contract.md::I1`). The provider itself resolves the four states through the
+ *  shape of its own memo instead. */
+export function pipelineReadStatus(read: {
+  bound: boolean;
+  loading: boolean;
+  failed: boolean;
+}): PipelineStatus {
+  if (!read.bound) return "unbound";
+  if (read.loading) return "loading";
+  return read.failed ? "error" : "ok";
+}
 
 export interface ConnectorReachability {
   reachable: boolean;

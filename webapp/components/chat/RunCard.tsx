@@ -82,6 +82,7 @@ export function RunCard({ sampleOrder }: Props) {
         originDoc={originFile.doc}
         originLoading={originFile.loading}
         schema={cv.nodeConfigSchema}
+        schemaStatus={cv.pipelineStatus}
         outputSchema={cv.nodeOutputSchema}
       />
       {/* A pp-self outer cycle has no per-sample roster — its "samples" are inner
@@ -199,6 +200,7 @@ function ConfigBox({
   originDoc,
   originLoading,
   schema,
+  schemaStatus,
   outputSchema,
 }: {
   observe: ReturnType<typeof useObserveSearchPoint>;
@@ -207,6 +209,7 @@ function ConfigBox({
   originDoc: RoundResult | null;
   originLoading: boolean;
   schema: Parameters<typeof NodeSurface>[0]["schema"];
+  schemaStatus: Parameters<typeof NodeSurface>[0]["schemaStatus"];
   outputSchema: Parameters<typeof NodeSurface>[0]["outputSchema"];
 }) {
   const options = observeOptions(observe.avail);
@@ -288,6 +291,7 @@ function ConfigBox({
             point={{ origin_prompt_fields: cfg.promptFields, pipeline_overlay: {} }}
             overlay={cfg.config}
             schema={schema}
+            schemaStatus={schemaStatus}
             outputSchema={outputSchema}
             mode="values"
             compact

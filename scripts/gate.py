@@ -139,13 +139,17 @@ def _scan(
     file exempt whatever it says (the migration-debt components). Honouring a path
     pattern against line text would exempt any line that merely names one of those
     files — a comment pointing at the spine would hide a real violation beside it.
+
+    Split on ``\\n`` rather than ``splitlines()``, which also breaks on five of the characters
+    ``_CONTROL_CHAR`` hunts — a needle matching one of those consumed it as a line terminator and
+    never saw it. ``read_text`` already translates newlines, so the two agree everywhere else.
     """
     hits = []
     for path in files:
         rel = path.relative_to(_REPO).as_posix()
         if allow_path is not None and allow_path.search(rel):
             continue
-        for num, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        for num, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
             if needle.search(line) and not (allow_line is not None and allow_line.search(line)):
                 hits.append(f"{rel}:{num}: {line.strip()}")
     return hits
@@ -171,6 +175,34 @@ def _layering(_: Sel) -> Outcome:
         allow_line=_LAYERING_ALLOW,
     )
     return (1, "application must not import presentation:\n" + "\n".join(hits)) if hits else (0, "")
+
+
+# A control character makes git call the whole FILE binary — the stat line reads `Bin 13089 ->
+# 14743` and no diff is rendered for it, in review or in `git show`. Not a style rule: one NUL used
+# as a key separator shipped a permanently stale freshness gate, and the diff that would have shown
+# it did not exist. CR is absent deliberately — `read_text` translates line endings.
+_CONTROL_CHAR = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _undiffable(_: Sel) -> Outcome:
+    files = [
+        *_sources(_REPO / "promptpotter", "*.py"),
+        *_sources(_REPO / "scripts", "*.py"),
+        *_sources(_REPO / "tests", "*.py"),
+        # `.css` too: the byte makes any FILE binary, and a stylesheet is authored beside the
+        # component it dresses, so leaving it out would leave the same hole one directory over.
+        *(
+            p
+            for root in ("components", "lib", "app")
+            for p in _sources(_WEBAPP / root, "*.ts", "*.tsx", "*.css")
+        ),
+    ]
+    hits = _scan(files, _CONTROL_CHAR)
+    return (
+        (1, "control character — git renders these binary, so no diff is read:\n" + "\n".join(hits))
+        if hits
+        else (0, "")
+    )
 
 
 _LIVE_L1 = re.compile(r"liveL1Candidates")
@@ -311,6 +343,9 @@ CHECKS: tuple[Check, ...] = (
     Check("deptry", "py", lambda _: _run(_py("deptry", "."), _REPO)),
     Check("mypy", "py", _mypy),
     Check("layering", "py", _layering, staged=True),
+    # "py" so it runs without `webapp/node_modules`, which is routinely absent — a guard that
+    # cannot run on the machine that would trip it is not a guard.
+    Check("undiffable", "py", _undiffable, staged=True),
     Check(
         "ts-types",
         "py",

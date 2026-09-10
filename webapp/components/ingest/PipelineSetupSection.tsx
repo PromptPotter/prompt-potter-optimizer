@@ -42,6 +42,10 @@ export function PipelineSetupSection({
     () => ({
       connector: draft.connector,
       view: draft.pipeline_view,
+      // The draft RESPONSE carries the resolver's own check-in arm, so this answer is landed by
+      // the time it is on screen — there is no fetch here to be in flight or to fail. Without it
+      // the context's default (`unbound`) would report the ingest surface as bound to no campaign.
+      pipelineStatus: "ok" as const,
       nodeConfigSchema: draft.node_config_schema,
       nodeOutputSchema: draft.node_output_schema,
       reach: draft.reach,
@@ -157,6 +161,7 @@ function PipelineSetupInner({
               overlay={draft.pipeline_overlay}
               isSingleNode={draft.is_single_node}
               schema={cv.nodeConfigSchema}
+              schemaStatus={cv.pipelineStatus}
               outputSchema={cv.nodeOutputSchema}
               mode="search-space"
               modelCapabilities={draft.model_capabilities}

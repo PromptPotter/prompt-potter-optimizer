@@ -352,6 +352,7 @@ export function MeasurementRun({
                     point={g.spec}
                     overlay={g.spec.pipeline_overlay}
                     schema={cv.nodeConfigSchema}
+                    schemaStatus={cv.pipelineStatus}
                     outputSchema={cv.nodeOutputSchema}
                     mode="values"
                     compact

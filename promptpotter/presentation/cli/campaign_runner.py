@@ -92,7 +92,7 @@ CLI_VERB_FOR_KIND: dict[str, str | None] = {
     # Reached by the verb named, but through an IN-PROCESS path rather than the command — the
     # terminal changes the same state and writes no `CommandRecord` naming who asked. Each is its
     # own standing finding; they are named here so the next reader inherits them instead of
-    # rediscovering them. `new`/`resume` mint and run inline (`--steer-model` is the fork),
+    # rediscovering them. `new`/`resume` mint and run inline (`--steer` is the fork),
     # `register-backend` is written by init wiring, `origin-gate-decision` is answered by the
     # in-run stdin prompt, and `compact-archive` calls the maintenance pass direct.
     "mint-campaign": "new",

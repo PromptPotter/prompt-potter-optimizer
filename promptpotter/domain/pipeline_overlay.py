@@ -9,8 +9,13 @@ import copy
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.pipeline_schema import SCHEMA_DESCRIPTIONS_PARAM
-from promptpotter.domain.search_point import WHO_ANSWERS_KEYS
+from promptpotter.domain.pipeline_schema import (
+    ANSWER_AS_TEXT,
+    OUTPUT_CONTRACT_KEYS,
+    SCHEMA_DESCRIPTIONS_PARAM,
+    SCHEMA_TOGGLE_PARAM,
+)
+from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, WHO_ANSWERS_KEYS
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -19,7 +24,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "RESERVED_PIPELINE_PARAM_KEYS",
-    "fold_schema_descriptions",
+    "allowed_values_from_narrowing",
+    "fold_output_contract",
     "node_config_items",
     "overlay_is_locked_axis_only",
     "overlay_sets_model_outside_allowed",
@@ -56,21 +62,36 @@ def overlay_is_locked_axis_only(overlay: dict[str, Any] | None) -> bool:
     return bool(keys) and all(k in WHO_ANSWERS_KEYS for k in keys)
 
 
-def permitted_models_from_narrowing(
+def allowed_values_from_narrowing(
     narrowing: Mapping[str, object] | None,
-) -> dict[str, list[str]]:
-    """The per-node permitted model set, read off a campaign's frozen
-    ``config.optimizer_narrowing``. The ONE derivation of it, so the fork gate, the runner and the
-    CLI cannot disagree about which models a branch sanctions."""
-    out: dict[str, list[str]] = {}
+) -> dict[str, dict[str, list[str]]]:
+    """What a frozen ``config.optimizer_narrowing`` DECLARES, per node and per param. The ONE
+    shape-read of it: a block is a :class:`NodeSearchNarrowing` in memory and a plain dict off
+    disk, so a caller spelling that itself sees one of the two and nothing in the other."""
+    out: dict[str, dict[str, list[str]]] = {}
     for node, block in (narrowing or {}).items():
         values = getattr(block, "param_allowed_values", None)
         if values is None and isinstance(block, dict):
             values = block.get("param_allowed_values")
-        models = (values or {}).get("model") if isinstance(values, dict) else None
-        if isinstance(models, list):
-            out[node] = [str(m) for m in models]
+        if isinstance(values, dict):
+            out[node] = {
+                param: [str(v) for v in vals]
+                for param, vals in values.items()
+                if isinstance(vals, list)
+            }
     return out
+
+
+def permitted_models_from_narrowing(
+    narrowing: Mapping[str, object] | None,
+) -> dict[str, list[str]]:
+    """The per-node permitted model set, so the fork gate, the runner and the CLI cannot disagree
+    about which models a branch sanctions."""
+    return {
+        node: values["model"]
+        for node, values in allowed_values_from_narrowing(narrowing).items()
+        if "model" in values
+    }
 
 
 def overlay_sets_model_outside_allowed(
@@ -79,10 +100,12 @@ def overlay_sets_model_outside_allowed(
     """The ADR-0005 babysit trigger: does this steer pick a responder the origin never sanctioned?
 
     *permitted* is per NODE — the node's own ``param_allowed_values["model"]``. A node absent from
-    it sanctions nothing, the restrictive default. A ``provider`` edit has no permitted set that
-    could sanction it, so it always counts."""
+    it sanctions nothing, the restrictive default. A cost lever (`PARAM_FORBIDDEN_KEYS` — the
+    gateway and the route) has no permitted set that could sanction it, so an edit to one always
+    counts. The SET, not one member of it: naming ``provider`` alone left ``route_order`` locked in
+    the browser and free on the wire."""
     for node, cfg in node_config_items(overlay):
-        if "provider" in cfg:
+        if cfg.keys() & PARAM_FORBIDDEN_KEYS:
             return True
         model = cfg.get("model")
         if model is not None and model not in set((permitted or {}).get(node, ())):
@@ -90,11 +113,26 @@ def overlay_sets_model_outside_allowed(
     return False
 
 
-def fold_schema_descriptions(pp: dict[str, Any] | None, schema: PipelineSchema) -> None:
-    """*schema* is REQUIRED — a node declaring its schema by registry identity carries none to write
-    on, and without it two opposite steers produced a byte-identical payload whose hashes collided."""
+def fold_output_contract(pp: dict[str, Any] | None, schema: PipelineSchema) -> None:
+    """Resolve the two structured-output levers onto the wire config: whether the node uses its
+    schema at all, and what its `description` prose says.
+
+    *schema* is REQUIRED — a node declaring its schema by registry identity carries none to write
+    on, and without it two opposite steers produced a byte-identical payload whose hashes collided.
+
+    The toggle is read, never WRITTEN: an unmoved node keeps a byte-identical payload, so every
+    banked measurement stays addressed by the hash it was measured under, and only a candidate
+    that actually chose ``text`` pays for a new one."""
     for node, cfg in node_config_items(pp):
         descriptions = cfg.pop(SCHEMA_DESCRIPTIONS_PARAM, None)
+        if cfg.get(SCHEMA_TOGGLE_PARAM) == ANSWER_AS_TEXT:
+            # BOTH keys go, not just the schema: a backend destructuring `answer_field` out of a
+            # response that never had the slot reads "" for every sample and grades the run
+            # NO_RESULT. The descriptions were popped above, so the fold below cannot resolve a
+            # registry schema back onto a node that just said it wants none.
+            for key in OUTPUT_CONTRACT_KEYS:
+                cfg.pop(key, None)
+            continue
         if not isinstance(descriptions, dict) or not descriptions:
             continue
         out_schema = cfg.get("output_schema")

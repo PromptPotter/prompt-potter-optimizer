@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -42,6 +43,7 @@ __all__ = [
     "ForkResult",
     "_mint_fork",
     "cleanup_stub_fork_if_empty",
+    "declare_steered_values",
     "mint_operator_fork",
     "permitted_models",
     "steer_is_babysit",
@@ -346,6 +348,42 @@ def permitted_models(stores: Stores, campaign_id: str) -> dict[str, list[str]]:
     return permitted_models_from_narrowing(narrowing)
 
 
+def declare_steered_values(seed: CycleSeed, narrowing: Mapping[str, Any] | None) -> CycleSeed:
+    """A steered value on an enumerable axis joins the fork's OWN permitted set. Without it the
+    fork runs ``model=X`` beside a set that excludes X, and L1 is offered a menu the running value
+    is not on. *narrowing* is the campaign's frozen ``optimizer_narrowing``; an axis it declares no
+    list for keeps the dataset's, which this cannot see and does not need to — except ``model``,
+    where the gate reads nothing declared as nothing sanctioned, so the fork must say what it runs.
+    An axis the caller's seed already declares is theirs and stays.
+
+    Applied at the MINT, so the terminal and the browser cannot mint two different forks from the
+    same steer. It widens the FORK's search space and nothing else: `steer_is_babysit` reads the
+    campaign manifest, never a cycle seed, so a branch steered outside the origin's sanction stays
+    babysat in every fork below it."""
+    from promptpotter.domain.pipeline_overlay import (
+        allowed_values_from_narrowing,
+        node_config_items,
+    )
+    from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
+
+    origin = allowed_values_from_narrowing(narrowing)
+    declared = dict(seed.optimizer_narrowing)
+    for node, cfg in node_config_items(seed.pipeline_overlay):
+        listed = origin.get(node, {})
+        own = declared.get(node)
+        values = dict(own.param_allowed_values) if own else {}
+        for param, value in cfg.items():
+            if param in values or (param != "model" and param not in listed):
+                continue
+            steered = str(value)
+            values[param] = [steered, *(v for v in listed.get(param) or () if v != steered)]
+        if values:
+            declared[node] = NodeSearchNarrowing(
+                param_keys=own.param_keys if own else None, param_allowed_values=values
+            )
+    return seed.model_copy(update={"optimizer_narrowing": declared})
+
+
 def mint_operator_fork(
     *,
     stores: Stores,
@@ -366,6 +404,10 @@ def mint_operator_fork(
     preview earns — the preview names the round the record stops holding, and this is the fork that
     keeps everything before it."""
     parent_index = stores.campaigns.load(hop) or {}
+    campaign = stores.campaigns.load_campaign(hop.campaign_id)
+    seed = declare_steered_values(
+        seed, campaign.config.get("optimizer_narrowing") if campaign else None
+    )
     if keep_rounds and seed.origin_prompt_fields:
         # Two different origins asked for at once: the lifted round 0 is already the origin, so a
         # declared one would either be ignored or overwrite measured rows. Refused rather than

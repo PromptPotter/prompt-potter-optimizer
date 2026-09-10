@@ -40,11 +40,13 @@ from promptpotter.infrastructure.store.io import (
     read_json_optional,
     read_json_tolerant,
     read_text_optional,
+    read_yaml_optional,
     rmtree_robust,
     unlink_robust,
     validate_path_component,
     write_json,
     write_text,
+    write_yaml,
 )
 from promptpotter.infrastructure.store.layout import (
     ROUND_GLOB,
@@ -1091,6 +1093,18 @@ class CampaignStore:
 
     def read_cycle_seed(self, hop: CycleHop) -> CycleSeed | None:
         return scan_ledger_cycle_seed(self._layout(hop).ledger)
+
+    def write_resolved_pipeline(self, hop: CycleHop, declaration: dict[str, Any]) -> None:
+        """Record the declaration this cycle RUNS — the merge of the live backend and the dataset
+        overlay, written once at run init. Not the ledger: it is a fact about the whole cycle, not
+        an event in it, and a reader that only wants "what may move here" should not scan a log."""
+        write_yaml(self._layout(hop).resolved_pipeline, declaration)
+
+    def read_resolved_pipeline(self, hop: CycleHop) -> dict[str, Any] | None:
+        """``None`` where a campaign has never run — the committed dataset file answers then, and
+        that IS the honest answer, because no backend has told this campaign anything yet."""
+        raw = read_yaml_optional(self._layout(hop).resolved_pipeline)
+        return raw if isinstance(raw, dict) else None
 
     def write_ruler(
         self, hop: CycleHop, ruler: DeltaRuler, *, dataset_name: str, round_num: int

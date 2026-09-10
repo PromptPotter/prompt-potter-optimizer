@@ -1,7 +1,7 @@
 // Canonical connector-state shape. One join of three streams:
 //
 //   - operator-level registered backends (`GET /backends`)
-//   - dataset-overlay pipeline (`GET /datasets/{name}/pipeline`)
+//   - the campaign's resolved pipeline (`GET /campaigns/{id}/pipeline?at=`)
 //   - live per-LLM-node observations (`dashboard.json::current_round.nodes`)
 //
 // `BackendConnection` (promptpotter/domain/backend.py) is the mother
@@ -30,7 +30,7 @@ import type {
 } from "@/lib/api";
 import type { NodeDataLike, PipelineView } from "@/components/workflow";
 
-// How the `GET /datasets/{name}/pipeline` read went. A null `view` alone cannot
+// How the pipeline read went. A null `view` alone cannot
 // say WHY — in flight, failed, and no-dataset-bound all read as null, and the
 // hero rendered the same silent dash for all three (claiming `aria-busy` forever
 // on a read that had already failed). Consumers must distinguish them: an

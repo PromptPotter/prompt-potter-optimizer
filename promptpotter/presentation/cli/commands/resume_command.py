@@ -4,6 +4,7 @@ fresh one; ``classify_config_diff`` calls it policy-only (resume) or data-affect
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -30,6 +31,7 @@ from promptpotter.presentation.cli.session import load_session
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import CycleResult
     from promptpotter.domain.sample import Sample
     from promptpotter.presentation.cli.session import SessionCtx
@@ -100,7 +102,7 @@ def _prepare_cycle_for_resume(
         elif steer_fork:
             # A steer-fork mints a fresh sibling under the current config — the drift's
             # own recommended resolution. Don't halt; the fork carries the new config.
-            print("Diff is data-affecting, but --steer-model mints a fresh sibling")
+            print("Diff is data-affecting, but --steer mints a fresh sibling")
             print("under the current config — proceeding to fork (parent preserved).")
         else:
             print("Diff is data-affecting — cached measurements may not apply.")
@@ -235,18 +237,55 @@ def _origin_candidate_id(session: Session, cycle_id: str, from_round: int) -> st
     return scores[0].candidate_id if scores else ""
 
 
+def _steer_overlay(specs: list[str], schema: PipelineSchema) -> dict[str, dict[str, Any]]:
+    """``NODE.PARAM=VALUE`` → the flat ``{node: {param: value}}`` seed overlay — the ONE channel L1,
+    L2 and the browser's steer form all write into, so the terminal gets a verb for the channel
+    rather than one per axis. A value is read in the param's DECLARED type, the same table the
+    browser coerces by (`nodeConfig.ts::coerce`): a string stays text, anything else is JSON.
+
+    The node's OWN ``param_types`` is the whole answer — it already resolves every key the node
+    declares or configures through ``WELL_KNOWN_PARAM_TYPES``, so asking that table again here
+    would type a param this node does not carry. A param it has no answer for is refused, which is
+    the same door the unknown-node arm below opens: both are typos, and the browser cannot express
+    either because neither has a served row."""
+    overlay: dict[str, dict[str, Any]] = {}
+    for spec in specs:
+        key, sep, raw = spec.partition("=")
+        node, dot, param = key.strip().partition(".")
+        if not sep or not dot or not node or not param:
+            raise SystemExit(f"ERROR: --steer expects NODE.PARAM=VALUE, got {spec!r}")
+        declared_node = schema.get_node(node)
+        if declared_node is None:
+            names = ", ".join(n.name for n in schema.config_nodes) or "(none)"
+            raise SystemExit(f"ERROR: --steer names no node called {node!r}; nodes: {names}")
+        kind = declared_node.param_types.get(param)
+        if kind is None:
+            known = ", ".join(sorted(declared_node.param_types)) or "(none)"
+            raise SystemExit(f"ERROR: --steer: {node!r} carries no {param!r}; params: {known}")
+        value: Any = raw.strip()
+        if kind != "string":
+            try:
+                value = json.loads(value)
+            except ValueError:
+                raise SystemExit(
+                    f"ERROR: --steer {node}.{param} is declared {kind}; {value!r} is not one "
+                    f"(spell it as JSON)."
+                ) from None
+        overlay.setdefault(node, {})[param] = value
+    return overlay
+
+
 def _maybe_fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx, session: Session) -> None:
-    """``--steer-model NODE=MODEL``: the CLI twin of the web steer-fork; C0 is INHERITED, so only the
-    candidate is measured. Outside what the node PERMITS needs ``campaign.babysit`` and grades the
-    branch C — and the fork then DECLARES the model it was steered to, so the branch carries its own
-    permitted set and the next fork from it is clean. Widening is a fork act, never an in-place
-    manifest edit: the permitted set is ``Scope.DATA``."""
-    specs = getattr(args, "steer_model", None)
+    """``--steer NODE.PARAM=VALUE``: the CLI twin of the web steer-fork; C0 is INHERITED, so only the
+    candidate is measured. A steer to a gateway or to a model the node does not PERMIT needs
+    ``campaign.babysit`` and grades the branch C. Which values the fork then declares as its own
+    search space is `mint_operator_fork`'s rule, not this door's."""
+    specs = getattr(args, "steer", None)
     if not specs:
         return
     if not ctx.cycle_id:
         raise SystemExit(
-            "ERROR: `resume --steer-model` requires an active cycle on this session.\n"
+            "ERROR: `resume --steer` requires an active cycle on this session.\n"
             "Run `python -m promptpotter new <dataset>` first."
         )
 
@@ -255,34 +294,31 @@ def _maybe_fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx, sessio
         permitted_models,
         steer_is_babysit,
     )
-    from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
     from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
     from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, has_capability
 
-    overlay: dict[str, Any] = {}
-    for spec in specs:
-        node, sep, model = spec.partition("=")
-        node, model = node.strip(), model.strip()
-        if not sep or not node or not model:
-            raise SystemExit(f"ERROR: --steer-model expects NODE=MODEL, got {spec!r}")
-        overlay.setdefault(node, {})["model"] = model
+    overlay = _steer_overlay(specs, session.pipeline_schema)
 
     # The SAME question the web fork-cycle applier asks, of the same list — the origin's frozen
     # per-node permitted set, off the campaign manifest. `ctx.campaign_config` is a different list,
     # one the inherited overlay and the cycle seed have already moved.
-    permitted = permitted_models(session.store, ctx.campaign_id)
     disallowed = steer_is_babysit(session.store, ctx.campaign_id, overlay)
     if disallowed:
         # Same capability gate the web fork-cycle applier runs. The terminal owner
         # holds it; a delegated sub-principal without it is refused here.
         if not has_capability(session.identity, CAMPAIGN_BABYSIT_CAP):
             raise SystemExit(
-                f"ERROR: steering to a model the node does not permit "
+                f"ERROR: steering to a gateway, or to a model the node does not permit, "
                 f"requires the {CAMPAIGN_BABYSIT_CAP} capability."
             )
-        models = ", ".join(sorted(m for c in overlay.values() for m in [c.get("model")] if m))
+        permitted = permitted_models(session.store, ctx.campaign_id)
+        steered = ", ".join(
+            f"{node}.{param}={value!r}"
+            for node, cfg in sorted(overlay.items())
+            for param, value in sorted(cfg.items())
+        )
         print()
-        print(f"⚠  Steering the inner-optimizer model to {models} — NOT permitted by")
+        print(f"⚠  Steering {steered} — NOT permitted by")
         print(f"   the origin: {permitted or '{} (nothing sanctioned)'}.")
         print("   This branch will be marked babysat (grade C); the origin's C0 is inherited.")
         print()
@@ -296,40 +332,22 @@ def _maybe_fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx, sessio
     config_overrides = (
         ConfigOverrides(max_rounds=steer_max) if steer_max is not None else ConfigOverrides()
     )
-    # The fork DECLARES the model it was steered to, joined to what the parent permitted.
-    # `narrow()` REPLACES `param_allowed_values` (keys still subset), so the seed's list stands.
-    narrowing = {
-        node: NodeSearchNarrowing(
-            param_allowed_values={
-                "model": [
-                    str(cfg["model"]),
-                    *(m for m in permitted.get(node, ()) if m != cfg["model"]),
-                ]
-            }
-        )
-        for node, cfg in overlay.items()
-        if cfg.get("model")
-    }
     parent_cycle_id = ctx.cycle_id
     new_cycle_id = mint_operator_fork(
         stores=session.store,
         hop=CycleHop(campaign_id=ctx.campaign_id, cycle_id=parent_cycle_id),
         from_round=0,
         # The origin candidate in the parent's round 0 — the C0 the fork inherits
-        # (skips the origin re-score, straight to L1 on the steered model).
+        # (skips the origin re-score, straight to L1 on the steered values).
         from_candidate_id=_origin_candidate_id(session, parent_cycle_id, 0),
-        seed=CycleSeed(
-            pipeline_overlay=overlay,
-            config_overrides=config_overrides,
-            optimizer_narrowing=narrowing,
-        ),
+        seed=CycleSeed(pipeline_overlay=overlay, config_overrides=config_overrides),
         steered_by=str(session.identity.user_id),
     )
     ctx.cycle_id = new_cycle_id
     session.state.cycle_id = new_cycle_id
     logger.info(
         "Operator steer-fork (%s): %s → %s [overlay=%s]",
-        "babysit, grade C" if disallowed else "clean, sanctioned model",
+        "babysit, grade C" if disallowed else "clean, sanctioned values",
         parent_cycle_id,
         new_cycle_id,
         overlay,
@@ -479,7 +497,7 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
         return backend_unreachable_result(exc)
 
     train_data = session.samples
-    steering = bool(getattr(args, "steer_model", None))
+    steering = bool(getattr(args, "steer", None))
     try:
         pipeline_params = _prepare_cycle_for_resume(
             args, ctx, session, campaign_config, train_data, steer_fork=steering

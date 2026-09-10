@@ -187,7 +187,30 @@ LEDGER_BASELINE = {
     # while every surface reading the campaign showed another. Silent by construction: both
     # numbers are real, and only a run that outlives the file's ceiling tells them apart.
     # (test_resume § the frozen-ceiling case)
-    "test_functions": 169,
+    # +1: a measured point is served the SCHEMA it ran under. `output_schema_descriptions` is a
+    # core always-on axis, so L1 moves it every round; the wire folded the new prose in and the
+    # served contract read the parsed DECLARATION, so every surface showed the pre-evolution
+    # schema with nothing saying the two had parted. Silent, and unrecoverable by re-reading —
+    # the display was wrong for the whole life of the campaign. (test_integrity § 4)
+    # +1: an axis the picked MODEL refuses offers only the value it runs. A key outside the
+    # endpoint's `supported_parameters` is dropped on the way out, so L1 searched a space where
+    # every value produced a byte-identical call and the round scored the difference as signal.
+    # Reported by a badge and never enforced on the search. (test_integrity § 4)
+    # +1: a narrowing layer answers for ITS params and no others. `merge_node_blocks` merged
+    # `optimizer` one level, so a connector naming one rung list REPLACED the backend's whole
+    # `param_allowed_values` — every other axis on that node lost its declared space while
+    # staying open, which handed L1 a bare string where a two-value toggle was declared.
+    # (test_integrity § 4)
+    # +1: every LLM node is offered the text-or-structured toggle. Whether the request carries a
+    # schema is PromptPotter's own lever, so a backend declaring it too made two mechanisms for
+    # one thing — and TermNorm's `output_schema` silently outranked its `response_format`, so
+    # every arm of the axis L1 was being offered produced the identical call. (test_integrity § 4)
+    # +1: answering in TEXT sends no contract to answer into. `answer_field` must leave with the
+    # schema — destructuring a slot the response never had reads "" for every sample and grades
+    # the run NO_RESULT, a mechanical zero the loop would charge to the idea under test. Pairs
+    # with the byte-identical claim for an unmoved node: the fold runs before the content hash,
+    # so a resolved default written here would re-key the whole archive. (test_integrity § 4)
+    "test_functions": 174,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

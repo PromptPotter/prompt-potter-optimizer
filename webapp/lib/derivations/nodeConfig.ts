@@ -20,13 +20,13 @@ export type ConfigMode = "search-space" | "values";
 
 // One row of the config editor. Search-space fields (`locked`, `allowed`,
 // `baseValue`) drive the optimizer search-space lever; values fields
-// (`fromCandidate`, `optimizerLocked`) drive the concrete fork-value lever. A row
+// (`fromCandidate`, `neverAxis`) drive the concrete fork-value lever. A row
 // carries both; the active `mode` decides which it renders + emits.
 export interface ConfigRow {
   node: string;
   key: string;
-  // "model" | "enum" | "number" | "bool" | "string" — drives the widget +
-  // coercion (enums carry a narrowed allow-set).
+  // "model" | "enum" | "number" | "bool" | "string" | "nested" — drives the widget + coercion
+  // (enums carry a narrowed allow-set; `nested` round-trips through JSON).
   kind: string;
   // Full declared value set (model/enum); empty otherwise.
   options: string[];
@@ -50,9 +50,11 @@ export interface ConfigRow {
   // values: present in the candidate overlay (vs the config floor) — keep it in
   // the emitted overlay even when the operator leaves it untouched.
   fromCandidate: boolean;
-  // NEVER a search axis (model/provider — a confound guard). Shown as a hint; a
-  // cap-holding operator may still set it on a fork (a babysit edit).
-  optimizerLocked: boolean;
+  // WHICH construction forbids this key from ever being an axis, "" where none does — served,
+  // because a browser reading it off the key's name can only ever tell one of the two stories.
+  // Shown as a hint; a cap-holding operator may still set a cost lever on a fork (a babysit
+  // edit), while a schema-owned key is the contract itself and moves nowhere.
+  neverAxis: NodeConfigParam["never_axis"];
   // Who searches this axis right now — served, and the reason a shut axis and an axis
   // nobody happens to be moving are two different rows rather than one badge.
   movableBy: string[];
@@ -60,25 +62,6 @@ export interface ConfigRow {
   // person caused, and the only one worth offering a click.
   held: boolean;
   description: string;
-}
-
-// The kinds this editor draws a widget for. The served param list is COMPLETE per
-// node (that is what makes `movable_by` summable into "where does the search reach
-// here"), so it also carries `prompt` (a PromptTemplate decomposition
-// field, owned by the prompt editor) and `nested` (object/array — a nested value in
-// a text box is a corrupt edit waiting to happen). Those are listed, not rendered:
-// the filter belongs here, at the surface that knows what it can draw, not at the
-// server, where dropping them blinds every other reader.
-export const WIDGET_KINDS: ReadonlySet<string> = new Set([
-  "model",
-  "enum",
-  "number",
-  "bool",
-  "string",
-]);
-
-export function isWidgetParam(p: { kind: string }): boolean {
-  return WIDGET_KINDS.has(p.kind);
 }
 
 /** The ladder a `reasoning_effort` row offers on the MENU, once a model is picked.
@@ -104,7 +87,8 @@ export function effortLadder(row: ConfigRow, caps: ModelCapability | undefined):
  *
  *  *permitted* is per NODE — the frozen `config.optimizer_narrowing[node].param_allowed_values
  *  .model`, which is the ONE permitted set. A node absent from it permits nothing, the restrictive
- *  default. A `provider` edit has no permitted set that could sanction it, so it always counts. */
+ *  default. A cost lever — the gateway or the route, the two keys served as `never_axis:
+ *  "cost_lever"` — has no permitted set that could sanction it, so an edit to one always counts. */
 export function overlaySetsModelOutsideAllowed(
   overlay: Record<string, unknown> | null | undefined,
   permitted: Record<string, readonly string[]> | null | undefined,
@@ -112,7 +96,7 @@ export function overlaySetsModelOutsideAllowed(
   for (const [node, cfg] of Object.entries(overlay ?? {})) {
     if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) continue;
     const c = cfg as Record<string, unknown>;
-    if ("provider" in c) return true;
+    if ("provider" in c || "route_order" in c) return true;
     const model = c.model;
     if (model != null && !new Set(permitted?.[node] ?? []).has(String(model))) return true;
   }
@@ -124,9 +108,9 @@ export function overlaySetsModelOutsideAllowed(
  *  whole distinction: `[]` says nothing may be picked, while `null` says `options` IS the permitted
  *  set (`domain/pipeline_schema.py::NodeConfigParam.permitted`).
  *
- *  It used to be derived from a SECOND read — the campaign's frozen `config.optimizer_narrowing`
- *  off `GET /campaigns/{id}` — which answers for the mint and not for the searchpoint being
- *  steered, so a fork or a cycle seed that moved the set steered against the wrong one. */
+ *  Off THESE rows and never off the campaign's frozen `config.optimizer_narrowing`: that one
+ *  answers for the mint, so a fork or a cycle seed that moved the set steers against the wrong
+ *  list. */
 export function permittedModels(
   schema: Record<string, NodeConfigParam[]> | null | undefined,
 ): Record<string, readonly string[]> {
@@ -152,30 +136,48 @@ function asObj(v: unknown): Record<string, unknown> {
   return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 }
 
+// A row's value as TEXT. `String()` on an object is `[object Object]`, which is how an axis with a
+// real value on the wire would arrive on screen saying nothing at all.
+function asRowValue(kind: string, value: unknown): string {
+  if (value == null) return "";
+  return kind === "nested" ? JSON.stringify(value, null, 1) : String(value);
+}
+
+// `undefined` means UNREPRESENTABLE — a draft that cannot become the value this row holds. Only
+// `nested` can produce it, and the emitters drop such a row rather than writing a string where an
+// object belongs. Distinct from `""`, which is a real answer meaning "inherit".
 function coerce(kind: string, raw: string): unknown {
   if (kind === "number") {
     const n = Number(raw);
     return Number.isFinite(n) ? n : raw;
   }
   if (kind === "bool") return raw === "true";
+  if (kind === "nested") return parseNested(raw);
   return raw;
+}
+
+/** A nested row's draft as the object it stands for, `""` for an empty one (which both emitters
+ *  drop, meaning inherit), or `undefined` if it is not parseable yet. Exported because the WIDGET
+ *  asks the same question to decide whether to accept a commit — two spellings of "is this valid
+ *  JSON" is how a box comes to accept what the emitter drops. */
+export function parseNested(raw: string): unknown {
+  if (raw.trim() === "") return "";
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
 }
 
 // Build rows from the served schema. `node` scopes to one node (search-space, per-node); omit for
 // whole-pipeline (values).
 //
 // **`valuesSeed` is read in `values` mode ONLY, and that asymmetry is the point.** A search-space
-// row's value, lock and permitted set are all SERVED now — `value` is the resolved answer,
-// `movable_by` already reflects the narrowing the resolution applied, and `permitted` is the
-// gate's own set beside the full menu in `options`. Deriving those three from a client-held
-// overlay re-answered, in the browser, a question the server's merge had already settled, and it
-// answered differently: it read `param_keys` off whichever overlay the call site passed, so a
-// campaign that narrowed further than its dataset rendered as wide open
-// (`frontend-surface-contract.md::I9`).
-//
-// `values` mode still takes one, because a fork's seed is a sparse delta that exists nowhere else
-// until it is confirmed — `fromCandidate` is what keeps an inherited-but-untouched param out of
-// the emission.
+// row's value, lock and permitted set are all SERVED — deriving them from a client-held overlay
+// re-answers in the browser what the server's merge already settled, and answers differently
+// (`frontend-surface-contract.md::I9`). A fork's seed is a sparse delta that exists nowhere else
+// until it is confirmed, so `values` takes one: `fromCandidate` is what keeps an
+// inherited-but-untouched param out of the emission.
 export function configRows(
   schema: Record<string, NodeConfigParam[]> | null,
   valuesSeed: Record<string, unknown>,
@@ -190,8 +192,11 @@ export function configRows(
   for (const [n, params] of entries) {
     const nodeSeed = asObj(valuesSeed[n]);
     for (const p of params) {
-      if (!isWidgetParam(p)) continue;
-      const baseValue = p.value == null ? "" : String(p.value);
+      // The served list is COMPLETE per node — that is what makes `movable_by` summable into
+      // "where does the search reach here" — and exactly one kind is subtracted: a `prompt` field
+      // belongs to the prompt editor, which the same surface renders directly below.
+      if (p.kind === "prompt") continue;
+      const baseValue = asRowValue(p.kind, p.value);
       // `permitted` is `null` when it does not differ from the menu — NOT `[]`, which says
       // nothing may be picked at all. `??` is what keeps those two apart.
       const permitted = p.permitted ?? p.options;
@@ -206,7 +211,7 @@ export function configRows(
           locked: p.movable_by.length === 0,
           allowed: permitted,
           fromCandidate: false,
-          optimizerLocked: p.optimizer_locked,
+          neverAxis: p.never_axis,
           movableBy: p.movable_by,
           held: p.held,
           description: p.description,
@@ -221,7 +226,7 @@ export function configRows(
           key: p.key,
           kind: p.kind,
           options: p.options,
-          value: seedVal == null ? "" : String(seedVal),
+          value: asRowValue(p.kind, seedVal),
           baseValue,
           locked: false,
           // The whole MENU, not the permitted subset: a babysit-capable operator may steer a fork
@@ -229,7 +234,7 @@ export function configRows(
           // `permittedModels` instead — restricting here would delete the act.
           allowed: p.options,
           fromCandidate,
-          optimizerLocked: p.optimizer_locked,
+          neverAxis: p.never_axis,
           movableBy: p.movable_by,
           held: p.held,
           description: p.description,
@@ -289,7 +294,12 @@ export function nodeOverlayPatch(
   const config: Record<string, unknown> = {};
   for (const r of rows) {
     if (r.value !== r.baseValue && r.value !== "") {
-      config[r.key] = coerce(r.kind, r.value);
+      const value = coerce(r.kind, r.value);
+      // Unparseable nested draft: drop it rather than write a string over an object. The
+      // permission half is unaffected either way — `nodeNarrowing` builds `param_keys` from
+      // UNLOCKED rows, so a schema-owned key can reach `config` (the operator declaring it)
+      // and still never become an axis.
+      if (value !== undefined) config[r.key] = value;
     }
   }
 
@@ -311,8 +321,8 @@ export function flatConfigKey(node: string, param: string): string {
   return `${node}.${param}`;
 }
 
-// What the operator actually CHANGED — the values editor's emission minus the config it was
-// seeded from.
+// What the operator actually CHANGED — a `values`-mode emission minus the config it was seeded
+// from.
 //
 // **The emission is not a diff, and reading it as one is the trap.** `configRows` sets
 // `fromCandidate` for every param the resolved config carries, and a searchpoint's resolved config
@@ -348,7 +358,7 @@ export function overlayEdits(
 }
 
 /** The seed with the operator's edits written back in, so the editor re-seeds from their scenario
- *  rather than from the record. That is what makes a restore actually restore: `ValuesEditor`
+ *  rather than from the record. That is what makes a restore actually restore: `NodeConfigEditor`
  *  drops its own draft when the seed changes, so clearing an edit puts the input back by itself. */
 export function applyFlatEdits(
   seed: Record<string, unknown>,
@@ -380,7 +390,9 @@ export function seedOverlayFromRows(
     if (!r.fromCandidate && (edit === undefined || edit === r.value)) continue; // inherited + untouched
     const raw = edit ?? r.value;
     if (raw === "") continue; // empty = drop (inherit)
-    (overlay[r.node] ??= {})[r.key] = coerce(r.kind, raw);
+    const value = coerce(r.kind, raw);
+    if (value === undefined) continue; // unparseable nested draft — never a string over an object
+    (overlay[r.node] ??= {})[r.key] = value;
   }
   return overlay;
 }

@@ -161,9 +161,12 @@ async def _resolve_pipeline_schema(
     status: Callable[[str], None],
     *,
     in_process: bool = False,
-) -> PipelineSchema:
+) -> tuple[PipelineSchema, dict[str, Any]]:
     """Backend schema underneath, dataset overlay on top; an ``in_process`` connector has no backend, so the local file IS
-    the schema. RAISES rather than returning ``None`` — optional at ~40 readers means a run completes with wrong numbers."""
+    the schema. RAISES rather than returning ``None`` — optional at ~40 readers means a run completes with wrong numbers.
+
+    Returns the parsed schema AND the declaration it was parsed from — the only copy of that merge
+    anywhere, which is why :attr:`Session.pipeline_declaration` carries it on."""
     backend_resp: dict[str, Any] | None = None
     if in_process:
         pass  # no remote backend — local pipeline.yaml is authoritative
@@ -190,7 +193,7 @@ async def _resolve_pipeline_schema(
         try:
             schema = parse_pipeline_response(merged)
             status(f"Pipeline: {schema.name} ({len(schema.nodes)} nodes)")
-            return schema
+            return schema, merged
         except PayloadInvalidError:
             raise
         except Exception as exc:
@@ -200,7 +203,7 @@ async def _resolve_pipeline_schema(
         try:
             schema = parse_pipeline_response(local_raw)
             status(f"Pipeline: {schema.name} ({len(schema.nodes)} nodes, offline)")
-            return schema
+            return schema, local_raw
         except PayloadInvalidError:
             raise
         except Exception as exc:
@@ -371,7 +374,7 @@ async def init_services(
     client = build_backend_client(connector, backend_url)
     status(f"Backend: {backend_url}")
 
-    pipeline_schema = await _resolve_pipeline_schema(
+    pipeline_schema, pipeline_declaration = await _resolve_pipeline_schema(
         client,
         dataset_config_dir,
         status,
@@ -391,6 +394,7 @@ async def init_services(
         backend_id=backend_id,
         backend_client=client,
         pipeline_schema=pipeline_schema,
+        pipeline_declaration=pipeline_declaration,
         dataset_name=dataset_name,
         dataset_config_dir=dataset_config_dir,
         identity=resolved_identity,

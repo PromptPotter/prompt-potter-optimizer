@@ -13,6 +13,7 @@ them out with the loud-breakage shape/contract bulk.
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import subprocess
 import sys
@@ -35,7 +36,11 @@ from promptpotter.domain.escalation_signals import EscalationSignal, EscalationT
 from promptpotter.domain.measurement_provenance import grade_run
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.pipeline_schema import ParamSource, PipelineSchema
+from promptpotter.domain.pipeline_schema import (
+    SCHEMA_TOGGLE_PARAM,
+    ParamSource,
+    PipelineSchema,
+)
 from promptpotter.domain.run_records import SnapshotRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import QueryMeasurement
@@ -1351,7 +1356,7 @@ def test_an_axis_no_agent_moves_is_SHUT_rather_than_exempt() -> None:
     shut = node_reach([param("output_format"), param("max_tokens")])
     assert (shut.state, shut.open, shut.openable, shut.held) == ("locked", 0, 2, False)
     assert node_reach([param("temperature", held=True)]).held is True
-    guards = [param(k, kind="string", optimizer_locked=True) for k in ("provider", "model")]
+    guards = [param(k, kind="string", never_axis="cost_lever") for k in ("provider", "model")]
     assert node_reach(guards).state == node_reach([]).state == "nothing"
     partial = node_reach(
         [
@@ -1392,6 +1397,249 @@ def test_a_measured_point_is_served_the_identity_it_RAN_under() -> None:
         {"agent": {"judge_instrument": "identity"}},
     )
     assert absent["agent"]["judge_instrument"] == "todays"
+
+
+def test_a_narrowing_layer_answers_for_ITS_params_and_no_others() -> None:
+    """`merge_node_blocks` layers node DEFINITIONS, and `param_allowed_values` is keyed BY PARAM —
+    so a connector declaring a rung list for `reasoning_effort` says nothing about `response_format`.
+
+    Merged one level, it said everything: the connector's map REPLACED the backend's, deleting the
+    declared value space of every other axis on that node. The axis stayed OPEN (`param_keys` is a
+    different key), so `build_l1_response_schema` emitted a bare string for it and L1 could put any
+    value at all on the wire — TermNorm's `llm_only` ran that way, with `response_format` reduced
+    from a two-value toggle to free text. `PipelineSchema.narrow` composes the same map the same
+    way, and the two must not disagree about what narrowing a value space means.
+    """
+    from promptpotter.domain.pipeline_parsing import merge_node_blocks
+
+    backend = {
+        "llm_only": {
+            "config": {"response_format": "text"},
+            "optimizer": {
+                "param_keys": ["response_format", "reasoning_effort"],
+                "param_allowed_values": {
+                    "reasoning_effort": ["none", "low", "high"],
+                    "response_format": ["text", "json"],
+                },
+                "param_descriptions": {"response_format": "Response mode"},
+            },
+        }
+    }
+    narrowed = merge_node_blocks(
+        backend,
+        {"llm_only": {"optimizer": {"param_allowed_values": {"reasoning_effort": ["low"]}}}},
+    )
+    opt = narrowed["llm_only"]["optimizer"]
+    assert opt["param_allowed_values"] == {
+        "reasoning_effort": ["low"],
+        "response_format": ["text", "json"],
+    }
+    assert opt["param_descriptions"] == {"response_format": "Response mode"}
+    # `param_keys` is a SET declaration, not a per-param map: a layer restating which axes exist
+    # is answering for all of them, and still replaces.
+    assert merge_node_blocks(backend, {"llm_only": {"optimizer": {"param_keys": ["temperature"]}}})[
+        "llm_only"
+    ]["optimizer"]["param_keys"] == ["temperature"]
+
+
+def test_an_axis_the_model_REFUSES_offers_only_the_value_it_runs() -> None:
+    """A key outside the endpoint's `supported_parameters` is dropped on the way out, so every
+    value it could take produces a byte-identical call — and the round scores the difference
+    anyway. L1 is shown the space, emits into it and is validated against it (`catalogues`,
+    `l1_wire_schema`, `l1_strict`), so the bound belongs to the space rather than to a badge.
+    UNKNOWN must strike nothing: an absent catalogue answer read as "no" deletes a live axis.
+    """
+    from promptpotter.domain.pipeline_schema import ModelCapability
+
+    def caps(**over: Any) -> ModelCapability:
+        return ModelCapability(
+            model="m", reasoning_efforts=None, reasoning_note="", source="test", **over
+        )
+
+    schema = parse_pipeline_response(
+        {
+            "steps": ["llm_only"],
+            "nodes": {
+                "llm_only": {
+                    "type": "generation",
+                    "runtime": "backend",
+                    "config": {
+                        "model": "m",
+                        "temperature": 0.3,
+                        # The toggle is OPEN because a structure is declared to switch to — the
+                        # axis itself is engine-injected, so nothing here names it.
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {"answer": {"type": "string"}},
+                        },
+                        "answer_field": "answer",
+                    },
+                    "optimizer": {"param_keys": ["temperature"]},
+                }
+            },
+        }
+    )
+    node = schema.get_node("llm_only")
+    assert node is not None
+    assert schema.param_options(node, "response_format") == ["text", "json"]
+
+    drops = schema.model_copy(
+        update={"model_capabilities": {"m": caps(unsupported_params=["response_format"])}}
+    )
+    dropped = drops.get_node("llm_only")
+    assert dropped is not None
+    # One value IS the pin (`NodeConfigParam` — the lock is derived), and only this axis closes.
+    assert drops.param_options(dropped, "response_format") == ["text"]
+    assert drops.param_options(dropped, "temperature") is None
+
+    silent = schema.model_copy(update={"model_capabilities": {"m": caps(unsupported_params=None)}})
+    unknown = silent.get_node("llm_only")
+    assert unknown is not None
+    assert silent.param_options(unknown, "response_format") == ["text", "json"]
+
+
+def test_a_measured_point_is_served_the_SCHEMA_it_ran_under() -> None:
+    """The structured output is an AXIS, so the contract a surface shows must be resolved like any
+    other value. `output_schema_descriptions` is always on: L1 rewrites the prose of any node
+    shipping a schema, `to_job_search_point` folds it into the wire, and the served contract read
+    the parsed DECLARATION — so the axis moved every round and every reader went on showing the
+    prose the run had already replaced, with nothing to say the two had parted.
+    """
+    from promptpotter.application.pipeline_resolve import resolved_output_schemas
+
+    schema = _pipeline_schema("justlogic-d234")
+    base = {n.name: dict(n.current_config) for n in schema.config_nodes}
+    declared = resolved_output_schemas(schema, base)["llm_only"]
+    assert declared is not None
+
+    evolved = {
+        **base,
+        "llm_only": {**base["llm_only"], "output_schema_descriptions": {"answer": "MOVED"}},
+    }
+    served = resolved_output_schemas(schema, evolved)["llm_only"]
+    assert served is not None
+    assert served.field_descriptions["answer"] == "MOVED"
+    # Only the field the axis names, and the generation ORDER is untouched: field order is
+    # load-bearing prompt structure, so a fold that re-keyed the schema would move a second axis
+    # nobody set.
+    assert served.field_descriptions["reasoning"] == declared.field_descriptions["reasoning"]
+    assert served.fields == declared.fields
+
+
+def test_every_llm_node_is_offered_the_text_or_structured_toggle() -> None:
+    """Whether the request carries a schema AT ALL is a lever, and it is ours: PromptPotter
+    composes the wire config, so a connector declaring the axis would be a second declaration of
+    one thing — which is how TermNorm's own `response_format` came to be searched while its
+    `output_schema` silently outranked it, making every arm of the axis produce the same call.
+
+    Two bounds ride the value space rather than a badge, because L1 is SHOWN the space, emits into
+    it and is validated against it. A node with no schema has nothing to switch to; one value is
+    the pin. And the axis is only offered where an LLM answers — a cache lookup has no format.
+    """
+    from promptpotter.domain.pipeline_schema import (
+        ANSWER_AS_JSON,
+        ANSWER_AS_TEXT,
+        NodeSearchNarrowing,
+    )
+
+    schema = parse_pipeline_response(
+        {
+            "nodes": {
+                "structured": {
+                    "type": "generation",
+                    "config": {
+                        "model": "m",
+                        "output_schema": {
+                            "type": "object",
+                            "properties": {"answer": {"type": "string"}},
+                        },
+                        "answer_field": "answer",
+                    },
+                    "optimizer": {"param_keys": []},
+                },
+                "prose": {"type": "generation", "config": {"model": "m"}, "optimizer": {}},
+                "lookup": {"type": "cache", "config": {}, "optimizer": {}},
+            },
+            "pipelines": {"default": ["structured", "prose", "lookup"]},
+        }
+    )
+    opts = {n.name: schema.param_options(n, SCHEMA_TOGGLE_PARAM) for n in schema.config_nodes}
+    assert opts["structured"] == [ANSWER_AS_TEXT, ANSWER_AS_JSON]
+    assert opts["prose"] == [ANSWER_AS_TEXT]
+    assert opts["lookup"] is None
+
+    # Open by default: an LLM node's toggle is an L1 axis without anyone opting in, and the two
+    # emittable surfaces agree with the served row about which nodes have one.
+    assert SCHEMA_TOGGLE_PARAM in schema.node_param_keys()["structured"]
+    assert "lookup" not in schema.node_param_keys()
+    # A node with nothing to switch TO keeps the ROW — the operator is owed the reason it is
+    # shut — but leaves L1's menu: one legal value is not a mutation, and listed it costs a
+    # catalogue line and a wire-schema property every round to propose the value already there.
+    assert SCHEMA_TOGGLE_PARAM not in schema.node_param_keys().get("prose", set())
+    rows = {
+        node: {p.key: p for p in params} for node, params in schema.node_config_schema().items()
+    }
+    assert rows["structured"][SCHEMA_TOGGLE_PARAM].movable_by == ["l1"]
+    # UNSET is a value the node RUNS, not a value nobody chose — an empty row would report a
+    # JSON-answering node as answering in prose.
+    assert rows["structured"][SCHEMA_TOGGLE_PARAM].value == ANSWER_AS_JSON
+    assert rows["prose"][SCHEMA_TOGGLE_PARAM].value == ANSWER_AS_TEXT
+    assert rows["prose"][SCHEMA_TOGGLE_PARAM].movable_by == []
+    assert SCHEMA_TOGGLE_PARAM not in rows["lookup"]
+
+    # The schema-less bound is a FACT about the node, so it outranks any declaration layered over
+    # it. The steer-fork axis list lets an operator type a value onto an axis — and a fork that
+    # typed `json` here would send it with nothing to fill, which the backend refuses once per
+    # sample, turning a whole branch into errors that look like the idea failing.
+    typed = schema.narrow(
+        {
+            "prose": NodeSearchNarrowing(
+                param_keys={SCHEMA_TOGGLE_PARAM},
+                param_allowed_values={SCHEMA_TOGGLE_PARAM: [ANSWER_AS_TEXT, ANSWER_AS_JSON]},
+            )
+        }
+    )
+    reopened = typed.get_node("prose")
+    assert reopened is not None
+    assert typed.param_options(reopened, SCHEMA_TOGGLE_PARAM) == [ANSWER_AS_TEXT]
+
+
+def test_answering_in_TEXT_sends_no_contract_to_answer_INTO() -> None:
+    """The toggle is spent at the wire seam, and it must take `answer_field` with it: a backend
+    destructuring a slot the response never had reads "" for every sample and grades the run
+    NO_RESULT — a mechanical zero the loop would attribute to the idea under test.
+
+    And an UNMOVED node must stay byte-identical. The fold runs before the content hash, so
+    writing a resolved default here would re-key every banked measurement in the archive to say
+    nothing new.
+    """
+    from promptpotter.application.pipeline_resolve import resolved_output_schemas
+    from promptpotter.domain.pipeline_overlay import fold_output_contract
+    from promptpotter.domain.pipeline_schema import ANSWER_AS_TEXT
+
+    schema = _pipeline_schema("justlogic-d234")
+    base = {n.name: dict(n.current_config) for n in schema.config_nodes}
+    assert "output_schema" in base["llm_only"] and "answer_field" in base["llm_only"]
+
+    untouched = copy.deepcopy(base)
+    fold_output_contract(untouched, schema)
+    assert untouched == base, "an unmoved point must hash as it always did"
+
+    chose_text = copy.deepcopy(base)
+    chose_text["llm_only"][SCHEMA_TOGGLE_PARAM] = ANSWER_AS_TEXT
+    chose_text["llm_only"]["output_schema_descriptions"] = {"answer": "IGNORED"}
+    fold_output_contract(chose_text, schema)
+    assert "output_schema" not in chose_text["llm_only"]
+    assert "answer_field" not in chose_text["llm_only"]
+    # The description lever reaches nothing under text and must not resolve a registry schema
+    # back onto a node that just said it wants none.
+    assert "output_schema_descriptions" not in chose_text["llm_only"]
+
+    # The served contract follows the same fold, so the panel says "free text" instead of showing
+    # a schema the searchpoint is not answering under.
+    assert resolved_output_schemas(schema, base)["llm_only"] is not None
+    text_point = {**base, "llm_only": {**base["llm_only"], SCHEMA_TOGGLE_PARAM: ANSWER_AS_TEXT}}
+    assert resolved_output_schemas(schema, text_point)["llm_only"] is None
 
 
 # 5. The dispatch frame — what a node is shown, within what budget

@@ -13,6 +13,7 @@ import {
   interiorNodes,
   nodeOriginPrompt,
   observeOptions,
+  pipelineReadStatus,
   prefixReading,
   type ObserveState,
 } from "@/lib/derivations";
@@ -94,6 +95,12 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
   const servedKind = node?.kind ?? null;
   const kindInfo = nodeKind(servedKind ?? undefined);
   const schema = isOptimizer ? (optimizer?.node_config_schema ?? null) : cv.nodeConfigSchema;
+  // Two different fetches back this panel, so the connector's status answers for only one of
+  // them — handing the optimizer scope `cv.pipelineStatus` reports the campaign's fetch under the
+  // manifest's rows.
+  const schemaStatus = isOptimizer
+    ? pipelineReadStatus({ bound: true, loading: pipelineLoading, failed: !optimizer })
+    : cv.pipelineStatus;
   const outputSchema = isOptimizer
     ? (optimizer?.node_output_schema ?? null)
     : cv.nodeOutputSchema;
@@ -195,6 +202,7 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
             node={node}
             origin={origin}
             schema={schema}
+            schemaStatus={schemaStatus}
             outputSchema={outputSchema}
             modelCapabilities={modelCapabilities}
           />
@@ -205,6 +213,7 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
             isSingleNode={cv.isSingleNode}
             observe={observe}
             schema={schema}
+            schemaStatus={schemaStatus}
             outputSchema={outputSchema}
             modelCapabilities={modelCapabilities}
             isLive={isLive}
@@ -242,6 +251,7 @@ function OptimizerProgram({
   node,
   origin,
   schema,
+  schemaStatus,
   outputSchema,
   modelCapabilities,
 }: {
@@ -249,6 +259,7 @@ function OptimizerProgram({
   // Resolved by the panel, so the header's copy and this body cannot show two prompts.
   origin: ReturnType<typeof nodeOriginPrompt>;
   schema: Parameters<typeof NodeSurface>[0]["schema"];
+  schemaStatus: Parameters<typeof NodeSurface>[0]["schemaStatus"];
   outputSchema: Parameters<typeof NodeSurface>[0]["outputSchema"];
   modelCapabilities: Parameters<typeof NodeSurface>[0]["modelCapabilities"];
 }) {
@@ -259,6 +270,7 @@ function OptimizerProgram({
         point={{ origin_prompt_fields: origin?.fields ?? {}, pipeline_overlay: {} }}
         overlay={{}}
         schema={schema}
+        schemaStatus={schemaStatus}
         outputSchema={outputSchema}
         modelCapabilities={modelCapabilities}
         mode="values"
@@ -282,6 +294,7 @@ function TargetProgram({
   isSingleNode,
   observe,
   schema,
+  schemaStatus,
   outputSchema,
   modelCapabilities,
   isLive,
@@ -292,6 +305,7 @@ function TargetProgram({
   isSingleNode: boolean;
   observe: ReturnType<typeof useObserveSearchPoint>;
   schema: Parameters<typeof NodeSurface>[0]["schema"];
+  schemaStatus: Parameters<typeof NodeSurface>[0]["schemaStatus"];
   outputSchema: Parameters<typeof NodeSurface>[0]["outputSchema"];
   modelCapabilities: Parameters<typeof NodeSurface>[0]["modelCapabilities"];
   isLive: boolean;
@@ -309,6 +323,7 @@ function TargetProgram({
         overlay={scoped ? authoring.overlay : {}}
         isSingleNode={isSingleNode}
         schema={schema}
+        schemaStatus={schemaStatus}
         outputSchema={outputSchema}
         modelCapabilities={modelCapabilities}
         mode={scoped ? "search-space" : "values"}
@@ -341,6 +356,7 @@ function TargetProgram({
             point={{ origin_prompt_fields: observe.cfg.promptFields, pipeline_overlay: {} }}
             overlay={observe.cfg.config}
             schema={schema}
+            schemaStatus={schemaStatus}
             outputSchema={outputSchema}
             modelCapabilities={modelCapabilities}
             label={observe.cfg.label}

@@ -18,14 +18,12 @@ import {
   liveCandidateSearchPoint,
   forkReconcileDefaults,
   configOverridesFromDefaults,
-  isWidgetParam,
   overlaySetsModelOutsideAllowed,
   permittedModels as permittedModelsOf,
   searchPoint,
 } from "@/lib/derivations";
-import type { SelectedCandidate } from "@/lib/types";
+import type { PipelineStatus, SelectedCandidate } from "@/lib/types";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
-import { NodeConfigEditor } from "@/components/shell/node-surface/NodeConfigEditor";
 import { LimitReconcile } from "./LimitReconcile";
 
 // The one operator-steered fork flow (decision H): the operator has selected a
@@ -56,6 +54,7 @@ export function SteerForkPanel({
   dash,
   parentIsLive,
   schema,
+  schemaStatus,
   isSingleNode,
   outputSchema,
   onDone,
@@ -78,6 +77,8 @@ export function SteerForkPanel({
   // connector view answers for whichever campaign is being VIEWED, which would seed these editors
   // from the wrong pipeline for any point outside it.
   schema: Record<string, NodeConfigParam[]> | null;
+  // How the read that produced `schema` went, from the same source. See `NodeConfigEditor`.
+  schemaStatus: PipelineStatus;
   isSingleNode: boolean;
   outputSchema: Record<string, NodeOutputSchema | null> | null;
   onDone: () => void;
@@ -94,13 +95,6 @@ export function SteerForkPanel({
     : candidateSearchPoint(doc, candidate.candidate_id);
   const seedPrompt = seed?.origin_prompt_fields ?? {};
   const overlay = seed?.pipeline_overlay ?? {};
-  // Nodes carrying a param this editor can DRAW. The served list also holds the prompt +
-  // nested params, which have no widget, so the widget filter is what keeps a prompt-only
-  // pipeline (pp-self) hiding the permission block entirely rather than printing a "no
-  // configurable params" box per node.
-  const permissionNodes = Object.entries(schema ?? {})
-    .filter(([, params]) => params.some(isWidgetParam))
-    .map(([nodeId]) => nodeId);
   // The per-node permitted model sets, off the SAME served rows this panel edits. A node absent
   // from them permits nothing, the restrictive default, so ANY model steer there taints —
   // matching the server gate (`overlay_sets_model_outside_allowed`).
@@ -217,6 +211,8 @@ export function SteerForkPanel({
         point={searchPoint(seedPrompt, overlay)}
         overlay={overlay}
         schema={schema}
+        schemaStatus={schemaStatus}
+        isSingleNode={isSingleNode}
         outputSchema={outputSchema}
         mode="values"
         babysitEditable={canBabysit}
@@ -228,36 +224,10 @@ export function SteerForkPanel({
           editedOverlay.current = o;
           setPickedOverlay(o);
         }}
+        onNarrowing={(nodeId, n) => {
+          editedNarrowing.current = { ...editedNarrowing.current, [nodeId]: n };
+        }}
       />
-
-      {/* Per-node PERMISSION editor — what the optimizer may do on the fork. Seeded from `{}`
-          so each row reflects the served (campaign-narrowed) schema's tunability; edits ride
-          `optimizer_narrowing` on the fork seed. It is passed no `onApply`, which is what makes
-          every VALUE here read-only text: the values are steered in the node surface above, and
-          this surface states only what may move. Rendered for nodes carrying a widget param,
-          and dropped entirely when none do (a prompt-only pipeline like pp-self, whose tunable
-          surface is the prompt fields above). */}
-      {permissionNodes.length > 0 ? (
-        <div className="steer-fork-locks">
-          <p className="steer-fork-sub">
-            What the optimizer may tune on this fork. ☑ = a value it may pick; one left and
-            the axis is pinned. 🔒 / 🔓 = held / tunable, for the params with no value list.
-          </p>
-          {permissionNodes.map((nodeId) => (
-            <NodeConfigEditor
-              key={nodeId}
-              mode="search-space"
-              schema={schema}
-              node={nodeId}
-              overlay={{}}
-              isSingleNode={isSingleNode}
-              onNarrowing={(n) => {
-                editedNarrowing.current = { ...editedNarrowing.current, [nodeId]: n };
-              }}
-            />
-          ))}
-        </div>
-      ) : null}
 
       <LimitReconcile onChange={(l) => (limits.current = l)} />
 

@@ -199,14 +199,18 @@ def _add_resume_args(p_resume: argparse.ArgumentParser) -> None:
         "ignored unless `--rewind ROUND` is set.",
     )
     p_resume.add_argument(
-        "--steer-model",
-        dest="steer_model",
+        "--steer",
+        dest="steer",
         action="append",
         default=None,
-        metavar="NODE=MODEL",
-        help="Mint an operator-steered fork that overrides a node's model on the seed "
-        "overlay (repeatable). Editing an optimizer-locked axis is a babysit act: it "
-        "requires the `campaign.babysit` capability and grades the fork's runs C. CLI "
+        metavar="NODE.PARAM=VALUE",
+        help="Mint an operator-steered fork whose seed overlay sets one node param "
+        "(repeatable) — any key the served node-config rows carry: "
+        "`--steer llm_only.model=gpt-5`, `--steer llm_only.temperature=0.2`, "
+        '`--steer llm_only.output_schema=\'{"type":"object",...}\'`. A value is read '
+        "in the param's declared type, so a number, bool or object is spelled as JSON. "
+        "Steering a node to a gateway or to a model it does not permit is a babysit act: "
+        "it requires the `campaign.babysit` capability and grades the fork's runs C. CLI "
         "twin of the web steer-fork (`POST /commands/fork-cycle`), same seam + gate.",
     )
     p_resume.add_argument(
@@ -215,8 +219,8 @@ def _add_resume_args(p_resume: argparse.ArgumentParser) -> None:
         type=int,
         default=None,
         metavar="N",
-        help="Round ceiling for a `--steer-model` fork (default: inherit the parent). "
-        "Ignored unless `--steer-model` is set.",
+        help="Round ceiling for a `--steer` fork (default: inherit the parent). "
+        "Ignored unless `--steer` is set.",
     )
     _add_runtime_halts(p_resume)
 

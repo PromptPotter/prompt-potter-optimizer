@@ -207,6 +207,14 @@ class CycleLayout:
         """The artifact a program that is not us reads — ``domain/export.py::PromptExport``."""
         return self.cycle_dir / "export.json"
 
+    @property
+    def resolved_pipeline(self) -> Path:
+        """The pipeline declaration this cycle actually RAN — the backend's under the dataset's
+        overlay, as ``wiring::_resolve_pipeline_schema`` merged it at init. The committed dataset
+        file deliberately snapshots no backend declaration (``merge_pipeline_overlay``), so without
+        this a served read knows every node's VALUES and none of its AXES."""
+        return self.cycle_dir / "pipeline.resolved.yaml"
+
     # --- resume state (heavy: dropped by ``delete --keep-results``) ---
     @property
     def rounds(self) -> Path:

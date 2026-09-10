@@ -28,6 +28,32 @@ describe("CommitInput", () => {
     expect(onCommit).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps a draft `validate` refuses, and commits it once it parses", () => {
+    const onCommit = vi.fn();
+    const ok = (d: string) => {
+      try {
+        JSON.parse(d);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    render(
+      <CommitInput value="{}" onCommit={onCommit} validate={ok} rows={4} aria-label="schema" />,
+    );
+    const box = screen.getByLabelText("schema");
+    // Half-typed JSON must not reach the caller as a STRING — the emitter would drop it, and a
+    // widget that accepted what the emitter drops loses the operator's schema in silence.
+    fireEvent.change(box, { target: { value: '{"answer": ' } });
+    fireEvent.blur(box);
+    expect(onCommit).not.toHaveBeenCalled();
+    expect((box as HTMLTextAreaElement).value).toBe('{"answer": ');
+
+    fireEvent.change(box, { target: { value: '{"answer": {}}' } });
+    fireEvent.blur(box);
+    expect(onCommit).toHaveBeenCalledWith('{"answer": {}}');
+  });
+
   it("takes a value arriving from elsewhere in the SAME render", () => {
     const { rerender } = render(<CommitInput value="a" onCommit={() => {}} aria-label="cell" />);
     fireEvent.change(screen.getByLabelText("cell"), { target: { value: "typed" } });

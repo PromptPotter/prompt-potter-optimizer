@@ -92,6 +92,10 @@ class Session:
     # not a degraded session, it is a session that cannot measure. `_resolve_pipeline_schema`
     # raises instead of handing back a `None` for ~40 readers to each mis-handle quietly.
     pipeline_schema: PipelineSchema
+    # The DECLARATION `pipeline_schema` was parsed from — the live backend's under the dataset's
+    # overlay, and the only copy of it in the system: a committed dataset file snapshots values
+    # and never axes, so `init_cycle` records this per cycle. Empty for an offline resolve.
+    pipeline_declaration: dict[str, Any] = field(default_factory=dict)
     samples: list[Sample] = field(default_factory=list)
     index_terms: list[str] = field(default_factory=list)
     identity: IdentityContext = field(default_factory=default_identity)

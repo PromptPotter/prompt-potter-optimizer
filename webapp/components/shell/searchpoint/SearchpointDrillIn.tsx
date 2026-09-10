@@ -15,7 +15,7 @@
 // Every number here is SERVED. Nothing subtracts, ranks or re-scores: the lift is the election's
 // own verdict with its own interval, not a difference of two accuracies computed in the browser.
 
-import type { ElectedRow, SampleRow } from "@/lib/types";
+import type { ElectedRow, PipelineStatus, SampleRow } from "@/lib/types";
 import type { DraftPatch, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
 import { cacheShare, prefixReading, type ObserveConfig } from "@/lib/derivations";
 import { TERMS } from "@/lib/terms";
@@ -29,6 +29,7 @@ export function SearchpointDrillIn({
   samples,
   arms,
   schema,
+  schemaStatus,
   outputSchema,
   pending,
   overlay,
@@ -47,6 +48,8 @@ export function SearchpointDrillIn({
   // fact from one — a crown over no rivals is not an election.
   arms: number | null;
   schema: Record<string, NodeConfigParam[]> | null;
+  // How the read that produced `schema` went, from the same source. See `NodeConfigEditor`.
+  schemaStatus: PipelineStatus;
   outputSchema: Record<string, NodeOutputSchema | null> | null;
   // What to say while there is no row: the two hosts are waiting on different things.
   pending: string;
@@ -71,6 +74,7 @@ export function SearchpointDrillIn({
           point={{ origin_prompt_fields: cfg.promptFields, pipeline_overlay: {} }}
           overlay={overlay ?? cfg.config}
           schema={schema}
+          schemaStatus={schemaStatus}
           outputSchema={outputSchema}
           // No `label`. NodeSurface prints one "because nothing else on screen names it", which is
           // true on the chat hero, where it carries the observe STATE ("best · C2.1"). Both hosts

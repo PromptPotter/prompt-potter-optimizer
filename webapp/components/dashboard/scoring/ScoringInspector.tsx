@@ -90,6 +90,7 @@ export function ScoringInspector({ selected, onClose }: Props) {
         samples={samples}
         arms={arms || null}
         schema={cv.nodeConfigSchema}
+        schemaStatus={cv.pipelineStatus}
         outputSchema={cv.nodeOutputSchema}
         pending={
           isLive
@@ -106,6 +107,7 @@ export function ScoringInspector({ selected, onClose }: Props) {
             dash={dash}
             parentIsLive={cv.isLive}
             schema={cv.nodeConfigSchema}
+            schemaStatus={cv.pipelineStatus}
             isSingleNode={cv.isSingleNode}
             outputSchema={cv.nodeOutputSchema}
           />

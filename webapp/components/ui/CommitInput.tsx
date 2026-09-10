@@ -1,7 +1,8 @@
 "use client";
 import { useState } from "react";
 
-// A text input that commits on Enter or blur, never per keystroke.
+// A text control that commits on Enter or blur — on blur alone once `rows` makes it multi-line —
+// and never per keystroke.
 //
 // Behavioural rather than presentational, which is why it carries no stylesheet — the caller keeps
 // its own class. What it owns is the discipline three surfaces hand-rolled separately (the metric
@@ -18,13 +19,23 @@ import { useState } from "react";
 export function CommitInput({
   value,
   onCommit,
+  rows,
+  validate,
   ...rest
 }: {
   value: string;
   onCommit: (value: string) => void;
+  // Multi-line mode. A structured value (a JSON schema, a layout) must be SEEN to be edited, so
+  // the shape of the value picks the element and the commit discipline stays this one rather than
+  // being hand-rolled beside it.
+  rows?: number;
+  // A draft this returns false for is NOT committed and stays on screen — a half-typed JSON value
+  // must not reach a caller as a string, and losing what was typed is the failure `sent` exists to
+  // prevent. Named `validate`, not `accept`: that one is a DOM attribute and would merge silently.
+  validate?: (draft: string) => boolean;
 } & Omit<
   React.InputHTMLAttributes<HTMLInputElement>,
-  "value" | "onChange" | "onBlur" | "onKeyDown"
+  "value" | "onChange" | "onBlur" | "onKeyDown" | "rows"
 >) {
   const [draft, setDraft] = useState(value);
   // Two latches, because "the prop moved" and "the prop is stale relative to what I sent" are
@@ -42,17 +53,35 @@ export function CommitInput({
   }
   const commit = () => {
     if (draft === sent) return;
+    if (validate && !validate(draft)) return;
     setSent(draft);
     onCommit(draft);
   };
+  const shared = {
+    value: draft,
+    spellCheck: false,
+    autoComplete: "off" as const,
+    onBlur: commit,
+  };
+  // Enter COMMITS on one line and is a newline in a multi-line value, so the multi-line arm
+  // commits on blur alone. A schema typed across four lines cannot be a control whose first
+  // Return sends it.
+  if (rows !== undefined) {
+    const { type: _type, inputMode: _inputMode, ...textareaProps } = rest;
+    return (
+      <textarea
+        {...(textareaProps as React.TextareaHTMLAttributes<HTMLTextAreaElement>)}
+        {...shared}
+        rows={rows}
+        onChange={(e) => setDraft(e.target.value)}
+      />
+    );
+  }
   return (
     <input
       {...rest}
-      value={draft}
-      spellCheck={false}
-      autoComplete="off"
+      {...shared}
       onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
       onKeyDown={(e) => {
         if (e.key !== "Enter") return;
         e.preventDefault();

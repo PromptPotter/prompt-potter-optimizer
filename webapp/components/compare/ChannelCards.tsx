@@ -54,6 +54,7 @@ import {
   nodeKeyOf,
   nodeOverlays,
   pathOf,
+  pipelineReadStatus,
   scoreboardRow,
   searchpointCopyChoices,
   selectedCandidateOf,
@@ -264,12 +265,22 @@ function ChannelCard({
     [pickedPath, selected],
   );
   const pickedCampaign = pickedPath?.at(-1)?.campaignId ?? "";
-  const { data: pipeline } = useFetch(
+  const {
+    data: pipeline,
+    loading: pipelineLoading,
+    error: pipelineError,
+  } = useFetch(
     pickedCampaign && at
       ? (s: AbortSignal) => fetchCampaignPipeline(pickedCampaign, at, s)
       : null,
     [pickedCampaign, at],
   );
+  // The state of THIS fetch, handed down beside the schema it produced.
+  const pipelineStatus = pipelineReadStatus({
+    bound: Boolean(pickedCampaign && at),
+    loading: pipelineLoading,
+    failed: Boolean(pipelineError),
+  });
   // The point's own round, on its own course: how many arms stood, and where this one sat among
   // them. Both come off the tree, which is the only thing that knows a round's shape.
   const { pickedArms, pickedIdx } = useMemo(() => {
@@ -539,56 +550,47 @@ function ChannelCard({
                 )}
                 <ChannelRestore edits={edits} subjectKey={pickedKey} onEdits={onEdits} />
               </summary>
-              {pipeline?.node_config_schema ? (
-                <SearchpointDrillIn
-                  row={pickedRow}
-                  cfg={pickedCfg}
-                  samples={pickedSamples}
-                  arms={pickedArms}
-                  schema={pipeline.node_config_schema}
-                  outputSchema={pipeline.node_output_schema}
-                  // Seeded with the operator's scenario written back in, not with the bare record:
-                  // the values editor drops its own draft whenever the seed changes, so a restore
-                  // puts the inputs back by itself rather than clearing the record underneath them.
-                  overlay={pickedSeed}
-                  pending={
-                    docLoading
-                      ? "Reading this searchpoint's round document…"
-                      : "No round document on disk for this point — a round still scoring has not written one yet, and this tab streams no cycle to read it from."
-                  }
-                  onOverlay={(next) =>
-                    onEdits(withOverlay(edits, pickedKey, next, pickedCfg?.config ?? {}))
-                  }
-                  actions={
-                    selected &&
-                    pickedPath && (
-                      <SteerForkAction
-                        candidate={selectedCandidateOf(selected, pickedPath.at(-1)?.cycleId ?? "")}
-                        path={pickedPath}
-                        // No stream for this branch — exactly one cycle streams and it is whichever
-                        // the dashboard is parked on. The seed comes from the round file, which is
-                        // the only source this tab could honestly have.
-                        dash={null}
-                        schema={pipeline.node_config_schema}
-                        isSingleNode={pipeline.is_single_node}
-                        outputSchema={pipeline.node_output_schema}
-                        parentIsLive={
-                          index.get(encodeCyclePath(pickedPath))?.course?.run_phase === "running"
-                        }
-                      />
-                    )
-                  }
-                />
-              ) : (
-                // No schema, no editor. `configRows` answers `[]` for a null one and the editor
-                // then prints "this node declares no configurable params" — which is a claim about
-                // the pipeline, not about the fetch, and it would be false.
-                <p className="l4-note">
-                  This point&rsquo;s dataset declares no pipeline on this instance, so its
-                  configuration cannot be shown in the pipeline&rsquo;s own terms. The table below
-                  lists what its round document recorded.
-                </p>
-              )}
+              <SearchpointDrillIn
+                row={pickedRow}
+                cfg={pickedCfg}
+                samples={pickedSamples}
+                arms={pickedArms}
+                schema={pipeline?.node_config_schema ?? null}
+                schemaStatus={pipelineStatus}
+                outputSchema={pipeline?.node_output_schema ?? null}
+                // Seeded with the operator's scenario written back in, not with the bare record:
+                // the editor drops its own draft whenever the seed changes, so a restore puts the
+                // inputs back by itself rather than clearing the record underneath them.
+                overlay={pickedSeed}
+                pending={
+                  docLoading
+                    ? "Reading this searchpoint's round document…"
+                    : "No round document on disk for this point — a round still scoring has not written one yet, and this tab streams no cycle to read it from."
+                }
+                onOverlay={(next) =>
+                  onEdits(withOverlay(edits, pickedKey, next, pickedCfg?.config ?? {}))
+                }
+                actions={
+                  selected &&
+                  pickedPath && (
+                    <SteerForkAction
+                      candidate={selectedCandidateOf(selected, pickedPath.at(-1)?.cycleId ?? "")}
+                      path={pickedPath}
+                      // No stream for this branch — exactly one cycle streams and it is whichever
+                      // the dashboard is parked on. The seed comes from the round file, which is
+                      // the only source this tab could honestly have.
+                      dash={null}
+                      schema={pipeline?.node_config_schema ?? null}
+                      schemaStatus={pipelineStatus}
+                      isSingleNode={!!pipeline?.is_single_node}
+                      outputSchema={pipeline?.node_output_schema ?? null}
+                      parentIsLive={
+                        index.get(encodeCyclePath(pickedPath))?.course?.run_phase === "running"
+                      }
+                    />
+                  )
+                }
+              />
             </details>
             {/* Same readings the dashboard's Scoring inspector offers, off the same builder: a
                 point pasted from a Compare channel has to be comparable to one pasted there, and

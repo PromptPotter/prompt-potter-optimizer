@@ -753,7 +753,7 @@ export interface NodeConfigParam {
   kind: string;
   options: string[];
   description: string;
-  optimizer_locked: boolean;
+  never_axis: '' | 'cost_lever' | 'schema_owned';
   movable_by: string[];
   held: boolean;
   source: 'backend' | 'dataset' | 'campaign' | 'seed' | 'evolved' | 'identity' | 'unset';

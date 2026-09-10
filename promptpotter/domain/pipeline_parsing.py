@@ -7,7 +7,11 @@ from typing import Any
 
 from promptpotter.config.settings import WELL_KNOWN_PARAM_TYPES
 from promptpotter.domain.pipeline_schema import (
+    ANSWER_AS_JSON,
+    ANSWER_AS_TEXT,
+    OUTPUT_CONTRACT_KEYS,
     SCHEMA_DESCRIPTIONS_PARAM,
+    SCHEMA_TOGGLE_PARAM,
     THINKING_KINDS,
     NodeKind,
     NodeOutputSchema,
@@ -19,6 +23,7 @@ from promptpotter.domain.pipeline_schema import (
     PipelineView,
     PipelineViewEdge,
     PipelineViewNode,
+    declares_llm_run,
 )
 from promptpotter.shared.errors import PayloadInvalidError
 
@@ -37,10 +42,20 @@ __all__ = [
 # incoming `properties` just dropped, and the backend rejects that.
 _MERGED_NODE_SUB_BLOCKS = ("config", "optimizer")
 
+# Maps INSIDE `optimizer` that are keyed BY PARAM, so a layer naming one param says nothing about
+# the others. `PipelineSchema.narrow` composes `param_allowed_values` the same way, and the two
+# must not disagree about what narrowing a value space means: merged one level, a rung list for
+# one axis DELETES the declared space of every other axis on that node, which leaves those axes
+# open with nothing to bound them and `build_l1_response_schema` emitting a bare string.
+_MERGED_OPTIMIZER_MAPS = ("param_allowed_values", "param_descriptions")
+
 
 def merge_node_blocks(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
     """Layers node DEFINITIONS — one level above ``application.pipeline_resolve.apply_node_overlay``,
-    which merges ``pipeline_params``. Only :data:`_MERGED_NODE_SUB_BLOCKS` merge by name."""
+    which merges ``pipeline_params``. Only :data:`_MERGED_NODE_SUB_BLOCKS` merge by name, and
+    inside `optimizer` the per-param maps merge by param (:data:`_MERGED_OPTIMIZER_MAPS`).
+    ``param_keys`` is a SET declaration and still replaces: a layer restating which axes exist is
+    answering for all of them."""
     out = copy.deepcopy(base)
     for node_name, node_def in overlay.items():
         if not isinstance(node_def, dict):
@@ -48,7 +63,17 @@ def merge_node_blocks(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str
         dst = out.setdefault(node_name, {})
         for key, val in node_def.items():
             if key in _MERGED_NODE_SUB_BLOCKS and isinstance(val, dict):
-                dst.setdefault(key, {}).update(val)
+                block = dst.setdefault(key, {})
+                for sub, sub_val in val.items():
+                    if (
+                        key == "optimizer"
+                        and sub in _MERGED_OPTIMIZER_MAPS
+                        and isinstance(sub_val, dict)
+                        and isinstance(block.get(sub), dict)
+                    ):
+                        block[sub] = {**block[sub], **sub_val}
+                    else:
+                        block[sub] = sub_val
             else:
                 dst[key] = val
     return out
@@ -361,9 +386,9 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         obs_name = opt.get("observation_name")
         if obs_name:
             step_kwargs["observation_name"] = obs_name
-        obs_raw = opt.get("observation_mappings", [])
-        if obs_raw:
-            step_kwargs["observation_mappings"] = [ObservationMapping(**m) for m in obs_raw]
+        mappings = [ObservationMapping(**m) for m in opt.get("observation_mappings") or ()]
+        if mappings:
+            step_kwargs["observation_mappings"] = mappings
 
         # Merge resolved registry metadata
         rm = resolved_metadata.get(name, {})
@@ -411,6 +436,43 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             step_kwargs["param_types"] = {
                 **step_kwargs["param_types"],
                 SCHEMA_DESCRIPTIONS_PARAM: "object",
+            }
+
+        # Synthesize the schema TOGGLE onto every node that runs an LLM — the sibling of the
+        # lever above, and neither is a per-dataset opt-in: whether the request carries a schema
+        # is PromptPotter's own decision, so a connector re-declaring it would be a second
+        # declaration of one axis (`docs/developer/node-standard.md`). One bound rides the value
+        # space below; the model's own refusal is the other and belongs to `_refused`.
+        if declares_llm_run(
+            name=name,
+            mappings=mappings,
+            wire_type=kind,
+            langfuse_type=step_kwargs["langfuse_type"],
+        ):
+            step_kwargs["param_keys"] = step_kwargs["param_keys"] | {SCHEMA_TOGGLE_PARAM}
+            # Typed even where the node declares no schema — that is the row an operator creates
+            # one from, and inference has nothing to read. Types only: they stay out of
+            # `param_keys`, so no layer's `narrow` can intersect the row away.
+            step_kwargs["param_types"] = {
+                **step_kwargs["param_types"],
+                SCHEMA_TOGGLE_PARAM: "string",
+                **{k: WELL_KNOWN_PARAM_TYPES[k] for k in OUTPUT_CONTRACT_KEYS},
+            }
+            step_kwargs["param_allowed_values"] = {
+                **step_kwargs["param_allowed_values"],
+                SCHEMA_TOGGLE_PARAM: (
+                    [ANSWER_AS_TEXT, ANSWER_AS_JSON] if out_schema else [ANSWER_AS_TEXT]
+                ),
+            }
+            # Operator-facing, and only that: the menu renderer prints a description for an axis
+            # with no value space, so L1 reads this axis through `catalogues::_schema_toggle_block`
+            # instead, which states the precondition rather than the two values.
+            step_kwargs["param_descriptions"] = {
+                SCHEMA_TOGGLE_PARAM: (
+                    f"How this node answers: {ANSWER_AS_JSON!r} fills the declared output "
+                    f"schema, {ANSWER_AS_TEXT!r} sends no schema and answers in prose."
+                ),
+                **step_kwargs["param_descriptions"],
             }
 
         parsed[name] = PipelineNode(**step_kwargs)

@@ -21,7 +21,7 @@ function row(over: Partial<ConfigRow> & { key: string; kind: string }): ConfigRo
     locked: false,
     allowed: [],
     fromCandidate: false,
-    optimizerLocked: false,
+    neverAxis: "",
     movableBy: [],
     held: false,
     description: "",
@@ -145,7 +145,7 @@ const schema: Record<string, NodeConfigParam[]> = {
       kind: "model",
       options: ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
       description: "",
-      optimizer_locked: false,
+      never_axis: "",
       movable_by: ["l1"],
       held: false,
       source: "dataset",
@@ -157,7 +157,7 @@ const schema: Record<string, NodeConfigParam[]> = {
       kind: "enum",
       options: ["low", "medium", "high"],
       description: "",
-      optimizer_locked: false,
+      never_axis: "",
       movable_by: ["l1"],
       held: false,
       source: "dataset",
@@ -169,7 +169,7 @@ const schema: Record<string, NodeConfigParam[]> = {
       kind: "number",
       options: [],
       description: "",
-      optimizer_locked: false,
+      never_axis: "",
       movable_by: ["l1"],
       held: false,
       source: "dataset",
@@ -181,7 +181,7 @@ const schema: Record<string, NodeConfigParam[]> = {
       kind: "number",
       options: [],
       description: "",
-      optimizer_locked: false,
+      never_axis: "",
       movable_by: ["l1"],
       held: false,
       source: "dataset",
@@ -200,7 +200,7 @@ describe("configRows (search-space mode)", () => {
     kind: "number",
     options: [],
     description: "",
-    optimizer_locked: false,
+    never_axis: "",
     movable_by: [],
     held: false,
     source: "campaign",
@@ -263,7 +263,7 @@ describe("configRows (values mode)", () => {
     ]);
     expect(byKey.model!.kind).toBe("model");
     expect(byKey.model!.options).toEqual(["openai/gpt-oss-120b", "openai/gpt-oss-20b"]);
-    expect(byKey.model!.optimizerLocked).toBe(false); // an axis, not a cost lever
+    expect(byKey.model!.neverAxis).toBe(""); // an axis, not a cost lever
     expect(byKey.reasoning_effort!.kind).toBe("enum");
     expect(byKey.temperature!.kind).toBe("number");
     expect(byKey.max_tokens!.value).toBe(""); // declared but unset
@@ -279,6 +279,105 @@ describe("configRows (values mode)", () => {
 
   it("returns no rows without a schema", () => {
     expect(configRows(null, {}, "values")).toEqual([]);
+  });
+
+  // A structured param is an AXIS (`output_schema_descriptions` is `movable_by: ["l1"]`), so a
+  // surface that drops it hides who may move it. It draws as JSON text, and an edit emits the
+  // OBJECT the text stands for — never the text itself, which would put a string where the
+  // object was; a draft that does not parse yet emits nothing at all.
+  it("round-trips a nested param through JSON, and emits the OBJECT", () => {
+    const nested: NodeConfigParam = {
+      key: "output_schema_descriptions",
+      value: { answer: "the account code" },
+      kind: "nested",
+      options: [],
+      description: "",
+      never_axis: "",
+      movable_by: ["l1"],
+      held: false,
+      source: "dataset",
+      permitted: null,
+    };
+    const withNested = { llm_only: [...schema.llm_only!, nested] };
+    const rows = configRows(withNested, {}, "values");
+    const drawn = rows.find((r) => r.key === "output_schema_descriptions")!;
+    expect(drawn.movableBy).toEqual(["l1"]);
+    expect(JSON.parse(drawn.value)).toEqual({ answer: "the account code" });
+    // Untouched stays out, as any row does.
+    expect(seedOverlayFromRows(rows, {})).toEqual({});
+    // Edited, it emits the parsed OBJECT — never the text that rendered it. Writing a string
+    // where an object belongs is the harm the row used to be withheld to prevent; the widget
+    // and this coercion prevent it instead, so the operator can actually set the value.
+    const edited = seedOverlayFromRows(rows, {
+      "llm_only.output_schema_descriptions": '{"answer":"EDITED"}',
+    });
+    expect(edited.llm_only!.output_schema_descriptions).toEqual({ answer: "EDITED" });
+
+    // A draft that is not yet parseable emits NOTHING, rather than a broken string.
+    expect(
+      seedOverlayFromRows(rows, { "llm_only.output_schema_descriptions": '{"answer": ' }),
+    ).toEqual({});
+  });
+
+  // `answer_field` names the slot the executor destructures. `schema_owned` says the OPTIMIZER may
+  // never emit it — a fence `node_param_keys` / `l1_strict` / `build_l1_response_schema` already
+  // hold, three deep, none of them here. It never said the operator may not SET it, and reading it
+  // that way is what left the output contract the one piece of a searchpoint no human could
+  // author — which in turn pinned `response_format` shut on every node without a schema.
+  it("lets the operator set a schema-owned key, and never makes it an axis", () => {
+    const owned: NodeConfigParam = {
+      key: "answer_field",
+      value: "answer",
+      kind: "string",
+      options: [],
+      description: "",
+      never_axis: "schema_owned",
+      movable_by: [],
+      held: false,
+      source: "dataset",
+      permitted: null,
+    };
+    const withOwned = { llm_only: [...schema.llm_only!, owned] };
+    const rows = configRows(withOwned, { llm_only: { answer_field: "answer" } }, "values");
+    expect(rows.find((r) => r.key === "answer_field")!.value).toBe("answer");
+    // Steering a fork onto a different answer slot is an ordinary edit and reaches the seed.
+    expect(seedOverlayFromRows(rows, { "llm_only.answer_field": "reasoning" })).toEqual({
+      llm_only: { answer_field: "reasoning" },
+    });
+
+    const patch = nodeOverlayPatch(
+      {},
+      "llm_only",
+      configRows(withOwned, {}, "search-space", "llm_only").map((r) =>
+        r.key === "answer_field" ? { ...r, value: "reasoning" } : r,
+      ),
+    );
+    // The VALUE is the operator declaring what this origin answers under…
+    expect(patch.pipeline_overlay!.llm_only).toHaveProperty("config", {
+      answer_field: "reasoning",
+    });
+    // …and it is still not an AXIS. `movable_by: []` makes the row locked, and `nodeNarrowing`
+    // builds `param_keys` from unlocked rows — so the fence holds without a second gate.
+    const optimizer = (patch.pipeline_overlay!.llm_only as { optimizer: { param_keys: string[] } })
+      .optimizer;
+    expect(optimizer.param_keys).not.toContain("answer_field");
+  });
+
+  it("leaves a prompt field to the prompt editor", () => {
+    const prompt: NodeConfigParam = {
+      key: "instruction",
+      value: null,
+      kind: "prompt",
+      options: [],
+      description: "",
+      never_axis: "",
+      movable_by: ["l1"],
+      held: false,
+      source: "dataset",
+      permitted: null,
+    };
+    const rows = configRows({ llm_only: [...schema.llm_only!, prompt] }, {}, "values");
+    expect(rows.find((r) => r.key === "instruction")).toBeUndefined();
   });
 
   it("scopes rows to one node when `node` is given (OBSERVE drill-in vs whole-pipeline)", () => {
@@ -310,7 +409,7 @@ describe("seedOverlayFromRows (values emit)", () => {
   });
 });
 
-// The values editor emits the searchpoint's WHOLE running configuration, never a delta — the test
+// `values` mode emits the searchpoint's WHOLE running configuration, never a delta — the test
 // directly above pins that. So a surface reading the emission as "what the operator changed" marks
 // every parameter edited on the first keystroke, which on Compare blanks the channel instantly.
 // These two are what stands between that emission and an honest scenario.
@@ -367,6 +466,8 @@ describe("overlaySetsModelOutsideAllowed", () => {
     expect(out({ l1_generate: { temperature: 0.9 } }, permitted)).toBe(false));
   it("always taints a provider edit", () =>
     expect(out({ l1_generate: { provider: "openrouter" } }, permitted)).toBe(true));
+  it("always taints a route edit — the SET of cost levers, not one member of it", () =>
+    expect(out({ l1_generate: { route_order: ["a", "b"] } }, permitted)).toBe(true));
   it("is clean for an empty overlay", () => expect(out({}, permitted)).toBe(false));
   it("handles a null overlay", () => expect(out(null, permitted)).toBe(false));
   it("skips non-object node entries", () =>
@@ -383,7 +484,7 @@ describe("permittedModels", () => {
       kind: "model",
       options: ["a", "b"],
       description: "",
-      optimizer_locked: false,
+      never_axis: "",
       movable_by: [],
       held: false,
       source: "campaign",

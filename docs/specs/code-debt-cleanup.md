@@ -201,11 +201,12 @@ longer "is a feature allowed" but "does the preprint need it", and these do not:
   leaving it implicitly internal. What remains is the credential itself, and the worked
   `submit → poll → fetch` examples and per-endpoint guarantees that wait on it. Blocker: that
   capability.
-- **Nothing probes whether a route implements `response_format` before a run spends money** — an
-  unsupporting model is discovered by paying for it (HTTP 405 outright, or empty content plus a
-  burned schema-repair re-prompt). Same shape: swapping a model means hand-editing two
-  `pipeline.yaml` lines and remembering to revert both, and a leaked pin mislabels the next run.
-  Blocker: a probe and a swap-verb are both new capabilities.
+- **Swapping a model means hand-editing two `pipeline.yaml` lines and remembering to revert both**,
+  and a leaked pin mislabels the next run. The half of this that was about `response_format` is
+  closed: the OpenRouter catalogue's `supported_parameters` already answers whether a route takes
+  the key, and `PipelineSchema._refused` spends that answer on the search space rather than on a
+  badge — so an unsupporting model no longer has to be discovered by paying for it. Blocker: the
+  swap-verb, which is a new capability.
 - **`infrastructure/llm/json_parse.py::try_groq_json_validate_repair` meters a fabricated ZERO** — it
   rebuilds `LLMResponse` with `usage` hardcoded to zeros after a `json_validate_failed` 400 that was
   already billed. The 400 body carries no `usage`, so the count is unrecoverable, and

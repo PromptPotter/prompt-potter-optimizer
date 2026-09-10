@@ -9,7 +9,7 @@
 import { useState } from "react";
 import type { NodeConfigParam, NodeOutputSchema } from "@/lib/api/types";
 import type { DashboardSnapshot } from "@/lib/poll";
-import type { SelectedCandidate } from "@/lib/types";
+import type { PipelineStatus, SelectedCandidate } from "@/lib/types";
 import type { CyclePath } from "@/lib/ids";
 import { shortId } from "@/lib/format";
 import { Dialog } from "@/components/ui";
@@ -21,6 +21,7 @@ export function SteerForkAction({
   dash,
   parentIsLive,
   schema,
+  schemaStatus,
   isSingleNode,
   outputSchema,
 }: {
@@ -35,6 +36,8 @@ export function SteerForkAction({
   dash: DashboardSnapshot | null;
   parentIsLive: boolean;
   schema: Record<string, NodeConfigParam[]> | null;
+  // How the read that produced `schema` went, from the same source. See `NodeConfigEditor`.
+  schemaStatus: PipelineStatus;
   // Served beside `schema`, by the same read. See `NodeConfigEditor`.
   isSingleNode: boolean;
   outputSchema: Record<string, NodeOutputSchema | null> | null;
@@ -83,6 +86,7 @@ export function SteerForkAction({
             path={path}
             dash={dash}
             schema={schema}
+            schemaStatus={schemaStatus}
             isSingleNode={isSingleNode}
             outputSchema={outputSchema}
             parentIsLive={parentIsLive}

@@ -134,6 +134,11 @@ invariants:
                       "(current)" off-menu option derived from a client-side diff is the
                       violation this invariant names — the ·evolved badge was exactly that, and
                       fired on every param because a resolved config carries them all.
+                      The compact fold died with it: once the base is served AT the addressed
+                      subject, `value !== baseValue` compares a number with itself and folds the
+                      whole configuration away. WHY an axis is shut is served too (`never_axis`),
+                      because the browser inferring it from the key''s name told the cost-lever
+                      story for the output-schema contract.
                       A component must not take a prop that RE-ROUTES which store it reads;
                       identity props (which campaign, which round) are fine, source props are
                       not. That distinction is the whole bug: one panel answered

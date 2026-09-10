@@ -3659,7 +3659,7 @@ components:
 
     NodeConfigParam:
       type: object
-      required: [key, kind, value, source, options, movable_by, optimizer_locked, held]
+      required: [key, kind, value, source, options, movable_by, never_axis, held]
       description: |
         One config row: what it IS, what it may become, and who set it.
       properties:
@@ -3668,9 +3668,12 @@ components:
           type: string
           enum: [model, enum, number, bool, string, prompt, nested]
           description: |
-            The surface that owns this param. The five widget kinds are
-            config-editor rows; `prompt` and `nested` are listed and carry no
-            widget, and a `prompt` param carries no value.
+            Which WIDGET can express this param's value — the only thing `kind`
+            decides. Every kind but `prompt` is a config-editor row (`nested`
+            gets a JSON box, `prompt` carries no value and belongs to the prompt
+            editor). Whether the OPTIMIZER may move it is `never_axis` +
+            `movable_by`; a reader that lets either answer the other withheld
+            the output contract from the operator who owns it.
         value:
           description: The RESOLVED value at the addressed searchpoint, never the declared default.
         source: { $ref: '#/components/schemas/ParamSource' }
@@ -3694,9 +3697,16 @@ components:
           type: array
           items: { type: string }
           description: Who may move this axis now (`l1`, `l2`); EMPTY is the only true lock.
-        optimizer_locked:
-          type: boolean
-          description: Never an axis — model/provider, a confound guard.
+        never_axis:
+          type: string
+          enum: ['', cost_lever, schema_owned]
+          description: |
+            Which construction forbids this key from ever being an axis, empty
+            where none does. `cost_lever` the gateway and route, set against a
+            measured capture; `schema_owned` the structured-output contract,
+            whose keys the optimizer cannot emit at all. Served rather than
+            inferred from the key's name, which is the only way a surface could
+            say WHICH before.
         held:
           type: boolean
           description: The dataset offered it; this campaign closed it.
@@ -3709,7 +3719,7 @@ components:
         How far the search reaches on one node — SERVED, because the client summed
         `movable_by` itself against the DATASET's narrowing rather than the
         campaign's. The denominator is what is OPENABLE, so a config param no agent
-        moves is SHUT, not exempt; only `optimizer_locked` rows are outside it.
+        moves is SHUT, not exempt; only `never_axis` rows are outside it.
       properties:
         open: { type: integer, minimum: 0 }
         openable: { type: integer, minimum: 0 }
@@ -3758,6 +3768,10 @@ components:
         node_output_schema:
           type: object
           additionalProperties: true
+          description: |
+            The contract each node ANSWERS UNDER at `at` — resolved, not declared. The
+            `output_schema_descriptions` axis is folded in through the same function the wire
+            uses, so a candidate that moved it is read here as the run will read it.
         model_capabilities:
           type: object
           additionalProperties: { $ref: '#/components/schemas/ModelCapability' }
@@ -4076,28 +4090,20 @@ components:
           description: |
             Every param each node carries, keyed by node id — COMPLETE, because
             clients sum `movable_by` across it to answer "where does the search
-            reach on this node". A lock is (axis, AGENT): `movable_by` names who
-            may move it now (`l1` the generator each round, `l2` escalation over
-            the optimizer's own knobs), and the EMPTY list is the only true lock —
-            nobody may, and changing it costs a fork. Two fields say why a shut
-            axis is shut: `optimizer_locked` (never an axis — model/provider, a
-            confound guard) and `held` (the dataset offered it, this campaign
-            closed it). Neither is plain configuration. An EMPTY param list is a
-            third answer again — nothing here to change at all — and
-            `[].every()` collapses it into the others, so test length first.
-            Each param's `kind` names the surface that owns it:
-            the five widget kinds (`model`/`enum`/`number`/`bool`/`string`) are
-            config-editor rows; `prompt` (a PromptTemplate decomposition field) and
-            `nested` (object/array) are listed but carry no widget, and a `prompt`
-            param carries no value — the prose lives in `prompts/{node}.json`.
+            reach on this node". Each row is a `NodeConfigParam` and that schema
+            owns what its fields mean; restated here they drifted, claiming a
+            `nested` param carried no widget after one was built for it. An EMPTY
+            param list is a third answer beside open and locked — nothing here to
+            change at all — and `[].every()` collapses it into the others, so test
+            length first.
             Boundary-added beside `pipeline_view`, same draft-derived parse.
         node_output_schema:
           type: object
           additionalProperties: true
           description: |
-            Per-node structured-output contract (read-only), keyed by node id;
-            null per node when it declares none. Boundary-added beside
-            `pipeline_view`.
+            Per-node structured-output contract (read-only), keyed by node id, RESOLVED
+            like its sibling above; null per node when it declares none. Boundary-added
+            beside `pipeline_view`.
         reach:
           type: object
           additionalProperties:

@@ -77,6 +77,11 @@ WELL_KNOWN_PARAM_TYPES: dict[str, str] = {
     "instruction": "string",
     "thinking_style": "string",
     "answer_format": "string",
+    # The structured-output contract (`pipeline_schema.OUTPUT_CONTRACT_KEYS`), typed rather than
+    # inferred because it must resolve on a node declaring NO schema. `object` is also what bounds
+    # the overlay merge to one level, so a fork replacing `properties` keeps its siblings.
+    "output_schema": "object",
+    "answer_field": "string",
 }
 
 
