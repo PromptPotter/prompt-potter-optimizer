@@ -35,6 +35,7 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.io import read_yaml_optional
 from promptpotter.infrastructure.store.stores import Stores, build_stores
+from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.identity import IdentityContext, default_identity
 
@@ -386,8 +387,6 @@ async def init_services(
     backend_id = _resolve_backend_id(
         stores, backend_id, backend_url, backend_type, pipeline_schema.name
     )
-
-    from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
     session = Session(
         store=stores,

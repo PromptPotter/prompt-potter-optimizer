@@ -16,6 +16,7 @@ from promptpotter.application.optimization.validators.l1_strict import (
     L1_SCHEMA_COMPLIANCE,
 )
 from promptpotter.application.pipeline_resolve import apply_node_overlay
+from promptpotter.application.scoring.evaluators import materialize_row_derivable
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_overlay import node_config_items
@@ -169,7 +170,6 @@ def build_score_report(
     ``sp_hash(session.pipeline_schema)`` — the call ``build_dataset_run_data`` makes to key the
     rows — so the report and the archive name one identity; ``""`` where nothing was measured."""
     # Lazy: scoring → optimization circular.
-    from promptpotter.application.scoring.evaluators import materialize_row_derivable
 
     evaluators = {**(score_summary.get("evaluators") or {}), "l1_diversity": l1_diversity}
     # Refresh the row-derivable subset from the rows, as the read-side mask does (`mask/load.py`):

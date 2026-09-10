@@ -6,7 +6,10 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.intelligence.exploration import PARENT_ABILITY_ID
+from promptpotter.application.intelligence.exploration import (
+    PARENT_ABILITY_ID,
+    theta_lift_over_parent,
+)
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     compute_optimizer_prompt_hashes,
 )
@@ -82,7 +85,6 @@ def _verdict_reason(
     lower-accuracy winner needs the number it actually won on, and a held round needs to say which
     arm came closest and how far short. On a COLD ruler it says so: θ there is logit-accuracy on
     each arm's own subset, which is not the scale the word promises."""
-    from promptpotter.application.intelligence.exploration import theta_lift_over_parent
 
     scale = "" if ruler_n else " (cold ruler — θ is logit-accuracy on each arm's own subset)"
     parent = abilities.theta.get(PARENT_ABILITY_ID)

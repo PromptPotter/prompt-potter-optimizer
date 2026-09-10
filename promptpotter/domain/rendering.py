@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, overload
 
 from promptpotter.config.settings import NO_RESULT, PROMPT_STRING_FIELDS
-from promptpotter.domain.results import CritiqueReadout
 from promptpotter.shared import (
     extract_boxed_number,
     extract_gsm8k_number,
@@ -17,6 +16,12 @@ from promptpotter.shared import (
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
+
+    # Annotation-only, and deliberately not a runtime import: `results` ranks its scoreboard
+    # on `display_rank_key` from here, so a runtime edge back to `results` would close a
+    # cycle and force one side to defer. Display depends on the model; the model does not
+    # depend on display.
+    from promptpotter.domain.results import CritiqueReadout
 from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
 
 

@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import logging
 
+from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring
+from promptpotter.application.optimization.resume_and_fork.ab_replay import ab_replay_cycle
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
@@ -20,8 +22,6 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 
 
 async def cmd_ab(args: argparse.Namespace) -> CommandResult:
-    from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring
-    from promptpotter.application.optimization.resume_and_fork.ab_replay import ab_replay_cycle
 
     ctx = load_session(args)
     session = await init_services_cli(**ctx.init_params, identity=identity_from_args(args))

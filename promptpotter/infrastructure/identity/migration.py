@@ -8,8 +8,10 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.infrastructure.store.io import read_json, write_json
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.identity import default_identity
 
 if TYPE_CHECKING:
     from promptpotter.shared.identity import IdentityContext
@@ -48,8 +50,6 @@ def maybe_claim_default(
 def registered_or_default_identity(explicit_tenant: str | None = None) -> IdentityContext:
     """The CLI's identity: explicit ``--tenant`` > registered user > ``default``. A registered developer resolves to their own
     tenant, so terminal runs join the one workspace the authenticated web reads."""
-    from promptpotter.infrastructure.identity.paths import default_identity_paths
-    from promptpotter.shared.identity import default_identity
 
     if explicit_tenant:
         return default_identity(tenant_id=explicit_tenant)

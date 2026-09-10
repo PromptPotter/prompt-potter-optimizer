@@ -7,6 +7,7 @@ from promptpotter.domain.escalation_signals import RuntimeFailure, rf_dedup_key
 from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
+from promptpotter.infrastructure.store.layout import root_cycle_id as _root_of
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
@@ -37,7 +38,6 @@ def gather_sibling_runtime_failures(
     backend_id: str,
     exclude_cycle_id: str | None = None,
 ) -> list[RuntimeFailure]:
-    from promptpotter.infrastructure.store.layout import root_cycle_id as _root_of
 
     out: list[RuntimeFailure] = []
     seen_keys: set[tuple[str, str, str]] = set()

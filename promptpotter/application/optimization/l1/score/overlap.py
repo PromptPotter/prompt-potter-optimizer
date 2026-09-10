@@ -7,6 +7,7 @@ import logging
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.scoring.metrics import _compute_accuracy
+from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.results import (
     OverlapMember,
     OverlapReading,
@@ -106,7 +107,6 @@ async def _measure_gaps(
 ) -> list[dict[str, Any]]:
     """*step*'s OWN configuration on *gaps* — never the round subject's. A member measured under
     another arm's prompt is that arm's reading wearing this one's label."""
-    from promptpotter.application.scoring.search_point_scorer import score_search_point
 
     schema = cycle.session.pipeline_schema
     assert step.opt_sp is not None, (

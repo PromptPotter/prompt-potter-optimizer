@@ -123,6 +123,20 @@ collects everything else.
   definition site (the `@signal` `INJECTIONS` pattern); enum-keyed dict +
   import-time completeness assert is the third acceptable form. String-keyed
   *data* tables are fine.
+- **A function-local import of our OWN package goes to module scope.** All three
+  reasons for deferring one were measured and none holds. *Startup:* `--help`
+  costs 1.38 s warm against a 0.16 s bare interpreter, so the deferrals buy no
+  fast CLI; a real startup fix is `-X importtime`, not scattered deferrals.
+  *Extras gating* ([`ADR-0006`](../adr/0006-embeddable-core-and-extras.md)) is
+  real but lives on the **third-party** import inside the function, never on a
+  `promptpotter` → `promptpotter` one — of 330 own-package deferrals, zero were
+  gated by an extra. *A cycle* is a layer boundary in the wrong place, so the fix
+  is to move the shared piece down (root `CLAUDE.md` § `<entry-point-parity>`),
+  and only 7 of the 330 were forced by one. All therefore count against
+  `complexity_ledger::deferred_imports`; `# extras: <name>` on the import line
+  exempts one that earns it. **The defect the rule ends is the ambiguity** — an
+  unmarked deferral cannot be told from a load-bearing one, so nobody can hoist
+  safely or add one knowingly.
 
 ## Auditing for debt
 

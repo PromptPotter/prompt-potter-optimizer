@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.datasets.loaders import build_dataset_run_data
+from promptpotter.application.optimization.pobb.classification import is_deprecated
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.query_loop import run_query_loop
@@ -16,7 +17,14 @@ from promptpotter.domain.escalation_signals import EscalationSignal, EscalationT
 from promptpotter.domain.scoring import CellScorer, QueryMeasurement
 from promptpotter.domain.validators import StopRule
 from promptpotter.infrastructure.store import archive_views
-from promptpotter.shared.errors import DatasetIdentityError, error_category, is_error_result
+from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
+from promptpotter.infrastructure.tracing.events import DatasetRun
+from promptpotter.shared.errors import (
+    DatasetIdentityError,
+    error_category,
+    graceful,
+    is_error_result,
+)
 from promptpotter.shared.instrument import MeasuredCandidate, measured_candidate_scope
 
 if TYPE_CHECKING:
@@ -104,7 +112,6 @@ def _split_off_deprecated_samples(
     cached_sample_results: dict[int, QueryMeasurement],
 ) -> tuple[dict[int, QueryMeasurement], dict[int, QueryMeasurement]]:
     """Load-side cache split: (kept, deprecated rows that need fresh re-measure)."""
-    from promptpotter.application.optimization.pobb.classification import is_deprecated
 
     deprecated = {sid: r for sid, r in cached_sample_results.items() if is_deprecated(r)}
     kept = {sid: r for sid, r in cached_sample_results.items() if sid not in deprecated}
@@ -153,10 +160,6 @@ def _resolve_prior_cache(
     dataset_name = session.dataset_name
     cached_sample_results: dict[int, QueryMeasurement] = {}
     if store and backend_id and dataset_name and not force_fresh:
-        from promptpotter.application.optimization.pobb.classification import (
-            is_deprecated,
-        )
-
         node_configs = pipeline_schema.node_configs(search_point.pipeline_params)
         cached_sample_results = cast(
             "dict[int, QueryMeasurement]",
@@ -249,9 +252,6 @@ def _emit_dataset_run(
     backend_id = session.backend_id
     if not (store and backend_id):
         return
-    from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
-    from promptpotter.infrastructure.tracing.events import DatasetRun
-    from promptpotter.shared.errors import graceful
 
     with graceful("DatasetRun emit failed"):
         obs = session.state.obs or ObservabilityBridge.file_only(store.base_dir)

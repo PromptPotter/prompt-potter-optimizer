@@ -15,6 +15,13 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
     record_decision,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.pipeline_overlay import (
+    allowed_values_from_narrowing,
+    node_config_items,
+    overlay_sets_model_outside_allowed,
+    permitted_models_from_narrowing,
+)
+from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import (
     FORK_DIRECTION,
@@ -333,7 +340,6 @@ def steer_is_babysit(stores: Stores, campaign_id: str, overlay: dict[str, Any] |
     config is the wrong list — it has already been through the inherited overlay and the cycle
     seed, so a seeded fork answers differently there than on the wire for the same steer.
     """
-    from promptpotter.domain.pipeline_overlay import overlay_sets_model_outside_allowed
 
     return overlay_sets_model_outside_allowed(overlay, permitted_models(stores, campaign_id))
 
@@ -341,7 +347,6 @@ def steer_is_babysit(stores: Stores, campaign_id: str, overlay: dict[str, Any] |
 def permitted_models(stores: Stores, campaign_id: str) -> dict[str, list[str]]:
     """The origin's frozen permitted model set, per NODE — for the gate above and for any surface
     that has to NAME them in its refusal."""
-    from promptpotter.domain.pipeline_overlay import permitted_models_from_narrowing
 
     campaign = stores.campaigns.load_campaign(campaign_id)
     narrowing = campaign.config.get("optimizer_narrowing") if campaign else None
@@ -360,11 +365,6 @@ def declare_steered_values(seed: CycleSeed, narrowing: Mapping[str, Any] | None)
     same steer. It widens the FORK's search space and nothing else: `steer_is_babysit` reads the
     campaign manifest, never a cycle seed, so a branch steered outside the origin's sanction stays
     babysat in every fork below it."""
-    from promptpotter.domain.pipeline_overlay import (
-        allowed_values_from_narrowing,
-        node_config_items,
-    )
-    from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 
     origin = allowed_values_from_narrowing(narrowing)
     declared = dict(seed.optimizer_narrowing)

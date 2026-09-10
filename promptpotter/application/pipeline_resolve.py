@@ -51,6 +51,7 @@ from promptpotter.domain.pipeline_schema import (
     ParamSource,
     PipelineView,
     reach_map,
+    stable_hash,
 )
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.capabilities import resolve_schema_menu
@@ -61,6 +62,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     readable_dataset_dir,
 )
 from promptpotter.infrastructure.store.io import read_yaml_optional
+from promptpotter.judges import get as get_judge
 from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
@@ -228,9 +230,6 @@ def _identity_contributions(
         if connector is not None and connector.identity_config is not None:
             out.update(connector.identity_config(dataset_dir))
     if judges and active:
-        from promptpotter.domain.pipeline_schema import stable_hash
-        from promptpotter.judges import get as get_judge
-
         # Attached to the TERMINAL step: a judge grades the pipeline's answer, and that is the
         # node the answer comes out of. Any stable node would move the hash, but this one says
         # what the fingerprint actually qualifies.

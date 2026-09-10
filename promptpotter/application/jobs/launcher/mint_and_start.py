@@ -44,10 +44,13 @@ from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_
 from promptpotter.application.jobs.quota import QuotaExceededError
 from promptpotter.application.jobs.registry import Job, JobRegistry
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
+from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
+from promptpotter.infrastructure.llm.telemetry import set_cycle_ledger
+from promptpotter.infrastructure.projections.live_dashboard.view import LiveDashboardView
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
     dataset_pipeline_path,
@@ -70,7 +73,6 @@ def _record_launch_stop(
 ) -> None:
     """Stamp a launch that ended before its projection pipeline bound. A crash gets ``finished_at``,
     an interrupt gets the paused declaration and none. Best-effort — must never mask *exc*."""
-    from promptpotter.infrastructure.projections.live_dashboard.view import LiveDashboardView
 
     interrupted = launch_interrupted(exc)
     try:
@@ -427,8 +429,6 @@ async def _run_in_background(
     token_budget: int | None,
     stop_after_rounds: int | None = None,
 ) -> None:
-    from promptpotter.application.run_observers import build_run_observers
-    from promptpotter.infrastructure.llm.telemetry import set_cycle_ledger
 
     # create_task copies the CURRENT context, where the dispatcher has the command ledger
     # bound to _CYCLE_LEDGER. Clear it so an emit before build_run_observers binds the real

@@ -7,6 +7,8 @@ from functools import partial
 from importlib.metadata import entry_points
 from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.application.scoring.evaluators import Evaluator, validate_campaign_evaluator
+from promptpotter.judges.call import absent, bind_cache
 from promptpotter.judges.grounding import ANSWER_GROUNDING, EVIDENCE_RETRIEVAL
 from promptpotter.judges.protocol import Judge, JudgeSpec
 from promptpotter.judges.simpleqa import SEALQA, SIMPLEQA
@@ -130,7 +132,6 @@ async def _compute(
 ) -> float | None:
     """The ``Evaluator.compute`` a judge becomes. ``measure_sample`` banks ``pipeline_data`` after
     this returns, so the label and the reason written here reach the archive and the round file."""
-    from promptpotter.judges.call import absent, bind_cache
 
     try:
         with bind_cache(cache):
@@ -162,10 +163,6 @@ def build_evaluators(
 ) -> tuple[Evaluator, ...]:
     """A campaign's judges, as ordinary ``per_sample`` evaluators. ``specs`` is keyed by the term
     the scoring formula reads, never by the judge's name."""
-    from promptpotter.application.scoring.evaluators import (
-        Evaluator,
-        validate_campaign_evaluator,
-    )
 
     out: list[Evaluator] = []
     for term, spec in specs.items():

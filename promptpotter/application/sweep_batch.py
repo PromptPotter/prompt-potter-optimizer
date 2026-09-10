@@ -19,18 +19,29 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
+from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     _mint_fork,
     cleanup_stub_fork_if_empty,
 )
+from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
+from promptpotter.application.runner.entry import RunMode
+from promptpotter.application.runner.entry import run_optimization as _orch_run_optimization
 from promptpotter.application.views.render.markdown import render_sweep_summary
 from promptpotter.application.views.view_models import SweepPayloadRow, SweepSummaryView
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import PayloadOutcome, SweepBatchResult
-from promptpotter.domain.run_records import ForkSpec, ForkTrigger, OperatorSweepFile
+from promptpotter.domain.run_records import (
+    ForkSpec,
+    ForkTrigger,
+    OperatorSweepFile,
+    ResumeCheckpointKind,
+    ResumeCheckpointRecord,
+)
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.io import read_yaml
-from promptpotter.infrastructure.store.layout import root_cycle_id
+from promptpotter.infrastructure.store.layout import CycleLayout, root_cycle_id
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
@@ -77,10 +88,6 @@ def existing_fork_source_files(
 ) -> dict[str, str]:
     """Prior FORK_CUT source files under this parent. A dropped fork dir is ignored, so a deleted-fork operator is not
     blocked from re-running it."""
-    from promptpotter.domain.cycle_paths import CycleDir
-    from promptpotter.domain.run_records import ResumeCheckpointKind, ResumeCheckpointRecord
-    from promptpotter.infrastructure.ledger import CycleEventLog
-    from promptpotter.infrastructure.store.layout import CycleLayout
 
     out: dict[str, str] = {}
     parent_dir = stores.campaigns.cycle_dir(
@@ -114,10 +121,6 @@ async def run_sweep_batch(
 ) -> SweepBatchResult:
     """Mint one fork per payload; restore the active pointer on exit. ``reload_ctx`` is INJECTED, not called: the pointer moves
     once per payload, so a single pre-resolved session would bind every fork to the first."""
-    from promptpotter.application.initialization.wiring import init_services
-    from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
-    from promptpotter.application.runner.entry import RunMode
-    from promptpotter.application.runner.entry import run_optimization as _orch_run_optimization
 
     # The parent context already resolved both — re-resolving them here was a third copy
     # of the `--tenant > registered developer > anonymous default` ladder, free to disagree

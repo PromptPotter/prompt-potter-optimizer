@@ -12,7 +12,9 @@ import threading
 import time
 from typing import TYPE_CHECKING, Literal, get_args
 
+from promptpotter.application.datasets.loaders import sample_dataset
 from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
+from promptpotter.application.origin import rescore_parent
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
 from promptpotter.application.runner.round import emit_origin_round
 from promptpotter.application.runner.termination import OriginGateMode, origin_gate_tripped
@@ -163,8 +165,6 @@ async def _rescore_and_reemit(
 ) -> None:
     """Re-score the origin force-fresh, then re-emit round 0 through the standard ``close_round`` seam so
     every round-0 surface updates in one shape."""
-    from promptpotter.application.datasets.loaders import sample_dataset
-    from promptpotter.application.origin import rescore_parent
 
     scoring_set = sample_dataset(dataset, config.origin_budget())
     origin = await rescore_parent(cycle, scoring_set, callbacks=cb, force_fresh=True)

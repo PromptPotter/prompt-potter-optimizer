@@ -64,6 +64,10 @@ def _inner_optimizer_revision(dataset_dir: Path) -> dict[str, Any]:
     body, its resolved output schema and its config. DERIVED from that declaration rather than a
     name list, so a surface that grows a node is covered without an edit here.
     """
+    # Deferred while `connectors/__init__` builds the registry at package import: anything this
+    # module pulls at top level is then reached BEFORE the package exists, and hoisting these makes
+    # `import promptpotter.connectors` fail on a partially initialized `injections.registry`. The
+    # heaviest of the three import-time-registry sites filed in `docs/specs/code-debt-cleanup.md`.
     from promptpotter.application.optimization.dispatch.llm_call.prompts import (
         optimizer_manifest,
         optimizer_resolved_schemas,

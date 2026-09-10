@@ -14,12 +14,17 @@ from typing import TYPE_CHECKING, Any, cast
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.sample_measurement import (
+    STALE_DATA_LOAD_PROTOCOL,
+    emit_step_token_usage,
+    measure_sample,
+)
+from promptpotter.application.scoring.sample_measurement import (
     execute_stale_data_protocol as _execute_stale_data_protocol,
 )
-from promptpotter.application.scoring.sample_measurement import measure_sample
 from promptpotter.domain.escalation_signals import EscalationSignal
 from promptpotter.domain.phases import RunPhase, StopLoop
 from promptpotter.domain.scoring import CellScorer, QueryMeasurement, is_hit
+from promptpotter.domain.spend import StepTokenUsage
 from promptpotter.domain.validators import StopRule
 from promptpotter.infrastructure.runtime_flags import effective_lookahead
 from promptpotter.shared.errors import (
@@ -101,8 +106,6 @@ def _materialize_cached(item: QueryMeasurement, scorer: CellScorer) -> QueryMeas
 def _emit_cached_step_tokens(row: QueryMeasurement) -> None:
     """Meter a measurement-cache hit off the tokens the archived row already carries. Replaying them costs nothing, but the
     search still made the call, so the ledger has to say so."""
-    from promptpotter.application.scoring.sample_measurement import emit_step_token_usage
-    from promptpotter.domain.spend import StepTokenUsage
 
     pd = row.get("pipeline_data")
     if not isinstance(pd, dict):
@@ -186,7 +189,6 @@ async def _maybe_recover_degraded(
     sample: Sample,
     ctx: QueryLoopState,
 ) -> QueryMeasurement:
-    from promptpotter.application.scoring.sample_measurement import STALE_DATA_LOAD_PROTOCOL
 
     if not _has_pipeline_warnings(result):
         return result

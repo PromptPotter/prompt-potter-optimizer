@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.optimization.pobb.classification import is_deprecated, scoreable_rows
 from promptpotter.application.scoring.diagnostics import count_degraded_samples
 from promptpotter.application.scoring.evaluators import (
     compute_accuracy,
@@ -39,10 +40,6 @@ def _compute_accuracy(results: list[QueryMeasurement]) -> dict[str, Any]:
     """``total`` is the EVIDENCE denominator: scoreable rows only. An errored or deprecated row
     carries no verdict, so neither belongs in the denominator a rate is read against."""
     # Lazy: scoring → optimization circular.
-    from promptpotter.application.optimization.pobb.classification import (
-        is_deprecated,
-        scoreable_rows,
-    )
 
     deprecated = sum(1 for r in results if is_deprecated(r))
     scoreable = scoreable_rows(results)
@@ -99,7 +96,6 @@ def compute_composite_fitness(
     cost or reliability term on θ: this number and the one every θ is fit on are the same
     per-cell value, read at two scopes instead of two formulas at one scope."""
     # Lazy: scoring → optimization circular.
-    from promptpotter.application.optimization.pobb.classification import scoreable_rows
 
     base = _compute_accuracy(results)
     scoreable = scoreable_rows(results)

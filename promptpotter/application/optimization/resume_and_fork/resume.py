@@ -10,6 +10,9 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.campaign_config import freeze_campaign_config
 from promptpotter.application.knobs import DiffScope, classify_config_diff
+from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+    compute_optimizer_prompt_hashes,
+)
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     ForkResult,
     _mint_fork,
@@ -24,6 +27,7 @@ from promptpotter.application.optimization.resume_and_fork.replayers import (
 )
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.results import round_document_digest
 from promptpotter.domain.run_records import ForkSpec, ForkTrigger
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_decisions,
@@ -50,7 +54,6 @@ def _stale_generation(
 ) -> ReplayMismatch | None:
     """Is the round about to run holding candidates its own predecessor no longer matches? Both
     sides are persisted, so this survives a restart. No recorded digest ⇒ a divergence, not a shrug."""
-    from promptpotter.domain.results import round_document_digest
 
     cached = campaign_store.load_round_candidates(hop, resumed_from_round)
     if cached is None or not prior:
@@ -79,9 +82,6 @@ def _stale_generation(
 def _optimizer_mismatches(prior: list[RoundResult]) -> dict[int, ReplayMismatch]:
     """Rounds produced by a DIFFERENT optimizer than the one loaded now. Asked PER ROUND so an edit
     forks from where it bites; an unstamped round is REPORTED, never guessed."""
-    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-        compute_optimizer_prompt_hashes,
-    )
 
     current = compute_optimizer_prompt_hashes()
     out: dict[int, ReplayMismatch] = {}

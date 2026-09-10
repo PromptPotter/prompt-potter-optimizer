@@ -7,6 +7,7 @@ import argparse
 import logging
 
 from promptpotter.application.noise_floor import NoiseFloorError, measure_noise_floor
+from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store.stores import build_stores
@@ -24,7 +25,6 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 async def cmd_noise_floor(args: argparse.Namespace) -> CommandResult:
     """Re-score the active/named cycle's cached C0 origin ``--k`` times (force_fresh)
     and report the spread as a workspace diagnostic-run record."""
-    from promptpotter.config.logging import setup_logging
 
     setup_logging(style="full" if get_verbose() else "cli")
     identity = identity_from_args(args)

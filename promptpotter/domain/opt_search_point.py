@@ -23,7 +23,7 @@ from promptpotter.domain.l1_layout import (
     default_l1_layout,
 )
 from promptpotter.domain.pipeline_overlay import fold_output_contract
-from promptpotter.domain.search_point import SearchPoint, TaskDecomposition
+from promptpotter.domain.search_point import JobSearchPoint, SearchPoint, TaskDecomposition
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
 
@@ -309,7 +309,6 @@ class OptSearchPoint(PromptTemplate):
     ) -> JobSearchPoint:
         """*schema* is REQUIRED: without one this produced a valid-looking point carrying neither the
         rendered prompt nor ``steps``, and that point is scored and archived like any other."""
-        from promptpotter.domain.search_point import JobSearchPoint
 
         pp = copy.deepcopy(base_pipeline_params or {})
         active_steps = schema.active_steps

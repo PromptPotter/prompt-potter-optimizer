@@ -59,6 +59,9 @@ def fingerprinted_modules() -> tuple[ModuleType, ...]:
 
     ``facade`` imports this module, so it is resolved at call time rather than above.
     """
+    # Deferred while INJECTIONS is built at import: `facade` reads it from here at top level, so
+    # naming `facade` here closes the loop on a partially initialized registry. One of the three
+    # import-time-registry sites filed in `docs/specs/code-debt-cleanup.md`.
     from promptpotter.application.optimization.dispatch import facade
     from promptpotter.domain import ruler
 

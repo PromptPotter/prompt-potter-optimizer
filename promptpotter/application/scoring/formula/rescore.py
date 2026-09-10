@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any
 
 from promptpotter.domain.scoring import CellScorer
+from promptpotter.shared.errors import is_error_result
 
 
 def rescore_results(results: list[dict[str, Any]], scorer: CellScorer) -> list[dict[str, Any]]:
@@ -14,7 +15,6 @@ def rescore_results(results: list[dict[str, Any]], scorer: CellScorer) -> list[d
 
     ``fitness`` first, then ``objective``: the composite reads the correctness it is composed OF
     (``compiler.py::objective_namespace`` binds ``fitness``), so the order is the dependency."""
-    from promptpotter.shared.errors import is_error_result
 
     for r in results:
         if is_error_result(r):

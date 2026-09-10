@@ -8,6 +8,23 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.application.intelligence.earned_blocks import (
+    answer_space_signature,
+    earned_library_for,
+)
+from promptpotter.application.intelligence.exploration import (
+    ORIGIN_ABILITY_ID,
+    Observation,
+    dedup_observations,
+    extend_ruler,
+    fit_theta_given_delta,
+    graded_response,
+    graduate_ruler_model,
+    observations_from_results,
+)
+from promptpotter.application.intelligence.hard_sample_archive import build_archive_observations
+from promptpotter.application.intelligence.sibling_wounds import gather_sibling_runtime_failures
+
 # Leaf import, never the package surface: `escalation/__init__` loads the firing driver, which
 # depends back on Cycle.
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
@@ -16,6 +33,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
 from promptpotter.application.optimization.escalation.state import EscalationFSM
 from promptpotter.application.scoring.metrics import _compute_accuracy
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
+from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.escalation_signals import rf_dedup_key
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_overlay import node_config_items
@@ -35,6 +53,10 @@ from promptpotter.domain.ruler import (
 )
 from promptpotter.domain.run_records import RebaseRequest, ResumeCheckpointRecord
 from promptpotter.domain.search_point import JobSearchPoint
+from promptpotter.infrastructure.store.io import read_json_tolerant
+from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.layout import root_cycle_id as _root_cycle_id
+from promptpotter.shared.errors import RulerUnpersistedError, is_error_result
 from promptpotter.shared.instrument import instrument_mode
 
 if TYPE_CHECKING:
@@ -177,15 +199,6 @@ def _calibrate_delta_ruler(
     """The per-cycle ANCHORING fit — the scale every later θ readout is measured against
     (``docs/methods/verdict-resolution.md``). It locks the anchor; ``extend_ruler`` grows the
     membership afterwards without moving it. Cold start returns ``None``, which reads FLAT."""
-    from promptpotter.application.intelligence.exploration import (
-        ORIGIN_ABILITY_ID,
-        Observation,
-        dedup_observations,
-        fit_theta_given_delta,
-        graded_response,
-        graduate_ruler_model,
-    )
-    from promptpotter.shared.errors import is_error_result
 
     origin_obs = [
         Observation(ORIGIN_ABILITY_ID, int(sid), graded_response(r))
@@ -253,10 +266,6 @@ def _refuse_unreproducible_rounds(session: Session) -> None:
     a fresh mint has no round files at all, which is the silent path. Falling through instead is
     what the fix removes: ``_calibrate_delta_ruler`` would walk an archive that has grown since
     the lock and hand back a different scale under the same cycle."""
-    from promptpotter.domain.cycle_paths import CycleDir
-    from promptpotter.infrastructure.store.io import read_json_tolerant
-    from promptpotter.infrastructure.store.layout import CycleLayout
-    from promptpotter.shared.errors import RulerUnpersistedError
 
     cycle_dir = session.store.campaigns.cycle_dir(session.hop)
     rounds = CycleLayout(CycleDir(cycle_dir)).round_files()
@@ -280,12 +289,6 @@ def _origin_theta_on(
     """C0's ability on an ALREADY-anchored ruler. Restricted to the cells that ruler carries: the
     archive has grown since the lock, and reading θ over rows the scale never absorbed is the very
     thing this arc removes."""
-    from promptpotter.application.intelligence.exploration import (
-        ORIGIN_ABILITY_ID,
-        dedup_observations,
-        fit_theta_given_delta,
-        observations_from_results,
-    )
 
     origin_obs = observations_from_results({ORIGIN_ABILITY_ID: list(origin_results or [])})
     obs = [
@@ -305,10 +308,6 @@ def _cumulative_theta(
 ) -> tuple[float, float] | None:
     """The θ-space peer of the cumulative composite: one virtual candidate (the frontier) fit
     against the fixed δ, so rounds land on one scale once per-round subsets drift."""
-    from promptpotter.application.intelligence.exploration import (
-        fit_theta_given_delta,
-        observations_from_results,
-    )
 
     obs = observations_from_results({_FRONTIER_ABILITY_ID: results})
     entries = ruler.entries() if ruler is not None else None
@@ -320,10 +319,6 @@ def _inherit_sibling_runtime_failures(opt_sp: OptSearchPoint, session: Session) 
     """Pull RuntimeFailures from sibling forks of this cycle's root so L1 sees configs
     prior siblings already proved to fail (``wounds.py::_runtime_block`` filters by pipeline
     match, under the ``l1_wounds`` signal)."""
-    from promptpotter.application.intelligence.sibling_wounds import (
-        gather_sibling_runtime_failures,
-    )
-    from promptpotter.infrastructure.store.layout import root_cycle_id as _root_cycle_id
 
     if not session.state.cycle_id:
         return
@@ -436,9 +431,6 @@ class Cycle:
         )
         _assert_overlay_preserved(sp, session.pipeline_params)
         _inherit_sibling_runtime_failures(opt_sp, session)
-        from promptpotter.application.intelligence.hard_sample_archive import (
-            build_archive_observations,
-        )
 
         # ONE archive walk, both consumers: the ruler and the intelligence layer ask for the
         # same observations at the same moment.
@@ -462,10 +454,6 @@ class Cycle:
                 enable_2pl=config.optimization.enable_2pl_graduation,
                 archive_obs=archive_obs,
             )
-        from promptpotter.application.intelligence.earned_blocks import (
-            answer_space_signature,
-            earned_library_for,
-        )
 
         # Silent when no block earned credible lift on a matching shape — the dispatch-first
         # "signal or silence" rule.
@@ -610,13 +598,6 @@ class Cycle:
         depressing every θ downstream. Called once per round, after every cell has a grade and
         before the election that reads them.
         """
-        from promptpotter.application.intelligence.exploration import (
-            extend_ruler,
-            observations_from_results,
-        )
-        from promptpotter.application.intelligence.hard_sample_archive import (
-            build_archive_observations,
-        )
 
         if self.ruler is None:
             # The ≥2-arm floor is satisfied the moment the round's own candidates are banked, so

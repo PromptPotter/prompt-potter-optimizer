@@ -66,7 +66,7 @@ from promptpotter.infrastructure.store.session_pointer import (
     read_active_pointer,
 )
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import BadRequestError, ConflictError, NotFoundError
+from promptpotter.shared.errors import BadRequestError, ConflictError, NotFoundError, graceful
 
 logger = logging.getLogger(__name__)
 
@@ -658,7 +658,6 @@ class CampaignStore:
         final: dict[str, Any] | None = None,
         export: PromptExport | None = None,
     ) -> None:
-        from promptpotter.shared.errors import graceful
 
         updates: dict[str, Any] = {
             "status": status,
@@ -730,7 +729,6 @@ class CampaignStore:
         stamp is skipped where one exists — overwriting a real ``stop_reason`` would destroy why
         the cycle ended. A cut from an already-finished parent therefore still records its
         successor. ``reopen_for_continuation`` clears the latch."""
-        from promptpotter.shared.errors import graceful
 
         with graceful("Supersede relation write failed"):
             self.update(hop, {"superseded_by": successor_cycle_id})

@@ -235,6 +235,10 @@ def effective_optimizer_prompts(
 def load_optimizer_prompt(name: str) -> PromptTemplate:
     """Every load runs ``validate_template``, so a template naming a slot outside ``INJECTIONS`` and
     the per-template extras raises at load time rather than silently rendering empty."""
+    # Deferred against a real loop, and moving `validate_template` here would not break it: the
+    # check needs `INJECTIONS`, and `registry` BUILDS that table at import, having imported every
+    # renderer — one of which (`injections/layer_state.py`) imports this module. One of the three
+    # sites of the import-time-registry shape filed in `docs/specs/code-debt-cleanup.md`.
     from promptpotter.application.optimization.dispatch.facade import validate_template
 
     template = base_optimizer_template(name)

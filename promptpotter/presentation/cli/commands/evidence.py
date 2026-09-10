@@ -15,6 +15,7 @@ from promptpotter.application.evidence import (
     subject_evidence,
 )
 from promptpotter.application.evidence_metrics import MEASURAND, MetricUnit
+from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
@@ -417,7 +418,6 @@ def _ranking_lines(ev: Evidence, top: int) -> list[str]:
 
 
 async def cmd_evidence(args: argparse.Namespace) -> CommandResult:
-    from promptpotter.config.logging import setup_logging
 
     setup_logging(style="full" if get_verbose() else "cli")
     stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)

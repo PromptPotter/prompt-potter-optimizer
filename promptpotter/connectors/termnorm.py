@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import BackendUnreachableError, Connector
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeType
@@ -238,7 +239,6 @@ _EXPECTED_REVISION: str | None = None
 def _termnorm_auth_token() -> str | None:
     """TermNorm's bearer token, read per client construction so an env change lands without a reimport.
     TermNorm gates it behind its own flag, so an unset token is the normal local posture."""
-    from promptpotter.config.settings import settings
 
     return settings.TERMNORM_TOKEN or None
 

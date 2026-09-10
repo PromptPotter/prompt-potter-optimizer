@@ -38,6 +38,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
+from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
 from promptpotter.config.settings import NO_RESULT
 from promptpotter.infrastructure.llm.rate_limit import (
     MAX_429_ATTEMPTS,
@@ -198,7 +199,6 @@ async def _sample(stage: JudgeStage, prompt: str, *, judge: str, started: float)
     """One provider round-trip — heartbeated, and retried on a 429. RAISES; :func:`ask` is the half
     that never does."""
     # Local: `judges/` is a leaf package and this reaches back into `application/`.
-    from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
 
     client = get_llm_client(stage.provider)
     label = f"{judge}:{stage.role}"

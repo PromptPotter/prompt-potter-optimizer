@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.application.views.view_models import AnyView
 from promptpotter.connectors.protocol import MeasuredUnit
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -140,7 +141,6 @@ class LiveDisplay(DerivedView):
     ) -> LiveDisplay:
         """The one construction from a session + its config. Every entry point spelled these four
         arguments out by hand, so the per-sample half of the scoring block was re-derived per caller."""
-        from promptpotter.application.scoring.formula import split_scoring_block
 
         return cls(
             origin_acc=origin_acc,

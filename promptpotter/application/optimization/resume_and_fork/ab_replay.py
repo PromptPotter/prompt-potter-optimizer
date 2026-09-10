@@ -7,6 +7,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.intelligence.hard_sample_archive import build_archive_observations
 from promptpotter.application.mask.divergence import (
     Divergence,
     Verdict,
@@ -15,6 +16,7 @@ from promptpotter.application.mask.divergence import (
 )
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.record import MaskRound
+from promptpotter.application.optimization.cycle import _calibrate_delta_ruler
 from promptpotter.application.optimization.resume_and_fork.replayers import (
     ReplayMismatch,
     replay_all_mismatches,
@@ -143,10 +145,6 @@ def ab_replay_cycle(
     parent's measurements, so an invalidating change reaches every branch below and a per-cycle answer cannot say that."""
     # Lazy import: cycle.py is a sibling in this layer and pulls the whole loop; importing it
     # at module load would risk an import cycle through resume_and_fork/__init__.
-    from promptpotter.application.intelligence.hard_sample_archive import (
-        build_archive_observations,
-    )
-    from promptpotter.application.optimization.cycle import _calibrate_delta_ruler
 
     sc = session.scoring
     scorer = sc.scorer

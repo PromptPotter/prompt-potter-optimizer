@@ -24,8 +24,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.connectors.protocol import BackendUnreachableError, Connector
+from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
 from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.spend import StepTokenUsage
+from promptpotter.infrastructure.store.io import read_yaml_optional
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -300,7 +303,6 @@ def harbor_wire_adapter(
 
 
 def _read_tasks(dataset_dir: Path) -> dict[str, Any]:
-    from promptpotter.infrastructure.store.io import read_yaml_optional
 
     return read_yaml_optional(dataset_dir / TASKS_FILE) or {}
 
@@ -314,7 +316,6 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
 
     Hashes the RESOLVED pins, never the declaration, which is what lets a dataset commit only a
     name and a version (:func:`_registry_tasks`)."""
-    from promptpotter.domain.pipeline_schema import stable_hash
 
     tasks = _read_tasks(dataset_dir)
     pins = [
@@ -883,8 +884,6 @@ async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]
     # denominator, so the number below would describe fewer steps than the task declared, and
     # describe it as a success.
     if unscoreable := _unscoreable_step(result):
-        from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
-
         raise InnerCycleUnscoreableError(f"harbor task {query!r}: {unscoreable}.")
 
     rewards = result.verifier_result.rewards if result.verifier_result else None
@@ -894,7 +893,6 @@ async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]
         # and failed. The campaign excludes the cell instead.
         # NOTE: this error's name and home are wrong now that it has a non-L4 consumer;
         # generalizing it outside `domain/l4/` is a rename across 23 sites.
-        from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
 
         raise InnerCycleUnscoreableError(
             f"harbor task {query!r} produced no reward under key {reward_key!r} "

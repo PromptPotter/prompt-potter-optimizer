@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.paths import benchmark_datasets_root
+from promptpotter.domain.measurement_provenance import grade_run
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.store.dataset_access import readable_dataset_rows
 from promptpotter.shared import GSM8K_ANSWER_RE
@@ -286,7 +287,6 @@ def build_dataset_run_data(
 ) -> dict[str, Any]:
     """Measurement-batch dict for ``Stores.archive.save()``. ``pipeline_schema`` is REQUIRED: it picks the
     ``sp_hash`` algorithm and supplies ``node_configs``, so a batch without one gets a second identity."""
-    from promptpotter.domain.measurement_provenance import grade_run
 
     rendered_prompt = search_point.render()
     sp_h = search_point.sp_hash(pipeline_schema)

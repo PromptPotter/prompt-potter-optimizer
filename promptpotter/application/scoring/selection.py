@@ -17,6 +17,22 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.intelligence.exploration import (
+    PARENT_ABILITY_ID,
+    Observation,
+    candidate_abilities,
+    fit_theta_given_delta,
+    theta_lift_over_parent,
+)
+from promptpotter.application.optimization.pobb.classification import scoreable_rows
+from promptpotter.shared.statistics import (
+    discordant_counts,
+    mean_ci,
+    p_exceeds,
+    paired_reading,
+    sign_posterior,
+)
+
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.exploration import RaschPosterior
     from promptpotter.domain.results import RoundResult
@@ -41,8 +57,6 @@ def mean_fitness_ci(results: list[QueryMeasurement]) -> tuple[float | None, floa
     point estimate must bracket the population that estimate came from — hence the filter here and
     deliberately not inside ``_mean_fitness_by_cell``."""
     # Lazy: scoring → optimization circular.
-    from promptpotter.application.optimization.pobb.classification import scoreable_rows
-    from promptpotter.shared.statistics import mean_ci
 
     per_cell = list(_mean_fitness_by_cell(scoreable_rows(results)).values())
     if not per_cell:
@@ -80,7 +94,6 @@ def _mean_fitness_by_cell(rows: list[QueryMeasurement]) -> dict[Any, float]:
 def distinct_valid_cells(results: list[QueryMeasurement]) -> int:
     """Counted per CELL, not per row, so replicate rows can never falsely satisfy
     ``coverage_floor``; a cell with one errored and one clean row still counts."""
-    from promptpotter.application.optimization.pobb.classification import scoreable_rows
 
     return len({sid for r in scoreable_rows(results) if (sid := r.get("sample_id")) is not None})
 
@@ -112,8 +125,6 @@ def matched_parent_lift(
     # ``scoreable_rows`` on both arms, matching ``mean_fitness_ci`` — the two intervals sit on one
     # row and must bracket one population. A cell either arm errored on drops the PAIR, which is what
     # makes the panel a narrowed comparison rather than a smaller one; ``n_cells`` cannot say which.
-    from promptpotter.application.optimization.pobb.classification import scoreable_rows
-    from promptpotter.shared.statistics import paired_reading
 
     cand_fit, parent_fit = paired_fitness(
         scoreable_rows(candidate_results), scoreable_rows(parent_results)
@@ -188,12 +199,6 @@ def elect_round_winner(
     θ_parent)``, the same quantity ``elimination_p_best`` cuts on, so the two cannot disagree about
     what better means. The overlap guard and the θ-lift guard cover different holes: one grades an
     errored row 0.0, the fit drops it."""
-    from promptpotter.application.intelligence.exploration import (
-        PARENT_ABILITY_ID,
-        candidate_abilities,
-        theta_lift_over_parent,
-    )
-    from promptpotter.shared.statistics import p_exceeds
 
     abilities = candidate_abilities(
         {cid: list(results_by_id.get(cid) or []) for cid in candidate_ids},
@@ -263,9 +268,6 @@ def elimination_p_best(
     caller that compares against a bar (`docs/methods/candidate-elimination.md` § The θ rule)."""
     if not paired_prior_grades:
         return 1.0, {}
-
-    from promptpotter.application.intelligence.exploration import Observation, fit_theta_given_delta
-    from promptpotter.shared.statistics import discordant_counts, p_exceeds, sign_posterior
 
     sids = [int(s) for s in candidate_sample_ids]
     # The ONE sanctioned provisional read: this runs DURING the round, on cells `calibrate_ruler`

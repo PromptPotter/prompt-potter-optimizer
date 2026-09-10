@@ -102,6 +102,12 @@ Each builder takes only the fields a test bends. **Add a parameter when a test n
 never add a builder for a shape an existing one can express** — eight local copies of the cell row
 had drifted apart here before, and adding `objective` to the loop had to find every one of them.
 
+**`measurement` stamps an `objective` that DIVERGES from `fitness`, deliberately** — pass
+`objective=fitness` where a test means them equal. Under no `per_cell` composite the two really are
+one float, and fixtures built on that identity are why two live confusions of correctness against
+the composite were invisible to this suite: `is_hit` thresholding the composite, and the
+campaign-ending stop reading accuracy.
+
 ## Frozen cycle fixtures (`tests/fixtures/cycles/`)
 
 `l2_terminal/` only, and it is **Vitest's** — reached via `webapp/lib/test-utils/fixtures.ts`,

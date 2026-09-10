@@ -11,12 +11,43 @@ from typing import TYPE_CHECKING, Any, NoReturn
 
 from pydantic import ValidationError
 
-from promptpotter.application.datasets.draft_campaign import OptimizationOverrides
+from promptpotter.application.campaign_config import load_campaign_config as _load_cfg
+from promptpotter.application.datasets.authored import (
+    dataset_campaign_path,
+    read_campaign_config_file,
+)
+from promptpotter.application.datasets.csv_ingest import IngestError
+from promptpotter.application.datasets.draft_campaign import (
+    OptimizationOverrides,
+    load_checkin_draft,
+)
 from promptpotter.application.datasets.draft_patch import SETTABLE_SCALARS, EditDraftPatch
+from promptpotter.application.datasets.ingest import SlugTakenError, ingest_draft
+from promptpotter.application.datasets.origin_readiness import origin_readiness
+from promptpotter.application.initialization.session import mint_checkin_skeleton
 from promptpotter.application.jobs.launcher.admission import probe_backend
+from promptpotter.application.jobs.launcher.checkin import (
+    load_checkin_for_start,
+    prepare_checkin_run,
+)
+from promptpotter.application.jobs.launcher.mint_and_start import LaunchError
 from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
+from promptpotter.application.optimization.task_context import (
+    checkin_call_context,
+    committed_task_context,
+    decompose_prompt_fields,
+)
+from promptpotter.application.runner.entry import RunMode
+from promptpotter.application.sweep_batch import (
+    load_sweep_payloads,
+    resolve_sweep_dir,
+    run_sweep_batch,
+)
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.connectors.protocol import BackendUnreachableError
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
+from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.api.middleware.command_dispatcher import (
     dispatch_draft_patch,
     dispatch_origin_resolution,
@@ -34,7 +65,7 @@ from promptpotter.presentation.cli.commands._shared import (
     init_services_cli,
     pipeline_summary,
 )
-from promptpotter.presentation.cli.session import load_session
+from promptpotter.presentation.cli.session import load_session, no_dataset_hint
 from promptpotter.presentation.views.startup_checklist import checkin_line
 from promptpotter.shared.errors import PayloadInvalidError, PotterError
 
@@ -120,7 +151,6 @@ def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
 def _reload_draft(stores: Stores, campaign_id: str) -> DraftCampaign:
     """The draft as the dispatcher just left it. Every write path persists, so the CLI re-reads
     rather than threading a model the applier already superseded."""
-    from promptpotter.application.datasets.draft_campaign import load_checkin_draft
 
     draft = load_checkin_draft(stores, campaign_id)
     assert draft is not None  # just written by the applier
@@ -152,11 +182,6 @@ def _raise_incomplete(gaps: Sequence[FieldGap], resolution: dict[str, Any] | Non
 async def _ingest_checkin(args: argparse.Namespace) -> str:
     """Parse → ``--set`` → resolve the origin → the gated check-in campaign id. On a residual gap this
     exits non-zero but the campaign SURVIVES, so a later ``--set`` + ``resume`` completes it."""
-    from promptpotter.application.datasets.csv_ingest import IngestError
-    from promptpotter.application.datasets.ingest import SlugTakenError, ingest_draft
-    from promptpotter.application.datasets.origin_readiness import origin_readiness
-    from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
-    from promptpotter.infrastructure.store.stores import build_stores
 
     file_path = Path(args.dataset)
     stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
@@ -227,13 +252,6 @@ async def _ingest_and_prepare_checkin(
 ) -> tuple[Session, CampaignConfig, str, str]:
     """The CLI tail of check-in Start, sharing :func:`prepare_checkin_run` with the web detach path.
     Backend reachability is not preflighted: a check-in is durable, so ``resume`` runs it later."""
-    from promptpotter.application.jobs.launcher.checkin import (
-        load_checkin_for_start,
-        prepare_checkin_run,
-    )
-    from promptpotter.application.jobs.launcher.mint_and_start import LaunchError
-    from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
-    from promptpotter.infrastructure.store.stores import build_stores
 
     campaign_id = await _ingest_checkin(args)
     stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
@@ -277,13 +295,6 @@ async def _commit_task_framing(
     """``--task-file`` / ``--task-text`` IS a check-in: decompose the operator's context and COMMIT
     it as the dataset's framing. Runs BEFORE the mint because framing renders — the cycle id hashes
     it, so a framing that arrives afterwards names a prompt the id never saw."""
-    from promptpotter.application.initialization.session import mint_checkin_skeleton
-    from promptpotter.application.optimization.task_context import (
-        checkin_call_context,
-        committed_task_context,
-        decompose_prompt_fields,
-    )
-    from promptpotter.domain.cycle_paths import CycleHop
 
     override = Path(task_file).read_text(encoding="utf-8") if task_file else task_text
     if not override:
@@ -327,11 +338,6 @@ async def _mint_fresh_session(
     args: argparse.Namespace,
 ) -> tuple[Session, CampaignConfig, str, str]:
     """Find-or-create campaign + mint session + root cycle. No scoring — the origin is phase 0 of the loop."""
-    from promptpotter.application.campaign_config import load_campaign_config as _load_cfg
-    from promptpotter.application.datasets.authored import (
-        dataset_campaign_path,
-        read_campaign_config_file,
-    )
 
     # Shared unwrap only — `new` validates AFTER merging with the connector
     # profile ({**profile, **file_config}), a different composition order than
@@ -342,8 +348,6 @@ async def _mint_fresh_session(
         getattr(args, "dataset", None) or args.dataset_name or file_config.get("dataset_name")
     )
     if not dataset_name:
-        from promptpotter.presentation.cli.session import no_dataset_hint
-
         raise SystemExit(
             "ERROR: `new` requires a dataset name. Pass it as a positional "
             "(`new aime`), via `--dataset-name <name>`, or via a `--config` "
@@ -399,8 +403,6 @@ async def _run_sweep_batch(
 ) -> CommandResult:
     """Thin shim → ``application.sweep_batch.run_sweep_batch``, binding the observer factory and the
     active-pointer reload to CLI args so the application layer imports no ``argparse``."""
-    from promptpotter.application.sweep_batch import run_sweep_batch
-    from promptpotter.presentation.cli.session import load_session
 
     def observer_factory(session: Session, origin_acc: float) -> RunObservers:
         return build_observers(session, campaign_config, train_data, origin_acc)
@@ -434,7 +436,6 @@ async def _maybe_dispatch_sweep_batch(
     setup error: running one unpaired cycle instead answers a different question than the one posed."""
     if not getattr(args, "sweep", False):
         return None
-    from promptpotter.application.sweep_batch import load_sweep_payloads, resolve_sweep_dir
 
     sweep_dir = resolve_sweep_dir(dataset_config_dir)
     if sweep_dir is None:
@@ -458,7 +459,6 @@ async def _run_loop(
     session: Session,
     train_data: list[Sample],
 ) -> CommandResult:
-    from promptpotter.application.runner.entry import RunMode
 
     cycle_result, _ = await drive_cycle(
         args,

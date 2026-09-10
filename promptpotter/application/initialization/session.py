@@ -6,18 +6,29 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.application.campaign_config import freeze_campaign_config
+from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+    combined_optimizer_prompt_hash,
+)
+from promptpotter.application.pipeline_resolve import resolved_dataset_name
+from promptpotter.application.run_observers import build_campaign_emitter
+from promptpotter.application.runner.campaign_ids import mint_campaign_id, mint_checkin_cycle_id
+from promptpotter.config.settings import APP_VERSION
+from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import HeadlineMetric
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellScorer
 from promptpotter.infrastructure.backend import BackendClient
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.io import validate_path_component
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.session_pointer import mint_session_id, save_active_pointer
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import graceful
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
@@ -190,7 +201,6 @@ def new_session_state(
 
 
 def _build_index_header(session: Session, dataset_size: int) -> dict[str, Any]:
-    from promptpotter.config.settings import APP_VERSION
 
     nodes = list(session.pipeline_schema.nodes)
     return {
@@ -220,12 +230,6 @@ def auto_mint_session(
 ) -> tuple[str, str, str]:
     """Mint fresh campaign + session + root cycle; claim the active pointer. ``campaign_id`` comes from the CALLER, so an
     L4 inner spawn can hand in an id derived from the cell it measures and land back on a campaign it already ran."""
-    from promptpotter.application.campaign_config import freeze_campaign_config
-    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-        combined_optimizer_prompt_hash,
-    )
-    from promptpotter.application.pipeline_resolve import resolved_dataset_name
-    from promptpotter.domain.campaign import Campaign
 
     target_hash = hop.cycle_id.removeprefix("cycle_")
     validate_path_component(target_hash)
@@ -287,8 +291,6 @@ def auto_mint_session(
     save_active_pointer(session.store.base_dir, session_id, root_hop)
 
     # Pre-seed dashboard.json so the webapp doesn't 404 in the mint→loop-start window.
-    from promptpotter.application.run_observers import build_campaign_emitter
-    from promptpotter.shared.errors import graceful
 
     with graceful("Pre-seeding dashboard.json failed"):
         build_campaign_emitter(session, campaign_config, origin_accuracy=origin_acc)
@@ -307,9 +309,6 @@ def mint_checkin_skeleton(stores: Stores, *, slug: str, backend_type: str) -> tu
     not-yet-run check-in following it snaps a watching workspace out of the authoring flow.
     ``backend_type`` is a required parameter, not read off the dataset: an ingest mints the
     skeleton before the slug has a ``pipeline.yaml``, so only the caller's draft knows it."""
-    from promptpotter.application.runner.campaign_ids import mint_campaign_id, mint_checkin_cycle_id
-    from promptpotter.config.settings import APP_VERSION
-    from promptpotter.domain.campaign import Campaign
 
     now = utcnow_iso()
     campaign_id = mint_campaign_id(slug)
@@ -369,10 +368,6 @@ def finalize_checkin_to_active(
 ) -> None:
     """Flip a ``checkin`` campaign to ``active`` against its EXISTING ids — the cycle id stays the provisional
     ``cycle_chk_*``, since drift reads ``root_content_hash`` and not the parsed id. This mints nothing new."""
-    from promptpotter.application.campaign_config import freeze_campaign_config
-    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-        combined_optimizer_prompt_hash,
-    )
 
     target_hash = cycle_plan.cycle_id.removeprefix("cycle_")
     plan_origin_fields = cycle_plan.origin.prompt_field_dict()
@@ -428,9 +423,6 @@ def finalize_checkin_to_active(
     cycle_dir = session.store.campaigns.cycle_dir(hop)
     CycleLayout(cycle_dir).checkin_flag.unlink(missing_ok=True)
 
-    from promptpotter.application.run_observers import build_campaign_emitter
-    from promptpotter.shared.errors import graceful
-
     with graceful("Pre-seeding dashboard.json failed"):
         build_campaign_emitter(session, campaign_config, origin_accuracy=0.0)
 
@@ -443,8 +435,6 @@ def finalize_checkin_to_active(
 
 
 def open_cycle_ledger(session: Session, cycle_id: str) -> CycleEventLog | None:
-    from promptpotter.domain.cycle_paths import CycleDir
-    from promptpotter.infrastructure.ledger import CycleEventLog
 
     if session.store is None:
         return None

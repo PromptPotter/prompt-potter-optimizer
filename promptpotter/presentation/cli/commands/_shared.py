@@ -10,12 +10,33 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter import connectors
+from promptpotter.application.initialization.wiring import init_services
+from promptpotter.application.jobs.capacity import resolve_run_capacity
+from promptpotter.application.jobs.launcher.admission import (
+    admit_and_hold,
+    job_status_for,
+    refuse_as_busy,
+    release_slot,
+    request_launch,
+)
+from promptpotter.application.jobs.registry import JobRegistry, default_jobs_dir
+from promptpotter.application.optimization.resume_and_fork.decisions import (
+    RESUME_CHECKPOINT_GATING,
+    GatingMode,
+)
+from promptpotter.application.run_observers import build_run_observers
+from promptpotter.application.runner.entry import run_optimization
+from promptpotter.config.logging import setup_logging
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
 )
 from promptpotter.connectors.protocol import BackendUnreachableError
+from promptpotter.infrastructure.identity.migration import registered_or_default_identity
+from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir
+from promptpotter.presentation.views.display import set_display_tags
+from promptpotter.presentation.views.live.display import LiveDisplay
 from promptpotter.shared.identity import IdentityContext
 
 if TYPE_CHECKING:
@@ -102,8 +123,6 @@ async def init_services_cli(
 ) -> Session:
     """*identity* is REQUIRED: a :func:`default_identity` fallback here disagrees with the CLI's own
     rule, and writes a terminal run into the anonymous workspace instead of the operator's."""
-    from promptpotter.application.initialization.wiring import init_services
-    from promptpotter.config.logging import setup_logging
 
     setup_logging(style="full" if _VERBOSE else "cli")
     return await init_services(
@@ -118,7 +137,6 @@ async def init_services_cli(
 def identity_from_args(args: argparse.Namespace) -> IdentityContext:
     """Build the Stage-0 :class:`IdentityContext` from CLI flags — ``--tenant``, else the registered
     operator, else anonymous. This is the seam where a flag becomes a :class:`TenantId`."""
-    from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 
     return registered_or_default_identity(getattr(args, "tenant", None))
 
@@ -168,9 +186,6 @@ def build_observers(
     train_data: list[Sample],
     origin_acc: float,
 ) -> RunObservers:
-    from promptpotter.application.run_observers import build_run_observers
-    from promptpotter.presentation.views.display import set_display_tags
-    from promptpotter.presentation.views.live.display import LiveDisplay
 
     set_display_tags(session.pipeline_schema)
     return build_run_observers(
@@ -196,14 +211,6 @@ async def _hold_machine_slot(
     happens inside it. Being in the shared QUEUE is what makes the wait fair: a terminal that
     merely retried in a loop would take the next free slot ahead of a browser launch that has
     waited longer. ``--no-wait`` leaves the line and refuses instead, naming the holder."""
-    from promptpotter.application.jobs.capacity import resolve_run_capacity
-    from promptpotter.application.jobs.launcher.admission import (
-        admit_and_hold,
-        refuse_as_busy,
-        request_launch,
-    )
-    from promptpotter.application.jobs.registry import JobRegistry, default_jobs_dir
-    from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 
     # No `on_reap`: this process ATTACHES to the machine-global jobs dir, it does not own it, so it
     # counts and releases slots but stamps nobody's cycle. Releasing needs no ownership — a job's
@@ -264,8 +271,6 @@ async def drive_cycle(
     this is where one begins and ends. Later than the web path admits (which gates before its
     mint), and deliberately so: the front of a CLI verb can sit for minutes on an interactive
     check-in, and a slot held across operator typing is a slot nobody else can have."""
-    from promptpotter.application.jobs.launcher.admission import job_status_for, release_slot
-    from promptpotter.application.runner.entry import run_optimization
 
     registry, job, ceilings = await _hold_machine_slot(args, ctx, session)
     registry.mark_started(job.job_id)
@@ -315,10 +320,6 @@ def cycle_result_command(
 def _build_divergence_hint() -> str:
     """Derive the divergence-checked kinds from ``RESUME_CHECKPOINT_GATING``. Walking the enum means
     adding a kind updates the operator message automatically."""
-    from promptpotter.application.optimization.resume_and_fork.decisions import (
-        RESUME_CHECKPOINT_GATING,
-        GatingMode,
-    )
 
     replayed = sorted(
         k.value for k, m in RESUME_CHECKPOINT_GATING.items() if m is GatingMode.REPLAYED

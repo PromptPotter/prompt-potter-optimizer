@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.pipeline_schema import CANDIDATE_LIBRARY_FILE
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import has_framing
 from promptpotter.infrastructure.store.io import (
     read_json_optional,
@@ -110,7 +111,6 @@ class TenantDatasetStore:
     def save_benchmark_rows(self, name: str, items: Sequence[Sample | dict[str, Any]]) -> Path:
         """Persist a fetched benchmark's rows. The one writer of materialized rows
         outside a committed dataset's own dir."""
-        from promptpotter.domain.sample import Sample
 
         serialized = [item.model_dump() if isinstance(item, Sample) else item for item in items]
         path = self.benchmark_rows_path(name)
@@ -198,7 +198,6 @@ class TenantDatasetStore:
     ) -> Path:
         """Create ``datasets/{slug}/`` fresh and write the Origin files — the one commit mechanism
         for both entry points. The candidate library rides :meth:`write_candidate_library`."""
-        from promptpotter.domain.sample import Sample
 
         dst = self.dataset_dir(slug)
         if dst.exists():

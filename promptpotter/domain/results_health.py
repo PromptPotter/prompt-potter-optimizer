@@ -12,6 +12,7 @@ from promptpotter.domain.results import (
     WarningDict,
 )
 from promptpotter.domain.scoring import is_verifier_graded, modal_answer_share
+from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
 
 STRUCTURAL_FLAG_RATE: float = 0.30
 DEGRADED_RATE_FLAG: float = 0.20
@@ -368,7 +369,6 @@ def compute_round_health(
 ) -> DegradationHealth | None:
     """The SINGLE computation site: every surface reads ``RoundResult.health`` and none
     recomputes it."""
-    from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
 
     structural = transient = unreachable = no_result = holes = 0
     structural_nodes: dict[str, int] = {}

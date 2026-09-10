@@ -11,14 +11,21 @@ from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     load_dataset_campaign_config,
 )
-from promptpotter.application.datasets.loaders import resolve_dataset_items
+from promptpotter.application.datasets.loaders import resolve_dataset_items, sample_dataset
+from promptpotter.application.datasets.prompts import has_dataset_prompts, load_node_prompt
 from promptpotter.application.initialization.loop_start import populate_session_scoring
 from promptpotter.application.initialization.session import Session
+from promptpotter.application.optimization.l1.population import INVALID_SCORES, build_score_report
+from promptpotter.application.optimization.l1.score.signal_effect import is_transient_scoring_abort
+from promptpotter.application.optimization.task_context import committed_task_context
 from promptpotter.application.pipeline_resolve import resolve_pipeline_config_params
 from promptpotter.application.runner.campaign_ids import build_origin_cycle_id
+from promptpotter.application.scoring.formula import split_scoring_block
+from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.config.settings import DATASET_NAME
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint
+from promptpotter.domain.phases import CampaignPhase, emit_phase
 from promptpotter.domain.pipeline_overlay import overlay_is_locked_axis_only
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.results import RoundParent, ScoredCandidate, candidate_label
@@ -28,7 +35,7 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
 from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import StoredConfigInvalidError
+from promptpotter.shared.errors import StoredConfigInvalidError, graceful
 from promptpotter.shared.instrument import (
     NO_ROUND_SLOT,
     MeasuredCandidate,
@@ -63,8 +70,6 @@ async def rescore_parent(
 ) -> RoundParent:
     """Score the round's parent on THIS round's ``scoring_set``, so election compares on the SAME
     samples. Without it ``matched_parent_stats`` intersects disjoint sets and returns a fake floor."""
-    from promptpotter.application.optimization.l1.population import build_score_report
-    from promptpotter.application.scoring.search_point_scorer import score_search_point
 
     session = cycle.session
     tr = cycle.tracking
@@ -227,23 +232,20 @@ def resolve_origin_opt_search_point(
                 source=seed.origin_source,
             ),
         )
-    elif dataset_dir is not None and names:
-        from promptpotter.application.datasets.prompts import has_dataset_prompts, load_node_prompt
-
-        if has_dataset_prompts(dataset_dir):
-            for node_name in names:
-                try:
-                    template = load_node_prompt(dataset_dir, node_name, "default")
-                except FileNotFoundError:
-                    continue
-                origin = OptSearchPoint.from_prompt_fields(
-                    template.prompt_field_dict(),
-                    lineage=IndividualLineage(
-                        changes_description=(f"Origin from {dataset_dir}/prompts/ ({node_name})"),
-                        source="origin",
-                    ),
-                )
-                break
+    elif dataset_dir is not None and names and has_dataset_prompts(dataset_dir):
+        for node_name in names:
+            try:
+                template = load_node_prompt(dataset_dir, node_name, "default")
+            except FileNotFoundError:
+                continue
+            origin = OptSearchPoint.from_prompt_fields(
+                template.prompt_field_dict(),
+                lineage=IndividualLineage(
+                    changes_description=(f"Origin from {dataset_dir}/prompts/ ({node_name})"),
+                    source="origin",
+                ),
+            )
+            break
 
     if origin is None:
         origin = OptSearchPoint(
@@ -271,7 +273,6 @@ async def establish_campaign_origin(
 ) -> CampaignOrigin:
     """The single origin-establishment seam — the OSP is resolved exactly once and shared by both
     branches, which return the same :class:`CampaignOrigin` shape."""
-    from promptpotter.application.optimization.task_context import committed_task_context
 
     resolved_origin = resolve_origin_opt_search_point(
         prompt_node_names=session.pipeline_schema.prompt_node_names(),
@@ -312,11 +313,8 @@ async def prepare_scoring_context(
 ) -> tuple[CampaignOrigin, list[Sample]]:
     """*resolved_origin* lets the caller pass an already-resolved origin OSP (so it isn't
     resolved twice on the runner path); when ``None`` it's resolved here (the notebook path)."""
-    from promptpotter.application.datasets.loaders import sample_dataset
 
     if resolved_origin is None:
-        from promptpotter.application.optimization.task_context import committed_task_context
-
         prompt_nodes = pipeline_schema.prompt_node_names()
         # Resolving one HERE means reading the committed framing off the store, so this branch
         # requires the session — a requirement it previously stated only by ``getattr``-ing the
@@ -340,10 +338,6 @@ async def prepare_scoring_context(
     # recursion, and the skip that guess produced is indistinguishable downstream from a crash.
     # An unscoreable origin is caught LOUD by the round-0 origin gate, never hidden here; the
     # remaining guard is the no-session notebook/test path, which has nothing to score.
-    from promptpotter.application.optimization.l1.population import (
-        INVALID_SCORES,
-        build_score_report,
-    )
 
     if not (campaign_config is not None and svc is not None and dataset):
         # The resolved origin still travels — dropping it hands back a blank
@@ -367,11 +361,6 @@ async def prepare_scoring_context(
             ),
             dataset,
         )
-
-    from promptpotter.application.scoring.formula import split_scoring_block
-    from promptpotter.application.scoring.search_point_scorer import score_search_point
-    from promptpotter.domain.phases import CampaignPhase, emit_phase
-    from promptpotter.shared.errors import graceful
 
     session: Session = svc
     scoring_set = sample_dataset(dataset, campaign_config.origin_budget())
@@ -437,10 +426,6 @@ async def prepare_scoring_context(
             resolved_pipeline_params=sp.config_params,
             sample_order=[s.id for s in scoring_set],
         )
-
-    from promptpotter.application.optimization.l1.score.signal_effect import (
-        is_transient_scoring_abort,
-    )
 
     try:
         # The origin is the campaign's whole reference, so a transient-transport abort must not
@@ -512,7 +497,6 @@ def prospective_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) 
     # Function-local for the reason the two callers above are: `application/optimization/` imports
     # this module, so a module-level edge here would close the cycle. Pre-existing shape, not one
     # this move introduced.
-    from promptpotter.application.optimization.task_context import committed_task_context
 
     try:
         raw = read_yaml(dataset_pipeline_path(dataset_dir))

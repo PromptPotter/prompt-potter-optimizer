@@ -11,16 +11,23 @@ from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
+from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
+from promptpotter.application.optimization.pobb.classification import terminal_ranking
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
 from promptpotter.application.scoring.diagnostics import rank_ground_truth
+from promptpotter.application.scoring.evaluators import materialize_sample_values
+from promptpotter.application.scoring.formula import rescore_results
+from promptpotter.application.scoring.formula.compiler import ScoringFormulaError
 from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.l4.proxies import INNER_FACT_KEYS, PARENT_LEVEL_SE_KEY
 from promptpotter.domain.phases import RunPhase
+from promptpotter.domain.rendering import classify_result, terminal_node
+from promptpotter.domain.run_records import PhaseRecord
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import QueryMeasurement, is_hit, turn_scalars
+from promptpotter.domain.scoring import QueryMeasurement, extract_item_label, is_hit, turn_scalars
 from promptpotter.domain.spend import StepTokenUsage, TokenAccount
 from promptpotter.infrastructure.llm.rate_limit import is_quota_rate_limit
-from promptpotter.infrastructure.llm.telemetry import emit_token_usage
+from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, emit_token_usage
 from promptpotter.shared.errors import ErrorCategory, has_pipeline_warnings
 
 if TYPE_CHECKING:
@@ -377,7 +384,6 @@ async def measure_sample(
             ledger = session.state.ledger
             if ledger is None:
                 return
-            from promptpotter.domain.run_records import PhaseRecord
 
             try:
                 ledger.append(
@@ -389,9 +395,6 @@ async def measure_sample(
                 )
             except Exception:
                 logger.exception("backend warning ledger emit failed; continuing")
-
-        from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
-        from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND
 
         ledger = session.state.ledger
         heartbeat_task: asyncio.Task[None] | None = None
@@ -428,10 +431,6 @@ async def measure_sample(
         # The head of the TERMINAL ranker's output, read through the schema rather than a
         # hardcoded key: candidate_ranking when token_matching is terminal, final_ranking when
         # an llm_ranking/llm_only node is.
-        from promptpotter.application.optimization.pobb.classification import (
-            terminal_ranking,
-        )
-        from promptpotter.domain.scoring import extract_item_label
 
         ranked = terminal_ranking({"pipeline_data": data}, pipeline_schema)
         # Where the backend DECLARED an answer key, that is the answer — the ranking is not
@@ -496,7 +495,6 @@ async def measure_sample(
             "ground_truth_rank": gt_rank,
             "pipeline_data": pd,
         }
-        from promptpotter.application.scoring.evaluators import materialize_sample_values
 
         # TOP-LEVEL into `pipeline_data`, exactly where a backend's own observation lands — that
         # is what makes a per-sample evaluator addressable from a scoring formula. Nested under an
@@ -516,8 +514,6 @@ async def measure_sample(
                 extra=session.scoring.judges,
             )
         )
-        from promptpotter.application.scoring.formula import rescore_results
-        from promptpotter.application.scoring.formula.compiler import ScoringFormulaError
 
         assert session.scoring.scorer is not None, "session.scoring.scorer required for measurement"
         try:
@@ -585,7 +581,6 @@ def _rerun_would_repeat_token_budget_failure(
 ) -> bool:
     """Skip the rerun when the cached failure was a binding token budget and the rerun's cap is no
     larger: the ladder exists for TRANSIENT failures, and a config-fundamental one will not recover."""
-    from promptpotter.domain.rendering import classify_result, terminal_node
 
     # Through the same helper ``classify_result`` stamps its codes with, never re-derived: these
     # membership tests are string matches on ``f"{node}:…"``, so a second spelling of the node

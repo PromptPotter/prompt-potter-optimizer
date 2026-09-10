@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from promptpotter.config.settings import settings
 from promptpotter.domain.pipeline_schema import CANDIDATE_LIBRARY_FILE
 from promptpotter.domain.sample import Sample
 from promptpotter.shared.errors import PayloadInvalidError
@@ -215,7 +216,6 @@ def _stringify_cell(value: Any) -> str:
 def _read_xlsx(blob: bytes) -> Table:
     """Gated by ``settings.HARDENED_MODE`` — Excel is a macro / zip-bomb / XXE vector, so a
     hardened deployment refuses rather than parses it."""
-    from promptpotter.config.settings import settings
 
     if settings.HARDENED_MODE:
         raise IngestError(

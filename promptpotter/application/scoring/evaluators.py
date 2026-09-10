@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
+from promptpotter.application.optimization.pobb.classification import is_deprecated, scoreable_rows
 from promptpotter.application.scoring.formula.compiler import CELL_INTRINSIC_NAMES
 from promptpotter.domain.pipeline_schema import NodeType
 from promptpotter.domain.scoring import (
@@ -60,10 +61,6 @@ def compute_accuracy(*, results: list[QueryMeasurement], **_: Any) -> float | No
     inner loop maximally DOWN". The composite keeps its 0.0 floor either way — that one is the
     elected quantity and ``total == 0`` is the marker beside it — but the reported RATE may not."""
     # Lazy: scoring → optimization circular.
-    from promptpotter.application.optimization.pobb.classification import (
-        is_deprecated,
-        scoreable_rows,
-    )
 
     if not results:
         return None

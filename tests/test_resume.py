@@ -37,7 +37,8 @@ _CAMPAIGN = "testds__20260101-000000"
 
 
 def _r(score: float) -> dict:
-    # ``objective`` is what θ is fit on; equal to ``fitness`` under no ``per_cell`` composite.
+    # ``objective`` is what θ is fit on. Pinned equal here deliberately — `factories.measurement`
+    # diverges the two, and these rows are about the rescore, not about the composite.
     return {
         "query": "q",
         "predicted": "p",
@@ -440,7 +441,7 @@ def test_lives_resume_fold_matches_live_observe() -> None:
             improved=improved,
             compared=electable > 0,
             separable=None,
-            current_accuracy=0.5,
+            current_objective=0.5,
             l1_patience=99,
             lives=cfg,
         )
@@ -486,7 +487,7 @@ def test_lives_resume_fold_matches_live_observe() -> None:
         improved=False,
         compared=True,
         separable=None,
-        current_accuracy=0.5,
+        current_objective=0.5,
         l1_patience=99,
         lives=cfg,
     )
@@ -494,7 +495,7 @@ def test_lives_resume_fold_matches_live_observe() -> None:
         improved=False,
         compared=True,
         separable=None,
-        current_accuracy=0.5,
+        current_objective=0.5,
         l1_patience=99,
         lives=cfg,
     )
@@ -523,7 +524,7 @@ def test_unresolved_round_stalls_and_replays_as_one() -> None:
             improved=improved,
             compared=True,
             separable=separable,
-            current_accuracy=0.5,
+            current_objective=0.5,
             l1_patience=99,
         )
     # Two unresolved rounds banked as stalls despite `improved` — at l1_patience 2 this is the

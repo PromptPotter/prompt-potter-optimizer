@@ -11,13 +11,21 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from promptpotter.application.optimization.dispatch.facade import build_bundle, node_packages
+from promptpotter.application.optimization.l1.critique import run_l1_critique
+from promptpotter.application.optimization.l1.population import build_score_report
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     ForkResult,
     _mint_fork,
 )
 from promptpotter.application.optimization.resume_and_fork.replayers import ReplayMismatch
+from promptpotter.application.optimization.round_analysis import compute_round_diagnostics
 from promptpotter.application.run_observers import RunCallbacks
+from promptpotter.application.scoring.diagnostics import count_degraded_samples
+from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.results import is_leader_eligible, unscoreable_cells
 from promptpotter.domain.run_records import (
     CandidateMintedRecord,
     ForkDirection,
@@ -27,9 +35,10 @@ from promptpotter.domain.run_records import (
     SnapshotRecord,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.telemetry import reset_current_round, set_current_round
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_candidates
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.shared.errors import graceful
+from promptpotter.shared.errors import graceful, is_error_result
 from promptpotter.shared.instrument import MeasuredCandidate, MeasurementRole
 
 if TYPE_CHECKING:
@@ -65,7 +74,6 @@ def _headline_disagrees(t: RoundResult) -> bool:
 def _first_divergent_candidate(t: RoundResult) -> str | None:
     """The earliest candidate in *t* the repair will move. Two ways a round stops re-deriving:
     a HOLE (about one candidate's rows) or a HEADLINE that no longer matches its winner."""
-    from promptpotter.domain.results import is_leader_eligible, unscoreable_cells
 
     for cs in t.candidate_scores:
         if is_leader_eligible(cs) and unscoreable_cells(
@@ -163,7 +171,6 @@ def _rebank_on_branch(
 def _resync_round_headline(t: RoundResult) -> bool:
     """Re-project the round's headline off the winner's OWN row. A projection, never a second
     election — miss it and the trajectory keeps quoting the holed panel."""
-    from promptpotter.application.scoring.diagnostics import count_degraded_samples
 
     if not _headline_disagrees(t):
         return False
@@ -202,12 +209,6 @@ async def repair_incomplete_rounds(
 ) -> list[int]:
     """Make an already-CLOSED round re-derive from its own rows again — IN MEMORY, **nothing here
     writes**: where the corrected rounds belong is unknowable until the caller has measured it."""
-    from promptpotter.application.optimization.l1.population import build_score_report
-    from promptpotter.application.optimization.round_analysis import compute_round_diagnostics
-    from promptpotter.application.scoring.search_point_scorer import score_search_point
-    from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.domain.results import is_leader_eligible, unscoreable_cells
-    from promptpotter.shared.errors import is_error_result
 
     by_id = {str(s.id): s for s in dataset}
     repaired: list[int] = []
@@ -331,7 +332,6 @@ async def repair_incomplete_rounds(
 def round_packages(cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
     """``{round: {node: package fingerprint}}``, each rebuilt at ITS OWN point in the run — a bundle
     carries the cumulative trajectory, so one full rebuild would move round 0's bundle too."""
-    from promptpotter.application.optimization.dispatch.facade import build_bundle, node_packages
 
     out: dict[int, dict[str, str]] = {}
     for k, rr in enumerate(rounds):
@@ -356,8 +356,6 @@ async def _rederive_critiques(
 ) -> None:
     """Re-distil the critique of each round whose package drifted, in place on disk. Measurements and
     winner untouched, so this is a repair, not a rewind; round 0's comes from the ORIGIN path."""
-    from promptpotter.application.optimization.l1.critique import run_l1_critique
-    from promptpotter.infrastructure.llm.telemetry import reset_current_round, set_current_round
 
     saved = cycle.rounds
     try:

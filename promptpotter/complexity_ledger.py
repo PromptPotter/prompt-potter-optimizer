@@ -4,6 +4,7 @@ Outside the layer tree because it counts every layer: inside one, an import woul
 
 from __future__ import annotations
 
+import ast
 import json
 import types
 import typing
@@ -205,6 +206,39 @@ def _count_lax_models(py_files: list[Path]) -> int:
     )
 
 
+# A function-local import of our OWN package. Sanctioned for one reason, which the import must
+# declare: it gates an optional extra, so hoisting it would make the core un-importable without
+# that extra (ADR-0006). Mark those `# extras: <name>` on the import line or the one above; the
+# rest are debt and count here. Why startup and cycles do not excuse one:
+# `docs/developer/conventions.md` § Code shape.
+_EXTRAS_MARKER = "# extras:"
+
+
+def _count_deferred_imports(py_files: list[Path]) -> int:
+    total = 0
+    for path in py_files:
+        try:
+            tree = ast.parse(src := path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        lines = src.splitlines()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            for inner in ast.walk(node):
+                if isinstance(inner, ast.ImportFrom):
+                    named = (inner.module or "").startswith("promptpotter")
+                elif isinstance(inner, ast.Import):
+                    named = any(a.name.startswith("promptpotter") for a in inner.names)
+                else:
+                    continue
+                if not named:
+                    continue
+                context = lines[max(0, inner.lineno - 2) : inner.end_lineno or inner.lineno]
+                total += not any(_EXTRAS_MARKER in line for line in context)
+    return total
+
+
 def _is_reexport_shim(init_file: Path) -> bool:
     """A TEXT test — it cannot see a body that also holds real code, or imports whose
     side effect IS the registry, so what it flags is named in the baseline, not emptied."""
@@ -245,6 +279,7 @@ def compute_ledger() -> dict[str, int]:
         "prompt_string_fields": len(PROMPT_STRING_FIELDS),
         "injections": len(INJECTIONS),
         "escalation_rules": len(DEFAULT_ESCALATION_RULES),
+        "deferred_imports": _count_deferred_imports(py_files),
         "claude_md": len(_package_files("CLAUDE.md")),
         "test_files": len(test_files := _test_files()),
         "test_functions": _count_test_functions(test_files),

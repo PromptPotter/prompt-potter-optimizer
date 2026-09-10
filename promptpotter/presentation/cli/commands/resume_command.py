@@ -8,11 +8,24 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.datasets.dataset_replace import recover_pending_replacements
 from promptpotter.application.jobs.launcher.admission import probe_backend
 from promptpotter.application.jobs.mint import resolve_cycle_plan
+from promptpotter.application.knobs import DiffScope, classify_config_diff
+from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
+    _mint_fork,
+    mint_operator_fork,
+    permitted_models,
+    steer_is_babysit,
+)
+from promptpotter.application.runner.entry import RunMode
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.connectors.protocol import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ForkSpec, ForkTrigger
+from promptpotter.infrastructure.runtime_flags import is_checkin
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
+from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
     _DIVERGENCE_HINT,
     CommandResult,
@@ -26,7 +39,10 @@ from promptpotter.presentation.cli.commands._shared import (
     init_services_cli,
     log_startup_summary,
 )
+from promptpotter.presentation.cli.commands.new import cmd_new
 from promptpotter.presentation.cli.session import load_session
+from promptpotter.shared.errors import ResumeDivergenceError
+from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, has_capability
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -58,7 +74,6 @@ def _prepare_cycle_for_resume(
 ) -> dict[Any, Any]:
     """Apply pipeline + verify the config still matches. OPTIMIZER drift is NOT asked here — it is asked
     per round from the application seam every entry point reaches, since a webapp resume bypasses this."""
-    from promptpotter.application.knobs import DiffScope, classify_config_diff
 
     resume_from_round: int | None = getattr(args, "resume_from_round", None)
     plan = resolve_cycle_plan(
@@ -160,8 +175,6 @@ def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx: SessionCtx, session:
     existing_index = session.store.campaigns.load(ctx.hop) or {}
     if (existing_index.get("final") or {}).get("mode") != "diag":
         return
-    from promptpotter.application.optimization.resume_and_fork.fork_siblings import _mint_fork
-    from promptpotter.domain.run_records import ForkSpec, ForkTrigger
 
     tenant_id = session.identity.tenant_id
     new_cycle_id = _mint_fork(
@@ -196,9 +209,6 @@ def _maybe_fork_operator_rewind(
         raise SystemExit(f"ERROR: --rewind must be >= 0, got {rewind_to}")
     if rewind_to == 0:
         raise SystemExit("ERROR: --rewind 0 mints a fork at the cycle root. Use `--diag` instead.")
-
-    from promptpotter.application.optimization.resume_and_fork.fork_siblings import _mint_fork
-    from promptpotter.domain.run_records import ForkSpec, ForkTrigger
 
     reason = (getattr(args, "rewind_reason", "") or "").strip() or (
         f"operator rewind to round {rewind_to}"
@@ -289,14 +299,6 @@ def _maybe_fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx, sessio
             "Run `python -m promptpotter new <dataset>` first."
         )
 
-    from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
-        mint_operator_fork,
-        permitted_models,
-        steer_is_babysit,
-    )
-    from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
-    from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, has_capability
-
     overlay = _steer_overlay(specs, session.pipeline_schema)
 
     # The SAME question the web fork-cycle applier asks, of the same list — the origin's frozen
@@ -364,7 +366,6 @@ async def _drive_optimization(
     fork_on_divergence: bool,
 ) -> CycleResult:
     """One pass through the loop. Caller handles divergence menu + re-invoke."""
-    from promptpotter.application.runner.entry import RunMode
 
     cycle_result, _ = await drive_cycle(
         args,
@@ -390,7 +391,6 @@ async def _run_loop(
     session: Session,
     train_data: list[Sample],
 ) -> CommandResult:
-    from promptpotter.shared.errors import ResumeDivergenceError
 
     fork_on_divergence = bool(getattr(args, "fork_on_divergence", False))
     try:
@@ -465,10 +465,6 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
     # rounds) isn't resumable: there's nothing to run until it's Started. Guard
     # cheaply before init_services so the operator gets a clear next step instead of
     # a confusing dataset-not-found deep in the loop.
-    from promptpotter.application.datasets.dataset_replace import recover_pending_replacements
-    from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
-    from promptpotter.infrastructure.runtime_flags import is_checkin
-    from promptpotter.infrastructure.store.stores import build_stores
 
     _stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
     # The same guard both web launchers open with: a crashed version-and-repoint leaves the
@@ -504,7 +500,6 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
         )
     except _PivotToFreshError as pivot:
         # Operator pivoted: synthesize a ``new`` namespace from the active session's dataset + halt/spend knobs.
-        from promptpotter.presentation.cli.commands.new import cmd_new
 
         new_args = argparse.Namespace(
             command="new",

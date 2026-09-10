@@ -7,6 +7,7 @@ import argparse
 import logging
 
 from promptpotter.application.seed_screen import SeedScreenError, screen_inner_seeds
+from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
@@ -21,7 +22,6 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 async def cmd_seed_screen(args: argparse.Namespace) -> CommandResult:
     """Score each candidate seed's bank with the dataset origin and the strongest banked
     configuration, and report what separates them."""
-    from promptpotter.config.logging import setup_logging
 
     setup_logging(style="full" if get_verbose() else "cli")
     identity = identity_from_args(args)

@@ -10,11 +10,11 @@ from __future__ import annotations
 import argparse
 
 from promptpotter.application.probe_reasoning import probe_reasoning, profile_suggestion
+from promptpotter.config.logging import setup_logging
 from promptpotter.presentation.cli.commands._shared import CommandResult, get_verbose
 
 
 async def cmd_probe_reasoning(args: argparse.Namespace) -> CommandResult:
-    from promptpotter.config.logging import setup_logging
 
     setup_logging(style="full" if get_verbose() else "cli")
 

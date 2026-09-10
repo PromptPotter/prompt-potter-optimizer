@@ -4,9 +4,26 @@ import argparse
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.campaign_config import apply_inherited_overlay
+from promptpotter.application.campaign_config import (
+    load_campaign_config as validate_campaign_config,
+)
+from promptpotter.application.datasets.authored import (
+    dataset_campaign_path,
+    read_campaign_config_file,
+)
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.infrastructure.store.dataset_access import (
+    DatasetAccessError,
+    readable_dataset_dir,
+)
+from promptpotter.infrastructure.store.session_pointer import (
+    active_pointer_exists,
+    read_active_pointer,
+)
 from promptpotter.infrastructure.store.stores import Stores, build_stores
+from promptpotter.presentation.cli.commands._shared import identity_from_args
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -41,18 +58,6 @@ class SessionCtx:
     def campaign_config(self) -> CampaignConfig:
         """The dataset's LIVE ``campaign.json`` with the frozen snapshot's overlay re-applied — that overlay exists only on
         the snapshot. Resolution is tenant-FIRST: repo-root-only made every ingested dataset resume off the snapshot."""
-        from promptpotter.application.campaign_config import apply_inherited_overlay
-        from promptpotter.application.campaign_config import (
-            load_campaign_config as validate_campaign_config,
-        )
-        from promptpotter.application.datasets.authored import (
-            dataset_campaign_path,
-            read_campaign_config_file,
-        )
-        from promptpotter.infrastructure.store.dataset_access import (
-            DatasetAccessError,
-            readable_dataset_dir,
-        )
 
         dataset_name = self.init_params.get("dataset_name") or ""
         raw: dict[str, Any] = {}
@@ -86,11 +91,6 @@ def no_dataset_hint() -> str:
 
 
 def load_session(args: argparse.Namespace) -> SessionCtx:
-    from promptpotter.infrastructure.store.session_pointer import (
-        active_pointer_exists,
-        read_active_pointer,
-    )
-    from promptpotter.presentation.cli.commands._shared import identity_from_args
 
     # THE resolver, not a copy of it — a comment asserting "same resolver as
     # `identity_from_args`" sat here instead, and a copy that must match is a copy that

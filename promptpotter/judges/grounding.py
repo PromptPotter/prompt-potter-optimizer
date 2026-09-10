@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.judges.call import absent, graded, judge_answer, judge_question
 from promptpotter.judges.protocol import Judge, JudgeSpec, JudgeVerdict
 
 if TYPE_CHECKING:
@@ -84,7 +85,6 @@ def _build_grade_fn(
     reads_answer: bool,
 ) -> object:
     async def grade(spec: JudgeSpec, result: QueryMeasurement) -> JudgeVerdict:
-        from promptpotter.judges.call import absent, graded, judge_answer, judge_question
 
         trace = _trace(result)
         if not trace:

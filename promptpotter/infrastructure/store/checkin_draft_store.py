@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.store.io import (
     read_json_optional,
     write_json,
@@ -48,7 +49,6 @@ class CheckinDraftStore:
     ) -> Path:
         """Persist the parsed sample bank. On ingest ``items`` are RAW header-keyed rows (the mapping isn't confirmed yet); a prior
         ``resolution`` block survives a rewrite. Start rewrites this with materialized rows and leaves it as the breadcrumb."""
-        from promptpotter.domain.sample import Sample
 
         path = self._checkin_dir(campaign_id) / "cache.json"
         prior = read_json_optional(path) or {}

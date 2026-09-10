@@ -207,7 +207,7 @@ class EscalationFSM:
         improved: bool,
         compared: bool,
         separable: bool | None,
-        current_accuracy: float | None,
+        current_objective: float | None,
         l1_patience: int,
         lives: LivesConfig | None = None,
         axes_with_positive_yield: int | None = None,
@@ -227,9 +227,12 @@ class EscalationFSM:
         self._bank_round(improved, lives, compared=compared, separable=separable)
 
         inputs = EscalationInputs(
-            current_accuracy=current_accuracy,
+            current_objective=current_objective,
             l1_stall_count=self._l1_stall_count,
             l1_patience=l1_patience,
+            # Already banked above; the objective-ceiling stop reads it too, because a headline is
+            # not a result until you know whether the round it came from resolved anything.
+            separable=separable,
             axes_with_positive_yield=axes_with_positive_yield,
             l1_mandatory_breach=l1_mandatory_breach,
             l1_zero_candidates=l1_zero_candidates,

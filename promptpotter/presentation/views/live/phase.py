@@ -6,6 +6,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.optimization.pobb.classification import (
+    get_ranked_items,
+    ranked_item_keys_from_schema,
+)
+from promptpotter.application.scoring.diagnostics import find_rank
 from promptpotter.connectors.protocol import MeasuredUnit, unit_count
 from promptpotter.domain.rendering import display_fitness, display_rank_key, fmt_pct
 from promptpotter.domain.results import is_round_winner, overlap_series
@@ -173,12 +178,6 @@ def render_round_stats(
         return "\n".join(lines)
 
     try:
-        from promptpotter.application.optimization.pobb.classification import (
-            get_ranked_items,
-            ranked_item_keys_from_schema,
-        )
-        from promptpotter.application.scoring.diagnostics import find_rank
-
         ranked_item_keys = ranked_item_keys_from_schema(pipeline_schema)
         results = round_result.results
         n_results = len(results)

@@ -14,10 +14,14 @@ from pydantic import Field
 
 from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
+    dataset_cell_scorer,
     load_dataset_campaign_config,
 )
 from promptpotter.application.datasets.loaders import samples_from_dicts
 from promptpotter.application.intelligence.adaptive_queue_mechanism import marginal_hit_probability
+from promptpotter.application.intelligence.hard_sample_archive import (
+    build_archive_hard_samples_artifact,
+)
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import HardSampleOrder
 from promptpotter.domain.scoring import is_hit
@@ -114,9 +118,6 @@ def _resolve_scope_artifact(
     """Resolve the hard-samples artifact for *scope*. Missing `hard_samples.json` returns `{}`
     (heatmap renders empty); missing campaign/cycle DIR is a real 404.
     """
-    from promptpotter.application.intelligence.hard_sample_archive import (
-        build_archive_hard_samples_artifact,
-    )
 
     if scope == "cycle":
         if not campaign_id or not cycle_id:
@@ -140,8 +141,6 @@ def _resolve_scope_artifact(
         return campaign_artifact
     # `dataset` — always per-dataset (cross-dataset pooling is meaningless), so the grade is the
     # one that dataset declares; there is no campaign in scope to ask.
-    from promptpotter.application.datasets.authored import dataset_cell_scorer
-    from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
 
     scorer, scorer_id = dataset_cell_scorer(readable_dataset_dir(stores, name))
     return build_archive_hard_samples_artifact(
