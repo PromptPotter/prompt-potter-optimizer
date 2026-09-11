@@ -251,13 +251,9 @@ def _scoreboard(
 # reference (``from .primitives import DISPLAY_TAGS``).
 DISPLAY_TAGS: dict[str, str] = {}
 
-# Keyed on the closed vocabulary, so a kind added there is a name this map can be asked about
-# rather than one that silently takes the initials fallback below. Partial on purpose, and the
-# test is whether a SHARED tag beats the node's own name: the optimizer's kinds (`l1_g`, `l1_c`)
-# and the in-process `llm` the teleprompter writes read better as themselves, and a graph with
-# two of one kind gets `ai_1`/`ai_2` — a family tag buying a number is worse than the name.
+# `ai` marks a node that OWNS a model (`is_llm`, as `llm_only` does); an optimizer node, which
+# owns none, reads better as `l1_g`/`l1_c` than as `ai_1`/`ai_2`.
 _WIRE_TYPE_TAGS: dict[NodeKind, str] = {
-    NodeKind.GENERATION: "ai",
     NodeKind.RETRIEVER: "retr",
     NodeKind.TOOL: "tool",
     NodeKind.CACHE: "cach",
@@ -270,7 +266,12 @@ def _build_display_tags(schema: PipelineSchema) -> dict[str, str]:
     base_tags: list[tuple[str, str]] = [
         # An UNDECLARED node has no kind to read a tag off, so it falls to its own initials —
         # the same place a declared kind this map does not carry lands.
-        (n.name, (_WIRE_TYPE_TAGS.get(n.wire_type) if n.wire_type else None) or n.name[:4])
+        (
+            n.name,
+            "ai"
+            if n.is_llm
+            else (_WIRE_TYPE_TAGS.get(n.wire_type) if n.wire_type else None) or n.name[:4],
+        )
         for n in schema.nodes
     ]
     tag_counts = Counter(tag for _, tag in base_tags)

@@ -31,7 +31,7 @@ thing to compute on it is the chance floor — before a single round is paid for
 
 ## Type
 
-Single `llm_only` generation node, no retrieval. Reads the liked titles and the slate, returns the
+Single `llm_only` node, no retrieval. Reads the liked titles and the slate, returns the
 slate reordered, against a running TermNorm backend.
 
 ## Data — provenance & cut

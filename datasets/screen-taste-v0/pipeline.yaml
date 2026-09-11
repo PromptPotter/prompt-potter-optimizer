@@ -2,7 +2,7 @@ name: Screen Taste (v0)
 version: v0.0
 description: >-
   Ten films or series someone likes go in beside a slate of ten candidates; the slate comes back
-  ordered. Single llm_only generation node against TermNorm /matches, scored by where the one
+  ordered. Single llm_only node against TermNorm /matches, scored by where the one
   held-out favourite hidden in the slate lands.
 backend_name: TermNorm
 backend_type: termnorm
@@ -10,7 +10,7 @@ available_models:
   - openai/gpt-oss-20b:nitro
 nodes:
   llm_only:
-    type: generation
+    type: llm
     runtime: backend
     node_role: ranker
     description: >-

@@ -8,7 +8,7 @@ available_models:
   - openai/gpt-oss-120b
 nodes:
   llm_only:
-    type: generation
+    type: llm
     runtime: backend
     node_role: ranker
     description: >-

@@ -23,7 +23,7 @@ available_models:
   - openai/gpt-oss-120b:nitro
 nodes:
   l1_generate:
-    type: llm/optimizer
+    type: llm
     # The MENUS behind this node's scalar params, so the operator picks a value instead of
     # typing one. `param_allowed_values` alone does NOT open a search axis — `node_config_schema`
     # reads L1's reach off `param_keys`, which stays empty here on purpose: L1 never searches
@@ -86,7 +86,7 @@ nodes:
     type: measurement
     config: {}
   l1_critique:
-    type: agent
+    type: llm
     optimizer: *node_menus
     config:
       temperature: 0.3
@@ -109,7 +109,7 @@ nodes:
       model: deepseek/deepseek-v4-flash:nitro
     description: *nitro_probe
   l2_context:
-    type: llm/optimizer
+    type: llm
     optimizer: *node_menus
     config:
       temperature: 0.3
@@ -122,7 +122,7 @@ nodes:
       model: deepseek/deepseek-v4-flash:nitro
     description: *nitro_probe
   l3_plan:
-    type: llm/optimizer
+    type: llm
     optimizer: *node_menus
     config:
       temperature: 0.5
@@ -135,7 +135,7 @@ nodes:
       model: deepseek/deepseek-v4-flash:nitro
     description: *nitro_probe
   checkin:
-    type: llm/optimizer
+    type: llm
     optimizer: *node_menus
     config:
       temperature: 0.3

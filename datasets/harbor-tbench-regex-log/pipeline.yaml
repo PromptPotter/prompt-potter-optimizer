@@ -17,7 +17,7 @@ available_models:
   - openai/gpt-oss-120b
 nodes:
   agent:
-    type: generation
+    type: agent
     runtime: backend
     description: >-
       One Harbor trial. The rendered prompt becomes `SKILL.md` in the container; `terminus-2`

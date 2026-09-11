@@ -171,6 +171,7 @@ def test_sp_hash_is_not_recoverable_from_the_stripped_config() -> None:
                 node_type="",
                 param_keys=[],
                 prompt_info=NodePromptInfo(),
+                tunes_llm=False,
             )
         ],
     )
@@ -327,9 +328,7 @@ def test_judge_identity_moves_the_searchpoint_hash() -> None:
 
     schema = parse_pipeline_response(
         {
-            "nodes": {
-                "llm_only": {"type": "generation", "config": {"model": "m", "provider": "p"}}
-            },
+            "nodes": {"llm_only": {"type": "llm", "config": {"model": "m", "provider": "p"}}},
             "pipelines": {"default": ["llm_only"]},
         }
     )
@@ -509,7 +508,7 @@ def test_the_provenance_sink_cannot_move_the_merge_it_observes(tmp_path: Path) -
     from promptpotter.application.pipeline_resolve import resolve_pipeline_config_params
 
     schema = parse_pipeline_response(
-        {"nodes": {"llm_only": {"type": "generation"}}, "pipelines": {"default": ["llm_only"]}}
+        {"nodes": {"llm_only": {"type": "llm"}}, "pipelines": {"default": ["llm_only"]}}
     )
     write_yaml(
         tmp_path / "pipeline.yaml",
@@ -1172,7 +1171,7 @@ def test_a_description_lock_holds_its_subtree_and_the_fold_reaches_nested_fields
         config = {"model": "m", "output_schema": {"type": "object", "properties": out}}
         return parse_pipeline_response(
             {
-                "nodes": {"llm_only": {"type": "generation", "config": config, "optimizer": {}}},
+                "nodes": {"llm_only": {"type": "llm", "config": config, "optimizer": {}}},
                 "pipelines": {"default": ["llm_only"]},
             }
         )
@@ -1274,7 +1273,7 @@ def test_a_schema_copy_answers_for_itself_not_for_the_schema_it_was_copied_from(
 
     schema = parse_pipeline_response(
         {
-            "nodes": {"a": {"type": "generation"}, "b": {"type": "generation"}},
+            "nodes": {"a": {"type": "llm"}, "b": {"type": "llm"}},
             "pipelines": {"default": ["a", "b"]},
         }
     )
@@ -1401,7 +1400,7 @@ def test_the_drafts_CHAIN_reaches_the_mint_on_a_reused_dataset(tmp_path: Path) -
     )
     schema = parse_pipeline_response(
         {
-            "nodes": {n: {"type": "generation"} for n in ("llm_only", "web_search", "rerank")},
+            "nodes": {n: {"type": "llm"} for n in ("llm_only", "web_search", "rerank")},
             "pipelines": {"default": ["web_search", "rerank", "llm_only"]},
         }
     )
@@ -1532,7 +1531,7 @@ def test_an_axis_the_model_REFUSES_offers_only_the_value_it_runs() -> None:
             "steps": ["llm_only"],
             "nodes": {
                 "llm_only": {
-                    "type": "generation",
+                    "type": "llm",
                     "runtime": "backend",
                     "config": {
                         "model": "m",
@@ -1595,7 +1594,7 @@ def test_a_measured_point_is_served_the_SCHEMA_it_ran_under() -> None:
     assert served.fields == declared.fields
 
 
-def test_every_llm_node_is_offered_the_text_or_structured_toggle() -> None:
+def test_every_tuned_llm_node_is_offered_the_text_or_structured_toggle() -> None:
     """Whether the request carries a schema AT ALL is a lever, and it is ours: PromptPotter
     composes the wire config, so a connector declaring the axis would be a second declaration of
     one thing — which is how TermNorm's own `response_format` came to be searched while its
@@ -1603,7 +1602,8 @@ def test_every_llm_node_is_offered_the_text_or_structured_toggle() -> None:
 
     Two bounds ride the value space rather than a badge, because L1 is SHOWN the space, emits into
     it and is validated against it. A node with no schema has nothing to switch to; one value is
-    the pin. And the axis is only offered where an LLM answers — a cache lookup has no format.
+    the pin. And the axis is offered only on a thinking node its declaration opens to search — a
+    model call declaring no axis (the optimizer's own) and a cache lookup get none.
     """
     from promptpotter.domain.pipeline_schema import (
         ANSWER_AS_JSON,
@@ -1615,7 +1615,7 @@ def test_every_llm_node_is_offered_the_text_or_structured_toggle() -> None:
         {
             "nodes": {
                 "structured": {
-                    "type": "generation",
+                    "type": "llm",
                     "config": {
                         "model": "m",
                         "output_schema": {
@@ -1624,17 +1624,23 @@ def test_every_llm_node_is_offered_the_text_or_structured_toggle() -> None:
                         },
                         "answer_field": "answer",
                     },
-                    "optimizer": {"param_keys": []},
+                    "optimizer": {"param_keys": ["temperature"]},
                 },
-                "prose": {"type": "generation", "config": {"model": "m"}, "optimizer": {}},
+                "prose": {
+                    "type": "llm",
+                    "config": {"model": "m"},
+                    "optimizer": {"param_keys": ["temperature"]},
+                },
+                "pinned": {"type": "llm", "config": {"model": "m"}, "optimizer": {}},
                 "lookup": {"type": "cache", "config": {}, "optimizer": {}},
             },
-            "pipelines": {"default": ["structured", "prose", "lookup"]},
+            "pipelines": {"default": ["structured", "prose", "pinned", "lookup"]},
         }
     )
     opts = {n.name: schema.param_options(n, SCHEMA_TOGGLE_PARAM) for n in schema.config_nodes}
     assert opts["structured"] == [ANSWER_AS_TEXT, ANSWER_AS_JSON]
     assert opts["prose"] == [ANSWER_AS_TEXT]
+    assert opts["pinned"] is None
     assert opts["lookup"] is None
 
     # Open by default: an LLM node's toggle is an L1 axis without anyone opting in, and the two
@@ -1923,6 +1929,7 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
                 node_type="",
                 param_keys=fields,
                 param_types=dict.fromkeys(fields, "string"),
+                tunes_llm=False,
             )
             for name in NODE_LAYOUTS
         ],

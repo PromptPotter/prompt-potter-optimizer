@@ -155,23 +155,6 @@ def _stated_permitted(
     return permitted if permitted != options or set(permitted) != set(absent) else None
 
 
-def declares_llm_run(
-    *,
-    name: str,
-    mappings: Iterable["ObservationMapping"],
-    wire_type: "NodeKind | None",
-    langfuse_type: str,
-) -> bool:
-    """The BROAD "this node runs an LLM" test. Free-standing because the parser must ask it BEFORE
-    the model is built; :attr:`PipelineNode.runs_llm` is the same question with one in hand."""
-    return (
-        name == "llm_only"
-        or any(m.is_llm for m in mappings)
-        or wire_type is NodeKind.GENERATION
-        or langfuse_type == "generation"
-    )
-
-
 def stable_hash(value: Any) -> str:
     blob = json.dumps(value, sort_keys=True, default=str).encode()
     return hashlib.sha256(blob).hexdigest()[:16]
@@ -196,19 +179,12 @@ class NodeKind(enum.StrEnum):
     does not reason. ``node_config_schema`` derives a node's params from ``current_config``, so
     without a kind to ask, a config key was left deciding what the node was.
 
-    Closed rather than an open string because the open one had to be read by SHAPE
-    (``startswith("llm")``), which cannot tell a DECLARED type from a DERIVED view kind — and
-    ``presentation/teleprompter.py`` writes ``"llm"``, which is the latter. Five members below
-    still spell one concept — "runs a model" — and collapsing them is a dataset migration rather
-    than a rename, so until it happens each is NAMED here rather than matched by shape: a spelling
-    nobody listed is now refused at parse instead of silently reading as a tool.
+    Closed, so a spelling nobody listed is refused at parse. The thinking family splits on what the
+    model DOES — ``llm`` answers in one call, ``agent`` works in a tool loop — never on who runs it.
     """
 
     # Thinking — it runs a model.
     LLM = "llm"
-    GENERATION = "generation"
-    LLM_OPTIMIZER = "llm/optimizer"
-    OPTIMIZER_PROMPT = "optimizer_prompt"
     AGENT = "agent"
     # Retrieval and plumbing — it moves data.
     RETRIEVER = "retriever"
@@ -224,15 +200,7 @@ class NodeKind(enum.StrEnum):
 # A real choice WITHIN the type, so it is asserted rather than derived (`promptpotter/CLAUDE.md`
 # § Ask the typed predicate): the members are listed, and the assert is what catches a new kind
 # added above without deciding which family it joins.
-THINKING_KINDS: frozenset[NodeKind] = frozenset(
-    {
-        NodeKind.LLM,
-        NodeKind.GENERATION,
-        NodeKind.LLM_OPTIMIZER,
-        NodeKind.OPTIMIZER_PROMPT,
-        NodeKind.AGENT,
-    }
-)
+THINKING_KINDS: frozenset[NodeKind] = frozenset({NodeKind.LLM, NodeKind.AGENT})
 assert frozenset(NodeKind) >= THINKING_KINDS
 
 
@@ -366,9 +334,9 @@ class PipelineNode(StrictModel):
     model_config = ConfigDict(frozen=True)
 
     name: str
-    # `None` is "the producer declared no type", a real state (`teleprompter.py` writes one) and
-    # deliberately not a member: an UNDECLARED node reading as some default kind is the silence
-    # this enum replaces. Anything else is refused at parse.
+    # `None` is "the producer declared no type", a real state and deliberately not a member: an
+    # UNDECLARED node reading as some default kind is the silence this enum replaces. Anything
+    # else is refused at parse.
     wire_type: NodeKind | None = None
     node_type: NodeType = NodeType.NONE
     param_keys: set[str] = Field(default_factory=set)
@@ -387,10 +355,12 @@ class PipelineNode(StrictModel):
     param_types: dict[str, str] = Field(default_factory=dict)
     observation_name: str | None = None
     observation_mappings: list[ObservationMapping] = Field(default_factory=list)
-    langfuse_type: str = "span"  # "generation" | "tool" | "retriever" | "span"
     output_schema: NodeOutputSchema | None = None
     prompt_info: NodePromptInfo | None = None
     current_config: dict[str, Any] = Field(default_factory=dict)
+    # A THINKING node whose declaration opens a search axis — decided at parse, before `narrow`,
+    # so no campaign's closing moves which node carries the `response_format` and model rows.
+    tunes_llm: bool
 
     @property
     def output_keys(self) -> list[str]:
@@ -408,17 +378,6 @@ class PipelineNode(StrictModel):
         """Narrow on purpose: this is the "the dataset must declare a per-node ``model``" signal. An
         in-process optimizer prompt node runs an LLM but owns no model, so it stays exempt."""
         return any(m.is_llm for m in self.observation_mappings)
-
-    @property
-    def runs_llm(self) -> bool:
-        """The BROAD signal — mapping, ``generation`` wire type, or the ``llm_only`` sentinel. Model-axis
-        carrier selection reads THIS: on ``is_llm`` a self-optimization pipeline resolves no carrier."""
-        return declares_llm_run(
-            name=self.name,
-            mappings=self.observation_mappings,
-            wire_type=self.wire_type,
-            langfuse_type=self.langfuse_type,
-        )
 
     @property
     def description_keys(self) -> list[str]:
@@ -1004,7 +963,7 @@ class PipelineSchema(StrictModel):
     def _model_carrier(self) -> str | None:
         """ONE carrier, not per-node, so an outer L4 search evolves ONE inner-optimizer model fanned
         across every node. Both the tunable-axis and operator-row readers share it."""
-        return next((s.name for s in self.nodes if s.runs_llm), None)
+        return next((s.name for s in self.nodes if s.tunes_llm), None)
 
     def node_output_schemas(self) -> dict[str, NodeOutputSchema | None]:
         """The read-only companion to :meth:`node_config_schema`, so the steer panel can show the WHOLE

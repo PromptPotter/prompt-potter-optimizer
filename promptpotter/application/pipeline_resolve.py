@@ -327,12 +327,12 @@ def _apply_starting_prompts(
         # `prompt_info` — so the rendered prompt has nowhere to land and is
         # dropped before the wire. Silent here = every backend call runs with
         # an empty system prompt (the bug that made an ingested dataset score
-        # 0% on email-replies). Fail loud: a generation node must advertise
+        # 0% on email-replies). Fail loud: an LLM node must advertise
         # `prompt_info` in GET /pipeline (or the dataset overlay).
         logger.warning(
             "configure_and_apply_pipeline: dataset %r has starting prompts but NO "
             "prompt-bearing node in the active pipeline %s — the prompt will "
-            "NOT reach the backend. A generation node must declare `prompt_info`.",
+            "NOT reach the backend. An LLM node must declare `prompt_info`.",
             dataset_name,
             active,
         )

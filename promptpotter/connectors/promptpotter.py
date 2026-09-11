@@ -21,8 +21,9 @@ from promptpotter.domain.l4 import proxies
 from promptpotter.domain.l4.inner_origin import INNER_ORIGIN_KEY
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY, OUTER_PROXY_KEYS
 from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import stable_hash
-from promptpotter.infrastructure.store.io import read_yaml_optional
+from promptpotter.infrastructure.store.io import read_yaml, read_yaml_optional
 from promptpotter.shared.hashing import module_source_digest
 
 if TYPE_CHECKING:
@@ -72,11 +73,9 @@ def _inner_optimizer_revision(dataset_dir: Path) -> dict[str, Any]:
     # bind (`docs/concepts/structured-output.md`). They sit in the generated sibling, so
     # reading the manifest alone left them out.
     schemas = optimizer_resolved_schemas()
-    outer_nodes = (read_yaml_optional(dataset_dir / "pipeline.yaml") or {}).get("nodes") or {}
+    outer = parse_pipeline_response(read_yaml(dataset_dir / "pipeline.yaml"))
     revision: dict[str, Any] = {}
-    for name, node in sorted(outer_nodes.items()):
-        if (node or {}).get("type") != "optimizer_prompt":
-            continue
+    for name in sorted(n.name for n in outer.config_nodes if n.tunes_llm):
         config = ((manifest.get("nodes") or {}).get(name) or {}).get("config") or {}
         prompt_key = _revision_key(config.get("prompt_family"), config.get("prompt_version"))
         schema_key = _revision_key(config.get("schema_family"), config.get("schema_version"))

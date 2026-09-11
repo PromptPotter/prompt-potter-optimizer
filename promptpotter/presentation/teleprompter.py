@@ -250,7 +250,6 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
                     {"pipeline_key": RESULT_KEY, "is_llm": True},
                     {"pipeline_key": SCORE_KEY},
                 ],
-                "langfuse_type": "generation",
             },
         }
         write_yaml(

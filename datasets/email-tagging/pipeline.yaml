@@ -2,7 +2,7 @@ name: Email Tagging (Pilot)
 version: v0.1
 description: >-
   Pilot: classify an inbound email into one of four routing categories (financial, actionable, informational,
-  other). Single llm_only generation node against TermNorm /matches, exact-match scoring. Mirrors the
+  other). Single llm_only node against TermNorm /matches, exact-match scoring. Mirrors the
   live n8n subject-classifier-LM tagging decision.
 backend_name: TermNorm
 backend_type: termnorm
@@ -10,7 +10,7 @@ available_models:
   - openai/gpt-oss-20b
 nodes:
   llm_only:
-    type: generation
+    type: llm
     runtime: backend
     node_role: ranker
     description: >-

@@ -19,7 +19,7 @@ available_models:
   - qwen/qwen3.7-flash:nitro
 nodes:
   agent:
-    type: generation
+    type: agent
     runtime: backend
     description: >-
       One Harbor episode. The rendered prompt becomes `SKILL.md` in the container and `terminus-2`

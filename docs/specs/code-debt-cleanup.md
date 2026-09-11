@@ -86,20 +86,6 @@ it.
   by nobody having looked. **Re-test:** the preprint ships (`.scratch/m13-preprint.md` carries the
   stage state); until then, do not open it and do not re-file it as unasked.
 
-- **FIVE node kinds spell one concept — "runs a model".** `domain/pipeline_schema.py::NodeKind`
-  closed the vocabulary and named the families, which is what makes the redundancy countable rather
-  than merely suspected: `llm` (1 site, written by `presentation/teleprompter.py` and actually a
-  VIEW kind spelled into a manifest), `generation` (20), `llm/optimizer` (4), `optimizer_prompt` (9),
-  `agent` (1). `THINKING_KINDS` is the predicate that keeps the split from spreading, but it is a
-  containment, not a fix — the five stay declarable and a sixth is one connector away. Not a rename:
-  `runs_llm` reads `GENERATION` *specifically* while `_derive_node_kind` treats all five alike, so
-  collapsing them decides which nodes newly carry the model axis, and every `datasets/*/pipeline.yaml`
-  is operator-curated on-disk config, so the survivor is the operator's call and not a sweep's.
-  Action: settle whether the survivor is `generation` or `llm`,
-  then rewrite writer→reader in one commit. **Re-test:** `grep -rh "^    type: " datasets/*/pipeline.yaml
-  promptpotter/assets/*/*/pipeline.yaml | sort | uniq -c` — fewer than five thinking spellings means
-  someone started, and `NodeKind` names what is left.
-
 - **Optimizer model repair-rate on heavy L2/L3 structured output — unmeasured.** What is owed is the
   measurement: a live cycle reaching L3, read under the model
   `promptpotter/assets/optimizer/pipeline.yaml` currently pins — read it off that file, never off

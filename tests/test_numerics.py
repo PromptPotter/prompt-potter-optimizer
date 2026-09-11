@@ -153,7 +153,8 @@ def _eval_result(
 def _single_node_schema() -> PipelineSchema:
     """Minimal schema with one generic node and no node_type assignments."""
     return PipelineSchema(
-        name="test", nodes=[PipelineNode(name="llm_only", node_type=NodeType.NONE)]
+        name="test",
+        nodes=[PipelineNode(name="llm_only", node_type=NodeType.NONE, tunes_llm=False)],
     )
 
 
@@ -260,10 +261,11 @@ def _recall_schema() -> PipelineSchema:
     return PipelineSchema(
         name="test_recall",
         nodes=[
-            PipelineNode(name="cache_lookup", node_type=NodeType.CACHE),
+            PipelineNode(name="cache_lookup", node_type=NodeType.CACHE, tunes_llm=False),
             PipelineNode(
                 name="fuzzy",
                 node_type=NodeType.CANDIDATE_SOURCE,
+                tunes_llm=False,
                 observation_mappings=[
                     ObservationMapping(
                         pipeline_key="candidate_ranking", output_field="candidate_ranking"
@@ -273,6 +275,7 @@ def _recall_schema() -> PipelineSchema:
             PipelineNode(
                 name="ranker",
                 node_type=NodeType.RANKER,
+                tunes_llm=False,
                 observation_mappings=[
                     ObservationMapping(pipeline_key="final_ranking", output_field="final_ranking")
                 ],
@@ -2763,7 +2766,9 @@ def test_parse_population_flags_dropped_optimizer_prompt_port():
 
     schema = PipelineSchema(
         name="promptpotter-self",
-        nodes=[PipelineNode(name="l1_generate", param_keys={"problem_description"})],
+        nodes=[
+            PipelineNode(name="l1_generate", param_keys={"problem_description"}, tunes_llm=False)
+        ],
     )
     parent = _parent()
     base_problem_description = base_optimizer_template("l1_generate").problem_description
@@ -2831,6 +2836,7 @@ def test_an_axis_is_bounded_by_the_model_that_would_run_it_not_by_the_yaml() -> 
                     param_allowed_values={"reasoning_effort": ["none", "low"]},
                     param_values_narrowed={"reasoning_effort"} if narrowed else set(),
                     current_config={"model": "m"},
+                    tunes_llm=False,
                 )
             ],
             model_capabilities={} if offers is None else {"m": _caps(offers)},

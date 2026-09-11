@@ -180,7 +180,7 @@ nodes:
           output_field: cost
       langfuse_type: tool
   entity_profiling:
-    type: generation
+    type: llm
     runtime: backend
     node_role: enricher
     description: >-
@@ -251,7 +251,7 @@ nodes:
           output_field: candidates
       langfuse_type: retriever
   llm_ranking:
-    type: generation
+    type: llm
     runtime: backend
     node_role: ranker
     description: >-
@@ -301,7 +301,7 @@ nodes:
           is_llm: true
       langfuse_type: generation
   direct_prompt:
-    type: generation
+    type: llm
     runtime: backend
     node_role: ''
     description: "Direct LLM prompt for simple queries — bypasses the full pipeline."
