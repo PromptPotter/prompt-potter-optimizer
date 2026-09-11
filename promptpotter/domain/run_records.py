@@ -134,8 +134,9 @@ class TokenUsageRecord(StrictModel):
     provider: str | None = None
     """Who billed the call. Not decoration beside ``model``: a rate belongs to the PAIR,
     and the rate table registers the same model under many vendors at prices that differ
-    several-fold, so a model alone cannot be priced (``shared/pricing.py::lookup_rate``).
-    ``None`` on a row written before this field, where only an exact key resolves."""
+    several-fold, so a model alone cannot be priced
+    (``infrastructure/llm/pricing.py::lookup_rate``). ``None`` on a row written before this
+    field, where only an exact key resolves."""
     served_by: str | None = None
     """WHICH upstream host answered, where the one above is a GATEWAY that routes onward. The pair
     is the point: ``provider`` is who bills, this is whose silicon ran it, and hosts of one model

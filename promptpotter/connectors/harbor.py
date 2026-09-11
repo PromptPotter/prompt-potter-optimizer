@@ -23,7 +23,8 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.connectors.protocol import BackendUnreachableError, Connector
+from promptpotter.connectors.protocol import Connector
+from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import stable_hash

@@ -35,7 +35,9 @@ whole sanctioned set; they name a sample's state, never a back-compat shim
   `OuterSampleProxies`, whose single field may not be defaulted. Which reading that field takes,
   and every term the panel retired, is argued in
   [`../../docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md) § The measurand.
-  `__init__.py` re-exports nothing — import `l4.proxies`, never the package.
+  **The estimator digest hashes `proxies`, so only what decides a cell's number lives there** —
+  an identity reader (`inner_origin.py`) sits beside it. `__init__.py` re-exports nothing — import
+  the module, never the package.
 - `export.py` — the export artifact (`cycles/{id}/export.json`): the winning prompt by field name
   plus the provenance that makes its fitness readable — the formula the number was computed under,
   n, lift + CI, θ, the rows' own hash, the optimizer manifest — and an `artifact_version` a reader

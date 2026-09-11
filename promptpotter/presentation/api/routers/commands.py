@@ -18,7 +18,6 @@ from promptpotter.application.jobs.launcher.checkin import (
 )
 from promptpotter.application.jobs.launcher.mint_and_start import OriginIncompleteError
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.connectors import BackendUnreachableError
 from promptpotter.domain.command_kinds import (
     ALL_DISPATCHED_KINDS,
     CampaignConfigKind,
@@ -27,6 +26,7 @@ from promptpotter.domain.command_kinds import (
     LifecycleKind,
     WorkspaceScopedKind,
 )
+from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import resolve_cycle_path

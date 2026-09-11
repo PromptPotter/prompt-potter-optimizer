@@ -5,39 +5,20 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.connector import SessionProtocol, WireAdapter
+from promptpotter.domain.connector import (
+    ConnectorExecution,
+    MeasuredUnit,
+    SessionProtocol,
+    WireAdapter,
+)
 from promptpotter.domain.pipeline_schema import NodeType
-from promptpotter.shared.errors import PotterError
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     import httpx
-
-# How a connector's backend runs, so the loop dispatches on a *declared*
-# capability instead of branching on the connector name. ``remote_http`` posts
-# to a live ``/matches`` endpoint (TermNorm + any external backend);
-# ``in_process`` runs the query in this process with no HTTP transport — today an
-# inner PromptPotter cycle (L4 self-recursion). ``BackendClient.run_query`` dispatches an
-# ``in_process`` connector to its ``in_process_run`` hook. A future hosted/worker
-# execution mode extends this enum without touching the loop.
-ConnectorExecution = Literal["remote_http", "in_process"]
-
-# What ONE MEASURED ROW is called on this backend: ``sample`` everywhere; ``cell`` on the
-# recursion, where one row is an entire inner campaign. DECLARED, never sniffed off a row.
-MeasuredUnit = Literal["sample", "cell"]
-
-
-def unit_plural(unit: MeasuredUnit) -> str:
-    return f"{unit}s"
-
-
-def unit_count(n: int, unit: MeasuredUnit) -> str:
-    """``1 cell`` / ``3 cells`` — the ONE place a measured row is counted in words."""
-    return f"{n} {unit if n == 1 else unit_plural(unit)}"
-
 
 # The in-process execution arm: ``(query, payload) -> resp`` where ``payload`` is
 # the connector's ``wire_adapter`` output and ``resp`` is the same ``{"data": {…}}``
@@ -60,24 +41,6 @@ PreflightFn = Callable[[str], Awaitable[None]]
 # The connector's wire credential, read at client-construction time (not at import,
 # so an env change lands without a reimport). ``None`` return = send no auth header.
 AuthTokenFn = Callable[[], str | None]
-
-
-class BackendUnreachableError(PotterError):
-    """The configured backend isn't responding (503). Carries backend type + URL on ``details`` so the ``PotterError`` seam
-    composes the envelope without re-parsing the message."""
-
-    http_status = 503
-    code = "backend_unreachable"
-
-    def __init__(self, backend_type: str, backend_url: str, detail: str = "") -> None:
-        self.backend_type = backend_type
-        self.backend_url = backend_url
-        self.detail = detail
-        super().__init__(
-            f"Backend '{backend_type}' at {backend_url} is not reachable. "
-            f"Start the backend and try again." + (f" ({detail})" if detail else ""),
-            details={"backend_type": backend_type, "backend_url": backend_url},
-        )
 
 
 @dataclass(frozen=True)
@@ -123,7 +86,8 @@ class Connector:
     (``application/seed_screen.py``)."""
 
     measured_unit: MeasuredUnit = "sample"
-    """What one measured row of this backend is CALLED — see :data:`MeasuredUnit`."""
+    """What one measured row of this backend is CALLED: ``cell`` where it is a whole inner campaign
+    or agent episode, else ``sample``. Declared, never sniffed off a row."""
 
     required_observation_keys: tuple[str, ...] = ()
     """Observation keys this backend ALWAYS emits; ``wiring.py::_verify_required_observation_keys``
@@ -231,15 +195,8 @@ class Connector:
 
 __all__ = [
     "AuthTokenFn",
-    "BackendUnreachableError",
     "Connector",
-    "ConnectorExecution",
     "InProcessRun",
-    "MeasuredUnit",
     "PreflightFn",
-    "SessionProtocol",
     "VersionCheck",
-    "WireAdapter",
-    "unit_count",
-    "unit_plural",
 ]

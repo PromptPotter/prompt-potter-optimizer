@@ -20,7 +20,7 @@ from promptpotter.application.optimization.resume_and_fork.fork_siblings import 
 )
 from promptpotter.application.runner.entry import RunMode
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
-from promptpotter.connectors.protocol import BackendUnreachableError
+from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ForkSpec, ForkTrigger
 from promptpotter.infrastructure.runtime_flags import is_checkin

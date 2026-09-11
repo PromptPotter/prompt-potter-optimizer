@@ -6,19 +6,15 @@ from importlib.metadata import entry_points
 from promptpotter.connectors.dspy_module import CONNECTOR as _DSPY
 from promptpotter.connectors.harbor import CONNECTOR as _HARBOR
 from promptpotter.connectors.promptpotter import CONNECTOR as _PROMPTPOTTER
-from promptpotter.connectors.protocol import (
-    BackendUnreachableError,
-    Connector,
-    ConnectorExecution,
-)
+from promptpotter.connectors.protocol import Connector
 from promptpotter.connectors.termnorm import CONNECTOR as _TERMNORM
+from promptpotter.domain.connector import ConnectorExecution
 
 __all__ = [
     "CONNECTORS",
     "CONNECTOR_ORIGINS",
     "DEFAULT_CONNECTOR",
     "ENTRY_POINT_GROUP",
-    "BackendUnreachableError",
     "Connector",
     "get",
 ]

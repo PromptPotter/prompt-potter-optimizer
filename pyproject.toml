@@ -202,7 +202,7 @@ include = ["promptpotter*"]
 [tool.setuptools.package-data]
 promptpotter = [
     "py.typed",
-    "shared/data/rates.json",
+    "infrastructure/llm/data/rates.json",
     "config/prompt_variants.json",  # config/prompt_blocks.py::BUNDLED_PATH
     "connectors/resources/*.json",  # n8n workflow templates
     "assets/optimizer/*.yaml",      # the optimizer's own pipeline manifest

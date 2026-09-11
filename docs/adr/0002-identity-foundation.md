@@ -174,7 +174,7 @@ Enforceable rules. A PR violating any of these is a block. The **(test)** marker
 
 ### Minimal-deps invariant
 
-- **Stage 0 — zero new deps.** Stdlib only. `IdentityContext` (`shared/identity.py`) + four newtypes (`domain/identity.py`) ship without any library.
+- **Stage 0 — zero new deps.** Stdlib only. `IdentityContext` + four newtypes (`shared/identity.py`) ship without any library.
 - **Stage 1 — one new Python dep: `cryptography`** for JWT/JWS signature verification against JWKS. Everything else (HTTP discovery fetch, session cookies, opaque token generation, PKCE) is stdlib. The OIDC client is ~200 LoC we write ourselves.
 - **Stage 2 — zero new Python deps.** Open-source IdPs (Ory / Zitadel / Keycloak / Authentik) are **sibling processes** — we call them over HTTP/OIDC, we do not import a Python auth library. The PostgreSQL adapter rides our existing storage abstractions plus the `psycopg` binding we'd already need for any DB store.
 - **Never** add a Python auth library (no `python-jose`, no `authlib`, no `python-social-auth`, no `flask-login`-shape framework). Either we implement OIDC client ourselves (Stage 1) or we call out to a sibling IdP (Stage 2).

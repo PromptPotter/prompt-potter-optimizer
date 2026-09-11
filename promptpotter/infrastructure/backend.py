@@ -20,13 +20,13 @@ from promptpotter.infrastructure.llm.rate_limit import (
 QUERY_TIMEOUT: float = 120.0  # HTTP timeout for /matches endpoint
 
 if TYPE_CHECKING:
-    from promptpotter.connectors.protocol import (
-        Connector,
+    from promptpotter.connectors.protocol import Connector, InProcessRun
+    from promptpotter.domain.connector import (
         ConnectorExecution,
-        InProcessRun,
         MeasuredUnit,
+        SessionProtocol,
+        WireAdapter,
     )
-    from promptpotter.domain.connector import SessionProtocol, WireAdapter
 
 logger = logging.getLogger(__name__)
 

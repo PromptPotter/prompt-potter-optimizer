@@ -44,7 +44,7 @@ from promptpotter.application.sweep_batch import (
     run_sweep_batch,
 )
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
-from promptpotter.connectors.protocol import BackendUnreachableError
+from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.stores import build_stores

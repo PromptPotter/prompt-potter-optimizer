@@ -1,14 +1,11 @@
-"""Token → USD — wire cost (``override_usd``) → runtime cache → the checked-in floor. stdlib only,
-by choice: the table is vendored from LiteLLM's public price backup (MIT, BerriAI), never eval-ed."""
+"""No LiteLLM dependency, by choice: the rate table is vendored from LiteLLM's public price backup
+(MIT, BerriAI) and never executed."""
 
 from __future__ import annotations
 
-import contextlib
 import functools
 import json
 import logging
-import os
-import tempfile
 import threading
 import time
 import urllib.error
@@ -18,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.config.paths import user_data_root
+from promptpotter.infrastructure.store.io import read_json_optional, write_text
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +48,8 @@ UPSTREAM_URL = (
     "https://raw.githubusercontent.com/BerriAI/litellm/main/"
     "litellm/model_prices_and_context_window_backup.json"
 )
-# Beside the rest of the user data, through the one resolver — it hand-rolled
-# ``Path.home()/".promptpotter"``, which ignores ``$PROMPTPOTTER_HOME`` and, on Windows,
-# misses ``%LOCALAPPDATA%`` where every other user file lands.
+# Beside the rest of the user data, through the one resolver: a hand-rolled ``~/.promptpotter``
+# ignores ``$PROMPTPOTTER_HOME`` and, on Windows, misses ``%LOCALAPPDATA%``.
 CACHE_PATH = user_data_root() / "rates.json"
 BUNDLED_PATH = Path(__file__).parent / "data" / "rates.json"
 _KEEP_FIELDS = (
@@ -80,10 +77,8 @@ def _strip_upstream(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def _cache_fresh() -> bool:
-    """Age off the file's own mtime, which the atomic replace below stamps at write time. The table
-    is ~1 MB and this fires on every launch, so parsing it to read a timestamp inside it cost a
-    second full parse for a number the filesystem already had — and left the age readable by nothing
-    but this function, where ``ls -l`` now answers it."""
+    """Age off the file's own mtime, which ``store/io.py::write_text`` stamps at its atomic replace:
+    the ~1 MB table is not parsed on every launch for a time ``ls -l`` already shows."""
     try:
         age_s = time.time() - CACHE_PATH.stat().st_mtime
     except OSError:
@@ -115,20 +110,7 @@ def refresh_rates(*, force: bool = False, timeout: float = _FETCH_TIMEOUT_S) -> 
         return False
 
     stripped = _strip_upstream(raw)
-    CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    # Hand-rolled rather than through ``store/io.py::write_json`` because this module is
-    # stdlib-only and one layer below it. The tmp name must be UNIQUE: this runs on a daemon
-    # thread per launch and an L4 run starts one per inner campaign, so a fixed name lets two
-    # writers interleave into one file — and a torn table then ages as FRESH off its own mtime.
-    fd, tmp = tempfile.mkstemp(dir=CACHE_PATH.parent, prefix=f"{CACHE_PATH.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps({"models": stripped}, indent=0, separators=(",", ":")))
-        os.replace(tmp, CACHE_PATH)
-    except OSError:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp)
-        raise
+    write_text(CACHE_PATH, json.dumps({"models": stripped}, indent=0, separators=(",", ":")))
     load_rates.cache_clear()
     logger.info("spend: refreshed %d model rates → %s", len(stripped), CACHE_PATH)
     return True
@@ -141,10 +123,8 @@ def refresh_rates_in_background() -> None:
 
 
 def _read_models(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = read_json_optional(path)
     except (OSError, json.JSONDecodeError) as exc:
         logger.warning("spend: failed to load %s (%s)", path, exc)
         return None
@@ -248,10 +228,8 @@ def compute_usd(
     rate = lookup_rate(model, provider)
     if rate is None:
         return None
-    # `cache_read` / `cache_write`, never `cached_*`: across this package `cached` is the boolean
-    # "we replayed our own archive and no provider was reached", and these are the opposite fact —
-    # a provider DID serve the call and discounted part of its input. Same collision that kept the
-    # harbor count out of the ledger; this was the last spelling of it left.
+    # `cache_read` / `cache_write`, never `cached_*`: `cached` means we replayed our own archive and
+    # no provider was reached, and these count input a provider DID serve, from its prompt cache.
     cache_read = max(0, int(cache_read_tokens))
     cache_write = max(0, int(cache_write_tokens))
     full_rate_input = max(0, input_tokens - cache_read - cache_write)

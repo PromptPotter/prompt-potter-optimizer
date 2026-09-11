@@ -7,6 +7,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.connectors.protocol import Connector
+from promptpotter.domain.l4.inner_origin import INNER_ORIGIN_KEY
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY, OUTER_PROXY_KEYS
 from promptpotter.domain.pipeline_overlay import node_config_items
 
@@ -17,23 +18,6 @@ if TYPE_CHECKING:
     import httpx
 
 logger = logging.getLogger(__name__)
-
-
-# Reserved per-node config key carrying the inner-origin fingerprint. Part of
-# measurement identity (rides node_configs / the origin cycle id), NEVER a wire
-# tunable — the adapter strips it before building ``optimizer_prompt_overrides``.
-INNER_ORIGIN_KEY = "inner_origin"
-
-
-def instrument_of(pipeline_params: object) -> str | None:
-    """Which INSTRUMENT a searchpoint was measured on — its inner-origin fingerprint, or ``None``
-    where the backend has none. The one reader of ``INNER_ORIGIN_KEY`` out of a params map, so the
-    mint-time cohort warning and the evidence roster cannot disagree about where it is written."""
-    if not isinstance(pipeline_params, dict):
-        return None
-    node = pipeline_params.get("l1_generate")
-    value = node.get(INNER_ORIGIN_KEY) if isinstance(node, dict) else None
-    return value if isinstance(value, str) and value else None
 
 
 # Most inner campaigns the operator may set running at once — a RESOURCE ceiling (peak RSS and

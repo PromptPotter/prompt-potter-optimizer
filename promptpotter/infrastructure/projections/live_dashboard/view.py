@@ -36,6 +36,7 @@ from promptpotter.domain.scoring import (
 )
 from promptpotter.domain.spend import TOKEN_KIND_BUCKET, SpendBucket, SpendRollup
 from promptpotter.infrastructure.ledger import open_with_history
+from promptpotter.infrastructure.llm.pricing import compute_usd
 from promptpotter.infrastructure.projections.audit_trail import (
     audit_rounds_dir,
     build_node_block,
@@ -83,10 +84,9 @@ from promptpotter.infrastructure.store.layout import (
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
 from promptpotter.shared.instrument import NO_ROUND_SLOT
-from promptpotter.shared.pricing import compute_usd
 
 if TYPE_CHECKING:
-    from promptpotter.connectors.protocol import MeasuredUnit
+    from promptpotter.domain.connector import MeasuredUnit
     from promptpotter.infrastructure.projections.audit_trail import AuditTrailView
 
 logger = logging.getLogger(__name__)

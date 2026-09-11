@@ -7,7 +7,7 @@ from typing import Any, ClassVar
 
 from pydantic import ConfigDict, Field
 
-from promptpotter.connectors.protocol import MeasuredUnit
+from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import DashboardCandidate, RoundSummary
 from promptpotter.domain.phases import DashboardState, RunPhase

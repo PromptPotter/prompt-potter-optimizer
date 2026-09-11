@@ -32,17 +32,16 @@ it.
   is a backbone shape, not three local accidents. 330 → 52 (the habit, swept 2026-09-10) → 23 (the
   `spawn_context` boundary move plus `entry`). Of the 23, eight are deliberate and stay:
   `complexity_ledger` (7, "outside the layer tree because it counts every layer") and
-  `escalation/state` ↔ `rules` (1). **The other 15 are all one pattern, at three sites** —
-  `connectors/__init__.py::_load()` (12), `dispatch/injections/registry.py`'s renderer walk (2, and
-  the 1 in `llm_call/prompts.py` that cannot reach `INJECTIONS` because of it), and
-  `judges/__init__.py::_load()` (0).
+  `escalation/state` ↔ `rules` (1). **The other 15 are all one pattern, at three sites** — the
+  connector registry (12, every one of them IN `connectors/promptpotter.py`, which
+  `connectors/__init__.py` imports eagerly for `_BUILTIN`; `_load()` itself holds none),
+  `dispatch/injections/registry.py`'s renderer walk (2, and the 1 in `llm_call/prompts.py` that
+  cannot reach `INJECTIONS` because of it), and `judges/__init__.py::_load()` (0).
   **The predicate that decides which sites bite: a registered member that reaches back UP into a
   layer which imports the registry.** `judges` registers leaves, so its identical `_load()` costs
   nothing — the pattern is only dangerous where a member is heavy. `connectors/promptpotter` drives
   the whole application; `injections/layer_state` imports the prompt loader. Both then close a loop
-  on a half-initialised package, and every module wanting only a TYPE off
-  `connectors.protocol` (13 of them: `MeasuredUnit`, `BackendUnreachableError`, `unit_count`) pays
-  the whole registry to get it.
+  on a half-initialised package.
   **The fix separates registration from completion.** Registration by import must stay eager — it
   is the `@signal` / `CONNECTOR` side effect, and walking beats a hand-listed tuple. What does not
   have to be eager is BUILDING and VALIDATING the table: make each accessor `@functools.cache`d and
@@ -50,8 +49,9 @@ it.
   The property both files defend in prose — a half-wired connector must not reach a campaign — is
   then kept by calling the accessors once from an explicit startup step (`init_services`), which is
   strictly better: the eagerness becomes a declared step instead of an import-order accident.
-  Sequencing note: this does not remove the need to decide whether `protocol.py` still belongs
-  under an `__init__` that does work, and `runner/inner/tasks` genuinely wants `CONNECTORS`.
+  Sequencing note: this does not remove the need to decide whether `protocol.py` (`Connector` and
+  its hook aliases) still belongs under an `__init__` that does work, and `runner/inner/tasks`
+  genuinely wants `CONNECTORS`.
   **Re-test:** `.venv/Scripts/python.exe -m promptpotter.complexity_ledger | grep deferred` —
   while it reads 23, the knot stands; the ledger row is the ratchet and cannot drift back up.
 
@@ -214,10 +214,7 @@ it.
 **Coupon + BYO build (Lane A2 — blocked on the build itself; ADR-0003 § Host coupon):**
 - **Adopt-in-new-code:** the new `grant.json` / `api_keys.json` stores MUST ride
   `read_json_optional` / `write_json` (the `UserStore` template, `store/io.py`) from day one — no
-  hand-rolled readers. `shared/pricing.py` still hand-rolls `json.loads(...)` at three sites (one of
-  them decoding a fetched payload); held separately because `shared/` importing
-  `infrastructure/store/io` is an unresolved layer-DIRECTION question — resolve it before or
-  alongside this build. (No longer an import-cycle question: the eager `store/__init__` is gone.)
+  hand-rolled readers.
 - **Two host-wallet mechanisms** — `application/jobs/quota.py::admit_launch` plus the
   `User.spend_budget_usd_total` / `token_budget_total` lifetime ceilings, vs the new coupon
   (`grant.json`, ledger-derived, live). Two guards on one concern = the no-redundant-mechanism rule.

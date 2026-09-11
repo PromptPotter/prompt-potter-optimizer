@@ -786,8 +786,8 @@ the PR description.
     `.inner/`: a sandbox is a SIBLING of the tenant tree, and summing it counts
     the forwarded half twice. Spend is summed one way
     (`store/account_spend.py::account_ledgers`) and priced one way
-    (`shared/pricing.py::compute_usd`, which returns `None` for a call it cannot
-    price rather than `0.0`).
+    (`infrastructure/llm/pricing.py::compute_usd`, which returns `None` for a
+    call it cannot price rather than `0.0`).
 
 - **`observed_node()` context manager** — the trace-emission seam
   every optimizer LLM call wraps. Cutting it removes Langfuse-shape

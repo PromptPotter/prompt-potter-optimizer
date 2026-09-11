@@ -593,7 +593,7 @@ def activity(
     `campaigns/*/cycles/*/` and projects ``TokenUsageRecord`` rows whose
     `timestamp` lands in the window onto ``_N_BUCKETS`` evenly-spaced
     bins. ``cost_usd`` may be null on disk (Groq doesn't return wire
-    cost); we fall back to ``shared.pricing.lookup_rate`` × tokens so
+    cost); we fall back to ``infrastructure.llm.pricing.lookup_rate`` × tokens so
     historical spend isn't silently zero.
 
     ``group_by`` selects the colour axis: ``model`` = exact model string,

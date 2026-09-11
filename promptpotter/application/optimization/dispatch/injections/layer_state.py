@@ -17,7 +17,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     effective_optimizer_prompts,
 )
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
-from promptpotter.connectors.protocol import unit_plural
+from promptpotter.domain.connector import unit_plural
 from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM

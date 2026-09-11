@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.application.views.view_models import AnyView
-from promptpotter.connectors.protocol import MeasuredUnit
+from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.rendering import DisplayRankKey, display_rank_key, prefix_reading

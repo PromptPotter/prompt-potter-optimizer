@@ -12,7 +12,6 @@ from typing import Any
 
 from promptpotter.config.paths import benchmark_datasets_root
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, WorkspaceDir
-from promptpotter.domain.identity import TenantId
 from promptpotter.infrastructure.store.backend_store import BackendStore
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.checkin_draft_store import CheckinDraftStore
@@ -35,7 +34,7 @@ from promptpotter.infrastructure.store.tenant_dataset_store import TenantDataset
 from promptpotter.infrastructure.store.user_store import UserStore
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 from promptpotter.shared.hashing import HASH_TRUNCATE
-from promptpotter.shared.identity import IdentityContext
+from promptpotter.shared.identity import IdentityContext, TenantId
 
 logger = logging.getLogger(__name__)
 

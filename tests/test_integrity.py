@@ -1310,7 +1310,7 @@ def test_a_reused_origin_seeds_exactly_the_config_it_ran() -> None:
 def _draft(overlay: dict[str, Any]) -> Any:
     from promptpotter.application.datasets.draft_campaign import DraftCampaign
     from promptpotter.connectors import DEFAULT_CONNECTOR
-    from promptpotter.domain.identity import TenantId
+    from promptpotter.shared.identity import TenantId
 
     now = "2026-09-08T00:00:00Z"
     return DraftCampaign(
@@ -2390,7 +2390,7 @@ def test_a_rate_belongs_to_the_provider_model_pair_not_the_model_alone(
     on CI and on every fresh clone, with its own "table unavailable" guard unable to see
     the difference. Upstream re-keying a model must not be able to red this.
     """
-    import promptpotter.shared.pricing as spend_mod
+    import promptpotter.infrastructure.llm.pricing as spend_mod
 
     table = {
         # The defect in one row: DeepSeek's own first-party key, character-for-character

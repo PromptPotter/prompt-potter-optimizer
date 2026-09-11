@@ -1,14 +1,54 @@
-"""The wire boundary: ``WireAdapter`` shapes the outbound payload, ``SessionProtocol`` the handshake. ``PipelineSchema`` owns pipeline
-SHAPE and connectors only TRANSMIT it, so anything beyond wire+session belongs in the schema."""
+"""The connector contract's pure half, read without loading the registry. ``PipelineSchema`` owns
+pipeline SHAPE and a connector only TRANSMITS it, so no pipeline fact lives here."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
+
+from promptpotter.shared.errors import PotterError
 
 if TYPE_CHECKING:
     import httpx
 
-__all__ = ["SessionProtocol", "WireAdapter"]
+__all__ = [
+    "BackendUnreachableError",
+    "ConnectorExecution",
+    "MeasuredUnit",
+    "SessionProtocol",
+    "WireAdapter",
+    "unit_count",
+    "unit_plural",
+]
+
+ConnectorExecution = Literal["remote_http", "in_process"]
+
+MeasuredUnit = Literal["sample", "cell"]
+
+
+def unit_plural(unit: MeasuredUnit) -> str:
+    return f"{unit}s"
+
+
+def unit_count(n: int, unit: MeasuredUnit) -> str:
+    return f"{n} {unit if n == 1 else unit_plural(unit)}"
+
+
+class BackendUnreachableError(PotterError):
+    """The configured backend isn't responding (503). Carries backend type + URL on ``details`` so the ``PotterError`` seam
+    composes the envelope without re-parsing the message."""
+
+    http_status = 503
+    code = "backend_unreachable"
+
+    def __init__(self, backend_type: str, backend_url: str, detail: str = "") -> None:
+        self.backend_type = backend_type
+        self.backend_url = backend_url
+        self.detail = detail
+        super().__init__(
+            f"Backend '{backend_type}' at {backend_url} is not reachable. "
+            f"Start the backend and try again." + (f" ({detail})" if detail else ""),
+            details={"backend_type": backend_type, "backend_url": backend_url},
+        )
 
 
 class WireAdapter(Protocol):

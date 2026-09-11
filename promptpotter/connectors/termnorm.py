@@ -8,7 +8,8 @@ from typing import Any
 import httpx
 
 from promptpotter.config.settings import settings
-from promptpotter.connectors.protocol import BackendUnreachableError, Connector
+from promptpotter.connectors.protocol import Connector
+from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeType
 

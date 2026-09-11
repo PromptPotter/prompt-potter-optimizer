@@ -50,7 +50,6 @@ from promptpotter.application.scoring.formula.compiler import (
     CompiledExpression,
     ScoringFormulaError,
 )
-from promptpotter.connectors.promptpotter import instrument_of
 from promptpotter.domain.candidate_diff import build_candidate_flat, flatten_sp_summary
 from promptpotter.domain.cycle_paths import (
     CycleHop,
@@ -58,6 +57,7 @@ from promptpotter.domain.cycle_paths import (
     decode_cycle_path,
     encode_cycle_path,
 )
+from promptpotter.domain.l4.inner_origin import instrument_of
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_elections

@@ -32,7 +32,6 @@ from promptpotter.application.optimization.dispatch.bundle import (
 )
 from promptpotter.application.scoring.evaluators import compute_accuracy
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
-from promptpotter.connectors.protocol import MeasuredUnit, unit_count, unit_plural
 from promptpotter.domain.candidate_diff import (
     IDEA_MATCH_MARK,
     candidate_delta,
@@ -40,6 +39,7 @@ from promptpotter.domain.candidate_diff import (
     flatten_sp_summary,
     same_idea,
 )
+from promptpotter.domain.connector import MeasuredUnit, unit_count, unit_plural
 from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS, PARENT_LEVEL_SE_KEY
 from promptpotter.domain.rendering import fmt_pct
