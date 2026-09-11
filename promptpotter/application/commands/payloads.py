@@ -143,7 +143,7 @@ class VerifyCandidatePayload(CyclePayload):
     naming the budget — which is what keeps one click on a million-row dataset from being a
     million-cell bill."""
 
-    label: str = Field(min_length=2, max_length=32, pattern=r"^C\d+(\.\d+)?$")
+    label: str = Field(min_length=2, max_length=32, pattern=r"^C(0|\d+\.[1-9]\d*)$")
     samples: WireInt | None = Field(default=None, ge=1, le=10_000)
 
 
@@ -217,7 +217,7 @@ class StartCheckinPayload(_CheckinPayload):
 
 
 class CancelQueuedRunPayload(CommandPayload):
-    job_id: str = Field(min_length=1, max_length=128)
+    job_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class MintCampaignPayload(CommandPayload):

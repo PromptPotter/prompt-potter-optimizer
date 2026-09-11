@@ -260,12 +260,13 @@ def _load_dataset_into_session(
             # gitignored and rebuilt per box. Naming only the backend_type cause sent the operator
             # to inspect a `pipeline.yaml` that was correct. Name the file and the directory, as
             # the loader this replaced did.
-            raise ValueError(
+            raise PayloadInvalidError(
                 f"Connector {connector.name!r} owns {dataset_name!r}'s panel, but "
                 f"{connector.experiment_file!r} was not readable in "
                 f"{readable_dataset_dir(session.store, dataset_name)}. Either the panel has not "
                 f"been generated on this machine (it is gitignored — rebuild it), or that "
-                f"dataset's pipeline.yaml no longer names the {connector.name!r} backend_type."
+                f"dataset's pipeline.yaml no longer names the {connector.name!r} backend_type.",
+                code="pipeline_config_invalid",
             )
         queries, session.index_terms = panel
         session.samples = samples_from_dicts(queries)
@@ -274,10 +275,11 @@ def _load_dataset_into_session(
     items = resolve_dataset_items(session.store, dataset_name, status=status)
     if not items:
         status(f"Dataset '{dataset_name}' not available")
-        raise ValueError(
+        raise PayloadInvalidError(
             f"Dataset {dataset_name!r} not found in tenant uploads, repo benchmarks, "
             f"or any registered loader. Add one to DATASET_LOADERS in "
-            f"application/datasets/loaders.py."
+            f"application/datasets/loaders.py.",
+            code="dataset_not_found",
         )
 
     # Whether a MISSING label disqualifies a row is DERIVED from the set, not declared: if any row

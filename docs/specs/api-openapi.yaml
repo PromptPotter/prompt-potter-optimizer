@@ -3052,6 +3052,9 @@ components:
       properties:
         job_id:
           type: string
+          pattern: '^[A-Za-z0-9_-]+$'
+          minLength: 1
+          maxLength: 128
           description: |
             The queued job to withdraw, from `GET /machine-status`'s `queue`. Not a
             `CycleRef`: the queue holds launch INTENT, and a queued mint names no
@@ -3079,7 +3082,7 @@ components:
           properties:
             label:
               type: string
-              pattern: '^C\d+(\.\d+)?$'
+              pattern: '^C(0|\d+\.[1-9]\d*)$'
               minLength: 2
               maxLength: 32
               description: >-

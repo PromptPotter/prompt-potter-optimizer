@@ -1045,6 +1045,7 @@ def test_an_applied_scenario_forks_at_its_round_and_carries_the_criterion(
     )
     from promptpotter.application.runner.entry import _apply_config_overrides
     from promptpotter.domain.run_records import ConfigOverrides
+    from promptpotter.shared.errors import PayloadInvalidError
 
     store = built_stores.campaigns
     parent = CycleHop(campaign_id=_CAMPAIGN, cycle_id="cycle_applyscenario")
@@ -1076,7 +1077,7 @@ def test_an_applied_scenario_forks_at_its_round_and_carries_the_criterion(
 
     # An origin-bearing seed asks for two different origins at once — the lifted round 0 already
     # is one. Refused rather than silently dropped.
-    with pytest.raises(ValueError, match="origin_prompt_fields"):
+    with pytest.raises(PayloadInvalidError, match="origin_prompt_fields"):
         mint_operator_fork(
             stores=built_stores,
             hop=parent,

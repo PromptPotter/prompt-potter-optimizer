@@ -37,7 +37,7 @@ from promptpotter.infrastructure.store.session_pointer import (
     save_active_pointer,
 )
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import graceful
+from promptpotter.shared.errors import PayloadInvalidError, graceful
 
 if TYPE_CHECKING:
     from promptpotter.domain.run_records import CycleSeed
@@ -412,7 +412,7 @@ def mint_operator_fork(
         # Two different origins asked for at once: the lifted round 0 is already the origin, so a
         # declared one would either be ignored or overwrite measured rows. Refused rather than
         # silently dropped — the caller meant one of the two acts and this says which it cannot be.
-        raise ValueError(
+        raise PayloadInvalidError(
             "keep_rounds lifts the parent's round 0 as its origin, so the seed must not "
             "declare origin_prompt_fields; fork without keep_rounds to start from an edited origin"
         )

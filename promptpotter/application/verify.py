@@ -34,6 +34,7 @@ from promptpotter.infrastructure.llm.telemetry import (
 )
 from promptpotter.infrastructure.store import archive_views
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import ConflictError
 
 if TYPE_CHECKING:
     from promptpotter.domain.sample import Measurement
@@ -105,7 +106,7 @@ def _diagnostic_trace(stores: Stores, hop: CycleHop) -> Iterator[None]:
         reset_cycle_ledger(token)
 
 
-class VerifyError(Exception):
+class VerifyError(ConflictError):
     """A resolved-state failure: campaign, round or candidate missing on disk. The CLI shell maps it to a clean exit — this
     module never raises ``SystemExit`` itself."""
 

@@ -110,8 +110,8 @@ async def dispatch_origin_resolution(
         except PotterError:
             raise
         except Exception as exc:
-            # A PotterError, so the dispatcher's mapping seam emits a `rejected` ack and
-            # re-raises as 502 rather than the generic 409 the bare-Exception arm produces.
+            # The turn is an upstream LLM call, so its failure serves as a 503 naming the resolver;
+            # the traceback is logged here because the 503 carries none.
             logger.exception("resolve-origin turn failed for draft %s", draft_id)
             raise ServiceUnavailableError(
                 f"origin resolver turn failed: {exc}", code="resolver_failed"

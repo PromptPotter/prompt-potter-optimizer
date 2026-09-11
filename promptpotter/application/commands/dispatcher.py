@@ -9,7 +9,7 @@ import re
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, assert_never
 
 from pydantic import ConfigDict, ValidationError
 
@@ -98,7 +98,6 @@ from promptpotter.shared.errors import (
     ConflictError,
     NotFoundError,
     PayloadInvalidError,
-    PotterError,
     ServiceUnavailableError,
 )
 from promptpotter.shared.identity import (
@@ -535,16 +534,11 @@ class CommandDispatcher:
             except _DeleteCycleRejectedError as exc:
                 ack_status = "rejected"
                 ack_detail = exc.reason
-            except PotterError as exc:
-                # ONE central mapping seam for every applier error carrying an HTTP status.
-                # Emit a rejected ack so the audit trail stays on the ledger, then re-raise for
-                # `main.py`'s handler. One site, not one arm per applier; no ``HTTPException``.
+            except Exception as exc:
+                # The rejected ack lands whatever the error, then it propagates: `main.py` maps a
+                # `PotterError` to its own status and anything else to a logged 500.
                 emit_command_ack(command_id=command_id, status="rejected", detail=str(exc))
                 raise
-            except Exception as exc:
-                logger.exception("apply failed for %s", kind)
-                ack_status = "rejected"
-                ack_detail = str(exc)
             effect = effect_fn() if (effect_fn is not None and ack_status == "applied") else None
             emit_command_ack(
                 command_id=command_id, status=ack_status, detail=ack_detail, effect=effect
@@ -716,7 +710,7 @@ class CommandDispatcher:
             campaigns.archive_campaign(campaign_id, changed_at=changed_at, reason=reason)
         elif kind == "unarchive-campaign":
             campaigns.unarchive_campaign(campaign_id, changed_at=changed_at, reason=reason)
-        else:  # delete-campaign — destructive (keepsake spared only with keep_results)
+        elif kind == "delete-campaign":  # destructive (keepsake spared only with keep_results)
             campaigns.delete_campaign(
                 campaign_id,
                 keep_results=payload.keep_results,
@@ -724,6 +718,8 @@ class CommandDispatcher:
                 reason=reason,
                 inner_sandbox_root=inner_sandboxes_dir(self._stores.shared_root),
             )
+        else:
+            assert_never(kind)
 
     def _apply_replace_dataset(self, slug: str) -> dict[str, str]:
         try:
