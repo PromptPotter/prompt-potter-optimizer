@@ -1,6 +1,6 @@
 // The closed-set command highway — every campaign-state write posts to `/commands/{kind}`,
 // declared in `docs/specs/api-openapi.yaml` and dispatched server-side by `CommandDispatcher`
-// (`promptpotter/presentation/api/middleware/`). The dispatcher writes a `CommandRecord` to the
+// (`promptpotter/application/commands/`). The dispatcher writes a `CommandRecord` to the
 // target cycle's ledger, inline-applies the mutation, then writes a `CommandAckRecord`.
 //
 // These are pure I/O — they do NOT trigger poll revalidation themselves. The caller bumps

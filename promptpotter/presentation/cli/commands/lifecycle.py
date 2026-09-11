@@ -12,17 +12,11 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable
 
-from promptpotter.application.jobs.capacity import resolve_run_capacity
-from promptpotter.application.jobs.registry import JobRegistry, default_jobs_dir
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
-from promptpotter.domain.command_kinds import CycleScopedKind, LifecycleKind
-from promptpotter.infrastructure.store.session_pointer import read_active_pointer
-from promptpotter.infrastructure.store.stores import Stores, build_stores
-from promptpotter.presentation.api.middleware.command_dispatcher import (
+from promptpotter.application.commands.dispatcher import CommandDispatcher
+from promptpotter.application.commands.payloads import (
     CancelQueuedRunPayload,
     ChangeSpendBudgetPayload,
     CleanupEmptyCyclesPayload,
-    CommandDispatcher,
     CyclePayload,
     DeleteCyclePayload,
     LifecyclePayload,
@@ -32,6 +26,12 @@ from promptpotter.presentation.api.middleware.command_dispatcher import (
     SkipSearchpointPayload,
     StepCyclePayload,
 )
+from promptpotter.application.jobs.capacity import resolve_run_capacity
+from promptpotter.application.jobs.registry import JobRegistry, default_jobs_dir
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.domain.command_kinds import CycleScopedKind, LifecycleKind
+from promptpotter.infrastructure.store.session_pointer import read_active_pointer
+from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
     identity_from_args,

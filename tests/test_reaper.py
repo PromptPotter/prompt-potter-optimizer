@@ -512,10 +512,8 @@ async def test_delete_cycle_guards_liveness_and_not_the_pointer(built_stores: St
     ``n_rounds == 0``, which IS the just-minted window before round 1 commits. So the one
     deletion the verb can perform is the one most likely to be live, and that was the
     unchecked case; the case it did refuse was harmless."""
-    from promptpotter.presentation.api.middleware.command_dispatcher import (
-        CommandDispatcher,
-        DeleteCyclePayload,
-    )
+    from promptpotter.application.commands.dispatcher import CommandDispatcher
+    from promptpotter.application.commands.payloads import DeleteCyclePayload
 
     tenant_root, _ = _lifecycle_fixture(built_stores, running=True)
     stub = "cycle-0_fork_deadbeef"

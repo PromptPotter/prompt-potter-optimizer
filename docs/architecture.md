@@ -302,7 +302,7 @@ pre-flight gate blocks code that introduces one without §0 backing.
 
 Sole writer: per-cycle `CycleEventLog.append`. HITL collapses into it — `inherit_from(parent,
 offset)` mints a fork at any chosen ledger offset, which is the operator-steered fork. Commands
-with no cycle target (`command_dispatcher.py::WorkspaceScopedKind`) write a sibling **workspace
+with no cycle target (`domain/command_kinds.py::WorkspaceScopedKind`) write a sibling **workspace
 ledger** at `projects/{tenant}/.workspace/events.jsonl`, same shape and same single-writer
 discipline; per-cycle ledgers stay canonical for anything targeting a campaign or cycle.
 
@@ -345,10 +345,11 @@ should do.
 
 #### 4 — Control-remote
 
-HTTP-ingressed mutations by signed-in principals. Every command is appended to the canonical
-per-cycle ledger as a `CommandRecord` by a sole `CommandDispatcher` at the FastAPI seam, applied
-inline, and acknowledged by a sibling `CommandAckRecord`. **One writer for both halves** — never
-split the ack onto a second subscriber.
+Command mutations, from a signed-in principal over HTTP or from a terminal verb that dispatches
+the kind (`cli/campaign_runner.py::CLI_VERB_FOR_KIND`). Every command is appended to the canonical
+per-cycle ledger as a `CommandRecord` by the sole `CommandDispatcher` (`application/commands/`),
+applied inline, and acknowledged by a sibling `CommandAckRecord`. **One writer for both halves** —
+never split the ack onto a second subscriber.
 
 Outbound, no projection writes SSE frames at all: `CycleLedgerTail` tails the on-disk ledger
 directly, cross-process. The closed inbound set is declared in
@@ -440,7 +441,7 @@ invariant (pinned above). Operator hand-edits to these files are not
 the input channel; the next ledger event overwrites them. Operator
 input flows through the **Control** kinds only: Control-local
 (`.runtime/{pause,skip}.flag` and `sample_lookahead.json`, polled per checkpoint) and Control-remote
-(HTTP → `CommandRecord` on the ledger → runner subscriber → `CommandAckRecord`).
+(§ 4 above).
 The early "folder-UI" workflow of just opening files was — and remains —
 a read-out workflow; writes have always landed via the running loop.
 

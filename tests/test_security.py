@@ -335,6 +335,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
     """
     import types
 
+    from promptpotter.application.commands.dispatcher import CommandDispatcher
     from promptpotter.infrastructure.identity.grants import (
         grant_principal,
         read_grant,
@@ -343,9 +344,6 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
     )
     from promptpotter.infrastructure.identity.session import SessionData
     from promptpotter.infrastructure.store.io import write_json
-    from promptpotter.presentation.api.middleware.command_dispatcher import (
-        CommandDispatcher,
-    )
     from promptpotter.presentation.api.middleware.oidc import _delegated_identity
     from promptpotter.shared.errors import NotFoundError
     from promptpotter.shared.identity import (
@@ -684,12 +682,12 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
     """
     import types
 
+    from promptpotter.application.commands.dispatcher import CommandDispatcher
     from promptpotter.application.jobs.quota import clamp_budget_change
     from promptpotter.application.jobs.registry import JobRegistry
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.infrastructure.runtime_flags import read_spend_caps
     from promptpotter.infrastructure.store.user_store import User
-    from promptpotter.presentation.api.middleware.command_dispatcher import CommandDispatcher
 
     stores = built_stores
     hop = CycleHop(campaign_id="camp-3", cycle_id="cycle_budget0000")
@@ -746,7 +744,7 @@ def test_a_non_finite_budget_cannot_disarm_the_spend_ceiling() -> None:
     """
     from pydantic import ValidationError
 
-    from promptpotter.presentation.api.middleware.command_dispatcher import (
+    from promptpotter.application.commands.payloads import (
         ChangeSpendBudgetPayload,
         MintCampaignPayload,
         StartRunPayload,
@@ -792,13 +790,13 @@ async def test_a_revoked_principal_cannot_replay_an_applied_command(tmp_path: Pa
     import dataclasses
     import types
 
-    from promptpotter.domain.cycle_paths import CycleDir
-    from promptpotter.domain.run_records import CommandAckRecord, CommandRecord
-    from promptpotter.infrastructure.ledger import CycleEventLog
-    from promptpotter.presentation.api.middleware.command_dispatcher import (
+    from promptpotter.application.commands.dispatcher import (
         CommandDispatcher,
         _find_idempotent_command,
     )
+    from promptpotter.domain.cycle_paths import CycleDir
+    from promptpotter.domain.run_records import CommandAckRecord, CommandRecord
+    from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.shared.errors import NotFoundError
     from promptpotter.shared.identity import default_identity
 

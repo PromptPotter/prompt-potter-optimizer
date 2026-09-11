@@ -12,6 +12,11 @@ from typing import TYPE_CHECKING, Any, NoReturn
 from pydantic import ValidationError
 
 from promptpotter.application.campaign_config import load_campaign_config as _load_cfg
+from promptpotter.application.commands.checkin_dispatch import (
+    dispatch_draft_patch,
+    dispatch_origin_resolution,
+    dispatch_start_checkin,
+)
 from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     read_campaign_config_file,
@@ -26,11 +31,7 @@ from promptpotter.application.datasets.ingest import SlugTakenError, ingest_draf
 from promptpotter.application.datasets.origin_readiness import origin_readiness
 from promptpotter.application.initialization.session import mint_checkin_skeleton
 from promptpotter.application.jobs.launcher.admission import probe_backend
-from promptpotter.application.jobs.launcher.checkin import (
-    load_checkin_for_start,
-    prepare_checkin_run,
-)
-from promptpotter.application.jobs.launcher.mint_and_start import LaunchError
+from promptpotter.application.jobs.launcher.checkin import prepare_checkin_run
 from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
 from promptpotter.application.optimization.task_context import (
     checkin_call_context,
@@ -48,10 +49,6 @@ from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.stores import build_stores
-from promptpotter.presentation.api.middleware.command_dispatcher import (
-    dispatch_draft_patch,
-    dispatch_origin_resolution,
-)
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
     backend_reach_line,
@@ -85,12 +82,6 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 
 
 # --- File-ingest branch: `new <file>` folds onto the durable check-in path ----
-# A raw file → durable check-in campaign → resolved origin → flip to active + run
-# inline. The CLI owns no ingest/resolve/commit logic of its own; every step is an
-# application-layer call shared with the web (`ingest_draft`, `resolve_origin_turn`,
-# `prepare_checkin_run`). The ONLY CLI/web difference is run-invocation: the CLI
-# runs the loop inline with `LiveDisplay`; the web detaches via `JobRegistry`.
-# Spec: ``docs/specs/roadmap.md``.
 
 # The CLI's ``--set`` vocabulary, DERIVED from the one patch model every ingress edits an origin
 # through (``application/datasets/draft_patch.py::EditDraftPatch``) — hand-listing it here would
@@ -250,18 +241,11 @@ async def _ingest_checkin(args: argparse.Namespace) -> str:
 async def _ingest_and_prepare_checkin(
     args: argparse.Namespace,
 ) -> tuple[Session, CampaignConfig, str, str]:
-    """The CLI tail of check-in Start, sharing :func:`prepare_checkin_run` with the web detach path.
-    Backend reachability is not preflighted: a check-in is durable, so ``resume`` runs it later."""
+    """The CLI tail of check-in Start. Backend reachability is not preflighted: a check-in is
+    durable, so ``resume`` runs it later."""
 
     campaign_id = await _ingest_checkin(args)
     stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
-    # The SAME gate the web Start runs, and it owns three things a bare load does not: recovering
-    # a pending dataset replacement, the ownership check and the lifecycle check. Hand-rolling it
-    # lets the terminal start a campaign the browser would refuse.
-    try:
-        hop, draft = load_checkin_for_start(stores, campaign_id)
-    except LaunchError as exc:
-        raise SystemExit(f"ERROR: {exc}") from None
 
     async def make_session(dataset_name: str) -> Session:
         return await init_services_cli(
@@ -271,11 +255,13 @@ async def _ingest_and_prepare_checkin(
             identity=identity_from_args(args),
         )
 
-    prepared = await prepare_checkin_run(
+    prepared = await dispatch_start_checkin(
         stores,
-        hop=hop,
-        draft=draft,
-        make_session=make_session,
+        campaign_id=campaign_id,
+        idempotency_key=uuid.uuid4().hex,
+        start=lambda hop, draft: prepare_checkin_run(
+            stores, hop=hop, draft=draft, make_session=make_session
+        ),
     )
     checkin_line("campaign", f"started check-in {campaign_id}")
     return (

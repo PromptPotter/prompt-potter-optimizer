@@ -11,31 +11,16 @@ from fastapi.routing import APIRoute
 from pydantic import Field, ValidationError
 
 from promptpotter.application.archive_maintenance import ArchiveReport
-from promptpotter.application.datasets.draft_campaign import load_checkin_draft
-from promptpotter.application.jobs.launcher.checkin import (
-    save_checkin_draft,
-    start_checkin_campaign,
+from promptpotter.application.commands.checkin_dispatch import (
+    dispatch_draft_patch,
+    dispatch_origin_resolution,
+    dispatch_start_checkin,
 )
-from promptpotter.application.jobs.launcher.mint_and_start import OriginIncompleteError
-from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.domain.command_kinds import (
-    ALL_DISPATCHED_KINDS,
-    CampaignConfigKind,
-    CheckinScopedKind,
-    CycleScopedKind,
-    LifecycleKind,
-    WorkspaceScopedKind,
-)
-from promptpotter.domain.connector import BackendUnreachableError
-from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.stores import resolve_cycle_path
-from promptpotter.presentation.api.deps import StoresDep, decode_descend
-from promptpotter.presentation.api.middleware.command_dispatcher import (
+from promptpotter.application.commands.dispatcher import CommandDispatcher
+from promptpotter.application.commands.payloads import (
     PAYLOAD_MODEL_FOR_KIND,
     CampaignPayload,
     CommandAcceptedBody,
-    CommandDispatcher,
     CommandPayload,
     CompactArchivePayload,
     CyclePayload,
@@ -45,9 +30,21 @@ from promptpotter.presentation.api.middleware.command_dispatcher import (
     ReplaceDatasetPayload,
     ResolveOriginPayload,
     StartCheckinPayload,
-    dispatch_draft_patch,
-    dispatch_origin_resolution,
 )
+from promptpotter.application.jobs.launcher.checkin import start_checkin_campaign
+from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.domain.command_kinds import (
+    ALL_DISPATCHED_KINDS,
+    CampaignConfigKind,
+    CheckinScopedKind,
+    CycleScopedKind,
+    LifecycleKind,
+    WorkspaceScopedKind,
+)
+from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.store.stores import resolve_cycle_path
+from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.shared.errors import (
     BadRequestError,
     NotFoundError,
@@ -178,52 +175,19 @@ async def start_checkin(
     _require_kind(envelope, "start-checkin")
     idemp = ensure_idempotency_key(idempotency_key)
     payload = cast(StartCheckinPayload, _validated_payload("start-checkin", envelope.payload))
-    campaign_id = payload.campaign_id
-
-    draft = load_checkin_draft(stores, campaign_id)
-    if draft is None:
-        raise NotFoundError(f"check-in {campaign_id!r} not found.", code="command_target_not_found")
-
     job_registry: JobRegistry | None = getattr(request.app.state, "job_registry", None)
     if job_registry is None:
         raise ServiceUnavailableError(
             "job registry not initialised", code="job_registry_unavailable"
         )
-
-    async def _apply() -> dict[str, Any]:
-        try:
-            job = await start_checkin_campaign(
-                stores=stores,
-                job_registry=job_registry,
-                campaign_id=campaign_id,
-            )
-        except OriginIncompleteError:
-            # Lifecycle stays ``checkin`` so the operator can resolve the gaps and retry; the
-            # exception already carries code=origin_incomplete + details.gaps.
-            save_checkin_draft(stores, draft)
-            raise
-        except BackendUnreachableError as exc:
-            # Preflight ran before any irreversible write, so the check-in survives and the
-            # operator retries without re-authoring.
-            exc.details["campaign_id"] = campaign_id
-            raise
-        # LaunchError is a PayloadInvalidError — the central PotterError handler maps it to
-        # 422 with its own message, so no per-case arm here.
-        return {"campaign_id": campaign_id, "cycle_id": job.cycle_id, "job_id": job.job_id}
-
-    dispatcher = CommandDispatcher(stores, job_registry=job_registry)
-    outcome = await dispatcher.dispatch_checkin_command(
-        kind="start-checkin",
-        campaign_id=campaign_id,
-        payload=payload.model_dump(mode="json"),
+    return await dispatch_start_checkin(
+        stores,
+        campaign_id=payload.campaign_id,
         idempotency_key=idemp,
-        applier=_apply,
-        # `job_id` has no disk home, so a deduped retry could only fabricate one;
-        # the `checkin → active` flip is already the retry guard (second Start →
-        # LaunchError → 422).
-        dedupe=False,
+        start=lambda hop, draft: start_checkin_campaign(
+            stores=stores, job_registry=job_registry, hop=hop, draft=draft
+        ),
     )
-    return cast("dict[str, Any]", outcome.result)
 
 
 @commands_router.post("/compact-archive")

@@ -9,6 +9,7 @@ from typing import Annotated, Any
 from fastapi import File, Form, Header, Request, UploadFile
 from pydantic import Field
 
+from promptpotter.application.commands.checkin_dispatch import dispatch_draft_patch
 from promptpotter.application.datasets.csv_ingest import (
     MAX_SAMPLES,
     IngestError,
@@ -35,7 +36,6 @@ from promptpotter.infrastructure.store.dataset_access import (
 from promptpotter.presentation.api.deps import (
     StoresDep,
 )
-from promptpotter.presentation.api.middleware.command_dispatcher import dispatch_draft_patch
 from promptpotter.presentation.api.routers.commands import ensure_idempotency_key
 from promptpotter.presentation.api.routers.datasets._router import datasets_router
 from promptpotter.shared.errors import (
@@ -160,7 +160,7 @@ class _BuildLibraryBody(StrictModel):
     """Body for building a candidate library from one of the draft's own columns."""
 
     # `draft_id` IS the owning `campaign_id`; bound it exactly as every other check-in payload
-    # does (`command_dispatcher.py::_CheckinPayload` and its subclasses), not 64.
+    # does (`commands/payloads.py::_CheckinPayload` and its subclasses), not 64.
     draft_id: str = Field(min_length=8, max_length=128)
     column: str = Field(min_length=1, max_length=256)
 

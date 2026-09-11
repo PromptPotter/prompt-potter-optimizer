@@ -256,8 +256,8 @@ class LLMCallRecord(StrictModel):
 
 
 class CommandRecord(StrictModel):
-    """Sole writer at the API seam is ``CommandDispatcher``. Three target ledgers: the
-    target cycle's, its campaign root's, or the workspace's — never a fourth."""
+    """Sole writer is ``CommandDispatcher``. Three target ledgers: the target cycle's, its campaign
+    root's, or the workspace's — never a fourth."""
 
     model_config = ConfigDict(frozen=True)
 

@@ -68,8 +68,13 @@ LEDGER_BASELINE = {
     # not name a campaign. The replay core stays beside the replayers it shares with resume
     # (`mask/verdicts.py`), and the half that calls `init_services` cannot join it there without a
     # runtime `optimization -> initialization` edge.
-    "modules": 345,
-    "init_files": 49,
+    # +3: `application/commands/` (an empty `__init__` plus three modules for one). The dispatcher
+    # imports no FastAPI and the CLI verbs dispatch through it, so it is application code. Split by
+    # importer: `payloads` alone serves the TS builder and the CLI's run-limit check,
+    # `checkin_dispatch` serves dataset ingest and CLI `new`, and `dispatcher` holds the appliers.
+    "modules": 348,
+    # +1: `application/commands/__init__.py`, empty — importers name the submodule.
+    "init_files": 50,
     # +1: `judges/__init__.py` — flagged for the same reason `connectors/__init__.py` is, and by
     # the same text test: a registry module has both an `__all__` and imports. Named rather than
     # emptied; the protocol types are deliberately NOT re-exported through it.

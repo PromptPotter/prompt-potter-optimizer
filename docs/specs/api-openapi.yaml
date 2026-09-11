@@ -55,7 +55,7 @@ info:
     authored by a signed-in operator or signed-in client, appended to its
     target ledger (the per-cycle `.runtime/ledger.jsonl` or the workspace
     `.workspace/events.jsonl`, per command scope) as a `CommandRecord` by the
-    sole `CommandDispatcher` at the FastAPI seam.
+    sole `CommandDispatcher`.
 
     See `docs/adr/0001-m12-control-plane.md` for the permanent contract, the
     Profile gradient (A-E), and the 20-item security checklist that every

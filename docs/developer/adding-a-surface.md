@@ -344,8 +344,8 @@ Join the right `Literal` and three import-time asserts start demanding the rest 
 
 | Add | Where | The assert that demands it |
 |---|---|---|
-| a capability | `CAP_FOR_KIND` (`api/middleware/command_dispatcher.py`) | `set(CAP_FOR_KIND) != ALL_DISPATCHED_KINDS` — a kind with no cap is a silent unguarded verb |
-| a payload model | `PAYLOAD_MODEL_FOR_KIND` (same file) | the sibling raise beside it |
+| a capability | `CAP_FOR_KIND` (`application/commands/dispatcher.py`) | `set(CAP_FOR_KIND) != ALL_DISPATCHED_KINDS` — a kind with no cap is a silent unguarded verb |
+| a payload model | `PAYLOAD_MODEL_FOR_KIND` (`application/commands/payloads.py`) | the sibling raise beside it |
 | **the terminal's half** | `CLI_VERB_FOR_KIND` (`cli/campaign_runner.py`) | totality over `ALL_DISPATCHED_KINDS`, plus every named verb being a real `COMMANDS` key |
 
 `CLI_VERB_FOR_KIND` is the `<entry-point-parity>` guard, and it is the one that had to be written

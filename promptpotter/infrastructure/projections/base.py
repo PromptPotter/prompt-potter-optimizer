@@ -60,7 +60,7 @@ _ROUTES: dict[type, str | None] = {
     RoundWarningRecord: "_handle_round_warning",
     CandidateMintedRecord: "_handle_candidate_minted",
     ElectionRecord: "_handle_election",
-    # Applied at the seam that wrote them (`middleware/command_dispatcher.py`), which answers the
+    # Applied at the seam that wrote them (`application/commands/dispatcher.py`), which answers the
     # caller inline; the ledger pair is the audit trail, not an input to any view.
     CommandRecord: None,
     CommandAckRecord: None,

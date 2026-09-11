@@ -19,6 +19,10 @@ _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO))
 
 from promptpotter.application.archive_maintenance import ArchiveReport
+from promptpotter.application.commands.payloads import (
+    CommandAcceptedBody,
+    OriginGateDecisionPayload,
+)
 from promptpotter.application.evidence import (
     ArmReplicate,
     Comparability,
@@ -98,10 +102,6 @@ from promptpotter.infrastructure.store.family_ray_views import RayItem, RayRespo
 from promptpotter.infrastructure.store.lineage_views import (
     LineageDivergence,
     LineageNode,
-)
-from promptpotter.presentation.api.middleware.command_dispatcher import (
-    CommandAcceptedBody,
-    OriginGateDecisionPayload,
 )
 from promptpotter.presentation.api.routers.active import (
     ActiveSessionResponse,

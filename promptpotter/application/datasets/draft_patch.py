@@ -5,8 +5,8 @@ candidate-library uploads, and the CLI's ``--set``. It sits in ``application/`` 
 parked in ``presentation/api/routers/`` is one no CLI verb can import without dragging FastAPI in,
 and the adapter that cannot reach it writes a narrower copy instead.
 
-What stays in ``presentation/``: appending the ``CommandRecord``, which is ``CommandDispatcher``'s
-job at the API seam. This module owns only what an edit MEANS.
+Appending the ``CommandRecord`` is ``commands/checkin_dispatch.py::dispatch_draft_patch``'s job.
+This module owns only what an edit MEANS.
 """
 
 from __future__ import annotations

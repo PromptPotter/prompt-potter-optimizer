@@ -91,7 +91,7 @@ one owns the same tenant and holds nothing. The single local operator gets the f
 control-plane command requires a **capability** — `CAMPAIGN_{STEP,RUN,CREATE,BUDGET,LIFECYCLE,BABYSIT,LOOKAHEAD}_CAP`
 (`shared/identity.py`, enumerated once as `CAMPAIGN_CAP_BY_NAME`). Enforcement is a
 **second one-chokepoint**: `_require_capability_for` reads `CAP_FOR_KIND[kind]` at the
-dispatcher's `_record_and_apply` (`command_dispatcher.py`) — the single site
+dispatcher's `_record_and_apply` (`application/commands/dispatcher.py`) — the single site
 every command funnels through — before applying. An import-time assert keeps `CAP_FOR_KIND`
 exhaustive over the closed kind set. Same 404 posture. A first-class tenant owner holds the
 full `OWNER_COMMAND_CAPABILITIES`, so single-owner installs are unaffected.
@@ -137,10 +137,9 @@ owner-scoped** (documented in-code). A CLI-minted campaign is owned by the regis
 `user_id`, which differs from a browser OIDC session's `user_id` *within one tenant*, so
 owner-filtering would hide the operator's own origins. Tenant isolation still holds.
 
-**All write commands** flow through one `CommandDispatcher`
-(`presentation/api/middleware/command_dispatcher/`) — the sole inbound writer, stamping
-`issued_by_user_id` and appending a `CommandRecord` to the ledger. The read API is otherwise
-read-only.
+**All write commands** flow through one `CommandDispatcher` (`application/commands/`) — the
+sole inbound writer, stamping `issued_by_user_id` and appending a `CommandRecord` to the ledger.
+The read API is otherwise read-only.
 
 ---
 
@@ -304,14 +303,14 @@ concurrency costs far more in *quota* than in RAM; size it against the provider 
 | Who is exempt from free-tier metering (one definition, two readings) | `quota.py::_is_host` — the terminal, or the identity that claimed the box. `spends_the_hosts_own_key` reads it off a LIVE identity (no issuer); `is_host_tenant_dir` off a DIRECTORY walk (the un-renamed `projects/default/`), which has no session to ask. Only the terminal DETECTOR differs, and merging the two is what would let an identity that merely omits an issuer resolve as the operator — the anonymous-tier trap |
 | What every account spent + produced (cross-tenant, ADR-0004 channel only) | `jobs/install_spend.py::read_install_spend`, rendered by `admin_bot.py`'s `/spend` — never an inbound route |
 | Dataset resolution (NOT a capability gate) | `store/dataset_access.py::readable_dataset_dir` — tenant content, then install content |
-| Command-verb gate (the one chokepoint) | `command_dispatcher.py::_require_capability_for` + `CAP_FOR_KIND` |
+| Command-verb gate (the one chokepoint) | `commands/dispatcher.py::_require_capability_for` + `CAP_FOR_KIND` |
 | Command capabilities (one enumeration) | `shared/identity.py::CAMPAIGN_CAP_BY_NAME`, `OWNER_COMMAND_CAPABILITIES` |
 | Sealed sub-principal grant store | `infrastructure/identity/grants.py` (`.promptpotter/identity/grants.json`) |
 | Delegation attenuation (enforced at read) | `grants.py::resolve_effective_capabilities`, `middleware/oidc.py::_delegated_identity` |
 | Dataset visibility gateway | `infrastructure/store/dataset_access.py` |
 | Tenant isolation (structural) | `infrastructure/store/stores.py::build_stores` |
 | Ownership rule (one definition) | `campaign_store/store.py::load_owned` |
-| Sole inbound writer | `middleware/command_dispatcher.py` |
+| Sole inbound writer | `application/commands/dispatcher.py` |
 | AuthN resolver + 401 | `deps.py::resolve_identity`, `middleware/oidc.py` |
 | Out-of-band admin channel | `presentation/admin_bot.py` + [ADR-0004](../adr/0004-operator-admin-channels.md) |
 | Response security headers | `main.py::SecurityHeadersMiddleware` |
