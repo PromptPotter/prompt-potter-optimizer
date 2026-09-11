@@ -117,9 +117,8 @@ CORRECT depends on what the payload carries:
   it and nothing raises. Here pruning IS the repair — `restamp.py::_prune_record`, derived from
   the union, so no field delete needs a migration of its own.
 
-`application/restamp.py::check_round_documents` reports which side has drifted; PRUNING never
-repairs a round document, because it cannot restore a renamed field's value. Recovering one from a
-record that survives is a different act and may write (`restamp.py::backfill_inner_facts`).
+`application/maintenance/restamp.py::check_round_documents` reports which side has drifted;
+PRUNING never repairs a round document, because it cannot restore a renamed field's value.
 
 ## Conventions
 

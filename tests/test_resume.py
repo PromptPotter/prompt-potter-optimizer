@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from promptpotter.application.archive_maintenance import (
+from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
     restore_measurement_archive,
 )

@@ -11,6 +11,7 @@ A thin index over the per-layer `CLAUDE.md` tree for the `promptpotter/` Python 
 | `domain/` | Frozen Pydantic models, pure types, `JobSearchPoint` / `OptSearchPoint` / `PromptTemplate`, `PipelineSchema`. No I/O. | [`domain/CLAUDE.md`](domain/CLAUDE.md) |
 | `application/` | Use-case layer: initialization, runner, scoring, intelligence. | [`application/CLAUDE.md`](application/CLAUDE.md) |
 | `application/optimization/` | The L1 / L2 / L3 **agent contracts** + Cycle + dispatch + escalation + PoBB. What each layer reads / writes / decides, when each escalates / heals. | [`application/optimization/CLAUDE.md`](application/optimization/CLAUDE.md) |
+| `application/evidence/` | The cross-subject read (`GET /evidence`, CLI `evidence`): what a subject is, what a cell can be asked for, and what the roster jointly says. | [`application/evidence/CLAUDE.md`](application/evidence/CLAUDE.md) |
 | `infrastructure/` | I/O contracts: persistence (`CycleEventLog`), projections (`LiveDashboardView` / `AuditTrailView` / `PoBBStreamView`), stores, LLM clients, backend wire, tracing. | [`infrastructure/CLAUDE.md`](infrastructure/CLAUDE.md) |
 | `presentation/` | Entry-point adapters: CLI, FastAPI, view formatters. Read-only over `application/`. | [`presentation/CLAUDE.md`](presentation/CLAUDE.md) |
 | `connectors/` | Backend-specific hook bundles: `termnorm`, `promptpotter` (self-recursion / L4). Adding a connector = one new file under this package. | [`connectors/CLAUDE.md`](connectors/CLAUDE.md) |

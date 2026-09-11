@@ -27,8 +27,8 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
 )
 from promptpotter.application.optimization.validators.l1_invariants import L1YieldStats
 from promptpotter.application.origin import rescore_parent
-from promptpotter.application.scoring.diagnostics import count_degraded_samples
 from promptpotter.application.scoring.metrics import _compute_accuracy, matched_parent_stats
+from promptpotter.application.scoring.row_diagnostics import count_degraded_samples
 from promptpotter.application.scoring.selection import (
     distinct_valid_cells,
     elect_round_winner,

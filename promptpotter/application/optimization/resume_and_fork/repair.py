@@ -21,7 +21,7 @@ from promptpotter.application.optimization.resume_and_fork.fork_siblings import 
 from promptpotter.application.optimization.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.optimization.round_analysis import compute_round_diagnostics
 from promptpotter.application.run_observers import RunCallbacks
-from promptpotter.application.scoring.diagnostics import count_degraded_samples
+from promptpotter.application.scoring.row_diagnostics import count_degraded_samples
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint

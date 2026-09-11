@@ -13,12 +13,6 @@ from typing import Any, Literal, assert_never
 
 from pydantic import ConfigDict, ValidationError
 
-from promptpotter.application.archive_maintenance import (
-    ArchiveReport,
-    compact_measurement_archive,
-    purge_cold_store,
-    restore_measurement_archive,
-)
 from promptpotter.application.commands.payloads import (
     CampaignPayload,
     CancelQueuedRunPayload,
@@ -47,6 +41,7 @@ from promptpotter.application.datasets.dataset_replace import (
     NothingToReplaceError,
     version_and_repoint,
 )
+from promptpotter.application.diagnostics.verify import verify_candidate
 from promptpotter.application.jobs.launcher.admission import launch
 from promptpotter.application.jobs.launcher.mint_and_start import (
     mint_campaign_command,
@@ -54,12 +49,17 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
 )
 from promptpotter.application.jobs.quota import clamp_budget_change, hold_ceiling
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.maintenance.archive_maintenance import (
+    ArchiveReport,
+    compact_measurement_archive,
+    purge_cold_store,
+    restore_measurement_archive,
+)
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     cleanup_stub_fork_if_empty,
     mint_operator_fork,
 )
 from promptpotter.application.runner.origin_gate import GateDecision, submit_gate_decision
-from promptpotter.application.verify import verify_candidate
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.command_kinds import (

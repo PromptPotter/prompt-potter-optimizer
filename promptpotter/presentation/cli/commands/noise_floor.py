@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import logging
 
-from promptpotter.application.noise_floor import NoiseFloorError, measure_noise_floor
+from promptpotter.application.diagnostics.noise_floor import NoiseFloorError, measure_noise_floor
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.cycle_paths import CycleHop

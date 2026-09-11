@@ -211,9 +211,9 @@ _PIPELINE_KEYS: frozenset[str] = frozenset(
 
 # -- what an archive row may lose ---------------------------------------------
 #
-# `application/archive_maintenance.py` moves these into the cold store; they live HERE because the
-# question they answer — which of a row's keys does anything read — is about the two types above,
-# and a set of key names sitting anywhere else is a second contract nobody declared.
+# `application/maintenance/archive_maintenance.py` moves these into the cold store; they live HERE
+# because the question they answer — which of a row's keys does anything read — is about the two
+# types above, and a set of key names sitting anywhere else is a second contract nobody declared.
 #
 # Two sets rather than one, because the asserts below run in OPPOSITE directions and a flat set
 # could not carry either.

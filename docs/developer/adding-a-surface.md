@@ -126,7 +126,7 @@ reconstructor to keep in sync** — that synchronized third edit is gone.
    read it where the fact is surfaced — `LiveDashboardView._apply_phase` reads
    the typed view by attribute (`getattr`, presentation-agnostic).
 4. If the field also appears in post-hoc `log.md`, set it in `from_disk_log`
-   (`application/output.py`) — that builder reads on-disk `index.json` for
+   (`application/runner/output.py`) — that builder reads on-disk `index.json` for
    **cross-cycle** rendering and is a genuinely separate source, not a roundtrip shim.
 
 **A field on the ROUND document is not this recipe — it is one edit.** Declare it on
@@ -320,7 +320,8 @@ and leaves the tree and every measurement where they are), **diagnostic** (`ab` 
 **maintenance** (`reindex` / `restamp` / `compact-archive`, which rewrite stored artifacts on
 purpose). A maintenance verb owes two things a diagnostic does not: it is dry-run by default,
 and it refuses while a producer could still be writing what it rewrites
-(`application/archive_maintenance.py::archive_writers`). And do
+(`application/maintenance/archive_maintenance.py::archive_writers`) — except `reindex`, which
+rebuilds a derived index from the detail files and deletes nothing, so it owes neither. And do
 **not** add a read verb: reads happen by opening the artifact tree, and raw-file ingest is
 `new <file.csv>`, not an `ingest` verb.
 

@@ -29,7 +29,7 @@ from promptpotter.application.datasets.prompts import (
     load_dataset_node_overlay,
     load_node_prompt,
 )
-from promptpotter.application.evidence import SubjectSpec
+from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.runner.inner.tasks import inner_tasks_path, load_inner_tasks
 from promptpotter.config.settings import (
     PROMPT_STRING_FIELDS,

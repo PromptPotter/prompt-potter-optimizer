@@ -342,7 +342,7 @@ def from_phase_event(event: PhaseEvent, ctx: ViewContext) -> AnyView | None:
     return builder(event.data, ctx) if builder is not None else None
 
 
-# --- score-entry helpers (shared with application/output disk render) ---
+# --- score-entry helpers ---
 
 
 def score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:

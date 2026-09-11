@@ -96,8 +96,8 @@ class InnerTasks(StrictModel):
         partition, and their marginals are then one contrast wearing two names — measured on five
         banked campaigns, ``agent.model`` split 292.2s against 58.5s and was aliased exactly by
         ``dataset``, so the "slower model" was the harbor bank. ``FactorReading.confounded_with``
-        (``application/evidence.py``) names that when it happens; a full product cannot alias in
-        the first place, which is the whole reason to generate.
+        (``application/evidence/grid.py``) names that when it happens; a full product cannot alias
+        in the first place, which is the whole reason to generate.
 
         Expanded HERE, before field validation, so the spawner, the ruler and the API's
         outer-dataset probe all see an ordinary cell list and there is no second path to keep in

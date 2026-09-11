@@ -416,7 +416,7 @@ export function fetchConfigMap(
 // a press instead of a poll.
 //
 // Every shape is GENERATED from the Pydantic source (`Evidence` &c in
-// `application/evidence.py`) — hand-mirroring them here bypasses `build_ts_types.py`
+// `application/evidence/`) — hand-mirroring them here bypasses `build_ts_types.py`
 // and drifts behind the model silently.
 // `inside` is the sandbox chain the address lives in — the hops ABOVE the leaf, which for a
 // tree node is `coursePath.slice(0, -1)`. Empty for a top-level campaign; one hop per L4

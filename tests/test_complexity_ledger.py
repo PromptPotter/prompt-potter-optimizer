@@ -54,27 +54,33 @@ LEDGER_BASELINE = {
     # cache, with no way to say which layer answered. It pays for itself immediately — the node
     # ladder and the model's are different sets, and conflating them let a campaign search
     # `reasoning_effort` on a model that does not take the parameter at all.
-    # +2: `application/probe_reasoning.py` + its `cli/commands/probe_reasoning.py` shell — the verb
-    # that FILLS the evidence table above. Without it `_MODEL_PROFILES` is a hand-list against a
-    # catalogue of hundreds, which is the shape that goes stale and then answers wrongly; the whole
-    # reason the table may narrow a search axis is that a human can cheaply re-measure it. It runs
-    # through `get_llm_client().chat`, not a raw request, so it reports what this repo SENDS.
+    # +2: `application/diagnostics/probe_reasoning.py` + its `cli/commands/probe_reasoning.py`
+    # shell — the verb that FILLS the evidence table above. Without it `_MODEL_PROFILES` is a
+    # hand-list against a catalogue of hundreds, which is the shape that goes stale and then answers
+    # wrongly; the whole reason the table may narrow a search axis is that a human can cheaply
+    # re-measure it. It runs through `get_llm_client().chat`, not a raw request, so it reports what
+    # this repo SENDS.
     # +1: `runner/inner/spawn_context.py`. One module bought 24 deferred imports, because the two
     # halves it separates point opposite ways: publishing an inner-spawn context is something the
     # ordinary runner does on its way past, while RUNNING an inner campaign reaches back down into
     # that runner. Sharing one file made `entry <-> spawn` mutual and `seed_screen` a third leg.
-    # +1: `application/ab.py` — the `ab` verb's session half, beside `verify.py` / `noise_floor.py`.
-    # The CLI shell held it and opened the session off the ACTIVE pointer, which is why `ab` could
-    # not name a campaign. The replay core stays beside the replayers it shares with resume
-    # (`mask/verdicts.py`), and the half that calls `init_services` cannot join it there without a
-    # runtime `optimization -> initialization` edge.
+    # +1: `application/diagnostics/ab.py` — the `ab` verb's session half, beside `verify.py` /
+    # `noise_floor.py`. The CLI shell held it and opened the session off the ACTIVE pointer, which
+    # is why `ab` could not name a campaign. The replay core stays beside the replayers it shares
+    # with resume (`mask/verdicts.py`), and the half that calls `init_services` cannot join it
+    # there without a runtime `optimization -> initialization` edge.
     # +3: `application/commands/` (an empty `__init__` plus three modules for one). The dispatcher
     # imports no FastAPI and the CLI verbs dispatch through it, so it is application code. Split by
     # importer: `payloads` alone serves the TS builder and the CLI's run-limit check,
     # `checkin_dispatch` serves dataset ingest and CLI `new`, and `dispatcher` holds the appliers.
-    "modules": 348,
+    # +6 (three of them `__init__`s): `application/evidence/` splits the evidence read into the
+    # address grammar (`subjects`, all an entry point that only ADDRESSES a subject imports), the
+    # disk walk (`read`) and the two pure statistics over its rows (`comparison`, `grid`); and
+    # `diagnostics/` + `maintenance/` gather the verbs loose at `application/`'s top level.
+    "modules": 354,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
-    "init_files": 50,
+    # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
+    "init_files": 53,
     # +1: `judges/__init__.py` — flagged for the same reason `connectors/__init__.py` is, and by
     # the same text test: a registry module has both an `__all__` and imports. Named rather than
     # emptied; the protocol types are deliberately NOT re-exported through it.
@@ -171,7 +177,9 @@ LEDGER_BASELINE = {
     # `connectors/CLAUDE.md` because its load-bearing rule is the OPPOSITE concern: a connector
     # says where a measurement comes from, a judge says a grader is a measurement and never a
     # formula term — and that rule is what stops six re-derivation sites re-billing the archive.
-    "claude_md": 8,
+    # +1: `application/evidence/CLAUDE.md` — the evidence rules, apart from `application/CLAUDE.md`
+    # so only a reader editing that package pays for them.
+    "claude_md": 9,
     # SIX by charter (`tests/CLAUDE.md` § What each file is for). This row never rises: a test
     # rides an existing file's existing section, or it is not written.
     "test_files": 6,

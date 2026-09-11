@@ -186,7 +186,7 @@ provisional, and say so rather than passing it on.
   more slowly and a round to cost a little more.
 - **The right toolkit exists and is only PARTLY on this path.** `holm_adjusted`,
   `exact_paired_reading`, `exact_p_floor`, `cells_for_exact_verdict`, `min_detectable_effect`,
-  `panel_precision` are wired to `application/evidence.py`, the offline read verb, and to nothing
+  `panel_precision` are wired to `application/evidence/`, the offline read verb, and to nothing
   the election calls. One member crossed over: `sign_posterior` bounds the ELIMINATION threshold
   (`candidate-elimination.md` § The θ rule, step 4), because a bar is absolute and a rank is not.
   The election still ranks on the unbounded posterior, and deliberately — bounding it moved a

@@ -280,7 +280,7 @@ class LiveDashboardState(StrictModel):
     # which left every round-axis surface showing a round with no price on it.
     #
     # PER ROUND, not cumulative: the atom is what a bar needs and what a cumulative series is
-    # summed FROM, and the reverse does not hold. `evidence.py::_spend_to_round` folds these
+    # summed FROM, and the reverse does not hold. `evidence/read.py::_spend_to_round` folds these
     # forward for its own cumulative reading rather than walking the ledger a second time.
     #
     # A call carrying no `round` banks at "0" — it ran before any round closed (init, the origin

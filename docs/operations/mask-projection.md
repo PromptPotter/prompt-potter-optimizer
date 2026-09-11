@@ -81,7 +81,7 @@ among them and invents none.
 
 What the evidence read serves back per masked channel — the round the two part, who each reading
 stood on there, invariant rounds, samples scored, and the caveat as a served sentence — is
-`ScenarioReading` (`application/evidence.py`). The caveat is the same boundary this section
+`ScenarioReading` (`application/evidence/subjects.py`). The caveat is the same boundary this section
 already draws: θ is not re-fitted and no election is replayed, so the round it names is where the
 two readings part rather than a verdict the campaign reached.
 

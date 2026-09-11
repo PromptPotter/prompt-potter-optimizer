@@ -139,9 +139,9 @@ class StepCyclePayload(CyclePayload):
 class VerifyCandidatePayload(CyclePayload):
     """``samples`` omitted is the ANSWER, not an absence: the count is derived from the
     per-candidate round budget and the rounds run since this cycle's last verification
-    (``application/verify.py::derive_verify_samples``). A larger explicit count is refused,
-    naming the budget — which is what keeps one click on a million-row dataset from being a
-    million-cell bill."""
+    (``application/diagnostics/verify.py::derive_verify_samples``). A larger explicit count is
+    refused, naming the budget — which is what keeps one click on a million-row dataset from being
+    a million-cell bill."""
 
     label: str = Field(min_length=2, max_length=32, pattern=r"^C(0|\d+\.[1-9]\d*)$")
     samples: WireInt | None = Field(default=None, ge=1, le=10_000)

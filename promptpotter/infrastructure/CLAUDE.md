@@ -23,7 +23,7 @@ the election) so nothing decides per-key at the seam what serializes. Measured b
 prompt stored three times, twice in the same file, and 37 of 39 MB of `pipeline_data` was the
 archive's own bytes — 102.6 MB of ledger, 56.6% of it duplication.
 
-**A resume-critical fact must be a declared field on the persisted half.** `EscalationFSM.fold` read its L2/L3 counters out of `payload["data"]`, which never reached disk, so every resume rebuilt both layers as never-fired and re-spent budget already spent — no error, just zeros. When a shape moves like that, `application/restamp.py::compact_cycle_ledgers` is where already-written data is lifted across, and it CALLS the writer's projections rather than restating them.
+**A resume-critical fact must be a declared field on the persisted half.** `EscalationFSM.fold` read its L2/L3 counters out of `payload["data"]`, which never reached disk, so every resume rebuilt both layers as never-fired and re-spent budget already spent — no error, just zeros. When a shape moves like that, `application/maintenance/restamp.py::compact_cycle_ledgers` is where already-written data is lifted across, and it CALLS the writer's projections rather than restating them.
 
 **Newtype-guarded projections** under `projections/`:
 

@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import logging
 
-from promptpotter.application.ab import ab_replay_campaign
+from promptpotter.application.diagnostics.ab import ab_replay_campaign
 from promptpotter.application.optimization.resume_and_fork.ab_replay import AbReplayError
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT

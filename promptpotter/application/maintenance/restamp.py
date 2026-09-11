@@ -29,12 +29,12 @@ from typing import Any, NamedTuple, Union, get_args, get_origin
 import yaml
 from pydantic import BaseModel, ValidationError
 
-from promptpotter.application.archive_maintenance import (
+from promptpotter.application.campaign_config import CampaignConfig, freeze_campaign_config
+from promptpotter.application.maintenance.archive_maintenance import (
     archive_writers,
     iter_cycle_ledgers,
     workspace_trees,
 )
-from promptpotter.application.campaign_config import CampaignConfig, freeze_campaign_config
 from promptpotter.application.run_observers import QUERY_PREVIEW_CHARS
 from promptpotter.application.views.view_models import (
     L2RefineExitView,

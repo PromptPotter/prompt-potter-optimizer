@@ -237,8 +237,8 @@ def reset_measurement_run(stores: Stores, run_id: str) -> None:
 # -- field compaction ---------------------------------------------------------
 #
 # The facade half of the archive's cold store. These are deliberately thin: WHICH fields move is
-# a policy the application layer owns (`application/archive_maintenance.py`), and the archive owns
-# the paths, the fold-key ordering invariant and the atomic swap.
+# a policy the application layer owns (`application/maintenance/archive_maintenance.py`), and the
+# archive owns the paths, the fold-key ordering invariant and the atomic swap.
 
 
 def maintenance_runs(stores: Stores, *, dataset_name: str | None = None) -> list[dict[str, Any]]:

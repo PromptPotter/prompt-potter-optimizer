@@ -100,7 +100,7 @@ harbor = [
     "harbor>=0.22.0,<0.23",
 ]
 jupyter = [
-    "jupyterlab>=4.0",  # why kept: notebook UI for `notebooks/optimization_campaign.ipynb`
+    "jupyterlab>=4.0",  # why kept: notebook UI for `notebooks/bbeh_potter.ipynb`
     "ipython>=8.0",     # why kept: in-notebook HTML rendering (presentation/views/completion.py)
 ]
 stats = [

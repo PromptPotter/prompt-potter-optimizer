@@ -9,7 +9,7 @@ from promptpotter.application.optimization.pobb.classification import (
     get_ranked_items,
     ranked_item_keys_from_schema,
 )
-from promptpotter.application.scoring.diagnostics import (
+from promptpotter.application.scoring.row_diagnostics import (
     extract_sample_diagnostics,
     rank_ground_truth,
 )

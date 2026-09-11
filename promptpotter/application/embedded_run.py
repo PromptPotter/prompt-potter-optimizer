@@ -14,15 +14,15 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.archive_maintenance import (
+from promptpotter.application.initialization.session import Session
+from promptpotter.application.initialization.wiring import init_services
+from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
+from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
     purge_cold_store,
     reindex_measurement_archive,
     restore_measurement_archive,
 )
-from promptpotter.application.initialization.session import Session
-from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
 from promptpotter.application.origin import CampaignOrigin, prepare_scoring_context
 from promptpotter.application.run_observers import RunObservers, build_run_observers
 from promptpotter.application.runner.entry import RunMode, run_optimization

@@ -402,7 +402,7 @@ paths:
 
         Spends, so it sits at `campaign.run` rather than with the step verbs. The loop fires the
         same application function by itself when a round reads 100%
-        (`application/verify.py::verify_on_saturation`), bounded in cadence as well as cells.
+        (`application/diagnostics/verify.py::verify_on_saturation`), bounded in cadence as well as cells.
       tags: [cycle-control]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1417,7 +1417,7 @@ paths:
           required: false
           description: |
             Which searchpoint to resolve, in the ONE subject grammar
-            (`application/evidence.py::parse_subject`): `campaign:<id>`,
+            (`application/evidence/subjects.py::parse_subject`): `campaign:<id>`,
             `course:<id>/<cycle>/<label>`, `candidate:<id>/<cycle>/<cand_id>`,
             each optionally suffixed `;in=<hop chain>` for an L4 inner point.
             Omitted defaults to `campaign:<campaign_id>`. `;lens=` and

@@ -10,7 +10,6 @@ from fastapi import APIRouter, Header, Path, Request
 from fastapi.routing import APIRoute
 from pydantic import Field, ValidationError
 
-from promptpotter.application.archive_maintenance import ArchiveReport
 from promptpotter.application.commands.checkin_dispatch import (
     dispatch_draft_patch,
     dispatch_origin_resolution,
@@ -33,6 +32,7 @@ from promptpotter.application.commands.payloads import (
 )
 from promptpotter.application.jobs.launcher.checkin import start_checkin_campaign
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
 from promptpotter.domain.command_kinds import (
     ALL_DISPATCHED_KINDS,
     CampaignConfigKind,

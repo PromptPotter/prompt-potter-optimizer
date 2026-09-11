@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import logging
 
-from promptpotter.application.verify import VerifyError, verify_candidate
+from promptpotter.application.diagnostics.verify import VerifyError, verify_candidate
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.cycle_paths import CycleHop

@@ -8,6 +8,7 @@ from typing import NamedTuple
 from fastapi import Query, Request, Response
 from fastapi.responses import JSONResponse
 
+from promptpotter.application.evidence.subjects import LENS_SCORE_PREFIX
 from promptpotter.application.mask.divergence import Verdict, find_divergences
 from promptpotter.application.mask.load import load_mask_record, parse_sample_ids
 from promptpotter.application.mask.record import MaskRecord
@@ -205,12 +206,12 @@ def _resolve_lens(lens: str | None) -> _Lens:
                 f"Unknown abort lens: {variant!r} (expected one of {sorted(_ABORT_SUPPRESS)})"
             )
         return _Lens(make_abort_verdict(suppress), None)
-    if lens and not lens.startswith("score:"):
+    if lens and not lens.startswith(LENS_SCORE_PREFIX):
         raise BadRequestError(
-            f"Unknown lens: {lens!r} (expected 'score:<formula>' or 'abort:<variant>')"
+            f"Unknown lens: {lens!r} (expected '{LENS_SCORE_PREFIX}<formula>' or 'abort:<variant>')"
         )
     try:
-        criterion = compile_round_scorer(lens.removeprefix("score:") if lens else None)
+        criterion = compile_round_scorer(lens.removeprefix(LENS_SCORE_PREFIX) if lens else None)
     except (ValueError, SyntaxError) as exc:
         raise BadRequestError(f"Invalid mask scoring formula: {exc}") from exc
     # No lens at all ⇒ a samples-only mask: the accuracy default folds, but nothing is served

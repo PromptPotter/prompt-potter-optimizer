@@ -3,15 +3,13 @@ the evaluator registry and the campaign's scoring formula. This is the COMPUTER;
 ingress that reaches it is ``search_point_scorer.py::score_search_point`` (§0.5), and confusing the
 gateway for the computer is the classic miss — a change to how the number is DERIVED lands here.
 
-Its two neighbours were split out of the same file: ``diagnostics.py`` (what a row reports) and
-``selection.py`` (which candidate wins)."""
+What a row reports is ``row_diagnostics.py``'s, and which candidate wins is ``selection.py``'s."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.pobb.classification import is_deprecated, scoreable_rows
-from promptpotter.application.scoring.diagnostics import count_degraded_samples
 from promptpotter.application.scoring.evaluators import (
     compute_accuracy,
     materialize_round_values,
@@ -21,6 +19,7 @@ from promptpotter.application.scoring.formula import (
     cell_channels_of,
     compile_round_scorer,
 )
+from promptpotter.application.scoring.row_diagnostics import count_degraded_samples
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

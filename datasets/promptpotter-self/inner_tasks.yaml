@@ -33,7 +33,7 @@ inner_benchmark_config:
     start: 2
     cap: 3
   inner_optimizer_temperature: 0.0
-# A seed picks WHICH 40 rows a cell draws (`application/seed_screen.py::draw_bank`, the ONE
+# A seed picks WHICH 40 rows a cell draws (`application/diagnostics/seed_screen.py::draw_bank`, the ONE
 # spelling — the runner imports it, so a screened bank and a run bank cannot diverge). These six
 # indices were 0-5 until 2026-08-02, chosen by nobody: they were simply the first six integers,
 # and THREE of them were bad in ways that cost real signal.

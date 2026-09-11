@@ -14,10 +14,10 @@ import httpx
 from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
 from promptpotter.application.optimization.pobb.classification import terminal_ranking
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
-from promptpotter.application.scoring.diagnostics import rank_ground_truth
 from promptpotter.application.scoring.evaluators import materialize_sample_values
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.formula.compiler import ScoringFormulaError
+from promptpotter.application.scoring.row_diagnostics import rank_ground_truth
 from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.l4.proxies import INNER_FACT_KEYS, PARENT_LEVEL_SE_KEY
 from promptpotter.domain.phases import RunPhase

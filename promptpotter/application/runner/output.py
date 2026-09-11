@@ -13,7 +13,7 @@ from promptpotter.application.intelligence.hard_sample_sorter import (
     build_hard_samples_artifact,
     build_hard_samples_artifact_from_observations,
 )
-from promptpotter.application.review_md import render_review_md
+from promptpotter.application.runner.review_md import render_review_md
 from promptpotter.application.views.render.markdown import to_markdown
 from promptpotter.application.views.view_models import (
     DigestStatusView,
@@ -285,10 +285,10 @@ def _spend_by_round(layout: CycleLayout) -> dict[str, SpendRollup]:
     """The projection's per-round spend split, read back off ``dashboard.json``.
 
     READ, never re-folded: the browser's cost strip and the ``log.md`` round line are the same
-    number or one of them is wrong, and the ledger walk that used to live in ``evidence.py`` was
-    already a second arithmetic for it. Empty for a cycle with no dashboard on disk — a foreign
-    fork sibling, or one that has not yet billed anything. A malformed entry is SKIPPED rather
-    than defaulted: an unreadable rollup is not a free round."""
+    number or one of them is wrong, and a ledger walk here is a second arithmetic for it. Empty
+    for a cycle with no dashboard on disk — a foreign fork sibling, or one that has not yet billed
+    anything. A malformed entry is SKIPPED rather than defaulted: an unreadable rollup is not a
+    free round."""
     raw = (read_json_tolerant(layout.dashboard, {}) or {}).get("spend_by_round")
     if not isinstance(raw, dict):
         return {}

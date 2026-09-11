@@ -83,7 +83,7 @@ class Connector:
     arming lasts.** A connector cannot see whether the walk in front of it sits inside a round;
     ``_bind_run_controls`` binds an arming only under ``run_optimization``, so the round spends
     every press, and a screen declares its depth at launch instead
-    (``application/seed_screen.py``)."""
+    (``application/diagnostics/seed_screen.py``)."""
 
     measured_unit: MeasuredUnit = "sample"
     """What one measured row of this backend is CALLED: ``cell`` where it is a whole inner campaign

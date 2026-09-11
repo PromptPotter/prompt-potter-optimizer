@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 
 from promptpotter.application.campaign_config import CampaignConfig
+from promptpotter.application.diagnostics.verify import verify_on_saturation
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.indexes.axis import NOISE_THRESHOLD
 from promptpotter.application.optimization.cycle import Cycle
@@ -14,14 +15,13 @@ from promptpotter.application.optimization.escalation.state import NextAction
 from promptpotter.application.optimization.l1.critique import run_l1_critique
 from promptpotter.application.optimization.round_analysis import compute_round_diagnostics
 from promptpotter.application.optimization.validators.l1_strict import DROPPED_MANDATORY_PLACEHOLDER
-from promptpotter.application.output import (
+from promptpotter.application.run_observers import RunCallbacks
+from promptpotter.application.runner.output import (
     write_hard_samples_artifacts,
     write_log_md,
     write_review_md,
 )
-from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.application.runner.termination import BudgetGate
-from promptpotter.application.verify import verify_on_saturation
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.results import RoundResult

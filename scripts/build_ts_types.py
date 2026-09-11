@@ -18,33 +18,39 @@ from pydantic.fields import ComputedFieldInfo, FieldInfo
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO))
 
-from promptpotter.application.archive_maintenance import ArchiveReport
 from promptpotter.application.commands.payloads import (
     CommandAcceptedBody,
     OriginGateDecisionPayload,
 )
-from promptpotter.application.evidence import (
+from promptpotter.application.evidence.comparison import (
     ArmReplicate,
     Comparability,
-    EditSpread,
-    EffectProvenance,
-    Evidence,
     EvidencePower,
     EvidenceVariance,
+    MetricReading,
+    OrderConfound,
+    PairwiseComparison,
+)
+from promptpotter.application.evidence.grid import (
     FactorCell,
     FactorGridReading,
     FactorLevel,
     FactorReading,
-    MetricReading,
-    OrderConfound,
-    PairwiseComparison,
+)
+from promptpotter.application.evidence.metric_catalogue import MetricSpec
+from promptpotter.application.evidence.read import (
+    EditSpread,
+    EffectProvenance,
+    Evidence,
     RankedEdit,
+)
+from promptpotter.application.evidence.subjects import (
     ScenarioReading,
     SubjectMask,
     SubjectReading,
     WinnerChainPoint,
 )
-from promptpotter.application.evidence_metrics import MetricSpec
+from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
 from promptpotter.application.pipeline_resolve import CampaignPipelineResponse
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import (

@@ -452,8 +452,8 @@ def test_the_constant_answer_floor_is_undefined_without_labels() -> None:
     """
     import inspect
 
+    from promptpotter.application.diagnostics.seed_screen import SeedScreenError, class_floor
     from promptpotter.application.runner.inner import spawn
-    from promptpotter.application.seed_screen import SeedScreenError, class_floor
 
     labelled = [Sample(id=i, query=f"q{i}", ground_truth="A" if i else "B") for i in range(4)]
     assert class_floor(labelled) == 0.75
@@ -915,8 +915,8 @@ def test_ruler_id_names_the_scale_a_theta_was_read_on() -> None:
     # THE ANCHOR, NOT THE MEMBERSHIP. Anchored extension adds cells without moving the ones
     # already there, so a θ read before and after are on ONE scale and must share an id. Hashing
     # the membership would churn it every round, read a cycle as incomparable with ITSELF, and —
-    # since `evidence.py` reads round 0's id into `Comparability` — poison cross-campaign
-    # comparison too.
+    # since `evidence/` reads round 0's id into `Comparability` — poison cross-campaign comparison
+    # too.
     grown = extend_ruler(fitted, [Observation("arm", 1, 1.0), Observation("arm", 9, 0.0)])
     assert set(grown.delta) == {1, 2, 3, 9}
     assert grown.anchor_id == fitted.anchor_id
@@ -3075,7 +3075,10 @@ def test_a_verify_is_bounded_by_the_budget_the_campaign_already_set() -> None:
     whatever was typed, and an AUTOMATIC verify with no cap would buy it every perfect round."""
     from types import SimpleNamespace
 
-    from promptpotter.application.verify import derive_verify_samples, rounds_since_verified
+    from promptpotter.application.diagnostics.verify import (
+        derive_verify_samples,
+        rounds_since_verified,
+    )
 
     def n(lift: int, unmeasured: int = 10_000) -> int:
         return derive_verify_samples(

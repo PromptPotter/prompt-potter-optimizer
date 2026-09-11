@@ -10,7 +10,7 @@ from promptpotter.application.optimization.pobb.classification import (
     get_ranked_items,
     ranked_item_keys_from_schema,
 )
-from promptpotter.application.scoring.diagnostics import find_rank
+from promptpotter.application.scoring.row_diagnostics import find_rank
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.rendering import display_fitness, display_rank_key, fmt_pct
 from promptpotter.domain.results import is_round_winner, overlap_series
