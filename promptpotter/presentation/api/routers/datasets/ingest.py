@@ -151,7 +151,7 @@ async def upload_candidate_library(
     return await dispatch_draft_patch(
         stores,
         draft_id=draft_id,
-        patch=EditDraftPatch(candidate_library=terms),
+        patch=EditDraftPatch(candidate_library=list(terms)),
         idempotency_key=idemp,
     )
 
@@ -203,7 +203,7 @@ async def build_candidate_library_from_column(
     return await dispatch_draft_patch(
         stores,
         draft_id=body.draft_id,
-        patch=EditDraftPatch(candidate_library=terms),
+        patch=EditDraftPatch(candidate_library=list(terms)),
         idempotency_key=idemp,
     )
 

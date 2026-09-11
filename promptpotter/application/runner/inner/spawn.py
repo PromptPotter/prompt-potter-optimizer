@@ -536,7 +536,8 @@ async def _run_inner_campaign(
     # A bank paying MORE for answering one label than for reasoning cannot measure an optimizer
     # prompt. REPORTED, never enforced: one origin pass sits inside its own error bar, so
     # rejecting a seat on it is the single-pass error the screen itself stopped making.
-    if bank_floor is not None and bank_floor >= result.origin_accuracy:
+    origin_acc = result.origin_accuracy
+    if origin_acc is not None and bank_floor is not None and bank_floor >= origin_acc:
         logger.warning(
             "inner cell %s/seed-%d MAY REWARD COLLAPSE: constant-answer floor %.3f >= this "
             "run's origin %.3f over %d rows. One pass sits inside its own error bar — re-screen "
@@ -544,7 +545,7 @@ async def _run_inner_campaign(
             spec.inner_dataset,
             spec.seed,
             bank_floor,
-            result.origin_accuracy,
+            origin_acc,
             len(train_data),
         )
     return result

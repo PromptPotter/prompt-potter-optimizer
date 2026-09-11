@@ -4,7 +4,7 @@ import json
 import logging
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import (
@@ -102,7 +102,7 @@ async def rescore_parent(
     )
     return RoundParent(
         opt_sp=cycle.opt_sp,
-        results=results,
+        results=cast("list[dict[str, Any]]", results),
         # The gateway's OWN answer — never re-run `compute_composite_fitness` over the same
         # rows, which drops the evaluator namespace on the way.
         report=build_score_report(

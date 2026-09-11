@@ -10,6 +10,7 @@ from promptpotter.application.verify import VerifyError, verify_candidate
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.rendering import fmt_pct
 from promptpotter.domain.results import parse_candidate_label
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
@@ -62,7 +63,8 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
 
     record = outcome.record
     human = (
-        f"{args.label}: acc {record.source_campaign_accuracy:.3f}→{record.workspace_accuracy:.3f} "
+        f"{args.label}: acc {fmt_pct(record.source_campaign_accuracy, '{:.3f}')}"
+        f"→{record.workspace_accuracy:.3f} "
         f"(cf {record.source_campaign_composite:.3f}→{record.workspace_composite:.3f}) "
         f"on {record.workspace_n} samples (+{record.samples_added} new from "
         f"{record.source_campaign_n} in campaign"

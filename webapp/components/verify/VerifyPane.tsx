@@ -123,7 +123,11 @@ function VerifyRow({ run }: { run: DiagnosticRunRecord }) {
       <td className="verify-num">{fmtFitness(run.source_campaign_composite)}</td>
       <td className="verify-num">{fmtFitness(run.workspace_composite)}</td>
       <td className="verify-bar-cell">
-        <TrendBar source={run.source_campaign_accuracy} workspace={run.workspace_accuracy} />
+        {run.source_campaign_accuracy === null ? (
+          "—"
+        ) : (
+          <TrendBar source={run.source_campaign_accuracy} workspace={run.workspace_accuracy} />
+        )}
       </td>
       <td className="verify-when">{ageText(run.ts)}</td>
     </tr>

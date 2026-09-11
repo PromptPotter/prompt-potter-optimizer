@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from promptpotter import connectors
 from promptpotter.domain.search_point import has_framing
@@ -29,7 +29,7 @@ class DatasetRef:
     name: str
     title: str | None
     n_samples: int | None
-    tier: str  # "yours" | "install"
+    tier: Literal["yours", "install"]
 
 
 def dataset_pipeline_path(dataset_dir: Path) -> Path:

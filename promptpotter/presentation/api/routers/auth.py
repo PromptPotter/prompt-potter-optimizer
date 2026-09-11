@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Literal, cast
 from urllib.parse import quote_plus
 
-from fastapi import APIRouter, BackgroundTasks, Path, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Path, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import Field
 
@@ -584,8 +584,8 @@ def accept_terms(body: AcceptTermsBody, stores: StoresDep) -> TermsConsent:
 @auth_router.get("/activity", response_model=ActivityResponse)
 def activity(
     stores: StoresDep,
-    window: Annotated[str, Query(pattern=r"^(15m|30m|1h|3h|1d|2d|1w|1mo|1y)$")] = "1d",
-    group_by: Annotated[str, Query(pattern=r"^(model|api_key)$")] = "model",
+    window: ActivityWindow = "1d",
+    group_by: ActivityGroupBy = "model",
 ) -> ActivityResponse:
     """Time-bucketed spend / requests / tokens over the requested window.
 

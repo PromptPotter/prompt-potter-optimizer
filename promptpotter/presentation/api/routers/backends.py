@@ -76,7 +76,9 @@ async def get_backend_health(backend_id: str, stores: StoresDep) -> BackendHealt
     # sentinel. `check_status` returns the backend's status dict on success
     # (its `status` may be absent or backend-specific) and {status:unreachable|error}
     # on failure — only those two sentinels are non-live.
-    status = raw if raw in ("unreachable", "error") else "live"
+    status: BackendReachability = (
+        "unreachable" if raw == "unreachable" else "error" if raw == "error" else "live"
+    )
     detail = probe.get("error") if status != "live" else None
     return BackendHealthResponse(
         backend_id=backend_id,

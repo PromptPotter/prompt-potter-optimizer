@@ -457,7 +457,7 @@ def _build_cycle_result(
     return CycleResult(
         rounds=cycle_rounds,
         n_l1_rounds=len(cycle_rounds),
-        best_accuracy=cycle.tracking.best_accuracy if cycle is not None else 0.0,
+        best_accuracy=cycle.tracking.best_accuracy if cycle is not None else None,
         best_round=cycle.tracking.best_round if cycle is not None else 0,
         origin_accuracy=origin.report.accuracy,
         origin_composite_fitness=(
@@ -467,7 +467,8 @@ def _build_cycle_result(
         origin_level_se=origin_lv[1] if origin_lv is not None else None,
         round_parent_levels=[t for t, _ in levels],
         round_parent_level_ses=[se for _, se in levels],
-        round_budget=(cycle.config.optimization.max_rounds if cycle is not None else 0),
+        # An unlimited `max_rounds` declares no budget, which is what this field's 0 means.
+        round_budget=(cycle.config.optimization.max_rounds or 0) if cycle is not None else 0,
         winner_prompt_fields=best_sp.prompt_fields if best_sp else {},
         winner_pipeline_params=best_sp.pipeline_params if best_sp else None,
         stop_reason=stop_reason,

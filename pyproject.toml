@@ -236,6 +236,10 @@ namespace_packages = false
 # stat() tax that dominated every warm run.
 sqlite_cache = true
 
+# Without it a model's `__init__` takes `**Any`, so no constructor call is type-checked.
+[tool.pydantic-mypy]
+init_typed = true
+
 # Deps we never type-check through. `follow_imports = "skip"` (not just
 # ignore_missing_imports, a no-op when the package is installed + typed) stops
 # mypy expanding their bodies. The tree this was sized against is gone: `mlflow`

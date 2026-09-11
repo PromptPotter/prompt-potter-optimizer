@@ -209,7 +209,7 @@ export interface DiagnosticRunRecord {
   workspace_n: number;
   workspace_accuracy: number;
   workspace_composite: number;
-  source_campaign_accuracy: number;
+  source_campaign_accuracy: number | null;
   source_campaign_composite: number;
   source_campaign_n: number;
   noise_floor_k: number | null;
@@ -454,7 +454,7 @@ export interface RoundResult {
   ability: AbilityReading | null;
   prompt_fields: Record<string, unknown>;
   pipeline_params: Record<string, unknown> | null;
-  parent_accuracy: number;
+  parent_accuracy: number | null;
   results: Record<string, unknown>[];
   all_candidate_results: Record<string, Record<string, unknown>[]>;
   parent_results: Record<string, unknown>[];

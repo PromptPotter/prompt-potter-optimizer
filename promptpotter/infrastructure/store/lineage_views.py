@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Literal, NamedTuple
+from typing import Any, Literal, NamedTuple, TypedDict
 
 from pydantic import ConfigDict, Field
 
@@ -430,13 +430,28 @@ def _round_facts(ledger_path: Path, candidates: list[LedgerCandidate]) -> dict[s
     return out
 
 
+class _CourseScalars(TypedDict):
+    course_kind: CourseKind
+    status: str
+    run_phase: RunPhase | None
+    trigger: str
+    fork_direction: ForkDirection | None
+    steered_by: str | None
+    task: str | None
+    dataset_name: str
+    best_accuracy: float | None
+    origin_accuracy: float | None
+    hearts: int | None
+    lives_cap: int | None
+
+
 def _course_scalars(
     stores: Stores,
     hop: CycleHop,
     index: dict[str, object],
     reads: _Reads,
     dash: dict[str, object],
-) -> dict[str, object]:
+) -> _CourseScalars:
     """The course's own facts: topology from ``index.json``, live ♥ from the dashboard."""
     layout = _layout(stores, hop)
 
@@ -456,9 +471,7 @@ def _course_scalars(
         "course_kind": kind,
         "status": str(index.get("status") or ""),
         # The ONE run-phase derivation, the same call `/cycles` makes.
-        "run_phase": str(
-            derive_run_phase(layout.cycle_dir, is_terminal=bool(index.get("finished_at")))
-        ),
+        "run_phase": derive_run_phase(layout.cycle_dir, is_terminal=bool(index.get("finished_at"))),
         "trigger": str(fork.get("trigger") or ""),
         "fork_direction": _fork_direction(fork),
         "steered_by": _str_or_none(fork.get("issued_by")),

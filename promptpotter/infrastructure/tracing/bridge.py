@@ -247,7 +247,7 @@ class ObservabilityBridge:
         self,
         tracing_campaign_id: str,
         *,
-        best_accuracy: float,
+        best_accuracy: float | None,
         n_l1_rounds: int,
         stop_reason: str,
         best_round: int,

@@ -453,13 +453,13 @@ async def l1_score(
         pipeline_params=strip_rendered_prompt(
             params_by_id.get(winner_id, pipeline_params) if winner_id else pipeline_params
         ),
-        results=best_results,
-        all_candidate_results=dict(all_candidate_results),
+        results=cast("list[dict[str, Any]]", best_results),
+        all_candidate_results=cast("dict[str, list[dict[str, Any]]]", dict(all_candidate_results)),
         # The bar, banked with the arms that were held to it. Every scalar this round stamps
         # about the parent — `parent_accuracy`, `matched_parent_*`, the θ the election fit under
         # `PARENT_ABILITY_ID` — is read off exactly these rows, and none of them could be
         # re-derived, masked or checked without them.
-        parent_results=list(parent_election_results),
+        parent_results=cast("list[dict[str, Any]]", list(parent_election_results)),
         candidates_scored=len(scored),
         electable_count=len(electable),
         candidate_scores=candidate_scores,
