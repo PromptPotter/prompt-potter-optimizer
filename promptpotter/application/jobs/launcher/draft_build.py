@@ -105,11 +105,7 @@ def _draft_schema_source(draft: DraftCampaign) -> str:
     resolution — a campaign read has a schema whoever answered for it."""
     if draft.backend_nodes:
         return "backend"
-    return (
-        "local"
-        if connectors.CONNECTORS[draft.connector].in_process_run is not None
-        else "unreachable"
-    )
+    return "local" if connectors.get(draft.connector).in_process_run is not None else "unreachable"
 
 
 def draft_wire(draft: DraftCampaign, workspace: Path | None = None) -> dict[str, Any]:

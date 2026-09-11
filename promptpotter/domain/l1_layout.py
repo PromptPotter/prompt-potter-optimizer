@@ -384,7 +384,7 @@ def default_l1_layout() -> L1Layout:
 
 # Import-time exhaustiveness — the same structural contract `validate_l1_layout` enforces per
 # edit, asserted at module load so a drift in any node's spec fails at the source. The
-# INJECTIONS-membership half lives in the dispatch registry, because domain must not import
+# registry-membership half lives in `injection_table()`, because domain must not import
 # application; this half is pure set algebra.
 for _node, _spec in NODE_LAYOUTS.items():
     _floor_ph = set(_spec.floor.all_placeholders())

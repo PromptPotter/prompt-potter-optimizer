@@ -2,8 +2,7 @@
 
 Each connector packages everything PromptPotter needs to talk to one
 backend kind. A connector is one file under this package exporting a
-``Connector(...)`` binding (`protocol.py`), registered via the dict in
-`__init__.py`. Operating one is local too: model/provider switches go in
+``Connector(...)`` binding (`protocol.py`) as `CONNECTOR`. Operating one is local too: model/provider switches go in
 `datasets/{name}/pipeline.yaml::nodes.{name}.config`, picked from the menu
 `Connector.available_models` seeds into that file — never in the backend's repo.
 
@@ -29,9 +28,9 @@ operator instead of doing it themselves. The bar on any defect found while addin
 | `dspy` | `dspy_module.py` | `{query, prompt, params}` → the caller's `dspy.Module` | Noop (no remote service) | PromptPotter as a DSPy `Teleprompter` (`presentation/teleprompter.py`) |
 | `harbor` | `harbor.py` | `{query, prompt, model_name, agent_kwargs}` → one containerized Harbor trial (`in_process_run` → `Trial.create(...).run()`) | Noop (no remote service) | Tuning an agent that works in a sandbox, graded by the task's own verifier |
 
-> **`import dspy` is function-local, and must stay that way.** `__init__.py` imports every
-> built-in eagerly, so a module-level import would break `import promptpotter.connectors` for
-> every install that did not ask for the `[dspy]` extra — which is all of them by default. The
+> **`import dspy` is function-local, and must stay that way.** Building the table imports every
+> built-in, so a module-level import would break every run for every install that did not ask
+> for the `[dspy]` extra — which is all of them by default. The
 > caller-facing half (`presentation/teleprompter.py`) imports it at module level instead, because
 > its only importer is the caller and a missing extra should stop them there, by name.
 
@@ -79,7 +78,7 @@ or `in_process` (runs in this process, no HTTP). `BackendClient.run_query`
 backend's transport is a capability it declares, not a branch in the core loop.
 
 **The `in_process` arm is wired (SHIPPED).** `run_query` calls the
-connector-supplied `Connector.in_process_run(query, payload) -> {"data": {…}}` —
+connector-supplied `Connector.in_process_run(workload, query, payload) -> {"data": {…}}` —
 the same shape the scorer parses from an HTTP `/matches` body. The registry guard
 (`__init__.py`) enforces the pairing: an `in_process` connector MUST supply
 `in_process_run`, a `remote_http` one MUST NOT. Three connectors ride the seam today, and
@@ -87,6 +86,15 @@ the same shape the scorer parses from an HTTP `/matches` body. The registry guar
 container, spends real money and takes minutes, so it declares `measured_unit="cell"` exactly as
 the recursion does. **`in_process` is a statement about TRANSPORT — there is no HTTP — and about
 nothing else.**
+
+**Per-run state is the `workload` argument, never a ContextVar or a module cache.**
+`InProcessWorkload` (`protocol.py`) is built once by `init_services` and held by the run's own
+`BackendClient`: the `experiment_file` its samples came from, already through
+`Connector.resolve_experiment`, and the `program` an embedded host passes to `open_session`. The
+run's samples, its workload and its identity fingerprint all read that one resolved document.
+Sibling campaigns are sibling tasks each building their own client, so neither sees the other's.
+What an inner cell spawns UNDER is not the workload: it names a cycle init has not minted yet,
+and moves every round.
 
 - **`promptpotter` (Feature B, SHIPPED)** — `in_process_run` is a thin delegate to
   `application/runner/inner/spawn.py::run_inner_cycle`, because running a whole inner campaign is
@@ -100,7 +108,7 @@ nothing else.**
     because nesting blows past Windows' 260-char `MAX_PATH` at depth 1; flat stays shallow at every
     depth, so the **re-entrant** invariant holds and L5+ nests.
   - **The spawning cycle publishes its context** via `publish_inner_spawn_context` at the runner
-    seam, so this context-free hook can find where to sandbox and which inner benchmark to run.
+    seam, so the hook can find where to sandbox and which inner benchmark to run.
   - **Owner and asker are two facts, and a fork splits them.** `retarget_inner_spawn` moves only
     the *asker* (`spawned_by.outer_cycle_id`); the sandbox owner never follows a fork, because a
     repaired cell CONTINUING the campaign the parent banked is the whole point. One field meaning
@@ -117,9 +125,8 @@ nothing else.**
   `AgentConfig.skills`, because that is the injection channel Harbor already has and the artifact
   class the skill-evolution literature evolves; the frontmatter `description` is FIXED and never a
   search axis, since the agent sees only that eagerly and a candidate free to write its own could
-  win by making itself uninviting. **The panel is published from `extract_experiment`**, which
-  init already calls with the parsed `harbor_tasks.yaml` — a second channel carrying the same file
-  would be a redundant path, and `in_process_run` has no argument to carry pins in. **Trial
+  win by making itself uninviting. **The panel is the workload's `experiment`**, its published
+  roster pinned by `resolve_experiment`, and `extract_experiment` publishes nothing. **Trial
   scratch goes to the system temp dir, not the workspace**: Harbor nests
   `<trials_dir>/<trial>/<role>/…` and a workspace path is already deep, which is the same
   `MAX_PATH` wall that forced `.inner` flat. Nothing durable lives there — reward, digest and
@@ -237,13 +244,13 @@ about the run — which is how a declaration reaches every backend whose cells m
 
 ## Registering a connector
 
-**Declare a built-in as a data row in the `_BUILTIN` dict in `__init__.py` — never a
-`register()` call, and never an append to `CONNECTORS`.** `CONNECTORS` is not that dict:
-it is what `_load()` returns after merging `_BUILTIN` with the `promptpotter.connectors`
-entry points and running `_validate` over both. Appending to it post-import registers a
-connector that was never validated, which is the one thing the module exists to prevent.
-A connector shipped from **another** package declares the entry point instead and touches
-nothing here ([`stable-api.md`](../../docs/developer/stable-api.md) §1).
+**A built-in is a module under this package defining `CONNECTOR` — never a `register()` call, and
+every module here but `protocol` is one.** `registered()` walks them, merges the
+`promptpotter.connectors` entry points and runs `_validate` over both, once per process.
+**The connector table completes at a declared step, never at import** — owned by
+[`../application/CLAUDE.md`](../application/CLAUDE.md) § Subpackages; nothing here may read the
+table at module scope. A connector shipped from **another** package declares the entry point
+instead and touches nothing here ([`stable-api.md`](../../docs/developer/stable-api.md) §1).
 
 ## A connector is trusted code, not sandboxed — and that is stated, not implied
 
@@ -252,11 +259,11 @@ tenant tree and the identity store, exactly as a module we ship does. Entry poin
 weaken that boundary (anything that can install a distribution into this environment can
 already run code here), but they do make the trust *explicit*: installing a connector package
 is trusting its publisher completely, and this repo's capability scoping (ADR-0005) governs
-API principals, not in-process code. **`CONNECTOR_ORIGINS` is the audit surface** — it names
+API principals, not in-process code. **`connector_origins()` is the audit surface** — it names
 the distribution behind every registered key, including the ones that are ours.
 
 Two rules follow, both enforced in `_load` / `_validate`. **A plugin may not shadow a
-built-in:** `CONNECTORS["promptpotter"]` is read by name by the L4 inner runner
+built-in:** `get("promptpotter")` is read by name by the L4 inner runner
 (`application/runner/inner/tasks.py`), so which object answers that key is not a third
 party's call. **A broken plugin is fatal, never skipped:** skipping would trade a loud error
 naming the package for `connector 'x' not registered` at mint time, with nothing pointing at
@@ -264,10 +271,9 @@ the cause.
 
 **Discovery is two paths; validation is one. Deliberately.** Declaring our own two as entry
 points would be the tidier "single path", and it is wrong here: it makes
-`import promptpotter.connectors` depend on this distribution's installed metadata, so a plain
-source-tree run would find zero backends. The property worth protecting — a half-wired
-connector fails at import, never mid-campaign — lives in the validator, not in the channel it
-arrived through.
+the table depend on this distribution's installed metadata, so a plain source-tree run would
+find zero backends. The property worth protecting — a half-wired connector fails before a run
+spends, never mid-campaign — lives in the validator, not in the channel it arrived through.
 
 ## The credential rides the connector
 
@@ -277,7 +283,7 @@ the ONLY place a `BackendClient` is constructed** — it reads the token off the
 was handed. Never name a credential at a construction site: four sites once passed
 `settings.TERMNORM_TOKEN` to whatever connector had been resolved, so a second `remote_http`
 backend would have had TermNorm's secret POSTed to its host. An `in_process` connector has
-no wire, so declaring a token on one fails the registry guard at import.
+no wire, so declaring a token on one fails the registry guard.
 
 ## Conventions
 
@@ -285,13 +291,14 @@ no wire, so declaring a token on one fails the registry guard at import.
   No I/O, no logging beyond debug-level drops.
 - `extract_experiment` returns `(queries, index_terms)` — the index_terms
   list may be empty for connectors with no retrieval index.
-- **A declared `experiment_file` OWNS its dataset's panel, and `dataset_access.py::dataset_panel_rows` is
-  its ONE reader — init and every roster read (`/preview`, `/measurement-series`) resolve the bank
-  through it.** Ordered before the row ladder, never a fallback: rows cached under the same name
-  used to win, publishing no panel and leaving `_PANEL` unset while the run reported a healthy
-  sample count. A resolver that knows only MATERIALIZED banks answers a connector-owned one
-  EMPTY, which is not a fact about the dataset — hence one reader rather than a rule per surface.
-  Panel ORDER is the `sample_id` (`samples_from_dicts` numbers positionally).
+- **A declared `experiment_file` OWNS its dataset's panel, and
+  `dataset_access.py::dataset_experiment` is its ONE reader** — `init_services`, and every read
+  outside a run: `GET /datasets`, `/origins`, `/preview`, `/measurement-series` (polled every 8 s)
+  and the campaign pipeline. L4's `runner/inner/` is the exception: it re-reads its typed
+  `inner_tasks.yaml` per cell. Ordered before the row ladder, never a
+  fallback: rows cached under the same name describe a different instrument, and a resolver that
+  knows only MATERIALIZED banks answers a connector-owned one EMPTY, which is not a fact about the
+  dataset. Panel ORDER is the `sample_id` (`samples_from_dicts` numbers positionally).
 - **`query` is whatever addresses one unit of work, and on an episodic backend that is an ID.**
   A judge falling back to it then grades against an identifier, so a task carrying a real question
   declares it and it rides `Sample.question` (`domain/sample.py`) — the only channel that reaches

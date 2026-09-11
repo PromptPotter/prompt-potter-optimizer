@@ -4,13 +4,17 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import hashlib
 import json
 import logging
+import sys
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.knobs import check_couplings
+from promptpotter.application.optimization.dispatch import bundle as bundle_module
+from promptpotter.application.optimization.dispatch import compose
 from promptpotter.application.optimization.dispatch.bundle import (
     OPTIMIZER_DISCRETIONARY_CHARS,
     ArmReading,
@@ -28,12 +32,16 @@ from promptpotter.application.optimization.dispatch.compose import (
 from promptpotter.application.optimization.dispatch.compose import (
     select as compose_select,
 )
-from promptpotter.application.optimization.dispatch.injections.registry import INJECTIONS
+from promptpotter.application.optimization.dispatch.injections.registry import (
+    injection_table,
+    renderer_modules,
+)
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     load_optimizer_prompt,
     node_layout,
 )
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
+from promptpotter.domain import ruler
 from promptpotter.domain.escalation_signals import exploration_budget
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
@@ -44,8 +52,11 @@ from promptpotter.infrastructure.llm.telemetry import (
     reset_cycle_ledger,
     set_cycle_ledger,
 )
+from promptpotter.shared.hashing import module_source_digest
 
 if TYPE_CHECKING:
+    from types import ModuleType
+
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.domain.results import RoundResult
 
@@ -136,38 +147,13 @@ class MandatoryPanelStarvedError(Exception):
         )
 
 
-# Caller-supplied `compile_prompt` extras (not signals). Anything outside `INJECTIONS ∪ extras`
-# in a template body is a typo — `validate_template` raises rather than silently dropping it.
-_TEMPLATE_EXTRAS: dict[str, set[str]] = {
-    "l1_generate": {"n_variants", "citable_fields"},
-    "l1_critique": set(),
-    "l2_context": set(),
-    "l3_plan": set(),
-    "checkin": {"consultation_instruction"},
-}
-
-
-def validate_template(name: str, template: PromptTemplate) -> None:
-    """Raise KeyError if any ``{{slot}}`` isn't a signal or known extra (typo → silent empty render)."""
-    extras = _TEMPLATE_EXTRAS.get(name, set())
-    text = template.render()
-    referenced = set(TEMPLATE_TOKEN_RE.findall(text))
-    unknown = referenced - INJECTIONS.keys() - extras
-    if unknown:
-        raise KeyError(
-            f"Template {name!r} references unknown slot(s): {sorted(unknown)}. "
-            f"Add to INJECTIONS (dispatch/injections/registry.py) or to "
-            f"_TEMPLATE_EXTRAS[{name!r}] if the slot is a caller-supplied extra."
-        )
-
-
 class DispatchHub:
     @staticmethod
     def render_items(name: str, bundle: InjectionBundle) -> list[Item]:
         """One injection's placeable items. The ``char_cap`` backstop applies only where the
         composition cannot thin — raises become ``InjectionRenderError`` (halts with
         ``StopReason.RENDER_ERROR``)."""
-        sig = INJECTIONS.get(name)
+        sig = injection_table().get(name)
         if sig is None:
             raise KeyError(f"Unknown signal: {name}")
         try:
@@ -201,13 +187,14 @@ class DispatchHub:
         cycle's searchpoint (`node_layout`), so every caller that supplied one re-derived the same
         thing — and could hand a node another node's panel set. *node* also names the discretionary
         allowance this composition must fit, and its mandatory rail."""
+        table = injection_table()
         layout = node_layout(node, bundle.opt_sp)
         order = layout.all_placeholders()
         items = {name: DispatchHub.render_items(name, bundle) for name in order}
         budget = OPTIMIZER_DISCRETIONARY_CHARS.get(node, _NO_CEILING)
         # Which panels may be thinned is a property of what they CARRY, so it is asked of the kind
         # each signal already declares rather than kept as a second list here.
-        whole = frozenset(n for n in order if (sig := INJECTIONS.get(n)) and not sig.kind.divisible)
+        whole = frozenset(n for n in order if (sig := table.get(n)) and not sig.kind.divisible)
         mandatory = NODE_LAYOUTS[node].mandatory
         rendered, coverage = compose_select(items, order, budget, exempt=whole, mandatory=mandatory)
         # `l1_layout_missing_mandatory` (`domain/l1_layout.py`) guards these against L2 EXCISING
@@ -230,7 +217,7 @@ class DispatchHub:
 
         remaining = set(TEMPLATE_TOKEN_RE.findall(filled.render()))
         injection_vars = {
-            name: DispatchHub.render(name, bundle) for name in remaining if name in INJECTIONS
+            name: DispatchHub.render(name, bundle) for name in remaining if name in table
         }
         return FilledPrompt(filled, injection_vars, rendered, coverage)
 
@@ -412,12 +399,40 @@ def build_bundle(
     )
 
 
+def fingerprinted_modules() -> tuple[ModuleType, ...]:
+    """Every module whose source shapes an optimizer prompt, in digest order. The panels' text is
+    code, so it sits outside ``_identity_config``'s prompt templates and layouts; its estimator-side
+    twin is ``connectors/promptpotter.py::measurement_modules``.
+
+    ``bundle`` is hashed beside the renderers because the constants deciding how much of a panel a
+    prompt receives live there rather than in the renderer that spends them, ``compose`` because
+    it decides which of those panels a prompt receives AT ALL, and this module because it picks the
+    allowance and derives the mandatory/exempt sets those two are handed. A module that shapes the
+    prompt and is not hashed here pools corpora the fingerprint exists to keep apart — which is why
+    the renderer half is WALKED rather than listed, and why what a move costs is counted at the mint
+    (``jobs/mint.py::_warn_on_novel_instrument``) rather than pinned as a name census.
+
+    ``domain.ruler`` because ``theta_caveat`` and the two collapse thresholds decide whether the
+    ``confounds`` panel says a round's θ is ability at all — a verdict the served reading and the
+    panel share, so it shapes the prompt from outside this package.
+
+    Held here because this module imports every other member, and the registry cannot import it.
+    """
+    return (bundle_module, compose, sys.modules[__name__], ruler, *renderer_modules())
+
+
+@functools.cache
+def injection_source_digest() -> str:
+    return module_source_digest(*fingerprinted_modules())
+
+
 __all__ = [
     "DispatchHub",
     "InjectionRenderError",
     "MandatoryPanelStarvedError",
     "build_bundle",
+    "fingerprinted_modules",
     "injection_char_counts",
+    "injection_source_digest",
     "node_packages",
-    "validate_template",
 ]

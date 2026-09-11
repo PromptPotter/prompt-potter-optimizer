@@ -31,7 +31,7 @@ persona → task_intent → problem_description → instruction
 → thinking_style → answer_format → few_shot_examples → plan
 ```
 
-**Invariant:** no prompt site summarizes its own data. If a name isn't in `INJECTIONS`, it doesn't enter a prompt. **The render chain, the per-layer composition paths and the per-placeholder source map are owned by** [`dispatch-hub.md`](dispatch-hub.md) — read them there.
+**Invariant:** no prompt site summarizes its own data. If a name isn't in `injection_table()`, it doesn't enter a prompt. **The render chain, the per-layer composition paths and the per-placeholder source map are owned by** [`dispatch-hub.md`](dispatch-hub.md) — read them there.
 
 ### Field channels between layers
 
@@ -132,7 +132,7 @@ The archive is tenant-global and **never backend-scoped** — no read or write t
 
 Order for a contributor who wants to follow L1/L2/L3 end-to-end:
 
-1. [`dispatch-hub.md`](dispatch-hub.md) — signal routing, `INJECTIONS`, `L1Layout`, slot composition, the mermaid flow.
+1. [`dispatch-hub.md`](dispatch-hub.md) — signal routing, `injection_table()`, `L1Layout`, slot composition, the mermaid flow.
 2. [`dispatch-hub.md`](dispatch-hub.md) § Outputs — what L2 writes, and the layout edits it makes.
 3. [`../../promptpotter/application/optimization/CLAUDE.md`](../../promptpotter/application/optimization/CLAUDE.md) — L3 plan + per-layer agent contracts.
 4. [`self-healing-internals.md`](self-healing-internals.md) — wound channels, heal-trigger ladder.

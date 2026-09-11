@@ -7,23 +7,23 @@ per-layer `CLAUDE.md` files say *what* the rules are; this page says *where you
 type* and *which test catches you* if you miss a half.
 
 The pattern every recipe shares: **one registry is the source of truth, and an
-import-time assert proves nothing fell out of it.** A capability can't silently
+import- or init-time assert proves nothing fell out of it.** A capability can't silently
 disappear because the registry is code-derived and the assert walks it.
 
 **Where the guard lives.** Per [`tests/CLAUDE.md`](../../tests/CLAUDE.md) a test
 earns its place only if it catches *silent* harm; the structural / wire / shape
 suites were deliberately cut because those failures break loud. So most guards
-below are **import-time asserts beside the registry they validate**, not standing
+below are **import- or init-time asserts beside the registry they validate**, not standing
 tests. Add new ones the same way — never as a `test_structure` scan.
 
 | You want to add… | Recipe | What actually catches you |
 |---|---|---|
 | A telemetry event / ledger record | [§1](#1-a-ledger-record--telemetry-event) | Breaks loud in use — a union member with no `on_record` arm never reaches `dashboard.json`; on the tracing half, `ObservabilityBridge.__init__` raises on an unrouted `Event` |
-| A prompt injection (`{{slot}}`) | [§2](#2-a-prompt-injection) | Import-time: the `registry.py` guard + `validate_template()` |
+| A prompt injection (`{{slot}}`) | [§2](#2-a-prompt-injection) | Init-time: the `injection_table()` guard + `validate_template()` |
 | A dashboard / view field | [§3](#3-a-dashboard--view-field) | Breaks loud — a wrong/empty dashboard |
 | A resume / decision checkpoint | [§4](#4-a-resume--decision-checkpoint-kind) | Import-time: `decisions.py` + `replayers.py` asserts |
-| A connector (backend) | [§5](#5-a-connector-backend) | Import-time: the `CONNECTORS` registry guard |
-| An optimizer node | [§6](#6-an-optimizer-node) | Import-time: `validate_template()` at prompt load |
+| A connector (backend) | [§5](#5-a-connector-backend) | Init-time: the `registered()` registry guard |
+| An optimizer node | [§6](#6-an-optimizer-node) | `validate_template()` at prompt load |
 | A CLI verb | [§7](#7-a-cli-verb) | Import-time: the `COMMANDS` ↔ `parser_verbs` assert |
 | A control-plane command kind | [§8](#8-a-control-plane-command-kind) | Import-time: three asserts over `ALL_DISPATCHED_KINDS` — cap, payload model, **and the CLI verb** |
 | A served READ (a GET) | [§9](#9-a-served-read) | `gate.py --only openapi` / `--only ts-types`, but **only once the route carries a `response_model`** — a read without one is invisible to both, which is how several shipped undeclared |
@@ -84,7 +84,7 @@ Contract: [`application/CLAUDE.md`](../../promptpotter/application/CLAUDE.md) §
 
 ## 2. A prompt injection
 
-A `{{slot}}` the optimizer LLM sees. The registry is `INJECTIONS`
+A `{{slot}}` the optimizer LLM sees. The registry is `injection_table()`
 (`application/optimization/dispatch/injections/registry.py`); every renderer
 is a pure `(InjectionBundle) -> str`.
 
@@ -94,15 +94,15 @@ is a pure `(InjectionBundle) -> str`.
    (returns `""` when its source field is empty — empty injections are skipped).
 2. Decorate it with `@signal("<name>", kind=…, char_cap=…, citable=…)` — registration
    happens at the definition site; key and body are co-located, no separate
-   `INJECTIONS` edit.
+   registry edit.
 3. To make it reachable, add it to the node's `NODE_LAYOUTS[node].possible`
    (and `.floor` to put it on by default — for `l1_generate` these alias
    `L1_POSSIBLE`/`L1_MANDATORY`), or use `{{<name>}}` directly in a template.
 
-**Guard (import-time, no standing test):** the registry guard in `registry.py`
-fails loud at import if a `possible` name has no registered renderer, and
-`validate_template()` (at `load_optimizer_prompt`) raises at module load on any
-`{{slot}}` not in `INJECTIONS` — typos fail loud.
+**Guard (at registry completion, no standing test):** `injection_table()` fails loud if a
+`possible` name has no registered renderer, and
+`validate_template()` (at `load_optimizer_prompt`) raises at template load on any
+`{{slot}}` not in the registry — typos fail loud.
 
 Contract: [`dispatch-hub.md`](dispatch-hub.md) § L1 layout.
 
@@ -197,12 +197,12 @@ has one; `cli/commands/_shared.py` asserts the divergence hint lists every kind.
 
 ## 5. A connector (backend)
 
-A new backend kind — one file under `connectors/` plus a row in its `CONNECTORS` dict, owned
-step by step by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md).
+A new backend kind — one file under `connectors/` defining `CONNECTOR`, owned step by step by
+[`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md).
 
 **The usual reader here is not us** — it is someone with a backend already running who wants it
 optimized, working through it in one conversation. **The wiring is the easy half**: four required
-fields, and the guard below catches a half-wired one at import. Step 2 is what decides whether the
+fields, and the guard below catches a half-wired one before a run spends. Step 2 is what decides whether the
 campaign is worth running, and nothing about their backend tells you the answer. Each step's output
 is the next one's input.
 
@@ -262,9 +262,9 @@ instruments and neither is visible from a single cell. `seed-screen`, `noise-flo
 answer the sharper versions of this, and `evidence` answers whether two readings can be compared
 at all — [`persistence-and-state.md`](../operations/persistence-and-state.md).
 
-**Guard (import-time, no standing test):** the registry guard at the bottom of
-`connectors/__init__.py` raises at import if any row is half-wired, and its own raise
-enumerates every half-wiring it rejects — read the list there rather than a copy here.
+**Guard (at registry completion, no standing test):** `connectors/__init__.py::_validate` raises
+if any connector is half-wired, and its own raise enumerates every half-wiring it rejects — read
+the list there rather than a copy here.
 
 Three things the recipe cannot show you:
 
@@ -294,8 +294,8 @@ and registry live in [`developer/node-standard.md`](node-standard.md). A node re
 `PromptTemplate` through the same `DispatchHub` fill path as every other node —
 adding a slot it needs is §2.
 
-**Guard (import-time):** `validate_template()` at `load_optimizer_prompt` rejects any
-`{{slot}}` the node's template references that isn't in `INJECTIONS`. Keep every
+**Guard (at template load):** `validate_template()` at `load_optimizer_prompt` rejects any
+`{{slot}}` the node's template references that isn't in `injection_table()`. Keep every
 optimizer LLM call on the one `dispatch/llm_call/call.py::llm_call` path — an
 unwrapped LLM call is an automatic block at review (pre-flight gate), not a test.
 

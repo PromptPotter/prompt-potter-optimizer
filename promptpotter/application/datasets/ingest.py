@@ -35,6 +35,7 @@ from promptpotter.application.jobs.launcher.checkin import create_checkin_campai
 from promptpotter.application.jobs.launcher.draft_build import overlay_from_campaign_config
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.connectors import DEFAULT_CONNECTOR
+from promptpotter.connectors.protocol import PROBE_WORKLOAD
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
@@ -71,7 +72,7 @@ async def fetch_backend_nodes(
     connector = connectors.get(connector_name)
     if connector.execution == "in_process":
         return {}
-    client = build_backend_client(connector, backend_url)
+    client = build_backend_client(connector, backend_url, workload=PROBE_WORKLOAD)
     try:
         resp = await client.fetch_pipeline()
     except (KeyboardInterrupt, asyncio.CancelledError):

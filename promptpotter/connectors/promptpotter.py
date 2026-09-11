@@ -6,12 +6,27 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.connectors.protocol import Connector
+from promptpotter.application.intelligence import exploration
+from promptpotter.application.optimization.dispatch.facade import injection_source_digest
+from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+    optimizer_manifest,
+    optimizer_resolved_schemas,
+)
+from promptpotter.application.runner.inner import ruler
+from promptpotter.application.runner.inner.spawn import run_inner_cycle
+from promptpotter.application.scoring import metrics, selection
+from promptpotter.connectors.protocol import Connector, InProcessWorkload
+from promptpotter.domain.l1_layout import NODE_LAYOUTS
+from promptpotter.domain.l4 import proxies
 from promptpotter.domain.l4.inner_origin import INNER_ORIGIN_KEY
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY, OUTER_PROXY_KEYS
 from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.pipeline_schema import stable_hash
+from promptpotter.infrastructure.store.io import read_yaml_optional
+from promptpotter.shared.hashing import module_source_digest
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
     from types import ModuleType
 
@@ -48,16 +63,6 @@ def _inner_optimizer_revision(dataset_dir: Path) -> dict[str, Any]:
     body, its resolved output schema and its config. DERIVED from that declaration rather than a
     name list, so a surface that grows a node is covered without an edit here.
     """
-    # Deferred while `connectors/__init__` builds the registry at package import: anything this
-    # module pulls at top level is then reached BEFORE the package exists, and hoisting these makes
-    # `import promptpotter.connectors` fail on a partially initialized `injections.registry`. The
-    # heaviest of the three import-time-registry sites filed in `docs/specs/code-debt-cleanup.md`.
-    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
-        optimizer_manifest,
-        optimizer_resolved_schemas,
-    )
-    from promptpotter.infrastructure.store.io import read_yaml_optional
-
     # The PARSED manifest, never its bytes. Its siblings in this fingerprint already hash parsed
     # values, and the file is comment-bearing YAML — byte-hashing would void every banked outer
     # measurement the moment someone documented a node, a change with no behavioural content.
@@ -91,40 +96,28 @@ def measurement_modules() -> tuple[ModuleType, ...]:
     accumulate at all. These five modules are what genuinely decides the number: the composite,
     the election and its intervals, the ability fit the levels are expressed in, the SCALE that
     fit is read on, and the law that reads a finished inner cycle. Unlike its prompt-side twin
-    ``registry.fingerprinted_modules``, this roster is a CHOICE within the layer rather than a
+    ``facade.fingerprinted_modules``, this roster is a CHOICE within the layer rather than a
     package, so it is listed and pinned by ``tests/test_integrity.py`` instead of walked.
     """
-    from promptpotter.application.intelligence import exploration
-    from promptpotter.application.runner.inner import ruler
-    from promptpotter.application.scoring import metrics, selection
-    from promptpotter.domain.l4 import proxies
-
     return (exploration, metrics, selection, proxies, ruler)
 
 
 def _measurement_source_digest() -> str:
     """Same AST normalization as the prompt side — a docstring is free, an expression is not."""
-    from promptpotter.shared.hashing import module_source_digest
-
     return module_source_digest(*measurement_modules())
 
 
-def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
+def _identity_config(
+    dataset_dir: Path, inner_tasks: Mapping[str, Any] | None
+) -> dict[str, dict[str, Any]]:
     """The inner optimizer's effective-revision fingerprint: what the inner optimizer nodes resolve
     to, the per-node layouts, the panel and estimator source, and the inner benchmark's own config."""
-    from promptpotter.application.optimization.dispatch.injections.registry import (
-        injection_source_digest,
-    )
-    from promptpotter.domain.l1_layout import NODE_LAYOUTS
-    from promptpotter.domain.pipeline_schema import stable_hash
-    from promptpotter.infrastructure.store.io import read_yaml_optional
-
     inner_optimizer = _inner_optimizer_revision(dataset_dir)
     layouts = {name: spec.model_dump(mode="json") for name, spec in sorted(NODE_LAYOUTS.items())}
     # `layouts` names WHICH panels fill each prompt; this is what those panels SAY. The text
     # is code, so nothing above reaches it — see `injection_source_digest`.
     panel_text = injection_source_digest()
-    inner_tasks = read_yaml_optional(dataset_dir / "inner_tasks.yaml") or {}
+    inner_tasks = inner_tasks or {}
     # `config` only, deliberately. `available_models` is a permission list and
     # `optimizer.param_allowed_values` bounds what L1 may PROPOSE — neither changes what the
     # origin does, so widening either must not void a panel that cost an hour to measure.
@@ -229,11 +222,10 @@ def _extract_experiment(
     return queries, []
 
 
-async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Run an inner cycle and return its three proxy metrics. The runner sandboxes it under a FLAT
-    ``<workspace>/.inner/<key>/`` registry — never nested, because physical nesting blew MAX_PATH."""
-    from promptpotter.application.runner.inner.spawn import run_inner_cycle
-
+async def _in_process_run(
+    _workload: InProcessWorkload, query: str, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Run an inner cycle and return its three proxy metrics."""
     return await run_inner_cycle(query, payload)
 
 

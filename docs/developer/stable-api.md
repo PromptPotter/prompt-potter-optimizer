@@ -16,10 +16,11 @@ class Connector:
     session_factory: Callable[[], SessionProtocol]                  # fresh session per BackendClient
     extract_experiment: Callable[[dict], tuple[list[dict], list[str]]]  # → (queries, index_terms)
     execution: ConnectorExecution = "remote_http"                   # "remote_http" | "in_process" (no HTTP; TRANSPORT only)
-    in_process_run: InProcessRun | None = None                      # async (query, payload) -> {"data": …}; required iff in_process
+    in_process_run: InProcessRun | None = None                      # async (workload, query, payload) -> {"data": …}; required iff in_process
     required_observation_keys: tuple[str, ...] = ()                 # keys the payload ALWAYS carries; init RAISES if the dataset declares no mapping
     experiment_file: str = ""                                       # on-disk experiment doc read from the dataset dir in place of a sample table
-    identity_config: Callable[[Path], dict] | None = None           # per-node config folded into MEASUREMENT IDENTITY, not the wire
+    resolve_experiment: ExperimentResolver | None = None            # parsed experiment_file -> the document every read sees (a named roster pinned)
+    identity_config: Callable[[Path, Mapping | None], dict] | None = None  # (dataset dir, resolved experiment) -> MEASUREMENT IDENTITY, not the wire
     measured_unit: MeasuredUnit = "sample"                          # what ONE row is CALLED — "sample" | "cell"
     expected_revision: str | None = None                            # backend rev this PP rev expects (paired w/ version_check)
     version_check: VersionCheck | None = None                       # async (http, base_url) -> str | None; init WARNs on drift
@@ -37,6 +38,8 @@ Three of the fields above are on this page because omitting them produced WRONG 
 
 `SessionProtocol` (`promptpotter/domain/connector.py`): `async set_terms(http, base_url, terms)` (backend handshake; noop ok) · `async recover(http, base_url)` (re-establish after transport error).
 
+`InProcessWorkload` (`protocol.py`) is the run's own state, handed to every `in_process_run` call: `experiment` (the resolved `experiment_file` the samples came from, `None` without one) · `program` (what an embedded host passed to `open_session`, §5b; `None` otherwise). Per-run state rides it — never a ContextVar or a module cache.
+
 **Registering one, from your own package — no fork.** `promptpotter.connectors` is a published entry-point group:
 
 ```toml
@@ -46,17 +49,17 @@ anything = "my_package.connector:CONNECTOR"
 
 The object named must be a `Connector`; **its `name` field is the registry key**, so the entry-point label is free and a package cannot claim a key its connector does not declare. No edits to `application/campaign_config.py` or `infrastructure/backend.py`. Reference impls: [`connectors/termnorm.py`](../../promptpotter/connectors/termnorm.py), [`connectors/promptpotter.py`](../../promptpotter/connectors/promptpotter.py).
 
-**What a plugin is held to** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md); all three rules are enforced at import in `connectors/__init__.py`, whose raise names them. What this page promises is only that they will not tighten within v1.
+**What a plugin is held to** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md); all three rules are enforced in `connectors/__init__.py` when the table completes, and each raise names its rule. What this page promises is only that they will not tighten within v1.
 
-`CONNECTOR_ORIGINS` maps every registered name to `"built-in"` or `"<distribution>: <module>:<attr>"` (the entry point's *value*, not its label — the label is free, the value is what was imported), so a name that greps to nothing in this tree can still be traced to its package. Audit what is loaded with:
+`connector_origins()` maps every registered name to `"built-in"` or `"<distribution>: <module>:<attr>"` (the entry point's *value*, not its label — the label is free, the value is what was imported), so a name that greps to nothing in this tree can still be traced to its package. Audit what is loaded with:
 
 ```bash
-python -c "from promptpotter.connectors import CONNECTOR_ORIGINS as o; print(*o.items(), sep='\n')"
+python -c "from promptpotter.connectors import connector_origins as o; print(*o().items(), sep='\n')"
 ```
 
 ⚠️ **A connector is trusted code, not sandboxed** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md). What v1 promises here is narrower and worth saying out loud: entry points do **not** lower that bar, and no future version will make them a sandbox. The capability scoping in [ADR-0005](../adr/0005-delegated-principals-and-capability-scoping.md) governs API principals, not in-process code.
 
-Adding one *to this repo* is still one new file under `promptpotter/connectors/` plus a `_BUILTIN` entry. Built-ins are deliberately **not** declared as entry points: reading them from install metadata would make a source-tree run with no metadata find zero backends.
+Adding one *to this repo* is one new file under `promptpotter/connectors/` defining `CONNECTOR`. Built-ins are deliberately **not** declared as entry points: reading them from install metadata would make a source-tree run with no metadata find zero backends.
 
 **Contracts beyond `protocol.py`:** wire adapters MUST be pure `(query, pipeline_params) → dict` — no I/O, no logging above debug · `extract_experiment` MUST return `(queries, index_terms)` (the latter may be empty).
 
@@ -138,9 +141,9 @@ The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no 
 
 ---
 
-## 4. DispatchHub INJECTIONS keys
+## 4. DispatchHub injection keys
 
-`{{slot}}` names available in any optimizer prompt. Assembled into `dispatch/injections/registry.py::INJECTIONS` from the `@signal("<slot>", …)` decorator on each renderer (`injections/{panels,layer_state,catalogues,wounds}.py`). Adding a slot is one decorated renderer — key and body co-located. Using a slot not in the dict is a load-time `KeyError` via `validate_template`.
+`{{slot}}` names available in any optimizer prompt. Assembled into `dispatch/injections/registry.py::injection_table()` from the `@signal("<slot>", …)` decorator on each renderer (`injections/{panels,layer_state,catalogues,wounds}.py`). Adding a slot is one decorated renderer — key and body co-located. Using a slot not in the registry is a load-time `KeyError` via `validate_template`.
 
 **The stable contract is the mechanism, not the slot list** — the set evolves, so this page doesn't freeze a table that drifts. The live set is the registry itself; the doc-level reference with per-slot detail is [`dispatch-hub.md`](dispatch-hub.md) § Reference.
 
@@ -191,7 +194,7 @@ one campaign inside its own event loop:
 
 ```python
 session = await open_session(dataset_name, *, backend_url=…, backend_id=…, on_status=None,
-                             identity=None, stores=None)
+                             identity=None, stores=None, program=None)
 observers, dataset, origin = await mint_and_score_origin(
     session, train_data, campaign_config, *, pipeline_params=None, display=None, on_status=None)
 result = await run_campaign(observers, dataset, origin, campaign_config, *, session,
@@ -203,8 +206,10 @@ Three steps rather than one because every caller does its own work between them.
 the same `prepare_fresh_cycle` prologue `new` and the web mint run, so the cycle it produces is
 resumable, forkable and diagnosable by the §5 verbs — that is what this seam buys over a private
 loop. `identity` / `stores` pass through to `init_services`; without them a host writes into the
-anonymous `projects/default/` tenant. **`origin_gate` defaults to `strict` and a host has no TTY**,
-so `run_campaign` blocks at round 0 until something answers — call
+anonymous `projects/default/` tenant. `program` rides the backend client as
+`InProcessWorkload.program` (§1) — the host's own code, for an in-process backend with no service.
+**`origin_gate` defaults to `strict` and a host has no TTY**, so `run_campaign` blocks at round 0
+until something answers — call
 `submit_gate_decision(cycle_dir, "rescore"|"proceed"|"abort")` from another task, or set the knob
 off. It is `application/`, so it renders nothing: pass `LiveDisplay.for_campaign(session,
 campaign_config)` for the run readout, and `presentation/views/completion.py::report_completion`
@@ -278,7 +283,7 @@ Sibling cycles (forks, diag) live flat under `cycles/` alongside the root, each 
 
 ## 8. What is NOT stable
 
-- **Internal module structure** beyond §1–§7. The dispatch hub split into `hub/{bundle, injections, facade}` is internal — only the public symbols (`DispatchHub`, `INJECTIONS`, `build_bundle`, `validate_template`) are stable.
+- **Internal module structure** beyond §1–§7. The dispatch hub split into `hub/{bundle, injections, facade}` is internal — only the public symbols (`DispatchHub`, `injections`, `build_bundle`, `validate_template`) are stable.
 - **Private types** (`_Injection`, `_TEMPLATE_EXTRAS`, etc., plus any `_`-prefixed name). Package `__init__` files are namespace markers that re-export nothing — §1–§7 is the whole public surface, not whatever a package surfaces.
 - **`__all__`** — this document is the public surface; `__all__` is a reader's hint and nothing more. It is mechanically inert here (`implicit_reexport = true`, no `import *` anywhere), so neither runtime nor mypy consults it, and a name listed there is not thereby promised. Prune an entry nothing imports rather than reading it as a contract.
 - **Runtime dataclass shapes** not in §1–§7 (`CycleSlice`, `RoundDigest`, `InjectionBundle`, `LiveStateCore`, etc.).

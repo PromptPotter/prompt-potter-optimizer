@@ -71,10 +71,10 @@ async def open_session(
     on_status: StatusFn | None = None,
     identity: IdentityContext | None = None,
     stores: Stores | None = None,
+    program: object | None = None,
 ) -> Session:
-    """``identity`` and ``stores`` pass straight through to :func:`init_services`. Dropping them
-    here pinned every embedded host to ``projects/default/`` — this is an adapter over that call,
-    so a parameter it declines to forward is a capability the host cannot reach at all."""
+    """``identity``, ``stores`` and ``program`` pass straight through to :func:`init_services`: a
+    parameter this adapter declines to forward is a capability no host can reach."""
     setup_logging()
     session = await init_services(
         dataset_name=dataset_name,
@@ -83,6 +83,7 @@ async def open_session(
         on_status=on_status,
         identity=identity,
         stores=stores,
+        program=program,
     )
     if on_status is not None:
         on_status(f"Dataset    : {dataset_name} ({len(session.samples)} queries)")

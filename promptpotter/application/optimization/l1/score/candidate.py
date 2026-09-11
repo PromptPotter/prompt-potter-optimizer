@@ -78,8 +78,8 @@ async def score_one_candidate(
 
     # Who this pass measures, handed to the gateway rather than bound here — every
     # re-entrant asker declares its own, so none can inherit this one. The L4 recursion
-    # reads it to stamp an inner campaign's provenance; the connector seam carries only
-    # `(query, payload)`, so identity cannot reach it any other way.
+    # reads it to stamp an inner campaign's provenance; the connector seam carries only the
+    # RUN's workload and `(query, payload)`, so identity cannot reach it any other way.
     measured = MeasuredCandidate(
         idx=idx, candidate_id=opt_sp_c.lineage.id, label=label, role=MeasurementRole.PANEL
     )

@@ -51,7 +51,7 @@ One round = generate → score → critique.
   has three single-place-to-extend mechanisms — exactly one entry
   for each shape: **scoring** goes through `score_search_point()`,
   **persistence** through `CycleEventLog.append`, **prompt-fill**
-  through the `INJECTIONS` registry. Two efficiency mechanisms
+  through the `injection_table()` registry. Two efficiency mechanisms
   operate inside `l1_score`, both first-class:
   - **Candidate budget allocation (PoBB).** A candidate keeps
     accumulating samples only while there is statistical evidence it
@@ -125,8 +125,8 @@ Every optimizer LLM call composes its prompt by the
 same path: `build_bundle(cycle) → DispatchHub.fill(template, bundle, node=…)
 → compile_prompt` — one fill path for every optimizer node. **Injections** are the named placeholder renderers
 (`{{slot}} → renderer(bundle) → str`) — they inject deterministic
-state into a prompt's body. One registry (`dispatch/injections/registry.py::INJECTIONS`).
-One `validate_template()` at module load that catches typos.
+state into a prompt's body. One registry (`dispatch/injections/registry.py::injection_table`).
+One `validate_template()` at template load that catches typos.
 **Adding a new piece of info to a prompt is one new injection
 renderer, period.** No sidecar paths, no out-of-band state mounting.
 
@@ -622,7 +622,7 @@ the PR description.
   recent arc that earned its keep. Cross-round AxisIndex digest.
 
 - **`injection_source_digest` inside `_identity_config`**
-  (`dispatch/injections/registry.py` → `connectors/promptpotter.py`) —
+  (`dispatch/facade.py` → `connectors/promptpotter.py`) —
   what a node is HANDED is L4 measurement identity, so everything
   deciding it is hashed: the renderers, `bundle` (how much of a panel
   arrives) and `compose` (which arrive at all). AST-normalized — a
@@ -730,7 +730,7 @@ the PR description.
 
 - **`score_search_point()` gateway**
   (`application/scoring/search_point_scorer.py::score_search_point`) — sole scoring
-  ingress. Sibling to `CycleEventLog.append` and `INJECTIONS`. Don't
+  ingress. Sibling to `CycleEventLog.append` and `injection_table()`. Don't
   add a second scoring entry path "for convenience."
 
 - **Composite-fitness resolution chain** — **fitness is never one fixed number;

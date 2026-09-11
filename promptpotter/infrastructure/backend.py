@@ -20,7 +20,7 @@ from promptpotter.infrastructure.llm.rate_limit import (
 QUERY_TIMEOUT: float = 120.0  # HTTP timeout for /matches endpoint
 
 if TYPE_CHECKING:
-    from promptpotter.connectors.protocol import Connector, InProcessRun
+    from promptpotter.connectors.protocol import Connector, InProcessRun, InProcessWorkload
     from promptpotter.domain.connector import (
         ConnectorExecution,
         MeasuredUnit,
@@ -36,15 +36,18 @@ __all__ = [
 ]
 
 
-def build_backend_client(connector: Connector, base_url: str) -> BackendClient:
+def build_backend_client(
+    connector: Connector, base_url: str, *, workload: InProcessWorkload
+) -> BackendClient:
     """The ONE ``BackendClient`` construction — every wire fact comes off the connector. Transport, payload shape, session
-    and credential are all per-backend, so they are read from the one place that declares them."""
+    and credential are all per-backend, so they are read from the one place that declares them. *workload* is per-RUN."""
     return BackendClient(
         base_url,
         wire_adapter=connector.wire_adapter,
         session=connector.session_factory(),
         execution=connector.execution,
         in_process_run=connector.in_process_run,
+        workload=workload,
         max_cells_in_flight=connector.max_cells_in_flight,
         measured_unit=connector.measured_unit,
         answer_key=connector.answer_key,
@@ -80,6 +83,7 @@ class BackendClient:
         session: SessionProtocol,
         execution: ConnectorExecution = "remote_http",
         in_process_run: InProcessRun | None = None,
+        workload: InProcessWorkload,
         max_cells_in_flight: int = 2,
         measured_unit: MeasuredUnit = "sample",
         answer_key: str | None = None,
@@ -94,8 +98,10 @@ class BackendClient:
         # this — not the connector name — so a new backend's transport is a
         # declared capability, not a core-loop branch.
         self._execution: ConnectorExecution = execution
-        # The non-HTTP execution arm, supplied by an ``in_process`` connector.
+        # The non-HTTP execution arm, supplied by an ``in_process`` connector, and what this run's
+        # backend runs against.
         self._in_process_run: InProcessRun | None = in_process_run
+        self.workload: InProcessWorkload = workload
         # What one sample COSTS, which the transport above does not answer — two `in_process`
         # connectors want opposite depths.
         self._max_cells_in_flight = max_cells_in_flight
@@ -203,14 +209,11 @@ class BackendClient:
         payload = self._wire_adapter(query, pipeline_params)
 
         if self._execution != "remote_http":
-            # Declared-mode dispatch: a non-HTTP connector runs in this process
-            # via its own arm (``promptpotter`` → an inner cycle). The connector
-            # owns *how* it runs; the registry guarantees the arm is present
-            # whenever the mode is ``in_process``.
-            assert self._in_process_run is not None, (
-                f"execution={self._execution!r} but no in_process_run wired"
-            )
-            return await self._in_process_run(query, payload)
+            # Declared-mode dispatch: a non-HTTP connector runs in this process via its own arm.
+            # The registry guarantees the arm whenever the mode is ``in_process``.
+            if self._in_process_run is None:
+                raise RuntimeError(f"execution={self._execution!r} but no in_process_run wired")
+            return await self._in_process_run(self.workload, query, payload)
 
         client = self._get_http()
 

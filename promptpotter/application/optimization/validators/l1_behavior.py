@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 from typing import Any
 
@@ -12,9 +13,9 @@ from promptpotter.application.optimization.dispatch.injections.layer_state impor
     HELD_PROMPT_FIELD_MARK,
 )
 from promptpotter.application.optimization.dispatch.injections.registry import (
-    INJECTIONS,
     STALL_EXPLORATION,
     citable_fields,
+    injection_table,
 )
 from promptpotter.application.optimization.validators.behavior_base import (
     CheckFn,
@@ -309,13 +310,14 @@ def _round_citable_fields(ctx: ValidatorContext) -> tuple[str, ...]:
     # A COMPLETE stored layout, NOT an edit — the snapshot names every slot — so it is parsed as
     # one. Routing it through `coerce_l1_layout` reads it as a `{panel: slot}` edit, which a dump
     # of per-slot lists is not, and every round then falls open to the whole citable registry.
-    if not isinstance(raw, dict) or not raw:
-        return tuple(sorted([n for n, i in INJECTIONS.items() if i.citable] + [STALL_EXPLORATION]))
-    try:
-        layout = L1Layout.model_validate(raw)
-    except ValidationError:
-        return tuple(sorted([n for n, i in INJECTIONS.items() if i.citable] + [STALL_EXPLORATION]))
-    return citable_fields(layout, exploration_budget=ctx.exploration_budget)
+    if isinstance(raw, dict) and raw:
+        with contextlib.suppress(ValidationError):
+            return citable_fields(
+                L1Layout.model_validate(raw), exploration_budget=ctx.exploration_budget
+            )
+    return tuple(
+        sorted([n for n, i in injection_table().items() if i.citable] + [STALL_EXPLORATION])
+    )
 
 
 _NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
@@ -355,7 +357,7 @@ def _uncitable_reason(field_name: str, ctx: ValidatorContext) -> str:
         return "no_field"
     if field_name == STALL_EXPLORATION:
         return "stall_exploration_when_tight"
-    injection = INJECTIONS.get(field_name)
+    injection = injection_table().get(field_name)
     if injection is None:
         return f"bad_field={field_name!r}"
     if not injection.citable:

@@ -49,7 +49,7 @@ SAMPLESWITCH_MIN_DEGRADATION_RATE: float = 0.5
 cached deprecated answer instead of re-evaluating."""
 
 # TARGET-prompt interpolation — the `{{var}}` slots a dataset row fills on its way to the
-# backend. NOT the dispatch-hub `INJECTIONS` registry, which fills `{{slot}}`s in the
+# backend. NOT the dispatch-hub `injection_table()` registry, which fills `{{slot}}`s in the
 # OPTIMIZER's prompts. Same syntax, two populations, two regexes (the other is
 # `dispatch/facade.py`); a signal for an L1/L2/L3 prompt goes there, never here.
 _TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")

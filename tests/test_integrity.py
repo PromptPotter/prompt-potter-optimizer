@@ -335,7 +335,7 @@ def test_judge_identity_moves_the_searchpoint_hash() -> None:
 
     def sp_hash(judges: dict[str, JudgeSpec]) -> str:
         return schema.sp_hash(
-            resolve_pipeline_config_params(active, {}, None, schema, judges=judges)
+            resolve_pipeline_config_params(active, {}, None, schema, judges=judges, experiment=None)
         )
 
     def spec(name: str, model: str) -> JudgeSpec:
@@ -515,9 +515,9 @@ def test_the_provenance_sink_cannot_move_the_merge_it_observes(tmp_path: Path) -
     )
     overlay = {"llm_only": {"model": "campaign-model"}}
     sink: dict[str, dict[str, str]] = {}
-    plain = resolve_pipeline_config_params(["llm_only"], overlay, tmp_path, schema)
+    plain = resolve_pipeline_config_params(["llm_only"], overlay, tmp_path, schema, experiment=None)
     observed = resolve_pipeline_config_params(
-        ["llm_only"], overlay, tmp_path, schema, provenance=sink
+        ["llm_only"], overlay, tmp_path, schema, experiment=None, provenance=sink
     )
     assert plain == observed
     assert sink["llm_only"] == {"model": "campaign", "temperature": "dataset"}
@@ -1290,11 +1290,11 @@ def test_a_reused_origin_seeds_exactly_the_config_it_ran() -> None:
     from promptpotter.application.campaign_config import load_campaign_config
     from promptpotter.application.datasets.draft_campaign import split_overlay
     from promptpotter.application.jobs.launcher.draft_build import overlay_from_campaign_config
-    from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
+    from promptpotter.connectors import DEFAULT_CONNECTOR, get
 
     config = load_campaign_config(
         {
-            "optimization": dict(CONNECTORS[DEFAULT_CONNECTOR].default_optimization),
+            "optimization": dict(get(DEFAULT_CONNECTOR).default_optimization),
             "pipeline_overlay": {"llm_only": {"model": "upstage/solar-pro4:nitro"}},
             "optimizer_narrowing": {
                 "llm_only": {"param_keys": [], "param_allowed_values": {"model": ["upstage/x"]}}
@@ -1388,18 +1388,14 @@ def test_the_drafts_CHAIN_reaches_the_mint_on_a_reused_dataset(tmp_path: Path) -
     commits its own `pipeline.yaml`, so `pipelines.default` IS the chosen chain; a REUSED dataset
     writes no file, and nothing else carried `draft.pipeline_steps` to the run."""
     from promptpotter.application.jobs.launcher.mint_and_start import build_cycle_config
-    from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
+    from promptpotter.connectors import DEFAULT_CONNECTOR, get
     from promptpotter.infrastructure.store.io import write_yaml
 
     root = tmp_path / "ds"
     root.mkdir()
     write_yaml(
         root / "campaign.yaml",
-        {
-            "campaign_config": {
-                "optimization": dict(CONNECTORS[DEFAULT_CONNECTOR].default_optimization)
-            }
-        },
+        {"campaign_config": {"optimization": dict(get(DEFAULT_CONNECTOR).default_optimization)}},
     )
     schema = parse_pipeline_response(
         {
@@ -1811,7 +1807,9 @@ def test_composition_selects_round_robin_so_no_panel_starves_the_frame() -> None
         Item,
     )
     from promptpotter.application.optimization.dispatch.compose import select
-    from promptpotter.application.optimization.dispatch.injections.registry import INJECTIONS
+    from promptpotter.application.optimization.dispatch.injections.registry import (
+        injection_table,
+    )
 
     # One panel that would eat any budget, and the short frame panels behind it in layout order.
     big = [Item(f"row {i}: " + "x" * 400, trusted=False) for i in range(12)]
@@ -1859,7 +1857,7 @@ def test_composition_selects_round_robin_so_no_panel_starves_the_frame() -> None
         **rendered,
         "rendered_prompt": [Item(f"[{f}] " + "y" * 300) for f in fields],
     }
-    whole = frozenset(n for n in edit_order if not INJECTIONS[n].kind.divisible)
+    whole = frozenset(n for n in edit_order if not injection_table()[n].kind.divisible)
     assert "rendered_prompt" in whole, "the artifact under edit must never arrive truncated"
     for squeeze in (400, 900, 1_600, 3_000, 6_000):
         _, cov = select(edit_rendered, edit_order, budget=squeeze, exempt=whole)
@@ -2275,11 +2273,11 @@ def test_the_l4_dataset_is_recognized_as_one() -> None:
         load_inner_tasks,
         resolve_inner_task,
     )
-    from promptpotter.connectors import CONNECTORS
+    from promptpotter.connectors import get
     from promptpotter.infrastructure.store.io import read_yaml
 
     d = Path(__file__).resolve().parents[1] / "datasets" / "promptpotter-self"
-    spec = d / CONNECTORS["promptpotter"].experiment_file
+    spec = d / get("promptpotter").experiment_file
     assert spec.is_file(), f"the L4 probe would read {d.name} as a plain dataset ({spec})"
     panel = load_inner_tasks(spec)
     assert panel.tasks

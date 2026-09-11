@@ -2,7 +2,7 @@
 
 A judge grades one cell by asking a model, where no deterministic matcher can — a free-text
 answer, a CRM note, a rated ordering. Adding one is local to `judges/<name>.py` plus a
-`_BUILTIN` row, exactly as adding a connector is.
+`_BUILTIN` row.
 
 ## A judge is a MEASUREMENT, never a formula term
 
@@ -201,12 +201,14 @@ field docs, not here.
 
 ## Registering one
 
-**Identical to registering a connector, deliberately** — `_BUILTIN` data row, the
-`promptpotter.judges` entry-point group, one `_validate` over both, no plugin shadowing a
-built-in, a broken plugin fatal, `JUDGE_ORIGINS` as the audit surface. The reasoning for every
+**A connector's rules, deliberately** — the `promptpotter.judges` entry-point group, one
+`_validate` over both, no plugin shadowing a built-in, a broken plugin fatal, `JUDGE_ORIGINS` as
+the audit surface. A built-in is a `_BUILTIN` row rather than a walked module because one module
+declares several judges; the table builds at import, the exception
+[`../application/CLAUDE.md`](../application/CLAUDE.md) § Subpackages owns. The reasoning for every
 one of those, and the trusted-code boundary that comes with them, is owned by
 [`../connectors/CLAUDE.md`](../connectors/CLAUDE.md) §§ Registering a connector · A connector is
-trusted code. Read it there; nothing about a judge changes it.
+trusted code. Read it there; nothing else about a judge changes it.
 
 ## What is cached is the REPLY, not the verdict
 

@@ -15,11 +15,13 @@ from promptpotter import connectors
 from promptpotter.application.datasets.csv_ingest import read_candidate_library_file
 from promptpotter.application.datasets.loaders import resolve_dataset_items, samples_from_dicts
 from promptpotter.application.initialization.session import Session
+from promptpotter.application.optimization.dispatch.injections.registry import injection_table
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
 )
+from promptpotter.connectors.protocol import InProcessWorkload
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.pipeline_parsing import merge_node_blocks, parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -29,8 +31,9 @@ from promptpotter.infrastructure.backend import BackendClient, build_backend_cli
 from promptpotter.infrastructure.llm.capabilities import ensure_model_capabilities
 from promptpotter.infrastructure.store.archive_views import maintain_measurement_index
 from promptpotter.infrastructure.store.dataset_access import (
-    dataset_panel_rows,
+    dataset_experiment,
     dataset_pipeline_path,
+    extract_panel_rows,
     readable_dataset_dir,
 )
 from promptpotter.infrastructure.store.io import read_yaml_optional
@@ -245,30 +248,25 @@ def _load_dataset_into_session(
     dataset_name: str,
     status: Callable[[str], None],
     *,
-    connector: connectors.Connector | None = None,
+    connector: connectors.Connector,
+    experiment: dict[str, Any] | None,
 ) -> None:
-    """Populate session.samples + index_terms — a connector's own experiment file where it declares
-    one, else tenant Origin, then repo benchmark, then the loader's one-shot download."""
+    """Populate session.samples + index_terms — out of the connector's own experiment document where
+    it declares one, else tenant Origin, then repo benchmark, then the loader's one-shot download."""
     # First, never a fallback: a connector declaring an `experiment_file` OWNS its panel, and rows
     # cached under the same dataset name describe a different instrument.
-    if connector is not None and connector.experiment_file:
-        panel = dataset_panel_rows(session.store, dataset_name)
-        if panel is None:
-            # `dataset_panel_rows` answers None for THREE causes and the commonest is the panel
-            # file simply not being on this machine — `dataset_access.py`'s own docstring calls a
-            # missing `harbor_tasks.yaml` "the ordinary state of a fresh clone", since it is
-            # gitignored and rebuilt per box. Naming only the backend_type cause sent the operator
-            # to inspect a `pipeline.yaml` that was correct. Name the file and the directory, as
-            # the loader this replaced did.
+    if connector.experiment_file:
+        if experiment is None:
+            # Handed init's own connector, `dataset_experiment` answers None for one cause: the
+            # panel file is not on this machine, the ordinary state of a fresh clone.
             raise PayloadInvalidError(
                 f"Connector {connector.name!r} owns {dataset_name!r}'s panel, but "
-                f"{connector.experiment_file!r} was not readable in "
-                f"{readable_dataset_dir(session.store, dataset_name)}. Either the panel has not "
-                f"been generated on this machine (it is gitignored — rebuild it), or that "
-                f"dataset's pipeline.yaml no longer names the {connector.name!r} backend_type.",
+                f"{connector.experiment_file!r} is not in "
+                f"{readable_dataset_dir(session.store, dataset_name)}. The panel has not been "
+                f"generated on this machine (it is gitignored — rebuild it).",
                 code="pipeline_config_invalid",
             )
-        queries, session.index_terms = panel
+        queries, session.index_terms = extract_panel_rows(connector, dataset_name, experiment)
         session.samples = samples_from_dicts(queries)
         status(f"Experiment: {connector.experiment_file} ({len(queries)} tasks)")
         return
@@ -342,6 +340,11 @@ def _resolve_backend_id(
     return backend_id
 
 
+def complete_registries() -> None:
+    connectors.registered()
+    injection_table()
+
+
 async def init_services(
     dataset_name: str,
     backend_url: str = DEFAULT_BACKEND_URL,
@@ -350,6 +353,7 @@ async def init_services(
     identity: IdentityContext | None = None,
     stores: Stores | None = None,
     enable_tracing: bool = True,
+    program: object | None = None,
 ) -> Session:
     """``store`` injects a pre-built :class:`Stores` rather than resolving the user-data root: it is
     the ONE way to relocate the tree, and the L4 inner runner passes a sandboxed one."""
@@ -357,6 +361,8 @@ async def init_services(
     def status(msg: str) -> None:
         if on_status:
             on_status(msg)
+
+    complete_registries()
 
     resolved_identity = identity if identity is not None else default_identity()
 
@@ -374,7 +380,10 @@ async def init_services(
     dataset_config_dir = readable_dataset_dir(stores, dataset_name)
     backend_type = _read_backend_type(dataset_config_dir, dataset_name)
     connector = connectors.get(backend_type)
-    client = build_backend_client(connector, backend_url)
+    experiment = dataset_experiment(dataset_config_dir, connector)
+    client = build_backend_client(
+        connector, backend_url, workload=InProcessWorkload(experiment=experiment, program=program)
+    )
     status(f"Backend: {backend_url}")
 
     pipeline_schema, pipeline_declaration = await _resolve_pipeline_schema(
@@ -408,10 +417,12 @@ async def init_services(
         langfuse=LangfuseLogger(enabled=enable_tracing),
     )
 
-    _load_dataset_into_session(session, dataset_name, status, connector=connector)
+    _load_dataset_into_session(
+        session, dataset_name, status, connector=connector, experiment=experiment
+    )
     # After the samples, never before: the invariant is about the schema AND the bank together.
     _warn_if_labels_have_no_ranker(pipeline_schema, session.samples, connector, status)
     return session
 
 
-__all__ = ["init_services"]
+__all__ = ["complete_registries", "init_services"]

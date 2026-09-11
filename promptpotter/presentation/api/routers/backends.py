@@ -9,6 +9,7 @@ from fastapi import APIRouter
 from pydantic import Field
 
 from promptpotter import connectors
+from promptpotter.connectors.protocol import PROBE_WORKLOAD
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.backend import build_backend_client
 from promptpotter.presentation.api.deps import StoresDep, get_backend_or_404
@@ -66,7 +67,9 @@ async def get_backend_health(backend_id: str, stores: StoresDep) -> BackendHealt
     backend; only a genuinely missing ``backend_id`` 404s (via ``get_backend_or_404``).
     """
     backend = get_backend_or_404(backend_id, stores)
-    client = build_backend_client(connectors.get(backend.backend_type), backend.base_url)
+    client = build_backend_client(
+        connectors.get(backend.backend_type), backend.base_url, workload=PROBE_WORKLOAD
+    )
     try:
         probe = await client.check_status()
     finally:

@@ -2,7 +2,7 @@
 
 Visual + reference for `promptpotter/application/optimization/dispatch/` — the registry that fills `{{placeholders}}` in the four optimizer prompts — and for `L1Layout`, the structural surface L2 edits to decide what L1_GENERATE sees. **L2_CONTEXT firing lives here too**, from § Trigger down: L2 is one entry in this hub — same `LayerStrategy` shape as L3, same `fill` path (from its `NODE_LAYOUTS["l2_context"].floor`), same `Bundle` per-call state, and the hub is what stops it accumulating its own renderers, surface object and escape hatches. Concept role: [`../concepts/the-loop.md`](../concepts/the-loop.md).
 
-The hub is stateless. `INJECTIONS` is a typed `dict[str, _Injection]` — each entry carries `name`, `kind` (MEASUREMENT / DERIVED / TRACE / DIRECTIVE), `render: InjectionBundle → list[Item]`, a `char_cap` and a `citable` flag, registered by the `@signal("<name>", …)` decorator at the renderer's definition site. `validate_template()` (called from `load_optimizer_prompt`) raises on `{{slot}}` names not in the registry: a typo in a template fails at module load, not at first render.
+The hub is stateless. `injection_table()` is a `Mapping[str, _Injection]` built and checked on its first call — each entry carries `name`, `kind` (MEASUREMENT / DERIVED / TRACE / DIRECTIVE), `render: InjectionBundle → list[Item]`, a `char_cap` and a `citable` flag, registered by the `@signal("<name>", …)` decorator at the renderer's definition site. `validate_template()` (called from `load_optimizer_prompt`) raises on `{{slot}}` names not in the registry: a typo in a template fails at template load, not at first render.
 
 `citable` answers one question: may an `l1_generate` variant name this panel in `evidence_grounding`? True for panels that REPORT (what was measured, what failed, what the layers steered); False for the value-space menus and the prompt under edit — citing those grounds a mutation in its own subject. `citable_fields(layout, exploration_budget)` intersects the flag with the node's **live layout**, so what L1 may cite is exactly what L1 was shown; the same call fills the prompt's `{{citable_fields}}` menu, the wire schema's enum, and the `evidence_grounding_present` check. Adding a panel to a floor makes it citable automatically.
 
@@ -153,7 +153,7 @@ flowchart LR
 
 Which panels may be thinned is `InjectionKind.divisible`, asked of the kind every signal already declares: MEASUREMENT and DERIVED are evidence and thin gracefully, TRACE and DIRECTIVE carry state and are placed whole or not at all. Asked of the kind rather than a set of names, because a set silently skips whatever it failed to list. `mutation_memory` renders **newest round first**, so what the ceiling drops is the OLDEST attempt. `prompt_chars` stays the measurement, and what selection dropped rides beside it.
 
-Each entry in `INJECTIONS` is a frozen `_Injection(name, kind, render, char_cap, citable)` — `char_cap` set only on the indivisible panels. `kind` is one of:
+Each entry in `injection_table()` is a frozen `_Injection(name, kind, render, char_cap, citable)` — `char_cap` set only on the indivisible panels. `kind` is one of:
 
 - **MEASUREMENT** — deterministic round-end output (e.g. `diagnostics`, `l1_wounds`, `guard_breaches`).
 - **DERIVED** — view/digest over MeasurementArchive or AxisIndex (e.g. `axis_memory`).
@@ -225,7 +225,7 @@ Substituted directly by `compile_prompt`; not signals.
 ## Mechanics
 
 - **Entry points** — two, both stateless: `render(name, bundle)` (internal, one injection's text) and `fill(template, layout, bundle)` (**every** optimizer node). `InjectionBundle` is the per-call frozen state `(opt_sp, pipeline_schema, cycle_slice, digest)`, built once via `build_bundle(cycle)`; `digest` is a `RoundDigest(diagnostics, critique)` — the post-scoring compression chain in one place, so renderers read through it instead of off two parallel `latest_*` fields.
-- **Fill** — one path for every node: `fill(template, layout, bundle)` walks the node's layout (per-slot injection-name lists — `l1_generate`'s from `opt_sp.l1_layout`, the rest from `NODE_LAYOUTS[node].floor`), appends rendered injection text to each addressable slot, then scans the filled body for any `{{name}}` left in non-layout prose and renders the `INJECTIONS` ones into a kwargs dict → `(filled_template, injection_vars)`. **No optimizer prose token names an injection** — every surviving `{{token}}` in the shipped prompts is a caller extra (`n_variants`, `citable_fields`, `consultation_instruction`), and `validate_template()` errors at module load on any `{{slot}}` outside the registry. Three of the four `problem_description` bodies are empty strings; `l1_generate`'s one line names the citable menu and sits there rather than in `answer_format` because it is the only per-ROUND value in an otherwise static template — measured, holding it in `answer_format` cost 1,791 of 7,197 stable prefix chars.
+- **Fill** — one path for every node: `fill(template, layout, bundle)` walks the node's layout (per-slot injection-name lists — `l1_generate`'s from `opt_sp.l1_layout`, the rest from `NODE_LAYOUTS[node].floor`), appends rendered injection text to each addressable slot, then scans the filled body for any `{{name}}` left in non-layout prose and renders the registered ones into a kwargs dict → `(filled_template, injection_vars)`. **No optimizer prose token names an injection** — every surviving `{{token}}` in the shipped prompts is a caller extra (`n_variants`, `citable_fields`, `consultation_instruction`), and `validate_template()` errors at template load on any `{{slot}}` outside the registry. Three of the four `problem_description` bodies are empty strings; `l1_generate`'s one line names the citable menu and sits there rather than in `answer_format` because it is the only per-ROUND value in an otherwise static template — measured, holding it in `answer_format` cost 1,791 of 7,197 stable prefix chars.
 - **L1_GENERATE visibility** — `L1_POSSIBLE` (`domain/l1_layout.py`) is the whole menu 🧩; the rest (`l3_to_l2_note`, `l1_overrides`, `l1_signal_catalogue`, `guard_breaches`, the capability directives) are L1_CRITIQUE / L2_CONTEXT / L3_PLAN-internal, so L1 cannot see L2's own state.
 - **L1_GENERATE guard** — every name in `L1_MANDATORY` 🧩 must sit across the 4 addressable slots once an edit is merged; missing fires `l1_layout_missing_mandatory`, a guard breach routing to L3_PLAN rather than letting L2_CONTEXT starve L1_GENERATE. Membership is two kinds, and the second gets forgotten: a field L1 cannot OPERATE without (parent prompt, plan, task framing, mutation surface, failure digest), and the sole carrier of a state L1 must not enter BLIND — `answer_distribution`, without which a collapse onto one label is invisible to the very run collapsing, and `measurand` + `confounds`, without which the generator optimises a column it cannot name and reads a cold ruler as ability.
 
@@ -239,8 +239,8 @@ L1_GENERATE's prompt is composed by walking a per-slot list of **injection names
 │      +                                                     │
 │  L1Layout (on OptSearchPoint)    per-slot injection lists  │
 │      ↓                                                     │
-│  DispatchHub.fill                    resolves names via    │
-│                                      INJECTIONS registry   │
+│  DispatchHub.fill               resolves names via the     │
+│                                 injection_table() registry │
 │      ↓                                                     │
 │  RENDERED L1 PROMPT (what the LLM sees)                    │
 └────────────────────────────────────────────────────────────┘
@@ -261,7 +261,7 @@ L2's parser (`escalation._parse_l2`) coerces `{name: slot}` onto the current lay
 
 **Adding an injection** → the golden-path recipe lives in [`adding-a-surface.md`](adding-a-surface.md).
 
-**File-line anchors** — `INJECTIONS`: `dispatch/injections/registry.py` · `InjectionBundle`: `dispatch/bundle.py` · `DispatchHub` + `build_bundle`: `dispatch/facade.py` · `L1Layout`, `L1_POSSIBLE`, `L1_MANDATORY`, `L1_LAYOUT_SLOTS`, `default_l1_layout`, `validate_l1_layout`: `promptpotter/domain/l1_layout.py` · L1 compose path: `application/optimization/l1/generate.py::l1_generate` · OSP layout field: `OptSearchPoint.memory.l1_layout` (`domain/opt_search_point.py`, `L2L3Memory`).
+**File-line anchors** — `injection_table()`: `dispatch/injections/registry.py` · `InjectionBundle`: `dispatch/bundle.py` · `DispatchHub` + `build_bundle`: `dispatch/facade.py` · `L1Layout`, `L1_POSSIBLE`, `L1_MANDATORY`, `L1_LAYOUT_SLOTS`, `default_l1_layout`, `validate_l1_layout`: `promptpotter/domain/l1_layout.py` · L1 compose path: `application/optimization/l1/generate.py::l1_generate` · OSP layout field: `OptSearchPoint.memory.l1_layout` (`domain/opt_search_point.py`, `L2L3Memory`).
 
 ## Trigger — when L2 fires
 

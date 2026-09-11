@@ -40,8 +40,6 @@ from promptpotter.connectors.dspy_module import (
     RESULT_KEY,
     SCORE_KEY,
     DspyProgram,
-    publish_dspy_program,
-    reset_dspy_program,
 )
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
@@ -184,8 +182,7 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
             )
 
         self._write_dataset_dir()
-        session = await open_session(self.dataset_name)
-        token = publish_dspy_program(program)
+        session = await open_session(self.dataset_name, program=program)
         try:
             # No overrides: the file this compile just wrote IS the projection of `loop` and
             # `nodes`, so passing them again would be a second path to the same values.
@@ -204,7 +201,6 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
                 token_budget=self.loop.token_budget,
             )
         finally:
-            reset_dspy_program(token)
             await session.backend_client.aclose()
 
         if stop_reason_outcome(result.stop_reason) is not StopOutcome.SUCCESS:

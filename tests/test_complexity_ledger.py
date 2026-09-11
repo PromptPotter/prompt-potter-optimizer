@@ -164,15 +164,19 @@ LEDGER_BASELINE = {
     # -16 -8: the `spawn_context` split (see `modules` above) — one boundary move, and the two
     # biggest knots fell together, which is what a boundary being in the wrong place looks like.
     # -5: `runner/entry`, which was only ever entangled through `spawn`.
-    # Of the 23 left, 8 are deliberate: `complexity_ledger`'s own 7 (it counts every layer, so it
-    # may import none at module scope) and `escalation/state` (1, documented there). The other 15
-    # are ONE backbone shape at three sites — a registry that COMPLETES itself at import time, so a
-    # registered member reaching back up closes a loop on a half-initialised package. Filed in
-    # `code-debt-cleanup.md` with the fix (separate registration from completion) and with the
-    # predicate for which sites bite. Count cycles with care: an `if TYPE_CHECKING:` import sits in the
-    # module body and reads as top-level to an AST walk, which made three "pairs" that were never
-    # runtime edges. The files whose cycle is invisible until the build breaks say so at the import.
-    "deferred_imports": 23,
+    # -14: the connector and injection tables complete in cached accessors, at a declared step.
+    # -1: `connectors/promptpotter.py` imports `spawn` at top level: `instrument_of` lives in
+    # `domain/l4/inner_origin.py`, so no cycle closes through `evidence`.
+    # +3: an own-package `importlib.import_module` counts too, which the `import` statements alone
+    # never showed — the two registries' member walks and the CLI's `COMMANDS` table.
+    # Of the 11, 10 are deliberate: `complexity_ledger`'s own 7 (it counts every layer, so it may
+    # import none at module scope), `escalation/state` (1, documented there) and the two walks,
+    # which import each member when the table completes. `COMMANDS` defers for startup, the reason
+    # `conventions.md` § Code shape measured and refused. Count cycles with care: an
+    # `if TYPE_CHECKING:` import sits in the module body and reads as top-level to an AST walk,
+    # which made three "pairs" that were never runtime edges. The files whose cycle is invisible
+    # until the build breaks say so at the import.
+    "deferred_imports": 11,
     # +1: `judges/CLAUDE.md` — the per-layer contract for a new top-level package, indexed from
     # `promptpotter/CLAUDE.md` like every other. It earns a page rather than a section in
     # `connectors/CLAUDE.md` because its load-bearing rule is the OPPOSITE concern: a connector

@@ -20,12 +20,27 @@ if TYPE_CHECKING:
 
     import httpx
 
-# The in-process execution arm: ``(query, payload) -> resp`` where ``payload`` is
+
+@dataclass(frozen=True)
+class InProcessWorkload:
+    experiment: Mapping[str, Any] | None
+    program: object | None
+
+
+# What a client built only to probe a backend holds: it runs no query.
+PROBE_WORKLOAD = InProcessWorkload(experiment=None, program=None)
+
+
+# The in-process execution arm: ``(workload, query, payload) -> resp`` where ``payload`` is
 # the connector's ``wire_adapter`` output and ``resp`` is the same ``{"data": {…}}``
 # shape ``measure_sample`` parses from an HTTP ``/matches`` body (so the scorer
 # reads an in-process result identically to a remote one). Required on (and only
 # on) an ``in_process`` connector — the registry guard enforces the pairing.
-InProcessRun = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
+InProcessRun = Callable[[InProcessWorkload, str, dict[str, Any]], Awaitable[dict[str, Any]]]
+
+# Parsed ``experiment_file`` → the document every reader sees, with anything it only NAMES (a
+# published roster) resolved to what it names.
+ExperimentResolver = Callable[[Mapping[str, Any]], dict[str, Any]]
 
 # Run init calls a connector's version_check once, with the
 # BackendClient's live httpx client + base_url; the return is the backend's
@@ -67,6 +82,9 @@ class Connector:
     samples. The in-process ``promptpotter`` connector sets ``inner_tasks.yaml`` —
     its outer "samples" ARE the inner tasks declared there, not a sample table.
     Empty (default) = samples come from the loader registry / tenant upload only."""
+
+    resolve_experiment: ExperimentResolver | None = None
+    """Applied by ``dataset_access.py::dataset_experiment`` to every read of the file."""
 
     execution: ConnectorExecution = "remote_http"
     """How this connector's backend runs — the dispatch capability the loop
@@ -117,13 +135,15 @@ class Connector:
 
     auth_token: AuthTokenFn | None = None
 
-    identity_config: Callable[[Path], dict[str, dict[str, Any]]] | None = None
+    identity_config: (
+        Callable[[Path, Mapping[str, Any] | None], dict[str, dict[str, Any]]] | None
+    ) = None
     """Per-node config entries that are part of MEASUREMENT IDENTITY but not
     wire tunables — folded into ``resolve_pipeline_config_params`` so the
     origin cycle id and the archive's node-config reuse key change whenever
     the backend's effective revision does. Receives the resolved dataset config
-    dir so a connector can fold dataset-scoped inner behavior into the
-    fingerprint. The canonical user is the in-process ``promptpotter``
+    dir and the resolved experiment, so a connector can fold dataset-scoped inner
+    behavior into the fingerprint. The canonical user is the in-process ``promptpotter``
     connector: its backend IS the inner optimizer (optimizer prompt origin +
     layouts + engine + the dataset's ``inner_tasks.yaml`` inner-run config), so
     without this an origin edit silently reuses stale measurements recorded
@@ -194,9 +214,12 @@ class Connector:
 
 
 __all__ = [
+    "PROBE_WORKLOAD",
     "AuthTokenFn",
     "Connector",
+    "ExperimentResolver",
     "InProcessRun",
+    "InProcessWorkload",
     "PreflightFn",
     "VersionCheck",
 ]

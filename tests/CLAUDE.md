@@ -60,10 +60,12 @@ than advisory.
 ## Structural invariants live in production, not tests
 
 This is the **destination** for anything axis 1 rejects, not a footnote. A wiring guarantee worth
-enforcing becomes an **import-time assert in the module that owns the registry** — it fails loud
-at import, costs nothing to maintain, and needs no test to update. They exist across the package, e.g.
+enforcing becomes a **check in the module that owns the registry** — in the accessor that completes
+it, or at import for a table built there (`application/CLAUDE.md` § Subpackages says which) — so it
+fails loud before a run spends, costs nothing to maintain, and needs no
+test to update. They exist across the package, e.g.
 `RESUME_CHECKPOINT_GATING` exhaustiveness (`application/optimization/resume_and_fork/decisions.py`),
-`L1_POSSIBLE ⊆ INJECTIONS` (`dispatch/injections/registry.py`), the `L1_MANDATORY`/origin-layout
+`L1_POSSIBLE ⊆ injection_table()` (`dispatch/injections/registry.py`), the `L1_MANDATORY`/origin-layout
 subset checks (`domain/l1_layout.py`), the unread/abandoned row-key checks (`domain/scoring.py`),
 the divergence-hint exhaustiveness (`cli/commands/_shared.py`). Add new ones the same way — beside
 the thing they validate, never as a repo-wide structure scan.

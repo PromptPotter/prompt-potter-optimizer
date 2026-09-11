@@ -71,7 +71,7 @@ Two that the model cannot tell you. **`wounds.l3_note` is sticky free-text and n
 
 ## The prompt-budget unit (a separate mechanism)
 
-Not a wound: it guards the size of a composed optimizer prompt, has no producer→nurse pair, and rides the `INJECTIONS` registry, `DispatchHub` and the existing `StopLoop` / round-loop teardown rather than a sidecar. Two healing modes:
+Not a wound: it guards the size of a composed optimizer prompt, has no producer→nurse pair, and rides the `injection_table()` registry, `DispatchHub` and the existing `StopLoop` / round-loop teardown rather than a sidecar. Two healing modes:
 
 1. **Truncate** — per-injection `char_cap`; an over-cap block is section-aware truncated in the hub (`facade.py`), with an `injection_budget_overrun` warning naming the overrun + dropped sections.
 2. **Halt** — `RENDER_ERROR`: an injection renderer *raised* (usually code drift); operator-recoverable stop.

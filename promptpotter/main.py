@@ -14,6 +14,7 @@ from scalar_fastapi import get_scalar_api_reference
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.reaper import periodic_sweep, reap_cycle_by_id
 from promptpotter.application.jobs.registry import Job, JobRegistry, default_jobs_dir
@@ -63,6 +64,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Quiet the benign Windows ProactorEventLoop disconnect noise (bpo-39010)
     # that fires when a browser tab drops a kept-alive socket.
     silence_proactor_disconnect_noise()
+    complete_registries()
     bundle = build_identity_bundle(default_identity_paths())
     app.state.identity_bundle = bundle
     print(

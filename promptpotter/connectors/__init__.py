@@ -1,22 +1,25 @@
 from __future__ import annotations
 
+import functools
+import importlib
+import pkgutil
 import typing
 from importlib.metadata import entry_points
+from types import MappingProxyType
 
-from promptpotter.connectors.dspy_module import CONNECTOR as _DSPY
-from promptpotter.connectors.harbor import CONNECTOR as _HARBOR
-from promptpotter.connectors.promptpotter import CONNECTOR as _PROMPTPOTTER
 from promptpotter.connectors.protocol import Connector
-from promptpotter.connectors.termnorm import CONNECTOR as _TERMNORM
 from promptpotter.domain.connector import ConnectorExecution
 
+if typing.TYPE_CHECKING:
+    from collections.abc import Mapping
+
 __all__ = [
-    "CONNECTORS",
-    "CONNECTOR_ORIGINS",
     "DEFAULT_CONNECTOR",
     "ENTRY_POINT_GROUP",
     "Connector",
+    "connector_origins",
     "get",
+    "registered",
 ]
 
 ENTRY_POINT_GROUP = "promptpotter.connectors"
@@ -24,25 +27,17 @@ ENTRY_POINT_GROUP = "promptpotter.connectors"
 string — third-party packages spell it in their own ``pyproject.toml``, so renaming it
 un-registers every plugin at once."""
 
-_BUILTIN: dict[str, Connector] = {
-    "termnorm": _TERMNORM,
-    "promptpotter": _PROMPTPOTTER,
-    "dspy": _DSPY,
-    "harbor": _HARBOR,
-}
-
 DEFAULT_CONNECTOR = "termnorm"
-"""Connector a fresh upload drafts against when its ``pipeline.yaml`` names none.
-Lives beside the registry because that is what knows a name is registered; the
-import-time guard below keeps the two from drifting."""
+"""Connector a fresh upload drafts against when its ``pipeline.yaml`` names none. Building the
+table raises unless a built-in answers it."""
 
 
-def _validate(key: str, c: Connector, origin: str) -> None:
-    """Every invariant a registered connector satisfies, built-in or plugin — that equivalence IS the contract. Raises at
-    IMPORT, so a half-wired connector cannot reach a campaign."""
-    where = f"connector {key!r} [{origin}]"
-    if c.name != key:
-        raise RuntimeError(f"{where}: registry key != connector.name ({c.name!r}).")
+def _validate(c: object, origin: str) -> Connector:
+    """Every invariant a registered connector satisfies, built-in or plugin — that equivalence IS
+    the contract."""
+    if not isinstance(c, Connector):
+        raise RuntimeError(f"[{origin}] resolved to {type(c).__name__}, not a Connector.")
+    where = f"connector {c.name!r} [{origin}]"
     for hook in ("wire_adapter", "extract_experiment", "session_factory"):
         if not callable(getattr(c, hook, None)):
             raise RuntimeError(f"{where}: {hook} is not callable.")
@@ -60,15 +55,35 @@ def _validate(key: str, c: Connector, origin: str) -> None:
     # none, so a token declared on it is dead config that reads as protection.
     if c.execution == "in_process" and c.auth_token is not None:
         raise RuntimeError(f"{where}: execution='in_process' has no wire — drop auth_token.")
+    return c
 
 
-def _load() -> tuple[dict[str, Connector], dict[str, str]]:
-    """Built-ins then plugins, each through :func:`_validate`. A function rather than inline module code so the resolution
-    rules are testable without installing anything."""
-    registry = dict(_BUILTIN)
-    origins = dict.fromkeys(_BUILTIN, "built-in")
-    for key, builtin in _BUILTIN.items():
-        _validate(key, builtin, "built-in")
+def _add(
+    registry: dict[str, Connector], origins: dict[str, str], c: Connector, origin: str, label: str
+) -> None:
+    if c.name in registry:
+        raise RuntimeError(
+            f"connector {c.name!r} declared twice: [{origins[c.name]}] and [{origin}]."
+        )
+    registry[c.name] = c
+    origins[c.name] = label
+
+
+@functools.cache
+def _load() -> tuple[Mapping[str, Connector], Mapping[str, str]]:
+    """Every module in this package but ``protocol`` is a built-in, then the plugins — each
+    through :func:`_validate`, once per process."""
+    registry: dict[str, Connector] = {}
+    origins: dict[str, str] = {}
+    for m in pkgutil.iter_modules(__path__):
+        if m.name != "protocol":
+            module = importlib.import_module(f"{__name__}.{m.name}")
+            origin = f"built-in: {module.__name__}"
+            builtin = _validate(getattr(module, "CONNECTOR", None), origin)
+            _add(registry, origins, builtin, origin, "built-in")
+    if DEFAULT_CONNECTOR not in registry:
+        raise RuntimeError(f"DEFAULT_CONNECTOR {DEFAULT_CONNECTOR!r} is not a built-in connector.")
+    builtins = frozenset(registry)
 
     for ep in entry_points(group=ENTRY_POINT_GROUP):
         dist = getattr(getattr(ep, "dist", None), "name", None) or "unknown distribution"
@@ -82,40 +97,30 @@ def _load() -> tuple[dict[str, Connector], dict[str, str]]:
                 f"connector it cannot load, because a skipped one comes back later as an "
                 f"unexplained 'not registered'."
             ) from exc
-        if not isinstance(obj, Connector):
+        plugin = _validate(obj, origin)
+        if plugin.name in builtins:
             raise RuntimeError(
-                f"connector entry point {ep.name!r} [{origin}] resolved to "
-                f"{type(obj).__name__}, not a promptpotter.connectors.Connector."
-            )
-        if obj.name in _BUILTIN:
-            raise RuntimeError(
-                f"connector entry point {ep.name!r} [{origin}] declares {obj.name!r}, which "
+                f"connector entry point {ep.name!r} [{origin}] declares {plugin.name!r}, which "
                 f"ships with PromptPotter. A plugin may not replace a built-in: "
-                f"CONNECTORS[{obj.name!r}] is read by name inside the loop. Rename it."
+                f"get({plugin.name!r}) is read by name inside the loop. Rename it."
             )
-        if obj.name in registry:
-            raise RuntimeError(
-                f"connector {obj.name!r} declared twice: [{origins[obj.name]}] and [{origin}]."
-            )
-        _validate(obj.name, obj, origin)
-        registry[obj.name] = obj
-        origins[obj.name] = origin
-    return registry, origins
+        _add(registry, origins, plugin, origin, origin)
+    return MappingProxyType(registry), MappingProxyType(origins)
 
 
-CONNECTORS, CONNECTOR_ORIGINS = _load()
-"""``CONNECTORS`` maps name → connector. ``CONNECTOR_ORIGINS`` maps the same keys to
-where each came from (``"built-in"``, or ``"<distribution>: <module>:<attr>"`` — the entry
-point's VALUE, since its label is free and only the value says what was imported). The second
-exists because a plugin's name is not greppable in this tree: without it, "which code
-answers this key" stops being a question this repo can answer."""
+def registered() -> Mapping[str, Connector]:
+    return _load()[0]
 
-if DEFAULT_CONNECTOR not in CONNECTORS:
-    raise RuntimeError(f"DEFAULT_CONNECTOR {DEFAULT_CONNECTOR!r} is not a registered connector.")
+
+def connector_origins() -> Mapping[str, str]:
+    """The same keys → ``"built-in"`` or ``"<distribution>: <module>:<attr>"``, the entry point's
+    VALUE: its label is free, and a plugin's name greps to nothing in this tree."""
+    return _load()[1]
 
 
 def get(name: str) -> Connector:
-    if name not in CONNECTORS:
-        known = ", ".join(f"{k} [{CONNECTOR_ORIGINS[k]}]" for k in sorted(CONNECTORS)) or "(none)"
+    table = registered()
+    if name not in table:
+        known = ", ".join(f"{k} [{connector_origins()[k]}]" for k in sorted(table)) or "(none)"
         raise KeyError(f"connector {name!r} not registered. Known: {known}")
-    return CONNECTORS[name]
+    return table[name]

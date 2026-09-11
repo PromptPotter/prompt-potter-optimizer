@@ -78,48 +78,52 @@ def backend_type_of_dataset(stores: Stores, dataset_name: str) -> str:
     return bt.lower() if isinstance(bt, str) else ""
 
 
-def dataset_panel_rows(
-    stores: Stores, dataset_name: str
-) -> tuple[list[dict[str, Any]], list[str]] | None:
-    """The panel a CONNECTOR owns — ``(rows, index_terms)`` — or ``None`` where this box has no
-    connector-owned panel to read.
-
-    THE reader of an ``experiment_file`` (harbor's task panel, L4's inner benchmark), and it sits
-    beside :func:`readable_dataset_rows` because the two ARE the one ladder this module promises:
-    a resolver that knows only materialized banks answers EMPTY for a connector-owned one, which
-    is not a fact about the dataset. Panel ORDER is the ``sample_id`` (``samples_from_dicts``
-    numbers positionally), so a second ordering would misfile every row against ``measurements/``.
-
-    **``None`` and the raise are the two halves of one distinction, and it is NOT
-    present-vs-absent.** ``None`` says "nothing here to read" — no connector, no declared panel,
-    or a declared panel this machine has not generated; every caller answers all three the same
-    way, by falling through to the materialized reader. The raise says "there is a panel and it is
-    WRONG", which no caller may render as an empty roster. `harbor_tasks.yaml` is gitignored and
-    rebuilt per machine, so a missing one is the ordinary state of a fresh clone: raising on it
-    turned a not-yet-generated panel into a 4xx on the dataset preview."""
-    connector = connectors.CONNECTORS.get(backend_type_of_dataset(stores, dataset_name))
-    if connector is None or not connector.experiment_file:
+def dataset_experiment(config_dir: Path, connector: connectors.Connector) -> dict[str, Any] | None:
+    """*connector*'s ``experiment_file`` in *config_dir*, parsed and resolved, or ``None`` where
+    this box has none — a gitignored panel absent on a fresh clone is not an error; a malformed one is."""
+    if not connector.experiment_file:
         return None
-    config_dir = readable_dataset_dir(stores, dataset_name)
     panel_path = config_dir / connector.experiment_file
     if not panel_path.is_file():
         return None
     data = read_yaml_optional(panel_path)
-    if not data:
+    if not isinstance(data, dict) or not data:
         raise ValueError(
             f"Connector {connector.name!r} expects {connector.experiment_file!r} in the "
-            f"dataset config dir ({config_dir}), but the file is empty."
+            f"dataset config dir ({config_dir}) to be a non-empty mapping."
         )
+    return data if connector.resolve_experiment is None else connector.resolve_experiment(data)
+
+
+def extract_panel_rows(
+    connector: connectors.Connector, dataset_name: str, experiment: dict[str, Any]
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """``(rows, index_terms)`` out of a document :func:`dataset_experiment` read, in panel ORDER —
+    the ``sample_id``, so a second ordering would misfile every row against ``measurements/``."""
     try:
-        return connector.extract_experiment(data)
+        return connector.extract_experiment(experiment)
     except (KeyError, TypeError, AttributeError, IndexError) as exc:
         # A shape the connector did not expect. Re-raised as `ValueError` for the same reason
         # `read_yaml` is: every guard above this seam is `except (ValueError, OSError, ImportError)`,
         # and a raw `KeyError` from a connector walks through all of them into a 500.
         raise ValueError(
-            f"Connector {connector.name!r} could not read {connector.experiment_file!r} in "
-            f"{config_dir}: {type(exc).__name__}: {exc}"
+            f"Connector {connector.name!r} could not read {dataset_name!r}'s "
+            f"{connector.experiment_file!r}: {type(exc).__name__}: {exc}"
         ) from exc
+
+
+def dataset_panel_rows(
+    stores: Stores, dataset_name: str
+) -> tuple[list[dict[str, Any]], list[str]] | None:
+    """The panel a CONNECTOR owns — ``(rows, index_terms)`` — or ``None`` where this box has no
+    connector-owned panel to read. It sits beside :func:`readable_dataset_rows` because the two ARE
+    the one ladder this module promises: a resolver that knows only materialized banks answers
+    EMPTY for a connector-owned one, which is not a fact about the dataset."""
+    connector = connectors.registered().get(backend_type_of_dataset(stores, dataset_name))
+    if connector is None:
+        return None
+    experiment = dataset_experiment(readable_dataset_dir(stores, dataset_name), connector)
+    return None if experiment is None else extract_panel_rows(connector, dataset_name, experiment)
 
 
 def readable_dataset_rows(stores: Stores, name: str) -> dict[str, Any] | None:
@@ -223,8 +227,10 @@ def _read_n_samples(stores: Stores, name: str) -> int | None:
 __all__ = [
     "DatasetAccessError",
     "backend_type_of_dataset",
+    "dataset_experiment",
     "dataset_panel_rows",
     "dataset_pipeline_path",
+    "extract_panel_rows",
     "is_dataset_dir",
     "list_readable_datasets",
     "readable_dataset_dir",

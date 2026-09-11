@@ -18,7 +18,7 @@ concept` and skip to Checks.**
       answer is yes.)
 - [ ] 3. Is the name distinct from every existing concept? (Grepped first.)
 - [ ] 4. Is the name self-describing without opening another file?
-- [ ] 5. Can this ride existing infrastructure (ledger, `INJECTIONS`,
+- [ ] 5. Can this ride existing infrastructure (ledger, `injection_table()`,
       `OptSearchPoint`, dispatch hub) without adding a sidecar?
 - [ ] 6. Can the AI / operator read this fact from a file without running the
       CLI?

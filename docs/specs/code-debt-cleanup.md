@@ -28,33 +28,6 @@ it.
 
 ## Open — multi-arc, no blocker
 
-- **A registry that COMPLETES itself at import time is the last cause of the import knot** — and it
-  is a backbone shape, not three local accidents. 330 → 52 (the habit, swept 2026-09-10) → 23 (the
-  `spawn_context` boundary move plus `entry`). Of the 23, eight are deliberate and stay:
-  `complexity_ledger` (7, "outside the layer tree because it counts every layer") and
-  `escalation/state` ↔ `rules` (1). **The other 15 are all one pattern, at three sites** — the
-  connector registry (12, every one of them IN `connectors/promptpotter.py`, which
-  `connectors/__init__.py` imports eagerly for `_BUILTIN`; `_load()` itself holds none),
-  `dispatch/injections/registry.py`'s renderer walk (2, and the 1 in `llm_call/prompts.py` that
-  cannot reach `INJECTIONS` because of it), and `judges/__init__.py::_load()` (0).
-  **The predicate that decides which sites bite: a registered member that reaches back UP into a
-  layer which imports the registry.** `judges` registers leaves, so its identical `_load()` costs
-  nothing — the pattern is only dangerous where a member is heavy. `connectors/promptpotter` drives
-  the whole application; `injections/layer_state` imports the prompt loader. Both then close a loop
-  on a half-initialised package.
-  **The fix separates registration from completion.** Registration by import must stay eager — it
-  is the `@signal` / `CONNECTOR` side effect, and walking beats a hand-listed tuple. What does not
-  have to be eager is BUILDING and VALIDATING the table: make each accessor `@functools.cache`d and
-  the cycles open, because the heavy member is imported on first use rather than at module import.
-  The property both files defend in prose — a half-wired connector must not reach a campaign — is
-  then kept by calling the accessors once from an explicit startup step (`init_services`), which is
-  strictly better: the eagerness becomes a declared step instead of an import-order accident.
-  Sequencing note: this does not remove the need to decide whether `protocol.py` (`Connector` and
-  its hook aliases) still belongs under an `__init__` that does work, and `runner/inner/tasks`
-  genuinely wants `CONNECTORS`.
-  **Re-test:** `.venv/Scripts/python.exe -m promptpotter.complexity_ledger | grep deferred` —
-  while it reads 23, the knot stands; the ledger row is the ratchet and cannot drift back up.
-
 - **Pointed out, NOT investigated — each needs a look before it is a claim.** Filed together
   because they were all passed while working on something else, and none has been measured.
   (1) **The winner's prompt duplicates itself.** By round 8 of `swiss-invoices-eval__b1b4f5` the
@@ -154,19 +127,6 @@ it.
   new spreadsheetbench-s10` past round 1 with `prompt_block_catalogue` on, then read the round file
   for a COLLAPSED verdict and `earned_blocks` under `OPEN` — if either now discriminates, the entry
   is stale.
-
-- **`InProcessRun` has no arming context, so both in-process connectors that need per-run state
-  invented the same ContextVar.** `InProcessRun = Callable[[str, dict], Awaitable[dict]]` — query
-  and payload, no session, no dataset, no resolved experiment. `dspy_module.py` holds `_PROGRAM`;
-  `harbor.py` holds `_PANEL`, armed as a **side effect of `extract_experiment`**, which neither
-  that function's name nor its protocol docstring mentions. Two connectors reaching the same
-  workaround independently is a missing NAME, and the author of connector #3 can only discover
-  the channel by debugging. The fix is a seam widening that DELETES both ContextVars — give
-  `in_process_run` the arming context (the resolved experiment doc, or the session handle). Both
-  are currently CORRECT, so this is cost-of-authoring, not a bug: campaigns are
-  `asyncio.create_task` siblings, so each copies the context and two concurrent Harbor campaigns
-  cannot clobber each other. **Re-test:** author a throwaway connector needing per-run state
-  without reading `harbor.py`; if it reaches for a ContextVar, the entry stands.
 
 
 ## Blocked — named blocker
