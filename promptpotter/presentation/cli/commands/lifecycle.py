@@ -36,6 +36,7 @@ from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
     identity_from_args,
     resolve_campaign_hint,
+    resolve_cycle,
 )
 from promptpotter.shared.errors import ConflictError, NotFoundError
 
@@ -58,17 +59,17 @@ __all__ = [
 
 
 def _resolve_target(args: argparse.Namespace, store: Stores) -> tuple[str, str]:
-    """The ``--campaign``/``--cycle`` pair, falling back to the active pointer. Shared by every
-    cycle-scoped verb here so they cannot resolve "which cycle" two different ways."""
+    """The ``--campaign``/``--cycle`` pair, else the active pointer's — never half of each: the
+    pointer's cycle belongs to the pointer's campaign, so a named one resolves its own."""
     campaign_id: str = getattr(args, "campaign", None) or ""
     cycle_id: str = getattr(args, "cycle", None) or ""
-    if not (campaign_id and cycle_id):
+    if not campaign_id:
         _sid, pointer_cid, pointer_cyid = read_active_pointer(store.base_dir)
-        campaign_id = campaign_id or pointer_cid
-        cycle_id = cycle_id or pointer_cyid
-    # The pointer already holds a full id; a hand-typed `--campaign` gets the same reach here as
-    # it does for `verify`, through the one matcher rather than a second rule.
-    return (resolve_campaign_hint(store, campaign_id) if campaign_id else ""), cycle_id
+        return pointer_cid, cycle_id or pointer_cyid
+    # A hand-typed `--campaign` gets the same reach here as it does for `verify`, through the one
+    # matcher rather than a second rule.
+    campaign_id = resolve_campaign_hint(store, campaign_id)
+    return campaign_id, cycle_id or resolve_cycle(store, campaign_id, None)
 
 
 async def _refused(awaitable: Awaitable[object], ids: dict[str, str]) -> CommandResult | None:
