@@ -46,7 +46,7 @@ Three verdicts ship, and each answers a different "what if".
 |---|---|---|
 | **A different scoring formula** | `?lens=score:<formula>` on `GET /campaigns/{c}/cycles/{cy}/tree` — each node also gets a `lens_value` | Yes — the candidate that formula ranks first |
 | **A PoBB gate switched off** | `?lens=abort:<variant>`, variant = `<gate>_off` for any `EliminationGate` (`epsilon` \| `lock_in` \| `collapsed`), or `all_off` — the table is DERIVED from that enum, so a new gate is switchable without editing this row | No — the continuation was never measured |
-| **A changed engine or scorer** | `python -m promptpotter ab` — replays the active cycle's whole campaign | Where a `round_winner` decision flips, yes |
+| **A changed engine or scorer** | `python -m promptpotter ab [--campaign <id>]` — replays one whole campaign, the active one by default | Where a `round_winner` decision flips, yes |
 
 **Row one re-ranks the RECORD; row three re-runs the ELECTION, and the difference is not a
 matter of degree.** The lens orders candidates by `display_rank_key` over the masked aggregate,

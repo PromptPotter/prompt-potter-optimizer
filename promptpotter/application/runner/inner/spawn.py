@@ -484,10 +484,9 @@ async def _run_inner_campaign(
         cfg_path = dataset_campaign_path(session.dataset_config_dir)
         if cfg_path.exists():
             file_config = read_campaign_config_file(cfg_path)
-    profile = session.store.backends.load_connector_profile(session.backend_id) or {}
     campaign_config = inner_instrument_config(
         spec,
-        load_campaign_config({**profile, **file_config}),
+        load_campaign_config(file_config),
         llm_node=session.llm_node_name(),
         n_scored=len(train_data),
     )

@@ -4,20 +4,9 @@ import argparse
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.campaign_config import apply_inherited_overlay
-from promptpotter.application.campaign_config import (
-    load_campaign_config as validate_campaign_config,
-)
-from promptpotter.application.datasets.authored import (
-    dataset_campaign_path,
-    read_campaign_config_file,
-)
+from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.infrastructure.store.dataset_access import (
-    DatasetAccessError,
-    readable_dataset_dir,
-)
 from promptpotter.infrastructure.store.session_pointer import (
     active_pointer_exists,
     read_active_pointer,
@@ -56,26 +45,12 @@ class SessionCtx:
 
     @property
     def campaign_config(self) -> CampaignConfig:
-        """The dataset's LIVE ``campaign.json`` with the frozen snapshot's overlay re-applied — that overlay exists only on
-        the snapshot. Resolution is tenant-FIRST: repo-root-only made every ingested dataset resume off the snapshot."""
-
-        dataset_name = self.init_params.get("dataset_name") or ""
-        raw: dict[str, Any] = {}
-        if dataset_name:
-            try:
-                ds_dir = readable_dataset_dir(self.store, dataset_name)
-            except DatasetAccessError:
-                pass  # campaign outlives its dataset dir — resume off the snapshot
-            else:
-                raw = read_campaign_config_file(dataset_campaign_path(ds_dir))
-        config = validate_campaign_config(raw)
         campaign = (
             self.store.campaigns.load_campaign(self.campaign_id) if self.campaign_id else None
         )
-        if campaign is not None:
-            seed = self.store.campaigns.read_cycle_seed(self.hop)
-            config = apply_inherited_overlay(config, campaign.config, seed)
-        return config
+        if campaign is None:
+            raise SystemExit(f"ERROR: campaign {self.campaign_id!r} has no manifest on disk.")
+        return resolve_campaign_config(self.store, campaign, self.hop)
 
     @property
     def task_context(self) -> dict[str, Any] | None:

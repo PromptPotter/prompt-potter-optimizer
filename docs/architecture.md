@@ -177,8 +177,9 @@ world is a strict containment hierarchy:
   resolved dir — none recompute a repo-relative `datasets/{name}/` path.
   So an ingested tenant dataset is first-class to the whole loop, not
   just to the mint that created it. That seam answers *which bytes on disk*.
-  The **effective-config** seam is
-  `application/pipeline_resolve.py::resolve_pipeline_for_campaign`, and it
+  The **effective-config** seam is `application/pipeline_resolve.py` —
+  `resolve_campaign_config` for the knobs (what resume and `ab` read),
+  `resolve_pipeline_for_campaign` for the node values over them — and it
   answers *which values a campaign runs* — the dataset floor with the
   campaign's frozen overrides, its cycle seed, the addressed candidate's
   evolved delta and the connector's identity contributions layered over it,

@@ -1328,13 +1328,7 @@ def test_the_drafts_CHAIN_reaches_the_mint_on_a_reused_dataset(tmp_path: Path) -
             "pipelines": {"default": ["web_search", "rerank", "llm_only"]},
         }
     )
-    session = types.SimpleNamespace(
-        store=types.SimpleNamespace(
-            backends=types.SimpleNamespace(load_connector_profile=lambda _id: {})
-        ),
-        backend_id="b",
-        pipeline_schema=schema,
-    )
+    session = types.SimpleNamespace(pipeline_schema=schema)
 
     chosen = build_cycle_config(cast(Any, session), root, pipeline_steps=["llm_only"])
     assert sorted(chosen.exclude_nodes) == ["rerank", "web_search"]

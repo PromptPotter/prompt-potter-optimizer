@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.infrastructure.store.io import (
@@ -51,13 +50,6 @@ class BackendStore:
     def update(self, backend: BackendConnection) -> None:
         path = self._backend_dir(backend.id) / "backend.json"
         write_json(path, backend.model_dump())
-
-    # -- connector profile (persistent per-backend defaults) -------------------
-
-    def load_connector_profile(self, backend_id: str) -> dict[str, Any] | None:
-        return read_json_optional(
-            self._backend_dir(backend_id) / "connector_profile.json",
-        )
 
 
 __all__ = ["BackendStore"]

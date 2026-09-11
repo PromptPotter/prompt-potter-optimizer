@@ -23,8 +23,8 @@ from promptpotter.application.optimization.resume_and_fork.replayers import (
 )
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.run_records import ResumeCheckpointKind
-from promptpotter.domain.search_point import JobSearchPoint
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
@@ -32,7 +32,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ab_replay_cycle"]
+__all__ = ["AbReplayError", "AbReport", "ab_replay_cycle"]
+
+
+class AbReplayError(Exception):
+    """The addressed campaign cannot be replayed off disk. The CLI shell maps it to a clean ``SystemExit``."""
 
 
 @dataclass(frozen=True)
@@ -143,9 +147,6 @@ def ab_replay_cycle(
 ) -> AbReport:
     """Re-derive a campaign under the active engine + scorer; no LLM calls. The walk is the CAMPAIGN's — a fork shares its
     parent's measurements, so an invalidating change reaches every branch below and a per-cycle answer cannot say that."""
-    # Lazy import: cycle.py is a sibling in this layer and pulls the whole loop; importing it
-    # at module load would risk an import cycle through resume_and_fork/__init__.
-
     sc = session.scoring
     scorer = sc.scorer
     assert scorer is not None, "session.scoring.scorer required for A/B replay"
@@ -161,19 +162,27 @@ def ab_replay_cycle(
         ),
         None,
     )
+    if origin is None:
+        raise AbReplayError(
+            f"{hop.campaign_id}/{hop.cycle_id} has no scored round 0, so there is no origin to "
+            "calibrate the δ ruler on and every replayed decision would be read against nothing."
+        )
     # Round 0 = the origin scored; its results calibrate the ruler, exactly as Cycle.start did —
     # including its searchpoint identity, which folds the archive's copies of the origin into the
     # one ``ORIGIN_ABILITY_ID`` candidate the live ruler saw. Rescored first: the ruler is fitted
     # on the grades the CURRENT scorer gives, or arm B is measured against arm A's δ.
-    origin_results = origin.results if origin is not None else []
-    rescore_results(origin_results, scorer)
+    rescore_results(origin.results, scorer)
+    # Through the OSP, as `Cycle.start` builds it: the round's `pipeline_params` has each node's
+    # rendered `prompt` stripped, and `sp_hash` keys on the whole node config.
     origin_sp_hash = (
-        JobSearchPoint(pipeline_params=origin.pipeline_params).sp_hash(session.pipeline_schema)
-        if origin is not None
-        else ""
+        OptSearchPoint.from_prompt_fields(origin.prompt_fields)
+        .to_job_search_point(
+            base_pipeline_params=origin.pipeline_params, schema=session.pipeline_schema
+        )
+        .sp_hash(session.pipeline_schema)
     )
     ruler, _ = _calibrate_delta_ruler(
-        origin_results,
+        origin.results,
         n_min,
         enable_2pl=enable_2pl,
         archive_obs=build_archive_observations(

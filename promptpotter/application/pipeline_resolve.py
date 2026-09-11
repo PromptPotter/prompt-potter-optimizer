@@ -88,6 +88,7 @@ __all__ = [
     "apply_node_overlay",
     "configure_and_apply_pipeline",
     "missing_template_vars",
+    "resolve_campaign_config",
     "resolve_pipeline_config_params",
     "resolve_pipeline_for_campaign",
     "resolve_pipeline_for_draft",
@@ -497,6 +498,21 @@ def _config_floor(campaign: Campaign, dataset_dir: Path | None) -> CampaignConfi
     return load_campaign_config({"optimization": dict(defaults)})
 
 
+def resolve_campaign_config(
+    stores: Stores, campaign: Campaign, hop: CycleHop | None
+) -> CampaignConfig:
+    """What a campaign RUNS under: its frozen declaration over the live dataset file, a cycle seed's
+    narrowing last (``hop=None`` reads none). Resume, ``ab`` and the served pipeline all ask it."""
+    try:
+        dataset_dir: Path | None = readable_dataset_dir(stores, campaign.dataset_name)
+    except DatasetAccessError:
+        dataset_dir = None
+    seed = stores.campaigns.read_cycle_seed(hop) if hop is not None else None
+    return apply_inherited_overlay(
+        _config_floor(campaign, dataset_dir), campaign.config or {}, seed
+    )
+
+
 def resolve_pipeline_for_draft(
     draft: DraftCampaign,
     *,
@@ -600,9 +616,8 @@ def resolve_pipeline_for_campaign(
         raw = read_yaml_optional(dataset_pipeline_path(dataset_dir))
     schema = parse_pipeline_response(raw or {"nodes": {}, "pipelines": {"default": []}})
 
-    live = _config_floor(campaign, dataset_dir)
     seed = stores.campaigns.read_cycle_seed(hop) if at.cycle_id else None
-    cfg = apply_inherited_overlay(live, campaign.config or {}, seed)
+    cfg = resolve_campaign_config(stores, campaign, hop if at.cycle_id else None)
 
     active, filtered = _resolve_active_schema(
         schema,

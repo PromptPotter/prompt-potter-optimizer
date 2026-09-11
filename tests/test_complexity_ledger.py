@@ -63,7 +63,12 @@ LEDGER_BASELINE = {
     # halves it separates point opposite ways: publishing an inner-spawn context is something the
     # ordinary runner does on its way past, while RUNNING an inner campaign reaches back down into
     # that runner. Sharing one file made `entry <-> spawn` mutual and `seed_screen` a third leg.
-    "modules": 344,
+    # +1: `application/ab.py` — the `ab` verb's session half, beside `verify.py` / `noise_floor.py`.
+    # The CLI shell held it and opened the session off the ACTIVE pointer, which is why `ab` could
+    # not name a campaign. The replay core stays beside the replayers it shares with resume
+    # (`mask/verdicts.py`), and the half that calls `init_services` cannot join it there without a
+    # runtime `optimization -> initialization` edge.
+    "modules": 345,
     "init_files": 49,
     # +1: `judges/__init__.py` — flagged for the same reason `connectors/__init__.py` is, and by
     # the same text test: a registry module has both an `__all__` and imports. Named rather than

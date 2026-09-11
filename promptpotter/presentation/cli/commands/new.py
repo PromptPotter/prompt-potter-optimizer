@@ -339,9 +339,6 @@ async def _mint_fresh_session(
 ) -> tuple[Session, CampaignConfig, str, str]:
     """Find-or-create campaign + mint session + root cycle. No scoring — the origin is phase 0 of the loop."""
 
-    # Shared unwrap only — `new` validates AFTER merging with the connector
-    # profile ({**profile, **file_config}), a different composition order than
-    # the draft path, so it keeps its own validate-after-merge step below.
     file_config = read_campaign_config_file(Path(args.config)) if args.config else {}
     # Resolution order: positional dataset → --dataset-name → config["dataset_name"]
     dataset_name = (
@@ -360,7 +357,6 @@ async def _mint_fresh_session(
         dataset_name=dataset_name,
         identity=identity_from_args(args),
     )
-    backend_id = session.backend_id
 
     # Auto-load dataset's campaign.json from the resolved config dir (tenant-first
     # via session.dataset_config_dir) when --config wasn't given — else the session
@@ -371,8 +367,7 @@ async def _mint_fresh_session(
         if default_config_path.exists():
             file_config = read_campaign_config_file(default_config_path)
 
-    profile = session.store.backends.load_connector_profile(backend_id) or {}
-    campaign_config = _load_cfg({**profile, **file_config})
+    campaign_config = _load_cfg(file_config)
 
     train_data = session.samples
 

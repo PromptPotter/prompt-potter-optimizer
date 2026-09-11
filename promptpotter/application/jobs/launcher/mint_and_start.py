@@ -13,7 +13,6 @@ from typing import Any
 
 from promptpotter.application.campaign_config import (
     CampaignConfig,
-    apply_inherited_overlay,
     load_campaign_config,
 )
 from promptpotter.application.datasets.authored import (
@@ -43,7 +42,10 @@ from promptpotter.application.jobs.launcher.draft_build import (
 from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
 from promptpotter.application.jobs.quota import QuotaExceededError
 from promptpotter.application.jobs.registry import Job, JobRegistry
-from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
+from promptpotter.application.pipeline_resolve import (
+    configure_and_apply_pipeline,
+    resolve_campaign_config,
+)
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
@@ -142,9 +144,9 @@ def build_cycle_config(
     channel a campaign already has; a second `pipeline_steps` knob would be `exclude_nodes` spelled
     twice (measured: they have identical expressive power, and `filter_to_steps` preserves the
     schema's own order, so a step list cannot even reorder)."""
-    file_config = read_campaign_config_file(dataset_campaign_path(dataset_root))
-    profile = session.store.backends.load_connector_profile(session.backend_id) or {}
-    campaign_config = load_campaign_config({**profile, **file_config})
+    campaign_config = load_campaign_config(
+        read_campaign_config_file(dataset_campaign_path(dataset_root))
+    )
     if pipeline_overlay:
         overrides, narrowing = split_overlay(pipeline_overlay)
         campaign_config = campaign_config.model_copy(
@@ -370,15 +372,7 @@ async def start_run_command(
         )
         logger.info("start[%s]: init_services=%.2fs", dataset_name, time.perf_counter() - _t0)
 
-        # Resume/fork rebuild config from the LIVE dataset file so declaration edits stay
-        # drift-detected, then re-apply the per-campaign overlay that file never holds —
-        # origin-floor values + param locks — off the frozen `Campaign.config` snapshot, a
-        # steered-fork seed's lock edits overriding per node. Without it locks silently reopen.
-        campaign_config = apply_inherited_overlay(
-            build_cycle_config(session, dataset_root),
-            campaign.config,
-            stores.campaigns.read_cycle_seed(hop),
-        )
+        campaign_config = resolve_campaign_config(stores, campaign, hop)
 
         train_data = session.samples
         configure_and_apply_pipeline(session, campaign_config, log=lambda *_a, **_k: None)
