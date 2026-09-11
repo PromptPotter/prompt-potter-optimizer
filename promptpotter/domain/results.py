@@ -388,7 +388,10 @@ class ScoreboardRow(StrictModel):
     rank: int
     candidate_id: str
     changes_description: str
-    accuracy: float
+    # ``None`` is UNSCOREABLE and is not ``0.0`` — see ``ScoredCandidate.accuracy``: a candidate
+    # whose every row errored was never read. Omitted here, the round document's own
+    # ``model_dump()`` raised building this row out of exactly such a candidate.
+    accuracy: float | None
     composite_fitness: float
     total: int
     escalation_aborted: bool

@@ -333,7 +333,7 @@ export interface ScoreboardRow {
   rank: number;
   candidate_id: string;
   changes_description: string;
-  accuracy: number;
+  accuracy: number | null;
   composite_fitness: number;
   total: number;
   escalation_aborted: boolean;
