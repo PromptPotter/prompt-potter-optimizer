@@ -58,7 +58,6 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent, StopLoop, StopReason, emit_phase
 from promptpotter.domain.run_records import (
     ConfigOverrides,
-    ForkSpec,
     ForkTrigger,
     RebaseRequest,
 )
@@ -286,24 +285,6 @@ L3 = LayerStrategy(
     enter_payload_fn=_l3_enter,
     exit_payload_fn=_l3_exit,
 )
-
-
-def apply_fork_payload_to_opt_sp(opt_sp: OptSearchPoint, payload: ForkSpec) -> None:
-    """Stamp a fork payload's L1-surface deltas on the OSP — the same shape L2 writes."""
-    if payload.l1_layout is not None:
-        layout = coerce_l1_layout(payload.l1_layout, base=opt_sp.memory.l1_layout)
-        if layout is None:
-            raise ValueError(
-                f"Fork payload l1_layout is unparseable: {payload.l1_layout!r}. "
-                "Expect a dict mapping each placeholder name to the L1 layout slot it moves to."
-            )
-        result = validate_l1_layout(
-            layout, spec=NODE_LAYOUTS["l1_generate"], prior_layout=opt_sp.memory.l1_layout
-        )
-        if not result.is_valid:
-            ids = sorted({o.validator_id for o in result.outcomes})
-            raise ValueError(f"Fork payload l1_layout failed hard validators: {ids}")
-        opt_sp.memory.l1_layout = layout
 
 
 async def _run_transition(
@@ -632,6 +613,5 @@ async def escalate_l2(
 __all__ = [
     "L2",
     "L3",
-    "apply_fork_payload_to_opt_sp",
     "escalate_l2",
 ]

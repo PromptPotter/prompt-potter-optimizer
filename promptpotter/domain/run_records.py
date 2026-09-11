@@ -29,7 +29,6 @@ __all__ = [
     "LLMCallStartRecord",
     "LedgerCandidate",
     "LedgerRoundClose",
-    "OperatorSweepFile",
     "PhaseRecord",
     "ResumeCheckpointKind",
     "ResumeCheckpointRecord",
@@ -351,7 +350,6 @@ class RoundWarningRecord(StrictModel):
 class ForkTrigger(enum.StrEnum):
     """One value per caller of :func:`_mint_fork`."""
 
-    OPERATOR_SWEEP = "operator_sweep"
     OPERATOR_DIAG = "operator_diag"
     OPERATOR_REWIND = "operator_rewind"
     OPERATOR_STEERED = "operator_steered"
@@ -390,7 +388,6 @@ class ForkDirection(enum.StrEnum):
 # Exhaustiveness is checked at import below — a new trigger must not land without an answer.
 FORK_DIRECTION: dict[ForkTrigger, ForkDirection] = {
     # Exploring beside a line that keeps its meaning; nothing about the parent is invalidated.
-    ForkTrigger.OPERATOR_SWEEP: ForkDirection.OFFSHOOT,
     ForkTrigger.OPERATOR_DIAG: ForkDirection.OFFSHOOT,
     ForkTrigger.OPERATOR_STEERED: ForkDirection.OFFSHOOT,
     # Each retargets the active pointer and abandons the tail it cut from. The parent keeps
@@ -419,7 +416,6 @@ MINT_KIND_FOR_TRIGGER: dict[ForkTrigger, MintKind] = {
     ForkTrigger.SCORING_DIVERGENCE: "divergent_resume",
     ForkTrigger.L2_REBASE: "auto_rebase",
     ForkTrigger.L3_REBASE: "auto_rebase",
-    ForkTrigger.OPERATOR_SWEEP: "user_fork",
     ForkTrigger.OPERATOR_DIAG: "user_fork",
     ForkTrigger.OPERATOR_STEERED: "user_fork",
     ForkTrigger.OPERATOR_REWIND: "user_fork",
@@ -684,7 +680,6 @@ class ForkSpec(StrictModel):
     issued_by: str
     from_round: int | None = None
     from_candidate_id: str | None = None
-    l1_layout: dict[str, str] | None = None
     seed: CycleSeed | None = None
     # The MEASURED direction, for a cut taken before its consequence was known — only a
     # correction needs it. `None` ⇒ the trigger implies the direction (`FORK_DIRECTION`),
@@ -703,31 +698,3 @@ class RebaseRequest(StrictModel):
     reason: str
     issued_by: str
     config_overrides: ConfigOverrides | None = None
-
-
-class OperatorSweepFile(StrictModel):
-    """DEPRECATED, removal pending — superseded by ``InnerTasks``' ``axes:``, which declares the
-    same contrast as a generated product, reaches DATASET (a fork cannot, being inside one
-    campaign), and is read back by ``evidence --grid``. Kept only until a grid has run for real.
-
-    Operator YAML under ``datasets/{name}/sweep/``; the dispatcher widens it to a ``ForkSpec``.
-    Every field but ``reason`` is a CONTRAST LEVER — ``reason`` is provenance and changes nothing
-    the fork runs."""
-
-    model_config = ConfigDict(frozen=True)
-
-    reason: str = ""
-    l1_layout: dict[str, str] | None = None
-
-    @model_validator(mode="after")
-    def _arm_pulls_a_lever(self) -> OperatorSweepFile:
-        """A lever-less arm forks a COPY of its parent and pays a full scored round to measure it, so
-        it fails here rather than at the end of the batch. The set is derived, never listed twice, and
-        the test is EMPTINESS — an empty ``l1_layout`` moves no panel and coerces back to its base."""
-        levers = sorted(set(type(self).model_fields) - {"reason"})
-        if not any(getattr(self, lever) for lever in levers):
-            raise ValueError(
-                "pulls no contrast lever, so it forks a copy of its parent and pays a full "
-                f"scored round to measure it; set one of: {', '.join(levers)}"
-            )
-        return self

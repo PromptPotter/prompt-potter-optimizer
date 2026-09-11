@@ -391,7 +391,7 @@ paths:
         The question a round's own panel cannot answer: a rate is read on the cells the
         acquisition bought that round, so a headline — 100% most of all — is a claim about a
         panel, not about the dataset. This re-scores one candidate on cells it has never seen
-        and writes the verdict to `diagnostics/runs/`. Not a cycle, fork or sweep: no ledger
+        and writes the verdict to `diagnostics/runs/`. Not a cycle or a fork: no ledger
         event on the cycle's own round series, no round id.
 
         **`samples` omitted is the answer, not an absence.** The count derives from the
@@ -1772,7 +1772,7 @@ paths:
         A *forest* is one store's whole content: campaigns (`GET /campaigns`,
         which takes the same `descend`) grouped by their `root_cycle_id` — their
         ORIGIN — each holding the runs on that origin, and each run's cycles: its
-        root plus every fork / diag / sweep, returned FLAT and related only by
+        root plus every fork / diag, returned FLAT and related only by
         `parent_cycle_id`. Whether a consumer nests them or lays them out as
         peers is the consumer's call; the wire asserts no hierarchy.
 
@@ -2689,7 +2689,7 @@ components:
           description: This node is inside the counterfactual subtree below a divergence; render dimmed.
         course_kind:
           type: [string, "null"]
-          enum: [root, fork, diag, sweep, inner, null]
+          enum: [root, fork, diag, inner, null]
           description: |
             Courses, and the candidates a FORK contributed to this timeline — on those it is
             the provenance stamp (⑂) marking an attempt the operator cut, apart from one L1
@@ -2915,7 +2915,7 @@ components:
         parent_session_id: { type: string, default: '' }
         parent_cycle_id:
           type: [string, 'null']
-          description: Immediate parent for siblings (forks/sweeps/diag); null for roots.
+          description: Immediate parent for siblings (forks/diag); null for roots.
         dataset_name: { type: string, default: '' }
         backend_id: { type: string, default: '' }
         mint_kind:

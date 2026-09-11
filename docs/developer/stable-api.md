@@ -177,11 +177,9 @@ which is both where `pip` deletes on upgrade and where the HuggingFace `datasets
 
 `python -m promptpotter new <name>` and `python -m promptpotter resume` are the loop-mint verbs; lifecycle, run-control, diagnostic and maintenance verbs exist beside them. **The flag set is `presentation/cli/parsers.py`** and what each does to the tree is [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md)'s — a table here is one `--help` away from its source and has drifted from it before. What v1 promises is that the two verbs, and the flags that file declares for them, keep their meanings.
 
-Four behaviours a fork may rely on, none of them readable off `--help`:
+Two behaviours a fork may rely on, neither of them readable off `--help`:
 
 - Every `new` mints a fresh root cycle; on content-hash collision with an existing root the `cycle_id` gains a `_r2` / `_r3` discriminator so the new run lands in its own directory tree. The prior campaign is preserved.
-- `--sweep-batch` and `--diag` are mutually exclusive on `new`.
-- There is no `sweep` verb: a sweep is `new --sweep-batch`, and `--sweep-batch` with no `sweep/*.yaml` payloads is a setup error rather than a fall-through to a single unpaired cycle.
 - A launch flag may only lower a budget. `set-budget` is the verb that raises one.
 
 The maintenance and diagnostic verbs are not part of v1.
@@ -276,7 +274,7 @@ Subscribers read via `DerivedView.on_record(record)` and MUST NOT write any camp
 
 **What each file holds, and who writes it** — owned by [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § File reference. What v1 promises is narrower and is only stated here: inside `campaigns/{campaign_id}/cycles/{cycle_id}/`, the contract for any tool reading per-cycle results is **`rounds/round_NNNN.json` + `index.json` + `log.md`**, and `export.json` (§5c) for the winner alone. Everything under `.runtime/` may change shape between minor versions, ledger records included — §6 promises the record family, not the file layout around it.
 
-Sibling cycles (forks, diag, sweeps) live flat under `cycles/` alongside the root, each carrying its own per-cycle artifacts including its own `dashboard.json`, which a fork seeds from its parent at the cut.
+Sibling cycles (forks, diag) live flat under `cycles/` alongside the root, each carrying its own per-cycle artifacts including its own `dashboard.json`, which a fork seeds from its parent at the cut.
 
 ## 8. What is NOT stable
 

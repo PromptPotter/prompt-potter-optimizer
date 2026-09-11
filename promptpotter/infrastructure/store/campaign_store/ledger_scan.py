@@ -45,7 +45,7 @@ _SCORED_INCLUDE = frozenset(LedgerCandidate.model_fields) - {
 
 
 def scan_ledger_cycle_seed(ledger_path: Path) -> CycleSeed | None:
-    """The cycle's own seed, or ``None`` when it carries none (sweep / diag). Written once at mint, but
+    """The cycle's own seed, or ``None`` when it carries none (a diag). Written once at mint, but
     the LAST match wins so a re-seed supersedes."""
     found: CycleSeed | None = None
     for rec in iter_jsonl(ledger_path, record_types=frozenset({"cycle_seed"})):

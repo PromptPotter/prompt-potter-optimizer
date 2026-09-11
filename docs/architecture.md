@@ -173,7 +173,7 @@ world is a strict containment hierarchy:
   **dataset-file** seam is `readable_dataset_dir` — it picks the dir
   (tenant slug first, repo benchmark second) once at init and stamps it on
   `Session.dataset_config_dir`; every downstream dataset-file loader
-  (node overlay, starting prompts, origin prompt, sweep dir) reads that
+  (node overlay, starting prompts, origin prompt) reads that
   resolved dir — none recompute a repo-relative `datasets/{name}/` path.
   So an ingested tenant dataset is first-class to the whole loop, not
   just to the mint that created it. That seam answers *which bytes on disk*.
@@ -201,7 +201,7 @@ world is a strict containment hierarchy:
 - **Campaign** — one declared optimization effort: a dataset, a
   pipeline origin, context text, **and the optimizer prompts it
   runs under**. A **first-class entity** and a **cycle tree** — root
-  + its fork/diag/sweep descendants. `campaign_id = {dataset}__{rand6_hex}`,
+  + its fork/diag descendants. `campaign_id = {dataset}__{rand6_hex}`,
   minted fresh per `new` invocation by `mint_campaign_id` — each `new`
   produces a distinct campaign regardless of declaration. The
   declaration is recorded as *properties* on `campaign.json`, never as
@@ -209,11 +209,11 @@ world is a strict containment hierarchy:
   `optimizer_prompt_hash` (an audit join key — optimizer drift is asked
   per ROUND, where it can name one and fork at it).
   The dataset is embedded so "campaigns for dataset X" is a prefix scan.
-- **Cycle** — one node in a campaign's lineage tree: root | fork | diag
-  | sweep. The operator-facing name is **Unit** — one continuous-parameter
+- **Cycle** — one node in a campaign's lineage tree: root | fork | diag.
+  The operator-facing name is **Unit** — one continuous-parameter
   run; `resume` extends the current unit, each fork branches a new one
   (the webapp + docs say "unit", the on-disk / API id stays `cycle_id`).
-  Identity stays `cycle_{target_hash[:12]}` (+ `_fork_`/`_diag_`/`_sweep_`
+  Identity stays `cycle_{target_hash[:12]}` (+ `_fork_`/`_diag_`
   for branches) — the *target* content hash, content-addressed. It keeps
   two jobs: archive cache-reuse keying and target-drift detection.
   `cycle_id` is campaign-scoped — all path resolution is
@@ -223,7 +223,7 @@ world is a strict containment hierarchy:
 ### A campaign has one root cycle — there is no Session tier
 
 A campaign
-owns a root cycle plus its fork/diag/sweep descendants, and that is the
+owns a root cycle plus its fork/diag descendants, and that is the
 whole containment story — `campaign → cycle → fork` would be two tiers
 wearing three names. What survives is *not* an entity:
 
@@ -453,12 +453,11 @@ root_cycle_id, root_content_hash, backend_id, config`; identity + config
 `index.json::status` and derived on read for campaign surfaces), `log.md`
 (campaign digest — covers every session, its forks, and its rounds),
 `hard_samples.json` (campaign-scope heatmap), and `cycles/{cycle_id}/`
-holding **every** cycle — all N session roots and every fork, diag, and
-sweep — **all flat** — sibling kind and sweep batch id are `index.json`
-metadata, not directory nesting. A flat `cycles/` store keyed by
+holding **every** cycle — all N session roots and every fork and diag —
+**all flat** — the sibling kind is read off the id, not directory nesting. A flat `cycles/` store keyed by
 `parent_cycle_id` scales as the fork tree grows; nested fork-of-fork
 directories do not. `dashboard.json` is **per-cycle**: every cycle (root,
-fork, diag, sweep) owns its live file in its own dir
+fork, diag) owns its live file in its own dir
 (`cycles/{cycle_id}/dashboard.json`), stamped with its own `cycle_id`. A
 fork's view never surfaces the parent's id; a fork seeds its prior
 trajectory from the parent's on-disk file ([`specs/roadmap.md`](specs/roadmap.md) § State-sync). Each

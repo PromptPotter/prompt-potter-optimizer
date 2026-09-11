@@ -33,7 +33,7 @@ def validate_path_component(name: str) -> str:
 
 def _long_path(p: str | Path) -> str:
     """The Windows long-path prefix bypasses ``MAX_PATH=260`` without the registry's
-    ``LongPathsEnabled`` — sweep-fork audit dirs nest past it. No-op on POSIX."""
+    ``LongPathsEnabled`` — fork audit dirs nest past it. No-op on POSIX."""
     s = str(p)
     if os.name != "nt":
         return s

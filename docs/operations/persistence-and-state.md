@@ -3,7 +3,7 @@
 Your work lives in `.promptpotter/`, in two trees:
 
 - `sessions/{session_id}/` — your operator workspace (journal, notes).
-- `campaigns/{campaign_id}/` — one campaign per directory; every cycle (session roots + forks + diags + sweeps) sits flat under `cycles/`.
+- `campaigns/{campaign_id}/` — one campaign per directory; every cycle (session roots + forks + diags) sits flat under `cycles/`.
 
 ## Four entities — where each one lands on disk
 
@@ -12,7 +12,7 @@ Your work lives in `.promptpotter/`, in two trees:
 - **Workspace** — `projects/{tenant}/`. Every directory is named for what it holds, and the root partitions by lifecycle, which is how "what survives a delete?" is answered by looking.
 - **Dataset** — resolved tenant-first: a tenant upload (`projects/{tenant}/datasets/{slug}/`, the `new <file>` ingest path) wins over a repo benchmark (`datasets/{name}/`). An ingested slug is first-class to both `new <slug>` and `resume`, not just the mint that made it.
 - **Campaign** — `campaign_id = {dataset}__{rand6_hex}`, minted fresh per `new`. `campaign.json` carries `root_content_hash` (resume's config-drift check) and `optimizer_prompt_hash`; neither is the id.
-- **Cycle** — `cycle_{content_hash[:12]}` (+ `_fork_`/`_diag_`/`_sweep_` on branches). Path resolution is always `(campaign_id, cycle_id)`.
+- **Cycle** — `cycle_{content_hash[:12]}` (+ `_fork_`/`_diag_` on branches). Path resolution is always `(campaign_id, cycle_id)`.
 
 **There is no Session tier** — owned by [`../architecture.md`](../architecture.md) § A campaign has one root cycle. What `sessions/{session_id}/` and `active_session.json` hold is the operator's workspace and pointer, never a container for cycles.
 
@@ -38,8 +38,6 @@ Reads happen by opening the on-disk artifact tree. `evidence` is the one read VE
 - **`noise-floor`** re-scores a campaign's cached origin `--k` times with `force_fresh`, reading the backend's run-to-run noise.
 - **`seed-screen`** scores a seeded bank draw of ANY dataset against that dataset's own origin over repeated passes, and rejects any bank whose constant-answer floor EXCEEDS the origin by more than the measurement's own error bar — such a bank pays a candidate for collapsing to a single label, the degeneracy the instrument exists to catch. Each pass also reports median and mean per-call latency, wire cost, and the share of answers that went to a single label, so screening a candidate *model* needs no second instrument. The gap between the two latency readings says the route is retrying; the answer share is the twin of the floor — the floor says what a constant answer would SCORE, the share says how nearly this model IS one. It is the one SCREEN (N independent draws, no round-to-round dependence), which is why its concurrency is `--parallel N` held for the whole run rather than the browser's ⇉ control: a depth is cleared by the round that scored under it, and a screen has no round.
 
-Cheap L1 A/B sweeps ride `new --sweep-batch`, not a verb of their own.
-
 ## Layout
 
 ```
@@ -53,7 +51,7 @@ Cheap L1 A/B sweeps ride `new --sweep-batch`, not a verb of their own.
       campaign.json                    # manifest (dataset, config snapshot, declaration hashes — no run state)
       log.md                           # campaign digest — session + forks + rounds + heatmap
       hard_samples.json                # campaign-scope hard-sample artifact
-      cycles/{cycle_id}/               # session root + forks + diags + sweeps, ALL FLAT
+      cycles/{cycle_id}/               # session root + forks + diags, ALL FLAT
         dashboard.json                 # live per-cycle telemetry (forks carry their own, seeded at the cut)
         index.json                     # phase, rounds, final block, parent_cycle_id (forks)
         export.json                    # the winner + its provenance, for a program that is not us
@@ -93,7 +91,7 @@ Cheap L1 A/B sweeps ride `new --sweep-batch`, not a verb of their own.
 | `campaign.json` | campaign dir | Manifest: dataset, label, `root_cycle_id`, declaration hashes, backend, lifecycle intent, and the frozen `CampaignConfig` snapshot (single owner — no per-cycle copies). Run state is per-cycle (`index.json::status`), derived on read for campaign surfaces. |
 | `dashboard.json` | the cycle's dir | Live per-cycle scalars: round, origin, best, candidates, counters. One stream per cycle. Post-mortem `stop_reason` is in `index.json`, not here. |
 | `log.md` / `hard_samples.json` (campaign) | campaign dir | Campaign digest + campaign-scope hard-sample artifact (across all its cycles). |
-| `index.json` | per cycle | `pipeline_params`, `cycle_id`, `parent_cycle_id`/`sweep_batch_id` (branches), `rounds[]`, `final` block (winner + stop_reason). A branch's KIND is not stored — `layout.py::sibling_kind` parses it from the id. |
+| `index.json` | per cycle | `pipeline_params`, `cycle_id`, `parent_cycle_id` (branches), `rounds[]`, `final` block (winner + stop_reason). A branch's KIND is not stored — `layout.py::sibling_kind` parses it from the id. |
 | `export.json` | per cycle | The winning prompt by field name, the node config it ran under, and the provenance a consumer needs to trust the number (fitness under its named formula, n, lift + CI, θ, the rows' hash, the optimizer manifest). Written from the same call that stamps `index.json::final`; absent when no round ever closed. Contract: `domain/export.py`. |
 | `pipeline.resolved.yaml` | per cycle | The declaration this cycle RUNS — the live backend's, under the dataset overlay, as `wiring::_resolve_pipeline_schema` merged it. Written at `init_cycle` and REWRITTEN on every resume, because what the operator is owed is the space the next round will search. It exists because a campaign's committed dataset file deliberately snapshots values and not the backend's `param_keys` (`draft_campaign::merge_pipeline_overlay`), so the served read had every node's settings and none of its axes. Absent until a cycle starts, and the dataset file answers then — which is honest, since no backend has spoken to that campaign yet. |
 | `log.md` / `review.md` (cycle) | per cycle | Per-cycle digests. Derived views — safe to delete and recompute. |
@@ -167,7 +165,7 @@ A fresh launch clears every polled run-control flag: a flag surviving the gestur
 
 Error prefixes — `[CLIENT]` / `[SERVER]` / `[CONNECTION]` / `[PIPELINE]` — land in the latest `rounds/round_NNNN.json`, alongside the mirrored `logs/latest.log`. The optimizer-call path carries a hard wall-clock (`_chat_under_deadline` → `OPTIMIZER_TIMEOUT`), so a hung optimizer call terminates itself. **An overnight death with no terminal record is machine-sleep or session-end class, not a code fault** — do not go looking for a bug in the loop.
 
-## Recovery: resume, rewind, fork, sweep
+## Recovery: resume, rewind, fork
 
 Three workflows over one fork primitive.
 
@@ -176,15 +174,14 @@ Three workflows over one fork primitive.
 | **Resume** | `resume` | Pick up from the latest completed round of the active cycle. |
 | **Rewind** | `resume --from N` | Same `cycle_id`; archive rounds after N; resume at N+1. |
 | **Fork on divergence** | `resume --fork-on-divergence` | On divergence — a round produced by a different optimizer, a package that no longer reproduces, or a decision that re-derives differently — mint a sibling cycle rooted at that round and continue. |
-| **Sweep batch** | `new --sweep-batch` | Mint N siblings under one root from operator-authored overrides; 2-round sweep each. |
 
 ### The primitive
 
-A fork is a new cycle whose `index.json` carries `parent_cycle_id`. Its KIND is stored nowhere, because the id already answers it — `layout.py::root_cycle_id` / `::sibling_kind` know exactly three separators (`_fork_`, `_diag_`, `_sweep_`). Forks land **flat** under `cycles/`; the tree is reconstructed from `parent_cycle_id`, never from directory nesting. The parent's ledger gets a `ResumeCheckpointRecord(kind=FORK_CUT)` naming the child's `cycle_id` and the cut round, and the child inherits the parent's history up to that cut.
+A fork is a new cycle whose `index.json` carries `parent_cycle_id`. Its KIND is stored nowhere, because the id already answers it — `layout.py::root_cycle_id` / `::sibling_kind` know exactly two separators (`_fork_`, `_diag_`). Forks land **flat** under `cycles/`; the tree is reconstructed from `parent_cycle_id`, never from directory nesting. The parent's ledger gets a `ResumeCheckpointRecord(kind=FORK_CUT)` naming the child's `cycle_id` and the cut round, and the child inherits the parent's history up to that cut.
 
 Three things a fork owns rather than shares: its own `dashboard.json` (seeded from the parent at the cut), `index.json::forked_at_offset` naming *where* on the parent it cut, and a ledger carrying **own appends only** — the parent's prefix is walked, not copied. **`mint_kind`** is the webapp sidebar label for what minted a cycle (`domain/run_records.py::MINT_KIND_FOR_TRIGGER`, which refuses an unbadged trigger at import); the raw kind is not served beside it, because the browser parses the id for the family tail anyway.
 
-Every cut serializes ONE typed `ForkSpec` to `FORK_CUT.data.fork` + `index.json::fork`, and three callers fill it: **scoring divergence** (trigger/reason/issued_by only), an **operator sweep** (batch id + source file ride `_mint_fork` args, not the spec), and an **operator-steered fork** (`seed: CycleSeed` + `from_candidate_id`). The primitive does not know which fired — a new caller adds a `ForkTrigger` member and nothing else.
+Every cut serializes ONE typed `ForkSpec` to `FORK_CUT.data.fork` + `index.json::fork`, and its callers differ only in what they fill: **scoring divergence** (trigger/reason/issued_by only) and an **operator-steered fork** (`seed: CycleSeed` + `from_candidate_id`). The primitive does not know which fired — a new caller adds a `ForkTrigger` member and nothing else.
 
 **`from_round` is provenance; `_mint_fork(fork_from_round=…)` is mechanics.** The arg says how many parent rounds this cut LIFTS (`0` = a clean offshoot lifting none); the spec field says which round it was CUT FROM. A rebase makes them equal, so the seam back-fills the spec when its author left it unset — but only then. Only a steered cut names `from_candidate_id`, so only it can be labelled by the candidate it came from.
 
@@ -200,7 +197,7 @@ Use when the active cycle went somewhere you don't want. `cycle_id` stays; round
 
 Use when a **data-affecting** edit (scoring formula, `pipeline_overlay`, `exclude_nodes`, `dataset_name`) makes resume's replayer find recorded decisions no longer hold. The optimizer halts rather than drift; either revert, or commit with `--fork-on-divergence`. It mints a new `cycle_id` **in the same session**, rooted at the divergence point, copies pre-divergence rounds, records `parent_cycle_id`, and re-runs the divergent round under the current scorer. The shared archive is not duplicated — both cycles read the same measurements through their own scoring ledger. **Why rewind isn't enough:** rewind restarts under the *same* policy and would re-hit the same divergence.
 
-**A cut has a DIRECTION** — which side the run continues on, written at the cut and served as `fork_direction`. The trigger usually implies it (`FORK_DIRECTION`, derived, so every fork already on disk answers it): a sweep / diag / steered fork is an `offshoot`, the child hanging off a line that keeps running; a `scoring_divergence`, `operator_rewind` or L2/L3 rebase **supersedes**, the child being the continuation the pointer moves to and the *parent* what was left behind. Same shape on disk, opposite reading — which is why nothing is deleted on a supersede. A correction is the one cut taken before its consequence is known, so it records the answer it later measured on `ForkSpec.direction`, which outranks the derived default; that is the only way `equivalent` arises. **How a cut READS once served** — the timeline renumber, which side wears `superseded_by`, which cycle speaks for the campaign — is owned by [`infrastructure/CLAUDE.md`](../../promptpotter/infrastructure/CLAUDE.md) § The lineage tree. What THIS layer must get right is that the direction, and how far it reaches, are on disk before any reader asks.
+**A cut has a DIRECTION** — which side the run continues on, written at the cut and served as `fork_direction`. The trigger usually implies it (`FORK_DIRECTION`, derived, so every fork already on disk answers it): a diag / steered fork is an `offshoot`, the child hanging off a line that keeps running; a `scoring_divergence`, `operator_rewind` or L2/L3 rebase **supersedes**, the child being the continuation the pointer moves to and the *parent* what was left behind. Same shape on disk, opposite reading — which is why nothing is deleted on a supersede. A correction is the one cut taken before its consequence is known, so it records the answer it later measured on `ForkSpec.direction`, which outranks the derived default; that is the only way `equivalent` arises. **How a cut READS once served** — the timeline renumber, which side wears `superseded_by`, which cycle speaks for the campaign — is owned by [`infrastructure/CLAUDE.md`](../../promptpotter/infrastructure/CLAUDE.md) § The lineage tree. What THIS layer must get right is that the direction, and how far it reaches, are on disk before any reader asks.
 
 **A cut retires only what the branch has actually replaced.** *How far* it reaches is read back from the branch's own ledger — the last round it minted a candidate for. Asserting "everything after this is replaced" at mint time is a claim about the future rendered as a fact about the past: a branch that was cut and then died retired a whole measured tail in favour of nothing. The write side hands the branch exactly the candidates it retires (`_rebank_on_branch`), so the two sides cannot drift.
 
@@ -235,30 +232,6 @@ A hole is plugged with a **real measurement, never an archive row** — a cached
 **An inner cycle stops when its owner does.** An L4 inner campaign runs in a child task under its own sandbox, whose pause flag nobody writes; it inherits the outer's pause predicate at the run-control binding seam (`runner/entry.py::_bind_run_controls`) rather than overwriting it. Without that a pause on the outer waited out the whole inner campaign, because one outer *sample* is an entire inner run.
 
 **Make a slow round finish sooner — the look-ahead control.** The remote's **⇉** control runs the walk with several of a candidate's samples in flight instead of one, cutting that walk's wall clock roughly in proportion. Suggest it whenever someone asks why a round is taking so long; it is the only speed lever needing no config change and no restart. **Every clause of it** — who may press, what one press buys, why the overshot sample is discarded — is owned by [`access-model.md`](access-model.md) § host-admin ↔ user. What this layer must hold is the on-disk half: the operator's *request* is `.runtime/sample_lookahead.json` and what the loop actually ran at is `dashboard.json::sample_lookahead`, never the flag served as that.
-
-### Sweep batch — `new --sweep-batch`
-
-Breadth-first comparison of N L1-prompt hypotheses: instead of one trial cycle on the active OSP, mint N cheap sibling cycles, each from a different operator-authored override. Sweep cycles sit flat under `cycles/` with `sibling_kind: "sweep"` and a shared `sweep_batch_id`. **Per-fork protocol:** origin (cache-hit after the first) + 1 scored round + 1 generation-only round + halt with `SWEEP_COMPLETE`.
-
-**Authoring.** One `*.yaml` file per arm under `datasets/{name}/sweep/`, shape `OperatorSweepFile` (`extra='forbid'` — typos fail at parse). `reason` is a label and changes nothing the fork runs, so **an arm setting no contrast lever is refused at load** (`application/sweep_batch.py::load_sweep_payloads`, which names every offending arm at once): it would fork a copy of its parent and pay a full scored round to measure it.
-
-```yaml
-reason: >-
-  Does the objective read better leading the prompt than buried mid-panel? Same evidence,
-  measurand and confounds moved to the front slot.
-l1_layout:
-  measurand: persona
-  confounds: persona
-```
-
-`l1_layout` moves panels on the fork's starting OSP — the same L1 surface L2 writes when it fires, staged without firing L2. Name each panel and the slot it moves to; one you omit stays where it is, and a panel is only ever in one place (`domain/l1_layout.py::coerce_l1_layout`). The slots are `L1_LAYOUT_SLOTS` and the placeholders that must each appear somewhere across them are `NODE_LAYOUTS["l1_generate"].mandatory` — read both there, never a copy: a layout failing them raises only once the fork is minted and its origin paid for.
-
-```bash
-python -m promptpotter new bbeh --backend-url http://127.0.0.1:8000
-python -m promptpotter new --sweep-batch   # dispatches sweep-mode against the freshly-minted cycle
-```
-
-**Reading results.** The sweep branches are ordinary forks on the campaign tree — read them side-by-side in the webapp, or open each branch's `round_NNNN.json`. **Sweep is screening, not validation** — promote winners to a full `new` run. L1-surface only; pipeline/scoring changes are intentionally absent from the operator file shape. Forks run sequentially (the active pointer doesn't tolerate concurrent mints).
 
 ## CLI flags — `new` and `resume`
 

@@ -158,7 +158,7 @@ def backend_reach_line(backend_type: str, backend_url: str) -> str:
 
 
 def backend_unreachable_result(exc: BackendUnreachableError) -> CommandResult:
-    """The shared preflight failure every loop verb (``new`` / ``resume`` / sweep) returns when the
+    """The shared preflight failure every loop verb (``new`` / ``resume``) returns when the
     connector's own probe reports the backend down (``launcher.admission::probe_backend``).
 
     **The connector's own ``detail`` IS the message.** A cure hardcoded here is a cure for whichever
@@ -180,7 +180,7 @@ def backend_unreachable_result(exc: BackendUnreachableError) -> CommandResult:
     )
 
 
-def build_observers(
+def _build_observers(
     session: Session,
     campaign_config: CampaignConfig,
     train_data: list[Sample],
@@ -276,7 +276,7 @@ async def drive_cycle(
     registry.mark_started(job.job_id)
     pre_origin_acc = ctx.state.get("origin_accuracy", 0.0)
     try:
-        observers = build_observers(session, campaign_config, train_data, pre_origin_acc)
+        observers = _build_observers(session, campaign_config, train_data, pre_origin_acc)
 
         # Control-local hooks (pause.flag under .runtime/) are bound centrally in
         # run_optimization (the single runner seam) so CLI and API launches behave
@@ -431,7 +431,6 @@ __all__ = [
     "CommandResult",
     "backend_unreachable_result",
     "bind_session_identity",
-    "build_observers",
     "confirm_tty",
     "cycle_result_command",
     "drive_cycle",

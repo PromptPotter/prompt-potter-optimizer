@@ -50,7 +50,7 @@ async def emit_origin_round(
     # critique only at round end (``l1/execute.py``), so without this seed round 1
     # opens blind — it never sees the per-sample failure pattern (here: predicted
     # material vs ground-truth process) and falls back to surface-axis guesses.
-    # Sweep/diag forks inherit round 0 and never call this path, so the seed is
+    # Diag forks inherit round 0 and never call this path, so the seed is
     # automatically off there (round 1 stays bit-identical across cheap forks).
     if round_result.results:
         round_result.diagnostics = compute_round_diagnostics(

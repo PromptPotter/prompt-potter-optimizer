@@ -554,8 +554,8 @@ components:
         appended at mint / operator-steered fork / check-in flip and re-read
         once at init. A fork inherits its parent's seed record *virtually*
         (`CycleEventLog.inherit_from`) but appends its OWN, so a scan of the
-        cycle's own ledger file returns that cycle's seed. Sweep and diag
-        cycles carry none.
+        cycle's own ledger file returns that cycle's seed. A diag cycle
+        carries none.
 
         Not progress, and deliberately at most one per cycle: it reads as a
         single "cycle seeded" marker at the head of a non-root cycle's thread.

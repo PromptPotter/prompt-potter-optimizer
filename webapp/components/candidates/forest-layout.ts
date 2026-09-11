@@ -58,14 +58,13 @@ export type CourseKind = NonNullable<LineageNode["course_kind"]>;
 export const KIND_GLYPH: Record<CourseKind, string> = {
   root: "●",
   fork: "⑂",
-  sweep: "~",
   diag: "Δ",
   inner: "◇",
 };
 
 // Operator-fork provenance mark, appended after the kind glyph. "✎" = the
 // operator steered the searchpoint (operator_steered). Everything else
-// (auto/divergence/sweep) is unmarked.
+// (auto/divergence) is unmarked.
 export const TRIGGER_GLYPH: Record<string, string> = {
   operator_steered: "✎",
 };

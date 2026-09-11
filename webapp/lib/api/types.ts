@@ -126,7 +126,7 @@ export type HardSamplesScope = "cycle" | "campaign" | "dataset";
 // What minted this cycle, as the sidebar badges it — derived server-side from the cycle id's own
 // kind plus the fork trigger. READ BACK off the generated interface: `session` = the root run
 // (resume extends it); `divergent_resume` = a fork-on-divergence branch; `user_fork` = any
-// operator-initiated branch (HITL fork, diagnostic, sweep); `auto_rebase` = an automatic
+// operator-initiated branch (HITL fork, diagnostic); `auto_rebase` = an automatic
 // layer-driven rebase branch (an L2/L3 `fork_proposal`, fork trigger `l2_rebase`/`l3_rebase`).
 export type MintKind = CycleListEntry["mint_kind"];
 

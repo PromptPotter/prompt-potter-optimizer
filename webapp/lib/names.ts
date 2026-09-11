@@ -11,7 +11,7 @@ import type { CampaignSummary, CycleListEntry, MintKind } from "./api";
 import { shortFamilyTail } from "./ids";
 
 // How the operator reads what minted a cycle. A campaign has exactly one root,
-// which reads as "Session"; the others tag a fork / diag / sweep branch.
+// which reads as "Session"; the others tag a fork / diag branch.
 const MINT_KIND_LABEL: Record<MintKind, string> = {
   session: "Session",
   divergent_resume: "divergent resume",
@@ -26,7 +26,7 @@ export function campaignDisplayName(c: CampaignSummary): string {
 }
 
 // Human name for one unit — "Session" for the campaign's root, "{kind} {tail}"
-// for a fork / diag / sweep branch.
+// for a fork / diag branch.
 export function unitDisplayName(c: CycleListEntry): string {
   if (c.is_root) return MINT_KIND_LABEL.session;
   return `${MINT_KIND_LABEL[c.mint_kind]} ${shortFamilyTail(c.cycle_id)}`;

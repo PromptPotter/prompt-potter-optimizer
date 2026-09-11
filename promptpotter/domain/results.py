@@ -42,12 +42,10 @@ __all__ = [
     "OverlapMember",
     "OverlapReading",
     "ParentStep",
-    "PayloadOutcome",
     "RoundParent",
     "RoundResult",
     "ScoreboardRow",
     "ScoredCandidate",
-    "SweepBatchResult",
     "WarningDict",
     "best_round_on_shared_cells",
     "candidate_label",
@@ -800,7 +798,7 @@ class RoundResult(StrictModel):
     # IDENTITY, NOT A FIRE RECORD — every optimizer node is named on every round, including ones
     # that never run. Which node RAN, and what each panel cost it, is the ledger's `llm_call`.
     optimizer_prompt_hashes: dict[str, str] = Field(default_factory=dict)
-    # "generation_only" for a sweep round (L1 variants generated, never scored — every
+    # "generation_only" for a diag round (L1 variants generated, never scored — every
     # scoring scalar below is a structural zero, not a measurement); "" for a scored round.
     status: str = ""
 
@@ -1078,24 +1076,3 @@ class DegradationHealth(StrictModel):
     # field there was no surface in the product that showed it: the text is in the round file, and
     # the operator was left to open it by hand or guess. ``None`` when no cell errored.
     last_error: str | None = None
-
-
-class PayloadOutcome(StrictModel):
-    source_file: str
-    # A ``StopOutcome`` value for every payload the batch ATTEMPTED — never a sweep-private
-    # vocabulary. The two batch states both mean not-attempted: ``skipped_already_forked`` (an
-    # earlier batch took it) and ``skipped`` (this batch halted first). Whether a cycle survived
-    # is ``cycle_id`` below — a separate fact, and never what decides this one.
-    status: str
-    cycle_id: str
-
-
-class SweepBatchResult(StrictModel):
-    batch_id: str
-    parent_cycle_id: str
-    family_root: str
-    started_at: str
-    completed_at: str
-    fork_cycle_ids: list[str]
-    payload_outcomes: list[PayloadOutcome]
-    interrupted: bool

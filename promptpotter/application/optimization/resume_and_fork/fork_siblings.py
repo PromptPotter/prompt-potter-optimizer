@@ -70,8 +70,6 @@ def _fork_sibling_setup(
     *,
     from_round: int,
     payload: ForkSpec,
-    sweep_batch_id: str | None = None,
-    source_file: str | None = None,
 ) -> str:
     parent_dir = campaign_store.cycle_dir(parent)
     new_dir = campaign_store.cycle_dir(parent.model_copy(update={"cycle_id": new_cycle_id}))
@@ -84,10 +82,6 @@ def _fork_sibling_setup(
         "forked_at": now,
         "fork": payload.model_dump(mode="json"),
     }
-    if source_file is not None:
-        record_data["source_file"] = source_file
-    if sweep_batch_id is not None:
-        record_data["sweep_batch_id"] = sweep_batch_id
 
     with graceful("FORK_CUT decision append failed"):
         record_decision(
@@ -167,8 +161,6 @@ def _mint_fork(
     payload: ForkSpec,
     *,
     surviving_rounds: list[RoundResult] | None = None,
-    sweep_batch_id: str | None = None,
-    sweep_source_file: str | None = None,
 ) -> str:
     """Single entry point, dispatching on ``payload.trigger``. ``fork_from_round`` is MECHANICAL (how many
     parent rounds this lifts); ``ForkSpec.from_round`` is PROVENANCE (which round the cut came from)."""
@@ -259,32 +251,6 @@ def _mint_fork(
             campaign_store.write_cycle_seed(
                 CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id), payload.seed
             )
-    elif payload.trigger is ForkTrigger.OPERATOR_SWEEP:
-        if sweep_batch_id is None or sweep_source_file is None:
-            raise ValueError(
-                "_mint_fork(OPERATOR_SWEEP) requires sweep_batch_id + sweep_source_file"
-            )
-        if "_" in sweep_batch_id:
-            raise ValueError(f"sweep_batch_id must not contain underscores; got {sweep_batch_id!r}")
-        suffix = _fork_suffix(parent.cycle_id, sweep_source_file)
-        new_cycle_id = f"{parent.cycle_id}_sweep_{sweep_batch_id}_{suffix}"
-        now = _fork_sibling_setup(
-            campaign_store,
-            parent,
-            session_id,
-            new_cycle_id,
-            from_round=0,
-            payload=payload,
-            sweep_batch_id=sweep_batch_id,
-            source_file=sweep_source_file,
-        )
-        campaign_store.write_fresh_sibling(
-            parent.campaign_id,
-            parent.cycle_id,
-            new_cycle_id,
-            sweep_batch_id=sweep_batch_id,
-            forked_at=now,
-        )
     # The lineage-read fork block — serialized from the one typed ForkSpec (no
     # hand-built per-trigger dict). The heavy `seed` payload is excluded; it rides
     # the fork's ledger as its own read-once `CycleSeedRecord`.

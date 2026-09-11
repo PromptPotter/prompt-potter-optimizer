@@ -1,4 +1,4 @@
-"""Terminal render target — typed View → ANSI. The markdown / heatmap / sweep-summary renderers are the APPLICATION's emit contract and
+"""Terminal render target — typed View → ANSI. The markdown / heatmap renderers are the APPLICATION's emit contract and
 live in ``promptpotter.application.views.render``; import those from there."""
 
 from __future__ import annotations

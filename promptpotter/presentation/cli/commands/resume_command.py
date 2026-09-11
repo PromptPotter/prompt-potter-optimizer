@@ -510,7 +510,6 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
             task_text=None,
             backend_url=ctx.init_params.get("backend_url"),
             backend_id=ctx.init_params.get("backend_id"),
-            sweep=False,
             diag=False,
             halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
             spend_budget_usd=getattr(args, "spend_budget_usd", None),

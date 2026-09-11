@@ -19,7 +19,7 @@
 //
 // THE CYCLE PREFIX IS STRIPPED. Every cycle id begins `cycle_` — there are exactly two
 // minters (`runner/campaign_ids.py::cycle_config_identity` and `::mint_checkin_cycle_id`)
-// and the fork/diag/sweep separators are suffixes on top of it, so the prefix carries no
+// and the fork/diag separators are suffixes on top of it, so the prefix carries no
 // information and costs six characters per hop. Stripping happens HERE and not in
 // `lib/ids.ts`: `encodeCyclePath` there is also the wire format for the server's
 // `?descend=` query and has to stay byte-exact.

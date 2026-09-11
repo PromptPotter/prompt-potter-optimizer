@@ -1,4 +1,4 @@
-"""``cmd_verify`` — re-score one campaign candidate on MORE samples. Not a cycle, fork or sweep: no ledger event, no round id, and
+"""``cmd_verify`` — re-score one campaign candidate on MORE samples. Not a cycle or a fork: no ledger event, no round id, and
 persistence lands in the workspace ``diagnostics/`` tree only."""
 
 from __future__ import annotations

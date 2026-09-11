@@ -1,6 +1,6 @@
 "use client";
 // Workspace-scope diagnostic-run records — one row per `verify` CLI invocation.
-// Categorically NOT a cycle, fork, or sweep: pure on-demand re-evaluation of
+// Categorically NOT a cycle or a fork: pure on-demand re-evaluation of
 // an existing candidate against more samples. Reads GET /api/v1/workspace/
 // diagnostic-runs and renders a sortable table with a per-row trend bar
 // (grey = source-campaign composite, red overlay = workspace composite).

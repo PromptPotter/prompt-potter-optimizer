@@ -64,7 +64,7 @@ Snapshot-then-tail plus a heartbeat; the ledger line index IS the
 `ProjectionEnvelope.sequence`. Certified contract:
 [`docs/developer/event-stream.md`](../../docs/developer/event-stream.md).
 
-**Every cycle — root, fork, sweep, diag — owns its live stream** at
+**Every cycle — root, fork, diag — owns its live stream** at
 `cycles/{cycle_id}/dashboard.json`, stamped with its own id; a fork's view can never
 surface the parent's, though it seeds its prior trajectory from the parent's file.
 Write target is the `CycleDir` newtype, and the read sites serve the viewed cycle's own

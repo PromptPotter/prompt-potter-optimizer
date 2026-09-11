@@ -1,4 +1,4 @@
-"""Re-score one campaign candidate on N ADDITIONAL samples. Not a cycle, fork or sweep: no round
+"""Re-score one campaign candidate on N ADDITIONAL samples. Not a cycle or a fork: no round
 id, and the verdict lands in the workspace ``diagnostics/`` tree. Its SPEND is the exception and
 joins the campaign's ledger in the ``diagnostic`` bucket — inside every ceiling, banked apart."""
 

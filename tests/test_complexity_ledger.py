@@ -77,7 +77,8 @@ LEDGER_BASELINE = {
     # address grammar (`subjects`, all an entry point that only ADDRESSES a subject imports), the
     # disk walk (`read`) and the two pure statistics over its rows (`comparison`, `grid`); and
     # `diagnostics/` + `maintenance/` gather the verbs loose at `application/`'s top level.
-    "modules": 354,
+    # -2: `application/sweep_batch.py` + `infrastructure/store/sweep_store.py` — the sweep batch goes.
+    "modules": 352,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     "init_files": 53,

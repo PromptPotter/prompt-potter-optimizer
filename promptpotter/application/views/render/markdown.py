@@ -12,7 +12,6 @@ from promptpotter.application.views.view_models import (
     HardSamplesView,
     LogMdView,
     RoundDigestView,
-    SweepSummaryView,
 )
 from promptpotter.domain.phases import STOP_REASON_INFO, StopReason, StopReasonInfo
 from promptpotter.domain.rendering import fmt_pct as _fmt_pct
@@ -256,24 +255,4 @@ def to_markdown(view: LogMdView) -> str:
     return "\n".join(parts).rstrip() + "\n"
 
 
-def render_sweep_summary(view: SweepSummaryView) -> str:
-    lines = [
-        f"# Sweep batch {view.batch_id}",
-        "",
-        f"- Parent cycle: `{view.parent_cycle_id}`",
-        f"- Family root: `{view.family_root}`",
-        f"- Started: {view.started_at}",
-        f"- Completed: {view.completed_at}",
-        f"- Forks minted: {view.n_minted} of {view.n_payloads}",
-        "",
-        "## Payloads",
-        "",
-        "| Source | Status | Cycle |",
-        "|---|---|---|",
-    ]
-    for row in view.payloads:
-        lines.append(f"| `{row.source_file}` | {row.status} | `{row.cycle_id}` |")
-    return "\n".join(lines) + "\n"
-
-
-__all__ = ["render_sweep_summary", "to_markdown"]
+__all__ = ["to_markdown"]

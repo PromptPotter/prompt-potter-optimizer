@@ -1,5 +1,5 @@
 """Campaign / cycle directory builders + cycle-id parsing. Pure — no I/O, no parent walk.
-Every cycle is flat under one ``cycles/``; sibling kind and sweep batch ride ``index.json``."""
+Every cycle is flat under one ``cycles/``, and its sibling kind is read off the id, never stored."""
 
 from __future__ import annotations
 
@@ -14,15 +14,8 @@ from typing import Literal
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.infrastructure.store.io import newest_mtime_ns, validate_path_component
 
-# The roots (``REPO_ROOT`` + its two derivatives) moved to
-# ``promptpotter/config/paths.py``. They were a ``parents[3]`` walk, which is I/O
-# about the install and a parent walk — the two things this module's own docstring
-# says it does not do. Import them from ``config.paths``; the name ``REPO_ROOT`` is
-# gone deliberately, because there is not one root.
-
-
-_SIBLING_SEP_RE = re.compile(r"_(fork|diag|sweep)_")
-_SIBLING_LAST_SEP_RE = re.compile(r"_(fork|diag|sweep)_(?!.*_(fork|diag|sweep)_)")
+_SIBLING_SEP_RE = re.compile(r"_(fork|diag)_")
+_SIBLING_LAST_SEP_RE = re.compile(r"_(fork|diag)_(?!.*_(fork|diag)_)")
 _DATASET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 
@@ -38,14 +31,14 @@ def validate_dataset_name(name: str) -> str:
 
 
 def root_cycle_id(cycle_id: str) -> str:
-    """Prefix before the FIRST sibling separator: ``cycle_X_fork_Y_sweep_b1_abc`` roots at
+    """Prefix before the FIRST sibling separator: ``cycle_X_fork_Y_diag_001`` roots at
     ``cycle_X``."""
     m = _SIBLING_SEP_RE.search(cycle_id)
     return cycle_id[: m.start()] if m else cycle_id
 
 
-def sibling_kind(cycle_id: str) -> Literal["root", "fork", "diag", "sweep"]:
-    """Kind of THIS cycle (LAST separator); ``cycle_X_fork_Y_sweep_b1_abc`` ⇒ ``sweep``."""
+def sibling_kind(cycle_id: str) -> Literal["root", "fork", "diag"]:
+    """Kind of THIS cycle (LAST separator); ``cycle_X_fork_Y_diag_001`` ⇒ ``diag``."""
     m = _SIBLING_LAST_SEP_RE.search(cycle_id)
     if m is None:
         return "root"
@@ -79,12 +72,6 @@ def cycle_dir_for(tenant_root: WorkspaceDir, hop: CycleHop) -> Path:
     """Per-cycle dir ``campaigns/{campaign_id}/cycles/{cycle_id}``; flat — sibling kind in ``index.json``, not the path."""
     campaign_root = campaign_root_dir_for(tenant_root, hop.campaign_id)
     return campaign_cycles_dir(campaign_root) / validate_path_component(hop.cycle_id)
-
-
-def sweep_batch_dir_for(tenant_root: WorkspaceDir, campaign_id: str, batch_id: str) -> Path:
-    """``campaigns/{campaign_id}/sweeps/{batch_id}`` — batch ``index.json`` + ``summary.md``; fork *cycles* live flat under ``cycles/``."""
-    validate_path_component(batch_id)
-    return campaign_root_dir_for(tenant_root, campaign_id) / "sweeps" / batch_id
 
 
 def session_dir_for(tenant_root: WorkspaceDir, session_id: str) -> Path:
@@ -323,7 +310,7 @@ class FileKind(Enum):
         False,
     )  # rounds/round_*.json — bytes split connector/state by the rollup
     LEDGER = ("history", False)  # .runtime/ledger.jsonl — the event spine (carries the cycle seed)
-    LOOP_TELEMETRY = ("trace", False)  # .runtime/streams, prompts/, sweeps/, residual
+    LOOP_TELEMETRY = ("trace", False)  # .runtime/streams, prompts/, residual
 
     # Keepsake — spared by ``delete --keep-results``.
     LANGFUSE_TRACE = ("trace", True)  # langfuse/{traces,observations,scores} — the loop trace
@@ -354,7 +341,7 @@ def classify(rel: Path) -> FileKind:
         return FileKind.REPORT
     if "rounds" in parts and rel.name.startswith("round_") and rel.suffix == ".json":
         return FileKind.ROUND_PUBLIC
-    return FileKind.LOOP_TELEMETRY  # prompts/, sweeps/summary.md, residual → loop telemetry
+    return FileKind.LOOP_TELEMETRY  # prompts/, residual → loop telemetry
 
 
 def course_validator_ns(cycle_dir: Path) -> int | None:
@@ -384,7 +371,6 @@ __all__ = [
     "sandbox_owner_path",
     "session_dir_for",
     "sibling_kind",
-    "sweep_batch_dir_for",
     "tenant_workspace",
     "validate_dataset_name",
 ]

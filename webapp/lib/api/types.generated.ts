@@ -865,8 +865,8 @@ export interface CycleListEntry {
   campaign_id: string;
   cycle_id: string;
   parent_session_id: string;
-  /** Immediate parent for siblings (forks/sweeps/diag); null for roots. Sidebar
-   * uses this to nest siblings. */
+  /** Immediate parent for siblings (forks/diag); null for roots. Sidebar uses this
+   * to nest siblings. */
   parent_cycle_id: string | null;
   dataset_name: string;
   backend_id: string;
@@ -1393,7 +1393,7 @@ export interface LineageNode {
   superseded_by: string | null;
   /** Courses, and the candidates a fork contributed here — on those it is the ⑂
    * stamp marking an attempt the operator cut. */
-  course_kind: 'root' | 'fork' | 'diag' | 'sweep' | 'inner' | null;
+  course_kind: 'root' | 'fork' | 'diag' | 'inner' | null;
   /** Courses only — the ONE server-owned run-state (`derive_run_phase`), the same
    * value `/cycles` serves. Null on a candidate, which has no run of its own. */
   run_phase: 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal' | null;
@@ -1923,7 +1923,6 @@ export const STOP_REASON_LABELS: Record<string, string> = {
   'target_hit': 'Target reached',
   'lives_exhausted': 'Out of lives',
   'hard_cap_reached': 'Round cap',
-  'sweep_complete': 'Sweep complete',
   'diag_complete': 'Diagnostic complete',
   'l3_patience_exhausted': 'Converged (L3 patience)',
   'rebased_to_fork': 'Rebased to fork',

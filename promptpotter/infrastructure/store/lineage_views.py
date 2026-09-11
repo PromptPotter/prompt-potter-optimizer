@@ -43,7 +43,7 @@ __all__ = [
 
 
 NodeKind = Literal["course", "candidate"]
-CourseKind = Literal["root", "fork", "diag", "sweep", "inner"]
+CourseKind = Literal["root", "fork", "diag", "inner"]
 
 # A COST BOUND on `.inner/` NESTING, never a caller's dial: one served tree per campaign, and
 # sandboxes nest re-entrantly, so an unbounded walk is unbounded on disk. 3 covers L4.
@@ -277,7 +277,7 @@ class FamilyCourse(NamedTuple):
     path: CyclePath
     # NOT `index` — a NamedTuple field by that name shadows `tuple.index`.
     manifest: dict[str, object]
-    # A sandbox root vs a fork/sweep/diag: only a fork contributes attempts to this timeline.
+    # A sandbox root vs a fork/diag: only a fork contributes attempts to this timeline.
     inner: bool
     # Hops off the family root, stamped by `iter_family_courses`; a fork costs no depth.
     depth: int = 0

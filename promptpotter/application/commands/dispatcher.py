@@ -640,12 +640,8 @@ class CommandDispatcher:
                         spend_budget_usd=None,
                     )
                 except BaseException:
-                    # ONE act, so it either lands whole or leaves nothing: the launch can still be
-                    # refused (a full machine, an exhausted wallet, a dark backend) after the mint
-                    # has already written the seeded fork, and what was left behind was a cycle
-                    # awaiting a resume nobody sends — the operator sees a fork in the tree that
-                    # never starts and cannot tell it from one that stopped. `sweep_batch.py` owes
-                    # the same debt and pays it in its `finally`; this site did not.
+                    # ONE act, landing whole or not at all: a launch refused after the mint (full
+                    # machine, empty wallet, dark backend) leaves no seeded fork that never starts.
                     # `_apply_start_run` raises only from BEFORE its background task exists, so the
                     # stub is provably idle and the shared cleanup's own emptiness test is the
                     # backstop.

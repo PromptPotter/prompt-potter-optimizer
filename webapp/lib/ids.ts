@@ -15,12 +15,12 @@ import {
   ID_COMPONENT_RE,
 } from "@/lib/api/types.generated";
 
-const SIBLING_LAST_SEP_RE = /_(fork|diag|sweep)_(?!.*_(?:fork|diag|sweep)_)([^/]*)$/;
-const SIBLING_FIRST_SEP_RE = /_(fork|diag|sweep)_/;
+const SIBLING_LAST_SEP_RE = /_(fork|diag)_(?!.*_(?:fork|diag)_)([^/]*)$/;
+const SIBLING_FIRST_SEP_RE = /_(fork|diag)_/;
 
 // Family-root id for a sibling, or the id itself when already a root.
 // Mirrors `root_cycle_id()` in layout.py — uses the FIRST separator so
-// `cycle_X_fork_Y_sweep_Z` still roots at `cycle_X`.
+// `cycle_X_fork_Y_diag_Z` still roots at `cycle_X`.
 export function rootCycleId(cycleId: string): string {
   const m = cycleId.match(SIBLING_FIRST_SEP_RE);
   return m && m.index !== undefined ? cycleId.slice(0, m.index) : cycleId;

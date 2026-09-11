@@ -137,7 +137,8 @@ def _fresh_sibling_index_blob(
     parent_index: dict[str, Any],
     parent_cycle_id: str,
     forked_at: str,
-    **extras: Any,
+    *,
+    forked_at_offset: int,
 ) -> dict[str, Any]:
     # Deliberately no ``sibling_kind``: the id's separator IS the kind (``layout.py``), and a
     # stored copy is a second answer free to disagree with the id it sits under.
@@ -154,7 +155,7 @@ def _fresh_sibling_index_blob(
         "status": "active",
         "created_at": forked_at,
         "updated_at": forked_at,
-        **extras,
+        "forked_at_offset": forked_at_offset,
     }
 
 
@@ -179,9 +180,6 @@ def _strip_to_keepsake(campaign_dir: Path) -> None:
             ]:
                 unlink_robust(p)
             _prune_empty_dirs(cdir)
-    sweeps = campaign_dir / "sweeps"
-    if sweeps.exists():
-        rmtree_robust(sweeps)
 
 
 def _mint_kind(kind: str, fork_trigger: str | None) -> MintKind:
@@ -860,7 +858,7 @@ class CampaignStore:
         return True, ""
 
     # ------------------------------------------------------------------
-    # Fork-sibling ``index.json`` writers — rebase / diag / sweep
+    # Fork-sibling ``index.json`` writers — rebase / diag
     # ------------------------------------------------------------------
 
     def write_fresh_sibling(
@@ -870,10 +868,9 @@ class CampaignStore:
         new_cycle_id: str,
         *,
         forked_at: str,
-        **blob_kwargs: Any,
     ) -> Path:
-        """The single writer for the diag / steered / sweep triggers — numbering restarts at
-        round 1; parent-round inheritance is ``save_rebase_fork``'s job."""
+        """The single writer for the diag / steered triggers — numbering restarts at round 1;
+        parent-round inheritance is ``save_rebase_fork``'s job."""
         parent = CycleHop(campaign_id=campaign_id, cycle_id=parent_cycle_id)
         child = CycleHop(campaign_id=campaign_id, cycle_id=new_cycle_id)
         parent_index = read_json_optional(self._index_path(parent)) or {}
@@ -882,7 +879,6 @@ class CampaignStore:
             parent_cycle_id,
             forked_at,
             forked_at_offset=_branch_offset(self.cycle_dir(parent)),
-            **blob_kwargs,
         )
         path = self._index_path(child)
         write_json(path, blob)

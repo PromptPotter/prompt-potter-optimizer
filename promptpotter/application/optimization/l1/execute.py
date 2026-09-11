@@ -49,12 +49,11 @@ async def execute_round(
     callbacks: RunCallbacks,
     degradation_checks: list[StopRule] | None = None,
     *,
-    skip_critique: bool = False,
     is_final_round: bool = False,
 ) -> RoundResult:
     """One L1 round: generate → score+select → critique. The runner folds the result in via ``absorb_round`` — this never mutates
-    ``Cycle``. Sweep mode and the final round drop the critique; `ensure_prior_critique` re-sends it
-    at the head of a round that turns out to follow one."""
+    ``Cycle``. The final round drops the critique; `ensure_prior_critique` re-sends it at the head
+    of a round that turns out to follow one."""
     session = cycle.session
     config = cycle.config
     opt = config.optimization
@@ -266,7 +265,7 @@ async def execute_round(
         config.optimization.lives,
         compared=round_result.electable_count > 0,
     )
-    if candidates and round_result.results and not skip_critique and not will_stop:
+    if candidates and round_result.results and not will_stop:
         # Critique is round-over-round feedback — survive a malformed response.
         with graceful("L1 critique failed; the next round re-sends it before generating"):
             async with observed_node(

@@ -161,7 +161,7 @@ def get_cycle_dashboard(
 ) -> Response:
     """Live telemetry for the viewed cycle — its own ``dashboard.json``.
 
-    ``dashboard.json`` is per-cycle: every cycle (root, fork, sweep, diag, or an
+    ``dashboard.json`` is per-cycle: every cycle (root, fork, diag, or an
     L4 inner descendant) owns its own live file, stamped with its own
     ``cycle_id``. The path ids address the top-level (root) cycle; the optional
     ``descend`` query walks into the previous hop's ``.inner/<key>`` sandbox one

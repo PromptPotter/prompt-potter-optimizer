@@ -71,10 +71,9 @@ def render_review_md(
     parts += _render_behavior_summary(behavior_per_round)
     parts += ["## Rounds", ""]
 
-    sweep_mode = (final.get("mode") or "").strip() == "sweep"
     last_idx = len(rounds) - 1
     for i, round_data in enumerate(rounds):
-        is_peek = sweep_mode and i == last_idx and _is_generation_only(round_data)
+        is_peek = i == last_idx and _is_generation_only(round_data)
         parts += _render_round(
             round_data,
             audits[i],

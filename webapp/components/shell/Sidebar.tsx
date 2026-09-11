@@ -35,7 +35,7 @@ interface Props {
 // (`cycle_<hash>`). A **run** is one campaign (`{dataset}__{rand6}`) measuring it
 // — so two campaigns on an unchanged declaration are two runs of ONE origin, and
 // the origin tier groups them. Each run is itself a tree: a root cycle + its
-// forks / diags / sweeps. Any cycle can open its own **inner forest** (an L4
+// forks / diags. Any cycle can open its own **inner forest** (an L4
 // `promptpotter-self` fan-out lives in a `.inner/<cycle_id>` sandbox, which is
 // structurally just another store) — that closes the recursion, so L5+ needs no
 // new tier.

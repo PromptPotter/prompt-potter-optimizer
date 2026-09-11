@@ -18,10 +18,6 @@ datasets/{name}/
 └── cache.json             # The dataset ITEM BANK (write-managed; don't hand-edit)
 ```
 
-Optional:
-
-- `sweep/` — sweep-mode sibling cycle outputs.
-
 ## Sole route for backend tunable changes
 
 **Backend overlay (`nodes.{name}.config` in `pipeline.yaml`) is the only way to switch model, provider, temperature, or anything in a node's `optimizer.param_keys`.** Never edit the backend repo (including the co-owned TermNorm backend) to achieve a tunable switch. Pipeline-agnostic is a §0 commitment.

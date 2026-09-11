@@ -39,11 +39,6 @@ from promptpotter.application.optimization.task_context import (
     decompose_prompt_fields,
 )
 from promptpotter.application.runner.entry import RunMode
-from promptpotter.application.sweep_batch import (
-    load_sweep_payloads,
-    resolve_sweep_dir,
-    run_sweep_batch,
-)
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
@@ -54,7 +49,6 @@ from promptpotter.presentation.cli.commands._shared import (
     backend_reach_line,
     backend_unreachable_result,
     bind_session_identity,
-    build_observers,
     cycle_result_command,
     drive_cycle,
     get_verbose,
@@ -64,7 +58,7 @@ from promptpotter.presentation.cli.commands._shared import (
 )
 from promptpotter.presentation.cli.session import load_session, no_dataset_hint
 from promptpotter.presentation.views.startup_checklist import checkin_line
-from promptpotter.shared.errors import PayloadInvalidError, PotterError
+from promptpotter.shared.errors import PotterError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -73,7 +67,6 @@ if TYPE_CHECKING:
     from promptpotter.application.datasets.draft_campaign import DraftCampaign
     from promptpotter.application.datasets.origin_readiness import FieldGap
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.run_observers import RunObservers
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.stores import Stores
     from promptpotter.presentation.cli.session import SessionCtx
@@ -375,64 +368,6 @@ async def _mint_fresh_session(
     return session, campaign_config, dataset_name, minted.session_id
 
 
-async def _run_sweep_batch(
-    args: argparse.Namespace,
-    root_ctx: SessionCtx,
-    campaign_config: CampaignConfig,
-    train_data: list[Sample],
-    sweep_payloads: list[tuple[Path, Any]],
-) -> CommandResult:
-    """Thin shim → ``application.sweep_batch.run_sweep_batch``, binding the observer factory and the
-    active-pointer reload to CLI args so the application layer imports no ``argparse``."""
-
-    def observer_factory(session: Session, origin_acc: float) -> RunObservers:
-        return build_observers(session, campaign_config, train_data, origin_acc)
-
-    result = await run_sweep_batch(
-        lambda: load_session(args),
-        root_ctx,
-        campaign_config,
-        train_data,
-        sweep_payloads,
-        observer_factory=observer_factory,
-        verbose=get_verbose(),
-    )
-    return CommandResult(
-        data=result.model_dump(),
-        human=(
-            f"Sweep batch {result.batch_id}: {len(result.fork_cycle_ids)} forks under "
-            f"{result.parent_cycle_id}\n" + "\n".join(f"  - {c}" for c in result.fork_cycle_ids)
-        ),
-    )
-
-
-async def _maybe_dispatch_sweep_batch(
-    args: argparse.Namespace,
-    ctx: SessionCtx,
-    campaign_config: CampaignConfig,
-    train_data: list[Sample],
-    dataset_config_dir: Path | None,
-) -> CommandResult | None:
-    """``--sweep-batch`` mints one fork per ``OperatorSweepFile``. A missing or empty payload is a LOUD
-    setup error: running one unpaired cycle instead answers a different question than the one posed."""
-    if not getattr(args, "sweep", False):
-        return None
-
-    sweep_dir = resolve_sweep_dir(dataset_config_dir)
-    if sweep_dir is None:
-        raise PayloadInvalidError(
-            f"--sweep-batch needs a sweep/ directory of payloads, and {dataset_config_dir} "
-            "has none. Author one YAML OperatorSweepFile per arm there, or drop the flag."
-        )
-    sweep_payloads = load_sweep_payloads(sweep_dir)
-    if not sweep_payloads:
-        raise PayloadInvalidError(
-            f"--sweep-batch found {sweep_dir} but no *.yaml payloads in it. Author one "
-            "OperatorSweepFile per arm, or drop the flag."
-        )
-    return await _run_sweep_batch(args, ctx, campaign_config, train_data, sweep_payloads)
-
-
 async def _run_loop(
     args: argparse.Namespace,
     ctx: SessionCtx,
@@ -448,7 +383,6 @@ async def _run_loop(
         session,
         train_data,
         mode=RunMode(
-            sweep=getattr(args, "sweep", False),
             diag=getattr(args, "diag", False),
             halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
         ),
@@ -481,13 +415,6 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
 
     logger.info("Session: %s", session.store.sessions.session_dir(ctx.session_id))
     logger.info("Campaign: %s", session.store.campaigns.campaign_root_dir(ctx.campaign_id))
-
-    if (
-        sweep_result := await _maybe_dispatch_sweep_batch(
-            args, ctx, campaign_config, train_data, session.dataset_config_dir
-        )
-    ) is not None:
-        return sweep_result
 
     checkin_line("origin", "launching origin scoring")
     return await _run_loop(args, ctx, campaign_config, session, train_data)

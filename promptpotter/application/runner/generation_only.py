@@ -1,4 +1,4 @@
-"""Generation-only round — L1 variants without scoring. Shared by ``new --sweep-batch`` and ``--diag``; the round
+"""Generation-only round — L1 variants without scoring, the round ``--diag`` ends on; the round
 document carries ``status='generation_only'``, the word every reader of it already uses (``output.py::gen_only_rounds``,
 ``review_md.py::_is_generation_only``), no scoreboard and no accuracy."""
 
@@ -23,8 +23,6 @@ async def run_generation_only_round(
     session: Session,
     cb: RunCallbacks,
     round_num: int,
-    *,
-    label: str,
 ) -> None:
     cb.set_round(round_num)
     if (ledger := session.state.ledger) is not None:
@@ -48,7 +46,7 @@ async def run_generation_only_round(
                 session.hop,
                 RoundResult(
                     round=round_num,
-                    label=label,
+                    label="diag_gen_only",
                     status="generation_only",
                     accuracy=0.0,
                     composite_fitness=0.0,

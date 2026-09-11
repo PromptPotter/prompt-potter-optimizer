@@ -45,7 +45,6 @@ class StopReason(enum.StrEnum):
     ABORT = "escalation_abort"
     L3_PATIENCE = "l3_patience_exhausted"
     HARD_CAP = "hard_cap_reached"
-    SWEEP_COMPLETE = "sweep_complete"
     DIAG_COMPLETE = "diag_complete"
     TARGET_HIT = "target_hit"
     SPEND_BUDGET = "spend_budget"
@@ -183,9 +182,6 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         "Out of lives", StopOutcome.SUCCESS, False, False, ""
     ),
     StopReason.HARD_CAP: StopReasonInfo("Round cap", StopOutcome.SUCCESS, False, False, ""),
-    StopReason.SWEEP_COMPLETE: StopReasonInfo(
-        "Sweep complete", StopOutcome.SUCCESS, False, False, ""
-    ),
     StopReason.DIAG_COMPLETE: StopReasonInfo(
         "Diagnostic complete", StopOutcome.SUCCESS, False, False, ""
     ),

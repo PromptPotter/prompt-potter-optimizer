@@ -21,7 +21,6 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     load_optimizer_set_overrides,
     set_optimizer_prompt_overrides,
 )
-from promptpotter.application.optimization.escalation.firing import apply_fork_payload_to_opt_sp
 from promptpotter.application.optimization.l1.stats import HEADLINE_ACC, first_round_at_threshold
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     _mint_fork,
@@ -95,7 +94,6 @@ class RunMode:
 
     no_divergence_check: bool = False
     fork_on_divergence: bool = False
-    sweep: bool = False
     diag: bool = False
     halt_at_accuracy: float | None = None
     resume_from_round_override: int | None = None
@@ -544,7 +542,6 @@ async def _run_single_cycle(
     session: Session,
     observers: RunObservers,
     mode: RunMode,
-    fork_payload: ForkSpec | None,
     langfuse_session_id: str | None,
     started_at: str,
 ) -> _CycleOutcome:
@@ -574,10 +571,6 @@ async def _run_single_cycle(
             session=session,
             started_at=started_at,
         )
-
-        # Operator forks (sweep, rebase) stamp L1-surface deltas; triggers without deltas skip.
-        if fork_payload is not None and fork_payload.l1_layout is not None:
-            apply_fork_payload_to_opt_sp(cycle.opt_sp, fork_payload)
 
         # Fork-on-divergence: rebuild observers around the fork's own ledger.
         forked = (
@@ -611,7 +604,6 @@ async def _run_single_cycle(
             campaign_config,
             session,
             cb,
-            sweep=mode.sweep,
             diag=mode.diag,
             halt_at_accuracy=mode.halt_at_accuracy,
             stop_after_rounds=mode.stop_after_rounds,
@@ -674,7 +666,7 @@ async def _run_single_cycle(
         observers,
         cycle_result,
         winner=_winning_round(cycle, cycle_result),
-        sweep=mode.sweep,
+        diag=mode.diag,
     )
     if langfuse_trace_id is not None:
         cycle_result = cycle_result.model_copy(update={"langfuse_trace_id": langfuse_trace_id})
@@ -763,7 +755,6 @@ async def run_optimization(
     origin: CampaignOrigin | None = None,
     langfuse_session_id: str | None = None,
     mode: RunMode | None = None,
-    fork_payload: ForkSpec | None = None,
     spend_budget_usd: float | None = None,
     token_budget: int | None = None,
 ) -> CycleResult:
@@ -817,7 +808,6 @@ async def run_optimization(
             session=session,
             observers=observers,
             mode=mode,
-            fork_payload=fork_payload,
             langfuse_session_id=langfuse_session_id,
             started_at=started_at,
         )
@@ -855,7 +845,7 @@ def _finalize_run(
     cycle_result: CycleResult,
     *,
     winner: RoundResult | None = None,
-    sweep: bool = False,
+    diag: bool,
 ) -> str | None:
     """Returns the Langfuse trace id from the terminal ``end_campaign`` emit (``None`` when
     no tracing bridge is active) so the caller can stamp it onto the returned ``CycleResult``.
@@ -904,7 +894,7 @@ def _finalize_run(
             # dashboard makes: one resolution, now four readers — the export names it too, since
             # a fitness handed to another program without its formula is a number, not a result.
             "scorer_cell_formula": round_formula,
-            "mode": "sweep" if sweep else "full",
+            "mode": "diag" if diag else "full",
             # Basis: the COMPOSITE-fitness high-water SP — the engine's adoption objective —
             # which may name a different round than the index's top-level
             # `best_accuracy`/`best_round`. "How good did it get" reads those top-level fields,

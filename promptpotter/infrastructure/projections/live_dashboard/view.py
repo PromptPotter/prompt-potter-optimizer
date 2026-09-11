@@ -504,7 +504,7 @@ class LiveDashboardView(DerivedView):
             if round_result is not None:
                 if self._recorder is not None:
                     self._recorder.set_l1_score(self._l1_score_block())
-                # Append round summary; re-firing the same round (replay / sweep) replaces in place.
+                # Append round summary; re-firing the same round (a replay) replaces in place.
                 origin_rows = (
                     [] if round_result.round == 0 else origin_rows_from_disk(self.cycle_dir)
                 )

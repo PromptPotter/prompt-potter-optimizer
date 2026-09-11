@@ -22,7 +22,6 @@ def test_path_builders_reject_traversal(tmp_path: Path) -> None:
     from promptpotter.infrastructure.store.layout import (
         campaign_root_dir_for,
         cycle_dir_for,
-        sweep_batch_dir_for,
     )
 
     with pytest.raises(ValueError):
@@ -30,9 +29,6 @@ def test_path_builders_reject_traversal(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         cycle_dir_for(tmp_path, CycleHop(campaign_id="ok_campaign", cycle_id="../escape"))
-
-    with pytest.raises(ValueError):
-        sweep_batch_dir_for(tmp_path, "ok_campaign", "../escape")
 
     out = cycle_dir_for(
         tmp_path, CycleHop(campaign_id="ds__20260101-000000", cycle_id="cycle_abc_fork_def_xyz")

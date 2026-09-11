@@ -126,17 +126,7 @@ def _add_new_args(p_new: argparse.ArgumentParser) -> None:
     p_new.add_argument("--backend-url", default=DEFAULT_BACKEND_URL)
     p_new.add_argument("--backend-id", default=DEFAULT_BACKEND_ID)
 
-    mode_group = p_new.add_mutually_exclusive_group()
-    mode_group.add_argument(
-        "--sweep-batch",
-        dest="sweep",
-        action="store_true",
-        help="DEPRECATED, removal pending — declare `axes:` in the dataset's inner_tasks.yaml "
-        "instead and read it with `evidence --grid`, which crosses DATASET as well and generates a "
-        "balanced product that cannot alias. Multi-fork batch from datasets/<name>/sweep/*.yaml: "
-        "mint one sweep fork per payload, run each.",
-    )
-    mode_group.add_argument(
+    p_new.add_argument(
         "--diag",
         dest="diag",
         action="store_true",
