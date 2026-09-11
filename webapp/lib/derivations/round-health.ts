@@ -1,5 +1,5 @@
 // Quiet per-round degradation notices — the webapp twin of the CLI's yellow
-// "round degraded" line (`presentation/views/live/phase.py`). The loud
+// "round degraded" line (`presentation/terminal/live/phase.py`). The loud
 // cross-tab banner (`critical-alert.ts`) only surfaces the `critical` grade; a
 // `degraded` round is real and operator-relevant but NOT abort-worthy, so it
 // stays quiet — an amber chip per round, never a banner.

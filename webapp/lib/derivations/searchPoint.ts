@@ -158,8 +158,8 @@ function rowConfig(
 }
 
 // Live: the latest-seeded (max idx) in-flight candidate of the running round.
-// The candidate buffer persists THROUGH L2/L3 (the backend resets it only at the
-// next `L1_GENERATE:enter`, view.py:374), so this stays non-null there. The one
+// The candidate buffer persists THROUGH L2/L3 (the backend resets it only at the next
+// `L1_GENERATE:enter`, `projection.py::_apply_phase`), so this stays non-null there. The one
 // null window is l1_generate-after-reset-before-first-candidate-started; the
 // OBSERVE view falls back to the last completed searchpoint for that brief gap.
 export function liveObserveConfig(

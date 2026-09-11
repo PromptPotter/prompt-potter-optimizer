@@ -23,8 +23,11 @@ from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.rendering import display_fitness
-from promptpotter.domain.results import DiagnosticRunRecord, parse_candidate_label
+from promptpotter.domain.results import (
+    DiagnosticRunRecord,
+    parse_candidate_label,
+    resolved_fitness,
+)
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import (
     active_cycle_ledger,
@@ -32,7 +35,7 @@ from promptpotter.infrastructure.llm.telemetry import (
     reset_cycle_ledger,
     set_cycle_ledger,
 )
-from promptpotter.infrastructure.store import archive_views
+from promptpotter.infrastructure.store import archive_queries
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError
 
@@ -220,7 +223,7 @@ async def verify_candidate(
     config_hash = schema.sp_hash(effective_pipeline_params)
 
     # Find samples this exact config has not yet been measured on.
-    prior = archive_views.measurements_for_config(
+    prior = archive_queries.measurements_for_config(
         stores,
         predicate=predicate,
         dataset_name=campaign.dataset_name,
@@ -275,7 +278,7 @@ async def verify_candidate(
         )
 
     # Workspace aggregate: archive rows matching this candidate's node-configs, deduped per sample (latest wins).
-    workspace_measurements = archive_views.measurements_for_config(
+    workspace_measurements = archive_queries.measurements_for_config(
         stores,
         predicate=predicate,
         dataset_name=campaign.dataset_name,
@@ -305,7 +308,7 @@ async def verify_candidate(
             "to compare against the recorded measurement."
         )
     workspace_accuracy = float(workspace_scores["accuracy"])
-    workspace_composite = display_fitness(
+    workspace_composite = resolved_fitness(
         workspace_scores.get("composite_fitness"), workspace_accuracy
     )
     samples_added = max(0, workspace_n - len(measured_ids))

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from promptpotter.config.settings import NO_RESULT
@@ -23,6 +25,163 @@ EVIDENCE_STARVED_RATE: float = 0.40
 # The share of its panel a round must actually have SENT before any rate below is allowed to grade
 # the pipeline. Below it there is no verdict to give — only "re-measure".
 MEASURED_COVERAGE_FLOOR: float = 0.50
+
+
+@dataclass(frozen=True)
+class ResultClassification:
+    """Three buckets: ``advisory`` observes; ``infra`` deprecates the sample without blaming the
+    candidate; ``fatal`` is candidate-quality and eliminates on one sighting."""
+
+    advisory_codes: frozenset[str]
+    infra_codes: frozenset[str]
+    fatal_codes: frozenset[str]
+
+    @property
+    def is_fatal(self) -> bool:
+        """True iff the sample should be treated as deprecated (fatal OR infra)."""
+        return bool(self.fatal_codes or self.infra_codes)
+
+    @property
+    def all_codes(self) -> list[str]:
+        return sorted(self.advisory_codes | self.infra_codes | self.fatal_codes)
+
+    @property
+    def dominant_fatal(self) -> str | None:
+        """Pick a fatal code for one-sighting fast-elimination. Reads ``fatal_codes`` ONLY — infra-driven deprecation must
+        never trigger the fast path."""
+        return next(iter(sorted(self.fatal_codes)), None)
+
+
+_REFUSAL_PATTERN = re.compile(
+    r"^\s*(?:i'?m\s+sorry|i\s+apologi[sz]e|i\s+cannot|i\s+can'?t|i'?m\s+(?:not\s+able|unable))\b",
+    re.IGNORECASE,
+)
+"""Head-anchored regex for LLM refusal prefixes. Anchored to ``^`` so
+mid-text apologies inside genuine reasoning don't false-positive — a
+real refusal opens with the apology, not buries it."""
+
+
+def _is_refusal(result: Mapping[str, Any]) -> bool:
+    """A refusal completes with ``finish_reason=stop`` and no warning, so every advisory channel
+    sees a plain MISS — L2 needs it as its own failure mode to propose a mitigation."""
+    predicted = str(result.get("predicted") or "")
+    if not predicted:
+        return False
+    # Cap the matched prefix at the first sentence/120 chars — refusals
+    # are short; a 500-char prediction that opens with apology framing
+    # is likely a real reasoning chain that started with hedging.
+    head = predicted[:120]
+    return bool(_REFUSAL_PATTERN.match(head))
+
+
+def _collect_advisories(result: Mapping[str, Any]) -> set[str]:
+    pd = result.get("pipeline_data") or {}
+    advisories: set[str] = set()
+    for w in (pd.get("diagnostics") or {}).get("warnings") or []:
+        advisories.add(f"{w.get('step', 'unknown')}:{w.get('code', 'unknown')}")
+    if not advisories and is_error_result(result):
+        advisories.add(f"{terminal_node(result)}:error")
+    if _is_refusal(result):
+        advisories.add(f"{terminal_node(result)}:model_refusal")
+    return advisories
+
+
+def _structural_advisory_keys(result: Mapping[str, Any]) -> set[str]:
+    """Keys whose SOURCE-STAMPED ``kind`` is structural. The backend owns that verdict and PoBB reads it directly, so
+    elimination stays in lockstep. A warning with no ``kind`` is NOT structural: under-count, never over-eliminate."""
+    pd = result.get("pipeline_data") or {}
+    keys: set[str] = set()
+    for w in (pd.get("diagnostics") or {}).get("warnings") or []:
+        if w.get("kind") == "structural":
+            keys.add(f"{w.get('step', 'unknown')}:{w.get('code', 'unknown')}")
+    return keys
+
+
+def terminal_node(result: Mapping[str, Any]) -> str:
+    """The deepest node this result reached, read off its OWN ``pipeline_data`` rather than a literal name, so truncation
+    classification keys on this result's terminal node and fires for a multi-node terminal LLM too."""
+    pd = result.get("pipeline_data") or {}
+    return pd.get("terminal_node") or "llm_only"
+
+
+def _terminal_llm_shape(result: Mapping[str, Any]) -> tuple[str | None, int]:
+    """(finish_reason, reasoning_tokens) from the terminal LLM node's step_tokens;
+    (None, 0) if missing."""
+    pd = result.get("pipeline_data") or {}
+    st = (pd.get("step_tokens") or {}).get(terminal_node(result)) or {}
+    fr = st.get("finish_reason")
+    reasoning = int(st.get("reasoning") or 0)
+    return (fr, reasoning)
+
+
+def classify_result(result: Mapping[str, Any]) -> ResultClassification:
+    """Advisories + response shape → advisory / infra / fatal codes. Truncation is INFRA (provider-ceiling, recurs per
+    sample); a backend 4xx is FATAL, so one sighting kills the candidate instead of poisoning every remaining one."""
+    advisories = _collect_advisories(result)
+    structural_advs = _structural_advisory_keys(result)
+    infra: set[str] = set()
+    fatals: set[str] = set()
+
+    node = terminal_node(result)
+    # ``content_empty`` describes ONE ATTEMPT, not the result: the backend raises it and
+    # retries (``llm_retry`` beside it, both stamped transient), and that retry can answer.
+    # A result carrying a real prediction is not an empty response whatever the advisory
+    # says — three archived rows recovered this way and two scored 1.0, yet all three were
+    # stamped ``empty_response``, whose FATAL routing fast-eliminates the candidate off one
+    # sighting. Read the result, not the attempt. ``NO_RESULT`` is the scorer's sentinel for
+    # "terminal node emitted nothing parseable" (``compute_round_health`` below owns the
+    # round-level version of this same question).
+    predicted = str(result.get("predicted") or "").strip()
+    answered = bool(predicted) and predicted != NO_RESULT
+    if f"{node}:content_empty" in advisories and not answered:
+        finish_reason, reasoning_tokens = _terminal_llm_shape(result)
+        # ``reasoning_tokens > 0`` is proof the model WORKED — it neither refused (a refusal
+        # carries content, or ``finish_reason=content_filter``) nor idled. Emitting nothing
+        # visible after thinking is a property of the ROUTE, deterministic for every prompt
+        # we could send it, so it routes to infra whatever ended the call: hitting the cap
+        # (``length``) and stopping on its own (``stop``) are the same fault seen at two
+        # budgets. Observed on ``z-ai/glm-4.7-flash`` — empty content, ``stop``, 5352
+        # reasoning chars, then a schema-repair re-prompt — and charging that to the
+        # candidate fast-eliminates a prompt that was never read.
+        if reasoning_tokens > 0:
+            infra.add(
+                f"{node}:reasoning_budget_exhausted"
+                if finish_reason == "length"
+                else f"{node}:reasoning_only_response"
+            )
+        elif finish_reason == "length":
+            infra.add(f"{node}:output_truncated")
+        else:
+            fatals.add(f"{node}:empty_response")
+
+    for adv in advisories:
+        if adv.endswith(":content_filtered"):
+            fatals.add(adv)
+        elif adv.endswith(":model_refusal"):
+            # Refusal routes to infra (not fatal): the same query at a
+            # different temperature / rephrased instruction can recover,
+            # so don't fast-path eliminate the candidate at n=1. But
+            # surfacing it in infra_codes routes it to RUNTIME FAILURES
+            # so L2 sees the pattern and can propose mitigations
+            # (different model, less safety-triggering instruction).
+            infra.add(adv)
+        elif adv in structural_advs:
+            # Source-stamped structural (``WarningKind.STRUCTURAL`` from the backend):
+            # a deterministic-for-config candidate failure — route to fatal so
+            # DegradationCheck fast-eliminates the candidate instead of retrying the
+            # same broken config on every remaining sample. Lockstep with the
+            # degradation verdict, which grades the same warning structural-critical
+            # off the same stamped field (one truth, not two disagreeing classifiers).
+            fatals.add(adv)
+
+    if is_error_result(result) and error_category(result) == ErrorCategory.CLIENT:
+        fatals.add("backend:client_error")
+
+    return ResultClassification(
+        advisory_codes=frozenset(advisories),
+        infra_codes=frozenset(infra),
+        fatal_codes=frozenset(fatals),
+    )
 
 
 def classify_sample_failure(

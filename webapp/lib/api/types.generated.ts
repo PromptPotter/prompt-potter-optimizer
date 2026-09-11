@@ -557,7 +557,7 @@ export interface RunLimits {
   lives_cap: number | null;
 }
 
-/** One paired-PoBB backfill event appended by ``LiveDashboardView._append_backfill``. */
+/** One paired-PoBB backfill event appended by ``LiveDashboardProjection._append_backfill``. */
 export interface BackfillLogEntry {
   round: number;
   candidate_idx: number;

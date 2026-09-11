@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Collection, Mapping, Sequence
 from enum import StrEnum
-from typing import Any, Literal, NamedTuple, NotRequired, TypedDict
+from typing import Any, Literal, NamedTuple, NotRequired, TypedDict, overload
 
 from pydantic import ConfigDict, Field, computed_field
 
@@ -15,7 +16,6 @@ from promptpotter.domain.escalation_signals import (
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import stable_hash
-from promptpotter.domain.rendering import display_rank_key
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.run_records import ErrorRecord
@@ -44,6 +44,7 @@ __all__ = [
     "ParentStep",
     "RoundParent",
     "RoundResult",
+    "ScoreboardRankKey",
     "ScoreboardRow",
     "ScoredCandidate",
     "WarningDict",
@@ -61,6 +62,8 @@ __all__ = [
     "parent_key",
     "parent_line",
     "parse_candidate_label",
+    "resolved_fitness",
+    "scoreboard_rank_key",
     "unscoreable_cells",
 ]
 
@@ -346,6 +349,57 @@ def merge_known_outcomes(
         if sid is not None:
             by_sid[sid] = r
     return list(by_sid.values())
+
+
+@overload
+def resolved_fitness(composite_fitness: float | None, accuracy: float) -> float: ...
+@overload
+def resolved_fitness(composite_fitness: float | None, accuracy: float | None) -> float | None: ...
+def resolved_fitness(composite_fitness: float | None, accuracy: float | None) -> float | None:
+    """THE composite-or-accuracy rule, one implementation: an honest ``0.0`` is a real score, so
+    only genuine absence degrades to ``accuracy``. Every display and ranking site routes here.
+
+    ``None`` out only when BOTH are absent — an unscoreable candidate has no number rather than a
+    low one. Overloaded so a caller that has already established a real accuracy keeps a ``float``
+    and needs no cast: the two arms are a fact about the input, not something to re-assert."""
+    return composite_fitness if composite_fitness is not None else accuracy
+
+
+# Declared once: a caller restating the tuple misses the next term added to the key.
+ScoreboardRankKey = tuple[bool, bool, float, float, float]
+
+
+def scoreboard_rank_key(
+    composite_fitness: float | None,
+    accuracy: float | None,
+    theta: float | None = None,
+    *,
+    is_winner: bool = False,
+    is_partial: bool = False,
+) -> ScoreboardRankKey:
+    """``resolved_fitness``'s argmax form: the order ``RoundResult.scoreboard`` persists in.
+
+    On a warm round rank 1 IS the crown, by construction: the round is won on Rasch θ-lift over
+    the parent (``elect_round_winner``), so a table ordered on the composite could seat the winner
+    anywhere and offer no column that explained it. Both leading terms DEFAULT OFF, so a cold
+    round — no candidate carrying a θ, nothing crowned yet — orders on the composite alone.
+
+    ⚠️ A mask lens must keep passing two arguments (``mask/verdicts.py``). It exists to show a
+    DIFFERENT ordering under a masked formula, and pinning the active-formula winner to rank 1
+    there would leave it unable to disagree."""
+    # An UNSCOREABLE arm is no score, not a low one, so it sorts to the bottom on the device a
+    # missing θ uses — it must never outrank a candidate that was actually read.
+    shown = resolved_fitness(composite_fitness, accuracy)
+    return (
+        is_winner,
+        # A rate the operator CUT SHORT never outranks one measured on the whole panel: the round
+        # order is stratified, so the cells a stopped walk kept are a biased slice rather than a
+        # smaller sample of the same thing.
+        not is_partial,
+        theta if theta is not None else -math.inf,
+        shown if shown is not None else -math.inf,
+        accuracy if accuracy is not None else -math.inf,
+    )
 
 
 # ``ScoredCandidate``'s display subset, spelled once and deliberately narrower than the
@@ -853,7 +907,7 @@ class RoundResult(StrictModel):
         winner_id = self.winner_id
         ranked = sorted(
             self.candidate_scores,
-            key=lambda c: display_rank_key(
+            key=lambda c: scoreboard_rank_key(
                 c.composite_fitness,
                 c.accuracy,
                 c.theta,

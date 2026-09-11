@@ -21,7 +21,7 @@ from promptpotter.application.scoring.row_diagnostics import rank_ground_truth
 from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.l4.proxies import INNER_FACT_KEYS, PARENT_LEVEL_SE_KEY
 from promptpotter.domain.phases import RunPhase
-from promptpotter.domain.rendering import classify_result, terminal_node
+from promptpotter.domain.results_health import classify_result, terminal_node
 from promptpotter.domain.run_records import PhaseRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import QueryMeasurement, extract_item_label, is_hit, turn_scalars
@@ -341,7 +341,7 @@ def _classify_http_error(exc: httpx.HTTPStatusError) -> tuple[ErrorCategory, str
         # A throttle is only the CALLER's fault when it is a quota no retry can outlast. A
         # per-minute window that just closed is transient, and CLIENT is read by two consumers that
         # both punish the candidate for the provider's load: ``query_loop._classify_abort`` voided
-        # the whole panel on the first occurrence, and ``rendering.py::classify_result`` adds
+        # the whole panel on the first occurrence, and ``results_health.py::classify_result`` adds
         # ``backend:client_error`` to ``fatal_codes``, which PoBB fast-eliminates on one sighting.
         # A quota still reaches both — that one IS the operator's to act on.
         quota = is_quota_rate_limit(exc.response.headers, exc.response.text)

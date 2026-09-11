@@ -6,7 +6,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.rendering import classify_result
+from promptpotter.domain.results_health import classify_result
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:

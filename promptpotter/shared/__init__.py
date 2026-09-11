@@ -35,10 +35,10 @@ def sigmoid(x: float) -> float:
 # --------------------------------------------------------------------------- #
 # Answer-label extraction — the regexes + isolators that pull a final answer    #
 # out of raw model output. Both the scorer (application/scoring/.../matchers)   #
-# and the display side (domain/rendering) read a label the same way through     #
-# these, so the displayed answer never diverges from the one that was scored.   #
-# They live here in the pure leaf because the two consumers sit in different     #
-# layers (application can't be imported by the pure domain).                    #
+# and the display side (presentation/terminal/live/sample) read a label the     #
+# same way through these, so the displayed answer never diverges from the one   #
+# that was scored. They live in this pure leaf so that neither consumer         #
+# imports the other one's layer.                                                #
 # --------------------------------------------------------------------------- #
 
 GSM8K_ANSWER_RE = re.compile(r"####\s*(-?[\d,]+\.?\d*)")

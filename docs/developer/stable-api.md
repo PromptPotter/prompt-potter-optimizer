@@ -212,7 +212,7 @@ anonymous `projects/default/` tenant. `program` rides the backend client as
 until something answers — call
 `submit_gate_decision(cycle_dir, "rescore"|"proceed"|"abort")` from another task, or set the knob
 off. It is `application/`, so it renders nothing: pass `LiveDisplay.for_campaign(session,
-campaign_config)` for the run readout, and `presentation/views/completion.py::report_completion`
+campaign_config)` for the run readout, and `presentation/terminal/completion.py::report_completion`
 for the closing box.
 
 Nothing on this path imports a server, and the dependency list says so: `pip install
@@ -273,7 +273,7 @@ Three consequences that a surface must not re-decide:
 - **`cycle` and `hop` ride together** because they must agree; every construction site derives one from the other through `cycle_dir_for`.
 - **Every artifact stamps the cut it is of**, so the ledger is the truth and each file is a cache: `?at=<offset>` on the dashboard route re-folds any past moment off disk, and `index.json::forked_at_offset` is a cut on the *parent*.
 
-Subscribers read via `DerivedView.on_record(record)` and MUST NOT write any campaign artifact beyond their declared allowlist (fails loud; see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
+Subscribers read via `Projection.on_record(record)` and MUST NOT write any campaign artifact beyond their declared allowlist (fails loud; see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
 
 ## 7. Per-cycle artifact paths
 

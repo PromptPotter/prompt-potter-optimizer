@@ -49,7 +49,7 @@ Three verdicts ship, and each answers a different "what if".
 | **A changed engine or scorer** | `python -m promptpotter ab [--campaign <id>]` — replays one whole campaign, the active one by default | Where a `round_winner` decision flips, yes |
 
 **Row one re-ranks the RECORD; row three re-runs the ELECTION, and the difference is not a
-matter of degree.** The lens orders candidates by `display_rank_key` over the masked aggregate,
+matter of degree.** The lens orders candidates by `scoreboard_rank_key` over the masked aggregate,
 so its divergence means *under this formula the crowned candidate is no longer the best-scoring
 one*. The election ranks Rasch θ-lift over the parent behind a coverage floor, and θ under
 another formula has to be re-fit from per-sample grades against a re-calibrated δ ruler — which

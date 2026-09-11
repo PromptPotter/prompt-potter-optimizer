@@ -249,7 +249,7 @@ class LLMCallRecord(StrictModel):
     candidate_idx: int | None = None
     payload_kind: Literal["llm_call", "synthesized"] = "llm_call"
     call_id: str = ""
-    # Opaque action-dict consumed by AuditTrailView — new fields don't churn the schema.
+    # Opaque action-dict consumed by AuditTrailProjection — new fields don't churn the schema.
     payload: dict[str, Any] = Field(default_factory=dict)
     timestamp: str = Field(default_factory=utcnow_iso)
 

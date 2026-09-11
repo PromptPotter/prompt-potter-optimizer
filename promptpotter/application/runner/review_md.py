@@ -19,9 +19,12 @@ from promptpotter.application.optimization.validators.l1_behavior import (
     run_all_checks,
 )
 from promptpotter.application.optimization.validators.l2_behavior import run_all_l2_checks
+from promptpotter.application.views.render.optimizer_prompt_text import (
+    fmt_pct,
+    format_l1_critique_for_prompt,
+)
 from promptpotter.domain.escalation_signals import exploration_budget
 from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
-from promptpotter.domain.rendering import fmt_pct, format_l1_critique_for_prompt
 from promptpotter.domain.results import (
     DegradationHealth,
     RoundResult,

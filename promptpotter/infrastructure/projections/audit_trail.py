@@ -9,14 +9,14 @@ from typing import Any
 
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import LLMCallRecord, PhaseRecord, RoundWarningRecord
-from promptpotter.infrastructure.projections.base import DerivedView
+from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
 from promptpotter.infrastructure.store.layout import CycleLayout, round_basename, round_number
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "AuditTrailView",
+    "AuditTrailProjection",
     "audit_rounds_dir",
     "build_node_block",
     "load_round_audits",
@@ -115,14 +115,14 @@ def _action_to_node_block(action: dict[str, Any]) -> dict[str, Any]:
     return block
 
 
-class AuditTrailView(DerivedView):
+class AuditTrailProjection(Projection):
     """Accumulates node I/O within a round and writes the round file on flush. Both constructors assert the audit path, so
     a fork can never point at the parent tree."""
 
     def __init__(self, rounds_dir: Path) -> None:
         if rounds_dir.parts[-len(_ROUNDS_SUBPATH) :] != _ROUNDS_SUBPATH:
             raise ValueError(
-                f"AuditTrailView rounds_dir must end in {'/'.join(_ROUNDS_SUBPATH)}; "
+                f"AuditTrailProjection rounds_dir must end in {'/'.join(_ROUNDS_SUBPATH)}; "
                 f"got {rounds_dir}"
             )
         self.rounds_dir = rounds_dir
@@ -140,7 +140,7 @@ class AuditTrailView(DerivedView):
         self._halted_mid_round: bool = False
 
     @classmethod
-    def from_cycle_dir(cls, cycle_dir: CycleDir) -> AuditTrailView:
+    def from_cycle_dir(cls, cycle_dir: CycleDir) -> AuditTrailProjection:
         return cls(CycleLayout(Path(cycle_dir)).audit_rounds)
 
     def begin_round(self, round_num: int, started_at: str = "") -> None:

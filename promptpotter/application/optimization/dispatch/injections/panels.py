@@ -31,6 +31,7 @@ from promptpotter.application.optimization.dispatch.bundle import (
     signal,
 )
 from promptpotter.application.scoring.evaluators import compute_accuracy
+from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.candidate_diff import (
     IDEA_MATCH_MARK,
@@ -42,7 +43,6 @@ from promptpotter.domain.candidate_diff import (
 from promptpotter.domain.connector import MeasuredUnit, unit_count, unit_plural
 from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS, PARENT_LEVEL_SE_KEY
-from promptpotter.domain.rendering import fmt_pct
 from promptpotter.domain.results import CritiqueReadout, EliminationGate, ScoredCandidate
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.ruler import ThetaCaveat, theta_caveat

@@ -7,7 +7,7 @@ from fastapi import Query, Request, Response
 from fastapi.responses import JSONResponse
 
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.infrastructure.store.family_ray_views import (
+from promptpotter.infrastructure.store.family_ray_queries import (
     DEFAULT_RAY_LIMIT,
     MAX_RAY_LIMIT,
     RayResponse,
@@ -16,7 +16,7 @@ from promptpotter.infrastructure.store.family_ray_views import (
     ray_validator_parts,
 )
 from promptpotter.infrastructure.store.layout import cycle_dir_for
-from promptpotter.infrastructure.store.lineage_views import iter_family_courses
+from promptpotter.infrastructure.store.lineage_queries import iter_family_courses
 from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._conditional import (
     client_has_etag,

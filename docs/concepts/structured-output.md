@@ -58,7 +58,7 @@ So the schema **teaches** more reliably than it **compels.** Where the grammar d
 
 ## Extraction is a double seam — slot first, label second
 
-Two things both called "answer extraction" run in sequence, in different repos. The **backend** arm runs first: TermNorm's `_step_llm_only` destructures the structured-output SLOT named by `answer_field` before the body is posted back. The **matcher** arm runs here, in `application/scoring/formula/matchers.py`, pulling the LABEL out of what is left (the last bold span, the last `\boxed{N}`) and deciding HIT/MISS. So no matcher will ever see the raw envelope, and one that parses JSON is fixing the wrong seam. Display-side extraction is a third thing again (`domain/rendering.py`).
+Two things both called "answer extraction" run in sequence, in different repos. The **backend** arm runs first: TermNorm's `_step_llm_only` destructures the structured-output SLOT named by `answer_field` before the body is posted back. The **matcher** arm runs here, in `application/scoring/formula/matchers.py`, pulling the LABEL out of what is left (the last bold span, the last `\boxed{N}`) and deciding HIT/MISS. So no matcher will ever see the raw envelope, and one that parses JSON is fixing the wrong seam. Display-side extraction is a third thing again (`presentation/terminal/live/sample.py`).
 
 ## Shape-determinism ≠ content-determinism
 

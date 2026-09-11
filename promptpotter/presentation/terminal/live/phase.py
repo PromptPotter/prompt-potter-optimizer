@@ -11,10 +11,15 @@ from promptpotter.application.optimization.pobb.classification import (
     ranked_item_keys_from_schema,
 )
 from promptpotter.application.scoring.row_diagnostics import find_rank
+from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.domain.connector import MeasuredUnit, unit_count
-from promptpotter.domain.rendering import display_fitness, display_rank_key, fmt_pct
-from promptpotter.domain.results import is_round_winner, overlap_series
-from promptpotter.presentation.views.display import (
+from promptpotter.domain.results import (
+    is_round_winner,
+    overlap_series,
+    resolved_fitness,
+    scoreboard_rank_key,
+)
+from promptpotter.presentation.terminal.primitives import (
     BOLD,
     GREEN,
     RED,
@@ -77,7 +82,7 @@ def render_progress_table(rounds: list[dict[str, Any]]) -> str:
             trend = "-" if prev is None else f"{theta - prev:+.3f}"
             prev = theta
         rl = "G" if rd.get("round") == "grid" else str(rd.get("round", "?"))
-        comp = display_fitness(rd.get("composite_fitness"), acc)
+        comp = resolved_fitness(rd.get("composite_fitness"), acc)
         # `28+33` when the origin panel is carried: the band this round chose to learn from,
         # then the fixed yardstick every round shares. One number would hide that two rounds
         # with the same `n` can have bought entirely different cells.
@@ -119,7 +124,7 @@ def render_round_stats(
             ),
             max(
                 round_result.candidate_scores,
-                key=lambda s: display_rank_key(
+                key=lambda s: scoreboard_rank_key(
                     s.composite_fitness,
                     s.accuracy,
                     s.theta,

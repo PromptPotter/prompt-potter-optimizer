@@ -126,7 +126,7 @@ class TokenAccount(StrictModel):
 
         REPLAYED rows are excluded: their counts are the banked call's, so folding them in reports
         a prefix discount this run never bought. Same exclusion the spend buckets fold under
-        (``live_dashboard/view.py::_bank_call``). ``None`` where no measured row carried one."""
+        (``live_dashboard/projection.py::_bank_call``). ``None`` where no measured row carried one."""
         accounts = [
             a
             for r in rows
@@ -219,7 +219,7 @@ class SpendRollup(StrictModel):
     # Billed tokens with no resolvable USD rate. >0 means ``total_used_usd`` UNDERSTATES real spend
     # — it is a floor, not the total.
     unpriced_tokens: int = 0
-    # Both are FOLDED beside the USD totals (`live_dashboard/view.py::_handle_token_usage`), never
+    # Both are FOLDED beside the USD totals (`live_dashboard/projection.py::_handle_token_usage`), never
     # derived on read: a `@computed_field` serializes but does not round-trip, and a resume
     # re-folds this whole state off the ledger (`resolve_resume_state`) before carrying it.
     # Serving them is also what keeps the gauge and the halt gate one computation.

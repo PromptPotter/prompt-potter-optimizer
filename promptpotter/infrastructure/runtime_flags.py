@@ -42,7 +42,7 @@ def effective_lookahead(requested: int, ceiling: int) -> int:
 
     **The one clamp**, and every reader meaning "the depth in force" ends here: the walk
     (`query_loop._lookahead`), the served overlay (`overlay_armed_controls`), and the dashboard
-    file (`live_dashboard/view.py::_persist`) — which was the one that did not, and wrote a depth
+    file (`live_dashboard/projection.py::_persist`) — which was the one that did not, and wrote a depth
     nothing was running beside the ceiling refusing it. The write side stores the request UNCLAMPED
     on purpose: a ceiling is a property of the backend a cycle runs against, not of the press."""
     return max(1, min(requested, ceiling))
@@ -124,7 +124,7 @@ def overlay_armed_controls(body: dict[str, Any], cycle_dir: Path) -> None:
 
     **The reason is the one ``run_phase`` is derived rather than served, and it is a property of
     the WRITER, not of any one field**: the API process applies the command while
-    :class:`LiveDashboardView` projects it from the RUNNER's, so the file answers for the last
+    :class:`LiveDashboardProjection` projects it from the RUNNER's, so the file answers for the last
     record rather than for the press — forever on a halted cycle. ``.runtime/`` is in the
     conditional-GET validator, so a press expires the cached answer on its own.
 

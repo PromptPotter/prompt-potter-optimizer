@@ -7,10 +7,10 @@ import argparse
 import logging
 
 from promptpotter.application.diagnostics.verify import VerifyError, verify_candidate
+from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.rendering import fmt_pct
 from promptpotter.domain.results import parse_candidate_label
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (

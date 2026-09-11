@@ -17,8 +17,7 @@ from promptpotter.application.runner.inner.spawn_context import publish_inner_sp
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.rendering import display_fitness
-from promptpotter.domain.results import DiagnosticRunRecord, candidate_label
+from promptpotter.domain.results import DiagnosticRunRecord, candidate_label, resolved_fitness
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.statistics import mean_ci
 
@@ -133,7 +132,7 @@ async def measure_noise_floor(
         # `scores["accuracy"]` — never `.get(..., 0.0)`. A rescore that measured nothing must
         # not enter the noise band as a 0% run; the KeyError says so.
         accuracy = float(scores["accuracy"])
-        composites.append(display_fitness(scores.get("composite_fitness"), accuracy))
+        composites.append(resolved_fitness(scores.get("composite_fitness"), accuracy))
         accuracies.append(accuracy)
         log_fn(f"noise-floor rescore {i + 1}/{k}: composite={composites[-1]:.4f}")
 

@@ -167,7 +167,7 @@ _IMPORTS_PRESENTATION = re.compile(r"(?:from|import) promptpotter\.presentation"
 # CLI-seam debt; shrink it to zero. The fix is to move the shared piece into
 # application/ — presentation imports upward.
 _LAYERING_ALLOW = re.compile(
-    r"presentation\.(?:views\.live\.display import LiveDisplay"
+    r"presentation\.(?:terminal\.live\.display import LiveDisplay"
     r"|cli\.session import (?:SessionCtx|load_session))"
 )
 

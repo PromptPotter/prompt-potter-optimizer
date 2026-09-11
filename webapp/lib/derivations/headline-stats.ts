@@ -106,7 +106,7 @@ function finite(v: unknown): number | null {
 
 export function headlineStats(dash: DashboardSnapshot | null): HeadlineStats {
   // `best` is the server-side rolling max of `rounds[].accuracy` — what each round
-  // actually MEASURED (LiveDashboardView._absorb_round_complete is the sole writer;
+  // actually MEASURED (LiveDashboardProjection._absorb_round_complete is the sole writer;
   // it is NOT composite-based). `abilityDelta` is SERVED (`ability_delta`) — never
   // recomputed here, so this chip and the L4 inner progress line read one number.
   // The two are on DIFFERENT bases now, deliberately: `best` answers "what did a round

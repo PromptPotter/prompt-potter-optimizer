@@ -45,7 +45,9 @@ from promptpotter.domain.run_records import SnapshotRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.search_point import JobSearchPoint
-from promptpotter.infrastructure.projections.live_dashboard.view import LiveDashboardView
+from promptpotter.infrastructure.projections.live_dashboard.projection import (
+    LiveDashboardProjection,
+)
 from promptpotter.infrastructure.store.io import read_yaml, write_yaml
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 from promptpotter.shared.errors import DatasetIdentityError
@@ -649,7 +651,7 @@ def test_a_grade_C_run_is_never_replayed_from_either_entry(tmp_path: Path) -> No
     nothing, and reaching the core directly was enough to launder a C cell into the ruler."""
     import types
 
-    from promptpotter.infrastructure.store import archive_views
+    from promptpotter.infrastructure.store import archive_queries
 
     archive = MeasurementArchive(tmp_path)
     _seed_graded(archive, run_id="clean", grade="A", terminal_node="llm_only", sample_id=7)
@@ -662,7 +664,7 @@ def test_a_grade_C_run_is_never_replayed_from_either_entry(tmp_path: Path) -> No
     assert set(from_core) == {7}, "the DB core served a grade-C run without being asked to exclude"
     assert from_core[7]["query"] == "q_clean"
 
-    served = archive_views.reusable_results(
+    served = archive_queries.reusable_results(
         types.SimpleNamespace(archive=archive), node_configs, dataset_name="aime"
     )
     assert set(served) == {7}, "the reuse facade served a grade-C run as a cache hit"
@@ -812,7 +814,7 @@ def test_unscoreable_cells_counts_holes_but_not_stops_or_deprecated_rows() -> No
     The row that motivated this guard was NOT of that kind: it carried ``content_empty`` and
     answered on the retry, and only reached here because ``classify_result`` read an
     attempt-level advisory as a verdict on the result. That is fixed at the predicate now
-    (``domain/rendering.py``), so a recovered retry is an ordinary scored row and never needs
+    (``domain/results_health.py``), so a recovered retry is an ordinary scored row and never needs
     this protection — which stays, for samples that really did come back empty.
     """
     from promptpotter.application.optimization.pobb.classification import is_deprecated
@@ -2651,7 +2653,7 @@ async def test_a_grading_reports_the_providers_prefix_cache(
     the one that matters most: its rubric is a module constant, so ~1.2k of a ~1.6k-token prompt is
     byte-identical on every cell of every campaign, and a live probe on the shipped grader model
     read 92.8% of its input off the provider's cache. Asserted on the WIRE call — a replay reached
-    no provider, and the rollup already excludes it (`live_dashboard/view.py::_handle_token_usage`).
+    no provider, and the rollup already excludes it (`live_dashboard/projection.py::_handle_token_usage`).
     """
     _client, metered, _score = await _grade_twice(tmp_path, monkeypatch, reply="A")
 
@@ -2779,7 +2781,7 @@ def test_every_prefix_state_says_which_one_it_is() -> None:
     Pinned here, and its browser peer in `derivations/__tests__/token-account.test.ts`, because the
     badge strings must match byte for byte: an operator reads the terminal tape and the sample row
     as one vocabulary."""
-    from promptpotter.domain.rendering import prefix_reading
+    from promptpotter.application.views.render.prefix_reading import prefix_reading
 
     assert prefix_reading(0.39, replayed=False) == ("discounted", 0.39, "c39%")
     # A reported zero is a MEASUREMENT — it is what proves a provider has no prefix cache at all.
@@ -3076,7 +3078,7 @@ def test_the_parent_rescore_ticks_the_run_without_minting_a_candidate(tmp_path: 
     ``NO_ROUND_SLOT`` as ``C{round}.0`` — a row naming a candidate nobody proposed. The run's
     own scalars must move; the round's population must not grow.
     """
-    view = LiveDashboardView(
+    view = LiveDashboardProjection(
         CycleDir(tmp_path),
         state_path=None,
         hop=CycleHop(campaign_id="c", cycle_id="cy"),

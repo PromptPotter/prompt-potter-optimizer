@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.validators import StopRule
     from promptpotter.infrastructure.ledger import CycleEventLog
-    from promptpotter.infrastructure.projections.audit_trail import AuditTrailView
+    from promptpotter.infrastructure.projections.audit_trail import AuditTrailProjection
     from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
     from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
@@ -84,7 +84,7 @@ class CycleSnapshot:
     tracing_campaign_id: str = ""
     resumed_from_round: int = 1
     obs: ObservabilityBridge | None = None
-    audit_projection: AuditTrailView | None = None
+    audit_projection: AuditTrailProjection | None = None
     ledger: CycleEventLog | None = None
     # Forensic traceback for ``index.json::crash_traceback`` written by
     # ``mark_finished``. Operator-facing summary (kind + message) is owned by

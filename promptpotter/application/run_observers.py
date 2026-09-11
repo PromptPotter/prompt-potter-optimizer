@@ -29,10 +29,12 @@ from promptpotter.infrastructure.llm.telemetry import (
     set_current_round,
     set_cycle_ledger,
 )
-from promptpotter.infrastructure.projections.audit_trail import AuditTrailView
+from promptpotter.infrastructure.projections.audit_trail import AuditTrailProjection
+from promptpotter.infrastructure.projections.live_dashboard.projection import (
+    LiveDashboardProjection,
+)
 from promptpotter.infrastructure.projections.live_dashboard.state import RunLimits
-from promptpotter.infrastructure.projections.live_dashboard.view import LiveDashboardView
-from promptpotter.infrastructure.projections.pobb_stream import PoBBStreamView
+from promptpotter.infrastructure.projections.pobb_stream import PoBBStreamProjection
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 from promptpotter.shared.errors import graceful
 
@@ -43,7 +45,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.phases import PhaseEvent
     from promptpotter.domain.sample import Sample
-    from promptpotter.presentation.views.live.display import LiveDisplay
+    from promptpotter.presentation.terminal.live.display import LiveDisplay
 
 __all__ = [
     "QUERY_PREVIEW_CHARS",
@@ -67,15 +69,15 @@ def build_campaign_emitter(
     *,
     origin_accuracy: float | None,
     resumed_from_round: int | None = None,
-    recorder: AuditTrailView | None = None,
+    recorder: AuditTrailProjection | None = None,
     seed_from_cycle_id: str | None = None,
     langfuse_trace_url: str | None = None,
-) -> LiveDashboardView | None:
+) -> LiveDashboardProjection | None:
     """Live dashboard projection from session + config. ``seed_from_cycle_id`` names the parent
     cycle to seed prior trajectory from; ``None`` seeds from the cycle's own dir. ``None`` back
     when the session carries no cycle to write into, which the return type states."""
     opt = campaign_config.optimization
-    return LiveDashboardView.for_session(
+    return LiveDashboardProjection.for_session(
         session.hop,
         tenant_root=session.tenant_root,
         session_id=session.session_id,
@@ -483,9 +485,9 @@ class RunObservers:
     ``_CYCLE_LEDGER`` ContextVar, so no background task inherits a stale ledger from the last cycle."""
 
     callbacks: RunCallbacks
-    audit: AuditTrailView
-    dashboard: LiveDashboardView
-    pobb: PoBBStreamView
+    audit: AuditTrailProjection
+    dashboard: LiveDashboardProjection
+    pobb: PoBBStreamProjection
     display: LiveDisplay | None
     _ledger_token: Token[CycleEventLog | None] | None = None
 
@@ -531,9 +533,9 @@ def build_run_observers(
         )
 
     cycle_dir = CycleDir(session.store.campaigns.cycle_dir(session.hop))
-    audit = AuditTrailView.from_cycle_dir(cycle_dir)
+    audit = AuditTrailProjection.from_cycle_dir(cycle_dir)
     session.state.audit_projection = audit
-    pobb = PoBBStreamView.from_cycle_dir(cycle_dir)
+    pobb = PoBBStreamProjection.from_cycle_dir(cycle_dir)
 
     ledger = CycleEventLog.open(cycle_dir)
     # A set-once identity stamp (like session_id), not a tracing-stream read — fan-out-only
@@ -583,7 +585,7 @@ def build_run_observers(
     # raise here anyway; saying which field is empty costs one line and names the cause.
     if dashboard is None:
         raise RuntimeError(
-            "build_run_observers: LiveDashboardView.for_session returned None — the session "
+            "build_run_observers: LiveDashboardProjection.for_session returned None — the session "
             f"address is incomplete (tenant_root={session.tenant_root!r}, "
             f"session_id={session.session_id!r}, hop={session.hop})"
         )

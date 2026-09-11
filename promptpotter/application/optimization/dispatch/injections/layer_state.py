@@ -16,12 +16,14 @@ from promptpotter.application.optimization.dispatch.bundle import (
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     effective_optimizer_prompts,
 )
+from promptpotter.application.views.render.optimizer_prompt_text import (
+    format_l1_critique_for_prompt,
+)
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.connector import unit_plural
 from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
-from promptpotter.domain.rendering import format_l1_critique_for_prompt
 from promptpotter.domain.results_health import evidence_starved_node
 
 logger = logging.getLogger(__name__)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from promptpotter.presentation.views.display import BOLD, DIM, RESET, YELLOW
+from promptpotter.presentation.terminal.primitives import BOLD, DIM, RESET, YELLOW
 
 if TYPE_CHECKING:
     from pathlib import Path

@@ -9,7 +9,7 @@ from typing import NamedTuple
 from promptpotter.application.mask.divergence import Verdict, VerdictOutcome
 from promptpotter.application.mask.record import MaskRound
 from promptpotter.application.scoring.metrics import value_with_mask_applied
-from promptpotter.domain.rendering import DisplayRankKey, display_rank_key
+from promptpotter.domain.results import ScoreboardRankKey, scoreboard_rank_key
 from promptpotter.domain.scoring import RoundScorer
 
 
@@ -37,10 +37,10 @@ def masked_election(
     disagree about the same round.
 
     The eligible filter is the realized one (``is_electable``); the ordering is
-    ``display_rank_key`` over the masked aggregate.
+    ``scoreboard_rank_key`` over the masked aggregate.
     """
 
-    def _key(evaluators: Mapping[str, float], accuracy: float | None) -> DisplayRankKey | None:
+    def _key(evaluators: Mapping[str, float], accuracy: float | None) -> ScoreboardRankKey | None:
         # A candidate/parent whose stored namespace can't satisfy this mask's formula —
         # it references a schema-bound evaluator absent from those values — is
         # *unscorable under the mask*, not a crash. ``value_with_mask_applied`` owns
@@ -50,7 +50,7 @@ def masked_election(
         # and the realized formula only names evaluators that WERE stored, so feeding it
         # never trips this — self-consistency is untouched.
         value = value_with_mask_applied(evaluators, criterion)
-        return None if value is None else display_rank_key(value, accuracy)
+        return None if value is None else scoreboard_rank_key(value, accuracy)
 
     best_key = _key(parent_evaluators, parent_accuracy)
     if not parent_evaluators or best_key is None:

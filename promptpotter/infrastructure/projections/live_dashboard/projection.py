@@ -42,8 +42,8 @@ from promptpotter.infrastructure.projections.audit_trail import (
     build_node_block,
     read_most_recent_round_nodes,
 )
-from promptpotter.infrastructure.projections.base import DerivedView
-from promptpotter.infrastructure.projections.live_dashboard.render import (
+from promptpotter.infrastructure.projections.base import Projection
+from promptpotter.infrastructure.projections.live_dashboard.blocks import (
     build_candidate_rows,
     build_l1_score_block,
     build_pobb_block,
@@ -87,7 +87,7 @@ from promptpotter.shared.instrument import NO_ROUND_SLOT
 
 if TYPE_CHECKING:
     from promptpotter.domain.connector import MeasuredUnit
-    from promptpotter.infrastructure.projections.audit_trail import AuditTrailView
+    from promptpotter.infrastructure.projections.audit_trail import AuditTrailProjection
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +195,7 @@ def _ability_delta(rounds: list[RoundSummary]) -> float | None:
     return round(latest.theta - origin.theta, 4)
 
 
-class LiveDashboardView(DerivedView):
+class LiveDashboardProjection(Projection):
     """Per-cycle dashboard writer; not an optimizer checkpoint."""
 
     def __init__(
@@ -211,7 +211,7 @@ class LiveDashboardView(DerivedView):
         headline_metric: HeadlineMetric,
         langfuse_trace_url: str | None = None,
         resume_from: LiveDashboardState | None = None,
-        recorder: AuditTrailView | None = None,
+        recorder: AuditTrailProjection | None = None,
         initial_llm_nodes: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         cycle_path = Path(cycle_dir)
@@ -283,11 +283,11 @@ class LiveDashboardView(DerivedView):
         headline_metric: HeadlineMetric,
         langfuse_trace_url: str | None = None,
         resumed_from_round: int | None = None,
-        recorder: AuditTrailView | None = None,
+        recorder: AuditTrailProjection | None = None,
         seed_from_cycle_id: str | None = None,
         max_cells_in_flight: int | None = None,
         measured_unit: MeasuredUnit | None = None,
-    ) -> LiveDashboardView | None:
+    ) -> LiveDashboardProjection | None:
         """``seed_from_cycle_id`` names the cycle to read the prior dashboard from — a fork inherits
         the parent's trajectory up to the cut while counting its own copied round files."""
         if not (tenant_root and session_id and hop.campaign_id and hop.cycle_id):
@@ -539,7 +539,7 @@ class LiveDashboardView(DerivedView):
         ``l1_score`` phase, and so folded with ``is_winner`` false on the one arm it has. The
         election record fires for round 0 too, saying exactly that it adopted ``C0``.
 
-        Two channels for one fact, and this is the one with its own record. ``DerivedView`` had no
+        Two channels for one fact, and this is the one with its own record. ``Projection`` had no
         branch for it at all, so the crown reached no fold.
 
         Everything the election stamps rides this record — the per-arm fit and the round's own
@@ -886,7 +886,7 @@ class LiveDashboardView(DerivedView):
         )
         self.state.backfill_log = log[-256:]
 
-    # -- Block builders (delegated to render.py) ------------------------------
+    # -- Block builders (delegated to blocks.py) ------------------------------
 
     def _l1_score_block(self) -> dict[str, Any]:
         return build_l1_score_block(self._buffer, self.short_formula_template)
@@ -1042,7 +1042,7 @@ def fold_at(cut: Cut) -> LiveDashboardState:
     constants (``WIRING_FIELDS``) are stamped at run start and ride no record, so they come back at
     their model defaults here and the serving route stamps the live ones over them — the same
     overlay it already does for ``run_phase``."""
-    view = LiveDashboardView(
+    view = LiveDashboardProjection(
         cut.cycle,
         state_path=None,
         hop=cut.hop,
@@ -1059,4 +1059,4 @@ def fold_at(cut: Cut) -> LiveDashboardState:
     return view.compose()
 
 
-__all__ = ["LiveDashboardView", "fold_at", "resolve_resume_state"]
+__all__ = ["LiveDashboardProjection", "fold_at", "resolve_resume_state"]

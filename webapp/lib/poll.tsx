@@ -29,7 +29,7 @@
 // (`projectionToActivity` returns null); a tick carrying `detail` names what the wait IS -- the
 // provider, or an inner campaign's round -- and becomes the progress chip. Stop sending them and
 // every heartbeated backend query grows a spurious gap marker. Coupled at `format.ts::fmtGap`,
-// `derivations/time-ray.ts` and `store/family_ray_views.py`.
+// `derivations/time-ray.ts` and `store/family_ray_queries.py`.
 //
 // THE LIVE HALF JOINS ON `label` -- `candidate_label(round, idx)`, composed at mint, unique
 // within a round, carried by the served row AND by the tree node a selection is minted off, so

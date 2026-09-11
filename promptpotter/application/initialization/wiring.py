@@ -29,7 +29,7 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.backend import BackendClient, build_backend_client
 from promptpotter.infrastructure.llm.capabilities import ensure_model_capabilities
-from promptpotter.infrastructure.store.archive_views import maintain_measurement_index
+from promptpotter.infrastructure.store.archive_queries import maintain_measurement_index
 from promptpotter.infrastructure.store.dataset_access import (
     dataset_experiment,
     dataset_pipeline_path,

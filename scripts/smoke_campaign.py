@@ -43,9 +43,9 @@ from promptpotter.application.embedded_run import (  # noqa: E402
 from promptpotter.application.pipeline_resolve import (  # noqa: E402
     configure_and_apply_pipeline,
 )
-from promptpotter.presentation.views.completion import report_completion  # noqa: E402
-from promptpotter.presentation.views.display import set_display_tags  # noqa: E402
-from promptpotter.presentation.views.live.display import LiveDisplay  # noqa: E402
+from promptpotter.presentation.terminal.completion import report_completion  # noqa: E402
+from promptpotter.presentation.terminal.live.display import LiveDisplay  # noqa: E402
+from promptpotter.presentation.terminal.primitives import set_display_tags  # noqa: E402
 
 
 def _build_config(

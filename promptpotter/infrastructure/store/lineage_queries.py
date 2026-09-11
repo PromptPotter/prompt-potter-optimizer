@@ -271,7 +271,7 @@ class LineageNode(StrictModel):
 
 class FamilyCourse(NamedTuple):
     """A course in the family and how to reach it — the recursion's unit of work. Public because
-    ``family_ray_views.py`` walks the same family, and a second walk is a second answer."""
+    ``family_ray_queries.py`` walks the same family, and a second walk is a second answer."""
 
     store: Stores
     path: CyclePath

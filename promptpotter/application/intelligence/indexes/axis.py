@@ -9,10 +9,10 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.scoring.formula import ScoringTermMissingError, rescore_results
 from promptpotter.domain.measurement_provenance import entry_grade
-from promptpotter.domain.rendering import display_fitness
+from promptpotter.domain.results import resolved_fitness
 from promptpotter.domain.scoring import CellScorer
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
-from promptpotter.infrastructure.store import archive_views
+from promptpotter.infrastructure.store import archive_queries
 
 
 def _is_forbidden_axis(axis: str) -> bool:
@@ -319,11 +319,11 @@ class AxisIndex:
         all-or-nothing so the replay ORDER matches ingest — ``persistent_failures`` reads a tail streak."""
         if not dataset_name:
             return False
-        rows = archive_views.sample_fold_rows(stores, dataset_name=dataset_name)
+        rows = archive_queries.sample_fold_rows(stores, dataset_name=dataset_name)
         if not rows:
             return False
 
-        signatures = archive_views.run_signatures(stores)
+        signatures = archive_queries.run_signatures(stores)
         for row in rows:
             run_id = row.get("run_id") or ""
             if row.get("fk") != formula_key:
@@ -360,12 +360,12 @@ class AxisIndex:
         # Captured BEFORE the details are read, never after: a run whose log grows between the
         # two must end up stamped with the OLDER signature, so the next process re-derives it.
         # Stamping the newer one would leave a fold that silently omits the rows it gained.
-        signatures = archive_views.run_signatures(stores)
+        signatures = archive_queries.run_signatures(stores)
 
         added = 0
         skipped: list[str] = []
         folded: list[dict[str, Any]] = []
-        for run_id, detail in archive_views.runs_since(
+        for run_id, detail in archive_queries.runs_since(
             stores, self.sample_index._seen_runs, dataset_name=dataset_name
         ):
             stamp = {"fk": scorer_id, "sig": list(signatures.get(run_id) or ())}
@@ -391,7 +391,7 @@ class AxisIndex:
         # Replace rather than append whenever the seed was rejected: what this process just
         # derived IS the whole fold, and appending would leave the rejected rows in front of it.
         if dataset_name and (folded or not self._fold_seeded):
-            archive_views.write_sample_fold(
+            archive_queries.write_sample_fold(
                 stores, dataset_name=dataset_name, rows=folded, append=self._fold_seeded
             )
             self._fold_seeded = True
@@ -409,7 +409,7 @@ class AxisIndex:
         # datapoints, not whichever connector replayed most. Unscoreable runs are dropped for the
         # same reason: a fitness from a dead vocabulary is not comparable to one from this run's.
         all_entries: list[dict[str, Any]] = []
-        for entry in archive_views.list_runs(stores, dataset_name=dataset_name):
+        for entry in archive_queries.list_runs(stores, dataset_name=dataset_name):
             run_id = entry.get("run_id", "")
             if entry_grade(entry) == "C" or run_id in self._unscoreable_runs:
                 continue
@@ -462,7 +462,7 @@ class AxisIndex:
                 run_id=run_id,
                 name=entry.get("name", ""),
                 accuracy=accuracy,
-                composite=display_fitness(scores.get("composite_fitness"), accuracy),
+                composite=resolved_fitness(scores.get("composite_fitness"), accuracy),
                 total=total,
             )
             prev = best_by_run.get(run_id)

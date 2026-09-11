@@ -20,17 +20,17 @@ import json
 import logging
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Protocol
 
 from pydantic import TypeAdapter, ValidationError
 
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
 from promptpotter.domain.run_records import CycleRecord
+from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.layout import CycleLayout
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CycleEventLog", "Projection", "branch_offset", "open_with_history"]
+__all__ = ["CycleEventLog", "branch_offset", "open_with_history"]
 
 
 def _fork_link(cycle_dir: CycleDir) -> tuple[str, int] | None:
@@ -98,13 +98,6 @@ def open_with_history(cycle_dir: CycleDir) -> CycleEventLog:
 
 
 _RECORD_ADAPTER: TypeAdapter[CycleRecord] = TypeAdapter(CycleRecord)
-
-
-class Projection(Protocol):
-    """A subscriber to the record stream. A projection rebuilds its own view deterministically and never
-    calls ``append`` — the ledger is single-writer, from the campaign loop."""
-
-    def on_record(self, record: CycleRecord, offset: int) -> None: ...
 
 
 class CycleEventLog:

@@ -78,7 +78,10 @@ LEDGER_BASELINE = {
     # disk walk (`read`) and the two pure statistics over its rows (`comparison`, `grid`); and
     # `diagnostics/` + `maintenance/` gather the verbs loose at `application/`'s top level.
     # -2: `application/sweep_batch.py` + `infrastructure/store/sweep_store.py` — the sweep batch goes.
-    "modules": 352,
+    # +1: `domain/rendering.py` leaves domain as two `application/views/render/` modules, each named
+    # for what it holds — `optimizer_prompt_text`, whose definitions shape the optimizer prompt, and
+    # `prefix_reading` — because no one name covers both.
+    "modules": 353,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     "init_files": 53,

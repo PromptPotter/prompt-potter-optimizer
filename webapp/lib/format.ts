@@ -100,7 +100,7 @@ export function fmtTokens(n: number): string {
   return `${n} tok`;
 }
 
-// A p-value, in the server's own register (`presentation/views/display.py::fmt_pvalue`) so the
+// A p-value, in the server's own register (`presentation/terminal/primitives.py::fmt_pvalue`) so the
 // terminal readout and the browser star the same result the same way. `null` means NOTHING WAS
 // TESTED — distinct from a test that found nothing, which is what a rendered 1.00 would claim.
 export function fmtPValue(p: number | null): string {
@@ -138,7 +138,7 @@ export function fmtMetricValue(unit: MetricUnit, v: number | null): string {
 }
 
 // The interval beside it, in the SAME units. Threading one unit through both is what the terminal
-// already does (`display.py::fmt_ci` takes its format spec as a keyword for exactly this reason);
+// already does (`primitives.py::fmt_ci` takes its format spec as a keyword for this reason);
 // without it a latency row reads "1000s [900.000, 1100.000]" — one value on two scales.
 // An absent interval must READ as absent: "[0.000, 0.000]" is a fabricated bracket claiming
 // certainty about a measurement that never happened.

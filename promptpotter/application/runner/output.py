@@ -15,6 +15,9 @@ from promptpotter.application.intelligence.hard_sample_sorter import (
 )
 from promptpotter.application.runner.review_md import render_review_md
 from promptpotter.application.views.render.markdown import to_markdown
+from promptpotter.application.views.render.optimizer_prompt_text import (
+    format_l1_critique_for_prompt,
+)
 from promptpotter.application.views.view_models import (
     DigestStatusView,
     FinalWinnerView,
@@ -24,7 +27,6 @@ from promptpotter.application.views.view_models import (
     RoundDigestView,
 )
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.rendering import format_l1_critique_for_prompt
 from promptpotter.domain.results import HardSampleOrder, RoundResult
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits

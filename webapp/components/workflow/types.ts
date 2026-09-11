@@ -53,7 +53,7 @@ export function nodeSubLabel(kind: string, model: string | null, loading: boolea
   return loading ? "…" : "idle";
 }
 
-// One node block as written by AuditTrailView._handle_llm_call
+// One node block as written by AuditTrailProjection._handle_llm_call
 // (promptpotter/infrastructure/projections/audit_trail.py). Shared by
 // dashboard.json::current_round.nodes and round_NNNN.json::nodes.
 export interface NodeDataLike {

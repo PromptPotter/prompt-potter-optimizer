@@ -61,7 +61,7 @@ async def emit_origin_round(
         with graceful("Origin critique failed; round 1 proceeds without seeded feedback"):
             async with observed_node(
                 "l1_critique_r0",
-                "llm/optimizer",
+                "llm",
                 obs=session.state.obs,
                 campaign_id=session.state.tracing_campaign_id,
                 round_num=0,

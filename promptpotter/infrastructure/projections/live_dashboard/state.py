@@ -47,7 +47,7 @@ def warming_payload(hop: CycleHop, *, run_phase: str) -> dict[str, Any]:
 
 
 class BackfillLogEntry(StrictModel):
-    """One paired-PoBB backfill event appended by ``LiveDashboardView._append_backfill``.
+    """One paired-PoBB backfill event appended by ``LiveDashboardProjection._append_backfill``.
     The writer caps the list at 256 entries."""
 
     round: int
@@ -99,7 +99,7 @@ class RunLimits(StrictModel):
     the longest phase of the run with no ceiling on screen at all.
 
     **The two spend arms are the ARMED ceilings, not the declared ones**, re-read from
-    ``spend_cap.json`` at every persist (``view.py::_persist``). They were static, and that is
+    ``spend_cap.json`` at every persist (``projection.py::_persist``). They were static, and that is
     precisely what made every surface reading them — the control's own prefill, the run strip —
     report a number ``BudgetGate`` had stopped using the moment ``change-spend-budget`` landed."""
 
@@ -128,7 +128,7 @@ class PobbBlock(StrictModel):
 class CurrentRound(StrictModel):
     """``dashboard.json::current_round`` — the round in flight, rebuilt whole on every persist.
     The four rules it serves under (no ``live`` flag, ``round`` is ``state.round``, this-round-only
-    ``nodes``, one candidate shape) are ``infrastructure/CLAUDE.md`` § LiveDashboardView RESOLVES."""
+    ``nodes``, one candidate shape) are ``infrastructure/CLAUDE.md`` § LiveDashboardProjection RESOLVES."""
 
     round: int = 0
     active_node: str | None = None
@@ -233,7 +233,7 @@ class LiveDashboardState(StrictModel):
     total_backend_calls: int = 0
 
     # The OLDEST open sample, derived from the open set rather than assigned per event, since
-    # look-ahead leaves more than one open (``view.py::_refresh_open_sample_markers``).
+    # look-ahead leaves more than one open (``projection.py::_refresh_open_sample_markers``).
     current_query_payload: str | None = None
     current_sample_id: int | None = None
     # EVERY sample in flight, oldest first — the membership test `current_sample_id` cannot
@@ -294,7 +294,7 @@ class LiveDashboardState(StrictModel):
 
     current_round: CurrentRound = Field(default_factory=CurrentRound)
 
-    # Sole writer ``LiveDashboardView._handle_error``; absent on normal stops.
+    # Sole writer ``LiveDashboardProjection._handle_error``; absent on normal stops.
     error: DashboardError | None = None
 
     # Stamped at run start and riding no ledger record, so a fold off disk cannot answer for them

@@ -27,16 +27,16 @@ from promptpotter.application.origin import CampaignOrigin, prepare_scoring_cont
 from promptpotter.application.run_observers import RunObservers, build_run_observers
 from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.application.runner.origin_gate import submit_gate_decision
+from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.settings import DEFAULT_BACKEND_ID, DEFAULT_BACKEND_URL
-from promptpotter.domain.rendering import fmt_pct
 from promptpotter.domain.results import CycleResult
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.stores import Stores
-    from promptpotter.presentation.views.live.display import LiveDisplay
+    from promptpotter.presentation.terminal.live.display import LiveDisplay
     from promptpotter.shared.identity import IdentityContext
 
 # `submit_gate_decision` is re-exported under its OWN name because this module IS the embedded

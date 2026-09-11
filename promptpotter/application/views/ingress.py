@@ -7,6 +7,9 @@ from typing import Any
 
 from promptpotter.application.optimization.dispatch.llm_call.prompts import optimizer_model
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
+from promptpotter.application.views.render.optimizer_prompt_text import (
+    format_l1_critique_for_prompt,
+)
 from promptpotter.application.views.view_models import (
     AnyView,
     CandidatesGeneratedView,
@@ -27,7 +30,6 @@ from promptpotter.application.views.view_models import (
 )
 from promptpotter.domain.candidate_diff import build_candidate_flat, flatten_sp_summary
 from promptpotter.domain.phases import PhaseEvent
-from promptpotter.domain.rendering import format_l1_critique_for_prompt
 from promptpotter.domain.results import ScoredCandidate
 from promptpotter.domain.ruler import is_flat_ruler_id
 from promptpotter.shared import truncate

@@ -23,14 +23,14 @@ Two questions resolve here. **(1)** Does spend ride the canonical per-cycle ledg
 ## Decision Drivers
 
 * **Canonical ledger only.** §0 names Persistence as the sole writeable I/O kind for state; spend is state. A `spend.json` parallel pipeline duplicates the ledger and bypasses the audit trail every other record gets.
-* **Sole writer per surface.** Every projection has exactly one writer (`LiveDashboardView` for `dashboard.json`, `AuditTrailView` for `round_NNNN.json`). Spend must not invent a parallel one.
+* **Sole writer per surface.** Every projection has exactly one writer (`LiveDashboardProjection` for `dashboard.json`, `AuditTrailProjection` for `round_NNNN.json`). Spend must not invent a parallel one.
 * **Kwargs-only emit-helper template.** ContextVar-scoped, no wrapper dataclass, builds the record inline — the shape every future per-call telemetry kind copies.
 * **Identity from path, not per-record.** The per-cycle ledger already sits under `projects/{tenant_id}/`; the OS-enforced prefix is the ground truth.
 * **Halt probe must be clean.** Spend-budget enforcement reads the dashboard's `spend_total_used_usd` accessor — no `state["spend"]` peek, no dict reach-through.
 
 ## Considered Options
 
-* **A: Canonical ledger via `emit_token_usage` over `_CYCLE_LEDGER` ContextVar + sole `LiveDashboardView` writer.**
+* **A: Canonical ledger via `emit_token_usage` over `_CYCLE_LEDGER` ContextVar + sole `LiveDashboardProjection` writer.**
 * **B: Process global `_token_usage_sink`** — the sink batches and flushes on its own schedule.
 * **C: Wrapper dataclass `TokenUsage` + a separate `apply_token_usage` chain.**
 * **D: Separate `SpendProjection` + `spend.json`** — its own projection, file and poll endpoint.
@@ -38,7 +38,7 @@ Two questions resolve here. **(1)** Does spend ride the canonical per-cycle ledg
 
 ## Decision Outcome
 
-Chosen: **A.** Tokens ride the canonical per-cycle ledger alongside every other record. The "highway" is the existing Persistence stream, and this arc promoted the path tokens take through it to the optimal sequence by eliminating four middlemen — the process global (B), the wrapper dataclass (C), the dual writer (D) and the multi-hop apply chain. Both cost routes, backend-LLM and optimizer-loop, flow through the same ledger as `TokenUsageRecord` distinguished by `kind`. `AuditTrailView` records them into `round_NNNN.json`; `LiveDashboardView._handle_token_usage` projects them into `dashboard.json::spend` and is sole writer. Identity scope rides the ledger path — no per-record `tenant_id`.
+Chosen: **A.** Tokens ride the canonical per-cycle ledger alongside every other record. The "highway" is the existing Persistence stream, and this arc promoted the path tokens take through it to the optimal sequence by eliminating four middlemen — the process global (B), the wrapper dataclass (C), the dual writer (D) and the multi-hop apply chain. Both cost routes, backend-LLM and optimizer-loop, flow through the same ledger as `TokenUsageRecord` distinguished by `kind`. `AuditTrailProjection` records them into `round_NNNN.json`; `LiveDashboardProjection._handle_token_usage` projects them into `dashboard.json::spend` and is sole writer. Identity scope rides the ledger path — no per-record `tenant_id`.
 
 The halt probe at `application/runner/entry.py` reads `observers.dashboard.spend_total_used_usd`. Operator-accepted Display→Control short-circuit: the dashboard owns spend semantics, so reading it back is not a parallel pipeline.
 
@@ -48,7 +48,7 @@ The halt probe at `application/runner/entry.py` reads `observers.dashboard.spend
 * **Good** — audit trail shape identical to every other record; one stream of truth.
 * **Good** — `emit_token_usage` becomes the template every subsequent per-call telemetry kind copies (`emit_command`, `emit_command_ack`, future `emit_*`). Forward direction: every other `RunCallbacks.on_*` that wraps a per-call event in a `*Record` and appends is a candidate for the same shape — catalogued in [`../specs/code-debt-cleanup.md`](../specs/code-debt-cleanup.md).
 * **Good** — adding new `*Record` types is additive; no schema churn elsewhere.
-* **Neutral** — `LiveDashboardView` owns spend semantics. Operator-accepted: it is the authoritative rollup, and the halt probe just reads it back.
+* **Neutral** — `LiveDashboardProjection` owns spend semantics. Operator-accepted: it is the authoritative rollup, and the halt probe just reads it back.
 * **Bad** — none on disk; the arc shipped clean.
 
 ### Why the others lost

@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 __all__ = ["declare_run_phase", "pause_requested"]
 
-# The PhaseRecord.phase discriminator that LiveDashboardView routes to run_phase.
+# The PhaseRecord.phase discriminator that LiveDashboardProjection routes to run_phase.
 _CONTROL_PHASE = "control"
 
 
@@ -27,7 +27,7 @@ def declare_run_phase(
     at the projection, so emitting ``paused`` from several checkpoints is cheap.
 
     ``TERMINAL`` carries the reason, and it belongs here for the same purpose the rest do: it was
-    pushed straight into the projection by ``LiveDashboardView.mark_stopped``, a side door past the
+    pushed straight into the projection by ``LiveDashboardProjection.mark_stopped``, a side door past the
     ledger, so a cycle could STOP and the record of it existed only in that projection's own output
     and in ``index.json``. A reader folding the ledger saw a run still going."""
     ledger = session.state.ledger

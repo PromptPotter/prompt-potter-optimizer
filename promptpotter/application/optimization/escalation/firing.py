@@ -308,7 +308,7 @@ async def _run_transition(
     )
     async with observed_node(
         f"{transition.template_name}_r{round_num}",
-        "llm/optimizer",
+        "llm",
         obs=obs,
         campaign_id=tracing_campaign_id,
         round_num=round_num,

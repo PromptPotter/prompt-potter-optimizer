@@ -1,4 +1,4 @@
-"""``DerivedView`` — typed-record dispatch for ledger subscribers, owning the routing in ONE place so a
+"""``Projection`` — typed-record dispatch for ledger subscribers, owning the routing in ONE place so a
 new record subtype touches one file. Default hooks are no-ops.
 
 ``on_record`` dispatches off a ``_ROUTES`` table checked against the ``CycleRecord`` union at
@@ -8,7 +8,7 @@ this base class is the only one.
 
 ``drain()`` is the runner's teardown seam — ``_finalize_run`` calls ``RunObservers.drain_all()``
 on every stop reason, so buffered state flushes without faking a ``round:complete``.
-``AuditTrailView`` is the only projection that buffers: its ``drain()`` writes the partial
+``AuditTrailProjection`` is the only projection that buffers: its ``drain()`` writes the partial
 ``round_NNNN.json`` with ``"interrupted": true`` when the cycle was torn down on Ctrl+C. The
 public ``rounds/`` tree stays empty for an interrupted round by design — a partial round is not a
 complete round — while the audit cache carries the partial so a post-mortem reader sees what the
@@ -39,7 +39,7 @@ from promptpotter.domain.run_records import (
     TokenUsageRecord,
 )
 
-__all__ = ["DerivedView"]
+__all__ = ["Projection"]
 
 
 # Record → the hook it routes to, or ``None`` for one no projection folds. It replaced an
@@ -85,8 +85,8 @@ if frozenset(_ROUTES) != _arms:
 del _arms
 
 
-class DerivedView:
-    #: The ``Cut`` this view is folded to. A fold that materializes itself STAMPS this, which is
+class Projection:
+    #: The ``Cut`` this projection is folded to. A fold that materializes itself STAMPS this, which is
     #: the only way a state on disk can say which moment it is of. ``-1`` = nothing folded yet.
     at_offset: int = -1
 

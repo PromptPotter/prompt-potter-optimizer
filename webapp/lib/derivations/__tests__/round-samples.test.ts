@@ -38,7 +38,7 @@ function row(source: CandidateRow["source"]): CandidateRow {
   };
 }
 
-// The served row (`render.py::sample_row`) — already graded, so the fixture states a verdict
+// The served row (`blocks.py::sample_row`) — already graded, so the fixture states a verdict
 // rather than a rendering for the reader to recover one from.
 const liveDash = {
   current_round: {

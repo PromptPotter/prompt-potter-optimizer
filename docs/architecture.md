@@ -309,7 +309,7 @@ discipline; per-cycle ledgers stay canonical for anything targeting a campaign o
 **Single-writer invariant** (fails loud — an out-of-allowlist write shows up in the file tree;
 owned by [`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md)
 § Persistence — one ingress, two projections). The MeasurementArchive is under the same
-discipline through the **`store/archive_views.py` facade** — a second raw consumer is drift.
+discipline through the **`store/archive_queries.py` facade** — a second raw consumer is drift.
 Together the two pins capture event-sourcing's reasoning-clarity gain without paying
 replay-on-every-read.
 
@@ -477,7 +477,7 @@ non-display code cell calls into `application/` (no orchestration
 logic, no scoring, no LLM calls authored in the notebook).
 Convention (not CI-enforced — the structural scan was cut; see
 `tests/CLAUDE.md`): notebook cells import from `application/` +
-`presentation/views/` only. The one surviving notebook
+`presentation/terminal/` only. The one surviving notebook
 (`notebooks/bbeh_potter.ipynb`) is **work-in-progress** — kept but not
 part of the documented entry-point surface. Mark it WIP in cell-1
 markdown so a reader knows status at a glance. The
@@ -549,7 +549,7 @@ cross-tenant.** The on-disk format is human-readable
 (operator can `cat` a row); programmatic reads go through two
 retrieval views (`measurements_for_sample()`,
 `measurements_for_config(predicate)`) — both behind the
-`store/archive_views.py` facade. Cache reuse (skip backend calls when a
+`store/archive_queries.py` facade. Cache reuse (skip backend calls when a
 matching content_hash already has measurements) and cross-run LLM
 digests are **derived views over this archive** — same
 single-source-of-truth pattern as ledger → derived views, but at
@@ -654,7 +654,7 @@ the PR description.
   `campaign_id`s while sharing a content-addressed root cycle and its cache-served origin.
 
 
-- **Per-cycle `CycleEventLog` + `DerivedView` dispatch** — the
+- **Per-cycle `CycleEventLog` + `Projection` dispatch** — the
   persistence backbone. No second ingress, ever.
 
 - **Control-remote highway** — the `CommandRecord` / `CommandAckRecord`
@@ -748,9 +748,9 @@ the PR description.
     to the cell.
   - **One writer, one resolver.** `compute_composite_fitness`
     (`application/scoring/metrics.py`) is the sole writer of `composite_fitness`;
-    `display_fitness` (`domain/rendering.py`) is the one canonical resolved value
+    `resolved_fitness` (`domain/results.py`) is the one canonical resolved value
     every display and ranking site reads. Don't add a second
-    composite-or-accuracy resolution. `display_rank_key` is its argmax form and
+    composite-or-accuracy resolution. `scoreboard_rank_key` is its argmax form and
     **is not the election** — that is `elect_round_winner`'s Rasch θ-lift, which
     no aggregate reproduces.
   - **Every score is served, never recomputed in the consumer.** Alternative

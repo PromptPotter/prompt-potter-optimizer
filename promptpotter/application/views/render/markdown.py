@@ -7,6 +7,8 @@ import json
 from typing import Any
 
 from promptpotter.application.views.render.heatmap import render_hard_sample_heatmap
+from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct as _fmt_pct
+from promptpotter.application.views.render.prefix_reading import prefix_reading
 from promptpotter.application.views.view_models import (
     ForkSummaryView,
     HardSamplesView,
@@ -14,8 +16,6 @@ from promptpotter.application.views.view_models import (
     RoundDigestView,
 )
 from promptpotter.domain.phases import STOP_REASON_INFO, StopReason, StopReasonInfo
-from promptpotter.domain.rendering import fmt_pct as _fmt_pct
-from promptpotter.domain.rendering import prefix_reading
 from promptpotter.domain.results import overlap_series
 from promptpotter.domain.spend import TOKEN_KIND_BUCKET, TokenAccount
 from promptpotter.shared.composite import render_composite_fitness_block

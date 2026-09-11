@@ -3,6 +3,7 @@ live in ``promptpotter.application.views.render``; import those from there."""
 
 from __future__ import annotations
 
+from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.application.views.view_models import (
     AnyView,
     CandidatesGeneratedView,
@@ -19,8 +20,8 @@ from promptpotter.application.views.view_models import (
     SpDiffView,
 )
 from promptpotter.domain.candidate_diff import group_diff_keys
-from promptpotter.domain.rendering import display_rank_key, fmt_pct
-from promptpotter.presentation.views.display import (
+from promptpotter.domain.results import scoreboard_rank_key
+from promptpotter.presentation.terminal.primitives import (
     BOLD,
     CYAN,
     DIM,
@@ -141,7 +142,7 @@ def _render_round_complete(v: RoundCompleteView) -> str:
             f"{s.label}={fmt_pct(s.accuracy)}{' (aborted)' if s.escalation_aborted else ''}"
             for s in sorted(
                 v.scores,
-                key=lambda s: display_rank_key(
+                key=lambda s: scoreboard_rank_key(
                     s.composite_fitness,
                     s.accuracy,
                     s.theta,
@@ -267,7 +268,7 @@ def _render_l2_refine_exit(v: L2RefineExitView) -> str:
     # Address the I/O, never re-print it — and address its CANONICAL home. The audit twin
     # assembles the whole call human-readably and uncapped; this record carries no copy of it,
     # so a dump here had nothing local to quote and the old `[:40]` on the response amputated
-    # what it did quote. `AuditTrailView` owns deep LLM I/O; this line points at it.
+    # what it did quote. `AuditTrailProjection` owns deep LLM I/O; this line points at it.
     out.append(
         f"  {CYAN}L2 call{RESET} {DIM}→ .runtime/cache/rounds/round_NNNN.json"
         f"::nodes.l2_context (prompt · response · usage){RESET}"

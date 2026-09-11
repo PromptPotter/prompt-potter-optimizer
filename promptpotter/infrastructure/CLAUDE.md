@@ -29,26 +29,26 @@ archive's own bytes — 102.6 MB of ledger, 56.6% of it duplication.
 
 | Projection | Scope | Writes | Role |
 |---|---|---|---|
-| `LiveDashboardView` (`projections/live_dashboard/view.py`) | per cycle | `dashboard.json` | **Display surface** — completed-round summaries (`dash.rounds[]`; **round 0 = the origin's round-0 score**, a one-candidate round (the origin scored) emitted via the standard `close_round` path, no separate origin block) + in-flight `current_round` block + `spend` rollup (sole writer for every bucket via `_handle_token_usage`, which picks one through `domain/spend.py::TOKEN_KIND_BUCKET` and folds the totals over `SpendRollup.buckets` — never a hand-named pair, or a new spend kind is money the cap cannot see; halt probe reads `spend_total_used_usd` accessor). Sole webapp source for the chart, lineage tree, trend sparkline. |
-| `AuditTrailView` (`projections/audit_trail.py`) | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundAudit`) only when an operator drills into a specific round; `useRoundFile` is the peer hook for the PUBLIC `rounds/` tree. |
-| `PoBBStreamView` (`projections/pobb_stream.py`) | per cycle | `.runtime/streams/round_NNNN_p_best.jsonl` | Per-sample P(best) trajectory for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
+| `LiveDashboardProjection` (`projections/live_dashboard/projection.py`) | per cycle | `dashboard.json` | **Display surface** — completed-round summaries (`dash.rounds[]`; **round 0 = the origin's round-0 score**, a one-candidate round (the origin scored) emitted via the standard `close_round` path, no separate origin block) + in-flight `current_round` block + `spend` rollup (sole writer for every bucket via `_handle_token_usage`, which picks one through `domain/spend.py::TOKEN_KIND_BUCKET` and folds the totals over `SpendRollup.buckets` — never a hand-named pair, or a new spend kind is money the cap cannot see; halt probe reads `spend_total_used_usd` accessor). Sole webapp source for the chart, lineage tree, trend sparkline. |
+| `AuditTrailProjection` (`projections/audit_trail.py`) | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundAudit`) only when an operator drills into a specific round; `useRoundFile` is the peer hook for the PUBLIC `rounds/` tree. |
+| `PoBBStreamProjection` (`projections/pobb_stream.py`) | per cycle | `.runtime/streams/round_NNNN_p_best.jsonl` | Per-sample P(best) trajectory for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
 
 **`dashboard.json` is an operator surface, not a cache, and three guarantees hold at the writer.**
 Someone alt-tabbing to the file tree mid-run has to see the truth, so before deferring or skipping
 any write, answer whether they still can — and a SERVED read now rests on the same guarantees:
-`archive_views::cycle_measurement_series` reads the round in flight off this file, because a round
+`archive_queries::cycle_measurement_series` reads the round in flight off this file, because a round
 file lands only at the close and the round being measured has none. It is **always on disk and always swapped atomically**
 (tmp + rename — never a partial write or a torn read), present after any ledger event in the cycle.
 It **settles within `_DASHBOARD_DEBOUNCE_S` of the last event**: the writer coalesces high-frequency
 bursts (sample-scored, token-usage, LLM-call progress) but converges behind real-time by no more
-than that constant (`view.py::_schedule_persist`). And it flushes **immediately, with no debounce,
+than that constant (`projection.py::_schedule_persist`). And it flushes **immediately, with no debounce,
 at round boundaries** — `PhaseRecord("round"|"origin", "complete"|"exit")` and `mark_stopped` go
-through `view.py::_flush_pending_persist`, so a round's file is current before the next begins.
+through `projection.py::_flush_pending_persist`, so a round's file is current before the next begins.
 Do not relax the swap, remove those flushes, or add a path that lets the file lag past a completed
 round. The public round file carries the same atomicity, with `CampaignStore.save_round_file` its
 sole writer, persisting `RoundResult.model_dump()` — the model **is** the round document.
 
-**`LiveDashboardView` RESOLVES; it does not hand the browser scalars to join.** `current_round` was `dict[str, Any]` inside an otherwise strict model, and being untyped is why it never had to answer the two questions its only consumer asks — so the webapp inferred both by joining facts written on different ledger events. Five rules follow, each a field or a filter rather than a convention:
+**`LiveDashboardProjection` RESOLVES; it does not hand the browser scalars to join.** `current_round` was `dict[str, Any]` inside an otherwise strict model, and being untyped is why it never had to answer the two questions its only consumer asks — so the webapp inferred both by joining facts written on different ledger events. Five rules follow, each a field or a filter rather than a convention:
 
 - **`active_node` is served**, over a `_STATE_TO_NODE` map TOTAL over `DashboardState` with an import-time exhaustiveness raise. A partial map does not fail loudly; it means "nothing is running", which is a lie for every state it omits.
 - **`current_round.round` is `state.round`, always**, so a reader selects this block over the audit twin by equality. There is deliberately no `live` flag beside it.
@@ -89,13 +89,13 @@ WHOLE and loudly, never salvaged field by field — a partial read is a compatib
 ledger is the truth, and everything this file carries on top of it is re-derived forward. The SSE
 snapshot answers exactly that way: `dashboard_unreadable` is a served reason, not an exception.
 
-`DerivedView.on_record` (`projections/base.py`) owns the dispatch, and that file's header states how. **Subscribers MUST NOT write campaign artifacts beyond their declared allowlist** — it fails loud, since an out-of-allowlist write shows up in the file tree ([`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
+`Projection.on_record` (`projections/base.py`) owns the dispatch, and that file's header states how. **Subscribers MUST NOT write campaign artifacts beyond their declared allowlist** — it fails loud, since an out-of-allowlist write shows up in the file tree ([`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
 
 **`--from N` admissibility is a LEDGER question, not a `rounds/` tree question** — and round 0 closes twice, so the scan must take a max. Both rules, and why, are `store/campaign_store/ledger_scan.py`'s header.
 
 ## The lineage tree — one timeline per campaign
 
-`store/lineage_views.py` serves the genealogy; nodes alternate `Course -> Candidate -> Course`
+`store/lineage_queries.py` serves the genealogy; nodes alternate `Course -> Candidate -> Course`
 at any depth, so L5+ needs no new tier. **A fork is not a node** — its candidates mount onto
 the parent's ONE timeline and are renumbered into it, because `C{round}.{n}` is a position in
 a course's PRIVATE counter and every course mints its own `C1.1`. **Unless the fork corrects
@@ -147,7 +147,7 @@ writes, and why — [`docs/operations/persistence-and-state.md`](../../docs/oper
 
 Shared I/O in `store/io.py`, and **format follows authorship**: `write_json`/`read_json*` for what code writes and only code reads, `write_yaml`/`read_yaml*` for the operator-authored config tier under `datasets/`. There is deliberately no `read_yaml_tolerant` — a corrupt config degrading to "not there" attributes a measurement to the wrong fingerprint.
 
-Path helpers live in `store/layout.py`, the per-tenant active-session pointer in `store/session_pointer.py`, and derived reads are free functions in view modules (`store/archive_views.py` is the template). `measurements/` is cross-cycle and cross-tenant; `MeasurementArchive` is the DB core and `store/archive_views.py` its single-writer facade — a write not going through that facade is the bug.
+Path helpers live in `store/layout.py`, the per-tenant active-session pointer in `store/session_pointer.py`, and derived reads are free functions in query modules (`store/archive_queries.py` is the template). `measurements/` is cross-cycle and cross-tenant; `MeasurementArchive` is the DB core and `store/archive_queries.py` its single-writer facade — a write not going through that facade is the bug.
 
 The `CycleDir` / `WorkspaceDir` write-target newtypes live in `domain/cycle_paths.py` — projections and stores accept these, not raw `str`/`Path` — as does `CycleHop`, which every per-cycle `CampaignStore` method takes in place of a `(campaign_id, cycle_id)` pair (both `str`, so a swapped call read as "no data" rather than raising). Build it from the carrier that owns both, never by re-pairing.
 

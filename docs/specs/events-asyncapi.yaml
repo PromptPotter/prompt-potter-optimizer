@@ -197,14 +197,14 @@ components:
             # R1: structured runner failure record. Emitted by the runner's
             # three ``except`` sites in ``application/runner/{entry,loop}.py``
             # via the kwargs-only ``emit_error_record(...)`` helper over the
-            # ``_CYCLE_LEDGER`` ContextVar; ``LiveDashboardView._handle_error``
+            # ``_CYCLE_LEDGER`` ContextVar; ``LiveDashboardProjection._handle_error``
             # is the sole writer of ``dashboard.json::error``.
             - error
             # Non-fatal round-scoped degradation (zero-candidate round, L2
             # framing soft-reject, injection budget truncation) — emitted via
             # ``emit_round_warning(...)`` over the ``_CYCLE_LEDGER`` ContextVar.
             # Previously log-only; now visible on every channel. Sole dashboard
-            # writer ``LiveDashboardView._handle_round_warning``
+            # writer ``LiveDashboardProjection._handle_round_warning``
             # (``dashboard.json::recent_loop_warnings``).
             - round_warning
             # The crown, stamped once per round by ``elect_round_winner`` on its
@@ -385,7 +385,7 @@ components:
         from ADR-0003).
 
         Subscribers:
-          * `LiveDashboardView._handle_error` — sole writer of
+          * `LiveDashboardProjection._handle_error` — sole writer of
             `dashboard.json::error`. The presentation layer reads this
             block; nothing else writes it.
           * `CycleLedgerTail` — tails this record to SSE subscribers.
@@ -441,9 +441,9 @@ components:
         `_CYCLE_LEDGER` ContextVar (mirrors `emit_error_record`).
 
         Subscribers:
-          * `LiveDashboardView._handle_round_warning` — sole writer of
+          * `LiveDashboardProjection._handle_round_warning` — sole writer of
             `dashboard.json::recent_loop_warnings` (rolling, capped).
-          * `AuditTrailView` — accumulates into `round_NNNN.json::warnings`.
+          * `AuditTrailProjection` — accumulates into `round_NNNN.json::warnings`.
           * `LiveDisplay` — prints a one-line CLI/notebook marker.
           * `CycleLedgerTail` — tails this record to SSE subscribers.
       required: [kind, severity, message, timestamp]
@@ -676,7 +676,7 @@ components:
         payload:
           type: object
           additionalProperties: true
-          description: Opaque action-dict consumed by AuditTrailView.
+          description: Opaque action-dict consumed by AuditTrailProjection.
         timestamp:
           type: string
           format: date-time

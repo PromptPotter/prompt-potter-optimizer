@@ -8,12 +8,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.scoring.formula import split_scoring_block
+from promptpotter.application.views.render.prefix_reading import prefix_reading
 from promptpotter.application.views.view_models import AnyView
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
-from promptpotter.domain.rendering import DisplayRankKey, display_rank_key, prefix_reading
-from promptpotter.domain.results import candidate_label, overlap_series
+from promptpotter.domain.results import (
+    ScoreboardRankKey,
+    candidate_label,
+    overlap_series,
+    scoreboard_rank_key,
+)
 from promptpotter.domain.run_records import (
     ElectionRecord,
     LLMCallProgressRecord,
@@ -24,7 +29,7 @@ from promptpotter.domain.run_records import (
     SnapshotRecord,
 )
 from promptpotter.domain.spend import TokenAccount
-from promptpotter.infrastructure.projections.base import DerivedView
+from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.live_state import (
     LiveStateCore,
     apply_p_best_update,
@@ -32,7 +37,19 @@ from promptpotter.infrastructure.projections.live_state import (
     roll_p_best_at_round_complete,
     top_n_p_best,
 )
-from promptpotter.presentation.views.display import (
+from promptpotter.presentation.terminal.ansi import to_text
+from promptpotter.presentation.terminal.live.candidate import (
+    fmt_individual_header,
+    individual_summary_from_dict,
+)
+from promptpotter.presentation.terminal.live.phase import (
+    fmt_elapsed,
+    render_patience_status,
+    render_progress_table,
+    render_round_stats,
+)
+from promptpotter.presentation.terminal.live.sample import fmt_query_result
+from promptpotter.presentation.terminal.primitives import (
     DIM,
     GREEN,
     RESET,
@@ -47,18 +64,6 @@ from promptpotter.presentation.views.display import (
     _node_top,
     _round_rule,
 )
-from promptpotter.presentation.views.live.candidate import (
-    fmt_individual_header,
-    individual_summary_from_dict,
-)
-from promptpotter.presentation.views.live.phase import (
-    fmt_elapsed,
-    render_patience_status,
-    render_progress_table,
-    render_round_stats,
-)
-from promptpotter.presentation.views.live.sample import fmt_query_result
-from promptpotter.presentation.views.render import to_text
 from promptpotter.shared.composite import render_composite_fitness_block
 
 if TYPE_CHECKING:
@@ -95,7 +100,7 @@ def _open_readout() -> TextIO | None:
         return None
 
 
-class LiveDisplay(DerivedView):
+class LiveDisplay(Projection):
     def __init__(
         self,
         *,
@@ -120,10 +125,10 @@ class LiveDisplay(DerivedView):
         # until the first sample announces the depth the run OPENS at — seeded to 1, a run that
         # opens sequential said nothing, so the operator learned the depth only by changing it.
         self._sample_lookahead_depth: int | None = None
-        # Live round-leader tracker, ordered by the shared `display_rank_key`
+        # Live round-leader tracker, ordered by the shared `scoreboard_rank_key`
         # (composite-first, accuracy tie-break) so ★ can't contradict the display
         # ranking; `_round_best_acc` is kept alongside for the Δ-from-leader line.
-        self._round_best_key: DisplayRankKey | None = None
+        self._round_best_key: ScoreboardRankKey | None = None
         self._round_best_acc: float | None = None
         self._round_best_label: str | None = None
         self._round_started_at: float | None = None
@@ -170,7 +175,7 @@ class LiveDisplay(DerivedView):
         self._core.origin_acc = fresh
         self._core.best_acc = max(self._core.best_acc, fresh)
 
-    # --- Ledger subscription (via DerivedView) ---------------------
+    # --- Ledger subscription (via Projection) ---------------------
 
     def _handle_phase(self, record: PhaseRecord) -> None:
         payload = record.payload
@@ -288,7 +293,7 @@ class LiveDisplay(DerivedView):
         qi = int(record.sample_idx or 0)
         qt = int(record.sample_total or 0)
         ev = record.event
-        # sample_started: LiveDashboardView pulses the in-flight row; CLI has no equivalent (sample_scored covers it).
+        # sample_started: LiveDashboardProjection pulses the in-flight row; CLI has no equivalent (sample_scored covers it).
         if ev == "sample_started":
             # …except a look-ahead TRANSITION: armed mid-run, expiring a round later, and nothing
             # else on the tape would show it. Per-sample repetition would bury the tape.
@@ -530,7 +535,7 @@ class LiveDisplay(DerivedView):
     def _fmt_round_leader(
         self, label: str, acc: float, lift: float | None, composite: float | None
     ) -> str:
-        """Scoreboard one-liner, ordered by the shared ``display_rank_key``.
+        """Scoreboard one-liner, ordered by the shared ``scoreboard_rank_key``.
 
         Ranks the round's arms AGAINST EACH OTHER, which needs no parent — mid-round no arm
         carries a θ and nobody is crowned, so the key degrades to the composite it always was.
@@ -538,7 +543,7 @@ class LiveDisplay(DerivedView):
 
         The Δ is the SERVED ``matched_parent_lift``, absent until round close stamps it: recomputed
         here it crowns whichever arm was cut earliest."""
-        key = display_rank_key(composite, acc)
+        key = scoreboard_rank_key(composite, acc)
         new_round_max = self._round_best_key is None or key > self._round_best_key
         if new_round_max:
             self._round_best_key = key

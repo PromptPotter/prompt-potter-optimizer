@@ -34,7 +34,7 @@ from promptpotter.presentation.api.routers.commands import commands_router
 from promptpotter.presentation.api.routers.datasets import datasets_router
 from promptpotter.presentation.api.routers.origins import origins_router
 from promptpotter.presentation.api.routers.verify import verify_router
-from promptpotter.presentation.views.server_banner import render_server_banner
+from promptpotter.presentation.terminal.server_banner import render_server_banner
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import PotterError
 

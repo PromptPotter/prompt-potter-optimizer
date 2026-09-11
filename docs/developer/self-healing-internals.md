@@ -82,7 +82,7 @@ Two mid-eval checks stop a candidate and only one is healing. `DegradationCheck`
 
 ## `classify_result()` — fatal classification
 
-`classify_result()` (`domain/rendering.py`) derives **fatal** and **infra** codes from the backend's neutral advisories (`llm_only:content_empty`, `*:content_filtered`, …) and raw response shape (`pipeline_data.step_tokens.{node}`: normalised `finish_reason`, `reasoning` token count). Backend = facts, optimizer = policy.
+`classify_result()` (`domain/results_health.py`) derives **fatal** and **infra** codes from the backend's neutral advisories (`llm_only:content_empty`, `*:content_filtered`, …) and raw response shape (`pipeline_data.step_tokens.{node}`: normalised `finish_reason`, `reasoning` token count). Backend = facts, optimizer = policy.
 
 Every `content_empty` row is gated on **the result not having answered** — the advisory describes one ATTEMPT, the backend retries beside it, and that retry can succeed, so a row carrying a real `predicted` is not an empty response whatever the advisory says. Among the unanswered, `reasoning_tokens > 0` proves the model **worked** (a refusal carries content, or `content_filter`), so emitting nothing after thinking is route shape whatever ended the call — `stop` and `length` are one fault at two budgets.
 

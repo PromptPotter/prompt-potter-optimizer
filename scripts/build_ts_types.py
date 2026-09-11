@@ -104,8 +104,8 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     PobbBlock,
     RunLimits,
 )
-from promptpotter.infrastructure.store.family_ray_views import RayItem, RayResponse
-from promptpotter.infrastructure.store.lineage_views import (
+from promptpotter.infrastructure.store.family_ray_queries import RayItem, RayResponse
+from promptpotter.infrastructure.store.lineage_queries import (
     LineageDivergence,
     LineageNode,
 )
@@ -261,11 +261,11 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     FileEntry,
     FilesResponse,
     FileContentResponse,
-    # --- the lineage tree (store/lineage_views) ---
+    # --- the lineage tree (store/lineage_queries) ---
     CycleHop,  # nested in LineageNode.path AND RayItem.path — the emitter does not recurse
     LineageDivergence,
     LineageNode,
-    # --- the time-ray (store/family_ray_views) ---
+    # --- the time-ray (store/family_ray_queries) ---
     RayItem,
     RayResponse,
     # --- the SSE frame. Hand-mirrored in `chat/activity.ts` until now, with `kind: string`,

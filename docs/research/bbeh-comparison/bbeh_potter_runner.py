@@ -22,9 +22,9 @@ from promptpotter.application.pipeline_resolve import configure_and_apply_pipeli
 from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.sample import Sample
-from promptpotter.presentation.views.completion import report_completion
-from promptpotter.presentation.views.display import set_display_tags
-from promptpotter.presentation.views.live.display import LiveDisplay
+from promptpotter.presentation.terminal.completion import report_completion
+from promptpotter.presentation.terminal.live.display import LiveDisplay
+from promptpotter.presentation.terminal.primitives import set_display_tags
 
 # datasets/bbeh/ is the SoT for everything about the task — pipeline.yaml drives the
 # target-layer schema (read by open_session via dataset_name="bbeh"), campaign.yaml

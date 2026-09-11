@@ -215,7 +215,7 @@ enforcement detail that must move freely, so they are named in prose (see
 | Closed outbound event set | `docs/specs/events-asyncapi.yaml` |
 | Identity seam consumed | `promptpotter/presentation/api/deps.py::resolve_identity` |
 | `emit_token_usage` template (mirrored by `emit_command`) | `promptpotter/infrastructure/llm/telemetry.py::emit_token_usage` |
-| Sole-writer template | `promptpotter/infrastructure/projections/live_dashboard/view.py::LiveDashboardView._handle_token_usage` |
+| Sole-writer template | `promptpotter/infrastructure/projections/live_dashboard/projection.py::LiveDashboardProjection._handle_token_usage` |
 | `CycleRecord` discriminated union (closed outbound record set) | `promptpotter/domain/run_records.py::CycleRecord` |
 | `ProjectionEnvelope` Python wire type (Profile A) | `promptpotter/domain/projection_envelope.py` |
 | Outbound highway ledger tail (Profile A; supersedes the originally-specified `EventStreamView` in-process projection) | `promptpotter/infrastructure/projections/event_stream.py::CycleLedgerTail` |

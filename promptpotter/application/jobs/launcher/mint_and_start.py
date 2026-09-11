@@ -52,7 +52,9 @@ from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.infrastructure.llm.telemetry import set_cycle_ledger
-from promptpotter.infrastructure.projections.live_dashboard.view import LiveDashboardView
+from promptpotter.infrastructure.projections.live_dashboard.projection import (
+    LiveDashboardProjection,
+)
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
     dataset_pipeline_path,
@@ -79,7 +81,7 @@ def _record_launch_stop(
     interrupted = launch_interrupted(exc)
     try:
         cycle_dir = CycleDir(stores.campaigns.cycle_dir(hop))
-        LiveDashboardView.write_launch_stop(
+        LiveDashboardProjection.write_launch_stop(
             cycle_dir,
             hop=hop,
             session_id=session_id,

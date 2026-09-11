@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, cast
 
 from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
-from promptpotter.presentation.views.display import (
+from promptpotter.presentation.terminal.primitives import (
     BOLD,
     GREEN,
     RESET,

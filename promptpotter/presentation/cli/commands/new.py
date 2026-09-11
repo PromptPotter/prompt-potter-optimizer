@@ -57,7 +57,7 @@ from promptpotter.presentation.cli.commands._shared import (
     pipeline_summary,
 )
 from promptpotter.presentation.cli.session import load_session, no_dataset_hint
-from promptpotter.presentation.views.startup_checklist import checkin_line
+from promptpotter.presentation.terminal.startup_checklist import checkin_line
 from promptpotter.shared.errors import PotterError
 
 if TYPE_CHECKING:

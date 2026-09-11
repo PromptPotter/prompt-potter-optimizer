@@ -606,7 +606,7 @@ def test_an_archive_row_is_graded_by_the_reading_scorer_not_its_stamp(monkeypatc
         build_archive_observations,
     )
     from promptpotter.domain.scoring import CellScorer
-    from promptpotter.infrastructure.store import archive_views
+    from promptpotter.infrastructure.store import archive_queries
 
     # Two cells the arm got RIGHT, banked before ``objective`` existed — and one stamped by a
     # formula that is not the reading campaign's, which must lose to the scorer just the same.
@@ -615,14 +615,14 @@ def test_an_archive_row_is_graded_by_the_reading_scorer_not_its_stamp(monkeypatc
         {"sample_id": 2, "fitness": 1.0, "objective": 0.0},
     ]
     monkeypatch.setattr(
-        archive_views,
+        archive_queries,
         "list_runs",
         lambda *_a, **_k: [
             {"run_id": "r1", "prompt_fields_id": "cand-a", "provenance": {"grade": "A"}}
         ],
     )
-    monkeypatch.setattr(archive_views, "run_signatures", lambda *_a, **_k: {"r1": (1, 1)})
-    monkeypatch.setattr(archive_views, "load_run", lambda *_a, **_k: {"measurements": rows})
+    monkeypatch.setattr(archive_queries, "run_signatures", lambda *_a, **_k: {"r1": (1, 1)})
+    monkeypatch.setattr(archive_queries, "load_run", lambda *_a, **_k: {"measurements": rows})
 
     stores = types.SimpleNamespace(
         archive=types.SimpleNamespace(base_dir="/nowhere-unique-to-this-test")
@@ -2870,7 +2870,7 @@ def test_classify_result_routes_structural_warning_to_fatal() -> None:
     grades it structural-critical off the same stamped field. A transient-stamped code
     stays advisory-only — NOT deprecated, since the measurement is still valid. An
     unstamped warning is NOT routed fatal (no guessing)."""
-    from promptpotter.domain.rendering import classify_result
+    from promptpotter.domain.results_health import classify_result
 
     structural = classify_result(
         {
@@ -2934,7 +2934,7 @@ def test_content_empty_on_a_result_that_answered_is_not_an_empty_response() -> N
     infra, where they deprecate the sample without fast-eliminating the arm.
     """
     from promptpotter.config.settings import NO_RESULT
-    from promptpotter.domain.rendering import classify_result
+    from promptpotter.domain.results_health import classify_result
 
     def result(predicted: str, *, reasoning: int = 0, finish: str = "stop") -> dict[str, object]:
         return {
@@ -3123,11 +3123,13 @@ def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
     # misses and the L4 origin arm reads as infinitely efficient.
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.domain.run_records import TokenUsageRecord
-    from promptpotter.infrastructure.projections.live_dashboard.view import LiveDashboardView
+    from promptpotter.infrastructure.projections.live_dashboard.projection import (
+        LiveDashboardProjection,
+    )
     from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 
     cycle_dir = CycleDir(cycle_dir_for(tmp_path, CycleHop(campaign_id="c1", cycle_id="cyc1")))
-    view = LiveDashboardView(
+    view = LiveDashboardProjection(
         cycle_dir=cycle_dir,
         state_path=CycleLayout(Path(cycle_dir)).dashboard,
         hop=CycleHop(campaign_id="c1", cycle_id="cyc1"),

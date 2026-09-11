@@ -23,7 +23,7 @@ from promptpotter.presentation.cli.commands._shared import (
     identity_from_args,
     resolve_campaign_hint,
 )
-from promptpotter.presentation.views.display import fmt_ci, fmt_pvalue
+from promptpotter.presentation.terminal.primitives import fmt_ci, fmt_pvalue
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 

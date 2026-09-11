@@ -49,8 +49,8 @@ impossible (the deep sites have nothing to call it on).
 
 The step-by-step is [`application/CLAUDE.md`](../../promptpotter/application/CLAUDE.md)
 § Conventions' canonical template. The one step it does not spell out: **override `_handle_xxx`
-on each projection that surfaces the fact** (`LiveDashboardView` for `dashboard.json`,
-`AuditTrailView` for `round_NNNN.json`, `LiveDisplay` for the CLI). Unhandled = silently dropped,
+on each projection that surfaces the fact** (`LiveDashboardProjection` for `dashboard.json`,
+`AuditTrailProjection` for `round_NNNN.json`, `LiveDisplay` for the CLI). Unhandled = silently dropped,
 which is exactly what the guard prevents.
 
 **Guard (an import-time raise, not a standing test — see
@@ -121,9 +121,9 @@ reconstructor to keep in sync** — that synchronized third edit is gone.
    `application/views/view_models.py`.
 2. Set it in the live builder `_<phase>_<event>` in
    `application/views/ingress.py` (`from_phase_event`).
-3. Render it in `presentation/views/render.py` (`to_text`) /
+3. Render it in `presentation/terminal/ansi.py` (`to_text`) /
    `application/views/render/` (`to_markdown`) and/or
-   read it where the fact is surfaced — `LiveDashboardView._apply_phase` reads
+   read it where the fact is surfaced — `LiveDashboardProjection._apply_phase` reads
    the typed view by attribute (`getattr`, presentation-agnostic).
 4. If the field also appears in post-hoc `log.md`, set it in `from_disk_log`
    (`application/runner/output.py`) — that builder reads on-disk `index.json` for

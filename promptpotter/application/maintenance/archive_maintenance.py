@@ -34,7 +34,7 @@ from promptpotter.domain.scoring import (
 )
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
-from promptpotter.infrastructure.store.archive_views import (
+from promptpotter.infrastructure.store.archive_queries import (
     cold_payload_bytes,
     cold_payload_size,
     drop_cold_payload,

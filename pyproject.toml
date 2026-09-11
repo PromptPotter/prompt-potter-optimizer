@@ -101,7 +101,7 @@ harbor = [
 ]
 jupyter = [
     "jupyterlab>=4.0",  # why kept: notebook UI for `notebooks/bbeh_potter.ipynb`
-    "ipython>=8.0",     # why kept: in-notebook HTML rendering (presentation/views/completion.py)
+    "ipython>=8.0",     # why kept: in-notebook HTML rendering (presentation/terminal/completion.py)
 ]
 stats = [
     "scipy>=1.12.0",    # why kept: Rasch fit + Wilson/normal-CI statistics

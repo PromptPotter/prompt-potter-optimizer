@@ -1560,7 +1560,7 @@ paths:
         ONE tree per campaign, and every consumer reads it. There is no `depth` dial:
         two clients choosing different depths for the same served object is how they
         came to disagree. Course recursion is bounded by a server constant instead
-        (`lineage_views.py::_MAX_COURSE_DEPTH`) — a cost bound, not a caller knob.
+        (`lineage_queries.py::_MAX_COURSE_DEPTH`) — a cost bound, not a caller knob.
 
         Conditional-GET is a **weak ETag** over the newest mtime across the subtree's
         `ledger.jsonl` + `index.json` **plus the `lens`/`samples` query**. The ledger
@@ -2445,7 +2445,7 @@ components:
         route body: both carriers are `additionalProperties: true` passthroughs
         (the file IS the contract per the folder-UI doctrine). Carried by
         `dashboard.json::current_round.nodes.l1_score.input.candidates[]` (live,
-        writer `projections/live_dashboard/render.py`) and
+        writer `projections/live_dashboard/blocks.py`) and
         `rounds/round_NNNN.json::candidate_scores[]` (historical, writer
         `domain/results.py::ScoredCandidate`, served via the generic file route).
         The webapp USED TO join `resolved_pipeline_params` values onto static

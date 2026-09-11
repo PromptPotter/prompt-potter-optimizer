@@ -85,7 +85,7 @@ def fmt_sample_line(row: DashboardSample) -> str:
             f" io={in_tok if in_tok is not None else '-'}/{out_tok if out_tok is not None else '-'}"
         )
     # The provider's prefix-cache share of the input, same column the CLI tape carries
-    # (`views/live/sample.py`) so the two renderings of one row stay one reading. The row DECIDES
+    # (`terminal/live/sample.py`) so the two renderings of one row stay one reading. The row DECIDES
     # (`DashboardSample.cache_share` — null on a replay, on a missing breakdown, on no input);
     # this only chooses to stay silent at a real 0.
     if share := row.cache_share:

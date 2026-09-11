@@ -36,6 +36,7 @@ from promptpotter.application.runner.inner.tasks import (
     inner_instrument_config,
     resolve_inner_task,
 )
+from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.proxies import (
     INNER_RESULT_KEY,
@@ -49,7 +50,6 @@ from promptpotter.domain.l4.proxies import (
 )
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_schema import stable_hash
-from promptpotter.domain.rendering import fmt_pct
 from promptpotter.domain.results import candidate_label
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.llm.rate_limit import set_throttle_stall_sink
@@ -65,7 +65,7 @@ from promptpotter.infrastructure.store.account_spend import (
     billed_spend,
     forwarded_mark,
 )
-from promptpotter.infrastructure.store.archive_views import capture_evidence_epoch
+from promptpotter.infrastructure.store.archive_queries import capture_evidence_epoch
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import read_json_optional, write_json
 from promptpotter.infrastructure.store.layout import (

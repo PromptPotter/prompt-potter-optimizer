@@ -81,7 +81,7 @@ async def decompose_prompt_fields(
     try:
         async with observed_node(
             "checkin",
-            "llm/optimizer",
+            "llm",
             obs=None,
             campaign_id=campaign_id,
             round_num=0,

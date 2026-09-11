@@ -178,7 +178,7 @@ class QueryMeasurement(TypedDict):
     # (``query_loop._with_running``) so a file-tree or chat reader watches it converge.
     _running: NotRequired[dict[str, Any]]
     # The stale-data ladder's per-sample verdicts. Each renders one annotation under the
-    # HIT/MISS line (``views/live/sample.py``) and nothing else reads them, so they are the
+    # HIT/MISS line (``terminal/live/sample.py``) and nothing else reads them, so they are the
     # ladder's only report: a dropped flag makes a re-measurement look like a plain score.
     retry_of_deprecated_cache: NotRequired[bool]
     retry_of_degraded: NotRequired[bool]
@@ -193,8 +193,8 @@ class QueryMeasurement(TypedDict):
 
 
 # The ledger's per-sample view: the UNION of what its two subscribers render — the terminal
-# tape (`views/live/sample.py::fmt_query_result` + `classify_result`) and the dashboard
-# (`live_dashboard/view.py::_absorb_sample_scored` → `RoundBuffer.append_sample` → the SSE
+# tape (`terminal/live/sample.py::fmt_query_result` + `classify_result`) and the dashboard
+# (`live_dashboard/projection.py::_absorb_sample_scored` → `RoundBuffer.append_sample` → the SSE
 # chat's `sampleScoredCandidate`). A superset of both, so the ledger holds exactly what the
 # operator was shown and there is one definition to keep in sync instead of two.
 _LEDGER_PIPELINE_KEYS: frozenset[str] = frozenset(

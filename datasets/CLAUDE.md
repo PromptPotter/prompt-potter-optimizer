@@ -38,7 +38,7 @@ The roster is the directory listing; each dataset's connector is read off its ow
 
 ## Re-cutting a dataset needs a NEW name
 
-**A `sample_id` identifies a sample only *within* a `dataset_name` — the row's text is not in the key.** So changing which rows a dataset holds, or what a row says, while keeping the name serves the OLD measurement for the new sample, silently and with no error anywhere. Cut the new version under a new `datasets/{name}/` and leave the old directory in place for as long as anything is still keyed to it. Key + the requirement that scopes it: `infrastructure/store/archive_views.py::reusable_results`.
+**A `sample_id` identifies a sample only *within* a `dataset_name` — the row's text is not in the key.** So changing which rows a dataset holds, or what a row says, while keeping the name serves the OLD measurement for the new sample, silently and with no error anywhere. Cut the new version under a new `datasets/{name}/` and leave the old directory in place for as long as anything is still keyed to it. Key + the requirement that scopes it: `infrastructure/store/archive_queries.py::reusable_results`.
 
 ## L4 — `promptpotter-self`
 
@@ -65,7 +65,7 @@ operator's, written to `.promptpotter/{tenant}/benchmark-rows/{name}.json` by
 read-only under a wheel. Both resolve through `readable_dataset_rows`. It is **not** an
 origin score cache: measurements
 live in the tenant-global content-addressed `measurements/` archive
-(`infrastructure/store/archive_views.py`), which is what replays origin rows across
+(`infrastructure/store/archive_queries.py`), which is what replays origin rows across
 cycles, forks and resumes. `sp_budget_origin` breadth is cheap *because* of that archive,
 never because of this file.
 

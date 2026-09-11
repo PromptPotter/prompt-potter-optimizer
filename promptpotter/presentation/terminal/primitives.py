@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.domain.escalation_signals import INVARIANT_REASONS
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.rendering import display_fitness, display_rank_key
+from promptpotter.domain.results import resolved_fitness, scoreboard_rank_key
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -195,7 +195,7 @@ def _scoreboard(
 
     ranked = sorted(
         scored,
-        key=lambda s: display_rank_key(
+        key=lambda s: scoreboard_rank_key(
             s.composite_fitness,
             s.accuracy,
             s.theta,
@@ -232,7 +232,7 @@ def _scoreboard(
             winner_mark = f"  {GREEN}{BOLD}*{RESET}"
         else:
             winner_mark = ""
-        comp_val = display_fitness(s.composite_fitness, acc)
+        comp_val = resolved_fitness(s.composite_fitness, acc)
         # "---", never "0.000": a candidate outside the election fit has no ability, and while the
         # ruler is cold NO row has one — a zero there would read as a measured mid-scale ability.
         theta_str = "---" if s.theta is None else f"{s.theta:+.3f}"
@@ -248,7 +248,7 @@ def _scoreboard(
 
 # Display tags — populated from _build_display_tags() at init.
 # Mutated in place by set_display_tags so importers can keep a stable
-# reference (``from .display import DISPLAY_TAGS``).
+# reference (``from .primitives import DISPLAY_TAGS``).
 DISPLAY_TAGS: dict[str, str] = {}
 
 # Keyed on the closed vocabulary, so a kind added there is a name this map can be asked about
@@ -301,7 +301,7 @@ def _step_tag(step_name: str | None) -> str:
 
 # ===========================================================================
 # Live-display formatting helpers shared across views.
-# Markdown/box helpers consumed by ``views/live/`` and the notebook ↔ Claude exchange
+# Markdown/box helpers consumed by ``terminal/live/`` and the notebook ↔ Claude exchange
 # channel; plus the ``fmt_*`` numeric formatters
 # (``fmt_ci`` / ``fmt_pvalue``) — single import surface.
 # ===========================================================================

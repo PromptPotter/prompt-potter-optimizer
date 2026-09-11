@@ -421,7 +421,7 @@ def _write_skill(root: Path, prompt: str) -> Path:
 
 
 # Every escape a terminal recording carries and a prompt must not: SGR colour, cursor and mode
-# sequences, charset selectors, bare control bytes. Local rather than `views/display.py::_ANSI_RE`,
+# sequences, charset selectors, bare control bytes. Local rather than `terminal/primitives.py::_ANSI_RE`,
 # which matches colour alone and sits in a layer this one may not import.
 _TERMINAL_ESC = re.compile(
     r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b[]()#][0-9A-Za-z]|\x1b.|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]"

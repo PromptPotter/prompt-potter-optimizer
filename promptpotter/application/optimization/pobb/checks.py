@@ -15,8 +15,8 @@ from promptpotter.application.optimization.pobb.classification import (
 from promptpotter.application.scoring.selection import elimination_p_best
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
-from promptpotter.domain.rendering import classify_result
 from promptpotter.domain.results import EliminationGate
+from promptpotter.domain.results_health import classify_result
 from promptpotter.domain.scoring import is_answer_collapsed
 from promptpotter.domain.validators import StopRule
 from promptpotter.shared.errors import is_error_result

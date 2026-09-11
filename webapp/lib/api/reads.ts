@@ -525,7 +525,7 @@ export function fetchEvidence(
 // recomputing the whole tree on every poll while a lens is open.
 //
 // There is no `depth`: one tree per campaign serves every consumer, and the recursion
-// bound is the server's (`lineage_views._MAX_COURSE_DEPTH`). Two clients picking
+// bound is the server's (`lineage_queries._MAX_COURSE_DEPTH`). Two clients picking
 // different depths for the same served object is what let them disagree.
 //
 // `path` addresses the ROOT COURSE of the tree — the same CyclePath every other

@@ -7,7 +7,7 @@ from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.domain.candidate_diff import flatten_sp_summary
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.results import EliminationGate
-from promptpotter.presentation.views.display import (
+from promptpotter.presentation.terminal.primitives import (
     CYAN,
     DIM,
     GREEN,

@@ -35,13 +35,11 @@ it.
   directly as the input column."* and two of another sentence — both are
   `upstream_context`/`downstream_context`, already injected, being re-absorbed by L1's rewrite one
   copy per round (0 repeats through round 5, 3 by round 8). Mechanical, not semantic, and a real
-  part of that cycle's 3.2x token growth. (2) **`domain/results.py::RoundResult.scoreboard` is a
-  display projection living on the data model** — a `@computed_field` returning `ScoreboardRow`s,
-  which is what made `results` reach into `rendering` at all. (3) **`domain/results.py:523`
-  (floor-pinned) reads `objective`** — under a formula that SUBTRACTS cost rather than scaling,
+  part of that cycle's 3.2x token growth. (2) **`domain/results.py::is_floor_pinned` reads
+  `objective`** — under a formula that SUBTRACTS cost rather than scaling,
   a correct-but-expensive arm could read as "0.0 on every cell", which is a caveat about a
   degenerate reading claiming the arm got everything wrong. Harmless under the house formula, which
-  clamps at `fitness`. (4) **`halt_at_accuracy` is threaded through ~14 call sites** as a
+  clamps at `fitness`. (3) **`halt_at_accuracy` is threaded through ~14 call sites** as a
   pass-through parameter across CLI, REST, launcher and runner.
   **Re-test:** each is a fresh measurement; none carries a verdict yet, so do not act on one
   without re-deriving it.

@@ -2,21 +2,24 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.application.views.render.prefix_reading import prefix_reading
 from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
-from promptpotter.domain.rendering import (
-    classify_result,
-    extract_display_answer,
-    prefix_reading,
-)
+from promptpotter.domain.results_health import classify_result
 from promptpotter.domain.scoring import is_hit, is_verifier_graded, recorded_elapsed_s
 from promptpotter.domain.spend import TokenAccount
-from promptpotter.presentation.views.display import (
+from promptpotter.presentation.terminal.primitives import (
     DIM,
     DISPLAY_TAGS,
     RED,
     RESET,
     YELLOW,
     _step_tag,
+)
+from promptpotter.shared import (
+    extract_boxed_number,
+    extract_gsm8k_number,
+    extract_last_bold,
+    text_list_items,
 )
 from promptpotter.shared.errors import is_error_result
 
@@ -30,6 +33,64 @@ def _ellide(s: str, n: int) -> str:
 
 def _append_annotation(line: str, indent: str, color: str, emoji: str, text: str) -> str:
     return line + f"\n{indent}{color}{emoji} {text}{RESET}"
+
+
+# The display side of the scorer's label extraction, over its primitives (`promptpotter.shared`).
+
+
+def _one_line(text: str) -> str:
+    # Collapses every whitespace run, newlines included, and strips — one call so no extractor
+    # has to remember it.
+    return " ".join(text.split())
+
+
+def _extract_gsm8k_display(text: str) -> str:
+    n = extract_gsm8k_number(text or "")
+    if n is None:
+        return (text or "").strip()
+    return str(int(n)) if n.is_integer() else str(n)
+
+
+def _extract_boxed_display(text: str) -> str:
+    # Route through the shared AIME extractor so the shown answer IS the value the
+    # scorer (`_aime_match`) matched — a non-numeric `\boxed{…}` falls back to the
+    # last number (as the scorer does), never the raw boxed junk. Mirrors
+    # `_extract_gsm8k_display`'s int-if-integral formatting; stripped text when none.
+    n = extract_boxed_number(text or "")
+    if n is None:
+        return (text or "").strip()
+    return str(int(n)) if n.is_integer() else str(n)
+
+
+def _extract_list_display(text: str) -> str:
+    # A list matcher's answer is the whole ORDERED SET, so route through the same
+    # `text_list_items` walk `_list_rr` scores on: bullets and `1.` numbering stripped
+    # the same way, joined so the slate the scorer read stays one readable line.
+    items = text_list_items(text or "")
+    return " | ".join(items) if items else (text or "")
+
+
+DISPLAY_EXTRACTORS: dict[str, Any] = {
+    "exact_match": extract_last_bold,
+    "gsm8k_match": _extract_gsm8k_display,
+    "aime_match": _extract_boxed_display,
+    "list_rr": _extract_list_display,
+}
+
+
+def extract_display_answer(predicted: str, formula: str | None) -> str:
+    """The parsed answer for *predicted* under *formula*, on ONE line; stripped text when no
+    extractor claims the formula.
+
+    Single-line is the CONTRACT, not the caller's to re-impose: every consumer renders into a
+    one-line-per-sample readout, so a multi-line answer — a ranked slate, reasoning no extractor
+    isolates — splits the row and the ANSI-stripped `logs/latest.log` mirror with it."""
+    text = predicted or ""
+    if formula:
+        for name, extractor in DISPLAY_EXTRACTORS.items():
+            if name in formula:
+                return _one_line(str(extractor(text)))
+    return _one_line(text)
 
 
 def fmt_query_result(
@@ -59,7 +120,7 @@ def fmt_query_result(
     if err:
         # Asked FIRST: an errored row carries no ``fitness``, and the MISS ladder below would read
         # that absence as a grade. The tape marks the same row ``ERR``
-        # (`live_dashboard/render.py::fmt_sample_line`) — two readouts of one row may not disagree
+        # (`live_dashboard/blocks.py::fmt_sample_line`) — two readouts of one row may not disagree
         # about whether it was ever scored.
         tag = "ERR"
     elif classify_result(r).is_fatal:

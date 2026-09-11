@@ -27,7 +27,7 @@ from promptpotter.infrastructure.store.layout import (
     course_validator_ns,
     cycle_dir_for,
 )
-from promptpotter.infrastructure.store.lineage_views import FamilyCourse
+from promptpotter.infrastructure.store.lineage_queries import FamilyCourse
 
 logger = logging.getLogger(__name__)
 

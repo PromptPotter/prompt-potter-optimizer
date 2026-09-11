@@ -35,8 +35,8 @@ from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir
-from promptpotter.presentation.views.display import set_display_tags
-from promptpotter.presentation.views.live.display import LiveDisplay
+from promptpotter.presentation.terminal.live.display import LiveDisplay
+from promptpotter.presentation.terminal.primitives import set_display_tags
 from promptpotter.shared.identity import IdentityContext
 
 if TYPE_CHECKING:

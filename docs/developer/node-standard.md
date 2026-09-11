@@ -124,7 +124,7 @@ Capabilities are opt-in. A deterministic node declares none; an LLM node in the 
 - **Warnings → search-point attachment** — failures pin to the exact configuration that caused them, not the round.
 - **Skip** — a candidate producing too many degraded or empty results is eliminated mid-run.
 - **Abort** — a candidate can signal the round should stop.
-- **Fatal fast-path** — fatal codes derived by `classify_result()` (`application/optimization/pobb/classification.py`) eliminate a candidate on the first query, with no rate threshold.
+- **Fatal fast-path** — fatal codes derived by `classify_result()` (`domain/results_health.py`) eliminate a candidate on the first query, with no rate threshold.
 
 ## How the prediction is read
 

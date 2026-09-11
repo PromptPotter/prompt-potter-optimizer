@@ -13,7 +13,7 @@ from promptpotter.application.intelligence.hard_sample_sorter import (
     build_hard_samples_artifact_from_observations,
 )
 from promptpotter.domain.measurement_provenance import entry_grade, meets_grade
-from promptpotter.infrastructure.store import archive_views
+from promptpotter.infrastructure.store import archive_queries
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
@@ -64,7 +64,7 @@ def _run_cells(
     hit = _CELLS.get(key)
     if hit is not None and hit[0] == sig:
         return hit[1]
-    detail = archive_views.load_run(stores, run_id)
+    detail = archive_queries.load_run(stores, run_id)
     if detail is None:
         return ()
     cells = tuple(
@@ -94,8 +94,8 @@ def build_archive_observations(
     worth builds one scale out of several formulas, so arm B is measured against arm A's δ, and a
     stored grade cannot answer a ``per_cell`` declared after the row was banked."""
     obs: list[Observation] = []
-    sigs = archive_views.run_signatures(stores)
-    entries = archive_views.list_runs(stores, dataset_name=dataset_name)
+    sigs = archive_queries.run_signatures(stores)
+    entries = archive_queries.list_runs(stores, dataset_name=dataset_name)
     for entry in sorted(entries, key=lambda e: (e.get("created_at") or "", e.get("run_id") or "")):
         if not meets_grade(entry_grade(entry), _RULER_GRADE):
             continue
