@@ -10,7 +10,7 @@ from __future__ import annotations
 import copy
 import re
 import uuid
-from typing import TYPE_CHECKING, Any, ClassVar, Self
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Self
 
 from pydantic import ConfigDict, Field, field_validator
 
@@ -26,6 +26,7 @@ from promptpotter.domain.pipeline_overlay import fold_output_contract
 from promptpotter.domain.search_point import JobSearchPoint, SearchPoint, TaskDecomposition
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -46,7 +47,9 @@ __all__ = [
 # The `{{token}}` shape `compile_prompt` substitutes — the ONE definition every
 # reader of a template's token set shares (dispatch-hub fill/validate, the
 # optimizer prompt port guard in `validators/l1_strict.py`).
-TEMPLATE_TOKEN_RE = re.compile(r"\{\{(\w+)\}\}")
+TEMPLATE_TOKEN_RE: Annotated[re.Pattern[str], shapes_optimizer_prompt] = re.compile(
+    r"\{\{(\w+)\}\}"
+)
 
 
 class FewShotExample(StrictModel):
@@ -79,7 +82,7 @@ class PromptTemplate(SearchPoint):
         super().__init_subclass__(**kwargs)
         _check_render_order(cls)
 
-    RENDER_ORDER: ClassVar[tuple[str, ...]] = (
+    RENDER_ORDER: ClassVar[Annotated[tuple[str, ...], shapes_optimizer_prompt]] = (
         "persona",
         "task_intent",
         "instruction",
@@ -128,20 +131,24 @@ class PromptTemplate(SearchPoint):
         ),
     )
 
+    @shapes_optimizer_prompt
     def render_fields(self) -> list[tuple[str, str]]:
         pairs = [(f, v) for f in type(self).RENDER_ORDER if (v := self._field_value(f))]
         if block := self._render_few_shot_block():
             pairs.append(("few_shot_examples", block))
         return pairs
 
+    @shapes_optimizer_prompt
     def render(self) -> str:
         return "\n\n".join(v for _, v in self.render_fields())
 
+    @shapes_optimizer_prompt
     def _field_value(self, name: str) -> str:
         """Subclass override point — see ``OptSearchPoint`` for task-context splicing."""
         value: str = getattr(self, name)
         return value
 
+    @shapes_optimizer_prompt
     def _render_few_shot_block(self) -> str:
         if not self.few_shot_examples:
             return ""
@@ -152,6 +159,7 @@ class PromptTemplate(SearchPoint):
                 lines.append(f"Explanation: {ex.explanation}")
         return "\n".join(lines)
 
+    @shapes_optimizer_prompt
     def compile_prompt(self, **kwargs: str | int) -> str:
         """Any ``{{…}}`` left after substitution stays LITERAL: an evolved node prompt echoed into an
         optimizer template carries the backend's own placeholders, which the backend fills, not us."""
@@ -278,7 +286,9 @@ class OptSearchPoint(PromptTemplate):
 
     model_config = ConfigDict(extra="forbid")
 
-    RENDER_ORDER: ClassVar[tuple[str, ...]] = tuple(PROMPT_STRING_FIELDS)
+    RENDER_ORDER: ClassVar[Annotated[tuple[str, ...], shapes_optimizer_prompt]] = tuple(
+        PROMPT_STRING_FIELDS
+    )
     """Order for the TARGET prompt, so it sits inside the measurement archive's ``node_configs``
     key and moving it re-cuts every banked cell. Restated, not inherited: inheriting is the
     coupling."""
@@ -290,6 +300,7 @@ class OptSearchPoint(PromptTemplate):
         """Deep-copy the L2/L3 memory onto *target* for L2/L3 adopt."""
         target.memory = self.memory.model_copy(deep=True)
 
+    @shapes_optimizer_prompt
     def _field_value(self, name: str) -> str:
         """Splice ``task_context`` up/downstream context around ``problem_description`` — which may
         be EMPTY, and they still render; they are mutable because they reach the target prompt."""

@@ -341,8 +341,11 @@ def _resolve_backend_id(
 
 
 def complete_registries() -> None:
-    connectors.registered()
+    table = connectors.registered()
     injection_table()
+    for connector in table.values():
+        if connector.completion_check is not None:
+            connector.completion_check()
 
 
 async def init_services(

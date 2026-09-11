@@ -15,6 +15,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
 from promptpotter.application.runner.inner import ruler
 from promptpotter.application.runner.inner.spawn import run_inner_cycle
 from promptpotter.application.scoring import metrics, selection
+from promptpotter.config.prompt_blocks import block_library
 from promptpotter.connectors.protocol import Connector, InProcessWorkload
 from promptpotter.domain.l1_layout import NODE_LAYOUTS
 from promptpotter.domain.l4 import proxies
@@ -106,6 +107,10 @@ def _measurement_source_digest() -> str:
     return module_source_digest(*measurement_modules())
 
 
+def _check_prompt_closure() -> None:
+    injection_source_digest(*measurement_modules())
+
+
 def _identity_config(
     dataset_dir: Path, inner_tasks: Mapping[str, Any] | None
 ) -> dict[str, dict[str, Any]]:
@@ -115,7 +120,7 @@ def _identity_config(
     layouts = {name: spec.model_dump(mode="json") for name, spec in sorted(NODE_LAYOUTS.items())}
     # `layouts` names WHICH panels fill each prompt; this is what those panels SAY. The text
     # is code, so nothing above reaches it — see `injection_source_digest`.
-    panel_text = injection_source_digest()
+    panel_text = injection_source_digest(*measurement_modules())
     inner_tasks = inner_tasks or {}
     # `config` only, deliberately. `available_models` is a permission list and
     # `optimizer.param_allowed_values` bounds what L1 may PROPOSE — neither changes what the
@@ -144,6 +149,9 @@ def _identity_config(
             inner_optimizer,
             layouts,
             panel_text,
+            # The block library is prompt MATERIAL stored as data, which no source digest reads —
+            # hashed as data, like the manifest above.
+            block_library(),
             _measurement_source_digest(),
             inner_spec,
         ]
@@ -246,6 +254,7 @@ CONNECTOR = Connector(
     # config dir and fed through ``extract_experiment`` at init (no CSV table).
     experiment_file="inner_tasks.yaml",
     identity_config=_identity_config,
+    completion_check=_check_prompt_closure,
 )
 
 

@@ -52,7 +52,7 @@ from promptpotter.infrastructure.llm.telemetry import (
     reset_cycle_ledger,
     set_cycle_ledger,
 )
-from promptpotter.shared.hashing import module_source_digest
+from promptpotter.shared.hashing import module_source_digest, optimizer_prompt_shapers
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -400,9 +400,10 @@ def build_bundle(
 
 
 def fingerprinted_modules() -> tuple[ModuleType, ...]:
-    """Every module whose source shapes an optimizer prompt, in digest order. The panels' text is
-    code, so it sits outside ``_identity_config``'s prompt templates and layouts; its estimator-side
-    twin is ``connectors/promptpotter.py::measurement_modules``.
+    """The dispatch modules whose source shapes an optimizer prompt, in digest order; outside them
+    a definition says so itself (``shapes_optimizer_prompt``). The panels' text is code, so it sits
+    outside ``_identity_config``'s templates and layouts; its estimator-side twin is
+    ``connectors/promptpotter.py::measurement_modules``.
 
     ``bundle`` is hashed beside the renderers because the constants deciding how much of a panel a
     prompt receives live there rather than in the renderer that spends them, ``compose`` because
@@ -422,8 +423,11 @@ def fingerprinted_modules() -> tuple[ModuleType, ...]:
 
 
 @functools.cache
-def injection_source_digest() -> str:
-    return module_source_digest(*fingerprinted_modules())
+def injection_source_digest(*measured: ModuleType) -> str:
+    """*measured* are the modules the estimator digest hashes beside this one: the scan counts
+    their names as hashed, and leaves their own reads to that digest."""
+    modules = fingerprinted_modules()
+    return module_source_digest(*modules, *optimizer_prompt_shapers(modules, covered=measured))
 
 
 __all__ = [

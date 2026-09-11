@@ -6,10 +6,11 @@ from __future__ import annotations
 import ast
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Any, NamedTuple, NotRequired, TypedDict, cast
+from typing import Annotated, Any, NamedTuple, NotRequired, TypedDict, cast
 
 from promptpotter.config.settings import ANSWER_SPACE_CAP
 from promptpotter.shared.errors import ErrorCategory
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
 class TurnRecord(TypedDict, total=False):
@@ -300,9 +301,10 @@ RoundScorer = Callable[[dict[str, float]], float]
 
 DEFAULT_SCORER_ID = "default_hit"
 
-HIT_THRESHOLD = 1.0
+HIT_THRESHOLD: Annotated[float, shapes_optimizer_prompt] = 1.0
 
 
+@shapes_optimizer_prompt
 def extract_item_label(c: Any) -> str:
     """Canonical label of a ranked item (dict ``{candidate: ...}``, list/tuple, or string) — what a
     rank walk compares against ground truth and what a display line prints."""
@@ -311,6 +313,7 @@ def extract_item_label(c: Any) -> str:
     return c[0] if isinstance(c, (list, tuple)) else str(c)
 
 
+@shapes_optimizer_prompt
 def is_hit(fitness: float | None) -> bool:
     """Per-sample display and stratification ONLY — never a rate, an interval or a comparison:
     graded formulas never reach the ceiling, and on a binary one the mean is ``accuracy``."""
@@ -422,6 +425,7 @@ def weighted_sum_weights(formula: str | None) -> dict[str, float] | None:
     return weights or None
 
 
+@shapes_optimizer_prompt
 def is_verifier_graded(ground_truth: str | None) -> bool:
     """Whether this cell was graded with NO label — the backend answered with a number and the
     task's own verifier (or L4's outer proxies) decided it, so there is no truth string for
@@ -441,6 +445,7 @@ def is_verifier_graded(ground_truth: str | None) -> bool:
     return not (ground_truth or "")
 
 
+@shapes_optimizer_prompt
 def all_verifier_graded(labels: Iterable[str | None]) -> bool:
     """The SET arity: whether a whole round, bank or dataset carries no labels.
 
@@ -461,6 +466,7 @@ def all_verifier_graded(labels: Iterable[str | None]) -> bool:
     return seen
 
 
+@shapes_optimizer_prompt
 def enumerable_truth_labels(rows: Sequence[Mapping[str, Any]]) -> Counter[str] | None:
     """The ground-truth label tally, or ``None`` where collapse is not a meaningful question —
     above ``ANSWER_SPACE_CAP`` truths, or one truth per row, every prediction is its own bucket."""
@@ -470,6 +476,7 @@ def enumerable_truth_labels(rows: Sequence[Mapping[str, Any]]) -> Counter[str] |
     return truth
 
 
+@shapes_optimizer_prompt
 def modal_answer_share(rows: Sequence[Mapping[str, Any]]) -> float | None:
     """Over PREDICTIONS — the ``answer_distribution`` panel's ``constant`` is over GROUND TRUTHS.
     Reports and never gates: below 1.0 this measures hedging, the gradient the loop climbs."""

@@ -23,7 +23,10 @@ from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.store.io import read_json, read_yaml
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.instrument import instrument_mode
+
+shapes_optimizer_prompt(__name__)
 
 logger = logging.getLogger(__name__)
 

@@ -10,6 +10,7 @@ import inspect
 import pkgutil
 from collections.abc import Mapping
 from types import MappingProxyType, ModuleType
+from typing import Annotated
 
 from promptpotter.application.optimization.dispatch import injections as _injections_pkg
 from promptpotter.application.optimization.dispatch.bundle import (
@@ -19,15 +20,16 @@ from promptpotter.application.optimization.dispatch.bundle import (
 from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.l1_layout import NODE_LAYOUTS, L1Layout
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 # The one name in an `evidence_grounding` citation that is NOT a panel: the escape hatch a
 # measured stall licenses ("no panel points anywhere — explore"). Offered only when the
 # escalation panel's budget has widened past `tight`.
-STALL_EXPLORATION = "stall_exploration"
+STALL_EXPLORATION: Annotated[str, shapes_optimizer_prompt] = "stall_exploration"
 
 # Caller-supplied `compile_prompt` extras (not signals). Anything outside
 # `injection_table() ∪ extras` in a template body is a typo — `validate_template` raises.
-_TEMPLATE_EXTRAS: dict[str, set[str]] = {
+_TEMPLATE_EXTRAS: Annotated[dict[str, set[str]], shapes_optimizer_prompt] = {
     "l1_generate": {"n_variants", "citable_fields"},
     "l1_critique": set(),
     "l2_context": set(),
@@ -36,6 +38,7 @@ _TEMPLATE_EXTRAS: dict[str, set[str]] = {
 }
 
 
+@shapes_optimizer_prompt
 @functools.cache
 def renderer_modules() -> tuple[ModuleType, ...]:
     """Walked, never listed: a hand-kept tuple drops a module from registration, the orphan check
@@ -47,6 +50,7 @@ def renderer_modules() -> tuple[ModuleType, ...]:
     )
 
 
+@shapes_optimizer_prompt
 @functools.cache
 def injection_table() -> Mapping[str, _Injection]:
     modules = renderer_modules()
@@ -90,6 +94,7 @@ def injection_table() -> Mapping[str, _Injection]:
     return MappingProxyType(table)
 
 
+@shapes_optimizer_prompt
 def validate_template(name: str, template: PromptTemplate) -> None:
     """Raise KeyError if any ``{{slot}}`` isn't a signal or known extra (typo → silent empty render)."""
     extras = _TEMPLATE_EXTRAS.get(name, set())
@@ -104,6 +109,7 @@ def validate_template(name: str, template: PromptTemplate) -> None:
         )
 
 
+@shapes_optimizer_prompt
 def citable_fields(
     layout: L1Layout,
     *,

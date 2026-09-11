@@ -4,7 +4,7 @@ import logging
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from itertools import combinations, pairwise
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.scoring.formula import ScoringTermMissingError, rescore_results
@@ -13,8 +13,10 @@ from promptpotter.domain.results import resolved_fitness
 from promptpotter.domain.scoring import CellScorer
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.infrastructure.store import archive_queries
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
+@shapes_optimizer_prompt
 def _is_forbidden_axis(axis: str) -> bool:
     _, _, param = axis.partition(".")
     return param in PARAM_FORBIDDEN_KEYS
@@ -27,14 +29,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-NOISE_THRESHOLD = 0.02
+NOISE_THRESHOLD: Annotated[float, shapes_optimizer_prompt] = 0.02
 
 
+@shapes_optimizer_prompt
 def _value_preview(value: Any) -> str:
     s = str(value)
     return s[:80] if len(s) > 80 else s
 
 
+@shapes_optimizer_prompt
 def _fmt_axis_rankings(
     rankings: list[AxisImpact], peaked_axes: frozenset[str] | None = None
 ) -> str:
@@ -54,6 +58,7 @@ def _fmt_axis_rankings(
     return "; ".join(parts)
 
 
+@shapes_optimizer_prompt
 def _fmt_clusters(clusters: list[FailureCluster], *, with_counts: bool) -> str:
     if with_counts:
         return "; ".join(
@@ -62,12 +67,14 @@ def _fmt_clusters(clusters: list[FailureCluster], *, with_counts: bool) -> str:
     return "; ".join(f"{c.failure_mode} ({c.fraction:.0%})" for c in clusters)
 
 
+@shapes_optimizer_prompt
 def _fmt_bottleneck(bottleneck: dict[str, float] | None) -> str | None:
     if not bottleneck:
         return None
     return "; ".join(f"{step}: {frac:.0%}" for step, frac in bottleneck.items())
 
 
+@shapes_optimizer_prompt
 def _fmt_persistent_failures(persistent: list[SampleRecord]) -> str:
     intractable = [q for q in persistent if q.hit_rate == 0]
     chronic = [q for q in persistent if q.hit_rate > 0]
@@ -105,6 +112,7 @@ class RunRecord:
     total: int
 
 
+@shapes_optimizer_prompt
 def _collect(*items: tuple[str, str | None]) -> dict[str, str] | None:
     out = {k: v for k, v in items if v}
     return out or None
@@ -133,11 +141,13 @@ class AxisIndex:
 
     # ----- axis analytics -----
 
+    @shapes_optimizer_prompt
     def peaked_axes(self) -> frozenset[str]:
         return frozenset(
             axis for axis in self._axis_values if self._axis_value_trend(axis) == "peaked"
         )
 
+    @shapes_optimizer_prompt
     def axis_rankings(self) -> list[AxisImpact]:
         impacts = [
             i
@@ -146,6 +156,7 @@ class AxisIndex:
         ]
         return sorted(impacts, key=lambda a: -a.effect_size)
 
+    @shapes_optimizer_prompt
     def _exhausted_axes(self, min_values: int = 4, max_effect: float = 0.02) -> list[AxisImpact]:
         out = [
             i
@@ -157,6 +168,7 @@ class AxisIndex:
         ]
         return sorted(out, key=lambda a: a.effect_size)
 
+    @shapes_optimizer_prompt
     def _axis_value_trend(self, axis: str) -> str:
         pairs: list[tuple[float, float]] = []
         for v, accs in self._axis_values.get(axis, {}).items():
@@ -184,6 +196,7 @@ class AxisIndex:
 
     # ----- digest construction (single entry-point, layer-agnostic) -----
 
+    @shapes_optimizer_prompt
     def digest(self) -> dict[str, str] | None:
         """Layer-agnostic axis-keyed digest — one payload into every L1/L2/L3 prompt. Per-layer filtering,
         if it ever returns, lives in the renderers and not here."""
@@ -257,6 +270,7 @@ class AxisIndex:
             ("improvement_attribution", self._format_recent_attributions(limit=3)),
         )
 
+    @shapes_optimizer_prompt
     def _format_recent_attributions(self, limit: int = 5) -> str | None:
         positive = [f for f in self.sample_index.all_flips() if f["new_hit"] and not f["old_hit"]]
         if not positive:
@@ -529,6 +543,7 @@ class AxisIndex:
             else:
                 axis_values[node_name][_value_preview(node_config)].append(accuracy)
 
+    @shapes_optimizer_prompt
     def _compute_axis_impact(
         self,
         axis: str,

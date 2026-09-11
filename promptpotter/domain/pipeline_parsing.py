@@ -26,6 +26,9 @@ from promptpotter.domain.pipeline_schema import (
     description_paths,
 )
 from promptpotter.shared.errors import PayloadInvalidError
+from promptpotter.shared.hashing import shapes_optimizer_prompt
+
+shapes_optimizer_prompt(__name__)
 
 logger = logging.getLogger(__name__)
 

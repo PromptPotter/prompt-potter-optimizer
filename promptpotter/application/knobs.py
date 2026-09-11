@@ -16,6 +16,9 @@ from pydantic.fields import FieldInfo
 
 from promptpotter.application.campaign_config import CampaignConfig, Estimand, Knob, Scope
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON
+from promptpotter.shared.hashing import shapes_optimizer_prompt
+
+shapes_optimizer_prompt(__name__)
 
 logger = logging.getLogger(__name__)
 

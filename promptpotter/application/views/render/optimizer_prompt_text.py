@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from promptpotter.shared.hashing import shapes_optimizer_prompt
+
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import CritiqueReadout
+
+shapes_optimizer_prompt(__name__)
 
 
 def fmt_pct(x: float | None, spec: str = "{:.1%}") -> str:

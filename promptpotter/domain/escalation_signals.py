@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
 class EscalationTarget(enum.StrEnum):
@@ -15,6 +16,7 @@ class EscalationTarget(enum.StrEnum):
     LEADER_LOCKED = "leader_locked"
 
 
+@shapes_optimizer_prompt
 class ExplorationBudget(enum.StrEnum):
     """How freely ``l1_generate`` may explore. The single source for the ``escalation_panel.exploration_budget`` signal AND
     for the value the review writer feeds ``ValidatorContext``, so prompt and validator cannot disagree."""
@@ -24,6 +26,7 @@ class ExplorationBudget(enum.StrEnum):
     WIDE = "wide"  # patience exhausted — explore freely; a PEAKED axis is mutable with a wide rebut
 
 
+@shapes_optimizer_prompt
 def exploration_budget(stall_count: int, l1_patience: int) -> ExplorationBudget:
     """Widen the budget with MEASURED L1 stall depth, never a round-count schedule. Pure, and called by both the prompt side
     and the validator side with the same stall depth, so the two consumers can never disagree on the mapping."""

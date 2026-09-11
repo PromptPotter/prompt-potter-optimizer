@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from typing import Any
+from typing import Annotated, Any
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import described_field, description_path
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 __all__ = [
     "IDEA_MATCH_MARK",
@@ -34,6 +35,7 @@ __all__ = [
 ]
 
 
+@shapes_optimizer_prompt
 def parent_param_value(parent_cfg: dict[str, Any], param: str) -> Any:
     """A description key is virtual once folded — its prose then lives inside the schema, so a
     parent carrying none reads it off its field, or re-proposing existing prose reads as a mutation."""
@@ -43,6 +45,7 @@ def parent_param_value(parent_cfg: dict[str, Any], param: str) -> Any:
     return (described_field(parent_cfg.get("output_schema"), path) or {}).get("description", "")
 
 
+@shapes_optimizer_prompt
 def candidate_delta(
     child_fields: dict[str, Any],
     parent_fields: dict[str, Any],
@@ -81,7 +84,7 @@ def variant_prose_written(variant: dict[str, Any]) -> dict[str, str]:
 
 
 # --- the IDEA a delta carries ----------------------------------------------
-IDEA_STOPWORDS: frozenset[str] = frozenset(
+IDEA_STOPWORDS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
     [
         "about",
         "after",
@@ -146,16 +149,16 @@ IDEA_STOPWORDS: frozenset[str] = frozenset(
     ]
 )
 # Below this length a token is structural, not distinguishing ("the", "and", "not").
-IDEA_MIN_TOKEN_CHARS = 4
+IDEA_MIN_TOKEN_CHARS: Annotated[int, shapes_optimizer_prompt] = 4
 # A fingerprint below this many content words cannot support a ratio: with 3 tokens one
 # shared word is 33% and two is 67%, so short mutations would pair with anything.
-IDEA_MIN_TOKENS = 6
+IDEA_MIN_TOKENS: Annotated[int, shapes_optimizer_prompt] = 6
 # Overlap-coefficient floor for "the same idea". NOT Jaccard: the two values compared are
 # routinely very different lengths — a one-clause `thinking_style` nudge against a rewritten
 # `reasoning` paragraph — and Jaccard divides by the union, so a short restatement of a long
 # idea scores low however completely it is contained. Overlap asks what matters: is the
 # smaller essentially a subset of the larger?
-IDEA_MATCH_MARK = 0.6
+IDEA_MATCH_MARK: Annotated[float, shapes_optimizer_prompt] = 0.6
 # The REJECT threshold is deliberately stricter than the MARK threshold. Marking a row is
 # free and reversible — the row renders either way. Rejecting costs a candidate slot outright,
 # and a wrong rejection is invisible (the variant simply never existed). Two thresholds, two
@@ -170,6 +173,7 @@ IDEA_MATCH_MARK = 0.6
 IDEA_MATCH_REJECT = 0.70
 
 
+@shapes_optimizer_prompt
 def idea_fingerprint(values: Iterable[str]) -> frozenset[str]:
     """It catches a re-proposal that REUSES vocabulary, and nothing else — a zero repeat count is not
     evidence the generator is exploring.
@@ -190,6 +194,7 @@ def idea_fingerprint(values: Iterable[str]) -> frozenset[str]:
     return frozenset(w for w in words if len(w) >= IDEA_MIN_TOKEN_CHARS and w not in IDEA_STOPWORDS)
 
 
+@shapes_optimizer_prompt
 def same_idea(a: frozenset[str], b: frozenset[str], *, threshold: float) -> bool:
     """*threshold* is explicit at every call site on purpose — see :data:`IDEA_MATCH_REJECT`."""
     if len(a) < IDEA_MIN_TOKENS or len(b) < IDEA_MIN_TOKENS:
@@ -197,6 +202,7 @@ def same_idea(a: frozenset[str], b: frozenset[str], *, threshold: float) -> bool
     return len(a & b) / min(len(a), len(b)) >= threshold
 
 
+@shapes_optimizer_prompt
 def candidate_idea(
     child_fields: dict[str, Any],
     parent_fields: dict[str, Any],
@@ -219,12 +225,14 @@ def candidate_idea(
     return written - carried
 
 
+@shapes_optimizer_prompt
 def _fmt_pp_val(v: object) -> str:
     if isinstance(v, float):
         return f"{v:g}"
     return str(v)
 
 
+@shapes_optimizer_prompt
 def flatten_sp_summary(pp: dict[str, Any] | None) -> dict[str, str]:
     """A nested param flattens ONE level further, to ``node.param.key`` — the depth its declaration
     lets the merge accumulate at. ``group_diff_keys`` splits on the first dot, so it still groups."""

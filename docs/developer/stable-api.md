@@ -26,6 +26,7 @@ class Connector:
     version_check: VersionCheck | None = None                       # async (http, base_url) -> str | None; init WARNs on drift
     preflight: PreflightFn | None = None                            # async (backend_url) -> None reachability probe; None opts out
     auth_token: AuthTokenFn | None = None                           # () -> str | None bearer for THIS backend; unset when in_process
+    completion_check: Callable[[], None] | None = None              # () -> None, run where the table completes; a raise stops boot and run init
 ```
 
 Plus the first-tenant draft seeds (`default_pipeline`, `default_node_config`, `default_optimization`, `default_exclude_nodes`, `node_types`) and `max_cells_in_flight`, which shape the ingest UI and the scoring walk rather than the measurement. **The dataclass is the roster** — read the field notes there, which say what each one costs to get wrong.

@@ -2,18 +2,21 @@ import enum
 import hashlib
 import json
 from collections.abc import Iterable, Mapping
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import ConfigDict, Field
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 # Prompt-decomposition fields the prompt editor owns — excluded from the
 # operator-editable node-config surface (they live in `param_keys` too, but the
 # steer panel edits them through `PromptFieldsEditor`, not the config widgets).
-_PROMPT_OWNED_FIELDS = frozenset(PROMPT_STRING_FIELDS) | {"few_shot_examples", "plan"}
+_PROMPT_OWNED_FIELDS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
+    PROMPT_STRING_FIELDS
+) | {"few_shot_examples", "plan"}
 
 MOVABLE_AGENTS: tuple[str, ...] = ("l1", "l2")
 """Who may move a search axis — the closed set behind ``NodeConfigParam.movable_by``, in the
@@ -29,8 +32,11 @@ up. That is the recursion working; a per-depth agent name would be a second spel
 # The pair, not the four below — `schema_family`/`schema_version` name a registry entry the
 # backend owns instead. The parser TYPES both (`output_schema` as `object`, so a fork's overlay
 # merges one level rather than replacing a schema wholesale).
-OUTPUT_SCHEMA_KEY = "output_schema"
-OUTPUT_CONTRACT_KEYS: tuple[str, str] = (OUTPUT_SCHEMA_KEY, "answer_field")
+OUTPUT_SCHEMA_KEY: Annotated[str, shapes_optimizer_prompt] = "output_schema"
+OUTPUT_CONTRACT_KEYS: Annotated[tuple[str, str], shapes_optimizer_prompt] = (
+    OUTPUT_SCHEMA_KEY,
+    "answer_field",
+)
 
 # Structured-output fields fenced off from the OPTIMIZER — and from the optimizer alone. They are
 # STRUCTURAL: a mutated `output_schema` breaks the backend ("Schema must contain 'properties'"),
@@ -41,7 +47,9 @@ OUTPUT_CONTRACT_KEYS: tuple[str, str] = (OUTPUT_SCHEMA_KEY, "answer_field")
 # **A search rule, never a display one.** The rows carry these, shut and saying why
 # (`never_axis`); only :data:`OUTPUT_SCHEMA_KEY` is subtracted there, because it is a tree and the
 # webapp's `NodeSurface.tsx::OutputContract` renders it as one.
-SCHEMA_OWNED_FIELDS = frozenset({*OUTPUT_CONTRACT_KEYS, "schema_family", "schema_version"})
+SCHEMA_OWNED_FIELDS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
+    {*OUTPUT_CONTRACT_KEYS, "schema_family", "schema_version"}
+)
 
 # The `param_types` values that make a param NESTED — a container the optimizer edits
 # one level deep rather than a scalar it replaces. Naming them once keeps the three
@@ -49,7 +57,9 @@ SCHEMA_OWNED_FIELDS = frozenset({*OUTPUT_CONTRACT_KEYS, "schema_family", "schema
 # replaces wholesale, since a merged ordering is meaningless), `node_config_schema`
 # (a row read as text, since no scalar widget could edit one), and `build_l1_response_schema`
 # (the emitted sub-schema, whose value space is the param's own, not the node's).
-NESTED_PARAM_TYPES = frozenset({"object", "array"})
+NESTED_PARAM_TYPES: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
+    {"object", "array"}
+)
 
 # The one nested param a campaign must UNLOCK before its L1 may emit it
 # (`OptimizationConfig.schema_field_rename`): renaming a field on the optimizer's own
@@ -58,7 +68,7 @@ NESTED_PARAM_TYPES = frozenset({"object", "array"})
 # literal without importing each other: `build_l1_response_schema` (drops it from the emitted
 # schema when locked, so the LLM cannot emit a key that does not exist) and the
 # `rebase_capability` directive (offers L2/L3 the unlock only where a node declares it).
-SCHEMA_RENAME_PARAM = "output_schema_field_names"
+SCHEMA_RENAME_PARAM: Annotated[str, shapes_optimizer_prompt] = "output_schema_field_names"
 
 # The core structured-output lever: rewrite the JSON-Schema `description` strings of a TARGET
 # node's own output schema. A `description` is the only natural language inside the field-filling
@@ -67,13 +77,15 @@ SCHEMA_RENAME_PARAM = "output_schema_field_names"
 # dotted path (`description_key`), so a field locks like any param: synthesized at parse time
 # (`pipeline_parsing.py`), folded into the wire schema at `OptSearchPoint.to_job_search_point`.
 # See `docs/concepts/structured-output.md`.
-SCHEMA_DESCRIPTION_PREFIX = "output_schema_descriptions."
+SCHEMA_DESCRIPTION_PREFIX: Annotated[str, shapes_optimizer_prompt] = "output_schema_descriptions."
 
 
+@shapes_optimizer_prompt
 def description_key(path: str) -> str:
     return SCHEMA_DESCRIPTION_PREFIX + path
 
 
+@shapes_optimizer_prompt
 def description_path(key: str) -> str | None:
     """The field path a description key names, ``None`` for any other param."""
     return (
@@ -81,6 +93,7 @@ def description_path(key: str) -> str | None:
     )
 
 
+@shapes_optimizer_prompt
 def _fields_of(schema: object) -> dict[str, object] | None:
     """The property map a path's next segment is looked up in: through a nullable ``anyOf`` and
     through array ``items`` — a list's elements are described under the list's own path — but
@@ -99,6 +112,7 @@ def _fields_of(schema: object) -> dict[str, object] | None:
     return None
 
 
+@shapes_optimizer_prompt
 def description_paths(json_schema: object) -> list[str]:
     """Every describable field, parent before child in schema order — the order the fields
     generate in. A name holding ``.`` is refused: its path would name two fields at once."""
@@ -116,6 +130,7 @@ def description_paths(json_schema: object) -> list[str]:
     return out
 
 
+@shapes_optimizer_prompt
 def described_field(json_schema: object, path: str) -> dict[str, object] | None:
     """The property schema *path* names — where its ``description`` is read and written."""
     node: dict[str, object] | None = None
@@ -134,9 +149,9 @@ def described_field(json_schema: object, path: str) -> dict[str, object] | None:
 # (`formula/matchers.py::EXTRACTION_NOTES`) reads the label out of it. UNSET is not a third
 # state: `schema_toggle_default` says what an unset node runs and the fold writes nothing, so a
 # configuration nobody moved keeps the hash it was measured under.
-SCHEMA_TOGGLE_PARAM = "response_format"
-ANSWER_AS_JSON = "json"
-ANSWER_AS_TEXT = "text"
+SCHEMA_TOGGLE_PARAM: Annotated[str, shapes_optimizer_prompt] = "response_format"
+ANSWER_AS_JSON: Annotated[str, shapes_optimizer_prompt] = "json"
+ANSWER_AS_TEXT: Annotated[str, shapes_optimizer_prompt] = "text"
 
 
 def schema_toggle_default(node: "PipelineNode") -> str:
@@ -155,6 +170,7 @@ def _stated_permitted(
     return permitted if permitted != options or set(permitted) != set(absent) else None
 
 
+@shapes_optimizer_prompt
 def stable_hash(value: Any) -> str:
     blob = json.dumps(value, sort_keys=True, default=str).encode()
     return hashlib.sha256(blob).hexdigest()[:16]
@@ -200,7 +216,9 @@ class NodeKind(enum.StrEnum):
 # A real choice WITHIN the type, so it is asserted rather than derived (`promptpotter/CLAUDE.md`
 # § Ask the typed predicate): the members are listed, and the assert is what catches a new kind
 # added above without deciding which family it joins.
-THINKING_KINDS: frozenset[NodeKind] = frozenset({NodeKind.LLM, NodeKind.AGENT})
+THINKING_KINDS: Annotated[frozenset[NodeKind], shapes_optimizer_prompt] = frozenset(
+    {NodeKind.LLM, NodeKind.AGENT}
+)
 assert frozenset(NodeKind) >= THINKING_KINDS
 
 
@@ -380,6 +398,7 @@ class PipelineNode(StrictModel):
         return any(m.is_llm for m in self.observation_mappings)
 
     @property
+    @shapes_optimizer_prompt
     def description_keys(self) -> list[str]:
         """Its description params in schema order — the order every surface lists them in."""
         if self.output_schema is None:
@@ -712,6 +731,7 @@ class PipelineSchema(StrictModel):
         options = self.param_options(node, param)
         return options is not None and len(options) == 1
 
+    @shapes_optimizer_prompt
     def param_indistinct(self, node: "PipelineNode", param: str) -> list[str]:
         """Values MEASURED to produce the same call on the node's current model — legal and
         offered, so this narrows nothing and is only ever reported. Two candidates separated by one
@@ -1070,6 +1090,7 @@ class PipelineSchema(StrictModel):
         configs = self.node_configs(pipeline_params)
         return stable_hash(configs) if configs else ""
 
+    @shapes_optimizer_prompt
     def node_param_keys(self) -> dict[str, set[str]]:
         """The SINGLE surface the param catalogue, the L1 output schema and ``validate_overrides`` all
         derive from — so a key stripped here is one the LLM's schema never declares.
@@ -1091,9 +1112,11 @@ class PipelineSchema(StrictModel):
                 out[step.name] = keys
         return out
 
+    @shapes_optimizer_prompt
     def prompt_node_names(self) -> list[str]:
         return [node.name for node in self.nodes if node.prompt_info is not None]
 
+    @shapes_optimizer_prompt
     def open_prompt_fields(self) -> list[str]:
         """The decomposition fields L1 may rewrite — the prompt node's open ``param_keys``, in
         ``PROMPT_STRING_FIELDS`` order. Only the FIRST prompt node's: it is the one

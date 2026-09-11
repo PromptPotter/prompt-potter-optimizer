@@ -7,6 +7,8 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import Any
 
+from promptpotter.shared.hashing import shapes_optimizer_prompt
+
 logger = logging.getLogger(__name__)
 
 
@@ -269,12 +271,14 @@ class DatasetIdentityError(RuntimeError):
         super().__init__("\n".join(lines))
 
 
+@shapes_optimizer_prompt
 def is_error_result(result: Mapping[str, Any]) -> bool:
     """Detection rides the typed ``error_category`` channel — the single owner of "this sample
     errored". ``predicted == "ERROR"`` is a display token, and ``error`` a human message."""
     return result.get("error_category") is not None
 
 
+@shapes_optimizer_prompt
 def has_pipeline_warnings(result: Mapping[str, Any]) -> bool:
     """A sample carries pipeline warnings iff ``pipeline_data.diagnostics.warnings`` is non-empty —
     the sibling of :func:`is_error_result`, where the backend failed outright."""
@@ -293,6 +297,7 @@ def graceful(msg: str) -> Iterator[None]:
         logger.warning(msg, exc_info=True)
 
 
+@shapes_optimizer_prompt
 def error_category(result: Mapping[str, Any]) -> ErrorCategory | None:
     """Read the typed error category off a measurement, ``None`` when clean. Tolerates the on-disk
     round-trip form, where a persisted row carries the bare ``StrEnum`` value as a plain ``str``."""

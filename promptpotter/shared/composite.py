@@ -6,6 +6,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from promptpotter.shared.hashing import shapes_optimizer_prompt
+
+shapes_optimizer_prompt(__name__)
+
 __all__ = [
     "inline_short_formula_values",
     "render_composite_fitness_block",

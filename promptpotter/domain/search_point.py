@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, fields
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import ConfigDict, Field, field_validator
 
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.shared.hashing import content_hash
+from promptpotter.shared.hashing import content_hash, shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -14,7 +14,9 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
-WHO_ANSWERS_KEYS: frozenset[str] = frozenset({"model", "provider", "route_order"})
+WHO_ANSWERS_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
+    {"model", "provider", "route_order"}
+)
 """The keys naming WHO ANSWERS the call, rather than what is asked of them. A steer that touches
 only these leaves the origin unchanged in every other respect, which is what three readers need:
 the fork inherits its done C0 (``pipeline_overlay.overlay_is_locked_axis_only``), a stale runtime
@@ -22,7 +24,9 @@ failure is matched by responder identity (``dispatch/injections/wounds.py``), an
 recognised as an LLM call at all (``datasets/origin_readiness.py``)."""
 
 
-PARAM_FORBIDDEN_KEYS: frozenset[str] = frozenset({"provider", "route_order"})
+PARAM_FORBIDDEN_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
+    {"provider", "route_order"}
+)
 """Optimizer-forbidden ``pipeline_params[node]`` keys — the subset of :data:`WHO_ANSWERS_KEYS`
 that is never a search axis, whatever a dataset's ``optimizer.param_keys`` says.
 
@@ -122,7 +126,7 @@ class JobSearchPoint(SearchPoint):
 # The FRAMING half: operator-authored, never measured (no candidate carries them), FROZEN for
 # the run — `merge` refuses them and L2's schema has no field for them. Why, with the numbers:
 # `application/optimization/CLAUDE.md` § L2.
-FRAMING_FIELDS: frozenset[str] = frozenset(
+FRAMING_FIELDS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
     {
         "domain",
         "pipeline_purpose",
@@ -138,15 +142,16 @@ FRAMING_FIELDS: frozenset[str] = frozenset(
 # can simply edit the file. Sized off what real framing needs — the widest field authored
 # across the shipped datasets is ~420 chars, and 600 leaves room to say something without
 # inviting a page.
-FRAMING_VALUE_BUDGET = 600
+FRAMING_VALUE_BUDGET: Annotated[int, shapes_optimizer_prompt] = 600
 
 # ...and a TOTAL, because five legal fields are not a legal framing: the per-field budget
 # alone permits 3000 chars, which renders VERBATIM into every optimizer prompt. It has held
 # only because a human wrote the shipped ones (640 / 1003 / 1186); the check-in decomposition
 # writes these five with an LLM, which is where a page arrives.
-FRAMING_TOTAL_BUDGET = 1500
+FRAMING_TOTAL_BUDGET: Annotated[int, shapes_optimizer_prompt] = 1500
 
 
+@shapes_optimizer_prompt
 @dataclass
 class TaskDecomposition:
     domain: str = ""

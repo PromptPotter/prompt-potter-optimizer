@@ -135,6 +135,10 @@ class Connector:
 
     auth_token: AuthTokenFn | None = None
 
+    completion_check: Callable[[], None] | None = None
+    """Run where the table completes (``wiring.py::complete_registries``), so what it raises stops
+    the server at boot and a run at init; ``None`` checks nothing."""
+
     identity_config: (
         Callable[[Path, Mapping[str, Any] | None], dict[str, dict[str, Any]]] | None
     ) = None

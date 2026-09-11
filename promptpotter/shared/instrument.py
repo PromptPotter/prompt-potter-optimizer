@@ -8,7 +8,9 @@ import contextvars
 import enum
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
+
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.domain.ruler import DeltaRuler
@@ -53,8 +55,8 @@ class InstrumentMode:
 # FINALIZE, or the archive reads and the optimizer clamp de-hermeticize mid-measurement. Its twin
 # is `_OPTIMIZER_PROMPT_OVERRIDES` (`optimization/dispatch/llm_call/prompts.py`), where clearing
 # would wipe the inner mutations `runner/inner/spawn.py` sets before `run_optimization`.
-_MODE: contextvars.ContextVar[InstrumentMode | None] = contextvars.ContextVar(
-    "instrument_mode", default=None
+_MODE: Annotated[contextvars.ContextVar[InstrumentMode | None], shapes_optimizer_prompt] = (
+    contextvars.ContextVar("instrument_mode", default=None)
 )
 
 
@@ -76,6 +78,7 @@ def enter_instrument_mode(
     return mode
 
 
+@shapes_optimizer_prompt
 def instrument_mode() -> InstrumentMode | None:
     """The instrument mode bound for this task, or ``None`` — the normal campaign case."""
     return _MODE.get()

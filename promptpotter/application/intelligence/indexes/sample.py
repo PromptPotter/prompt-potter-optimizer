@@ -8,6 +8,7 @@ from typing import Any
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import is_hit
 from promptpotter.shared.errors import is_error_result
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
 @dataclass
@@ -213,6 +214,7 @@ class SampleIndex:
         records.sort(key=lambda r: r.hit_rate)
         return records
 
+    @shapes_optimizer_prompt
     def rare_hit_samples(
         self,
         *,

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_TEXT,
@@ -17,6 +17,7 @@ from promptpotter.domain.pipeline_schema import (
     description_path,
 )
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, WHO_ANSWERS_KEYS
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -34,7 +35,9 @@ __all__ = [
 ]
 
 
-RESERVED_PIPELINE_PARAM_KEYS: frozenset[str] = frozenset({"steps"})
+RESERVED_PIPELINE_PARAM_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
+    {"steps"}
+)
 """Keys in ``pipeline_params`` that are NOT node-config dicts. ``steps`` is the
 wire scaffold (the active-node list every connector's outbound payload reads);
 everything else is a ``{node: {param: value}}`` config block. The single source
@@ -43,6 +46,7 @@ of truth for the "is this a node config or reserved?" question — read this or
 at each site."""
 
 
+@shapes_optimizer_prompt
 def node_config_items(pp: dict[str, Any] | None) -> Iterator[tuple[str, dict[str, Any]]]:
     """The canonical walk over a ``pipeline_params`` dict's tunable surface — skips the reserved
     wire keys and any non-dict value."""

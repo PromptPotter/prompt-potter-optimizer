@@ -249,7 +249,8 @@ every module here but `protocol` is one.** `registered()` walks them, merges the
 `promptpotter.connectors` entry points and runs `_validate` over both, once per process.
 **The connector table completes at a declared step, never at import** — owned by
 [`../application/CLAUDE.md`](../application/CLAUDE.md) § Subpackages; nothing here may read the
-table at module scope. A connector shipped from **another** package declares the entry point
+table at module scope, and a check that must fail before a run spends is the connector's
+`completion_check`, which that step runs. A connector shipped from **another** package declares the entry point
 instead and touches nothing here ([`stable-api.md`](../../docs/developer/stable-api.md) §1).
 
 ## A connector is trusted code, not sandboxed — and that is stated, not implied

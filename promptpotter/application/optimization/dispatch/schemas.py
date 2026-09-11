@@ -20,6 +20,9 @@ from pydantic import (
 from promptpotter.application.optimization.dispatch.bundle import LAYOUT_SCHEMA_INSTRUCTION
 from promptpotter.domain.l1_layout import NODE_LAYOUTS, layout_json_schema
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.shared.hashing import shapes_optimizer_prompt
+
+shapes_optimizer_prompt(__name__)
 
 
 def _truncate(max_len: int) -> Callable[[Any], Any]:

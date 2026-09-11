@@ -77,6 +77,7 @@ from promptpotter.infrastructure.store.layout import (
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.shared.errors import graceful
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.instrument import (
     MAX_INSTRUMENT_DEPTH,
     MeasurementRole,
@@ -140,6 +141,7 @@ def _spawn_provenance(ctx: InnerSpawnContext, round_num: int | None, query: str)
     }
 
 
+@shapes_optimizer_prompt
 def _clip(text: str, cap: int) -> str:
     text = " ".join(text.split())
     if len(text) <= cap:
@@ -147,6 +149,7 @@ def _clip(text: str, cap: int) -> str:
     return text[: cap - 1].rsplit(" ", 1)[0] + "…"
 
 
+@shapes_optimizer_prompt
 def _lift_shape(result: CycleResult) -> str:
     """Which rounds LIFTED, read off ``RoundResult.improved`` — a within-round paired verdict that
     touches neither noise term the scalar carries. Denominator is the ROUND BUDGET it divides by."""
@@ -159,6 +162,7 @@ def _lift_shape(result: CycleResult) -> str:
     return f"lifts: {marks} ({n}/{budget}; target: early and often, thinning late)"
 
 
+@shapes_optimizer_prompt
 def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
     """Human-grade digest of one inner campaign — the outer loop's MODEL REASONING, riding the
     ``reasoning_trace`` infra key. Authored under ``TRANSCRIPT_REASONING_CAP`` so the render never clips."""

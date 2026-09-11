@@ -24,6 +24,7 @@ from promptpotter.domain.search_point import strip_rendered_prompt
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import is_error_result
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 __all__ = [
     "ABORT_LENS_LABELS",
@@ -336,6 +337,7 @@ def unscoreable_cells(results: Sequence[Mapping[str, Any]]) -> int:
     return sum(1 for r in results if is_error_result(r))
 
 
+@shapes_optimizer_prompt
 def merge_known_outcomes(
     prior: list[dict[str, Any]], incoming: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import math
 import re
+from typing import Annotated
+
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 __all__ = [
     "GSM8K_ANSWER_RE",
@@ -48,9 +51,12 @@ NUMBER_RE = re.compile(r"-?\d[\d,]*\.?\d*")
 BOXED_RE = re.compile(r"\\boxed\{([^{}]+)\}")
 _BOLD_RE = re.compile(r"\*\*([^*]+?)\*\*")
 # Leading list furniture on one returned item: "1.", "1)", "-", "*", "•".
-_LIST_ITEM_RE = re.compile(r"^\s*(?:\d+\s*[.)]|[-*•])\s*")
+_LIST_ITEM_RE: Annotated[re.Pattern[str], shapes_optimizer_prompt] = re.compile(
+    r"^\s*(?:\d+\s*[.)]|[-*•])\s*"
+)
 
 
+@shapes_optimizer_prompt
 def text_list_items(text: str) -> list[str]:
     """The ordered items of a newline-listed *text*, normalised for comparison.
 
@@ -67,6 +73,7 @@ def text_list_items(text: str) -> list[str]:
     return out
 
 
+@shapes_optimizer_prompt
 def text_list_rank(text: str, item: str) -> int | None:
     """1-based position of *item* among :func:`text_list_items`, else ``None``."""
     want = item.strip().lower().strip(".")

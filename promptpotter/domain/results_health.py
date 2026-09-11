@@ -15,6 +15,9 @@ from promptpotter.domain.results import (
 )
 from promptpotter.domain.scoring import is_verifier_graded, modal_answer_share
 from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
+from promptpotter.shared.hashing import shapes_optimizer_prompt
+
+shapes_optimizer_prompt(__name__)
 
 STRUCTURAL_FLAG_RATE: float = 0.30
 DEGRADED_RATE_FLAG: float = 0.20

@@ -70,9 +70,9 @@ Fires only on L2 stall. Produces a **strategic replan** — the framing surface,
 
 ## Editing a renderer's PROSE is a measurement change
 
-`dispatch/injections/` composes most of every optimizer prompt, so rewording a directive changes what every inner cycle is handed — and on L4 that is measurement identity. `injection_source_digest` hashes it AST-normalized: a comment, docstring or reflow costs nothing; a panel's prose, its `char_cap`, a node's discretionary allowance or a selection rule voids the banked origins. **Expect the re-measure; the bug is the reverse.**
+`dispatch/injections/` composes most of every optimizer prompt, so rewording a directive changes what every inner cycle is handed — and on L4 that is measurement identity. `injection_source_digest` hashes it AST-normalized: a comment, docstring, reflow or import path costs nothing; a panel's prose, its `char_cap`, a node's discretionary allowance or a selection rule voids the banked origins. **Expect the re-measure; the bug is the reverse.**
 
-The hashed set is `bundle` + `compose` + `facade` + `domain/ruler.py` + the renderers. **A prompt-shaping constant lives in `bundle.py` unless it is a fact about something else the prompt reports** — `OPTIMIZER_DISCRETIONARY_CHARS` and the wire schema's `maxLength`/descriptions belong there; `BAND_COLLAPSE_LOGITS`/`_RATIO` do not, describing the δ scale and served on `AbilityReading` as well as rendered. Either way **the module holding it MUST be in the hashed set** — one parked outside shapes every prompt for free.
+The hashed set is `bundle` + `compose` + `facade` + `domain/ruler.py` + the renderers. **A prompt-shaping constant lives in `bundle.py` unless it is a fact about something else the prompt reports** — `OPTIMIZER_DISCRETIONARY_CHARS` and the wire schema's `maxLength`/descriptions belong there; `BAND_COLLAPSE_LOGITS`/`_RATIO` do not, describing the δ scale and served on `AbilityReading` as well as rendered. Either way **the module holding it MUST be in the hashed set, or the definition itself carries `shared/hashing.py::shapes_optimizer_prompt`** — one parked outside both shapes every prompt for free.
 
 ## A validator either REJECTS or SCORES — never both
 

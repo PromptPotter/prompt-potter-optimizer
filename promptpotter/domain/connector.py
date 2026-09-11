@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from promptpotter.shared.errors import PotterError
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     import httpx
@@ -25,10 +26,12 @@ ConnectorExecution = Literal["remote_http", "in_process"]
 MeasuredUnit = Literal["sample", "cell"]
 
 
+@shapes_optimizer_prompt
 def unit_plural(unit: MeasuredUnit) -> str:
     return f"{unit}s"
 
 
+@shapes_optimizer_prompt
 def unit_count(n: int, unit: MeasuredUnit) -> str:
     return f"{n} {unit if n == 1 else unit_plural(unit)}"
 

@@ -8,12 +8,14 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.results_health import classify_result
 from promptpotter.shared.errors import is_error_result
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import QueryMeasurement
 
 
+@shapes_optimizer_prompt
 def ranked_item_keys_from_schema(schema: PipelineSchema | None) -> list[str]:
     if not schema:
         return []
@@ -24,6 +26,7 @@ def ranked_item_keys_from_schema(schema: PipelineSchema | None) -> list[str]:
     return keys
 
 
+@shapes_optimizer_prompt
 def get_ranked_items(r: Mapping[str, Any], ranked_item_keys: list[str] | None = None) -> list[Any]:
     pd = r.get("pipeline_data") or {}
     for key in ranked_item_keys or []:
@@ -54,12 +57,14 @@ def extract_warning_types(result: Mapping[str, Any]) -> list[str]:
     return classify_result(result).all_codes
 
 
+@shapes_optimizer_prompt
 def is_deprecated(result: Mapping[str, Any]) -> bool:
     """True iff the classifier flagged the sample fatal or infra-truncated. Both deprecate it for accounting, but only
     ``fatal_codes`` participate in one-sighting fast-path elimination."""
     return classify_result(result).is_fatal
 
 
+@shapes_optimizer_prompt
 def scoreable_rows(results: list[QueryMeasurement]) -> list[QueryMeasurement]:
     """The EVIDENCE population — rows that carry a verdict. A deprecated row was measured and thrown
     out, an errored one never happened, so neither belongs in a denominator.

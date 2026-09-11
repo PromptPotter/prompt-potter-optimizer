@@ -9,6 +9,9 @@ from pydantic import ConfigDict, Field, field_serializer
 
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
+from promptpotter.shared.hashing import shapes_optimizer_prompt
+
+shapes_optimizer_prompt(__name__)
 
 # What L2 may never excise: a field L1 cannot OPERATE without, or the sole carrier of a state L1
 # must not enter blind — `answer_distribution` is the second kind, and it self-suppresses where
