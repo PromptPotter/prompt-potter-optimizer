@@ -25,16 +25,13 @@
 .new-campaign-optional > summary{cursor:pointer;font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-tertiary);padding:2px 0}
 .new-campaign-optional > summary:hover{color:var(--color-text-secondary)}
 .new-campaign-optional-body{display:flex;flex-direction:column;gap:var(--space-14);padding-top:12px}
-/* The uploaded rows, above the mapping picker they inform. Its own scroll container:
-   a 40-column CSV must scroll inside the card, never widen the chat panel. */
-.ds-preview{display:flex;flex-direction:column;gap:var(--space-8);padding:var(--space-12) var(--space-14);border-radius:6px;border:0.5px solid var(--color-border);background:var(--color-background-secondary)}
-.ds-preview-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-8);flex-wrap:wrap}
-.ds-preview-title{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-tertiary)}
-.ds-preview-meta{font-size:var(--text-xs);color:var(--color-text-tertiary);font-variant-numeric:tabular-nums}
+/* The uploaded rows, above the mapping picker they inform — a `.setup-preview` section like
+   the two below it. Its own scroll container: a 40-column CSV must scroll inside it, never
+   widen the chat panel. */
 .ds-preview-scroll{overflow-x:auto;max-height:220px;overflow-y:auto}
 .ds-preview-table{border-collapse:collapse;font-size:var(--text-sm);width:max-content;min-width:100%}
 .ds-preview-table th,.ds-preview-table td{text-align:left;padding:var(--space-4) var(--space-8);border-bottom:0.5px solid var(--color-border);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ds-preview-table th{position:sticky;top:0;background:var(--color-background-secondary);font-weight:600;color:var(--color-text-secondary);white-space:nowrap}
+.ds-preview-table th{position:sticky;top:0;background:var(--color-background-primary);font-weight:600;color:var(--color-text-secondary);white-space:nowrap}
 .ds-preview-table td{color:var(--color-text-primary)}
 .ds-preview-table tr:last-child td{border-bottom:0}
 /* The two mapped columns, marked where the operator is deciding them. */
@@ -71,20 +68,41 @@
 /* Starting-prompt control panel — the editable 6-field decomposition. Draws no frame of
    its own: every host already frames it (`PromptFieldsEditor` nests inside `NodeSurface`). */
 .prompt-editor{display:flex;flex-direction:column;gap:var(--space-8)}
-.prompt-editor-title{font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-primary)}
-.prompt-editor-grid{display:flex;flex-direction:column;gap:var(--space-8)}
-.prompt-field{display:flex;flex-wrap:wrap;align-items:start;gap:var(--space-8)}
-.prompt-field > :first-child{flex:0 0 96px}
-.prompt-field > :last-child{flex:1 1 200px;min-width:0}
-.prompt-field-label{font-size:var(--text-sm);font-weight:600;color:var(--color-text-primary);padding-top:6px}
-.prompt-field-input{width:100%;resize:vertical;font:inherit;font-size:var(--text-sm);line-height:1.45;padding:var(--space-6) var(--space-8);border-radius:6px;border:0.5px solid var(--color-border);background:var(--color-background-primary);color:var(--color-text-primary)}
+/* A sibling of "Structured output" under the same node, so it wears that heading, not a section's. */
+.prompt-editor-title{font-size:var(--text-xs);font-weight:600;color:var(--color-text-secondary)}
+/* ONE grid, fields `display:contents`: the name column is as wide as the longest name with its
+   lock. A fixed 96px column pushed the lock under "Thinking style" and "Answer format". */
+.prompt-editor-grid{display:grid;grid-template-columns:minmax(0,max-content) minmax(0,1fr);align-items:start;gap:var(--space-6) var(--space-12)}
+.prompt-field{display:contents}
+/* The lock at the column's far edge, beside the box it holds, so the six line up. */
+.prompt-field-label{display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);white-space:nowrap;font-size:var(--text-sm);font-weight:600;color:var(--color-text-primary);padding-top:var(--space-4)}
+/* Sized to its text where the browser can: a fixed row count clipped the long fields and left the
+   short ones half empty. `rows` is the fallback, and so is the resize handle. */
+.prompt-field-input{width:100%;resize:vertical;field-sizing:content;max-height:16em;font:inherit;font-size:var(--text-sm);line-height:1.45;padding:var(--space-6) var(--space-8);border-radius:6px;border:0.5px solid var(--color-border);background:var(--color-background-primary);color:var(--color-text-primary)}
+@supports (field-sizing:content){.prompt-field-input{resize:none}}
 .prompt-field-input:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
 .prompt-editor-fewshot{margin:0;font-size:var(--text-xs);color:var(--color-text-tertiary)}
 /* Compact — the half-width hosts (the chat run card). Tighter, never truncating:
    what compact hides is folded behind a disclosure, not dropped. */
-.prompt-editor.is-compact .prompt-editor-grid{gap:var(--space-6)}
-.prompt-editor.is-compact .prompt-field > :first-child{flex-basis:80px}
+.prompt-editor.is-compact .prompt-editor-grid{gap:var(--space-4) var(--space-8)}
 .prompt-editor.is-compact .prompt-field-input{font-size:var(--text-xs)}
+/* The structured-output tree (`SchemaTreeEditor`) — the prompt list's shape, one row per field.
+   Nesting is indentation under a rule, never a fold. ONE grid for the whole tree, every level a
+   subgrid of it: an indent narrows the name column alone, so type, description, lock and the
+   buttons line up down the tree instead of drifting right at each depth. */
+.schema-head{display:flex;align-items:center;gap:var(--space-6)}
+.schema-fields{display:grid;grid-template-columns:[name] minmax(4rem,11rem) [type] 6.5rem [desc] minmax(0,1fr) [lock] auto [answer] auto [add] auto [remove] auto;align-items:center;gap:var(--space-4) var(--space-6)}
+.schema-field,.schema-field .schema-fields{grid-column:1/-1;display:grid;grid-template-columns:subgrid;align-items:center}
+.schema-field .schema-fields{margin-left:var(--space-10);padding-left:var(--space-8);border-left:0.5px solid var(--color-border)}
+.schema-field-row{display:contents}
+.schema-field-name{grid-column:name;width:100%;min-width:0;font-family:var(--font-mono)}
+.schema-field-type{grid-column:type}
+.schema-field-desc{grid-column:desc;width:100%;min-width:0}
+.schema-field-row > .config-lock{grid-column:lock}
+.schema-field-answer{grid-column:answer}
+.schema-field-add{grid-column:add}
+.schema-field-remove{grid-column:remove}
+.schema-add{align-self:flex-start}
 /* Unified setup preview — one compact card holding the editable pipeline
    config + starting prompt (step 3). */
 .setup-preview{display:flex;flex-direction:column;gap:var(--space-12);padding:var(--space-12) var(--space-14);border-radius:6px;border:0.5px solid var(--color-border);background:var(--color-background-secondary)}
@@ -116,8 +134,12 @@
 .config-optlocked,.config-optmovable{font-size:var(--text-xs);cursor:help;white-space:nowrap}
 .config-optlocked{opacity:.5}
 .config-value{display:flex;align-items:center;gap:var(--space-6);flex-wrap:wrap;min-width:0}
-.config-lock{font-size:var(--text-xs);font-weight:600;padding:2px var(--space-8);border-radius:9px;border:0.5px solid var(--color-border);background:transparent;color:var(--color-text-secondary);cursor:pointer}
-.config-lock.is-locked{color:var(--color-accent);border-color:var(--color-accent)}
+/* The button is a glyph too, for the same reason: a pill around the emoji, beside bordered
+   inputs, read as one more field. A hover wash says it can be clicked, an accent wash that it is
+   pressed — at this size the two shackles alone are a squint apart. */
+.config-lock{font-size:var(--text-sm);font-weight:600;line-height:1;padding:var(--space-4);border:0;border-radius:var(--border-radius-sm);background:transparent;color:var(--color-text-secondary);cursor:pointer}
+.config-lock:hover:not(:disabled){background:var(--color-background-hover)}
+.config-lock.is-locked{color:var(--color-accent);background:rgba(var(--color-accent-rgb),0.14)}
 .config-lock:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
 .config-input{flex:1;min-width:min(120px,100%);font:inherit;font-size:var(--text-sm);padding:var(--space-4) var(--space-8);border-radius:6px;border:0.5px solid var(--color-border);background:var(--color-background-primary);color:var(--color-text-primary);font-family:var(--font-mono)}
 .config-input:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
@@ -134,14 +156,13 @@ textarea.config-input{resize:vertical;line-height:1.45;white-space:pre}
    long one cannot push every row below it off the panel. */
 .config-static.is-structured{white-space:pre-wrap;max-height:14em;overflow:auto}
 .config-hint{grid-column:2;font-size:var(--text-xs);line-height:1.4;color:var(--color-text-tertiary)}
-/* The picked model's card — a plain definition list under the model row. Only what the
-   catalogue actually carries renders, so a missing field shortens the card instead of
-   blanking it. */
-.model-card{margin:var(--space-4) 0 0;display:flex;flex-direction:column;gap:1px;font-size:var(--text-xs);color:var(--color-text-tertiary)}
-.model-card-name{color:var(--color-text-secondary);font-family:var(--font-mono);overflow-wrap:anywhere}
-.model-card-row{display:flex;gap:var(--space-8)}
-.model-card-row dt{flex:0 0 auto;width:5.5em}
-.model-card-row dd{margin:0;min-width:0;overflow-wrap:anywhere}
+/* The picked model's card — a plain definition list under the model row, its pairs flowing
+   along one wrapped line rather than stacked six deep. Only what the catalogue actually
+   carries renders, so a missing field shortens the card instead of blanking it. */
+.model-card{flex-basis:100%;margin:var(--space-4) 0 0;display:flex;flex-wrap:wrap;gap:1px var(--space-12);font-size:var(--text-xs);color:var(--color-text-tertiary)}
+.model-card-name{flex-basis:100%;color:var(--color-text-secondary);font-family:var(--font-mono);overflow-wrap:anywhere}
+.model-card-row{display:flex;gap:var(--space-4);min-width:0}
+.model-card-row dd{margin:0;min-width:0;color:var(--color-text-secondary);overflow-wrap:anywhere}
 /* Node-level master lock: it needs a BOX for its separator, which `display:contents` denies,
    so it spans the editor and re-reads the two columns through `subgrid` to stay aligned. */
 .config-node-row{grid-column:1/-1;display:grid;grid-template-columns:subgrid;align-items:center;justify-items:start;padding-bottom:8px;margin-bottom:2px;border-bottom:0.5px solid var(--color-border)}
@@ -164,5 +185,10 @@ textarea.config-input{resize:vertical;line-height:1.45;white-space:pre}
   .new-campaign-modal{max-width:none;max-height:calc(var(--vh-full) - 32px)}
   .new-campaign-field select,.new-campaign-field input{font-size:var(--text-xl);min-height:44px}
   .origin-column-row{flex-direction:column;gap:var(--space-14)}
+  /* A phone has no room for a name column: the name heads its box. */
+  .prompt-editor-grid{grid-template-columns:minmax(0,1fr)}
+  /* Nor for a description column: it takes the field's second line, under everything else. */
+  .schema-fields{grid-template-columns:[name] minmax(0,1fr) [type] 5.5rem [lock] auto [answer] auto [add] auto [remove] auto;column-gap:var(--space-4)}
+  .schema-field-desc{grid-column:name / -1;grid-row:2}
 }
 

@@ -10,7 +10,6 @@ from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_JSON,
     ANSWER_AS_TEXT,
     OUTPUT_CONTRACT_KEYS,
-    SCHEMA_DESCRIPTIONS_PARAM,
     SCHEMA_TOGGLE_PARAM,
     THINKING_KINDS,
     NodeKind,
@@ -24,6 +23,8 @@ from promptpotter.domain.pipeline_schema import (
     PipelineViewEdge,
     PipelineViewNode,
     declares_llm_run,
+    description_key,
+    description_paths,
 )
 from promptpotter.shared.errors import PayloadInvalidError
 
@@ -423,19 +424,21 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
                     f"output_schema (have: {sorted(props)})"
                 )
 
-        # Synthesize the always-on `description` lever onto any node that ships an
-        # `output_schema` with fields — schema-driven, never a per-dataset `param_keys`
-        # opt-in. The field NAME stays locked (`SCHEMA_OWNED_FIELDS`); only the free
-        # prose becomes tunable. Declared as an `object` param so the one nesting
-        # contract (`apply_node_overlay` merges one level, `build_l1_response_schema`
-        # emits the sub-schema, `validate_overrides` type-checks it) applies with no
-        # special case downstream — the same shape a hand-declared nested param has.
+        # Synthesize the `description` lever onto any node that ships an `output_schema` —
+        # schema-driven, never a per-dataset `param_keys` opt-in. The field NAME stays locked
+        # (`SCHEMA_OWNED_FIELDS`); only the free prose becomes tunable, one `string` param per
+        # field, so a campaign's `param_keys` holds or opens each like any scalar.
         out_schema = step_kwargs.get("output_schema")
-        if out_schema is not None and out_schema.fields:
-            step_kwargs["param_keys"] = pk | {SCHEMA_DESCRIPTIONS_PARAM}
+        described = (
+            [description_key(p) for p in description_paths(out_schema.json_schema)]
+            if out_schema is not None
+            else []
+        )
+        if described:
+            step_kwargs["param_keys"] = pk | set(described)
             step_kwargs["param_types"] = {
                 **step_kwargs["param_types"],
-                SCHEMA_DESCRIPTIONS_PARAM: "object",
+                **dict.fromkeys(described, "string"),
             }
 
         # Synthesize the schema TOGGLE onto every node that runs an LLM — the sibling of the

@@ -15,13 +15,19 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic import Field
 
-from promptpotter.application.datasets.draft_campaign import OptimizationOverrides
+from promptpotter.application.datasets.draft_campaign import (
+    OptimizationOverrides,
+    rendered_pipeline_json,
+)
 from promptpotter.domain.origin_provenance import Provenance
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+from promptpotter.domain.pipeline_schema import description_key, description_path
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import ConflictError, PayloadInvalidError
 
 if TYPE_CHECKING:
     from promptpotter.application.datasets.draft_campaign import DraftCampaign
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = [
@@ -99,13 +105,26 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
     for patch_val, draft_attr in (
         (patch.connector, "connector"),
         (patch.scoring_composite, "scoring_composite"),
-        (patch.pipeline_overlay, "pipeline_overlay"),
         (patch.origin_prompt_fields, "origin_prompt_fields"),
         (patch.pipeline_steps, "pipeline_steps"),
         (patch.candidate_library, "candidate_library"),
     ):
         if patch_val is not None:
             changes[draft_attr] = patch_val
+
+    # A declared output contract is checked by the one parser that reads it: an `answer_field`
+    # outside its `output_schema` raises there, and unchecked here it failed the draft's own read.
+    if patch.pipeline_overlay is not None:
+        try:
+            before = parse_pipeline_response(rendered_pipeline_json(draft))
+            after = parse_pipeline_response(
+                rendered_pipeline_json(draft.patch(pipeline_overlay=patch.pipeline_overlay))
+            )
+        except ValueError as exc:
+            raise PayloadInvalidError(f"patch.pipeline_overlay: {exc}") from exc
+        changes["pipeline_overlay"] = _narrowing_follows_schema(
+            patch.pipeline_overlay, before, after
+        )
 
     # Shallow-merge so one knob can change without resetting the rest, then validate the
     # result (rejects unknown keys / out-of-range max_rounds / malformed mechanisms).
@@ -138,6 +157,33 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
         column_query=patch.column_query,
         column_ground_truth=patch.column_ground_truth,
     )
+
+
+def _narrowing_follows_schema(
+    overlay: dict[str, Any], before: PipelineSchema, after: PipelineSchema
+) -> dict[str, Any]:
+    """A stored ``param_keys`` list names each description key by PATH, so an edited output schema
+    would leave it naming fields that are gone and holding every field that is new. It follows
+    instead: a surviving path keeps its state, a removed one drops, a new top-level field opens —
+    as on a node with no list — and a new nested one takes its parent's, the lock's inheritance.
+    A rename is a removal plus an addition."""
+    out = dict(overlay)
+    for name, block in overlay.items():
+        opt = block.get("optimizer") if isinstance(block, dict) else None
+        if not isinstance(opt, dict) or not isinstance(opt.get("param_keys"), list):
+            continue
+        was, now = before.get_node(name), after.get_node(name)
+        old = set(was.description_keys) if was else set()
+        new = now.description_keys if now else []
+        if set(new) == old:
+            continue
+        kept = [k for k in opt["param_keys"] if description_path(k) is None or k in new]
+        for key in new:
+            parent = (description_path(key) or "").rpartition(".")[0]
+            if key not in old and (not parent or description_key(parent) in kept):
+                kept.append(key)
+        out[name] = {**block, "optimizer": {**opt, "param_keys": kept}}
+    return out
 
 
 def apply_draft_patch(draft: DraftCampaign, plan: DraftPatchPlan) -> DraftCampaign:

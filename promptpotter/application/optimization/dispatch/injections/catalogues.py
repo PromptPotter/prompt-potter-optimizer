@@ -5,6 +5,8 @@ vocabulary). Load-bearing per architecture.md §0.5.
 
 from __future__ import annotations
 
+from typing import Any
+
 from promptpotter.application.optimization.dispatch.bundle import (
     AXES_ENUM_PREVIEW,
     InjectionBundle,
@@ -18,25 +20,31 @@ from promptpotter.domain.l1_layout import NODE_LAYOUTS
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_JSON,
     ANSWER_AS_TEXT,
-    SCHEMA_DESCRIPTIONS_PARAM,
+    OUTPUT_SCHEMA_KEY,
+    SCHEMA_DESCRIPTION_PREFIX,
     SCHEMA_TOGGLE_PARAM,
     PipelineNode,
+    described_field,
 )
 
 
-def _schema_description_block(node: PipelineNode) -> list[str]:
-    """The node's CURRENT output-schema descriptions — the value space of the ``output_schema_descriptions`` param.
-    Without it the lever is offered blind; an UNDESCRIBED field is marked, being the highest-value target."""
-    out_schema = node.output_schema
-    if out_schema is None or not out_schema.fields:
-        return []
-    described = out_schema.field_descriptions
+def _schema_description_block(
+    node: PipelineNode, keys: list[str], current: dict[str, Any]
+) -> list[str]:
+    """The CURRENT prose under each open description key — without it the lever is offered blind.
+    Read off the point being improved, whose folded schema carries what earlier winners wrote: the
+    declaration shows the prose they replaced. An UNDESCRIBED field is marked, being the
+    highest-value target."""
+    schema = current.get(OUTPUT_SCHEMA_KEY) or (
+        node.output_schema.json_schema if node.output_schema else None
+    )
     lines = [
-        f"    {SCHEMA_DESCRIPTIONS_PARAM} — current prose per field (rewrite what underspecifies):"
+        f"    {SCHEMA_DESCRIPTION_PREFIX}<path> — current prose (rewrite what underspecifies):"
     ]
-    for field in out_schema.fields:
-        prose = described.get(field)
-        lines.append(f"      {field}: {prose}" if prose else f"      {field}: (undescribed)")
+    for key in keys:
+        path = key.removeprefix(SCHEMA_DESCRIPTION_PREFIX)
+        prose = (described_field(schema, path) or {}).get("description")
+        lines.append(f"      {path}: {prose or '(undescribed)'}")
     return lines
 
 
@@ -51,7 +59,7 @@ def _schema_toggle_block(formula: str | None) -> list[str]:
     note = extraction_note_for_scoring(formula or "")
     lines = [
         f"    {SCHEMA_TOGGLE_PARAM}={ANSWER_AS_TEXT} REMOVES the output schema from the call: "
-        f"{SCHEMA_DESCRIPTIONS_PARAM} then reaches nothing, and the answer has to be findable "
+        f"{SCHEMA_DESCRIPTION_PREFIX}* then reach nothing, and the answer has to be findable "
         f"in prose. Rewrite answer_format in the SAME variant."
     ]
     if note:
@@ -86,8 +94,10 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> list[Item]:
         if not node or not params:
             continue
         descs = node.param_descriptions
+        # Listed under the node with their current prose, never as bare names on its line.
+        described = [k for k in node.description_keys if k in params]
         bits: list[str] = []
-        for p in sorted(params):
+        for p in sorted(params - set(described)):
             allowed = schema.param_options(node, p)
             # `[]` is a declared axis with nothing legal left, and the wire schema emits no
             # property for it — so listing it here would advertise a mutation L1 cannot make.
@@ -109,11 +119,12 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> list[Item]:
                 bits.append(p)
         # Every axis skipped leaves the node with nothing to offer, and a bare `name:` in the
         # menu reads as an axis whose values went missing rather than as a node with none.
-        if not bits:
+        if not bits and not described:
             continue
-        lines.append(f"  {node_name}: {', '.join(bits)}")
-        if SCHEMA_DESCRIPTIONS_PARAM in params:
-            lines.extend(_schema_description_block(node))
+        lines.append(f"  {node_name}: {', '.join(bits)}".rstrip())
+        if described:
+            current = b.cycle_slice.pipeline_params.get(node_name) or {}
+            lines.extend(_schema_description_block(node, described, current))
         # Only where the other arm is actually reachable: a node pinned to one value has no
         # trade to explain, and printing the cost of a move nobody can make is prompt mass.
         if ANSWER_AS_JSON in (schema.param_options(node, SCHEMA_TOGGLE_PARAM) or ()):

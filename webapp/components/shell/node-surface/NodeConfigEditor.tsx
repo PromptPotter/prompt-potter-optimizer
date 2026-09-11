@@ -82,6 +82,10 @@ export function NodeConfigEditor(props: {
   // the node id would emit one narrowing mixing every node's axes.
   onNarrowing?: (node: string, narrowing: NodeSearchNarrowing) => void;
   onChange?: (overlay: Record<string, Record<string, unknown>>) => void;
+  // Params a sibling region of this surface asks instead — the structured-output tree owns each
+  // field's description where it is shown. Not DRAWN here, still in every emit: a row missing from
+  // `rows` would leave `param_keys` and read as the operator closing it.
+  keysAskedElsewhere?: readonly string[];
 }) {
   const {
     mode,
@@ -98,6 +102,7 @@ export function NodeConfigEditor(props: {
     onApply,
     onNarrowing,
     onChange,
+    keysAskedElsewhere,
   } = props;
   const nodeId = node ?? "";
   // The rows as SERVED, kept beside the edited copy: `seedOverlayFromRows` needs the untouched
@@ -118,7 +123,10 @@ export function NodeConfigEditor(props: {
     setTouched(new Set());
   }
 
-  if (rows.length === 0) {
+  // Prompt rows and the keys a sibling region asks ride every emit (a lock is a `param_keys`
+  // membership) but are drawn elsewhere — so HERE they are neither drawn nor held by the node lock.
+  const drawn = (r: ConfigRow) => r.kind !== "prompt" && !keysAskedElsewhere?.includes(r.key);
+  if (!rows.some(drawn)) {
     return <EmptyConfig status={schemaStatus} schema={schema} node={node} />;
   }
 
@@ -152,19 +160,19 @@ export function NodeConfigEditor(props: {
     persist(next, marks);
   };
 
-  // Which of the two facts this host owns. A single-node pipeline is UNLOCKABLE besides, since
-  // holding its lone node would leave the optimizer nothing to tune — but its axes still narrow:
-  // a tick is a permitted set, not a hold.
+  // Which of the two facts this host owns. A single-node pipeline has no NODE lock — the node row
+  // is the server's `is_single_node` guard — but each padlock and each tick still narrows it.
   const narrowChannel = Boolean(onApply || onNarrowing);
-  const canLock = narrowChannel && !isSingleNode;
   const canSetValue = Boolean(onApply || onChange);
 
-  const freeValued = rows.filter((r) => r.kind !== "model" && r.kind !== "enum");
+  // ONE answer to "does this row carry a padlock", for the row and the node lock alike: a free
+  // value no optimizer is barred from. A `never_axis` key wears its badge, whose title says why.
+  const lockable = (r: ConfigRow) =>
+    narrowChannel && drawn(r) && r.kind !== "model" && r.kind !== "enum" && !r.neverAxis;
+  const freeValued = rows.filter(lockable);
   const nodeLocked = freeValued.length > 0 && freeValued.every((r) => r.locked);
   const toggleNodeLock = () => {
-    const next = rows.map((r) =>
-      r.kind === "model" || r.kind === "enum" ? r : { ...r, locked: !nodeLocked },
-    );
+    const next = rows.map((r) => (lockable(r) ? { ...r, locked: !nodeLocked } : r));
     setRows(next);
     persist(next, touched);
   };
@@ -197,6 +205,7 @@ export function NodeConfigEditor(props: {
   return (
     <div className={cx("config-editor", compact && "is-compact")}>
       {rows.map((r, i) => {
+        if (!drawn(r)) return null;
         if (r.kind !== "model" && r.kind !== "enum") {
           return (
             <ConfigRowView
@@ -207,7 +216,7 @@ export function NodeConfigEditor(props: {
               // `undefined` here means the catalogue said nothing and the row claims nothing.
               ignoredBy={caps?.unsupported_params?.includes(r.key) ? pickedModel : undefined}
               readOnly={readOnly || (!babysitEditable && r.neverAxis === "cost_lever")}
-              onToggleLock={canLock ? () => update(i, { locked: !r.locked }) : undefined}
+              onToggleLock={lockable(r) ? () => update(i, { locked: !r.locked }) : undefined}
               onValue={canSetValue ? (v) => update(i, { value: v }) : undefined}
             />
           );
@@ -250,7 +259,7 @@ export function NodeConfigEditor(props: {
         );
       })}
 
-      {canLock && freeValued.length > 0 ? (
+      {!isSingleNode && freeValued.length > 0 ? (
         <div className="config-row config-node-row">
           <span className="config-label">Tuning</span>
           <button
@@ -273,10 +282,7 @@ export function NodeConfigEditor(props: {
         <small className="config-hint">
           Click an axis to drop its list. The first value is where this point starts — click
           another to move it there; ☑ = what the optimizer may pick, and one value left pins the
-          axis.
-          {isSingleNode
-            ? " Single-node pipeline, so there is no whole-node lock: holding the only node would leave nothing to tune."
-            : " 🔒 / 🔓 = held / tunable, for the params that carry no value list."}
+          axis. 🔒 / 🔓 = held / tunable, for the params that carry no value list.
         </small>
       ) : null}
     </div>
@@ -408,8 +414,8 @@ function ConfigRowView({
   // The picked model, when it does NOT accept this key — so the row says the value is dropped
   // rather than showing it as a live setting. Undefined = accepted, or the catalogue never said.
   ignoredBy?: string;
-  // Absent = this host does not set the padlock (a single-node pipeline, whose lone node cannot
-  // be held) or the value (a permissions-only host). Each renders as what it is instead.
+  // Absent = no padlock here (the host narrows nothing, or no optimizer may search the key) or no
+  // value (a permissions-only host). Each renders as what it is instead.
   onToggleLock?: () => void;
   onValue?: (v: string) => void;
 }) {
@@ -436,27 +442,24 @@ function ConfigRowView({
         ) : null}
         {/* Two states — the optimizer may move this axis, or it may not — as the 🔓 / 🔒 pair the
             hint under this editor teaches. The reasons it may not are different operator remedies,
-            so they ride the title with the layer names, read one row at a time. Suppressed where a
-            LockButton draws beside the row: that IS the answer, and a badge repeats it. */}
-        {!onToggleLock ? (
-          row.movableBy.length > 0 ? (
-            <span
-              className="config-optmovable"
-              title={`Searched by ${row.movableBy.map(agentLabel).join(", ")}.`}
-            >
-              🔓
-            </span>
-          ) : (
-            <span className="config-optlocked" title={lockReason(row, readOnly)}>
-              🔒
-            </span>
-          )
-        ) : null}
-      </span>
-      <span className="config-value">
+            so they ride the title with the layer names, read one row at a time. Where the host can
+            lock, the BUTTON takes the badge's place, so every value box starts on one edge. */}
         {onToggleLock ? (
           <LockButton locked={row.locked} readOnly={readOnly} onClick={onToggleLock} />
-        ) : null}
+        ) : row.movableBy.length > 0 ? (
+          <span
+            className="config-optmovable"
+            title={`Searched by ${row.movableBy.map(agentLabel).join(", ")}.`}
+          >
+            🔓
+          </span>
+        ) : (
+          <span className="config-optlocked" title={lockReason(row, readOnly)}>
+            🔒
+          </span>
+        )}
+      </span>
+      <span className="config-value">
         {!onValue ? (
           // No value channel — a sibling surface sets this one, or the value is structured and
           // nothing types it. Text rather than a disabled input: a greyed box says "you may not",
@@ -533,7 +536,7 @@ function lockReason(row: ConfigRow, readOnly: boolean): string {
   return "Nothing searches this. It COULD be opened: an axis is a key in the node's `param_keys`. Open it on a fork.";
 }
 
-function LockButton({
+export function LockButton({
   locked,
   readOnly,
   onClick,

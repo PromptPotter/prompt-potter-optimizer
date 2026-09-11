@@ -60,14 +60,73 @@ NESTED_PARAM_TYPES = frozenset({"object", "array"})
 # `rebase_capability` directive (offers L2/L3 the unlock only where a node declares it).
 SCHEMA_RENAME_PARAM = "output_schema_field_names"
 
-# The core, always-on structured-output lever: rewrite the JSON-Schema `description`
-# strings of a TARGET node's own output schema. A `description` is the only natural
-# language inside the field-filling loop and no code reads it, so it is free to move on
-# ANY node that declares an `output_schema` — unlike the field NAME (the wire + grading
-# contract). Synthesized onto such nodes at parse time (`pipeline_parsing.py`), keyed by
-# that node's own fields; emitted by `build_l1_response_schema`; folded into the wire schema
-# at `OptSearchPoint.to_job_search_point`. See `docs/concepts/structured-output.md`.
-SCHEMA_DESCRIPTIONS_PARAM = "output_schema_descriptions"
+# The core structured-output lever: rewrite the JSON-Schema `description` strings of a TARGET
+# node's own output schema. A `description` is the only natural language inside the field-filling
+# loop and no code reads it, so it is free to move on ANY node that declares an `output_schema` —
+# unlike the field NAME (the wire + grading contract). ONE string param per field, keyed by its
+# dotted path (`description_key`), so a field locks like any param: synthesized at parse time
+# (`pipeline_parsing.py`), folded into the wire schema at `OptSearchPoint.to_job_search_point`.
+# See `docs/concepts/structured-output.md`.
+SCHEMA_DESCRIPTION_PREFIX = "output_schema_descriptions."
+
+
+def description_key(path: str) -> str:
+    return SCHEMA_DESCRIPTION_PREFIX + path
+
+
+def description_path(key: str) -> str | None:
+    """The field path a description key names, ``None`` for any other param."""
+    return (
+        key[len(SCHEMA_DESCRIPTION_PREFIX) :] if key.startswith(SCHEMA_DESCRIPTION_PREFIX) else None
+    )
+
+
+def _fields_of(schema: object) -> dict[str, object] | None:
+    """The property map a path's next segment is looked up in: through a nullable ``anyOf`` and
+    through array ``items`` — a list's elements are described under the list's own path — but
+    never through a ``$ref``, whose target this schema does not carry."""
+    while isinstance(schema, dict) and "$ref" not in schema:
+        arms = [
+            a for a in schema.get("anyOf") or () if isinstance(a, dict) and a.get("type") != "null"
+        ]
+        if len(arms) == 1:
+            schema = arms[0]
+        elif schema.get("type") == "array":
+            schema = schema.get("items")
+        else:
+            props = schema.get("properties")
+            return props if isinstance(props, dict) else None
+    return None
+
+
+def description_paths(json_schema: object) -> list[str]:
+    """Every describable field, parent before child in schema order — the order the fields
+    generate in. A name holding ``.`` is refused: its path would name two fields at once."""
+    out: list[str] = []
+
+    def walk(schema: object, prefix: str) -> None:
+        for name, sub in (_fields_of(schema) or {}).items():
+            if "." in name:
+                raise ValueError(f"output schema field {prefix + name!r}: a name may not hold '.'")
+            if isinstance(sub, dict):
+                out.append(prefix + name)
+                walk(sub, f"{prefix}{name}.")
+
+    walk(json_schema, "")
+    return out
+
+
+def described_field(json_schema: object, path: str) -> dict[str, object] | None:
+    """The property schema *path* names — where its ``description`` is read and written."""
+    node: dict[str, object] | None = None
+    fields = _fields_of(json_schema)
+    for name in path.split("."):
+        sub = (fields or {}).get(name)
+        if not isinstance(sub, dict):
+            return None
+        node, fields = sub, _fields_of(sub)
+    return node
+
 
 # Whether the node uses its schema AT ALL — the one lever over the structured-output contract
 # that is not `SCHEMA_OWNED_FIELDS`. `json` sends the declared `output_schema` + `answer_field`;
@@ -84,6 +143,16 @@ def schema_toggle_default(node: "PipelineNode") -> str:
     """The ONE reading of an unset toggle — the fold and the served row both ask here, so the wire
     and the panel cannot disagree about what "unset" meant."""
     return ANSWER_AS_JSON if node.output_schema else ANSWER_AS_TEXT
+
+
+def _stated_permitted(
+    permitted: list[str], options: list[str], absent: list[str]
+) -> list[str] | None:
+    """A row's served ``permitted``: the set, wherever it is not the menu OR not what an ABSENT
+    entry resolves to. The editor writes a set out only when told it differs, so one equal to the
+    menu but not to the declaration — a widening folded into the menu, a toggle ticked to its whole
+    space — would be dropped on its next emit and resolve back to the declaration."""
+    return permitted if permitted != options or set(permitted) != set(absent) else None
 
 
 def declares_llm_run(
@@ -231,8 +300,8 @@ class NodeOutputSchema(StrictModel):
 
     This is the ``output_schema`` the word belongs to. NOT the optimizer's own
     response schema (``dispatch/l1_wire_schema.py::build_l1_response_schema``), which
-    describes what ``l1_generate`` returns. The L4 levers named ``output_schema_*``
-    act on the optimizer side; the target-side axis is spec-only today.
+    describes what ``l1_generate`` returns. The rename lever (``SCHEMA_RENAME_PARAM``) acts on that
+    optimizer side; the description keys act on this one.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -351,6 +420,13 @@ class PipelineNode(StrictModel):
             langfuse_type=self.langfuse_type,
         )
 
+    @property
+    def description_keys(self) -> list[str]:
+        """Its description params in schema order — the order every surface lists them in."""
+        if self.output_schema is None:
+            return []
+        return [description_key(p) for p in description_paths(self.output_schema.json_schema)]
+
 
 ParamSource = Literal["backend", "dataset", "campaign", "seed", "evolved", "identity", "unset"]
 """WHICH LAYER set a resolved param's value, stamped BY the merge (last writer wins), never diffed
@@ -365,10 +441,10 @@ class NodeConfigParam(StrictModel):
 
     `kind` names the surface that OWNS the param: `model`/`enum` → a select,
     `number`/`bool`/`string` → a typed input, `prompt` → the prompt editor's (a
-    `PromptTemplate` decomposition field), `nested` → structured, read as text and typed by
-    nobody (`NESTED_PARAM_TYPES`). Every kind but `prompt` is a config row; do not re-filter
-    this list at the source, and do not read `nested` as unrenderable — the schema-description
-    axis and L2's layout are both nested, and both are axes an operator may be shown.
+    `PromptTemplate` decomposition field), `description` → one output-schema field's prose, which
+    the schema tree draws where a host has one, `nested` → structured, read as text and typed by
+    nobody (`NESTED_PARAM_TYPES`). Do not re-filter this list at the source, and do not read
+    `nested` as unrenderable — L2's layout is nested, and an axis an operator may be shown.
 
     **A lock is (axis, AGENT), never an axis alone.** `movable_by` names the agents that may
     move this param right now — the vocabulary is `MOVABLE_AGENTS` — and the empty list is the
@@ -391,7 +467,9 @@ class NodeConfigParam(StrictModel):
 
     key: str
     value: Any = None
-    kind: str  # "model" | "enum" | "number" | "bool" | "string" | "prompt" | "nested"
+    kind: (
+        str  # "model" | "enum" | "number" | "bool" | "string" | "prompt" | "description" | "nested"
+    )
     options: list[str] = Field(default_factory=list)
     description: str = ""
     never_axis: Literal["", "cost_lever", "schema_owned"] = ""
@@ -400,9 +478,10 @@ class NodeConfigParam(StrictModel):
     # "unset" on a DATASET-scoped read, which has no campaign to attribute to; a campaign read
     # stamps every row from the merge that produced it.
     source: ParamSource = "unset"
-    # What the BABYSIT gate accepts without tainting, where that differs from the menu above.
-    # `None` = it does not differ, which is NOT `[]` (nothing may be picked). `options` is a UNION,
-    # so narrowing cannot become a one-way ratchet; the gate enforces the narrower list.
+    # What the BABYSIT gate accepts without tainting, where that differs from the menu above OR
+    # from what an absent entry resolves to (`_stated_permitted`). `None` = neither, which is NOT
+    # `[]` (nothing may be picked). `options` is a UNION, so narrowing cannot become a one-way
+    # ratchet; the gate enforces the narrower list.
     permitted: list[str] | None = None
 
 
@@ -526,8 +605,8 @@ class NodeSearchNarrowing(StrictModel):
     way — see :meth:`PipelineSchema.narrow`.
 
     ``param_keys`` SUBSETS: the dataset's ``pipeline.yaml`` declares the maximum tunable surface
-    and a campaign may only close axes within it. Prompt-decomposition fields stay tunable
-    regardless — the prompt is always evolved.
+    and a campaign may only close axes within it — the prompt-decomposition fields included, so
+    one left out is a prompt field the optimizer may not rewrite.
 
     ``param_allowed_values`` REPLACES: a value space is not a permission over the dataset's, it is
     this campaign's statement of what its axis ranges over, with the dataset's list as the default
@@ -802,7 +881,17 @@ class PipelineSchema(StrictModel):
                 # UNSET is a value the node RUNS, not one nobody chose — the fold writes nothing,
                 # so an empty row would report a JSON-answering node as answering in prose.
                 unset = schema_toggle_default(n) if key == SCHEMA_TOGGLE_PARAM else None
-                if key in _PROMPT_OWNED_FIELDS:
+                if (path := description_path(key)) is not None:
+                    # Unset, a field says what its schema says: the inline one the config holds,
+                    # else the declaration.
+                    kind = "description"
+                    field = described_field(
+                        resolved.get(OUTPUT_SCHEMA_KEY)
+                        or (n.output_schema.json_schema if n.output_schema else None),
+                        path,
+                    )
+                    unset = str((field or {}).get("description") or "")
+                elif key in _PROMPT_OWNED_FIELDS:
                     kind = "prompt"
                 elif n.param_types.get(key) in NESTED_PARAM_TYPES:
                     kind = "nested"
@@ -813,7 +902,14 @@ class PipelineSchema(StrictModel):
                     # operator TYPED is exactly one this list does not carry, which is the only
                     # thing that lets a surface mark it as theirs rather than the admin's.
                     kind, options = "model", list(model_menu or self.available_models)
-                    permitted = self.model_options(n) if self.model_options(n) != options else None
+                    allowed = self.model_options(n)
+                    permitted = _stated_permitted(
+                        allowed,
+                        options,
+                        declared.model_options(declared_node)
+                        if declared and declared_node
+                        else allowed,
+                    )
                 elif key in n.param_allowed_values:
                     # `permitted` is what THIS CAMPAIGN declared, and never the model-resolved
                     # space, because it is also what the editor emits back as the narrowing
@@ -822,13 +918,19 @@ class PipelineSchema(StrictModel):
                     # axis resolving to nothing would come back as a closed one.
                     kind = "enum"
                     narrowed = list(n.param_allowed_values[key])
-                    wide = (
+                    absent = (
                         list(declared_node.param_allowed_values.get(key, ()))
                         if declared_node
-                        else []
+                        else narrowed
                     )
-                    options = list(dict.fromkeys([*wide, *narrowed]))
-                    permitted = narrowed if options != narrowed else None
+                    # The toggle's whole space is its menu, as the catalogue is a model's: on a node
+                    # with no schema `json` sits unticked, and ticking it asks for one. The run
+                    # refuses it until one exists (`param_options`).
+                    menu = (
+                        [ANSWER_AS_TEXT, ANSWER_AS_JSON] if key == SCHEMA_TOGGLE_PARAM else absent
+                    )
+                    options = list(dict.fromkeys([*menu, *narrowed]))
+                    permitted = _stated_permitted(narrowed, options, absent)
                 else:
                     t = n.param_types.get(key, "string")
                     kind = (
@@ -924,8 +1026,8 @@ class PipelineSchema(StrictModel):
 
     def narrow(self, narrowing: dict[str, NodeSearchNarrowing] | None) -> "PipelineSchema":
         """**Keys SUBSET, values REPLACE** — the two halves protect different things, and only the
-        first is the maximum-surface contract. Prompt-decomposition fields are always kept tunable.
-        Empty narrowing is a no-op and a node absent from the mapping is unchanged.
+        first is the maximum-surface contract. Empty narrowing is a no-op and a node absent from
+        the mapping is unchanged.
 
         ``param_keys`` intersects: a campaign may close an axis the dataset opened, never open one
         it closed. ``param_allowed_values`` assigns: the value space is the campaign's own
@@ -941,11 +1043,7 @@ class PipelineSchema(StrictModel):
                 if nv is None:
                     out.append(n)
                     continue
-                if nv.param_keys is None:
-                    keys = n.param_keys
-                else:
-                    kept = set(nv.param_keys)
-                    keys = (n.param_keys & kept) | (n.param_keys & _PROMPT_OWNED_FIELDS)
+                keys = n.param_keys if nv.param_keys is None else n.param_keys & set(nv.param_keys)
                 allowed = {
                     **n.param_allowed_values,
                     **{k: list(v) for k, v in nv.param_allowed_values.items()},
@@ -960,10 +1058,14 @@ class PipelineSchema(StrictModel):
                             "param_keys_held": n.param_keys_held | (n.param_keys - keys),
                             "param_allowed_values": allowed,
                             # Accumulated like the keys above; `param_options` reads it so a
-                            # model's ladder cannot reopen what a campaign deliberately closed.
-                            "param_values_narrowed": (
-                                n.param_values_narrowed | set(nv.param_allowed_values)
-                            ),
+                            # model's ladder cannot reopen what a campaign deliberately closed. A
+                            # list restating the declaration closed nothing.
+                            "param_values_narrowed": n.param_values_narrowed
+                            | {
+                                k
+                                for k, v in nv.param_allowed_values.items()
+                                if set(v) != set(n.param_allowed_values.get(k, ()))
+                            },
                         }
                     )
                 )
@@ -1018,8 +1120,13 @@ class PipelineSchema(StrictModel):
         be told to improve.
         """
         out: dict[str, set[str]] = {}
+        prompt_node = next(iter(self.prompt_node_names()), None)
         for step in self.config_nodes:
             declared = set(step.param_keys) - PARAM_FORBIDDEN_KEYS - SCHEMA_OWNED_FIELDS
+            # The node the prompt renders onto takes its prompt fields through the
+            # `prompt_fields_updates` slot, never as node params: one carrier, so one lock.
+            if step.name == prompt_node:
+                declared -= _PROMPT_OWNED_FIELDS
             keys = {k for k in declared if not self.pinned(step, k)}
             if keys:
                 out[step.name] = keys
@@ -1027,6 +1134,14 @@ class PipelineSchema(StrictModel):
 
     def prompt_node_names(self) -> list[str]:
         return [node.name for node in self.nodes if node.prompt_info is not None]
+
+    def open_prompt_fields(self) -> list[str]:
+        """The decomposition fields L1 may rewrite — the prompt node's open ``param_keys``, in
+        ``PROMPT_STRING_FIELDS`` order. Only the FIRST prompt node's: it is the one
+        ``to_job_search_point`` renders the searchpoint's prompt onto. Empty where none renders."""
+        names = self.prompt_node_names()
+        node = self.get_node(names[0]) if names else None
+        return [f for f in PROMPT_STRING_FIELDS if node is not None and f in node.param_keys]
 
 
 __all__ = [

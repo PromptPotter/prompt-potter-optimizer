@@ -122,7 +122,9 @@ LEDGER_BASELINE = {
     # -1: `pipeline_schema.py::PipelineSchema.model_post_init(self, __context: Any)` is GONE — it
     # cached `_node_map` at init and pydantic skips it on `model_copy`, so a narrowed schema
     # answered with pre-copy nodes. Derived on read now. A real subtraction, not a re-annotation.
-    "any_params": 50,
+    # -1: `candidate_diff.py::parent_param_value(…, proposed: Any)` — it read the proposal only to
+    # know which fields a nested description dict named; one key per path names its own.
+    "any_params": 49,
     # +1: `results.py::is_floor_pinned(rows: Sequence[Mapping[str, Any]])`, the same signature as
     # `measured_cells` and `is_answer_collapsed` beside it — a round row read off disk is a plain
     # mapping, so a narrower annotation here would be a claim the callers cannot honour.
@@ -242,7 +244,13 @@ LEDGER_BASELINE = {
     # +1: a verify's SIZE, now that the loop fires one by itself and the count is no longer a
     # number a human typed. Behaviour-coupled and silent the same way: a wrong size still produces
     # a verdict, just an unaffordable or an empty one. (test_numerics § 10)
-    "test_functions": 176,
+    # +1: a prompt field the check-in locked is neither offered to L1 nor accepted from it. The
+    # engine force-kept all six open, so a lock drawn on one was honoured by nothing and a rewrite
+    # of the operator's text could win the round unreported. (test_integrity § 4)
+    # +1: an output-schema field's prose locks per field, and a field added under a held one stays
+    # held. One `object` param reached top-level fields only and locked all or none, so a nested
+    # field's prose was unreachable and a locked one could not be told apart. (test_integrity § 4)
+    "test_functions": 178,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

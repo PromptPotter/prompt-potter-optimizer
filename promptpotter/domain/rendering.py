@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, overload
 
-from promptpotter.config.settings import NO_RESULT, PROMPT_STRING_FIELDS
+from promptpotter.config.settings import NO_RESULT
 from promptpotter.shared import (
     extract_boxed_number,
     extract_gsm8k_number,
@@ -119,10 +119,11 @@ def display_rank_key(
 
 
 def _valid_axis_set(schema: PipelineSchema) -> set[str]:
-    """Schema-legitimate axes (prompt fields + node names + param keys) — used to filter L2's
-    hallucinated `suggested_axes` (e.g. `prompt_size`) before they seed the next round.
+    """Schema-legitimate axes (open prompt fields + node names + param keys) — used to filter L2's
+    hallucinated `suggested_axes` (e.g. `prompt_size`) before they seed the next round. A prompt
+    field the campaign held is not one: steering L1 at it spends a round on a slot it cannot write.
     """
-    out: set[str] = set(PROMPT_STRING_FIELDS) | {"few_shot_examples", "plan"}
+    out: set[str] = set(schema.open_prompt_fields()) | {"few_shot_examples", "plan"}
     for node in schema.nodes:
         if node.name:
             out.add(node.name)

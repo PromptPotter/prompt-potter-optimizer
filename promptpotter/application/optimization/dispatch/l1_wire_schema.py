@@ -28,7 +28,6 @@ from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVER
 from promptpotter.domain.l1_layout import NODE_LAYOUTS, layout_json_schema
 from promptpotter.domain.pipeline_schema import (
     NESTED_PARAM_TYPES,
-    SCHEMA_DESCRIPTIONS_PARAM,
     SCHEMA_RENAME_PARAM,
     PipelineNode,
     PipelineSchema,
@@ -83,22 +82,6 @@ def _rename_variant_schema(variant: dict[str, Any], field_names: dict[str, str])
 def _nested_param_property(node: PipelineNode, param: str) -> dict[str, Any] | None:
     """Each lever is keyed by a CLOSED set, so the optimizer can edit but never invent; ``None``
     where the node declares none."""
-    if param == SCHEMA_DESCRIPTIONS_PARAM:
-        out_schema = node.output_schema
-        if out_schema is None or not out_schema.fields:
-            return None
-        return {
-            "type": "object",
-            "description": SCHEMA_DESCRIPTIONS_INSTRUCTION,
-            # Bounded HERE, the only production site this prose has. It rides forward — the
-            # winner's descriptions become the next round's parent — so an unbounded one
-            # compounds exactly like `l3_plan.plan` did.
-            "properties": {
-                f: {"type": "string", "maxLength": SCHEMA_DESCRIPTION_MAX_CHARS}
-                for f in out_schema.fields
-            },
-            "additionalProperties": False,
-        }
     if param == "layout":
         spec = NODE_LAYOUTS.get(node.name)
         return (
@@ -178,13 +161,14 @@ def build_l1_response_schema(
         node = pipeline_schema.get_node(node_name)
         if node is None or (reachable is not None and node_name not in reachable):
             continue
-        # Scalars first, then the nested params, each alphabetical. Field ORDER is what
-        # this schema teaches (`docs/concepts/structured-output.md`), so the two groups
-        # are emitted in a fixed sequence rather than one interleaved sort — the optimizer
-        # levers read after the surface they act on.
+        # Scalars first, then the nested params, each alphabetical, then the description keys in
+        # schema order. Field ORDER is what this schema teaches
+        # (`docs/concepts/structured-output.md`), so the groups are emitted in a fixed sequence
+        # rather than one interleaved sort — the optimizer levers read after the surface they act on.
         nested = {p for p in keys if node.param_types.get(p) in NESTED_PARAM_TYPES}
+        described = [k for k in node.description_keys if k in keys]
         param_props: dict[str, dict[str, Any]] = {}
-        for param in sorted(keys - nested):
+        for param in sorted(keys - nested - set(described)):
             allowed = pipeline_schema.param_options(node, param)
             declared_type = node.param_types.get(param)
             # `[]` (declared, nothing legal) is not `None` (no space declared): the first emits no
@@ -213,10 +197,16 @@ def build_l1_response_schema(
             prop = _nested_param_property(node, param)
             if prop is not None:
                 param_props[param] = prop
+        # Bounded HERE, the only production site this prose has. It rides forward — the winner's
+        # descriptions become the next round's parent — so an unbounded one compounds exactly like
+        # `l3_plan.plan` did.
+        for key in described:
+            param_props[key] = {"type": "string", "maxLength": SCHEMA_DESCRIPTION_MAX_CHARS}
         if not param_props:
             continue
         pp_properties[node_name] = {
             "type": "object",
+            **({"description": SCHEMA_DESCRIPTIONS_INSTRUCTION} if described else {}),
             "properties": param_props,
             "additionalProperties": False,
         }
@@ -225,11 +215,14 @@ def build_l1_response_schema(
     # node to land on. `to_job_search_point` gates its whole render on the same
     # `prompt_node_names()`, so with none the slots would be write-only.
     # The same rule, second condition (below, off `_SLOT_PANEL`): never offer a slot L1 cannot
-    # OBSERVE.
+    # OBSERVE. A held prompt field is simply not a property, so the lock is structural.
     if pipeline_schema.prompt_node_names():
+        open_fields = pipeline_schema.open_prompt_fields()
         pf_updates = variant_props["prompt_fields_updates"]
-        pf_updates["properties"] = {field: {"type": "string"} for field in PROMPT_STRING_FIELDS}
+        pf_updates["properties"] = {field: {"type": "string"} for field in open_fields}
         pf_updates["additionalProperties"] = False
+        if not open_fields:
+            del variant_props["prompt_fields_updates"]
 
         tc_updates = variant_props["task_context_updates"]
         tc_updates["properties"] = {

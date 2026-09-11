@@ -1118,22 +1118,109 @@ def test_l1_is_offered_no_slot_whose_panel_it_never_saw() -> None:
         )
 
 
+def test_a_held_prompt_field_is_neither_offered_nor_accepted() -> None:
+    """A prompt field the campaign left out of `param_keys` is the operator's text. Offered or
+    accepted anyway, the rewrite is scored like any variant and can win the round, while the
+    check-in still shows the field locked."""
+    from promptpotter.application.optimization.dispatch.l1_wire_schema import (
+        build_l1_response_schema,
+    )
+    from promptpotter.application.optimization.l1.population import parse_population
+    from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
+    from promptpotter.domain.results import CandidateProposal
+
+    base = _pipeline_schema("sealqa-longseal-12")
+    node = base.prompt_node_names()[0]
+    assert "persona" in base.open_prompt_fields(), "fixture no longer opens the field held below"
+    keys = sorted(cast(Any, base.get_node(node)).param_keys - {"persona"})
+    schema = base.narrow({node: NodeSearchNarrowing(param_keys=keys)})
+
+    slot = build_l1_response_schema(schema, citable_fields=())["properties"]["variants"]["items"][
+        "properties"
+    ]["prompt_fields_updates"]["properties"]
+    assert "persona" not in slot and "instruction" in slot
+
+    parent = OptSearchPoint(persona="Expert", instruction="Solve.")
+
+    def forbidden(updates: dict[str, str]) -> list[str]:
+        cp = CandidateProposal(opt_sp=parent.mutate(**updates), prompt_fields_updates=updates)
+        [opt_sp], _ = parse_population([cp], None, schema)
+        failures = opt_sp.memory.wounds.validation_failures
+        return [f.axis for f in failures if f.reason == "forbidden_axis"]
+
+    assert forbidden({"persona": "Pirate", "instruction": "Solve fast."}) == [f"{node}.persona"]
+    assert forbidden({"instruction": "Solve fast."}) == []
+
+
+def test_a_description_lock_holds_its_subtree_and_the_fold_reaches_nested_fields() -> None:
+    """Each output-schema field's prose is its own param, so a lock on one is a `param_keys`
+    membership: held, L1 is not offered it; open, the fold writes it onto the nested field it
+    names. A field ADDED under a held one stays held — opened by default, it would hand L1 prose
+    inside a subtree the operator locked, and the round would score it as an ordinary mutation."""
+    from promptpotter.application.datasets.draft_patch import _narrowing_follows_schema
+    from promptpotter.application.optimization.dispatch.l1_wire_schema import (
+        build_l1_response_schema,
+    )
+    from promptpotter.domain.pipeline_overlay import fold_output_contract
+    from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, description_key
+
+    def pipeline(line_fields: list[str]) -> PipelineSchema:
+        items = {"type": "object", "properties": {f: {"type": "string"} for f in line_fields}}
+        out = {"lines": {"type": "array", "items": items}, "total": {"type": "number"}}
+        config = {"model": "m", "output_schema": {"type": "object", "properties": out}}
+        return parse_pipeline_response(
+            {
+                "nodes": {"llm_only": {"type": "generation", "config": config, "optimizer": {}}},
+                "pipelines": {"default": ["llm_only"]},
+            }
+        )
+
+    before = pipeline(["amount"])
+    lines, amount, total = (description_key(p) for p in ("lines", "lines.amount", "total"))
+    assert cast(Any, before.get_node("llm_only")).description_keys == [lines, amount, total]
+
+    held = before.narrow({"llm_only": NodeSearchNarrowing(param_keys=[amount, total])})
+    offered = build_l1_response_schema(held, citable_fields=())["properties"]["variants"]["items"][
+        "properties"
+    ]["pipeline_overlay"]["properties"]["llm_only"]["properties"]
+    assert amount in offered and lines not in offered
+
+    pp = copy.deepcopy({"llm_only": {**cast(Any, before.get_node("llm_only")).current_config}})
+    pp["llm_only"][amount] = "Net, in CHF."
+    fold_output_contract(pp, before)
+    line = pp["llm_only"]["output_schema"]["properties"]["lines"]["items"]["properties"]["amount"]
+    assert line["description"] == "Net, in CHF." and amount not in pp["llm_only"]
+
+    after = pipeline(["amount", "currency"])
+
+    def follows(keys: list[str]) -> list[str]:
+        overlay = {"llm_only": {"optimizer": {"param_keys": keys}}}
+        return _narrowing_follows_schema(overlay, before, after)["llm_only"]["optimizer"][
+            "param_keys"
+        ]
+
+    currency = description_key("lines.currency")
+    assert currency not in follows([amount, total])
+    assert currency in follows([lines, amount, total])
+
+
 def test_nested_param_override_accumulates_instead_of_reverting_its_parent() -> None:
     """A `param_types: object` param merges one level; siblings the child did not name survive.
 
     A nested param is ONE key in the node config, so a node-level `{**existing, **incoming}`
-    spread replaces it whole: a candidate that improves a single `output_schema_descriptions`
-    entry silently reverts every entry its parent earned, and the axis cannot accumulate
-    across generations. The `object` declaration is what buys the depth, so every nested
-    param the schema grafts must carry one. An `array` must NOT merge — a list is an ordering.
+    spread replaces it whole: a candidate that improves a single `layout` slot silently reverts
+    every slot its parent earned, and the axis cannot accumulate across generations. The
+    `object` declaration is what buys the depth, so every nested param the schema grafts must
+    carry one. An `array` must NOT merge — a list is an ordering.
     """
     from promptpotter.application.optimization.l1.population import merge_pipeline_params
+    from promptpotter.domain.pipeline_schema import description_key
 
     schema = _pipeline_schema("promptpotter-self")
 
     # Every nested param a node's schema can graft accumulates, not just the first one:
-    # `output_schema_field_names` + `layout` on the optimizer's own nodes (pp-self),
-    # `output_schema_descriptions` on any target node (justlogic-d234's `llm_only`, below).
+    # `output_schema_field_names` + `layout` on the optimizer's own nodes (pp-self). The
+    # description keys, one per field, accumulate on any target node (below).
     for node, nested in (("l1_generate", "output_schema_field_names"), ("l1_critique", "layout")):
         got = merge_pipeline_params(
             {node: {nested: {"a": "A", "b": "B"}}},
@@ -1146,22 +1233,14 @@ def test_nested_param_override_accumulates_instead_of_reverting_its_parent() -> 
             f"its parent's siblings"
         )
 
-    # The description axis accumulates on the TARGET node, keyed by that node's fields.
     just = _pipeline_schema("justlogic-d234")
-    base = {
-        "llm_only": {
-            "temperature": 0.7,
-            "output_schema_descriptions": {"reasoning": "A", "answer": "B"},
-        }
-    }
-    merged = merge_pipeline_params(
-        base, {"llm_only": {"output_schema_descriptions": {"reasoning": "A2"}}}, just
-    )
+    reasoning, answer = description_key("reasoning"), description_key("answer")
+    base = {"llm_only": {"temperature": 0.7, reasoning: "A", answer: "B"}}
+    merged = merge_pipeline_params(base, {"llm_only": {reasoning: "A2"}}, just)
     assert merged is not None
-    assert merged["llm_only"]["output_schema_descriptions"] == {"reasoning": "A2", "answer": "B"}
-    assert merged["llm_only"]["temperature"] == 0.7
+    assert merged["llm_only"] == {"temperature": 0.7, reasoning: "A2", answer: "B"}
     # The origin is never aliased or mutated by a candidate's merge.
-    assert base["llm_only"]["output_schema_descriptions"]["reasoning"] == "A"
+    assert base["llm_only"][reasoning] == "A"
 
     # A named slot's list REPLACES; an unnamed slot keeps the floor.
     lay_base = {
@@ -1494,22 +1573,20 @@ def test_an_axis_the_model_REFUSES_offers_only_the_value_it_runs() -> None:
 
 def test_a_measured_point_is_served_the_SCHEMA_it_ran_under() -> None:
     """The structured output is an AXIS, so the contract a surface shows must be resolved like any
-    other value. `output_schema_descriptions` is always on: L1 rewrites the prose of any node
+    other value. The description keys are open by default: L1 rewrites the prose of any node
     shipping a schema, `to_job_search_point` folds it into the wire, and the served contract read
     the parsed DECLARATION — so the axis moved every round and every reader went on showing the
     prose the run had already replaced, with nothing to say the two had parted.
     """
     from promptpotter.application.pipeline_resolve import resolved_output_schemas
+    from promptpotter.domain.pipeline_schema import description_key
 
     schema = _pipeline_schema("justlogic-d234")
     base = {n.name: dict(n.current_config) for n in schema.config_nodes}
     declared = resolved_output_schemas(schema, base)["llm_only"]
     assert declared is not None
 
-    evolved = {
-        **base,
-        "llm_only": {**base["llm_only"], "output_schema_descriptions": {"answer": "MOVED"}},
-    }
+    evolved = {**base, "llm_only": {**base["llm_only"], description_key("answer"): "MOVED"}}
     served = resolved_output_schemas(schema, evolved)["llm_only"]
     assert served is not None
     assert served.field_descriptions["answer"] == "MOVED"
@@ -1609,7 +1686,7 @@ def test_answering_in_TEXT_sends_no_contract_to_answer_INTO() -> None:
     """
     from promptpotter.application.pipeline_resolve import resolved_output_schemas
     from promptpotter.domain.pipeline_overlay import fold_output_contract
-    from promptpotter.domain.pipeline_schema import ANSWER_AS_TEXT
+    from promptpotter.domain.pipeline_schema import ANSWER_AS_TEXT, description_key
 
     schema = _pipeline_schema("justlogic-d234")
     base = {n.name: dict(n.current_config) for n in schema.config_nodes}
@@ -1621,13 +1698,13 @@ def test_answering_in_TEXT_sends_no_contract_to_answer_INTO() -> None:
 
     chose_text = copy.deepcopy(base)
     chose_text["llm_only"][SCHEMA_TOGGLE_PARAM] = ANSWER_AS_TEXT
-    chose_text["llm_only"]["output_schema_descriptions"] = {"answer": "IGNORED"}
+    chose_text["llm_only"][description_key("answer")] = "IGNORED"
     fold_output_contract(chose_text, schema)
     assert "output_schema" not in chose_text["llm_only"]
     assert "answer_field" not in chose_text["llm_only"]
     # The description lever reaches nothing under text and must not resolve a registry schema
     # back onto a node that just said it wants none.
-    assert "output_schema_descriptions" not in chose_text["llm_only"]
+    assert description_key("answer") not in chose_text["llm_only"]
 
     # The served contract follows the same fold, so the panel says "free text" instead of showing
     # a schema the searchpoint is not answering under.

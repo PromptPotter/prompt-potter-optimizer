@@ -12,8 +12,9 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_TEXT,
     OUTPUT_CONTRACT_KEYS,
-    SCHEMA_DESCRIPTIONS_PARAM,
     SCHEMA_TOGGLE_PARAM,
+    described_field,
+    description_path,
 )
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, WHO_ANSWERS_KEYS
 
@@ -124,7 +125,9 @@ def fold_output_contract(pp: dict[str, Any] | None, schema: PipelineSchema) -> N
     banked measurement stays addressed by the hash it was measured under, and only a candidate
     that actually chose ``text`` pays for a new one."""
     for node, cfg in node_config_items(pp):
-        descriptions = cfg.pop(SCHEMA_DESCRIPTIONS_PARAM, None)
+        descriptions = {
+            path: cfg.pop(key) for key in list(cfg) if (path := description_path(key)) is not None
+        }
         if cfg.get(SCHEMA_TOGGLE_PARAM) == ANSWER_AS_TEXT:
             # BOTH keys go, not just the schema: a backend destructuring `answer_field` out of a
             # response that never had the slot reads "" for every sample and grades the run
@@ -133,7 +136,7 @@ def fold_output_contract(pp: dict[str, Any] | None, schema: PipelineSchema) -> N
             for key in OUTPUT_CONTRACT_KEYS:
                 cfg.pop(key, None)
             continue
-        if not isinstance(descriptions, dict) or not descriptions:
+        if not descriptions:
             continue
         out_schema = cfg.get("output_schema")
         if not isinstance(out_schema, dict):
@@ -146,14 +149,8 @@ def fold_output_contract(pp: dict[str, Any] | None, schema: PipelineSchema) -> N
             if not isinstance(out_schema, dict) or not out_schema:
                 continue
             cfg["output_schema"] = out_schema
-        props = out_schema.get("properties")
-        if not isinstance(props, dict):
-            continue
-        for field, text in descriptions.items():
-            if (
-                field in props
-                and isinstance(props[field], dict)
-                and isinstance(text, str)
-                and text.strip()
-            ):
-                props[field] = {**props[field], "description": text}
+        # Written in place: both callers fold a deep copy, never the params they were handed.
+        for path, text in descriptions.items():
+            field = described_field(out_schema, path)
+            if field is not None and isinstance(text, str) and text.strip():
+                field["description"] = text

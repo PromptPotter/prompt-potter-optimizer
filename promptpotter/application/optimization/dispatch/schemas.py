@@ -160,9 +160,8 @@ class L1Variant(OptimizerResponseModel):
     prompt_fields_updates: dict[str, str] = Field(
         default_factory=dict,
         description=(
-            "Top-level prompt-template fields; keys must be one of "
-            "{persona, task_intent, problem_description, instruction, "
-            "thinking_style, answer_format}."
+            "Top-level prompt-template fields; the open ones are grafted from the "
+            "active PipelineSchema at runtime."
         ),
     )
     task_context_updates: dict[str, str] = Field(

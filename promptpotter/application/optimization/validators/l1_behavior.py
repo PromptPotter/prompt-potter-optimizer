@@ -8,6 +8,9 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from promptpotter.application.optimization.dispatch.injections.layer_state import (
+    HELD_PROMPT_FIELD_MARK,
+)
 from promptpotter.application.optimization.dispatch.injections.registry import (
     INJECTIONS,
     STALL_EXPLORATION,
@@ -117,7 +120,7 @@ def _check_param_scope_discipline(round_dict: dict[str, Any], ctx: ValidatorCont
         return CheckResult("param_scope_discipline", True, "no variants emitted")
 
     early = ctx.round_num < PARAM_UNLOCK_ROUND
-    stale_field = _stale_prompt_field(ctx)
+    stale_field = _stale_prompt_field(ctx, _held_prompt_fields(round_dict))
     if not early and stale_field is None:
         return CheckResult(
             "param_scope_discipline",
@@ -204,6 +207,8 @@ def _check_not_only_param_variants(
     variants = extract_l1_variants(round_dict)
     if not variants:
         return CheckResult("not_only_param_variants", True, "no variants emitted")
+    if _held_prompt_fields(round_dict) >= set(PROMPT_STRING_FIELDS):
+        return CheckResult("not_only_param_variants", True, "every prompt field is held")
 
     for v in variants:
         if variant_prose_written(v):
@@ -419,7 +424,16 @@ def _touches_param_scope(pipeline_overlay: dict[str, Any]) -> bool:
     return False
 
 
-def _stale_prompt_field(ctx: ValidatorContext) -> str | None:
+def _held_prompt_fields(round_dict: dict[str, Any]) -> frozenset[str]:
+    """The prompt fields THIS round showed L1 as held, read off the prompt it rendered — a score
+    judges the generator against what it was shown, and a held field is not stale."""
+    node = ((round_dict.get("nodes") or {}).get("l1_generate")) or {}
+    fields = ((node.get("input") or {}).get("template_fields")) or {}
+    shown = " ".join(str(v) for v in fields.values() if isinstance(v, str))
+    return frozenset(f for f in PROMPT_STRING_FIELDS if f"[{f}{HELD_PROMPT_FIELD_MARK}]" in shown)
+
+
+def _stale_prompt_field(ctx: ValidatorContext, held: frozenset[str]) -> str | None:
     """A field appearing in zero variants for two rounds is stale and triggers the param-scope lock."""
     if len(ctx.prior_rounds) < 2:
         return None
@@ -430,6 +444,6 @@ def _stale_prompt_field(ctx: ValidatorContext) -> str | None:
             # Leaf of `field` / `node.field` — same axis either carrier wrote it through.
             mutated_fields.update(k.rpartition(".")[2] for k in variant_prose_written(v))
     for field_name in PROMPT_STRING_FIELDS:
-        if field_name not in mutated_fields:
+        if field_name not in mutated_fields and field_name not in held:
             return field_name
     return None

@@ -320,9 +320,9 @@ class OptSearchPoint(PromptTemplate):
         if rendered and prompt_node:
             pp.setdefault(prompt_node, {})["prompt"] = rendered
 
-        # Resolve the structured-output contract onto the wire: fold the accumulated
-        # `output_schema_descriptions` into each node's real `output_schema` prose and drop the
-        # virtual key, and strip the contract entirely where this point chose to answer in text.
+        # Resolve the structured-output contract onto the wire: fold the accumulated description
+        # keys into each node's real `output_schema` prose and drop the virtual keys, and strip the
+        # contract entirely where this point chose to answer in text.
         # `schema` resolves the registry-declared case (`schema_family`, no inline schema).
         fold_output_contract(pp, schema)
 

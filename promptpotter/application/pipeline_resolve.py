@@ -463,7 +463,7 @@ def resolved_output_schemas(
     """The structured output each node ANSWERS UNDER at this searchpoint — never the one its file
     declares.
 
-    ``output_schema_descriptions`` is always on (`docs/concepts/structured-output.md`), so L1 moves
+    The description keys are open by default (`docs/concepts/structured-output.md`), so L1 moves
     the prose on any node shipping a schema. The WIRE folds it through ``fold_output_contract``, and
     so must every reader — off the parsed DECLARATION a surface shows the prose the run replaced,
     with nothing to say the two have parted. The same fold answers the other lever: a point that

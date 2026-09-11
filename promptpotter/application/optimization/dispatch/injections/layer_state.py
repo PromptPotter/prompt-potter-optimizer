@@ -16,6 +16,7 @@ from promptpotter.application.optimization.dispatch.bundle import (
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     effective_optimizer_prompts,
 )
+from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.connectors.protocol import unit_plural
 from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.l1_layout import L1_LAYOUT_SLOTS, NODE_LAYOUTS
@@ -65,6 +66,10 @@ _TARGET_PROMPT_HEADER = (
 )
 
 
+# Public: the behaviour scores read a round's held fields back off the prompt it rendered.
+HELD_PROMPT_FIELD_MARK = " — held by the operator, not yours to replace"
+
+
 _OPTIMIZER_PROMPT_HEADER = (
     "CURRENT INNER OPTIMIZER PROMPTS — the text an override REPLACES, field by field.\n"
     "Text in doubled curly braces is an injection slot the inner loop fills; a replacement "
@@ -95,8 +100,19 @@ def _r_rendered_prompt(b: InjectionBundle) -> list[Item]:
     # and since the fields concatenate verbatim, they shipped twice. 26% of banked
     # candidates carried a duplicated paragraph; the worst ran 2.13x its parent's length.
     if fields := b.opt_sp.render_fields():
+        # A HELD field still renders — the fields you replace must fit around it — but is named as
+        # the operator's; the override slot has no key for it.
+        schema = b.pipeline_schema
+        held = (
+            set(PROMPT_STRING_FIELDS) - set(schema.open_prompt_fields())
+            if schema is not None and schema.prompt_node_names()
+            else set()
+        )
         sections.append(_TARGET_PROMPT_HEADER)
-        sections.extend(f"[{field}]\n{text}" for field, text in fields)
+        sections.extend(
+            f"[{field}{HELD_PROMPT_FIELD_MARK if field in held else ''}]\n{text}"
+            for field, text in fields
+        )
     inner = effective_optimizer_prompts(b.pipeline_schema, b.cycle_slice.pipeline_params)
     if inner:
         sections.append(_OPTIMIZER_PROMPT_HEADER)

@@ -14,7 +14,7 @@ from typing import Any
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.pipeline_schema import SCHEMA_DESCRIPTIONS_PARAM
+from promptpotter.domain.pipeline_schema import described_field, description_path
 
 __all__ = [
     "IDEA_MATCH_MARK",
@@ -34,13 +34,13 @@ __all__ = [
 ]
 
 
-def parent_param_value(parent_cfg: dict[str, Any], param: str, proposed: Any) -> Any:
-    """``output_schema_descriptions`` is virtual — its prose lives folded inside the schema, so the
-    parent never carries the key and a naive lookup makes re-proposing existing prose read as a mutation."""
-    if param == SCHEMA_DESCRIPTIONS_PARAM and isinstance(proposed, dict):
-        props = (parent_cfg.get("output_schema") or {}).get("properties") or {}
-        return {f: (props.get(f) or {}).get("description", "") for f in proposed}
-    return parent_cfg.get(param)
+def parent_param_value(parent_cfg: dict[str, Any], param: str) -> Any:
+    """A description key is virtual once folded — its prose then lives inside the schema, so a
+    parent carrying none reads it off its field, or re-proposing existing prose reads as a mutation."""
+    path = description_path(param)
+    if path is None or param in parent_cfg:
+        return parent_cfg.get(param)
+    return (described_field(parent_cfg.get("output_schema"), path) or {}).get("description", "")
 
 
 def candidate_delta(
@@ -61,7 +61,7 @@ def candidate_delta(
         (n, p): v
         for n, cfg in node_config_items(pipeline_overlay)
         for p, v in cfg.items()
-        if v != parent_param_value(parent.get(n) or {}, p, v)
+        if v != parent_param_value(parent.get(n) or {}, p)
     }
     return pf, pp
 
@@ -212,8 +212,8 @@ def candidate_idea(
         [str(v) for v in parent_fields.values() if v]
         + [
             str(prior)
-            for (n, p), v in pp.items()
-            if (prior := parent_param_value(parent.get(n) or {}, p, v)) is not None
+            for n, p in pp
+            if (prior := parent_param_value(parent.get(n) or {}, p)) is not None
         ]
     )
     return written - carried

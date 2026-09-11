@@ -49,11 +49,11 @@ OPTIMIZER_PROMPT_FIELD_MAX_CHARS: dict[str, int] = {
 SCHEMA_DESCRIPTION_MAX_CHARS = 400
 
 SCHEMA_DESCRIPTIONS_INSTRUCTION = (
-    "Rewrite the JSON-Schema `description` of a field on this node's OWN output "
-    "schema. This prose sits adjacent to the slot it governs, inside the field-"
-    "filling loop, so it steers the model harder per token than the instruction "
-    "does. Keys are the node's existing field names and are FIXED — you describe a "
-    "field, you never rename or add one. Describe only where the current prose "
+    "Each `output_schema_descriptions.<path>` key rewrites the JSON-Schema "
+    "`description` of that field on this node's OWN output schema. This prose sits "
+    "adjacent to the slot it governs, inside the field-filling loop, so it steers the "
+    "model harder per token than the instruction does. Paths are FIXED — you describe "
+    "a field, you never rename or add one. Describe only where the current prose "
     "underspecifies what the field should hold."
 )
 
