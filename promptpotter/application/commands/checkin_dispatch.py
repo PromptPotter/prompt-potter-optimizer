@@ -3,18 +3,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.commands.dispatcher import CommandDispatcher
+from promptpotter.application.commands.dispatcher import Applier, CommandCall, CommandDispatcher
 from promptpotter.application.commands.payloads import (
     EditDraftCampaignPayload,
     ResolveOriginPayload,
     StartCheckinPayload,
 )
 from promptpotter.application.datasets.draft_campaign import load_checkin_draft
-from promptpotter.application.datasets.draft_patch import (
-    EditDraftPatch,
-    apply_draft_patch,
-    plan_draft_patch,
-)
+from promptpotter.application.datasets.draft_patch import apply_draft_patch, plan_draft_patch
 from promptpotter.application.datasets.origin_readiness import origin_delta, origin_projection
 from promptpotter.application.datasets.origin_resolve import resolve_origin_turn
 from promptpotter.application.jobs.launcher.checkin import (
@@ -61,18 +57,14 @@ def origin_effect(stores: Stores, draft_id: str, before: dict[str, Any]) -> dict
 
 
 async def dispatch_draft_patch(
-    stores: Stores,
-    *,
-    draft_id: str,
-    patch: EditDraftPatch,
-    idempotency_key: str,
+    stores: Stores, call: CommandCall[EditDraftCampaignPayload]
 ) -> dict[str, Any]:
     """The single write path behind ``edit-draft-campaign``. The candidate-library ingresses and
     the CLI's ``--set`` derive their patch and then ride this, so an origin edit is a
     ``CommandRecord`` whatever the ingress looked like."""
-
+    draft_id = call.payload.draft_id
     draft = _reread_draft(stores, draft_id)
-    plan = plan_draft_patch(stores, draft, patch)
+    plan = plan_draft_patch(stores, draft, call.payload.patch)
 
     def _apply() -> dict[str, Any]:
         updated = apply_draft_patch(draft, plan)
@@ -81,27 +73,22 @@ async def dispatch_draft_patch(
 
     before = origin_projection(draft)
     outcome = await CommandDispatcher(stores).dispatch_checkin_command(
-        kind="edit-draft-campaign",
-        campaign_id=draft_id,
-        payload=EditDraftCampaignPayload(draft_id=draft_id, patch=patch).model_dump(mode="json"),
-        idempotency_key=idempotency_key,
-        applier=_apply,
-        on_replay=lambda: reread_draft_wire(stores, draft_id),
-        effect_fn=lambda: origin_effect(stores, draft_id, before),
+        call,
+        Applier(
+            _apply,
+            on_replay=lambda: reread_draft_wire(stores, draft_id),
+            effect_fn=lambda: origin_effect(stores, draft_id, before),
+        ),
     )
     return cast("dict[str, Any]", outcome.result)
 
 
 async def dispatch_origin_resolution(
-    stores: Stores,
-    *,
-    draft_id: str,
-    message: str,
-    idempotency_key: str,
+    stores: Stores, call: CommandCall[ResolveOriginPayload]
 ) -> dict[str, Any]:
     """One origin-resolver turn, recorded. Calling ``resolve_origin_turn`` bare puts the turn on no
     ledger AND re-spends the LLM call that ``on_replay`` serves from ``cache.json``."""
-
+    draft_id, message = call.payload.draft_id, call.payload.message
     draft = _reread_draft(stores, draft_id)
 
     async def _apply() -> dict[str, Any]:
@@ -129,24 +116,23 @@ async def dispatch_origin_resolution(
 
     before = origin_projection(draft)
     outcome = await CommandDispatcher(stores).dispatch_checkin_command(
-        kind="resolve-origin",
-        campaign_id=draft_id,
-        payload=ResolveOriginPayload(draft_id=draft_id, message=message).model_dump(mode="json"),
-        idempotency_key=idempotency_key,
-        applier=_apply,
-        on_replay=_on_replay,
-        effect_fn=lambda: origin_effect(stores, draft_id, before),
+        call,
+        Applier(
+            _apply,
+            on_replay=_on_replay,
+            effect_fn=lambda: origin_effect(stores, draft_id, before),
+        ),
     )
     return cast("dict[str, Any]", outcome.result)
 
 
 async def dispatch_start_checkin[T](
     stores: Stores,
+    call: CommandCall[StartCheckinPayload],
     *,
-    campaign_id: str,
-    idempotency_key: str,
     start: Callable[[CycleHop, DraftCampaign], Awaitable[T]],
 ) -> T:
+    campaign_id = call.payload.campaign_id
     draft = _reread_draft(stores, campaign_id)
 
     async def _apply() -> T:
@@ -165,12 +151,8 @@ async def dispatch_start_checkin[T](
             raise
 
     outcome = await CommandDispatcher(stores).dispatch_checkin_command(
-        kind="start-checkin",
-        campaign_id=campaign_id,
-        payload=StartCheckinPayload(campaign_id=campaign_id).model_dump(mode="json"),
-        idempotency_key=idempotency_key,
-        applier=_apply,
         # The flip from `checkin` to `active` is the retry guard: a second Start is a `LaunchError`.
-        dedupe=False,
+        call,
+        Applier(_apply, dedupe=False),
     )
     return cast("T", outcome.result)

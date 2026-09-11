@@ -50,6 +50,7 @@ from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.infrastructure.llm.telemetry import set_cycle_ledger
 from promptpotter.infrastructure.projections.live_dashboard.projection import (
@@ -175,9 +176,7 @@ async def mint_campaign_command(
     dataset_name: str,
     job_registry: JobRegistry,
     job: Job,
-    halt_at_accuracy: float | None = None,
-    spend_budget_usd: float | None = None,
-    token_budget: int | None = None,
+    limits: LaunchLimits,
     origin_override: dict[str, Any] | None = None,
     pipeline_overlay: dict[str, Any] | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
@@ -197,7 +196,7 @@ async def mint_campaign_command(
 
     backend_type = _read_backend_type_from_dataset(dataset_root, dataset_name)
 
-    spend_budget_usd, token_budget = await admit_and_hold(
+    held = await admit_and_hold(
         stores=stores,
         job_registry=job_registry,
         job=job,
@@ -205,8 +204,7 @@ async def mint_campaign_command(
         dataset_name=dataset_name,
         backend_type=backend_type,
         backend_url=backend_url,
-        requested_cap_usd=spend_budget_usd,
-        requested_cap_tokens=token_budget,
+        requested=limits,
     )
 
     # SETUP — the ids bind only once the mint resolves; init them so the failure handler can tell
@@ -265,9 +263,7 @@ async def mint_campaign_command(
             train_data=train_data,
             job_registry=job_registry,
             job_id=job.job_id,
-            halt_at_accuracy=halt_at_accuracy,
-            spend_budget_usd=spend_budget_usd,
-            token_budget=token_budget,
+            limits=held,
         ),
         name=f"job-{job.job_id}",
     )
@@ -328,9 +324,7 @@ async def start_run_command(
     job: Job,
     hop: CycleHop,
     kind: str,
-    halt_at_accuracy: float | None = None,
-    spend_budget_usd: float | None = None,
-    token_budget: int | None = None,
+    limits: LaunchLimits,
     stop_after_rounds: int | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
 ) -> Job:
@@ -353,7 +347,7 @@ async def start_run_command(
     backend_type = _read_backend_type_from_dataset(dataset_root, campaign.dataset_name)
     dataset_name = campaign.dataset_name
 
-    spend_budget_usd, token_budget = await admit_and_hold(
+    held = await admit_and_hold(
         stores=stores,
         job_registry=job_registry,
         job=job,
@@ -361,8 +355,7 @@ async def start_run_command(
         dataset_name=dataset_name,
         backend_type=backend_type,
         backend_url=backend_url,
-        requested_cap_usd=spend_budget_usd,
-        requested_cap_tokens=token_budget,
+        requested=limits,
     )
 
     try:
@@ -402,9 +395,7 @@ async def start_run_command(
             train_data=train_data,
             job_registry=job_registry,
             job_id=job.job_id,
-            halt_at_accuracy=halt_at_accuracy,
-            spend_budget_usd=spend_budget_usd,
-            token_budget=token_budget,
+            limits=held,
             stop_after_rounds=stop_after_rounds,
         ),
         name=f"job-{job.job_id}",
@@ -420,9 +411,7 @@ async def _run_in_background(
     train_data: list[Any],
     job_registry: JobRegistry,
     job_id: str,
-    halt_at_accuracy: float | None,
-    spend_budget_usd: float | None,
-    token_budget: int | None,
+    limits: LaunchLimits,
     stop_after_rounds: int | None = None,
 ) -> None:
 
@@ -447,9 +436,8 @@ async def _run_in_background(
             campaign_config,
             session=session,
             observers=observers,
-            mode=RunMode(halt_at_accuracy=halt_at_accuracy, stop_after_rounds=stop_after_rounds),
-            spend_budget_usd=spend_budget_usd,
-            token_budget=token_budget,
+            mode=RunMode(stop_after_rounds=stop_after_rounds),
+            limits=limits,
         )
         stop_reason = result.stop_reason
         # The SAME classification index.json / dashboard.json / the webapp read.

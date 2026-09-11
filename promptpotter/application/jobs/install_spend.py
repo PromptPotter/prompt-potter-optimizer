@@ -7,12 +7,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import NamedTuple
 
-from promptpotter.application.jobs.quota import (
-    SpendCeilings,
-    is_host_tenant_dir,
-    lifetime_ceilings,
-)
+from promptpotter.application.jobs.quota import is_host_tenant_dir, lifetime_ceilings
 from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.spend import SpendCeilings
 from promptpotter.infrastructure.store.account_spend import (
     UserSpend,
     account_ledgers,
@@ -24,7 +21,7 @@ from promptpotter.infrastructure.store.user_store import User, UserStore
 
 class AccountUsage(NamedTuple):
     """One account's row: who, what they spent, and what they produced. ``ceilings`` reads ``None``
-    for the host, who spends their own money; ``ceilings.overrun(spent)`` is how far past it went.
+    for the host, who spends their own money; ``quota.overrun`` says how far past it went.
     ``cycles`` counts ledger FILES, so a cycle that died before its first append is not among them.
     ``unreadable`` set means the row could not be summed and every other field is a placeholder."""
 

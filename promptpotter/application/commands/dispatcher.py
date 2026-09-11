@@ -14,14 +14,18 @@ from typing import Any, Literal, assert_never
 from pydantic import ConfigDict, ValidationError
 
 from promptpotter.application.commands.payloads import (
+    KIND_OF_PAYLOAD,
+    ArchiveCampaignPayload,
     CampaignPayload,
     CancelQueuedRunPayload,
     ChangeSpendBudgetPayload,
+    CheckinPayload,
     CleanupEmptyCyclesPayload,
     CommandAcceptedBody,
     CommandPayload,
     CompactArchivePayload,
     CyclePayload,
+    DeleteCampaignPayload,
     DeleteCyclePayload,
     ForkCyclePayload,
     LifecyclePayload,
@@ -35,6 +39,7 @@ from promptpotter.application.commands.payloads import (
     SkipSearchpointPayload,
     StartRunPayload,
     StepCyclePayload,
+    UnarchiveCampaignPayload,
     VerifyCandidatePayload,
 )
 from promptpotter.application.datasets.dataset_replace import (
@@ -62,21 +67,16 @@ from promptpotter.application.optimization.resume_and_fork.fork_siblings import 
 from promptpotter.application.runner.origin_gate import GateDecision, submit_gate_decision
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.command_kinds import (
-    ALL_DISPATCHED_KINDS,
-    CampaignConfigKind,
-    CheckinScopedKind,
-    CycleScopedKind,
-    LifecycleKind,
-    WorkspaceScopedKind,
-)
+from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.pipeline_overlay import (
     overlay_sets_model_outside_allowed,
     permitted_models_from_narrowing,
 )
 from promptpotter.domain.results import parse_candidate_label
 from promptpotter.domain.run_records import CommandAckRecord, CommandRecord, CycleSeed
+from promptpotter.domain.spend import BudgetChange
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import (
@@ -173,10 +173,8 @@ def _find_idempotent_command(
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CAP_FOR_KIND", "CommandDispatcher", "CommandOutcome"]
+__all__ = ["CAP_FOR_KIND", "Applier", "CommandCall", "CommandDispatcher", "CommandOutcome"]
 
-
-Applier = Callable[[], Awaitable[Any]] | Callable[[], Any]
 
 # The one cap→verb ladder (ADR-0005 §3): every command kind that funnels through
 # `_record_and_apply` requires exactly one capability, checked at that single
@@ -233,6 +231,27 @@ if set(CAP_FOR_KIND) != ALL_DISPATCHED_KINDS:
 
 
 @dataclass(frozen=True, slots=True)
+class CommandCall[P: CommandPayload]:
+    payload: P
+    idempotency_key: str
+
+    @property
+    def kind(self) -> str:
+        return KIND_OF_PAYLOAD[type(self.payload)]
+
+
+@dataclass(frozen=True, slots=True)
+class Applier:
+    """How one command applies and answers for itself. A deduped retry answers ``on_replay``, never
+    ``run``; ``dedupe=False`` leaves retries to the domain's guard; ``effect_fn`` lands on the ack."""
+
+    run: Callable[[], Awaitable[Any]] | Callable[[], Any]
+    on_replay: Callable[[], Any] | None = None
+    dedupe: bool = True
+    effect_fn: Callable[[], dict[str, Any]] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class CommandOutcome:
     accepted: CommandAcceptedBody
     result: Any = None
@@ -249,49 +268,29 @@ class CommandDispatcher:
     # ------------------------------------------------------------------
     # Lifecycle (campaign-scoped, workspace-style)
     # ------------------------------------------------------------------
-    async def dispatch_lifecycle(
-        self,
-        *,
-        kind: LifecycleKind,
-        payload: LifecyclePayload,
-        idempotency_key: str,
-    ) -> CommandOutcome:
+    async def dispatch_lifecycle(self, call: CommandCall[LifecyclePayload]) -> CommandOutcome:
         """The ``CommandRecord`` lands on the WORKSPACE ledger because ``archive`` MOVES the
         campaign tree and ``delete`` REMOVES it — its own ledger cannot be the audit home."""
-        self._load_owned_campaign(payload.campaign_id)
+        self._load_owned_campaign(call.payload.campaign_id)
         ledger = CycleEventLog.open_workspace(self._stores.base_dir)
         return await self._record_and_apply(
-            ledger=ledger,
-            kind=kind,
-            payload=payload.model_dump(mode="json"),
-            idempotency_key=idempotency_key,
-            applier=lambda: self._apply_lifecycle(kind, payload),
+            ledger, call, Applier(lambda: self._apply_lifecycle(call.payload))
         )
 
-    async def dispatch_campaign_config(
-        self,
-        *,
-        kind: CampaignConfigKind,
-        payload: CampaignPayload,
-        idempotency_key: str,
-    ) -> CommandOutcome:
+    async def dispatch_campaign_config(self, call: CommandCall[CampaignPayload]) -> CommandOutcome:
         """An in-place edit of ``campaign.json`` — the campaign persists, so the record is an
         ordinary workspace-ledger admin edit rather than the lifecycle move beside it."""
-        self._load_owned_campaign(payload.campaign_id)
+        self._load_owned_campaign(call.payload.campaign_id)
         ledger = CycleEventLog.open_workspace(self._stores.base_dir)
         return await self._record_and_apply(
-            ledger=ledger,
-            kind=kind,
-            payload=payload.model_dump(mode="json"),
-            idempotency_key=idempotency_key,
-            applier=self._build_campaign_config_applier(payload),
+            ledger, call, self._build_campaign_config_applier(call.payload)
         )
 
     def _build_campaign_config_applier(self, payload: CampaignPayload) -> Applier:
         cid = payload.campaign_id
         if isinstance(payload, SetCampaignLabelPayload):
             label = payload.label
-            return lambda: self._apply_set_campaign_label(cid, label)
+            return Applier(lambda: self._apply_set_campaign_label(cid, label))
         raise PayloadInvalidError(  # pragma: no cover — the registry pairs every kind with a type
             f"no applier wired for campaign-config payload {type(payload).__name__}"
         )
@@ -307,19 +306,14 @@ class CommandDispatcher:
     # Cycle-scoped (migrated sanctioned POSTs)
     # ------------------------------------------------------------------
     async def dispatch_cycle_command(
-        self,
-        *,
-        kind: CycleScopedKind,
-        payload: CyclePayload,
-        idempotency_key: str,
-        expected_version: int | None,
+        self, call: CommandCall[CyclePayload], *, expected_version: int | None
     ) -> CommandOutcome:
         """The payload arrives TYPED, which is the whole validation — the CLI and the API build the
         same model, so neither entry point can validate a field the other spells differently.
 
         ``Expected-Version`` is checked only when the header is present — the v0 relaxation of
         ADR-0001, which mandates it."""
-        campaign_id, cycle_id = payload.campaign_id, payload.cycle_id
+        campaign_id, cycle_id = call.payload.campaign_id, call.payload.cycle_id
         campaign = self._load_owned_campaign(campaign_id)
         hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
         cycle_dir = self._stores.campaigns.cycle_dir(hop)
@@ -341,18 +335,11 @@ class CommandDispatcher:
 
         # delete-cycle's apply removes the dir AND its ledger, so the record + ack must be
         # built BEFORE it disappears — pre-emitted on the parent's root ledger.
-        if kind == "delete-cycle":
-            return await self._dispatch_delete_cycle(
-                campaign=campaign, hop=hop, idempotency_key=idempotency_key
-            )
+        if isinstance(call.payload, DeleteCyclePayload):
+            return await self._dispatch_delete_cycle(campaign=campaign, hop=hop, call=call)
 
-        applier = self._build_cycle_applier(kind, campaign, hop, payload)
         return await self._record_and_apply(
-            ledger=ledger,
-            kind=kind,
-            payload=payload.model_dump(mode="json"),
-            idempotency_key=idempotency_key,
-            applier=applier,
+            ledger, call, self._build_cycle_applier(campaign, hop, call.payload)
         )
 
     async def _dispatch_delete_cycle(
@@ -360,7 +347,7 @@ class CommandDispatcher:
         *,
         campaign: Campaign,
         hop: CycleHop,
-        idempotency_key: str,
+        call: CommandCall[CyclePayload],
     ) -> CommandOutcome:
         """Liveness, not activeness — and gated HERE rather than in the store, because the runner
         calls the same helper as the OWNER, inside ``RUN_FRESH_S`` of its own index write."""
@@ -384,86 +371,62 @@ class CommandDispatcher:
             if not deleted:
                 raise _DeleteCycleRejectedError(reason)
 
-        return await self._record_and_apply(
-            ledger=root_ledger,
-            kind="delete-cycle",
-            payload=DeleteCyclePayload(
-                campaign_id=hop.campaign_id, cycle_id=hop.cycle_id
-            ).model_dump(mode="json"),
-            idempotency_key=idempotency_key,
-            applier=_apply,
-        )
+        return await self._record_and_apply(root_ledger, call, Applier(_apply))
 
     # ------------------------------------------------------------------
     # Workspace-scoped (no cycle target — backend registry mutations)
     # ------------------------------------------------------------------
-    async def dispatch_workspace_command(
-        self,
-        *,
-        kind: WorkspaceScopedKind,
-        payload: CommandPayload,
-        idempotency_key: str,
-    ) -> CommandOutcome:
+    async def dispatch_workspace_command(self, call: CommandCall[CommandPayload]) -> CommandOutcome:
         ledger = CycleEventLog.open_workspace(self._stores.base_dir)
+        payload = call.payload
         applier: Applier
-        # A deduped retry must not re-run the migration — it would version the slug a second
-        # time — and the body echoes the subject, so it replays without touching disk.
-        on_replay: Callable[[], Any] | None = None
         if isinstance(payload, RegisterBackendPayload):
             backend = payload
-            applier = lambda: self._apply_register_backend(backend)  # noqa: E731
+            applier = Applier(lambda: self._apply_register_backend(backend))
         elif isinstance(payload, ReplaceDatasetPayload):
             slug = payload.slug
-            applier = lambda: self._apply_replace_dataset(slug)  # noqa: E731
-            on_replay = lambda: {"slug": slug}  # noqa: E731
+            # A deduped retry must not re-run the migration — it would version the slug a second
+            # time — and the body echoes the subject, so it replays without touching disk.
+            applier = Applier(
+                lambda: self._apply_replace_dataset(slug), on_replay=lambda: {"slug": slug}
+            )
         elif isinstance(payload, CompactArchivePayload):
             job = payload
-            applier = lambda: self._apply_compact_archive(job)  # noqa: E731
             # A deduped retry must not re-run the pass: `purge-cold` would report a second deletion
             # of bytes already gone. It replays an EMPTY report — the same model the applier
             # answers with, because the route validates this body too, and a bespoke
             # `{"replayed": true}` shape 500s the retry that an Idempotency-Key exists to make safe.
             # All-zero is also the true answer: this attempt moved nothing.
-            on_replay = lambda: ArchiveReport().model_dump(mode="json")  # noqa: E731
+            applier = Applier(
+                lambda: self._apply_compact_archive(job),
+                on_replay=lambda: ArchiveReport().model_dump(mode="json"),
+            )
         elif isinstance(payload, CancelQueuedRunPayload):
             job_id = payload.job_id
-            applier = lambda: self._apply_cancel_queued_run(job_id)  # noqa: E731
+            applier = Applier(lambda: self._apply_cancel_queued_run(job_id))
         elif isinstance(payload, MintCampaignPayload):
             mint = payload
 
-            async def applier() -> None:
+            async def _mint() -> None:
                 await self._apply_mint_campaign(mint)
+
+            applier = Applier(_mint)
         else:  # pragma: no cover — the registry pairs every kind with a type
             raise PayloadInvalidError(
                 f"no applier wired for workspace payload {type(payload).__name__}"
             )
 
-        return await self._record_and_apply(
-            ledger=ledger,
-            kind=kind,
-            payload=payload.model_dump(mode="json"),
-            idempotency_key=idempotency_key,
-            applier=applier,
-            on_replay=on_replay,
-        )
+        return await self._record_and_apply(ledger, call, applier)
 
     # ------------------------------------------------------------------
     # Check-in scoped (origin authoring — the draft-mutating commands)
     # ------------------------------------------------------------------
-    async def dispatch_checkin_command(
-        self,
-        *,
-        kind: CheckinScopedKind,
-        campaign_id: str,
-        payload: dict[str, Any],
-        idempotency_key: str,
-        applier: Applier,
-        on_replay: Callable[[], Any] | None = None,
-        dedupe: bool = True,
-        effect_fn: Callable[[], dict[str, Any]] | None = None,
+    async def dispatch_checkin_command[P: CheckinPayload](
+        self, call: CommandCall[P], applier: Applier
     ) -> CommandOutcome:
-        """``on_replay`` rebuilds the 200 body from disk on a deduped retry. ``start-checkin``
-        alone passes ``dedupe=False`` — its ``job_id`` has no disk home."""
+        """The one family whose ``Applier`` is authored outside this class (``checkin_dispatch.py``).
+        ``start-checkin`` alone sets ``dedupe=False`` — its ``job_id`` has no disk home."""
+        campaign_id = call.payload.checkin_campaign_id
         campaign = self._load_owned_campaign(campaign_id)
         cycle_dir = self._stores.campaigns.cycle_dir(campaign.root_hop)
         if not CycleLayout(cycle_dir).manifest.is_file():
@@ -471,37 +434,17 @@ class CommandDispatcher:
                 f"check-in cycle not found: {campaign_id}/{campaign.root_cycle_id}",
                 code="command_target_not_found",
             )
-        return await self._record_and_apply(
-            ledger=CycleEventLog.open(CycleDir(cycle_dir)),
-            kind=kind,
-            payload=payload,
-            idempotency_key=idempotency_key,
-            applier=applier,
-            on_replay=on_replay,
-            dedupe=dedupe,
-            effect_fn=effect_fn,
-        )
+        return await self._record_and_apply(CycleEventLog.open(CycleDir(cycle_dir)), call, applier)
 
     # ------------------------------------------------------------------
     # Shared record / apply / ack pipeline
     # ------------------------------------------------------------------
-    async def _record_and_apply(
-        self,
-        *,
-        ledger: CycleEventLog,
-        kind: str,
-        payload: dict[str, Any],
-        idempotency_key: str,
-        applier: Applier,
-        on_replay: Callable[[], Any] | None = None,
-        dedupe: bool = True,
-        effect_fn: Callable[[], dict[str, Any]] | None = None,
+    async def _record_and_apply[P: CommandPayload](
+        self, ledger: CycleEventLog, call: CommandCall[P], applier: Applier
     ) -> CommandOutcome:
+        kind, idempotency_key = call.kind, call.idempotency_key
         self._require_capability_for(kind)
-        # A deduped retry never re-runs the applier, so a 200-body kind supplies
-        # `on_replay` to rebuild its body from disk; one whose body has no disk
-        # home passes `dedupe=False` and lets its own domain guard answer.
-        if dedupe:
+        if applier.dedupe:
             existing = _find_idempotent_command(ledger, idempotency_key)
             if existing is not None:
                 return CommandOutcome(
@@ -510,7 +453,7 @@ class CommandDispatcher:
                         correlation_id=idempotency_key,
                         ledger_sequence=existing.offset,
                     ),
-                    result=on_replay() if on_replay is not None else None,
+                    result=applier.on_replay() if applier.on_replay is not None else None,
                 )
 
         command_id = str(uuid.uuid4())
@@ -520,14 +463,14 @@ class CommandDispatcher:
             offset = emit_command(
                 command_id=command_id,
                 kind=kind,
-                payload=payload,
+                payload=call.payload.model_dump(mode="json"),
                 idempotency_key=idempotency_key,
                 issued_by_user_id=acting_principal_id(self._stores.identity),
             )
             ack_status: Literal["applied", "rejected"] = "applied"
             ack_detail = ""
             try:
-                result = applier()
+                result = applier.run()
                 if asyncio.iscoroutine(result):
                     result = await result
                 applied_value = result
@@ -539,7 +482,11 @@ class CommandDispatcher:
                 # `PotterError` to its own status and anything else to a logged 500.
                 emit_command_ack(command_id=command_id, status="rejected", detail=str(exc))
                 raise
-            effect = effect_fn() if (effect_fn is not None and ack_status == "applied") else None
+            effect = (
+                applier.effect_fn()
+                if (applier.effect_fn is not None and ack_status == "applied")
+                else None
+            )
             emit_command_ack(
                 command_id=command_id, status=ack_status, detail=ack_detail, effect=effect
             )
@@ -568,11 +515,10 @@ class CommandDispatcher:
     # ------------------------------------------------------------------
     def _build_cycle_applier(
         self,
-        kind: CycleScopedKind,
         campaign: Campaign,
         hop: CycleHop,
         payload: CyclePayload,
-    ) -> Any:
+    ) -> Applier:
         """Dispatched on the payload's TYPE, not on ``kind`` — every cycle-scoped verb owns one
         model, so the branch that reads a field is the branch its type reached. Nothing here
         re-validates: the model is the only validation, and a second lenient pass over an
@@ -596,7 +542,7 @@ class CommandDispatcher:
                     seed=None,
                 )
 
-            return _apply_verify
+            return Applier(_apply_verify)
         if isinstance(payload, ForkCyclePayload):
             seed = _parse_cycle_seed(payload.seed)
             # Steering the model OUTSIDE what the node permits (nothing declared = nothing
@@ -620,8 +566,8 @@ class CommandDispatcher:
 
             async def _apply_fork() -> None:
                 # Mint THEN launch: minting alone is disk I/O, and the fork would sit
-                # seeded-but-idle awaiting a CLI `resume` that never comes from the web. Pass no
-                # spend/halt — the seed's reconciled limits govern at the runner seam.
+                # seeded-but-idle awaiting a CLI `resume` that never comes from the web. Declare
+                # no limits — the seed's reconciled ones govern at the runner seam.
                 new_cycle_id = mint_operator_fork(
                     stores=self._stores,
                     hop=hop,
@@ -636,8 +582,7 @@ class CommandDispatcher:
                         hop=CycleHop(campaign_id=hop.campaign_id, cycle_id=new_cycle_id),
                         kind="resume",
                         dataset_name=dataset_name,
-                        halt_at_accuracy=None,
-                        spend_budget_usd=None,
+                        limits=LaunchLimits(),
                     )
                 except BaseException:
                     # ONE act, landing whole or not at all: a launch refused after the mint (full
@@ -648,65 +593,58 @@ class CommandDispatcher:
                     self._cleanup_failed_fork(hop, new_cycle_id)
                     raise
 
-            return _apply_fork
+            return Applier(_apply_fork)
         if isinstance(payload, StepCyclePayload):
             # Advance N rounds in place then auto-pause, on the resume machinery + RunMode's
             # run-scoped stop — the `campaign.step` capability for a delegate without run.
             steps = payload.rounds
-            return lambda: self._apply_start_run(
-                hop=hop,
-                kind="resume",
-                dataset_name=dataset_name,
-                halt_at_accuracy=None,
-                spend_budget_usd=None,
-                stop_after_rounds=steps,
+            return Applier(
+                lambda: self._apply_start_run(
+                    hop=hop,
+                    kind="resume",
+                    dataset_name=dataset_name,
+                    limits=LaunchLimits(),
+                    stop_after_rounds=steps,
+                )
             )
         if isinstance(payload, SkipSearchpointPayload):
-            return lambda: self._apply_skip_searchpoint(hop)
+            return Applier(lambda: self._apply_skip_searchpoint(hop))
         if isinstance(payload, CleanupEmptyCyclesPayload):
-            return lambda: self._apply_cleanup_empty(hop)
+            return Applier(lambda: self._apply_cleanup_empty(hop))
         if isinstance(payload, PauseCyclePayload):
-            return lambda: self._apply_pause_cycle(hop)
+            return Applier(lambda: self._apply_pause_cycle(hop))
         if isinstance(payload, SetSampleLookaheadPayload):
             cells = payload.cells
-            return lambda: self._apply_set_sample_lookahead(hop, cells=cells)
+            return Applier(lambda: self._apply_set_sample_lookahead(hop, cells=cells))
         if isinstance(payload, OriginGateDecisionPayload):
             decision = payload.decision
-            return lambda: self._apply_origin_gate_decision(hop, decision)
+            return Applier(lambda: self._apply_origin_gate_decision(hop, decision))
         if isinstance(payload, ChangeSpendBudgetPayload):
-            usd_val, tok_val = payload.max_usd, payload.max_tokens
-
-            async def _apply_budget() -> None:
-                await self._apply_change_spend_budget(hop, max_usd=usd_val, max_tokens=tok_val)
-
-            return _apply_budget
+            change = BudgetChange(payload.max_usd, payload.max_tokens)
+            return Applier(lambda: self._apply_change_spend_budget(hop, change))
         if isinstance(payload, StartRunPayload):
             run = payload
 
             async def _apply() -> None:
                 await self._apply_start_run(
-                    hop=hop,
-                    kind=run.kind,
-                    dataset_name=dataset_name,
-                    halt_at_accuracy=run.halt_at_accuracy,
-                    spend_budget_usd=run.spend_budget_usd,
-                    token_budget=run.token_budget,
+                    hop=hop, kind=run.kind, dataset_name=dataset_name, limits=run
                 )
 
-            return _apply
+            return Applier(_apply)
         raise PayloadInvalidError(  # pragma: no cover — the registry pairs every kind with a type
-            f"no applier wired for cycle-scoped kind {kind!r}"
+            f"no applier wired for cycle-scoped payload {type(payload).__name__}"
         )
 
-    def _apply_lifecycle(self, kind: LifecycleKind, payload: LifecyclePayload) -> None:
+    def _apply_lifecycle(self, payload: LifecyclePayload) -> None:
         changed_at = utcnow_iso()
         campaigns = self._stores.campaigns
         campaign_id, reason = payload.campaign_id, payload.reason
-        if kind == "archive-campaign":
+        if isinstance(payload, ArchiveCampaignPayload):
             campaigns.archive_campaign(campaign_id, changed_at=changed_at, reason=reason)
-        elif kind == "unarchive-campaign":
+        elif isinstance(payload, UnarchiveCampaignPayload):
             campaigns.unarchive_campaign(campaign_id, changed_at=changed_at, reason=reason)
-        elif kind == "delete-campaign":  # destructive (keepsake spared only with keep_results)
+        elif isinstance(payload, DeleteCampaignPayload):
+            # destructive (keepsake spared only with keep_results)
             campaigns.delete_campaign(
                 campaign_id,
                 keep_results=payload.keep_results,
@@ -715,7 +653,7 @@ class CommandDispatcher:
                 inner_sandbox_root=inner_sandboxes_dir(self._stores.shared_root),
             )
         else:
-            assert_never(kind)
+            assert_never(payload)
 
     def _apply_replace_dataset(self, slug: str) -> dict[str, str]:
         try:
@@ -782,36 +720,24 @@ class CommandDispatcher:
         submit_gate_decision(self._stores.campaigns.cycle_dir(hop), decision)
 
     def _clamp_to_account_ceilings(
-        self,
-        hop: CycleHop,
-        job_registry: JobRegistry,
-        max_usd: float | None,
-        max_tokens: int | None,
-    ) -> tuple[float | None, int | None]:
+        self, hop: CycleHop, job_registry: JobRegistry, change: BudgetChange
+    ) -> BudgetChange:
         """Only a SUPPLIED arm is clamped — composing an absent one would write a ceiling the
         caller asked to leave alone."""
         user = self._stores.users.get_or_create(
             user_id=str(self._stores.identity.user_id),
             tenant_id=str(self._stores.identity.tenant_id),
         )
-        caps = clamp_budget_change(
-            max_usd=max_usd,
-            max_tokens=max_tokens,
+        return clamp_budget_change(
+            requested=change,
             user=user,
             stores=self._stores,
             job_registry=job_registry,
             hop=hop,
         )
-        return caps.usd, caps.tokens
 
-    async def _apply_change_spend_budget(
-        self,
-        hop: CycleHop,
-        *,
-        max_usd: float | None,
-        max_tokens: int | None,
-    ) -> None:
-        """The round loop's BudgetGate re-reads the moved ceiling every clean round. A ``None`` arg
+    async def _apply_change_spend_budget(self, hop: CycleHop, change: BudgetChange) -> None:
+        """The round loop's BudgetGate re-reads the moved ceiling every clean round. A ``None`` arm
         leaves that ceiling untouched; ``0`` halts at the next round boundary. Both arms compose
         against the account first, because ``entry.py::_usd_cap`` prefers this file over the cap the
         launch composed — unclamped, raising one here is the way around the host-wallet gate."""
@@ -820,15 +746,12 @@ class CommandDispatcher:
             raise ServiceUnavailableError(
                 "job registry not initialised", code="job_registry_unavailable"
             )
-        max_usd, max_tokens = await asyncio.to_thread(
-            self._clamp_to_account_ceilings, hop, registry, max_usd, max_tokens
-        )
+        clamped = await asyncio.to_thread(self._clamp_to_account_ceilings, hop, registry, change)
         hold_ceiling(
             job_registry=registry,
             hop=hop,
             cycle_dir=self._stores.campaigns.cycle_dir(hop),
-            max_usd=max_usd,
-            max_tokens=max_tokens,
+            change=clamped,
         )
 
     async def _apply_mint_campaign(self, payload: MintCampaignPayload) -> None:
@@ -848,9 +771,7 @@ class CommandDispatcher:
                 dataset_name=payload.dataset_name,
                 job_registry=registry,
                 job=job,
-                halt_at_accuracy=payload.halt_at_accuracy,
-                spend_budget_usd=payload.spend_budget_usd,
-                token_budget=payload.token_budget,
+                limits=payload,
             ),
         )
 
@@ -860,9 +781,7 @@ class CommandDispatcher:
         hop: CycleHop,
         kind: str,
         dataset_name: str,
-        halt_at_accuracy: float | None,
-        spend_budget_usd: float | None,
-        token_budget: int | None = None,
+        limits: LaunchLimits,
         stop_after_rounds: int | None = None,
     ) -> None:
         """``stop_after_rounds`` bounds the run in place — the ``step-round`` verb's mechanism.
@@ -888,9 +807,7 @@ class CommandDispatcher:
                 job=job,
                 hop=hop,
                 kind=kind,
-                halt_at_accuracy=halt_at_accuracy,
-                spend_budget_usd=spend_budget_usd,
-                token_budget=token_budget,
+                limits=limits,
                 stop_after_rounds=stop_after_rounds,
             ),
         )

@@ -10,6 +10,8 @@ from fastapi import File, Form, Header, Request, UploadFile
 from pydantic import Field
 
 from promptpotter.application.commands.checkin_dispatch import dispatch_draft_patch
+from promptpotter.application.commands.dispatcher import CommandCall
+from promptpotter.application.commands.payloads import EditDraftCampaignPayload
 from promptpotter.application.datasets.csv_ingest import (
     MAX_SAMPLES,
     IngestError,
@@ -44,6 +46,13 @@ from promptpotter.shared.errors import (
     NotFoundError,
     PayloadInvalidError,
 )
+
+
+def _candidate_library_call(
+    draft_id: str, terms: tuple[str, ...], idempotency_key: str
+) -> CommandCall[EditDraftCampaignPayload]:
+    patch = EditDraftPatch(candidate_library=list(terms))
+    return CommandCall(EditDraftCampaignPayload(draft_id=draft_id, patch=patch), idempotency_key)
 
 
 def _too_large(observed: int | str) -> ContentTooLargeError:
@@ -148,12 +157,7 @@ async def upload_candidate_library(
             code="ingest_failed",
             details={"reason": "empty"},
         )
-    return await dispatch_draft_patch(
-        stores,
-        draft_id=draft_id,
-        patch=EditDraftPatch(candidate_library=list(terms)),
-        idempotency_key=idemp,
-    )
+    return await dispatch_draft_patch(stores, _candidate_library_call(draft_id, terms, idemp))
 
 
 class _BuildLibraryBody(StrictModel):
@@ -200,12 +204,7 @@ async def build_candidate_library_from_column(
             code="ingest_failed",
             details={"reason": "empty"},
         )
-    return await dispatch_draft_patch(
-        stores,
-        draft_id=body.draft_id,
-        patch=EditDraftPatch(candidate_library=list(terms)),
-        idempotency_key=idemp,
-    )
+    return await dispatch_draft_patch(stores, _candidate_library_call(body.draft_id, terms, idemp))
 
 
 @datasets_router.post("/{name}/draft")

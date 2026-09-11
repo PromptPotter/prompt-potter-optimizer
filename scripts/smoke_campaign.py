@@ -43,6 +43,8 @@ from promptpotter.application.embedded_run import (  # noqa: E402
 from promptpotter.application.pipeline_resolve import (  # noqa: E402
     configure_and_apply_pipeline,
 )
+from promptpotter.application.runner.entry import RunMode  # noqa: E402
+from promptpotter.domain.launch_limits import LaunchLimits  # noqa: E402
 from promptpotter.presentation.terminal.completion import report_completion  # noqa: E402
 from promptpotter.presentation.terminal.live.display import LiveDisplay  # noqa: E402
 from promptpotter.presentation.terminal.primitives import set_display_tags  # noqa: E402
@@ -165,6 +167,8 @@ async def _run(args: argparse.Namespace) -> int:
         origin,
         campaign_config,
         session=session,
+        limits=LaunchLimits(),
+        mode=RunMode(),
     )
     report_completion(result, session=session)
 

@@ -37,6 +37,7 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
 from promptpotter.application.jobs.mint import resolve_cycle_plan
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.infrastructure.runtime_flags import is_checkin
 from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
@@ -235,7 +236,7 @@ async def _start_checkin_run(
     """Everything a check-in Start does once its slot is HELD — which, for a queued launch, is
     after the wait. Nothing before this point touches the campaign, so a launch sitting in the
     queue leaves the check-in exactly as the operator left it."""
-    spend_budget_usd, token_budget = await admit_and_hold(
+    held = await admit_and_hold(
         stores=stores,
         job_registry=job_registry,
         job=job,
@@ -243,8 +244,7 @@ async def _start_checkin_run(
         dataset_name=draft.slug,
         backend_type=draft.connector,
         backend_url=backend_url,
-        requested_cap_usd=None,
-        requested_cap_tokens=None,
+        requested=LaunchLimits(),
     )
 
     async def make_session(dataset_name: str) -> Session:
@@ -279,9 +279,7 @@ async def _start_checkin_run(
             train_data=prepared.train_data,
             job_registry=job_registry,
             job_id=job.job_id,
-            halt_at_accuracy=None,
-            spend_budget_usd=spend_budget_usd,
-            token_budget=token_budget,
+            limits=held,
         ),
         name=f"job-{job.job_id}",
     )

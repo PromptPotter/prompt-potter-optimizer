@@ -34,6 +34,7 @@ from promptpotter.application.embedded_run import (
     run_campaign,
 )
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
+from promptpotter.application.runner.entry import RunMode
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.connectors.dspy_module import (
     PROGRAM_NODE,
@@ -41,6 +42,7 @@ from promptpotter.connectors.dspy_module import (
     SCORE_KEY,
     DspyProgram,
 )
+from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
 from promptpotter.infrastructure.store.io import write_text, write_yaml
@@ -197,8 +199,11 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
                 origin,
                 config,
                 session=session,
-                spend_budget_usd=self.loop.spend_budget_usd,
-                token_budget=self.loop.token_budget,
+                limits=LaunchLimits(
+                    spend_budget_usd=self.loop.spend_budget_usd,
+                    token_budget=self.loop.token_budget,
+                ),
+                mode=RunMode(),
             )
         finally:
             await session.backend_client.aclose()

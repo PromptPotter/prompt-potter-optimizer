@@ -71,8 +71,8 @@ LEDGER_BASELINE = {
     # there without a runtime `optimization -> initialization` edge.
     # +3: `application/commands/` (an empty `__init__` plus three modules for one). The dispatcher
     # imports no FastAPI and the CLI verbs dispatch through it, so it is application code. Split by
-    # importer: `payloads` alone serves the TS builder and the CLI's run-limit check,
-    # `checkin_dispatch` serves dataset ingest and CLI `new`, and `dispatcher` holds the appliers.
+    # importer: `payloads` alone serves the TS builder, `checkin_dispatch` serves dataset ingest
+    # and CLI `new`, and `dispatcher` holds the appliers.
     # +6 (three of them `__init__`s): `application/evidence/` splits the evidence read into the
     # address grammar (`subjects`, all an entry point that only ADDRESSES a subject imports), the
     # disk walk (`read`) and the two pure statistics over its rows (`comparison`, `grid`); and
@@ -81,7 +81,9 @@ LEDGER_BASELINE = {
     # +1: `domain/rendering.py` leaves domain as two `application/views/render/` modules, each named
     # for what it holds — `optimizer_prompt_text`, whose definitions shape the optimizer prompt, and
     # `prefix_reading` — because no one name covers both.
-    "modules": 353,
+    # +1: `domain/launch_limits.py` — the one run-limit carrier the wire payloads, admission, the
+    # runner and every ingress import; it replaces `RunLimitsPayload` and `RunMode.halt_at_accuracy`.
+    "modules": 354,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     "init_files": 53,
@@ -271,7 +273,11 @@ LEDGER_BASELINE = {
     # +1: an output-schema field's prose locks per field, and a field added under a held one stays
     # held. One `object` param reached top-level fields only and locked all or none, so a nested
     # field's prose was unreachable and a locked one could not be told apart. (test_integrity § 4)
-    "test_functions": 178,
+    # +1: moving one spend ceiling leaves the other at the cap its launch composed. Merged against
+    # the job's reservation instead, the untouched arm would land in `spend_cap.json`, which the
+    # gate prefers, and a USD raise would lift the token ceiling to the account's headroom.
+    # (test_security)
+    "test_functions": 179,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

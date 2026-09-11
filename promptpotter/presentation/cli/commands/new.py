@@ -17,6 +17,12 @@ from promptpotter.application.commands.checkin_dispatch import (
     dispatch_origin_resolution,
     dispatch_start_checkin,
 )
+from promptpotter.application.commands.dispatcher import CommandCall
+from promptpotter.application.commands.payloads import (
+    EditDraftCampaignPayload,
+    ResolveOriginPayload,
+    StartCheckinPayload,
+)
 from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     read_campaign_config_file,
@@ -197,9 +203,10 @@ async def _ingest_checkin(args: argparse.Namespace) -> str:
         if args.sets:
             await dispatch_draft_patch(
                 stores,
-                draft_id=campaign_id,
-                patch=_sets_to_patch(args.sets),
-                idempotency_key=uuid.uuid4().hex,
+                CommandCall(
+                    EditDraftCampaignPayload(draft_id=campaign_id, patch=_sets_to_patch(args.sets)),
+                    uuid.uuid4().hex,
+                ),
             )
             draft = _reload_draft(stores, campaign_id)
 
@@ -212,9 +219,7 @@ async def _ingest_checkin(args: argparse.Namespace) -> str:
             # rather than spinning more LLM turns.
             turn = await dispatch_origin_resolution(
                 stores,
-                draft_id=campaign_id,
-                message="",
-                idempotency_key=uuid.uuid4().hex,
+                CommandCall(ResolveOriginPayload(draft_id=campaign_id), uuid.uuid4().hex),
             )
             resolution = turn.get("resolution") or {}
             draft = _reload_draft(stores, campaign_id)
@@ -250,8 +255,7 @@ async def _ingest_and_prepare_checkin(
 
     prepared = await dispatch_start_checkin(
         stores,
-        campaign_id=campaign_id,
-        idempotency_key=uuid.uuid4().hex,
+        CommandCall(StartCheckinPayload(campaign_id=campaign_id), uuid.uuid4().hex),
         start=lambda hop, draft: prepare_checkin_run(
             stores, hop=hop, draft=draft, make_session=make_session
         ),
@@ -384,7 +388,6 @@ async def _run_loop(
         train_data,
         mode=RunMode(
             diag=getattr(args, "diag", False),
-            halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
         ),
     )
     return cycle_result_command(ctx, session, cycle_result)

@@ -198,9 +198,13 @@ session = await open_session(dataset_name, *, backend_url=…, backend_id=…, o
 observers, dataset, origin = await mint_and_score_origin(
     session, train_data, campaign_config, *, pipeline_params=None, display=None, on_status=None)
 result = await run_campaign(observers, dataset, origin, campaign_config, *, session,
-                            langfuse_session_id=None, spend_budget_usd=None, token_budget=None,
-                            mode=None)
+                            langfuse_session_id=None, limits, mode)
 ```
+
+`limits` is a `promptpotter.domain.launch_limits.LaunchLimits(halt_at_accuracy=…,
+spend_budget_usd=…, token_budget=…)`, the model the CLI flags and the `start-run` payload build; a
+budget it declares may only lower the campaign's own, and `LaunchLimits()` declares none. `mode`
+is `runner/entry.py::RunMode`, and `RunMode()` is a plain run.
 
 Three steps rather than one because every caller does its own work between them. It mints through
 the same `prepare_fresh_cycle` prologue `new` and the web mint run, so the cycle it produces is

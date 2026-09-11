@@ -14,7 +14,6 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
-from promptpotter.application.commands.payloads import RunLimitsPayload
 from promptpotter.application.jobs.reaper import sweep_dead_cycles
 from promptpotter.config.first_run import ensure_api_key
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
@@ -22,7 +21,11 @@ from promptpotter.config.settings import settings
 from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
 from promptpotter.infrastructure.store.layout import tenant_workspace
 from promptpotter.infrastructure.store.session_pointer import active_pointer_exists
-from promptpotter.presentation.cli.commands._shared import identity_from_args, set_verbose
+from promptpotter.presentation.cli.commands._shared import (
+    identity_from_args,
+    launch_limits_from_args,
+    set_verbose,
+)
 from promptpotter.presentation.cli.parsers import build_parser, parser_verbs
 from promptpotter.shared.errors import PotterError, RequestTooLargeError
 
@@ -134,11 +137,7 @@ def _validate_run_limits(args: argparse.Namespace) -> None:
     from pydantic import ValidationError
 
     try:
-        RunLimitsPayload(
-            halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
-            spend_budget_usd=getattr(args, "spend_budget_usd", None),
-            token_budget=getattr(args, "token_budget", None),
-        )
+        launch_limits_from_args(args)
     except ValidationError as exc:
         bad = ", ".join(f"--{str(e['loc'][0]).replace('_', '-')}: {e['msg']}" for e in exc.errors())
         raise SystemExit(f"invalid run limit — {bad}") from None

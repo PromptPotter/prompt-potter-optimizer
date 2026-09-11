@@ -19,7 +19,9 @@ from promptpotter.application.embedded_run import (
     run_campaign,
 )
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
+from promptpotter.application.runner.entry import RunMode
 from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
+from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.sample import Sample
 from promptpotter.presentation.terminal.completion import report_completion
@@ -123,6 +125,8 @@ async def run_bbeh_campaign(
             origin,
             campaign_config,
             session=session,
+            limits=LaunchLimits(),
+            mode=RunMode(),
         )
         report_completion(cycle_result, session=session)
         # Ask the outcome table, never a hand-authored string: the export below is only

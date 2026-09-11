@@ -32,6 +32,7 @@ from promptpotter.config.settings import (
     DEFAULT_BACKEND_URL,
 )
 from promptpotter.domain.connector import BackendUnreachableError
+from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir
@@ -44,7 +45,6 @@ if TYPE_CHECKING:
 
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.jobs.quota import SpendCeilings
     from promptpotter.application.jobs.registry import Job, JobRegistry
     from promptpotter.application.run_observers import RunObservers
     from promptpotter.application.runner.entry import RunMode
@@ -141,6 +141,16 @@ def identity_from_args(args: argparse.Namespace) -> IdentityContext:
     return registered_or_default_identity(getattr(args, "tenant", None))
 
 
+def launch_limits_from_args(args: argparse.Namespace) -> LaunchLimits:
+    """``--halt-at`` / ``--spend-budget`` / ``--token-budget`` as the one model the route validates
+    too — argparse types these and bounds none of them."""
+    return LaunchLimits(
+        halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
+        spend_budget_usd=getattr(args, "spend_budget_usd", None),
+        token_budget=getattr(args, "token_budget", None),
+    )
+
+
 def bind_session_identity(session: Session, ctx: SessionCtx) -> None:
     """Stamp a resumed session's identity onto the freshly-initialized :class:`Session` — the shared
     bind every cycle-scoped CLI command runs after :func:`init_services_cli`."""
@@ -199,7 +209,7 @@ def _build_observers(
 
 async def _hold_machine_slot(
     args: argparse.Namespace, ctx: SessionCtx, session: Session
-) -> tuple[JobRegistry, Job, SpendCeilings]:
+) -> tuple[JobRegistry, Job, LaunchLimits]:
     """Take the SAME machine slot the browser takes, joining the SAME queue when the box is full.
 
     A terminal run that holds nothing makes every statement the machine makes about itself false
@@ -241,7 +251,7 @@ async def _hold_machine_slot(
             f"It starts by itself; Ctrl+C to leave the queue.\n"
         )
         sys.stderr.flush()
-    ceilings = await admit_and_hold(
+    held = await admit_and_hold(
         stores=session.store,
         job_registry=registry,
         job=job,
@@ -249,10 +259,9 @@ async def _hold_machine_slot(
         dataset_name=dataset_name,
         backend_type=backend_type_of_dataset(session.store, dataset_name),
         backend_url=ctx.backend_url,
-        requested_cap_usd=getattr(args, "spend_budget_usd", None),
-        requested_cap_tokens=getattr(args, "token_budget", None),
+        requested=launch_limits_from_args(args),
     )
-    return registry, job, ceilings
+    return registry, job, held
 
 
 async def drive_cycle(
@@ -272,7 +281,7 @@ async def drive_cycle(
     mint), and deliberately so: the front of a CLI verb can sit for minutes on an interactive
     check-in, and a slot held across operator typing is a slot nobody else can have."""
 
-    registry, job, ceilings = await _hold_machine_slot(args, ctx, session)
+    registry, job, held = await _hold_machine_slot(args, ctx, session)
     registry.mark_started(job.job_id)
     pre_origin_acc = ctx.state.get("origin_accuracy", 0.0)
     try:
@@ -287,11 +296,10 @@ async def drive_cycle(
             session=session,
             observers=observers,
             mode=mode,
-            # What admission ADMITTED, not what the flags asked for. Identical for the operator of
+            # What admission HELD, not what the flags asked for. Identical for the operator of
             # the box, who is metered in neither unit; a delegate reaching the terminal under
             # `--tenant` is held to the ceiling their grant allows, exactly as in the browser.
-            spend_budget_usd=ceilings.usd,
-            token_budget=ceilings.tokens,
+            limits=held,
         )
     except BaseException as exc:
         release_slot(registry, job.job_id, exc)
@@ -437,6 +445,7 @@ __all__ = [
     "get_verbose",
     "identity_from_args",
     "init_services_cli",
+    "launch_limits_from_args",
     "log_startup_summary",
     "pipeline_summary",
     "resolve_campaign",

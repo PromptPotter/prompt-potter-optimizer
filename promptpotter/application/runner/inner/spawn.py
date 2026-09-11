@@ -48,6 +48,7 @@ from promptpotter.domain.l4.proxies import (
     mean_parent_level_se,
     parent_level_series,
 )
+from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.results import candidate_label
@@ -518,9 +519,9 @@ async def _run_inner_campaign(
             campaign_config,
             session=session,
             observers=observers,
-            # No `spend_budget_usd=`: that argument is the RUN-SCOPED override, and restating the
-            # config's own value through it is a second spelling of the same cap. Omitted, the
-            # inner cycle is bound by `campaign_config.optimization.spend_budget_usd` directly.
+            # Declares none: restating the config's own cap here would be a second spelling of
+            # it, so the inner cycle binds on `campaign_config.optimization` alone.
+            limits=LaunchLimits(),
             mode=RunMode(),
         )
     finally:

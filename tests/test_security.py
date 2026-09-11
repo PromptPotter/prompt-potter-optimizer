@@ -446,6 +446,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
     # cannot outspend its grant even if the requested/account caps are higher. Escaping
     # it is silent budget over-run, so it is pinned here with the other authority caps.
     from promptpotter.application.jobs.quota import admit_launch
+    from promptpotter.domain.launch_limits import LaunchLimits
     from promptpotter.infrastructure.store.user_store import User
 
     def _oidc_stores(claims: dict[str, float]) -> types.SimpleNamespace:
@@ -470,8 +471,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
     )
     assert (
         admit_launch(
-            requested_cap_usd=10.0,
-            requested_cap_tokens=None,
+            requested=LaunchLimits(spend_budget_usd=10.0),
             user=generous,
             stores=_oidc_stores({"spend_ceiling_usd": 2.0}),
             job_registry=idle_registry,
@@ -481,8 +481,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
     )
     assert (
         admit_launch(
-            requested_cap_usd=10.0,
-            requested_cap_tokens=None,
+            requested=LaunchLimits(spend_budget_usd=10.0),
             user=generous,
             stores=_oidc_stores({}),
             job_registry=idle_registry,
@@ -504,8 +503,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
     )
     assert (
         admit_launch(
-            requested_cap_usd=None,
-            requested_cap_tokens=None,
+            requested=LaunchLimits(),
             user=thin,
             stores=_oidc_stores({"spend_ceiling_usd": 2.0}),
             job_registry=idle_registry,
@@ -670,11 +668,9 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
     """``change-spend-budget`` takes each ceiling independently, and both halves of "leave it alone"
     are silent when they break. Down at the clamp, a delegate's grant composed into an ABSENT arm
     writes a USD ceiling the caller never asked for, and `BudgetGate` then halts a run nobody
-    capped. Up in the two homes a running ceiling lives in — the job's reservation and
-    `spend_cap.json` — an absent arm has to be left at its PRIOR, and the two priors are not the
-    same: the job's pair is complete from admission while the file starts empty. Merged against its
-    own, the file's absent arm reads unmetered and the job's reads released, so the account quotes
-    headroom this cycle is still holding and the next launch spends it twice.
+    capped. Up in the job's reservation, an absent arm has to stay at the JOB's prior: merged
+    against the file's, which starts empty, it reads released, so the account quotes headroom this
+    cycle is still holding and the next launch spends it twice.
     """
     import types
 
@@ -682,7 +678,7 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
     from promptpotter.application.jobs.quota import clamp_budget_change
     from promptpotter.application.jobs.registry import JobRegistry
     from promptpotter.domain.cycle_paths import CycleHop
-    from promptpotter.infrastructure.runtime_flags import read_spend_caps
+    from promptpotter.domain.spend import BudgetChange
     from promptpotter.infrastructure.store.user_store import User
 
     stores = built_stores
@@ -693,14 +689,12 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
     registry.set_caps(job.job_id, cap_usd=0.30, cap_tokens=5_000_000)
 
     await CommandDispatcher(stores, registry)._apply_change_spend_budget(
-        hop, max_usd=None, max_tokens=1_000
+        hop, BudgetChange(None, 1_000)
     )
     held = registry.get(job.job_id)
     assert held is not None
     assert held.cap_tokens == 1_000
     assert held.cap_usd == pytest.approx(0.30), "the untouched USD reservation was released"
-    # Both homes, one answer — the gate probe must not read a ceiling the reservation disagrees with.
-    assert read_spend_caps(stores.campaigns.cycle_dir(hop)) == (pytest.approx(0.30), 1_000)
 
     # An absent arm stays absent through the clamp too, delegated ceiling or not.
     delegated = types.SimpleNamespace(
@@ -713,8 +707,7 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
         campaigns=types.SimpleNamespace(iter_cycle_ledgers=lambda: [], workspace=tmp_path / "ws-d"),
     )
     caps = clamp_budget_change(
-        max_usd=None,
-        max_tokens=1_000,
+        requested=BudgetChange(None, 1_000),
         user=User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01"),
         stores=delegated,
         job_registry=types.SimpleNamespace(
@@ -724,6 +717,39 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
     )
     assert caps.usd is None, "a grant became a ceiling on an arm the caller left alone"
     assert caps.tokens == 1_000
+
+
+async def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
+    built_stores: Any, tmp_path: Path
+) -> None:
+    """A run declaring nothing reserves the account's headroom while the wallet bound composes its
+    ceiling far lower. Moving one arm must leave the other at that composed cap: pinned at the
+    reservation in ``spend_cap.json``, which the gate prefers, it lets the run spend past it."""
+    import types
+
+    from promptpotter.application.commands.dispatcher import CommandDispatcher
+    from promptpotter.application.jobs.registry import JobRegistry
+    from promptpotter.application.runner.entry import _build_budget_gate
+    from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.domain.phases import StopReason
+    from promptpotter.domain.spend import BudgetChange
+
+    hop = CycleHop(campaign_id="camp-4", cycle_id="cycle_budget0001")
+    registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    job = registry.request_slot(user_id="default", dataset_name="ds1", hop=hop)
+    registry.set_caps(job.job_id, cap_usd=0.30, cap_tokens=5_000_000)
+    observers = types.SimpleNamespace(
+        dashboard=types.SimpleNamespace(spend_total_used_usd=0.10, spend_total_tokens=210_000)
+    )
+    gate = _build_budget_gate(
+        observers, built_stores.campaigns.cycle_dir(hop), usd_cap=0.30, token_cap=210_000
+    )
+    assert gate.tripped() == StopReason.TOKEN_BUDGET
+
+    await CommandDispatcher(built_stores, registry)._apply_change_spend_budget(
+        hop, BudgetChange(0.50, None)
+    )
+    assert gate.tripped() == StopReason.TOKEN_BUDGET, "a USD raise lifted the token ceiling"
 
 
 def test_a_non_finite_budget_cannot_disarm_the_spend_ceiling() -> None:
@@ -787,9 +813,12 @@ async def test_a_revoked_principal_cannot_replay_an_applied_command(tmp_path: Pa
     import types
 
     from promptpotter.application.commands.dispatcher import (
+        Applier,
+        CommandCall,
         CommandDispatcher,
         _find_idempotent_command,
     )
+    from promptpotter.application.commands.payloads import PauseCyclePayload
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.domain.run_records import CommandAckRecord, CommandRecord
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -805,12 +834,12 @@ async def test_a_revoked_principal_cannot_replay_an_applied_command(tmp_path: Pa
     touched: list[str] = []
     with pytest.raises(NotFoundError):
         await CommandDispatcher(types.SimpleNamespace(identity=revoked))._record_and_apply(
-            ledger=ledger,
-            kind="pause-cycle",
-            payload={},
-            idempotency_key="k1",
-            applier=lambda: touched.append("applied"),
-            on_replay=lambda: touched.append("replayed"),
+            ledger,
+            CommandCall(PauseCyclePayload(campaign_id="c", cycle_id="y"), "k1"),
+            Applier(
+                lambda: touched.append("applied"),
+                on_replay=lambda: touched.append("replayed"),
+            ),
         )
     assert touched == [], "the dedupe short-circuit answered before the capability gate"
 
@@ -832,6 +861,7 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
 
     from promptpotter.application.runner.entry import _build_budget_gate
     from promptpotter.domain.phases import StopReason
+    from promptpotter.domain.spend import BudgetChange
     from promptpotter.infrastructure.runtime_flags import (
         clear_run_control_flags,
         write_spend_caps,
@@ -845,11 +875,11 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
     # A run that declared NOTHING is still gated, and the gate stays silent until a ceiling exists.
     gate = _build_budget_gate(observers, cycle_dir, usd_cap=None, token_cap=None)
     assert gate.tripped() is None
-    write_spend_caps(cycle_dir, usd=0.50, tokens=None)
+    write_spend_caps(cycle_dir, BudgetChange(0.50, None))
     assert gate.tripped() == StopReason.SPEND_BUDGET, "a mid-run ceiling reached no gate"
 
     # The token arm binds on its own, in the unit that survives an unpriced model.
-    write_spend_caps(cycle_dir, usd=None, tokens=5_000)
+    write_spend_caps(cycle_dir, BudgetChange(None, 5_000))
     assert gate.tripped() == StopReason.TOKEN_BUDGET
 
     # And the launch sweep returns what it dropped, so a paused-cycle change cannot be lost silently.
@@ -870,6 +900,8 @@ def test_an_operator_raise_survives_relaunch_but_never_escapes_the_wallet() -> N
     """
     from promptpotter.application.campaign_config import load_campaign_config
     from promptpotter.application.runner.entry import _compose_run_ceilings
+    from promptpotter.domain.spend import BudgetChange as B
+    from promptpotter.domain.spend import SpendCeilings as C
 
     config = load_campaign_config(
         {
@@ -882,17 +914,17 @@ def test_an_operator_raise_survives_relaunch_but_never_escapes_the_wallet() -> N
     )
 
     # The raise the fix exists for: above the config, under an unmetered wallet.
-    raised = _compose_run_ceilings(config, operator=(0.50, 500_000), wallet=(None, None))
+    raised = _compose_run_ceilings(config, operator=B(0.50, 500_000), wallet=C(None, None))
     assert raised.optimization.spend_budget_usd == pytest.approx(0.50)
     assert raised.optimization.token_budget == 500_000
 
     # ...and the wallet still bounds it, in both units, however large the operator typed.
-    bounded = _compose_run_ceilings(config, operator=(1e9, 10**12), wallet=(0.30, 5_000_000))
+    bounded = _compose_run_ceilings(config, operator=B(1e9, 10**12), wallet=C(0.30, 5_000_000))
     assert bounded.optimization.spend_budget_usd == pytest.approx(0.30)
     assert bounded.optimization.token_budget == 5_000_000
 
     # One arm set leaves the other at what the config declared — a raise is not a reset.
-    tokens_only = _compose_run_ceilings(config, operator=(None, 400_000), wallet=(None, None))
+    tokens_only = _compose_run_ceilings(config, operator=B(None, 400_000), wallet=C(None, None))
     assert tokens_only.optimization.token_budget == 400_000
     assert tokens_only.optimization.spend_budget_usd == pytest.approx(0.10)
 
@@ -910,6 +942,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
 
     from promptpotter.application.jobs.quota import QuotaExceededError, admit_launch
     from promptpotter.config.settings import settings
+    from promptpotter.domain.launch_limits import LaunchLimits
     from promptpotter.infrastructure.store.account_spend import sum_user_spend
     from promptpotter.infrastructure.store.user_store import User
 
@@ -950,8 +983,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
     # No override must NOT read as uncapped in either unit. The USD arm is one STEP, not the whole
     # ceiling — the offer is denominated in runs, and a first run declaring the lot funds no second.
     fresh = admit_launch(
-        requested_cap_usd=None,
-        requested_cap_tokens=None,
+        requested=LaunchLimits(),
         user=free_tier,
         stores=_stores(issuer=web, ledgers=[]),
         job_registry=idle,
@@ -965,8 +997,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
     # declaration the account cannot cover is refused at the door instead.
     with pytest.raises(QuotaExceededError):
         admit_launch(
-            requested_cap_usd=10.0,
-            requested_cap_tokens=None,
+            requested=LaunchLimits(spend_budget_usd=10.0),
             user=free_tier,
             stores=_stores(issuer=web, ledgers=[]),
             job_registry=idle,
@@ -981,8 +1012,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
 
     with pytest.raises(QuotaExceededError):
         admit_launch(
-            requested_cap_usd=None,
-            requested_cap_tokens=None,
+            requested=LaunchLimits(),
             user=free_tier,
             stores=_stores(issuer=web, ledgers=[]),
             job_registry=_sibling(
@@ -997,8 +1027,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
     # ceiling, with no error at any step. It must refuse instead.
     with pytest.raises(QuotaExceededError):
         admit_launch(
-            requested_cap_usd=None,
-            requested_cap_tokens=None,
+            requested=LaunchLimits(),
             user=free_tier,
             stores=_stores(issuer=web, ledgers=[]),
             job_registry=_sibling(cap_usd=None, cap_tokens=None),
@@ -1009,8 +1038,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
     # total reads $0.00 for 500k billed tokens. Trusting `ceiling - spent` would hand back nearly
     # the whole ceiling; the grace bounds it, and the token arm counts what the USD arm cannot.
     blind = admit_launch(
-        requested_cap_usd=None,
-        requested_cap_tokens=None,
+        requested=LaunchLimits(),
         user=free_tier,
         stores=_stores(
             issuer=web, ledgers=_ledger("blind.jsonl", model="openai/gpt-oss-20b:nitro")
@@ -1039,8 +1067,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
 
     # The box operator spends their own money and is metered in neither unit.
     assert admit_launch(
-        requested_cap_usd=None,
-        requested_cap_tokens=None,
+        requested=LaunchLimits(),
         user=free_tier,
         stores=_stores(issuer=None, ledgers=[]),
         job_registry=idle,

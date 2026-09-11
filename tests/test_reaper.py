@@ -512,7 +512,7 @@ async def test_delete_cycle_guards_liveness_and_not_the_pointer(built_stores: St
     ``n_rounds == 0``, which IS the just-minted window before round 1 commits. So the one
     deletion the verb can perform is the one most likely to be live, and that was the
     unchecked case; the case it did refuse was harmless."""
-    from promptpotter.application.commands.dispatcher import CommandDispatcher
+    from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
     from promptpotter.application.commands.payloads import DeleteCyclePayload
 
     tenant_root, _ = _lifecycle_fixture(built_stores, running=True)
@@ -529,24 +529,15 @@ async def test_delete_cycle_guards_liveness_and_not_the_pointer(built_stores: St
     disp = CommandDispatcher(built_stores)
 
     # Live producer on the target → refused, and the tree is still there.
+    payload = DeleteCyclePayload(campaign_id=_CAMPAIGN, cycle_id=stub)
     with pytest.raises(ConflictError):
-        await disp.dispatch_cycle_command(
-            kind="delete-cycle",
-            payload=DeleteCyclePayload(campaign_id=_CAMPAIGN, cycle_id=stub),
-            idempotency_key="k1",
-            expected_version=None,
-        )
+        await disp.dispatch_cycle_command(CommandCall(payload, "k1"), expected_version=None)
     assert stub_dir.is_dir()
 
     # Producer gone: being the ACTIVE cycle is not a reason to refuse — the pointer
     # falls back to the parent instead.
     _age(stub_dir, 10_000)
-    await disp.dispatch_cycle_command(
-        kind="delete-cycle",
-        payload=DeleteCyclePayload(campaign_id=_CAMPAIGN, cycle_id=stub),
-        idempotency_key="k2",
-        expected_version=None,
-    )
+    await disp.dispatch_cycle_command(CommandCall(payload, "k2"), expected_version=None)
     assert not stub_dir.exists()
     assert read_active_pointer(tenant_root)[2] == _CYCLE
 

@@ -34,6 +34,7 @@ from promptpotter.domain.results import CycleResult
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.domain.launch_limits import LaunchLimits
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.stores import Stores
     from promptpotter.presentation.terminal.live.display import LiveDisplay
@@ -142,13 +143,11 @@ async def run_campaign(
     *,
     session: Session,
     langfuse_session_id: str | None = None,
-    spend_budget_usd: float | None = None,
-    token_budget: int | None = None,
-    mode: RunMode | None = None,
+    limits: LaunchLimits,
+    mode: RunMode,
 ) -> CycleResult:
-    """Run the loop over an origin this caller already scored. The two ceilings and ``mode`` are the
-    same flags the web launcher passes — an embedded run that omits a ceiling keeps the campaign's
-    own value for it."""
+    """Run the loop over an origin this caller already scored. With no slot there is no admission:
+    a declared budget may only LOWER the campaign's own, and ``LaunchLimits()`` declares none."""
     return await run_optimization(
         dataset,
         campaign_config,
@@ -156,7 +155,6 @@ async def run_campaign(
         observers=observers,
         origin=origin,
         langfuse_session_id=langfuse_session_id,
-        spend_budget_usd=spend_budget_usd,
-        token_budget=token_budget,
+        limits=limits,
         mode=mode,
     )

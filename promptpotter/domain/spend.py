@@ -10,7 +10,7 @@ from __future__ import annotations
 import operator
 from collections.abc import Iterable, Mapping
 from functools import reduce
-from typing import Literal, NotRequired, TypedDict, get_args
+from typing import Literal, NamedTuple, NotRequired, TypedDict, get_args
 
 from pydantic import ConfigDict, Field, ValidationError
 
@@ -18,7 +18,9 @@ from promptpotter.domain.strict_model import StrictModel
 
 __all__ = [
     "TOKEN_KIND_BUCKET",
+    "BudgetChange",
     "SpendBucket",
+    "SpendCeilings",
     "SpendRollup",
     "StepTokenUsage",
     "TokenAccount",
@@ -172,6 +174,20 @@ loop). ``diagnostic`` is what a `verify` / `ab` / `noise-floor` spends — it an
 the search rather than advancing it, so folding it into `backend` would report re-measuring a
 candidate as the cost of finding one. It is a bucket and not an exemption: a diagnostic is inside
 every ceiling, always, because the loop can fire one itself."""
+
+
+class SpendCeilings(NamedTuple):
+    """A ceiling in the two units spend is metered in; ``None`` on an arm means unmetered."""
+
+    usd: float | None
+    tokens: int | None
+
+
+class BudgetChange(NamedTuple):
+    """A move of those two ceilings; ``None`` leaves the arm untouched."""
+
+    usd: float | None
+    tokens: int | None
 
 
 class SpendBucket(StrictModel):

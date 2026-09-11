@@ -1,32 +1,18 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
-from pydantic import BeforeValidator, Field, model_validator
+from pydantic import Field, model_validator
 
 from promptpotter.application.datasets.draft_patch import EditDraftPatch
 from promptpotter.application.runner.origin_gate import GateDecision
 from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.strict_model import StrictModel, WireFloat, WireInt
 from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.shared.errors import PayloadInvalidError
 
-__all__ = ["PAYLOAD_MODEL_FOR_KIND", "CommandAcceptedBody", "CommandPayload"]
-
-
-def _reject_bool(v: object) -> object:
-    """``bool`` IS an ``int`` in Python and Pydantic coerces it, so a wire ``true`` arrives as 1 —
-    which reads as "disarm" on a count and as a $1 ceiling on a budget."""
-    if isinstance(v, bool):
-        raise ValueError("must be a number, not a boolean")
-    return v
-
-
-# The two wire scalar types. `strict` is what refuses `true` where an int is meant; `allow_inf_nan`
-# is what refuses `+inf`, which PASSES a bare `ge=` bound and then disarms the `BudgetGate` whose
-# probe is `spent >= cap`. Neither is a default — both were bought.
-WireInt = Annotated[int, Field(strict=True)]
-WireFloat = Annotated[float, BeforeValidator(_reject_bool), Field(allow_inf_nan=False)]
+__all__ = ["KIND_OF_PAYLOAD", "PAYLOAD_MODEL_FOR_KIND", "CommandAcceptedBody", "CommandPayload"]
 
 
 class CommandPayload(StrictModel):
@@ -115,20 +101,7 @@ class ChangeSpendBudgetPayload(CyclePayload):
         return self
 
 
-class RunLimitsPayload(CommandPayload):
-    """The three launch ceilings, bounded ONCE. ``campaign_runner.main`` validates the CLI's
-    ``--halt-at`` / ``--spend-budget`` / ``--token-budget`` through this before dispatch, so the
-    terminal refuses what HTTP refuses — argparse types these and bounds none of them, and an
-    unbounded ceiling is one that never fires or fires on round 0."""
-
-    halt_at_accuracy: WireFloat | None = Field(default=None, ge=0.0, le=1.0)
-    # Both budget arms ride: the USD one goes blind on a model with no rate on file and the token
-    # one is what still holds, so serving only USD is a half-gate.
-    spend_budget_usd: WireFloat | None = Field(default=None, ge=0.0)
-    token_budget: WireInt | None = Field(default=None, ge=0)
-
-
-class StartRunPayload(CyclePayload, RunLimitsPayload):
+class StartRunPayload(CyclePayload, LaunchLimits):
     kind: Literal["new", "resume"]
 
 
@@ -147,10 +120,23 @@ class VerifyCandidatePayload(CyclePayload):
     samples: WireInt | None = Field(default=None, ge=1, le=10_000)
 
 
-class LifecyclePayload(CampaignPayload):
+class _LifecyclePayload(CampaignPayload):
     reason: str = Field(default="", max_length=512)
-    # Only meaningful for `delete-campaign`; harmless on the other two.
+
+
+class ArchiveCampaignPayload(_LifecyclePayload):
+    pass
+
+
+class UnarchiveCampaignPayload(_LifecyclePayload):
+    pass
+
+
+class DeleteCampaignPayload(_LifecyclePayload):
     keep_results: bool = False
+
+
+LifecyclePayload = ArchiveCampaignPayload | UnarchiveCampaignPayload | DeleteCampaignPayload
 
 
 class SetCampaignLabelPayload(CampaignPayload):
@@ -206,25 +192,37 @@ class EditDraftCampaignPayload(_CheckinPayload):
     # a `CommandRecord` and an ack, so the ledger would carry an edit that edited nothing.
     patch: EditDraftPatch
 
+    @property
+    def checkin_campaign_id(self) -> str:
+        return self.draft_id
+
 
 class ResolveOriginPayload(_CheckinPayload):
     draft_id: str = Field(min_length=8, max_length=128)
     message: str = Field(default="", max_length=4000)
 
+    @property
+    def checkin_campaign_id(self) -> str:
+        return self.draft_id
+
 
 class StartCheckinPayload(_CheckinPayload):
     campaign_id: str = Field(min_length=8, max_length=128)
+
+    @property
+    def checkin_campaign_id(self) -> str:
+        return self.campaign_id
+
+
+CheckinPayload = EditDraftCampaignPayload | ResolveOriginPayload | StartCheckinPayload
 
 
 class CancelQueuedRunPayload(CommandPayload):
     job_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
-class MintCampaignPayload(CommandPayload):
+class MintCampaignPayload(CommandPayload, LaunchLimits):
     dataset_name: str = Field(min_length=1, max_length=64)
-    halt_at_accuracy: WireFloat | None = Field(default=None, ge=0.0, le=1.0)
-    spend_budget_usd: WireFloat | None = Field(default=None, ge=0.0)
-    token_budget: WireInt | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _name_is_a_dataset_name(self) -> MintCampaignPayload:
@@ -250,9 +248,9 @@ PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {
     "start-run": StartRunPayload,
     "step-cycle": StepCyclePayload,
     "verify-candidate": VerifyCandidatePayload,
-    "archive-campaign": LifecyclePayload,
-    "delete-campaign": LifecyclePayload,
-    "unarchive-campaign": LifecyclePayload,
+    "archive-campaign": ArchiveCampaignPayload,
+    "delete-campaign": DeleteCampaignPayload,
+    "unarchive-campaign": UnarchiveCampaignPayload,
     "set-campaign-label": SetCampaignLabelPayload,
     "register-backend": RegisterBackendPayload,
     "mint-campaign": MintCampaignPayload,
@@ -270,6 +268,13 @@ if set(PAYLOAD_MODEL_FOR_KIND) != ALL_DISPATCHED_KINDS:
         "PAYLOAD_MODEL_FOR_KIND out of sync with the dispatched command set: "
         f"{ALL_DISPATCHED_KINDS.symmetric_difference(PAYLOAD_MODEL_FOR_KIND)}"
     )
+
+# One type per kind, so a payload names its own kind and no call carries both.
+KIND_OF_PAYLOAD: dict[type[CommandPayload], str] = {
+    model: kind for kind, model in PAYLOAD_MODEL_FOR_KIND.items()
+}
+if len(KIND_OF_PAYLOAD) != len(PAYLOAD_MODEL_FOR_KIND):
+    raise RuntimeError("two command kinds share one payload type; give each its own.")
 
 
 class CommandAcceptedBody(StrictModel):

@@ -12,6 +12,8 @@ from typing import NamedTuple
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.spend import BudgetChange, SpendCeilings
 from promptpotter.infrastructure.identity.migration import registered_user_id
 from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.infrastructure.runtime_flags import read_spend_caps, write_spend_caps
@@ -105,21 +107,14 @@ def check_launch_quotas(
             )
 
 
-class SpendCeilings(NamedTuple):
-    """The two units a run is metered in; ``None`` on an arm means unmetered."""
-
-    usd: float | None
-    tokens: int | None
-
-    def overrun(self, spent: UserSpend) -> tuple[float, int]:
-        """What went past these ceilings anyway. Admission bounds what a run may DECLARE, not what a
-        round boundary overshoots or an unpriced call turns out to have cost — so this is the residue
-        neither arm could refuse, and it is the OPERATOR's number: ``/quota-status`` never serves
-        it."""
-        return (
-            0.0 if self.usd is None else max(0.0, spent.used_usd - self.usd),
-            0 if self.tokens is None else max(0, spent.used_tokens - self.tokens),
-        )
+def overrun(ceilings: SpendCeilings, spent: UserSpend) -> tuple[float, int]:
+    """What went past *ceilings* anyway. Admission bounds what a run may DECLARE, not what a round
+    boundary overshoots or an unpriced call turns out to have cost — so this is the residue neither
+    arm could refuse, and it is the OPERATOR's number: ``/quota-status`` never serves it."""
+    return (
+        0.0 if ceilings.usd is None else max(0.0, spent.used_usd - ceilings.usd),
+        0 if ceilings.tokens is None else max(0, spent.used_tokens - ceilings.tokens),
+    )
 
 
 class AccountWallet(NamedTuple):
@@ -177,8 +172,7 @@ def read_account_wallet(
 
 def admit_launch(
     *,
-    requested_cap_usd: float | None,
-    requested_cap_tokens: int | None,
+    requested: LaunchLimits,
     user: User,
     stores: Stores,
     job_registry: JobRegistry,
@@ -211,13 +205,13 @@ def admit_launch(
         raise _refused(wallet, "This account has nothing left to spend.")
     delegated = _delegated_spend_ceiling(stores)
     step = _launch_step(user, wallet, delegated)
-    tokens = requested_cap_tokens
-    if requested_cap_usd is None:
+    tokens = requested.token_budget
+    if requested.spend_budget_usd is None:
         # A grant bounds what may be DECLARED, so declaring nothing declares the headroom under it
         # — never the grant itself, which would refuse an account that can still afford the run.
         usd = _lowest(wallet.headroom.usd, delegated, step)
     else:
-        usd = _lowest(requested_cap_usd, delegated)
+        usd = _lowest(requested.spend_budget_usd, delegated)
         if step is not None and usd is not None and usd > step:
             raise _refused(
                 wallet,
@@ -275,13 +269,12 @@ def admit_llm_turn(*, stores: Stores) -> None:
 
 def clamp_budget_change(
     *,
-    max_usd: float | None,
-    max_tokens: int | None,
+    requested: BudgetChange,
     user: User,
     stores: Stores,
     job_registry: JobRegistry,
     hop: CycleHop,
-) -> SpendCeilings:
+) -> BudgetChange:
     """Moving a RUNNING cycle's ceiling clamps where a launch refuses: the campaign is already
     admitted, so the only question is how far the operator may move it, and lowering one must always
     work. The cycle's own reservation is excluded, or it would be denied headroom it holds itself.
@@ -302,13 +295,15 @@ def clamp_budget_change(
     delegated = _delegated_spend_ceiling(stores)
     usd = (
         None
-        if max_usd is None
-        else _lowest(max_usd, wallet.headroom.usd, delegated, _launch_step(user, wallet, delegated))
+        if requested.usd is None
+        else _lowest(
+            requested.usd, wallet.headroom.usd, delegated, _launch_step(user, wallet, delegated)
+        )
     )
-    tokens = max_tokens
+    tokens = requested.tokens
     if tokens is not None and wallet.headroom.tokens is not None:
         tokens = min(tokens, wallet.headroom.tokens)
-    return SpendCeilings(usd, tokens)
+    return BudgetChange(usd, tokens)
 
 
 def hold_ceiling(
@@ -316,32 +311,25 @@ def hold_ceiling(
     job_registry: JobRegistry,
     hop: CycleHop,
     cycle_dir: Path,
-    max_usd: float | None,
-    max_tokens: int | None,
-) -> SpendCeilings:
-    """Land a moved ceiling on BOTH homes it has to be true in, from ONE prior.
-
-    A running cycle's ceiling lives twice on purpose: the JOB carries what the account has committed
-    while the run is in flight — the only home a mint has, since it reserves its slot before its
-    cycle exists — and ``spend_cap.json`` carries what the run may spend right now, the probe the
-    ``BudgetGate`` re-reads. An ABSENT arm means "leave it alone", so each home needs a prior to
-    leave alone, and **the two priors are not interchangeable**: the job's pair is complete from
-    admission, the file's starts empty and reads an untouched arm as unmetered. So the running job
-    is the prior and the file its projection, written whole."""
+    change: BudgetChange,
+) -> None:
+    """Land *change* on the job's reservation and on ``spend_cap.json``, each from its OWN prior —
+    the file's absent arm defers to the launch's composed cap, often far below the reservation."""
+    prior = read_spend_caps(cycle_dir)
+    write_spend_caps(
+        cycle_dir,
+        BudgetChange(
+            prior.usd if change.usd is None else change.usd,
+            prior.tokens if change.tokens is None else change.tokens,
+        ),
+    )
     job = job_registry.running_job_for(hop)
-    prior = (
-        SpendCeilings(job.cap_usd, job.cap_tokens)
-        if job is not None
-        else SpendCeilings(*read_spend_caps(cycle_dir))
-    )
-    moved = SpendCeilings(
-        prior.usd if max_usd is None else max_usd,
-        prior.tokens if max_tokens is None else max_tokens,
-    )
-    write_spend_caps(cycle_dir, usd=moved.usd, tokens=moved.tokens)
     if job is not None:
-        job_registry.set_caps(job.job_id, cap_usd=moved.usd, cap_tokens=moved.tokens)
-    return moved
+        job_registry.set_caps(
+            job.job_id,
+            cap_usd=job.cap_usd if change.usd is None else change.usd,
+            cap_tokens=job.cap_tokens if change.tokens is None else change.tokens,
+        )
 
 
 def _contended(subject: str) -> QuotaExceededError:
@@ -360,7 +348,7 @@ def _contended(subject: str) -> QuotaExceededError:
 def _refused(wallet: AccountWallet, reason: str) -> QuotaExceededError:
     """Every refusal names the overrun, which is where the operator reads that a ceiling was
     CROSSED rather than merely reached."""
-    over_usd, over_tokens = wallet.ceilings.overrun(wallet.spent)
+    over_usd, over_tokens = overrun(wallet.ceilings, wallet.spent)
     if over_usd or over_tokens:
         reason += f" It is already ${over_usd:.4f} / {over_tokens:,} tokens past its ceiling."
     return QuotaExceededError(
@@ -480,7 +468,6 @@ def _delegated_spend_ceiling(stores: Stores) -> float | None:
 __all__ = [
     "AccountWallet",
     "QuotaExceededError",
-    "SpendCeilings",
     "admit_launch",
     "admit_llm_turn",
     "check_launch_quotas",
@@ -488,6 +475,7 @@ __all__ = [
     "hold_ceiling",
     "is_host_tenant_dir",
     "lifetime_ceilings",
+    "overrun",
     "read_account_wallet",
     "spends_the_hosts_own_key",
 ]

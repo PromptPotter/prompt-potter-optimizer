@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.phases import RunPhase
+from promptpotter.domain.spend import BudgetChange
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
 from promptpotter.infrastructure.store.layout import CycleLayout
 
@@ -68,7 +69,7 @@ def read_sample_lookahead(cycle_dir: Path) -> int:
     return max(1, cells)
 
 
-def clear_run_control_flags(cycle_dir: Path) -> tuple[float | None, int | None]:
+def clear_run_control_flags(cycle_dir: Path) -> BudgetChange:
     """Drop every POLLED run-control flag — a fresh launch IS the operator's intent to run at the
     engine's own cadence, and a flag surviving the gesture it answered re-answers the next one.
 
@@ -89,29 +90,29 @@ def clear_run_control_flags(cycle_dir: Path) -> tuple[float | None, int | None]:
     return dropped
 
 
-def write_spend_caps(cycle_dir: Path, *, usd: float | None, tokens: int | None) -> None:
-    """Land the live ceilings, an unmetered arm omitted. Peer of :func:`read_spend_caps` so the
+def write_spend_caps(cycle_dir: Path, change: BudgetChange) -> None:
+    """Land the live ceilings, an untouched arm omitted. Peer of :func:`read_spend_caps` so the
     shape is spelled once — a caller hand-building this dict is a writer that can drift from its
     own reader."""
     path = CycleLayout(cycle_dir).spend_cap
     path.parent.mkdir(parents=True, exist_ok=True)
     caps: dict[str, float | int] = {}
-    if usd is not None:
-        caps["max_usd"] = usd
-    if tokens is not None:
-        caps["max_tokens"] = tokens
+    if change.usd is not None:
+        caps["max_usd"] = change.usd
+    if change.tokens is not None:
+        caps["max_tokens"] = change.tokens
     write_json(path, caps)
 
 
-def read_spend_caps(cycle_dir: Path) -> tuple[float | None, int | None]:
-    """Live ``(usd, tokens)`` ceilings, ``None`` per key when absent, unreadable or the wrong type.
+def read_spend_caps(cycle_dir: Path) -> BudgetChange:
+    """Live ceilings, ``None`` per arm when absent, unreadable or the wrong type.
     **The one place that knows this file's shape.**"""
     data = read_json_tolerant(CycleLayout(cycle_dir).spend_cap)
     if not isinstance(data, dict):
-        return None, None
+        return BudgetChange(None, None)
     usd = data.get("max_usd")
     tokens = data.get("max_tokens")
-    return (
+    return BudgetChange(
         float(usd) if isinstance(usd, int | float) and not isinstance(usd, bool) else None,
         int(tokens) if isinstance(tokens, int) and not isinstance(tokens, bool) else None,
     )

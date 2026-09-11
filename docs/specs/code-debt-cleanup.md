@@ -39,8 +39,7 @@ it.
   `objective`** — under a formula that SUBTRACTS cost rather than scaling,
   a correct-but-expensive arm could read as "0.0 on every cell", which is a caveat about a
   degenerate reading claiming the arm got everything wrong. Harmless under the house formula, which
-  clamps at `fitness`. (3) **`halt_at_accuracy` is threaded through ~14 call sites** as a
-  pass-through parameter across CLI, REST, launcher and runner.
+  clamps at `fitness`.
   **Re-test:** each is a fresh measurement; none carries a verdict yet, so do not act on one
   without re-deriving it.
 

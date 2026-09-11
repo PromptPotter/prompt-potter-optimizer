@@ -378,7 +378,6 @@ async def _drive_optimization(
             no_divergence_check=getattr(args, "no_divergence_check", False),
             fork_on_divergence=fork_on_divergence,
             diag=getattr(args, "diag", False),
-            halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
         ),
     )
     return cycle_result
@@ -513,6 +512,7 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
             diag=False,
             halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
             spend_budget_usd=getattr(args, "spend_budget_usd", None),
+            token_budget=getattr(args, "token_budget", None),
             tenant=getattr(args, "tenant", None),
             verbose=getattr(args, "verbose", False),
             session=getattr(args, "session", None),

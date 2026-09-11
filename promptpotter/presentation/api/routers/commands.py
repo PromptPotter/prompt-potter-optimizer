@@ -15,7 +15,7 @@ from promptpotter.application.commands.checkin_dispatch import (
     dispatch_origin_resolution,
     dispatch_start_checkin,
 )
-from promptpotter.application.commands.dispatcher import CommandDispatcher
+from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.payloads import (
     PAYLOAD_MODEL_FOR_KIND,
     CampaignPayload,
@@ -127,12 +127,7 @@ async def edit_draft_campaign(
     payload = cast(
         EditDraftCampaignPayload, _validated_payload("edit-draft-campaign", envelope.payload)
     )
-    return await dispatch_draft_patch(
-        stores,
-        draft_id=payload.draft_id,
-        patch=payload.patch,
-        idempotency_key=idemp,
-    )
+    return await dispatch_draft_patch(stores, CommandCall(payload, idemp))
 
 
 @commands_router.post("/resolve-origin")
@@ -150,10 +145,7 @@ async def resolve_origin(
     _require_kind(envelope, "resolve-origin")
     payload = cast(ResolveOriginPayload, _validated_payload("resolve-origin", envelope.payload))
     return await dispatch_origin_resolution(
-        stores,
-        draft_id=payload.draft_id,
-        message=payload.message,
-        idempotency_key=ensure_idempotency_key(idempotency_key),
+        stores, CommandCall(payload, ensure_idempotency_key(idempotency_key))
     )
 
 
@@ -182,8 +174,7 @@ async def start_checkin(
         )
     return await dispatch_start_checkin(
         stores,
-        campaign_id=payload.campaign_id,
-        idempotency_key=idemp,
+        CommandCall(payload, idemp),
         start=lambda hop, draft: start_checkin_campaign(
             stores=stores, job_registry=job_registry, hop=hop, draft=draft
         ),
@@ -207,11 +198,7 @@ async def compact_archive(
     idemp = ensure_idempotency_key(idempotency_key)
     payload = cast(CompactArchivePayload, _validated_payload("compact-archive", envelope.payload))
     dispatcher = CommandDispatcher(stores)
-    outcome = await dispatcher.dispatch_workspace_command(
-        kind="compact-archive",
-        payload=payload,
-        idempotency_key=idemp,
-    )
+    outcome = await dispatcher.dispatch_workspace_command(CommandCall(payload, idemp))
     result = cast("dict[str, Any]", outcome.result)
     # The applier hands back a dump so the dispatcher can carry it like every other payload, and a
     # dump carries COMPUTED fields. `ArchiveReport` is a `StrictModel`, so feeding one straight back
@@ -239,11 +226,7 @@ async def replace_dataset(
     idemp = ensure_idempotency_key(idempotency_key)
     payload = cast(ReplaceDatasetPayload, _validated_payload("replace-dataset", envelope.payload))
     dispatcher = CommandDispatcher(stores)
-    outcome = await dispatcher.dispatch_workspace_command(
-        kind="replace-dataset",
-        payload=payload,
-        idempotency_key=idemp,
-    )
+    outcome = await dispatcher.dispatch_workspace_command(CommandCall(payload, idemp))
     # Echo the subject, nothing more — `version_and_repoint` records the counts + the
     # versioned slug itself, and no caller reads them off the wire.
     return cast("dict[str, Any]", outcome.result)
@@ -278,30 +261,19 @@ async def post_command(
     dispatcher = CommandDispatcher(stores, job_registry=job_registry)
 
     if kind in _WORKSPACE_SCOPED_KINDS:
-        workspace_kind: WorkspaceScopedKind = kind  # type: ignore[assignment]
-        workspace_outcome = await dispatcher.dispatch_workspace_command(
-            kind=workspace_kind,
-            payload=payload,
-            idempotency_key=idemp,
-        )
+        workspace_outcome = await dispatcher.dispatch_workspace_command(CommandCall(payload, idemp))
         return workspace_outcome.accepted
 
     if kind in _CAMPAIGN_CONFIG_KINDS:
         # In-place manifest edit — campaign-scoped, no cycle.
-        config_kind: CampaignConfigKind = kind  # type: ignore[assignment]
         config_outcome = await dispatcher.dispatch_campaign_config(
-            kind=config_kind,
-            payload=cast(CampaignPayload, payload),
-            idempotency_key=idemp,
+            CommandCall(cast(CampaignPayload, payload), idemp)
         )
         return config_outcome.accepted
 
     if kind in _LIFECYCLE_KINDS:
-        lifecycle_kind: LifecycleKind = kind  # type: ignore[assignment]
         lifecycle_outcome = await dispatcher.dispatch_lifecycle(
-            kind=lifecycle_kind,
-            payload=cast(LifecyclePayload, payload),
-            idempotency_key=idemp,
+            CommandCall(cast(LifecyclePayload, payload), idemp)
         )
         return lifecycle_outcome.accepted
 
@@ -321,12 +293,8 @@ async def post_command(
     # Rebuilt on the RESOLVED store: a descent hands back a different workspace root, and the
     # one above was bound to the caller's own.
     dispatcher = CommandDispatcher(stores, job_registry=job_registry)
-    cycle_kind: CycleScopedKind = kind  # type: ignore[assignment]
     cycle_outcome = await dispatcher.dispatch_cycle_command(
-        kind=cycle_kind,
-        payload=cycle_payload,
-        idempotency_key=idemp,
-        expected_version=expected_version,
+        CommandCall(cycle_payload, idemp), expected_version=expected_version
     )
     return cycle_outcome.accepted
 
