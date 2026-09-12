@@ -1951,6 +1951,32 @@ export const STOP_REASON_NEXT_STEPS: Record<string, string> = {
   'diverged': '`resume --fork-on-divergence` to branch here, or revert the config edit to continue.',
 };
 
+// Whether a stop SUCCEEDED, and the only half of the table that decides anything —
+// `StopOutcome`, where `paused` is the one non-terminal member. TOTAL over the reasons,
+// so ask it rather than matching names: a hand-listed set of crash names rots in both
+// directions, missing the reason added yesterday and keeping one that was renamed.
+export const STOP_REASON_OUTCOMES: Record<string, string> = {
+  'perfect_score': 'success',
+  'max_rounds': 'success',
+  'target_hit': 'success',
+  'lives_exhausted': 'success',
+  'hard_cap_reached': 'success',
+  'diag_complete': 'success',
+  'l3_patience_exhausted': 'success',
+  'rebased_to_fork': 'success',
+  'paused': 'paused',
+  'escalation_abort': 'halted',
+  'spend_budget': 'halted',
+  'token_budget': 'halted',
+  'origin_gate': 'halted',
+  'backend_unreachable': 'halted',
+  'crashed': 'failed',
+  'producer_vanished': 'failed',
+  'render_error': 'failed',
+  'diverged': 'failed',
+  'optimizer_timeout': 'failed',
+};
+
 // Abort-lens variant -> operator label, in picklist order. Mirror of
 // domain/results.py::ABORT_LENS_LABELS, whose keys are asserted against the API edge's
 // own `_ABORT_SUPPRESS` at import. Don't hand-list these.
