@@ -14,6 +14,7 @@ from promptpotter.domain.connector import (
     WireAdapter,
 )
 from promptpotter.domain.pipeline_schema import NodeType
+from promptpotter.domain.value_tree import Delivery
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -106,6 +107,20 @@ class Connector:
     measured_unit: MeasuredUnit = "sample"
     """What one measured row of this backend is CALLED: ``cell`` where it is a whole inner campaign
     or agent episode, else ``sample``. Declared, never sniffed off a row."""
+
+    prompt_delivery: Delivery = "request"
+    """The CHANNEL the candidate's rendered prompt reaches the model by, read by
+    ``PipelineSchema.value_tree``.
+
+    ``request`` — in the message that carries the task, so it always arrives. Three of the four
+    connectors, and the reason this is the default.
+
+    ``artifact_body`` — written into the environment as an Agent Skill, where the harness shows the
+    model only the frontmatter and the BODY arrives only if the model opens the file. A value on
+    this channel **may never arrive**, which no param name says and no roster of keys could; the
+    connector owes an arrival observation beside it (``harbor.py::SKILL_KEY``). Declared here and
+    not inferred from ``execution`` or ``measured_unit``: an in-process agent backend could just as
+    well put the prompt in the request, and a guess would be silently wrong exactly once."""
 
     required_observation_keys: tuple[str, ...] = ()
     """Observation keys this backend ALWAYS emits; ``wiring.py::_verify_required_observation_keys``

@@ -83,7 +83,14 @@ LEDGER_BASELINE = {
     # `prefix_reading` — because no one name covers both.
     # +1: `domain/launch_limits.py` — the one run-limit carrier the wire payloads, admission, the
     # runner and every ingress import; it replaces `RunLimitsPayload` and `RunMode.halt_at_accuracy`.
-    "modules": 354,
+    # +1: `domain/value_tree.py` — the vocabulary for ONE addressable tree of every value an arm may
+    # hold. A module rather than fields on `PipelineSchema` because the two facts it adds are the
+    # CONNECTOR's: which channel a value travels, and whether the model sees it eagerly, on demand,
+    # or never because it is not text. That is what lets a prompt field, a tool and a step be leaves
+    # instead of subsystems — an Agent Skill is a directory of instructions, resources and programs,
+    # and an MCP tool is a name, a description and a schema. It PAYS for itself: `node_param_keys`
+    # projects off it instead of walking the same declarations again.
+    "modules": 355,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     "init_files": 53,

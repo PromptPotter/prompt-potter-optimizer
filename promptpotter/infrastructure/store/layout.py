@@ -202,6 +202,14 @@ class CycleLayout:
         this a served read knows every node's VALUES and none of its AXES."""
         return self.cycle_dir / "pipeline.resolved.yaml"
 
+    @property
+    def optimized_surface(self) -> Path:
+        """What this cycle OPTIMIZES, and the channel each value reaches the model by — the reading
+        of the declaration beside it that the declaration itself cannot give, since it names a key
+        and never whether the model will ever see the value. Markdown: its only reader is a person.
+        """
+        return self.cycle_dir / "optimized.md"
+
     # --- resume state (heavy: dropped by ``delete --keep-results``) ---
     @property
     def rounds(self) -> Path:

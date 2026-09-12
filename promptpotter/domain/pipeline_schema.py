@@ -9,6 +9,7 @@ from pydantic import ConfigDict, Field
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.value_tree import Delivery, ValueLeaf, visibility_of
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 # Prompt-decomposition fields the prompt editor owns — excluded from the
@@ -1091,15 +1092,19 @@ class PipelineSchema(StrictModel):
         return stable_hash(configs) if configs else ""
 
     @shapes_optimizer_prompt
-    def node_param_keys(self) -> dict[str, set[str]]:
-        """The SINGLE surface the param catalogue, the L1 output schema and ``validate_overrides`` all
-        derive from — so a key stripped here is one the LLM's schema never declares.
+    def value_tree(self, *, prompt_delivery: Delivery) -> tuple[ValueLeaf, ...]:
+        """Every value an arm may hold, as addressable leaves carrying their delivery channel.
 
-        DECLARED nodes, matching :attr:`config_nodes`: what the optimizer may EDIT is not what
-        this round happens to run, or an escalation node reached only on a stall could never
-        be told to improve.
+        ``prompt_delivery`` takes no default: it is the connector's fact
+        (``Connector.prompt_delivery``), and a default would answer "always arrives" for the one
+        backend where that is false — which is a wrong number, not a missing one.
+
+        DECLARED nodes, matching :attr:`config_nodes`: what the optimizer may EDIT is not what this
+        round happens to run, or an escalation node reached only on a stall could never be told to
+        improve. Pinned values stay in the tree, marked immutable — "configured and held" is what a
+        reader of the harness asks for as much as "being searched".
         """
-        out: dict[str, set[str]] = {}
+        leaves: list[ValueLeaf] = []
         prompt_node = next(iter(self.prompt_node_names()), None)
         for step in self.config_nodes:
             declared = set(step.param_keys) - PARAM_FORBIDDEN_KEYS - SCHEMA_OWNED_FIELDS
@@ -1107,9 +1112,65 @@ class PipelineSchema(StrictModel):
             # `prompt_fields_updates` slot, never as node params: one carrier, so one lock.
             if step.name == prompt_node:
                 declared -= _PROMPT_OWNED_FIELDS
-            keys = {k for k in declared if not self.pinned(step, k)}
-            if keys:
-                out[step.name] = keys
+            for key in sorted(declared):
+                leaves.append(
+                    ValueLeaf(
+                        path=f"{step.name}.harness.{key}",
+                        node=step.name,
+                        key=key,
+                        kind="config",
+                        delivery="harness",
+                        mutable=not self.pinned(step, key),
+                    )
+                )
+            if step.name != prompt_node or step.prompt_info is None:
+                continue
+            if visibility_of(prompt_delivery) == "on_demand":
+                # The leaf that decides whether the body's leaves arrive at all: an injected
+                # artifact is advertised by its metadata and read only if the model opens it.
+                # PINNED as a measurement decision — a candidate free to write its own advert wins
+                # by making itself uninviting, and hiding then reads as discovery
+                # (`connectors/harbor.py::_SKILL_DESCRIPTION`).
+                leaves.append(
+                    ValueLeaf(
+                        path=f"{step.name}.artifact.description",
+                        node=step.name,
+                        key="description",
+                        kind="prose",
+                        delivery="artifact_meta",
+                        mutable=False,
+                    )
+                )
+            # The prompt's own fields, in render order, on the channel the connector declares. Two
+            # leaves' worth of one artifact where that channel is an injected one: the metadata is
+            # eager and decides whether the body is ever opened, which is why the body's fields
+            # cannot carry the eager channel's visibility.
+            for key in self.open_prompt_fields():
+                leaves.append(
+                    ValueLeaf(
+                        path=f"{step.name}.prompt.{key}",
+                        node=step.name,
+                        key=key,
+                        kind="prose",
+                        delivery=prompt_delivery,
+                        mutable=True,
+                    )
+                )
+        return tuple(leaves)
+
+    def node_param_keys(self) -> dict[str, set[str]]:
+        """The SINGLE surface the param catalogue, the L1 output schema and ``validate_overrides`` all
+        derive from — so a key stripped here is one the LLM's schema never declares.
+
+        A PROJECTION of :meth:`value_tree` rather than a second walk of the same declarations: the
+        mutable non-prompt leaves, which is what this always meant. ``prompt_delivery`` is immaterial
+        here — it changes no key's presence, only how a reader is told the value travels — so the
+        request channel is passed rather than threaded through every caller of a param roster.
+        """
+        out: dict[str, set[str]] = {}
+        for leaf in self.value_tree(prompt_delivery="request"):
+            if leaf.mutable and leaf.delivery == "harness":
+                out.setdefault(leaf.node, set()).add(leaf.key)
         return out
 
     @shapes_optimizer_prompt

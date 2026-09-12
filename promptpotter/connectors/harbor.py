@@ -972,6 +972,11 @@ CONNECTOR = Connector(
     # An episode is a whole agent run — minutes, with its own container build and its own spend —
     # so it is a cell.
     measured_unit="cell",
+    # The prompt is the SKILL's body, not a message. `terminus-2` shows the model only the
+    # frontmatter, so it arrives only if the model opens the file — which is why `SKILL_KEY` is a
+    # required observation beside it, and why this is the one connector where a value can be
+    # optimized every round and reach nothing.
+    prompt_delivery="artifact_body",
     # Each cell holds a container. Two is the shipped default elsewhere and is the right floor
     # here too: the ceiling is the operator's machine, not the provider.
     max_cells_in_flight=2,

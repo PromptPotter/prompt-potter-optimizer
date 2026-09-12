@@ -22,6 +22,7 @@ from promptpotter.domain.run_records import (
     MintKind,
     RulerRecord,
 )
+from promptpotter.domain.value_tree import ValueLeaf
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.runtime_flags import derive_run_phase, is_checkin
 from promptpotter.infrastructure.store.account_spend import (
@@ -1101,6 +1102,45 @@ class CampaignStore:
         overlay, written once at run init. Not the ledger: it is a fact about the whole cycle, not
         an event in it, and a reader that only wants "what may move here" should not scan a log."""
         write_yaml(self._layout(hop).resolved_pipeline, declaration)
+
+    def write_optimized_surface(self, hop: CycleHop, leaves: Sequence[ValueLeaf]) -> None:
+        """Record WHAT this cycle optimizes, and how each value reaches the model.
+
+        Beside the resolved declaration rather than inside it, because the two are different kinds:
+        that file is the declaration, this is the READING of it an operator needs and cannot derive
+        from it — a declaration names a key, never the channel it travels nor whether the model
+        will see it. Human-readable and on disk per the pre-flight gate; a material fact surfaced
+        only in stdout is one the operator had to have been watching for.
+
+        Written at init and re-written on resume, the same cadence and for the same reason as the
+        declaration above: what this owes the operator is what the NEXT round will search.
+        """
+        by_delivery: dict[str, list[ValueLeaf]] = {}
+        for leaf in leaves:
+            by_delivery.setdefault(leaf.delivery, []).append(leaf)
+        lines = [
+            "# What this cycle optimizes",
+            "",
+            "Derived at run init from `PipelineSchema.value_tree`, never hand-maintained.",
+            "**may-not-arrive** marks a channel the model reads only if it OPENS the artifact",
+            "carrying the value — there, a value can be mutated every round and reach nothing.",
+            "",
+            "These are the AXES. The VALUES they currently hold are in `pipeline.resolved.yaml`",
+            "beside this file, written on the same cadence — not copied here, because a second",
+            "copy of a value is one that can disagree with the declaration it came from.",
+            "",
+        ]
+        for delivery in sorted(by_delivery):
+            group = by_delivery[delivery]
+            caveat = " · **may-not-arrive**" if group[0].may_not_arrive else ""
+            lines.append(f"## {delivery} — {group[0].visibility}{caveat}")
+            lines.append("")
+            lines += [
+                f"- `{leaf.path}` ({leaf.kind}){'' if leaf.mutable else ' — PINNED'}"
+                for leaf in group
+            ]
+            lines.append("")
+        write_text(self._layout(hop).optimized_surface, "\n".join(lines))
 
     def read_resolved_pipeline(self, hop: CycleHop) -> dict[str, Any] | None:
         """``None`` where a campaign has never run — the committed dataset file answers then, and

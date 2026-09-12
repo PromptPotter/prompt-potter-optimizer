@@ -27,6 +27,7 @@ if TYPE_CHECKING:
         SessionProtocol,
         WireAdapter,
     )
+    from promptpotter.domain.value_tree import Delivery
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,7 @@ def build_backend_client(
         max_cells_in_flight=connector.max_cells_in_flight,
         measured_unit=connector.measured_unit,
         answer_key=connector.answer_key,
+        prompt_delivery=connector.prompt_delivery,
         auth_token=connector.auth_token() if connector.auth_token else None,
     )
 
@@ -87,6 +89,7 @@ class BackendClient:
         max_cells_in_flight: int = 2,
         measured_unit: MeasuredUnit = "sample",
         answer_key: str | None = None,
+        prompt_delivery: Delivery = "request",
         timeout: float = 30.0,
         auth_token: str | None = None,
     ):
@@ -106,6 +109,10 @@ class BackendClient:
         # connectors want opposite depths.
         self._max_cells_in_flight = max_cells_in_flight
         self._measured_unit: MeasuredUnit = measured_unit
+        # Which channel the candidate's prompt travels, so `PipelineSchema.value_tree` can say
+        # whether a value being optimized can even arrive. A wire fact like the three above it,
+        # and the one that distinguishes a prompt the model always sees from one it must open.
+        self.prompt_delivery: Delivery = prompt_delivery
         # Where this backend's answer TEXT lives, when it emits one outside a ranking.
         self._answer_key: str | None = answer_key
         self._auth_token = auth_token or ""
