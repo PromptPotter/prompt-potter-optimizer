@@ -652,7 +652,7 @@
       },
       "CampaignPipelineResponse": {
         "additionalProperties": false,
-        "description": "One campaign's pipeline at one searchpoint — the body of ``GET /campaigns/{id}/pipeline``.\nThe peer of ``readable_dataset_dir`` one question up: that seam answers which bytes are on disk,\nthis one which values a campaign runs (``architecture.md`` §0, two resolution seams).",
+        "description": "One campaign's pipeline at one searchpoint — the body of ``GET /campaigns/{id}/pipeline``.\nThe peer of ``readable_dataset_dir`` one question up: that seam answers which bytes are on disk,\nthis one which values a campaign runs (``architecture.md`` § Two resolution seams).",
         "properties": {
           "backend_type": {
             "title": "Backend Type",
@@ -6605,7 +6605,7 @@
     },
     "/api/v1/commands/edit-draft-campaign": {
       "post": {
-        "description": "Sparse-patch a `DraftCampaign`. Returns the post-mutation full shape.\n\nPer ``docs/specs/api-openapi.yaml::editDraftCampaign``. The mutation rides\n`CommandDispatcher` (architecture.md §0: sole writer of `CommandRecord`); only\nthe response shape differs from the generic 202 verbs, never the ingress.",
+        "description": "Sparse-patch a `DraftCampaign`. Returns the post-mutation full shape.\n\nPer ``docs/specs/api-openapi.yaml::editDraftCampaign``. The mutation rides\n`CommandDispatcher` (architecture.md § Control-remote: sole writer of `CommandRecord`);\nonly the response shape differs from the generic 202 verbs, never the ingress.",
         "operationId": "edit_draft_campaign_api_v1_commands_edit_draft_campaign_post",
         "parameters": [
           {

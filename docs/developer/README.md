@@ -107,7 +107,7 @@ Both files are append-only logs folded last-wins (`store/read_model.py`). The in
 
 **Read paths** (both return `list[Measurement]`):
 
-- `measurements_for_sample(sample_id)` — *"history of training example X"*. Exposed through `archive_queries.measurements_for_sample()`; **no caller today**, and kept anyway because architecture.md §0 declares both keys first-class read surfaces of the archive.
+- `measurements_for_sample(sample_id)` — *"history of training example X"*. Exposed through `archive_queries.measurements_for_sample()`; **no caller today**, and kept anyway because architecture.md § Measurement archive (the actual database) declares both keys first-class read surfaces of the archive.
 - `measurements_for_config(predicate)` — *"runs whose config matches this subset"*. Optional `run_ids` hint keeps the scan O(K + matches).
 
 The archive is tenant-global and **never backend-scoped** — no read or write takes a `backend_id`.
@@ -119,7 +119,7 @@ The archive is tenant-global and **never backend-scoped** — no read or write t
 | Change | Files |
 |---|---|
 | New field on every measurement | `Measurement` (`domain/sample.py`), `build_dataset_run_data()` (`application/datasets/loaders.py`), `_to_measurement()` (`infrastructure/store/measurement_archive.py`) |
-| New retrieval view | Method on `MeasurementArchive` parallel to `for_sample/for_config`. Pair with an index class if filtering must stay efficient. |
+| New retrieval query | Method on `MeasurementArchive` parallel to `for_sample/for_config`. Pair with an index class if filtering must stay efficient. |
 | New derived index | Class with `_seen_runs` cursor + `ingest_run()` returning its per-run row, applied through ONE `replay_row()` both live and on replay; register on `AxisIndex.refresh()`. Persist via `read_model` (`infrastructure/store/read_model.py`) — never a second mechanism |
 
 **The one rule:** `node_configs` is canonical identity — must be deterministic from pipeline params. Don't break determinism.

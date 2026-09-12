@@ -111,6 +111,38 @@ it.
   for a COLLAPSED verdict and `earned_blocks` under `OPEN` — if either now discriminates, the entry
   is stale.
 
+- **A Harbor run's roster never lands on disk.** `connectors/harbor.py::_registry_tasks` memoizes per
+  `(dataset, version)` for reads outside a run, but a Harbor version names an EDITABLE registry entry:
+  a long-lived process keeps the first roster it read, and a served campaign's identity is recomputed
+  from the current fetch rather than from the roster its run used. The run itself is consistent — its
+  `InProcessWorkload` carries one resolution. Action: land the resolved roster beside
+  `pipeline.resolved.yaml` when a cycle starts, and read it for that campaign; the memo is the
+  operator's chosen interim. **Re-test:** `ls .promptpotter/projects/*/campaigns/harbor-*/cycles/*/`
+  — no roster file beside `pipeline.resolved.yaml` means open.
+
+- **A web check-in Start declares no run limits; CLI `new <file>` does.**
+  `application/commands/payloads.py::StartCheckinPayload` carries only `campaign_id`, so the web Start
+  launches under `LaunchLimits()` while the CLI passes a halt target and both budgets — an
+  `<entry-point-parity>` gap. Action: `StartCheckinPayload` takes `LaunchLimits` as `StartRunPayload`
+  does, then the check-in Start surface offers the three fields. **Re-test:**
+  `grep -n "class StartCheckinPayload" promptpotter/application/commands/payloads.py` — any base but
+  `LaunchLimits` means open.
+
+- **L4 re-reads `inner_tasks.yaml` from disk during a run.** `application/runner/inner/ruler.py` and
+  `spawn_context.py` each call `tasks.py::load_inner_tasks`, so an edit mid-run splits one run's cells
+  across two panels — the per-run-state shape `InProcessWorkload` closed for in-process connectors.
+  Action: the outer run resolves the panel once and hands it down through the spawn context.
+  **Re-test:** `grep -rn "load_inner_tasks(" promptpotter/application/runner/inner/` — more than one
+  call site means open.
+
+- **The CLI's verb table defers every handler import, for startup speed.**
+  `presentation/cli/campaign_runner.py::COMMANDS` resolves each handler through
+  `importlib.import_module` at call time — the deferral [`../developer/conventions.md`](../developer/conventions.md)
+  refuses, counted in `complexity_ledger`'s `deferred_imports`. Action: time `python -m promptpotter
+  --help` cold with the handlers imported eagerly, then hoist them or state the exemption beside the
+  table. **Re-test:** the operator answers whether that measured startup cost justifies the deferral;
+  until then `grep -n import_module promptpotter/presentation/cli/campaign_runner.py` hits.
+
 
 ## Blocked — named blocker
 

@@ -365,7 +365,7 @@ Then declare it on the wire: `docs/specs/api-openapi.yaml`, *before* the handler
 ## 9. A served read
 
 A new `GET`. **Not a Control-remote command and not a sixth I/O kind** — that kind is defined by
-MUTATION, so a read adds no ingress and no writer (`architecture.md` §0 — Control-remote). Reads
+MUTATION, so a read adds no ingress and no writer (`architecture.md` § Control-remote). Reads
 having had no bucket is exactly why several shipped undeclared, `api-openapi.yaml` says so at its
 own head, and this recipe is the fix.
 

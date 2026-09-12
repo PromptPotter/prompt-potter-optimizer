@@ -11,9 +11,8 @@ field, dict, or file? Then answer all eight (`CLAUDE.md` → Pre-flight gate).
 **If this PR adds no new concept, replace this list with `N/A — no new
 concept` and skip to Checks.**
 
-- [ ] 1. Which §0 bucket does this belong to? (central loop / escalation /
-      errors-heal / dispatch / state+persistence / on-disk / tracing /
-      archive). If none — stop.
+- [ ] 1. Which §0 bucket does this belong to? (Every `###` heading of
+      `docs/architecture.md` §0 but Purpose is one.) If none — stop.
 - [ ] 2. Does an existing channel already do this? (Searched first — default
       answer is yes.)
 - [ ] 3. Is the name distinct from every existing concept? (Grepped first.)

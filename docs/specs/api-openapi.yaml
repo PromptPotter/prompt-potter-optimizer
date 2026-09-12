@@ -41,7 +41,7 @@
 # once advertised `endorse-candidate` as live on the strength of this file alone.
 #
 # Permanent contract: docs/adr/0001-m12-control-plane.md
-# §0 definition: docs/architecture.md (§0 "State + persistence" — Five I/O kinds)
+# §0 definition: docs/architecture.md § State + persistence — the five I/O kinds
 
 openapi: 3.1.0
 

@@ -119,8 +119,8 @@ async def edit_draft_campaign(
     """Sparse-patch a `DraftCampaign`. Returns the post-mutation full shape.
 
     Per ``docs/specs/api-openapi.yaml::editDraftCampaign``. The mutation rides
-    `CommandDispatcher` (architecture.md §0: sole writer of `CommandRecord`); only
-    the response shape differs from the generic 202 verbs, never the ingress.
+    `CommandDispatcher` (architecture.md § Control-remote: sole writer of `CommandRecord`);
+    only the response shape differs from the generic 202 verbs, never the ingress.
     """
     _require_kind(envelope, "edit-draft-campaign")
     idemp = ensure_idempotency_key(idempotency_key)

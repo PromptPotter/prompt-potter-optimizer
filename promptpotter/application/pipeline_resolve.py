@@ -398,7 +398,7 @@ def resolved_dataset_name(session: Session, campaign_config: CampaignConfig) -> 
 class CampaignPipelineResponse(StrictModel):
     """One campaign's pipeline at one searchpoint — the body of ``GET /campaigns/{id}/pipeline``.
     The peer of ``readable_dataset_dir`` one question up: that seam answers which bytes are on disk,
-    this one which values a campaign runs (``architecture.md`` §0, two resolution seams)."""
+    this one which values a campaign runs (``architecture.md`` § Two resolution seams)."""
 
     campaign_id: str
     cycle_id: str

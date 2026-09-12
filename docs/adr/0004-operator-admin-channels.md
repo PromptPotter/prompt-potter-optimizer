@@ -36,7 +36,7 @@ Two prior instincts were wrong and are worth recording so they don't recur:
    cloud (n8n / Railway). Breach of that SaaS, or a leaked token, lets an attacker
    lift themselves off the auth gate. Single factor, maximal exposure.
 2. **"Ride the `POST /commands/{kind}` Control-remote highway."** A category error.
-   The blocklist is the **Identity** I/O kind (architecture.md §0), not Control-remote;
+   The blocklist is the **Identity** I/O kind (architecture.md § Identity), not Control-remote;
    it is deployment-global, not per-tenant; the campaign command highway is
    OIDC-session-gated for *humans* and lands records on a *tenant* ledger. Forcing a
    global identity mutation through it inverts the scope and conflates two I/O kinds.
@@ -123,7 +123,7 @@ route.** It is delivered by an operator-admin channel (in-zone, outbound conduit
 where an external driver is unavoidable, behind an edge-broker + app-token conduit
 (option C). A PR adding an inbound, internet-reachable route that mutates
 identity/deployment config is a block. Adding a new operator-admin action amends
-architecture.md §0 (Identity kind) first, per the CLAUDE.md pre-flight Q4 sub-rule and
+architecture.md § Identity first, per the CLAUDE.md pre-flight Q4 sub-rule and
 ADR-0002 gate #5.
 
 ### Confirmation
@@ -160,7 +160,7 @@ in `.env`, run `deploy-linux/install-admin-bot.sh`, then message the bot
   this ADR adds its administrative-write facet + delivery channel.
 - [`0001-m12-control-plane.md`](0001-m12-control-plane.md) — the campaign Control-remote
   highway this action deliberately does **not** ride.
-- [`../architecture.md`](../architecture.md) §0 — the Identity-kind amendment naming the
+- [`../architecture.md`](../architecture.md) § Identity — the Identity-kind amendment naming the
   operator-admin channel.
 
 ### Anchors
@@ -170,7 +170,7 @@ verified by review, no standing test (see [`../../tests/CLAUDE.md`](../../tests/
 
 | Concern | File |
 |---|---|
-| §0 Identity-kind amendment (admin facet + operator-admin channel) | `docs/architecture.md` |
+| §0 Identity-kind amendment (admin facet + operator-admin channel) | `docs/architecture.md` § Identity |
 | Blocklist writers + audit (`block_email` / `unblock_email` / `list_blocked`) | `promptpotter/infrastructure/identity/blocklist.py` |
 | Identity-zone paths (`blocklist`, `blocklist_audit`) | `promptpotter/infrastructure/identity/paths.py` |
 | On-box admin bot (first operator-admin channel) | `promptpotter/presentation/admin_bot.py` |

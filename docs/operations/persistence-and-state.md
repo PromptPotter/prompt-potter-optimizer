@@ -14,7 +14,7 @@ Your work lives in `.promptpotter/`, in two trees:
 - **Campaign** — `campaign_id = {dataset}__{rand6_hex}`, minted fresh per `new`. `campaign.json` carries `root_content_hash` (resume's config-drift check) and `optimizer_prompt_hash`; neither is the id.
 - **Cycle** — `cycle_{content_hash[:12]}` (+ `_fork_`/`_diag_` on branches). Path resolution is always `(campaign_id, cycle_id)`.
 
-**There is no Session tier** — owned by [`../architecture.md`](../architecture.md) § A campaign has one root cycle. What `sessions/{session_id}/` and `active_session.json` hold is the operator's workspace and pointer, never a container for cycles.
+**There is no Session tier** — owned by [`../architecture.md`](../architecture.md) § A campaign has one root cycle — there is no Session tier. What `sessions/{session_id}/` and `active_session.json` hold is the operator's workspace and pointer, never a container for cycles.
 
 ## Active session pointer
 
@@ -323,4 +323,4 @@ There is **one** storage vocabulary, the operator's mental model. Every byte in 
 
 **Running jobs (`.runtime/jobs/{job_id}.json`).** The browser-launched runner is tracked one file per job (`campaign_id, cycle_id, user_id, status, …`); reads filter by user. Concurrent campaigns are isolated via the per-cycle ledger ContextVar.
 
-**Identity** is the fifth I/O kind ([`../architecture.md`](../architecture.md) §0): OIDC verification at the API trust boundary populates `IdentityContext`, and tokens never appear past the middleware ([`../adr/0002-identity-foundation.md`](../adr/0002-identity-foundation.md) — review-enforced, no standing test). Stage 0 substitutes `default_identity()`.
+**Identity** is the fifth I/O kind ([`../architecture.md`](../architecture.md) § Identity): OIDC verification at the API trust boundary populates `IdentityContext`, and tokens never appear past the middleware ([`../adr/0002-identity-foundation.md`](../adr/0002-identity-foundation.md) — review-enforced, no standing test). Stage 0 substitutes `default_identity()`.

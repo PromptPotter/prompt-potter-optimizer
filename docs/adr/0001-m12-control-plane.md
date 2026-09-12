@@ -209,7 +209,7 @@ enforcement detail that must move freely, so they are named in prose (see
 
 | Concern | File |
 |---|---|
-| §0 Control-remote definition | `docs/architecture.md` (§0 "State + persistence" — I/O kinds taxonomy) |
+| §0 Control-remote definition | `docs/architecture.md` § Control-remote |
 | §0.5 Control-remote load-bearing-surface entry | `docs/architecture.md` (§0.5 load-bearing surface) |
 | Closed inbound command set | `docs/specs/api-openapi.yaml` |
 | Closed outbound event set | `docs/specs/events-asyncapi.yaml` |
