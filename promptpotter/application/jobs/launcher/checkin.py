@@ -202,6 +202,7 @@ async def start_checkin_campaign(
     job_registry: JobRegistry,
     hop: CycleHop,
     draft: DraftCampaign,
+    limits: LaunchLimits,
     backend_url: str = DEFAULT_BACKEND_URL,
 ) -> dict[str, str]:
     """Transition (b), web tail — take the machine slot (or a place in line), then spawn the runner
@@ -218,6 +219,7 @@ async def start_checkin_campaign(
             job=job,
             hop=hop,
             draft=draft,
+            limits=limits,
             backend_url=backend_url,
         ),
     )
@@ -231,6 +233,7 @@ async def _start_checkin_run(
     job: Job,
     hop: CycleHop,
     draft: DraftCampaign,
+    limits: LaunchLimits,
     backend_url: str,
 ) -> None:
     """Everything a check-in Start does once its slot is HELD — which, for a queued launch, is
@@ -244,7 +247,7 @@ async def _start_checkin_run(
         dataset_name=draft.slug,
         backend_type=draft.connector,
         backend_url=backend_url,
-        requested=LaunchLimits(),
+        requested=limits,
     )
 
     async def make_session(dataset_name: str) -> Session:

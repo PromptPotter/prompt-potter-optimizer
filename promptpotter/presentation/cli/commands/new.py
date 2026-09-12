@@ -60,6 +60,7 @@ from promptpotter.presentation.cli.commands._shared import (
     get_verbose,
     identity_from_args,
     init_services_cli,
+    launch_limits_from_args,
     pipeline_summary,
 )
 from promptpotter.presentation.cli.session import load_session, no_dataset_hint
@@ -253,9 +254,17 @@ async def _ingest_and_prepare_checkin(
             identity=identity_from_args(args),
         )
 
+    # The ceilings ride the payload even though `drive_cycle` is what admits under them here: the
+    # `CommandRecord` is the only durable statement of what this Start asked for, and a terminal
+    # launch whose record says "no ceiling" reads as a different command from the web's.
     prepared = await dispatch_start_checkin(
         stores,
-        CommandCall(StartCheckinPayload(campaign_id=campaign_id), uuid.uuid4().hex),
+        CommandCall(
+            StartCheckinPayload(
+                campaign_id=campaign_id, **launch_limits_from_args(args).model_dump()
+            ),
+            uuid.uuid4().hex,
+        ),
         start=lambda hop, draft: prepare_checkin_run(
             stores, hop=hop, draft=draft, make_session=make_session
         ),

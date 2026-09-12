@@ -3300,11 +3300,12 @@ components:
             resolves it to its root and sweeps every empty stub under that
             root (matching `cleanup_empty_stubs` semantics).
 
-    # The three operator-set launch ceilings. Written out on BOTH payloads rather than $ref'd as
-    # one branch: `additionalProperties: false` only sees `properties` in its own schema object,
-    # so folding these in via `allOf` would close the payload against the very fields it declares.
-    # One model serves both (`domain/launch_limits.py::LaunchLimits`, which each payload inherits)
-    # — keep the two copies identical.
+    # The three operator-set launch ceilings. Written out on EACH declaring payload rather than
+    # $ref'd as one branch: `additionalProperties: false` only sees `properties` in its own schema
+    # object, so folding these in via `allOf` would close the payload against the very fields it
+    # declares. One model serves all three (`domain/launch_limits.py::LaunchLimits`, which each
+    # payload inherits) — keep the copies identical. The set is mint-campaign, start-run and
+    # start-checkin: every verb that BEGINS spending, which is what makes it the whole set.
     MintCampaignPayload:
       type: object
       required: [dataset_name]
@@ -4527,10 +4528,37 @@ components:
       required: [campaign_id]
       additionalProperties: false
       description: |
-        Start-verb payload — no field overrides at Start; the durable check-in
-        draft is the canonical source of truth. Tenant-scoped; 404 on a
-        cross-tenant `campaign_id` (or one with no check-in working state).
+        Start-verb payload. The durable check-in draft stays the canonical source
+        for everything the campaign IS — no field of it is overridable here. The
+        three launch ceilings are not draft fields: they bound what THIS launch
+        may spend, exactly as on `start-run` and `mint-campaign`, and omitting
+        them from this payload is what left the web Start unable to declare a
+        budget that CLI `new <file>` takes on the same three seams. Tenant-scoped;
+        404 on a cross-tenant `campaign_id` (or one with no check-in working state).
       properties:
+        halt_at_accuracy:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: |
+            Stop once the best measured accuracy reaches this. Omitted, the run
+            never halts on accuracy. Must be FINITE — `NaN` satisfies a
+            `minimum`/`maximum` pair and then never compares true.
+        spend_budget_usd:
+          type: number
+          minimum: 0
+          description: |
+            USD ceiling for this run. One the account cannot cover is refused
+            whole (ADR-0003 § D1); one it can may lower the campaign's ceiling,
+            never raise it. Must be FINITE: the `BudgetGate` probe is `spent >= cap`.
+        token_budget:
+          type: integer
+          minimum: 0
+          description: |
+            Cumulative-token ceiling (optimizer + backend, input + output), the
+            model-portable twin of `spend_budget_usd` and the one that still binds
+            when a model has no rate on file. Whichever ceiling is met first halts
+            the cycle.
         campaign_id:
           type: string
           minLength: 8

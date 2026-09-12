@@ -278,7 +278,15 @@ CONNECTOR = Connector(
     # tenant may pick from, that is where they start. Without it the committed pipeline.yaml
     # carries no `available_models` and the check-in's model list has zero options — so an
     # operator could see their model and not change it.
-    available_models=("openai/gpt-oss-20b", "qwen/qwen3.7-flash:nitro"),
+    # The three below price at or under gpt-oss-20b on both axes and postdate it; none of them
+    # takes `reasoning_effort`, so the rung a dataset pins is inert on them.
+    available_models=(
+        "openai/gpt-oss-20b",
+        "qwen/qwen3.7-flash:nitro",
+        "inclusionai/ling-3.0-flash",
+        "upstage/solar-pro4",
+        "nex-agi/nex-n2-mini",
+    ),
     # A fresh drop's committed pipeline.yaml must OWN its task model — the dataset
     # is the authority for what the backend runs, never the backend's own hidden
     # GET /pipeline default (which would silently pick the heavy groq/120b). This

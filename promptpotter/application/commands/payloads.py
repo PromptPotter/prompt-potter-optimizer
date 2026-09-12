@@ -206,7 +206,12 @@ class ResolveOriginPayload(_CheckinPayload):
         return self.draft_id
 
 
-class StartCheckinPayload(_CheckinPayload):
+class StartCheckinPayload(_CheckinPayload, LaunchLimits):
+    """The draft is canonical for everything the campaign IS; the limits are what THIS launch may
+    spend, which no draft field holds. Carrying neither is what made the web Start launch under a
+    bare ``LaunchLimits()`` while CLI ``new <file>`` — the same three seams, one argv away — passed
+    a halt target and both budgets."""
+
     campaign_id: str = Field(min_length=8, max_length=128)
 
     @property

@@ -176,7 +176,7 @@ async def start_checkin(
         stores,
         CommandCall(payload, idemp),
         start=lambda hop, draft: start_checkin_campaign(
-            stores=stores, job_registry=job_registry, hop=hop, draft=draft
+            stores=stores, job_registry=job_registry, hop=hop, draft=draft, limits=payload
         ),
     )
 
