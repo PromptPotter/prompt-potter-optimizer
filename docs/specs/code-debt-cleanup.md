@@ -278,3 +278,9 @@ longer "is a feature allowed" but "does the preprint need it", and these do not:
   distinct value is `null`, no live row has reached either layer.
 
 Closed items are not tracked here — `git log` is the history layer.
+
+## verified 2026-09-12
+
+- **Pointed out, NOT investigated** — VALID. Code-verifiable sub-claims (2), (3), (4) all hold. `domain/results.py::RoundResult.scoreboard` is still a `@computed_field` at line 845 returning `list[ScoreboardRow]`; `results.py` imports `display_rank_key` from `rendering` at line 18 — the coupling the entry describes. `is_floor_pinned` (domain/results.py:530) still reads `r["objective"]` at line 544; line number drifted from the filed 523 but the claim holds. `halt_at_accuracy` has 28 occurrences across `promptpotter/` — the "~14 call sites" figure is an undercount, but the pass-through shape across CLI, REST, launcher and runner stands. Sub-claim (1) is empirical and cannot be verified from code.
+- **No BROWSER is ever opened in CI** — VALID. All four onboarding components confirmed present: `webapp/components/onboarding/{AccessGate,ConsentGate,AllowanceSpent,WelcomeLockoutModal}.tsx`. No `webapp/e2e` directory. No `*.spec.ts` files in webapp/ (only `*.test.ts` for lib/derivations and candidates components; none cover onboarding or `app/page.tsx`). `scripts/smoke_wheel.py` contains no browser navigation calls. Re-test condition (empty result) confirmed.
+- **FIVE node kinds spell one concept** — VALID. All five `NodeKind` members still declared at `domain/pipeline_schema.py:139–143` (`LLM`, `GENERATION`, `LLM_OPTIMIZER`, `OPTIMIZER_PROMPT`, `AGENT`). `THINKING_KINDS` frozenset still carries all five (lines 158–165). `presentation/teleprompter.py:236` still writes `"type": "llm"`. `llm/optimizer` (4 occurrences) and `agent` (1) still appear in `promptpotter/assets/` pipeline.yaml files alongside `generation` and `optimizer_prompt`. No consolidation has occurred.
