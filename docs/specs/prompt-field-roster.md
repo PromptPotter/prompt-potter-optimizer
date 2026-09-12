@@ -69,6 +69,28 @@ restated rather than inherited for exactly this reason. So:
   render of a descendant reading under a changed order is `?`, never a recomputed number
   (`webapp/CLAUDE.md` § Scoring authority, "A number kept alive under a changed setup").
 
+## What the value tree already settled, and the one constraint it adds
+
+`domain/value_tree.py` landed after this spec was written and changes its ground without answering
+either half of § The decision.
+
+**Settled: addressing.** Every field is already an addressable leaf —
+`agent.prompt.instruction` — carrying the node, the key, the channel it travels and whether the
+model sees it. § B needed that addressing to exist and now does not have to invent it; a roster
+becomes a SELECTION over leaves rather than a second list beside the constant.
+
+**Still open: the set and the order.** The tree derives its prose leaves from
+`open_prompt_fields()`, which still reads `PROMPT_STRING_FIELDS`, and it lists them in render order
+without making order an axis. Both halves below stand as written.
+
+**The constraint it adds, which changes § B's cost line.** A field's cost depends on the CHANNEL it
+travels, which this spec assumed was always the request. It is not: on an `artifact_body` connector
+the rendered prompt is a file the agent must open, so a roster that grows there grows a document
+the model **may never read** — while the `artifact_meta` description that decides whether it is
+opened at all is a separate, pinned leaf. Weigh § B per channel: growing a request costs input
+tokens on every call, growing an artifact costs nothing until it is opened and buys nothing if it
+never is.
+
 ## The decision
 
 Two independent halves. They can ship in either order; the order half is far cheaper.

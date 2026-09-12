@@ -90,15 +90,29 @@ empty and for the `NO_RESULT` sentinel). One reader each, for the reason there i
 here — `judge_answer` exists because reading `predicted` raw graded the literal string `NO_RESULT`
 on every cell of a backend that emits no ranking, and banked a category for it.
 
-## The step schema — `retrieve → ground → answer`
+## The step schema — one per task SHAPE
 
 `campaign_config.judges` is keyed by **the term the scoring formula reads, never by the judge's
 name**, and that is what makes a multi-STEP cell expressible: three entries, three rubrics, three
 banked observations per cell. Keyed by judge, two terms sharing a rubric would collapse into one
 and the second verdict would land on top of the first.
 
-**The schema is `retrieve → ground → answer`, it is a semantic decision, and it is fixed BEFORE a
-cell is bought.** Per-step δ pools only if "step 2" is the same KIND of thing across cells, so a
+**A schema belongs to a task SHAPE, and `retrieve → ground → answer` is one shape's** — the
+search-augmented one. An agent-harness task has a different shape and a different schema,
+`open → adhere` (`datasets/spreadsheetbench-s10/dataset.md` § Step schema), because what can go
+wrong first there is not retrieval but whether the candidate's prompt reached the model at all.
+Adopt the shipped schema where the shape matches; coining one on a task it does not fit is a schema
+that is *wrong*, which is worse than one that is merely new. A third shape earns a third schema and
+owes the same screen.
+
+**A step may be graded by a CONNECTOR OBSERVATION as well as by a judge — what makes something a
+step is that it banks its own TERM, not that a model decided it.** `open` is graded by
+`connectors/harbor.py::_skill_opened` off the trial's own trajectory at no model cost, and composes
+into the cell exactly as a judge term does. So look for the cheap mechanical half of a schema
+before authoring a rubric: it costs nothing per cell, it cannot saturate the way a rubric can, and
+on that backend it is the half that decides whether the round measured anything at all.
+
+**The schema is a semantic decision, and it is fixed BEFORE a cell is bought.** Per-step δ pools only if "step 2" is the same KIND of thing across cells, so a
 turn *index* is not an item and an agentic episode takes however many turns it takes. Retrofitting
 a schema means re-paying for every row — the fingerprint folds the whole term → judge mapping
 (`pipeline_resolve.py::_identity_contributions`), so re-keying a grader is a new measurement, by

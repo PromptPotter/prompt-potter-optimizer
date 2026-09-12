@@ -12,12 +12,24 @@ campaign_config:
     # an episode's wall clock is `turns x per-turn latency` and only the first factor is the
     # prompt's, so seconds charge the provider's weather.
     #
-    # 29924 is C0's median `input + output` across `step_tokens` on this dataset+model. **The n is
-    # 10** — a real distribution rather than the single cell this comment used to report, but a
-    # thin one, and its p90 (87809) is nearly 3x the median. Treat the anchor as provisional and
-    # re-pin it off the first campaign that measures more than a screen. Census and the recompute
-    # path: `docs/operations/dataset-selection-rationale.md` § What a cell costs.
-    per_cell: max(0.0, min(1.0, fitness * 29924.0 / (29924.0 + 0.5 * max(0.0, tokens - 29924.0))))
+    # 56844 is C0's median `input + output` across `step_tokens`, n=10, re-pinned 2026-09-12 off
+    # the first origin this dataset ever measured with the candidate's prompt actually DELIVERED.
+    # The previous 29924 was measured on episodes that never opened the injected skill
+    # (`connectors/harbor.py::_write_skill` wrote CRLF and terminus-2 dropped the frontmatter in
+    # silence), so it priced a no-skill episode: reading the skill roughly DOUBLES the tokens.
+    # Distribution here is wide — mean 63291, p90 113243 — and it is bimodal by outcome: every
+    # miss is a high-token cell (77k / 113k / 163k) against every hit being lower, so an episode
+    # that flails is an episode that burns. Census and the recompute path:
+    # `docs/operations/dataset-selection-rationale.md` § What a cell costs.
+    #
+    # NO `skill_opened` term, and the absence is the decision. It is the OPEN half of this
+    # dataset's `open -> adhere` schema and it is banked on every row as a required observation —
+    # but on a healthy channel it is constant 1.0 (10/10 on this origin), so charging it here would
+    # move nothing when things work and discount every arm UNIFORMLY when they break. That is
+    # arithmetically invisible and reads exactly like a real finding, which is the one failure this
+    # term exists to make impossible. It is enforced where it can be LOUD instead: the connector
+    # warns per cell, and `required_observation_keys` raises at init if a dataset drops the mapping.
+    per_cell: max(0.0, min(1.0, fitness * 56844.0 / (56844.0 + 0.5 * max(0.0, tokens - 56844.0))))
   optimization:
     # ORIGIN ONLY. `max_rounds: 0` is the declared "measure round 0 and stop" — this campaign is
     # an INSTRUMENT CHECK, not a search: it answers whether the model lands mid-range on these

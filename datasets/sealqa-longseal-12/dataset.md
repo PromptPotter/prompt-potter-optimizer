@@ -90,19 +90,22 @@ runtime (`connectors/harbor.py::_preflight` fails naming both).
 
 ## Fine-grained scoring — the point of this dataset
 
-The `retrieve → ground → answer` schema
-([`../../promptpotter/judges/CLAUDE.md`](../../promptpotter/judges/CLAUDE.md) § The step schema),
-banked as three named terms per cell:
+Two steps are graded per cell
+([`../../promptpotter/judges/CLAUDE.md`](../../promptpotter/judges/CLAUDE.md) § The step schema):
 
-| term | judge | asks |
+| term | graded by | asks |
 |---|---|---|
-| `evidence_settled` | `evidence_retrieval` | does the reasoning show evidence that SETTLES the question |
-| `answer_grounded` | `answer_grounding` | is the answer traceable to the documents, or asserted |
-| `answer_correct` | `sealqa` | is the answer right, under the paper's own auto-rater |
+| `skill_opened` | `connectors/harbor.py::_skill_opened` — no model call | did the candidate's prompt reach the model at all |
+| `answer_correct` | the `sealqa` judge | is the answer right, under the paper's own auto-rater |
 
-**Only `exact_match` decides the round.** All three judge terms are banked beside it and none is in
-the scoring formula — a grading that fails past its retry omits its term and would bank a paid cell
-as an ERROR, and two of the three rubrics are unscreened. This campaign exists partly to read them.
+**`evidence_settled` and `answer_grounded` are GONE.** They were declared to be screened, the
+`def880` campaign screened them, and the answer was no — `campaign.yaml::judges` records the
+numbers and the argument, which are not restated here.
+
+**Only `exact_match` decides the round today**, with `answer_correct` banked beside it. Naming a
+judge term in the formula is safe — a grading that fails past its retry resolves the row UNSCORED
+and keeps its measurement (`application/scoring/formula/rescore.py`) — so this is a choice about
+which grader the round is won on, not a constraint.
 
 **The step terms may never become separate items.** They compose into one cell score that θ reads;
 k steps per cell would claim kN observations where there are N, shrinking every SE by ~√k and

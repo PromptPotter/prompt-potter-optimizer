@@ -7,11 +7,12 @@ campaign_config:
   # reads `accuracy`. DISPLAY scope: it changes what the operator READS, never what is decided.
   headline_metric: ability
   scoring:
-    # The ANSWER step alone decides the round, and now it is the only step graded at all — the
-    # screen the two evidence rubrics were declared for has run and is written up beside `judges`
-    # below. One reason to keep this shape even so: a grading that fails past its retry omits its
-    # term, `rescore_results` raises inside `measure_sample`, and the catch-all there banks the
-    # whole cell as an ERROR, so a formula naming a judge term can discard a paid answer.
+    # The ANSWER step alone decides the round — the screen the two evidence rubrics were declared
+    # for has run and is written up beside `judges` below.
+    #
+    # Naming a judge term here is SAFE: a grading that fails past its retry resolves the row
+    # UNSCORED, which keeps its `pipeline_data` and stays out of every denominator
+    # (`formula/rescore.py`). So this is a choice about which grader wins the round, not a rail.
     #
     # `env_reward` is deliberately NOT here even though the connector always emits it. On this
     # dataset it reports whether the episode left an answer file at all — the gold is held outside
@@ -23,6 +24,12 @@ campaign_config:
     # prompt's: the same panel reads 48.6s at p50 and 710.7s at its worst, so charging seconds
     # would charge the provider's weather and would punish the origin for replaying cached rows
     # that carry an older run's `step_timings`.
+    #
+    # ⚠️ STALE, and knowingly left in place. Every cell behind this figure was measured while the
+    # injected skill was silently dropped (CRLF frontmatter, fixed 2026-09-12), so it prices a
+    # NO-SKILL episode. On `spreadsheetbench-s10` the same correction roughly doubled the median.
+    # Not guessed at: re-pinning needs this dataset's own origin re-measured, and a number invented
+    # here would be a third answer disagreeing with both the old rows and the future ones.
     #
     # 21301 is C0's median `input + output` across `step_tokens` on this dataset+model, over the
     # 185 origin-labelled rows in the workspace archive; the panel's own median is 22035 over 861
