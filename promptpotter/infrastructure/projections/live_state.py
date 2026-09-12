@@ -45,12 +45,24 @@ def apply_phase(core: LiveStateCore, event: PhaseEvent, view: Any = None) -> Non
     if not fields:
         return
     if event.phase == CampaignPhase.INIT and event.event == "exit":
-        new_origin = float(fields["origin_acc"])
+        # An origin that graded no cell carries the key with a null (`InitExitView.origin_acc`),
+        # and getting it wrong HERE is the silent arm of that class: `ledger.append` swallows a
+        # subscriber exception, so the dashboard simply stops anchoring and only the projection's
+        # own log line — never the run — says so.
+        recorded = fields.get("origin_acc")
+        if recorded is None:
+            return
+        new_origin = float(recorded)
         core.origin_acc = new_origin
         if new_origin > core.best_acc:
             core.best_acc = new_origin
     elif event.phase == CampaignPhase.L1_SCORE and event.event == "exit" and fields.get("improved"):
-        winner = float(fields["winner_accuracy"])
+        # `improved` is a verdict on θ, not on accuracy, so it does NOT imply an accuracy was
+        # recorded: the same null arrives here on exactly the runs it arrives at the origin on.
+        recorded = fields.get("winner_accuracy")
+        if recorded is None:
+            return
+        winner = float(recorded)
         if winner > core.best_acc:
             core.best_acc = winner
 

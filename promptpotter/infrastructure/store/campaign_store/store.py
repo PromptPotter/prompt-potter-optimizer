@@ -84,9 +84,17 @@ def _index_round(rr: RoundResult) -> dict[str, Any]:
 
 def origin_accuracy_of(index: dict[str, Any]) -> float | None:
     """Round 0 IS the origin and there is no stored copy — every path that (re)scores it
-    (init, a diag fork, the origin gate) re-emits round 0 through ``save_round_file``."""
+    (init, a diag fork, the origin gate) re-emits round 0 through ``save_round_file``.
+
+    A round 0 that recorded NO accuracy answers ``None``, which is what this signature has
+    always promised and what an outer L4 cycle actually stores: its measurand is
+    ``mean_round_delta``, so the row carries ``accuracy: null``. Reading the key without asking
+    whether it held a value turned that into ``float(None)`` — and because this is folded by
+    every lineage and listing read, one L4 campaign with a completed round 500'd ``/cycles``,
+    ``/tree``, ``/ray`` and ``/origins`` at once, taking the campaign picker down with them."""
     rounds = index.get("rounds") or []
-    return next((float(r["accuracy"]) for r in rounds if r.get("round") == 0), None)
+    recorded = next((r.get("accuracy") for r in rounds if r.get("round") == 0), None)
+    return float(recorded) if recorded is not None else None
 
 
 def _apply_best(data: dict[str, Any]) -> None:

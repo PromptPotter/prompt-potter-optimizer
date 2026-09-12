@@ -530,11 +530,18 @@ class AxisIndex:
         entry: dict[str, Any],
     ) -> None:
         """Fold one entry into ``axis_values``. An entry with no accuracy is skipped, never folded as 0.0 —
-        a fabricated arm manufactures ``effect_size`` against every real arm on the same axis."""
+        a fabricated arm manufactures ``effect_size`` against every real arm on the same axis.
+
+        "No accuracy" is a statement about the VALUE, and testing the key alone was not the same
+        thing: a row carrying ``accuracy: null`` passed the guard and died in ``float(None)``,
+        taking the whole run down at init with a TypeError and no mention of the axis index. An
+        outer L4 cell is exactly that row — its measurand is ``mean_round_delta`` and it has no
+        accuracy to record — so the recursion could not enter its round loop at all."""
         scores = entry.get("scores") or {}
-        if "accuracy" not in scores:
+        recorded = scores.get("accuracy")
+        if recorded is None:
             return
-        accuracy = float(scores["accuracy"])
+        accuracy = float(recorded)
         for node_name, node_config in (entry.get("pipeline_params") or {}).items():
             if isinstance(node_config, dict):
                 for param, value in node_config.items():

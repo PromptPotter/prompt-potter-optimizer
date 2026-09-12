@@ -51,7 +51,7 @@ def _render_init_enter(v: InitEnterView) -> str:
 def _render_init_exit(v: InitExitView) -> str:
     obs = "ON" if v.obs_on else "OFF"
     out = [
-        f"  {GREEN}✓{RESET} Initialized  origin={v.origin_acc:.1%}  "
+        f"  {GREEN}✓{RESET} Initialized  origin={fmt_pct(v.origin_acc)}  "
         f"cycle={v.cycle_id_short}  samples={v.samples}  obs={obs}"
     ]
     parts: list[str] = []
@@ -177,11 +177,12 @@ def _render_round_complete(v: RoundCompleteView) -> str:
     # each round, so accuracy is subset-relative and a parent that did nothing still moves with it.
     # Accuracy does not disappear; it moves into the parenthetical, so declaring the other loses
     # no reading.
+    acc_txt = fmt_pct(v.winner_accuracy)
     if v.headline_metric == "ability" and v.ability_theta is not None:
         headline = f"θ {v.ability_theta:+.3f}"
-        detail = f"{v.winner_accuracy:.1%}, {versus}"
+        detail = f"{acc_txt}, {versus}"
     else:
-        headline = f"{v.winner_accuracy:.1%}"
+        headline = acc_txt
         detail = versus
 
     if v.improved:

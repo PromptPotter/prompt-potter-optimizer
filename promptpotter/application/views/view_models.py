@@ -98,7 +98,12 @@ class InitExitView:
     """Post-origin init exit. ``resumed_from_round`` is the NEXT L1 round; ``cached_rounds_count`` is a literal count of
     round artifacts, kept independent so "Resumed from N (M cached)" can be truthful."""
 
-    origin_acc: float
+    # ``None`` where the origin graded no cell on accuracy — the same absence as
+    # ``RoundCompleteView.winner_accuracy`` below, reached first by an L4 outer cycle, whose
+    # measurand is ``mean_round_delta``. The builder reads it off a ``cycle`` typed ``Any``, so a
+    # declaration narrower than the ``RoundResult`` feeding it is invisible to the checker and
+    # surfaces as a formatted ``None``.
+    origin_acc: float | None
     cycle_id_short: str
     samples: int
     obs_on: bool
@@ -197,7 +202,12 @@ class RoundCompleteView:
     parent_acc: float
     scores: tuple[ScoreEntry, ...]
     winner_label: str
-    winner_accuracy: float
+    # ``None`` where the round graded no cell on accuracy — every arm errored, or the backend is
+    # verifier-graded. It matches ``RoundResult.accuracy``, which has always been optional; this
+    # field narrowed it to ``float`` and the builder bridged the gap with a ``float()`` that
+    # RAISES, taking the whole round loop down (`stop_reason: crashed`) on a round whose only
+    # fault was having nothing to report.
+    winner_accuracy: float | None
     winner_composite_fitness: float | None
     winner_evaluators: dict[str, float]
     winner_total: int

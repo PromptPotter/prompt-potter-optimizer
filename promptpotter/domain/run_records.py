@@ -92,7 +92,12 @@ def as_view_mapping(view: Any) -> dict[str, Any]:
     the frozen dataclass, so `getattr` works on one and silently returns the default on the
     other — reporting a fact that is present as absent. Lives beside `PhaseRecord` because both
     an `application/` reader and an `infrastructure/` projection need it; owning it in either
-    would invert a layer."""
+    would invert a layer.
+
+    **Every value comes back `Any`, so the VIEW's own field type is the contract.** No checker can
+    follow a key back to the dataclass it came from, and an accuracy is `float | None` at every
+    producer here — so a reader spending one on `float()` or an f-string format spec raises on
+    exactly the runs that had nothing to report. `fmt_pct` is the rendering side of the same rule."""
     if is_dataclass(view) and not isinstance(view, type):
         return asdict(view)
     return view if isinstance(view, dict) else {}
