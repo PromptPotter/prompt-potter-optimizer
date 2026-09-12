@@ -519,11 +519,11 @@ async def measure_sample(
         try:
             rescore_results([result], session.scoring.scorer)
         except ScoringFormulaError as exc:
-            # The measurement succeeded and only the SCORE failed — typically a judge that could
-            # not grade, leaving its term absent from a formula that names it. Unscorable is not
-            # unmade: `pipeline_data` is kept, so the backend call stays in the archive and a
-            # re-grade recovers it. The outer catch-all would have banked `pipeline_data=None` and
-            # thrown a paid cell away.
+            # A formula CONTRACT bug — it raised, or returned a non-finite. Deterministic, so every
+            # cell fails it, and the row is marked so the run stops rather than grading a campaign
+            # against a broken formula. A judge that merely could not grade never arrives here:
+            # `rescore_results` resolves that row to UNSCORED, keeping the paid measurement.
+            # The outer catch-all would have banked `pipeline_data=None` and thrown a paid cell away.
             logger.warning("measure_sample could not score %s: %s", query[:60], exc)
             result["error"] = str(exc)
             result["error_category"] = ErrorCategory.PIPELINE

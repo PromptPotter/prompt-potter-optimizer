@@ -7,10 +7,10 @@ from itertools import combinations, pairwise
 from typing import TYPE_CHECKING, Annotated, Any
 
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
-from promptpotter.application.scoring.formula import ScoringTermMissingError, rescore_results
+from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.domain.measurement_provenance import entry_grade
 from promptpotter.domain.results import resolved_fitness
-from promptpotter.domain.scoring import CellScorer
+from promptpotter.domain.scoring import CellScorer, is_unscored
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.infrastructure.store import archive_queries
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -384,9 +384,11 @@ class AxisIndex:
         ):
             stamp = {"fk": scorer_id, "sig": list(signatures.get(run_id) or ())}
             if scorer is not None:
-                try:
-                    rescore_results(detail.get("measurements") or [], scorer)
-                except ScoringTermMissingError as exc:
+                rows = rescore_results(detail.get("measurements") or [], scorer)
+                # The WHOLE run goes, on the first row that could not be graded. A per-row skip
+                # would fold a partial run under a `scorer_id` claiming it scored entire, and the
+                # digest cannot tell one from the other afterwards.
+                if unscored := next((r for r in rows if is_unscored(r)), None):
                     skipped.append(run_id)
                     self._unscoreable_runs.add(run_id)
                     self.sample_index.mark_seen(run_id)
@@ -395,7 +397,7 @@ class AxisIndex:
                         "axis refresh: archived run %r is unscoreable under the active formula "
                         "— skipping it (it predates the current observation vocabulary). %s",
                         run_id,
-                        exc,
+                        unscored.get("unscored"),
                     )
                     continue
             folded.append({**self.sample_index.ingest_run(detail), **stamp})

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.dashboard_rows import DashboardCandidate, DashboardSample, SampleStatus
 from promptpotter.domain.results import candidate_label
-from promptpotter.domain.scoring import is_hit, is_verifier_graded
+from promptpotter.domain.scoring import is_hit, is_unscored, is_verifier_graded
 from promptpotter.infrastructure.projections.live_dashboard.state import PobbBlock
 from promptpotter.shared.composite import inline_short_formula_values
 
@@ -38,10 +38,17 @@ def sample_row(s: dict[str, Any]) -> DashboardSample:
     decided, and where the display trim happens."""
     sid = s.get("sample_id")
     time_s = s.get("time_s")
-    # `ERR` is asked BEFORE the grade: an errored row was never graded, so putting its absent
-    # fitness through `is_hit` reports a backend fault as a candidate answering wrong.
+    # `ERR` and `UNSC` are both asked BEFORE the grade: neither row was graded, so putting an
+    # absent fitness through `is_hit` reports a backend fault — or the FORMULA's own silence — as a
+    # candidate answering wrong. Same ladder and same precedence as the CLI tape
+    # (`terminal/live/sample.py`), because two readouts of one row may not disagree about whether
+    # it was ever scored.
     status: SampleStatus = (
-        "ERR" if s.get("error") else ("HIT" if is_hit(s.get("fitness")) else "MISS")
+        "ERR"
+        if s.get("error")
+        else "UNSC"
+        if is_unscored(s)
+        else ("HIT" if is_hit(s.get("fitness")) else "MISS")
     )
     # A verifier-graded row has no label, so the answer/truth pair is both halves of a comparison
     # nobody made — and `prediction` there is the `NO_RESULT` sentinel a ranking mechanism that is

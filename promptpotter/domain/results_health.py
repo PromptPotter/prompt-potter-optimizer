@@ -247,6 +247,7 @@ def compute_degradation_health(
     no_result_count: int = 0,
     hole_count: int = 0,
     not_attempted: int = 0,
+    unscored: int = 0,
     last_error: str | None = None,
     answer_modal_share: float | None = None,
     node_failure_rates: dict[str, float] | None = None,
@@ -276,6 +277,7 @@ def compute_degradation_health(
                 no_result_count=no_result_count,
                 hole_count=hole_count,
                 not_attempted=not_attempted,
+                unscored=unscored,
                 last_error=last_error,
                 degraded_rate=0.0,
                 consecutive_degraded_rounds=0,
@@ -297,6 +299,16 @@ def compute_degradation_health(
                         if not_attempted
                         else "The pipeline/connector returned no result rows at all (a crash or "
                         "an empty return, not a wrong answer). "
+                    )
+                    + (
+                        # Named separately because the remedy is the opposite one: these cells ran
+                        # and their measurement is banked, so re-measuring re-buys what is already
+                        # on disk. The formula is what has to change.
+                        f"{unscored} of the cells that DID run carry no verdict — the scoring "
+                        "formula names a term their rows do not carry, so they were measured and "
+                        "not graded. Fix the formula and re-read them; do not re-buy them. "
+                        if unscored
+                        else ""
                     )
                     + "Re-measure with `resume`. If it stops in the same place, read the error on "
                     "the last cell that WAS measured — the cause is upstream of the prompt."
@@ -453,6 +465,7 @@ def compute_degradation_health(
         cause=cause,
         samples=attempted,
         not_attempted=not_attempted,
+        unscored=unscored,
         last_error=last_error,
         structural_count=structural_count,
         transient_count=transient_count,
@@ -528,6 +541,11 @@ def compute_round_health(
     # Cells of the panel the walk never sent. They have no row in ``results`` by construction, so
     # this is the only way the verdict learns the round was cut short rather than simply small.
     not_attempted: int = 0,
+    # Cells that WERE measured and carry no verdict. Passed in rather than recounted off
+    # ``results``, even though it could be: the number is the winner's and
+    # ``l1/score/winner.py`` owns it, so deriving it a second time here is a second answer that
+    # can disagree with the round document beside it — the same reason ``deprecated`` is threaded.
+    unscored: int = 0,
 ) -> DegradationHealth | None:
     """The SINGLE computation site: every surface reads ``RoundResult.health`` and none
     recomputes it."""
@@ -630,6 +648,7 @@ def compute_round_health(
         no_result_count=no_result,
         hole_count=holes,
         not_attempted=not_attempted,
+        unscored=unscored,
         last_error=last_error,
         # Over every attempted row, not just the scoreable ones: hedging IS how a round
         # produces unscoreable rows, so excluding them would hide the behaviour in the

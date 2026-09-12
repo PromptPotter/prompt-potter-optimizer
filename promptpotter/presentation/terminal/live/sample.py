@@ -5,7 +5,12 @@ from typing import TYPE_CHECKING, Any, cast
 from promptpotter.application.views.render.prefix_reading import prefix_reading
 from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS
 from promptpotter.domain.results_health import classify_result
-from promptpotter.domain.scoring import is_hit, is_verifier_graded, recorded_elapsed_s
+from promptpotter.domain.scoring import (
+    is_hit,
+    is_unscored,
+    is_verifier_graded,
+    recorded_elapsed_s,
+)
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.presentation.terminal.primitives import (
     DIM,
@@ -125,6 +130,11 @@ def fmt_query_result(
         tag = "ERR"
     elif classify_result(r).is_fatal:
         tag = "DEPR"
+    elif is_unscored(r):
+        # Asked before the hit ladder for the same reason ``ERR`` is: an ungraded row carries no
+        # ``fitness`` either, and MISS would report the FORMULA's silence as the arm's failure —
+        # the one misreading that makes a grading outage look like a bad prompt.
+        tag = "UNSC"
     elif is_hit(r.get("fitness")):
         tag = "HIT"
     else:

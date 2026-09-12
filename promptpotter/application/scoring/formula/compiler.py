@@ -34,7 +34,10 @@ class ScoringFormulaError(Exception):
 
 class ScoringTermMissingError(ScoringFormulaError):
     """The formula names a term the measurement does not carry. Distinct from its parent because the readers want opposites:
-    the live scorer must HALT, the read-side mask reports *unscorable* and never a fabricated number."""
+    the parent is a contract bug every cell fails, while this one is PER-CELL — a grading that fails
+    past its retry omits its term while the cell beside it grades fine. So neither reader halts on
+    it: ``rescore_results`` resolves the row to UNSCORED and keeps the paid measurement, and the
+    read-side mask reports *unscorable*."""
 
 
 SAFE_BUILTINS = {
@@ -92,16 +95,35 @@ _ALLOWED_AST_NODES: frozenset[type[ast.AST]] = frozenset(
 )
 
 
+# Every name a formula may CALL: the safe builtins plus the registered matchers. Spelled off the
+# two tables rather than listed, so a helper added to either is callable without a second edit.
+_CALLABLE_NAMES: frozenset[str] = frozenset(SAFE_BUILTINS["__builtins__"]) | frozenset(
+    SCORING_FUNCTIONS
+)
+
+
 def validate_ast(tree: ast.AST, *, source: str) -> None:
     for node in ast.walk(tree):
         kind = type(node)
-        if kind in _ALLOWED_AST_NODES:
-            continue
-        raise ValueError(
-            f"Scoring formula rejected — disallowed syntax {kind.__name__!r} "
-            f"in {source}. Allowed: arithmetic, comparisons, calls to the "
-            "registered scoring helpers, namespace name lookups."
-        )
+        if kind not in _ALLOWED_AST_NODES:
+            raise ValueError(
+                f"Scoring formula rejected — disallowed syntax {kind.__name__!r} "
+                f"in {source}. Allowed: arithmetic, comparisons, calls to the "
+                "registered scoring helpers, namespace name lookups."
+            )
+        # A CALL target must be a registered callable, refused HERE rather than at eval: a record's
+        # namespace carries floats and strings, never a callable, so this is decidable at compile
+        # time. At eval it arrives as `NameError` and so as `ScoringTermMissingError`, which makes a
+        # MISTYPED FUNCTION indistinguishable from a term one record lacks — every cell resolves
+        # UNSCORED and the campaign reports having graded nothing.
+        if isinstance(node, ast.Call) and (
+            not isinstance(node.func, ast.Name) or node.func.id not in _CALLABLE_NAMES
+        ):
+            called = ast.unparse(node.func)
+            raise ValueError(
+                f"Scoring formula rejected — {called!r} is not a scoring helper, in {source}. "
+                f"Callable: {sorted(_CALLABLE_NAMES)}."
+            )
 
 
 class CompiledExpression(NamedTuple):

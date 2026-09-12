@@ -116,6 +116,12 @@ class RoundBuffer:
                 # `error_category` the typed one `is_error_result` ASKS (`shared/errors.py`).
                 "error": result.get("error"),
                 "error_category": result.get("error_category"),
+                # A third state beside scored and errored (`domain/scoring.py::is_unscored`). It
+                # rides the buffer because `blocks.py` decides the row's status from this dict
+                # alone, and without it an ungraded row arrives carrying no `fitness` and renders
+                # MISS — the browser then reporting the formula's silence as the arm's failure,
+                # while the CLI tape beside it reads UNSC off the same row.
+                "unscored": result.get("unscored"),
                 "terminal_node": pd.get("terminal_node") or "",
                 "input_tokens": account.input if account else None,
                 "output_tokens": account.output if account else None,

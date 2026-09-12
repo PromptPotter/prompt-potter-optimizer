@@ -751,6 +751,12 @@ class RoundResult(StrictModel):
     # round's degradation verdict, which without it cannot tell a round that measured badly from
     # one that barely measured at all.
     not_attempted: int = 0
+    # Cells of the winner's panel that WERE measured and could not be graded — the formula named a
+    # term the row did not carry. Beside ``not_attempted`` because the two are the only ways a round
+    # ends with fewer verdicts than cells, and they call for opposite remedies: a cell never sent is
+    # re-run, an ungraded one is re-graded off the row already banked. Without it a round that
+    # graded six of ten reads exactly like one that graded ten.
+    unscored: int = 0
     # Fatal-warning samples discarded from total/accuracy on the winner's run.
     deprecated: int = 0
     escalation_signal: EscalationSignal | None = None
@@ -1110,6 +1116,12 @@ class DegradationHealth(StrictModel):
     # a verdict can say "the origin was not measured" instead of grading a pipeline on cells that
     # never ran — which is what the abort's fabricated error rows made it do.
     not_attempted: int = 0
+    # Cells that WERE sent and measured and carry no verdict, because the active formula named a
+    # term the row did not carry. In ``samples`` — they were attempted — and absent from every rate
+    # above, so without this field a round holding four of them reads exactly like one that graded
+    # everything. Threaded from ``RoundResult`` rather than recounted here, the way
+    # ``not_attempted`` is: one owner (`l1/score/winner.py`), one number.
+    unscored: int = 0
     # Share of this round's predictions on its single commonest label; ``None`` where the answer
     # space makes collapse meaningless. REPORTED, never graded — hedging to one label is the
     # addressable failure the loop exists to correct, so grading it critical would halt the

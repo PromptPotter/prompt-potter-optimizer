@@ -20,8 +20,13 @@ from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
     restore_measurement_archive,
 )
+from promptpotter.application.optimization.pobb.classification import scoreable_rows
 from promptpotter.application.optimization.resume_and_fork.replayers import replay_decisions
-from promptpotter.application.scoring.formula import compile_scorer
+from promptpotter.application.scoring.formula import (
+    ScoringFormulaError,
+    compile_scorer,
+    rescore_results,
+)
 from promptpotter.application.scoring.search_point_scorer import (
     merge_with_unprocessed_priors,
     rescored_prior_tail,
@@ -29,8 +34,10 @@ from promptpotter.application.scoring.search_point_scorer import (
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import CycleSeed
+from promptpotter.domain.scoring import is_unscored
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.shared.errors import error_category, is_error_result
 
 # Every cycle lives inside a campaign; the foundation factory's default id.
 _CAMPAIGN = "testds__20260101-000000"
@@ -877,6 +884,64 @@ def test_two_readings_of_one_searchpoint_are_two_runs_and_reindex_destroys_neith
     assert after == rows  # reindex reproduces the fold, doesn't shrink it
     for run_id in ("run_10", "run_11", "run_12"):
         assert archive.load_by_id(run_id) is not None  # nothing was deleted
+
+
+def test_a_measured_cell_the_formula_cannot_grade_is_kept_not_failed() -> None:
+    """A cell the active formula cannot grade is UNSCORED — a third state, keeping the measurement.
+
+    The harm is silent and costs paid measurement twice over. A judge term is absent per CELL — one
+    grading fails past its retry while the cell beside it grades fine. Marked ERRORED, that row is
+    stamped ``fitness = 0.0``, which reads as an arm answering wrong rather than as a formula saying
+    nothing, and it trips ``query_loop.py::_classify_abort`` on ``ErrorCategory.PIPELINE``, which
+    abandons the candidate's ENTIRE remaining walk. Nothing raises either way.
+
+    The replay half is the unrecoverable one: the cached path rescores every archived row on its way
+    back in, so a row arrives carrying the verdict of whatever formula was active when it was
+    banked. Left in place, one campaign's grade is served as another's; raising instead kills
+    resume, fork and ``ab`` on an archive that is fine on disk.
+    """
+    scorer = compile_scorer("skill_opened", None, verifier_graded=True)
+
+    carries = {**_r(1.0), "pipeline_data": {"skill_opened": 1.0}}
+    # Banked under an OLDER formula, so it arrives holding a verdict this one cannot re-derive.
+    lacks = {**_r(1.0), "pipeline_data": {"env_reward": 1.0}}
+    rescore_results([carries, lacks], scorer)
+
+    assert carries["fitness"] == 1.0 and carries["objective"] == 1.0
+    assert not is_unscored(carries)
+
+    # The two stamps are ORDERED, not merely both written: `objective_namespace` binds `fitness`
+    # off the row, so a composite naming it — which every shipped `per_cell` does — is unevaluable
+    # until the first stamp has landed. Computing the pair before assigning either read as a
+    # missing term and marked all four shipped datasets UNSCORED on every cell.
+    composed = {**_r(1.0), "pipeline_data": {"skill_opened": 0.0}}
+    rescore_results(
+        [composed],
+        compile_scorer("1.0", "fitness * (0.85 + 0.15 * skill_opened)", verifier_graded=True),
+    )
+    assert (composed["fitness"], composed["objective"]) == (1.0, 0.85)
+
+    # The stale verdict is GONE rather than left to be read as this formula's.
+    assert "fitness" not in lacks and "objective" not in lacks
+    assert is_unscored(lacks)
+    # Not an error, which is the whole reason the walk survives it.
+    assert not is_error_result(lacks)
+    assert error_category(lacks) is None
+    # And it carries no verdict into any denominator.
+    assert scoreable_rows([carries, lacks]) == [carries]  # type: ignore[arg-type]
+
+    # Idempotent in BOTH directions: the same row re-graded under a formula that can read it loses
+    # the mark, or a recovered cell would stay unscored forever.
+    rescore_results([lacks], compile_scorer("env_reward", None, verifier_graded=True))
+    assert lacks["fitness"] == 1.0 and not is_unscored(lacks)
+
+    # A formula that RAISES is a different fact and must still halt loud — every cell fails it, so
+    # swallowing it would grade a whole campaign against a broken formula.
+    with pytest.raises(ScoringFormulaError):
+        rescore_results(
+            [{**_r(1.0), "pipeline_data": {"tokens": 0.0}}],
+            compile_scorer("1.0 / tokens", None, verifier_graded=True),
+        )
 
 
 def test_compaction_round_trips_every_field_it_moved(built_stores: Stores) -> None:

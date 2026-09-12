@@ -405,10 +405,7 @@ def test_a_conversation_reaches_the_formula_only_as_projected_scalars() -> None:
     from factories import measurement
 
     from promptpotter.application.scoring.formula import compile_scorer, rescore_results
-    from promptpotter.application.scoring.formula.compiler import (
-        CELL_INTRINSIC_NAMES,
-        ScoringTermMissingError,
-    )
+    from promptpotter.application.scoring.formula.compiler import CELL_INTRINSIC_NAMES
     from promptpotter.domain.scoring import TURN_SCALAR_KEYS, turn_scalars
 
     assert not (TURN_SCALAR_KEYS & CELL_INTRINSIC_NAMES), (
@@ -443,17 +440,16 @@ def test_a_conversation_reaches_the_formula_only_as_projected_scalars() -> None:
     rescore_results([row], scorer)
     assert row["fitness"] == 1.0
 
-    # Indexing and attribute access are refused at compile; `len` is a bare Call, so it compiles
-    # and fails at eval. Both are stops — pinned here so adding `len` to SAFE_BUILTINS is caught.
+    # All three are refused at COMPILE, before a cell is bought — indexing and attribute access on
+    # node kind, `len` on its call target. `len` matters most: a bare Call reaches eval as a
+    # NameError, which the classifier reads as a missing TERM, so a mistyped function becomes a
+    # campaign that grades nothing and reports measuring fine. Pinned so adding `len` to
+    # SAFE_BUILTINS is caught.
     for formula in ("turns[0]", "turns.index"):
         with pytest.raises(ValueError, match="disallowed syntax"):
             compile_scorer(formula, None, verifier_graded=True)
-
-    with pytest.raises(ScoringTermMissingError):
-        rescore_results(
-            [measurement(sample_id=0, fitness=0.0, pipeline_data={"turns": turns})],
-            compile_scorer("len(turns)", None, verifier_graded=True),
-        )
+    with pytest.raises(ValueError, match="not a scoring helper"):
+        compile_scorer("len(turns)", None, verifier_graded=True)
 
 
 def test_a_judge_never_grades_a_cell_that_has_no_answer() -> None:

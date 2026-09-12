@@ -16,6 +16,7 @@ function health(
     no_result_count: 0,
     hole_count: 0,
     not_attempted: 0,
+    unscored: 0,
     last_error: null,
     answer_modal_share: null,
     degraded_rate: 0.25,

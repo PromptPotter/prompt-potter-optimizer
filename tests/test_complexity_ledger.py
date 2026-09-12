@@ -131,7 +131,13 @@ LEDGER_BASELINE = {
     # the shape of failure. With the padding gone the counters are honest but the round can no
     # longer tell "measured badly" from "barely measured", which is the difference between grading
     # a pipeline and asking for a re-measure. One name, two arities — the round's and its verdict's.
-    "cycle_result_fields": 165,
+    # +1: `unscored`, at the same two arities and for the reason its neighbour exists: cells the
+    # walk DID send and measure, carrying no verdict because the formula names a term their rows do
+    # not. No subtraction finds them — an ungraded cell was attempted, so it is inside `samples` —
+    # and the number is the WINNER's, which the rows at this altitude cannot say. Without it a round
+    # that graded six of ten reads as one that graded ten. Distinct from `not_attempted` because the
+    # remedies invert: a cell never sent is re-run, an ungraded one re-graded off the banked row.
+    "cycle_result_fields": 166,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -277,7 +283,10 @@ LEDGER_BASELINE = {
     # the job's reservation instead, the untouched arm would land in `spend_cap.json`, which the
     # gate prefers, and a USD raise would lift the token ceiling to the account's headroom.
     # (test_security)
-    "test_functions": 179,
+    # +1: a cell the active formula cannot grade keeps its measurement rather than being banked a
+    # failure, which costs the candidate's whole remaining walk and kills every later replay of an
+    # archive that is fine on disk. (test_resume)
+    "test_functions": 180,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

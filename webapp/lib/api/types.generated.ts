@@ -70,7 +70,7 @@ export interface DashboardSample {
    * the order. Null where the row carries none. */
   sample_id: number | null;
   /** The grading verdict. */
-  status: 'HIT' | 'MISS' | 'ERR';
+  status: 'HIT' | 'MISS' | 'ERR' | 'UNSC';
   /** The graded per-cell score `status` is the verdict OF — the same number
    * `MeasurementDot.fitness` carries, so the live round's cells join the
    * served series and a heat cell can shade a partial grade `status` rounds
@@ -145,6 +145,7 @@ export interface DegradationHealth {
   no_result_count: number;
   hole_count: number;
   not_attempted: number;
+  unscored: number;
   answer_modal_share: number | null;
   degraded_rate: number;
   consecutive_degraded_rounds: number;
@@ -443,6 +444,7 @@ export interface RoundResult {
   verdict_reason: string | null;
   degraded_samples: number;
   not_attempted: number;
+  unscored: number;
   deprecated: number;
   escalation_signal: unknown | null;
   matched_parent_accuracy: number | null;

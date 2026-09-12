@@ -45,7 +45,7 @@ from promptpotter.domain.results import (
     is_electable,
     is_leader_eligible,
 )
-from promptpotter.domain.scoring import QueryMeasurement
+from promptpotter.domain.scoring import QueryMeasurement, is_unscored
 from promptpotter.domain.search_point import strip_rendered_prompt
 from promptpotter.domain.validators import StopRule
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
@@ -398,6 +398,9 @@ async def l1_score(
     best_not_attempted = (
         max(0, winner_cs.expected_samples - winner_cs.scored_samples) if winner_id else 0
     )
+    # Counted off the rows rather than differenced off the counters: an ungraded cell WAS sent and
+    # WAS measured, so it is already inside `scored_samples` and no subtraction can find it.
+    best_unscored = sum(1 for r in best_results if is_unscored(r))
     p_value: float | None = None
     if base["total"] > 0 and winner_id:
         # A recorded diagnostic; it does not gate promotion. Significance runs on the per-sample
@@ -430,6 +433,7 @@ async def l1_score(
         composite_fitness=best_comp,
         total=best_total,
         not_attempted=best_not_attempted,
+        unscored=best_unscored,
         improved=improved,
         p_value=p_value,
         verdict_reason=verdict_reason,
