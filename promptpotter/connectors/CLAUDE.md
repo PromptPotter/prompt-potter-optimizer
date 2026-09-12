@@ -208,6 +208,23 @@ belong here, because they are what a connector author gets wrong:
   you build it — those are the task WE handed the agent, and on such a panel they are the whole
   haystack, quoted back at the optimizer as if the agent had produced it.
 
+## Injection is not consumption — one backend, and the absence elsewhere is DECLARED
+
+**On every connector but one, the candidate prompt is IN the request, so "did the model receive it"
+is not a question.** termnorm, dspy and promptpotter all put the rendered prompt on the wire. Harbor
+does not: `harbor.py::_write_skill` drops it into the container as an Agent Skill, and `terminus-2`
+eagerly shows the model only the frontmatter — name, description, location — *"so the model can
+`cat` the file to activate a skill"*. **The candidate's prompt is the BODY, and it reaches the model
+only if the model opens the file.** An episode that never does ran as no-skill, so every arm of that
+round was the same episode, the δ ruler is flat by construction, and the round reports a tie it
+never measured. `harbor.py::_skill_opened` measures it and `SKILL_KEY` is a required observation.
+
+**There is deliberately no core `turn_scalars` member for this, and that hole is not an oversight to
+fix.** A term whose value is decided by which backend you are on is not a core projection: on the
+other three it would be the constant `1.0`. The rule generalizes rather than the key — **ask of any
+new connector whether what it injects is what the model consumes**, and if the two can diverge, that
+gap is a measured observation and not a diagnostic.
+
 **A per-step aggregate can flatter, and Harbor's does.** `_aggregate_step_rewards` drops a step
 with no verifier result from the denominator, so a cell whose first step scored 1.0 and whose
 second CRASHED reports a perfect 1.0 while an honest wrong answer reports 0.5. `harbor.py::

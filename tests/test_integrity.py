@@ -452,6 +452,77 @@ def test_a_conversation_reaches_the_formula_only_as_projected_scalars() -> None:
         compile_scorer("len(turns)", None, verifier_graded=True)
 
 
+def test_whether_the_episode_opened_the_injected_skill_is_measured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``skill_opened`` decides whether a harbor round measured anything at all, and every way it
+    can go wrong is silent.
+
+    The candidate's prompt is the skill's BODY and the model is shown only the frontmatter, so an
+    unopened skill is a NO-SKILL episode — and a round whose arms all ran one is
+    arms-all-identical, a δ ruler flat by construction, and a tie nobody measured.
+
+    The silence is the point. Harbor's trial layout is PRIVATE and upstream's to move
+    (``pyproject.toml`` upper-bounds the pin for exactly this). If it moves, the derivation reads
+    ``0.0`` on every cell and warns on every cell — nothing raises, every number still renders, and
+    the result is INDISTINGUISHABLE from the real finding this term exists to make. The fabricated
+    ``0.0`` is then banked on the archived row, so no re-run re-attributes it.
+
+    A namespace stands in for ``TrialResult`` deliberately, which the usual rule forbids: it
+    carries ONLY ``trial_name`` and ``step_results``, the two real declared fields at their
+    declared types, both read through ``getattr`` with a default. Nothing asserts a shape Harbor
+    could not produce, and the trajectory — the part that could drift — is read off disk exactly as
+    production reads it, with no Docker and no ``harbor`` import.
+    """
+    import json
+    import re
+    from types import SimpleNamespace
+
+    from promptpotter.connectors import harbor
+
+    monkeypatch.setattr(harbor, "_TRIALS_ROOT", tmp_path)
+    skill_path = f"/harbor/skills/task-approach/{harbor.SKILL_FILENAME}"
+
+    def trial(name: str, *steps: dict[str, Any]) -> SimpleNamespace:
+        agent_dir = tmp_path / name / "agent"
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        (agent_dir / "trajectory.json").write_text(
+            json.dumps({"steps": list(steps)}), encoding="utf-8"
+        )
+        return SimpleNamespace(trial_name=name, step_results=None)
+
+    def ran(cmd: str) -> dict[str, Any]:
+        return {"tool_calls": [{"function_name": "bash", "arguments": {"cmd": cmd}}]}
+
+    assert harbor._skill_opened(trial("opened", ran("ls /x"), ran(f"cat {skill_path}"))) == 1.0
+    assert harbor._skill_opened(trial("ignored", ran("ls /app"), ran("python solve.py"))) == 0.0
+
+    # The false positive that would make this term useless while every number still rendered:
+    # `terminus-2` appends an `<available_skills>` block naming the skill's own PATH to the
+    # instruction, which arrives as a turn MESSAGE. Scanning turn text would score every episode
+    # 1.0 — the term would be a constant, separate no arms, and read as "the skill is always read".
+    told = trial("told", {"source": "user", "message": f"<location>{skill_path}</location>"})
+    assert harbor._skill_opened(told) == 0.0
+
+    # ABSENT, never 0.0: an episode that wrote no trajectory has not declined to open the skill,
+    # it has said nothing — and 0.0 would discount the arm for our own blindness.
+    assert harbor._skill_opened(SimpleNamespace(trial_name="gone", step_results=None)) is None
+
+    # And the OTHER half of the same subject: the skill has to be legible once it arrives.
+    # `terminus_2.py::_parse_skill_frontmatter` matches `r"^---\n(.*?)\n---"` and the agent drops
+    # a skill it cannot parse in SILENCE, so a CRLF-terminated file means the model is never told
+    # a skill exists — every arm runs the identical no-skill episode and every round is a tie
+    # measured on noise. `write_text` translates newlines to the platform default, so on Windows
+    # this happened on every cell ever bought here until `newline="\n"`.
+    written = tmp_path / "skill-root"
+    harbor._write_skill(written, "BODY LINE ONE\nBODY LINE TWO")
+    raw = (written / "task-approach" / harbor.SKILL_FILENAME).read_bytes()
+    assert b"\r" not in raw, "a CRLF SKILL.md is dropped by the agent without a word"
+    assert re.match(rb"^---\n(.*?)\n---\n", raw, re.DOTALL), (
+        "the frontmatter must satisfy the agent's own parser, or the skill is skipped silently"
+    )
+
+
 def test_a_judge_never_grades_a_cell_that_has_no_answer() -> None:
     """A cell with no answer must cost nothing and bank nothing.
 

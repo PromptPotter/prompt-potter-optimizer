@@ -57,9 +57,9 @@ nodes:
       # unbounded integer axis would be a cost rail removed rather than a search axis added.
       observation_name: agent
       observation_mappings:
-        # The verifier's number, and the ONLY observation this node emits. The connector declares
-        # this key in `required_observation_keys`, so init RAISES if this mapping is missing
-        # rather than dropping the reward in silence and grading a measurement it never received.
+        # The verifier's number. The connector declares this key in `required_observation_keys`,
+        # so init RAISES if this mapping is missing rather than dropping the reward in silence and
+        # grading a measurement it never received.
         #
         # `is_llm` marks the mapping the node's LLM spend is attributed through — it is what makes
         # `nodes.agent.config.model` REQUIRED (`pipeline_resolve.py`), so a measurement can never
@@ -69,6 +69,13 @@ nodes:
         - pipeline_key: env_reward
           output_field: env_reward
           is_llm: true
+        # Did the episode OPEN the skill this candidate's prompt IS. The agent is shown only the
+        # frontmatter and must `cat` the file to get the body, so an unopened skill means the arm
+        # ran as no-skill — and a round whose arms all did that is a tie it never measured. NO
+        # `is_llm`: one mapping per node carries the spend attribution, and this is a float, not
+        # the text an estimator reads.
+        - pipeline_key: skill_opened
+          output_field: skill_opened
 pipelines:
   default:
     - agent

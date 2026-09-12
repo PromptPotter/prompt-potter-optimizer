@@ -56,6 +56,13 @@ DEFAULT_TASK_REWARD_KEY = "reward"
 ANSWER_KEY = "agent_answer"
 ANSWER_FILENAME = "answer.txt"
 
+# Whether the episode opened the artifact the candidate prompt WAS (see `_skill_opened`). A
+# measured observation like the reward beside it, not a diagnostic: on this backend the prompt
+# reaches the model only if the model opens the file, so this is the term that separates "the skill
+# was wrong" from "the skill was never read" — and an arm scoring as no-skill is a round whose arms
+# were all the same episode.
+SKILL_KEY = "skill_opened"
+
 # NO `final_ranking`, and its absence is the declaration: the `agent` node declares no
 # `node_role`, so nothing would read one. Do not restore it, and do not reach the same place by
 # declaring the agent a RANKER — that switches on `candidate_recall`, which walks a ranking for a
@@ -96,6 +103,9 @@ _TRIALS_ROOT = Path(tempfile.gettempdir()) / "promptpotter-harbor"
 # file to read the body, so a candidate free to write its own could win by making itself
 # uninviting — the skill goes unread, the arm scores as no-skill, and hiding reads as discovery.
 _SKILL_NAME = "task-approach"
+# The Agent Skills spec's filename, and the needle `_skill_opened` looks for. One owner: it is both
+# what we WRITE and what we detect a read of, and two spellings could disagree silently.
+SKILL_FILENAME = "SKILL.md"
 _SKILL_DESCRIPTION = (
     "Read this before acting. Required approach, conventions and completion criteria for "
     "this task. Always consult it first."
@@ -407,15 +417,19 @@ async def _preflight(backend_url: str) -> None:
 def _write_skill(root: Path, prompt: str) -> Path:
     """The candidate's prompt as an Agent Skill. The layout is not ours to choose: Harbor uploads
     ``<skills_dir>/<name>/SKILL.md`` and the agent finds it with a depth-2 ``find``, so the extra
-    directory level is load-bearing. The frontmatter must parse as YAML and carry both ``name``
-    and ``description`` — an agent that fails to parse it SKIPS the skill in silence, which would
-    make every candidate score as no-skill and read as 'the prompt does not matter'."""
+    directory level is load-bearing.
+
+    Two things the agent SILENTLY skips the skill for, which scores every candidate as no-skill:
+    frontmatter that is not YAML carrying both ``name`` and ``description``, and a line ending that
+    is not LF — ``terminus_2.py::_parse_skill_frontmatter`` matches ``r"^---\\n(.*?)\\n---"``, so
+    ``newline`` may never fall back to the platform default."""
     skill_dir = root / _SKILL_NAME
     skill_dir.mkdir(parents=True, exist_ok=True)
     body = prompt.strip()
-    (skill_dir / "SKILL.md").write_text(
+    (skill_dir / SKILL_FILENAME).write_text(
         f"---\nname: {_SKILL_NAME}\ndescription: {_SKILL_DESCRIPTION}\n---\n\n{body}\n",
         encoding="utf-8",
+        newline="\n",
     )
     return root
 
@@ -534,8 +548,8 @@ def _read_trajectory(path: Path) -> list[dict[str, Any]]:
     return [s for s in steps or [] if isinstance(s, dict)]
 
 
-def _turns(result: TrialResult) -> list[dict[str, Any]]:
-    """The cell's conversation, in order, each turn stamped with the STEP it served.
+def _trajectory_sources(result: TrialResult) -> list[tuple[Path, str | None]]:
+    """Every ATIF trajectory this trial wrote, with the STEP each one served.
 
     Two layouts: ``<trial>/agent/trajectory.json`` single-step, ``<trial>/steps/<name>/agent/`` per
     step. Walking ``step_results`` rather than globbing is what makes the STEP NAME available — the
@@ -543,21 +557,50 @@ def _turns(result: TrialResult) -> list[dict[str, Any]]:
     (``domain/scoring.py::TurnRecord``)."""
     root = _TRIALS_ROOT / str(getattr(result, "trial_name", "") or "")
     steps = getattr(result, "step_results", None) or []
-    sources: list[tuple[Path, str | None]] = (
-        [
+    if steps:
+        return [
             (root / "steps" / str(sr.step_name) / "agent" / "trajectory.json", str(sr.step_name))
             for sr in steps
         ]
-        if steps
-        else [(root / "agent" / "trajectory.json", None)]
-    )
+    return [(root / "agent" / "trajectory.json", None)]
+
+
+def _turns(result: TrialResult) -> list[dict[str, Any]]:
+    """The cell's conversation, in order, each turn stamped with the STEP it served."""
     turns: list[dict[str, Any]] = []
-    for path, step in sources:
+    for path, step in _trajectory_sources(result):
         for raw in _read_trajectory(path):
             turns.append(_turn(raw, len(turns) + 1, step))
     if not turns:
+        root = _TRIALS_ROOT / str(getattr(result, "trial_name", "") or "")
         _warn_layout_drift(f"no agent trajectory under {root}")
     return turns
+
+
+def _skill_opened(result: TrialResult) -> float | None:
+    """Whether the episode OPENED the skill: ``1.0``, ``0.0``, or ``None`` for no evidence.
+
+    The candidate's prompt is the skill's BODY, and the agent is shown only the frontmatter, so an
+    unopened skill is an episode that ran with no candidate prompt in it — every arm of such a
+    round is the same no-skill episode and the δ ruler is flat by construction.
+
+    Read off ``tool_calls[].arguments``, never a turn's message: the ``<available_skills>`` block
+    carries the skill's own path and is appended to the INSTRUCTION, so a text scan there matches
+    every episode whether or not it acted.
+
+    ``None`` rather than ``0.0`` where no trajectory exists — an episode that produced no record has
+    not declined to open the skill. Same rule as ``_phase_timings``."""
+    saw_trajectory = False
+    for path, _step in _trajectory_sources(result):
+        for raw in _read_trajectory(path):
+            saw_trajectory = True
+            for call in raw.get("tool_calls") or []:
+                if not isinstance(call, dict):
+                    continue
+                args = call.get("arguments")
+                if SKILL_FILENAME in (json.dumps(args) if args else ""):
+                    return 1.0
+    return 0.0 if saw_trajectory else None
 
 
 # An answer is read, graded and displayed, never scanned — so the HEAD, and generous enough for a
@@ -892,6 +935,22 @@ async def _in_process_run(
         data["turns"] = turns
     if phases := _phase_timings(result, elapsed):
         data["step_phases"] = phases
+    # Only where a skill was actually injected. With no prompt there is no artifact to open, so
+    # `0.0` would report the arm declining to read a file that was never written.
+    if skills and (opened := _skill_opened(result)) is not None:
+        data[SKILL_KEY] = opened
+        if not opened:
+            # A line per cell rather than a scoring discount: the term is constant on a healthy
+            # channel, so charging it moves nothing when things work and discounts every arm
+            # UNIFORMLY when they break — invisible arithmetically, and identical to a finding.
+            logger.warning(
+                "harbor connector: %r never opened the injected skill, so this cell measured a "
+                "NO-SKILL episode — the candidate's prompt reached the model not at all. A round "
+                "of these cannot separate arms on the prompt. Check the frontmatter parses "
+                "(`_write_skill`) and that %s is present in the container.",
+                query,
+                SKILL_FILENAME,
+            )
     data.update(_step_rewards(result))
     return {"data": data}
 
@@ -916,10 +975,15 @@ CONNECTOR = Connector(
     # Each cell holds a container. Two is the shipped default elsewhere and is the right floor
     # here too: the ceiling is the operator's machine, not the provider.
     max_cells_in_flight=2,
-    # The one key always emitted that a formula reads, verified against the dataset's declared
+    # The keys always emitted that a formula reads, verified against the dataset's declared
     # mappings at init. Per-step rewards are NOT here — a single-step task emits none, so
     # declaring them would fail init for every task that is not multi-step.
-    required_observation_keys=(REWARD_KEY,),
+    #
+    # `SKILL_KEY` earns its place where those cannot: EVERY harbor cell handed a prompt can answer
+    # it, single-step or not. Declared here so a harbor dataset that forgets the mapping raises at
+    # init rather than dropping the observation in silence — which on this key would mean a whole
+    # campaign of arms scored as no-skill with nothing saying so.
+    required_observation_keys=(REWARD_KEY, SKILL_KEY),
     # An episode answers even though a verifier grades it, and until this existed nothing carried
     # the answer: no ranking means `predicted` was the `NO_RESULT` sentinel on every cell here.
     answer_key=ANSWER_KEY,

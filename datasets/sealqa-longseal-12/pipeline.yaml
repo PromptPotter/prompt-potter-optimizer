@@ -96,6 +96,13 @@ nodes:
         - pipeline_key: env_reward
           output_field: env_reward
           is_llm: true
+        # Did the episode OPEN the skill this candidate's prompt IS. The agent is shown only the
+        # frontmatter and must `cat` the file to get the body, so an unopened skill means the arm
+        # ran as no-skill — and this bank is where that is most likely: the instruction is a
+        # twelve-document haystack, so the `<available_skills>` block lands tens of thousands of
+        # characters in. NO `is_llm`: one mapping per node carries the spend attribution.
+        - pipeline_key: skill_opened
+          output_field: skill_opened
 pipelines:
   default:
     - agent

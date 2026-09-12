@@ -549,8 +549,10 @@ def _execute(check: Check, sel: Sel) -> Result:
 # Spelled once: the message a missing `uv` prints and the argv it would have run are the
 # same list, and they drifted the moment one grew an extra the other did not. `api` is here
 # because mypy type-checks `main.py` and the routers — from an engine-only install it cannot
-# resolve fastapi, and reports it as a first-party error.
-_PINNED_EXTRAS = ("stats", "dev", "api")
+# resolve fastapi, and reports it as a first-party error. `harbor` is here because this env is
+# where the verdict is TAKEN: without it `import harbor` fails here while succeeding at the desk,
+# which is the drift this function exists to stop, pointing the other way.
+_PINNED_EXTRAS = ("stats", "dev", "api", "harbor")
 
 
 def _reexec_pinned() -> None:

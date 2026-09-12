@@ -286,7 +286,10 @@ LEDGER_BASELINE = {
     # +1: a cell the active formula cannot grade keeps its measurement rather than being banked a
     # failure, which costs the candidate's whole remaining walk and kills every later replay of an
     # archive that is fine on disk. (test_resume)
-    "test_functions": 180,
+    # +1: whether a harbor episode OPENED the skill its prompt IS. Unopened is a no-skill episode,
+    # so a round of them is arms-all-identical read as a tie — and a silent layout drift reads 0.0
+    # on every cell, which is indistinguishable from exactly that finding. (test_integrity § 1)
+    "test_functions": 181,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
