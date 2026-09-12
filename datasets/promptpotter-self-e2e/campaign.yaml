@@ -1,0 +1,58 @@
+campaign_config:
+  dataset_name: promptpotter-self-e2e
+  # Every number here is the smallest that still exercises the TRANSITION it belongs to, and
+  # none of them is calibrated. `promptpotter-self/campaign.yaml` carries the reasoning for the
+  # real values — the panel width that lets PoBB eliminate, the round count that makes a lift
+  # falsifiable, the epsilon fitted to its own p_best stream. None of that survives at this size,
+  # which is the point: this fixture exists to prove the L4 path RUNS — generate, score, elect,
+  # carry a winner into the next round — and it is deliberately unable to MEASURE anything.
+  optimizer_narrowing:
+    l1_generate: &e2e_models
+      param_allowed_values:
+        model:
+          - deepseek/deepseek-v4-flash:nitro
+    l1_critique: *e2e_models
+    l2_context: *e2e_models
+    l3_plan: *e2e_models
+    checkin: *e2e_models
+  # The real panel re-anchors `mean_round_delta` into [0,1] with a window fitted on 50 banked
+  # cells. There is no banked corpus here and nothing to fit, so this is the same linear
+  # re-anchor with the same window — carried over so the shape of the formula is exercised,
+  # NOT because the window means anything at this size.
+  #
+  # No `per_cell` term: the real one prices fitness against a 500s/cell latency anchor measured
+  # on 4-round cells. A 1-round cell is nowhere near that anchor, so applying it would dress a
+  # geometry artefact up as a cost signal.
+  scoring:
+    per_sample: max(0.0, min(1.0, (mean_round_delta + 1.0) / 3.0))
+  headline_metric: ability
+  # = the panel size in inner_tasks.yaml. One cell.
+  sp_budget_round: 1
+  exclude_nodes: []
+  pipeline_overlay: {}
+  optimization:
+    optimizer_set: self_optimizing
+    prompt_block_catalogue: 'off'
+    l1_patience: 1
+    # Round 0 (the origin) plus ONE optimization round. The inner campaigns stay at
+    # `max_inner_rounds: 1` — depth is what costs money here, since every outer cell is a whole
+    # inner campaign, and one outer round is enough to exercise generate → score → elect.
+    max_rounds: 2
+    # NOT 1, and this is a correctness bound rather than a coverage nicety. An inner cycle id is
+    # content-addressed on its optimizer prompt, so a single variant makes round 0's candidate
+    # byte-identical to the origin — the same inner cycle, spawned twice, and the second spawn
+    # hits `_open_inner_campaign`'s "another producer owns it" guard and errors the only cell on
+    # the panel. Two variants give the round a real candidate field and two distinct inner ids.
+    n_variants: 2
+    degradation_threshold: 0.4
+    l2_patience: 1
+    l3_patience: 1
+    # PoBB cannot eliminate on a 1-cell panel whatever this says — the floor is above the
+    # panel by construction. Left at the engine default rather than tuned, so nothing here
+    # reads as a considered racing decision.
+    elimination_n_min: 4
+    pobb_epsilon: 0.30
+    # The ceiling the browser walk runs under. It is a STOP, not a forecast: the fixture is
+    # built to come in far below it, and the run halting here means the geometry drifted.
+    spend_budget_usd: 0.05
+    token_budget: null

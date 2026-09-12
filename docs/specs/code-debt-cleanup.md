@@ -17,6 +17,16 @@ it.
 > "always-False return slot" that is a live signal, a directory deleted by the same commit that
 > filed it. If an entry is wrong, fix or drop it as part of the work.
 
+> **And every entry names the work that will REACH it: `Rides with:`.** The file, surface or kind
+> of pass that lands on this anyway — written for a reader holding no context, so that a session
+> already in there does the item ON THE WAY, inside the commit it came to make. This is the
+> forward half of "fixed in the pass that found it": nothing here is large enough to earn a
+> session of its own, which is what made it a backlog item rather than a task, so an entry that
+> names no carrier is waiting for a pass that will never be scheduled. Name the carrier even when
+> it is a whole surface ("any stylesheet change") — a vague one still fires, and none never does.
+> Under § Blocked the blocker already IS the carrier: whatever lifts it is the pass that lands the
+> item, so a second line there would only restate it.
+
 **Not debt — goes elsewhere, and none of it comes back here:**
 
 | Kind | Home |
@@ -27,6 +37,26 @@ it.
 | How to HUNT debt, and what to skip on sight | [`../developer/conventions.md`](../developer/conventions.md) § Auditing for debt |
 
 ## Open — multi-arc, no blocker
+
+A leading `NEXT` marks the one to take up cold when nothing else is in hand.
+
+- **Nine account-pane page loads put the server 45 SECONDS behind, and every other surface waits
+  there.** Reproduced twice by running `e2e/walk/account.spec.ts` before `e2e/walk/dashboard.spec.ts`:
+  the dashboard's `/cycles`, its poll and `/ray` all fire together and none of the three answers for
+  **45.8s**, so the chronology — `TimeRay` renders null until the ray reports `loaded` — is simply
+  absent for three quarters of a minute on a page that otherwise looks finished. **It is not one
+  slow read**: measured against this workspace, `/ray` is 0.08s, the dashboard 0.01s, `/cycles`
+  0.04s, `/workspace/storage` 0.50s, `/workspace/storage-by-dataset` 0.40s, `/auth/activity` 0.35s.
+  **And it is not generic load**: `dashboard.spec.ts --repeat-each=3` is 21 page loads and stays
+  green, while nine ACCOUNT page loads do it every time. What those panes add is whole-workspace
+  directory walks (`routers/campaigns/storage.py` — both `def`, so each holds a threadpool thread
+  for its whole walk) that keep running after the browser that asked for them has gone. Action:
+  bound or cache the workspace walk, and decide whether a read nobody is waiting for should still be
+  running at all. **Rides with:** any work on the account modal's panes or on `storage.py` — and any
+  report that the dashboard "hangs" after a visit to Account, which is the operator-visible form of
+  this. **Re-test:** `npx playwright test --project=walk e2e/walk/account.spec.ts
+  e2e/walk/dashboard.spec.ts`, then read the chronology test's DURATION — it carries a 60s bound for
+  exactly this reason, and anything near it means the backlog is still there.
 
 - **Pointed out, NOT investigated — each needs a look before it is a claim.** Filed together
   because they were all passed while working on something else, and none has been measured.
@@ -40,22 +70,43 @@ it.
   a correct-but-expensive arm could read as "0.0 on every cell", which is a caveat about a
   degenerate reading claiming the arm got everything wrong. Harmless under the house formula, which
   clamps at `fitness`.
+  **Rides with:** (1) any work on L1's prompt composition or a token-growth reading — the repeats
+  are visible in any winner's `problem_description` you already have open; (2) any edit to a
+  scoring formula or to `domain/results.py`.
   **Re-test:** each is a fresh measurement; none carries a verdict yet, so do not act on one
   without re-deriving it.
 
-- **No BROWSER is ever opened in CI**, so a whole class of first-user breakage ships green.
-  `scripts/smoke_wheel.py` now serves the wheel over a real socket, but nothing navigates a route:
-  there is no Playwright suite anywhere, and
-  `webapp/components/onboarding/{AccessGate,ConsentGate,AllowanceSpent,WelcomeLockoutModal}.tsx` —
-  the four surfaces a brand-new account meets before it sees anything else — have no test of any
-  kind. Vitest is jsdom units of primitives and pure derivations; nothing renders `app/page.tsx`.
-  Two arcs: (1) a scripted browser walk of the zero-campaign path, asserting console-clean; (2)
-  coverage on the four onboarding components.
-  **Re-test:** `ls webapp/**/*.spec.ts webapp/e2e 2>/dev/null` — empty means both are open.
+- **`AccessGate` and `AllowanceSpent` render only for a NON-HOST account, and the browser walk has
+  no way to be one.** Two of the four onboarding surfaces are now covered — `ConsentGate` because a
+  throwaway `PROMPTPOTTER_HOME` is unaccepted by construction, `WelcomeLockoutModal` through the
+  `?auth_error=` bounce-back, which is its only trigger that does not require `unauthed`. The other
+  two are blocked by one shared fact rather than by a missing fixture, which is what the entry used
+  to say: `PROMPTPOTTER_AUTH=off` resolves `registered_or_default_identity()`, whose `issuer` is
+  `None`, so `quota.py::_is_host` answers YES and `lifetime_ceilings` exempts it from metering
+  (`AllowanceSpent` can never see a ceiling), while `shared/identity.py::claim_access_state` stamps
+  nothing and defaults to active (`AccessGate` can never see a block). Both are correct — metering
+  bounds a stranger spending the host's key, and `_is_host`'s own docstring says merging its two
+  detectors is the trap — so writing a `user.json` or a `blocklist.json` changes neither answer.
+  What it would take is an OIDC session in the harness, which is the real cost and the reason this
+  is filed. **Rides with:** any work that gives the walk a signed-in identity — a fake issuer for
+  the cold tier, or the first spec that needs to be somebody other than the box's operator. One
+  assertion per surface behind it then, never a suite. **Re-test:** `grep -rn "auth_error\|issuer"
+  webapp/e2e/` — while nothing there mints a session, both surfaces are unreachable by
+  construction rather than merely unwritten.
 
-- **The mobile pass was verified at 375/1440 on chat/dashboard/files/verify only.** Unswept: 393,
-  412, 768 and landscape; login, onboarding, l4, account modal, candidates, lineage. No Lighthouse
-  number was recorded, so there is no before/after. Action: sweep + record one pass.
+- **The responsive walk proves only that no page scrolls sideways.** Six widths (375/393/412/768,
+  landscape, 1440) run every pass against the shell, all five tabs, the account modal and login
+  (`e2e/walk/responsive.spec.ts`). That catches content DELETED by an `overflow:hidden` wrapper,
+  or a `viewBox`'d SVG that scaled instead of overflowing; it says nothing about whether a phone
+  layout is USABLE, which stays a human pass. Two gaps sit behind it: the L4 panel, the candidates
+  card and the lineage forest are swept at NO width, each needing a campaign of a shape the walk
+  cannot count on finding; and the original mobile pass recorded no Lighthouse score, so a later
+  one has no before to beat. Action: one Lighthouse run on the dashboard at 375, written down here.
+  **Rides with:** any stylesheet or layout change that already has a browser open — the
+  Lighthouse number is one run once you are there, and the three panels get their widths the
+  next time a spec has a campaign of the right shape to hand (the spend tier mints one).
+  **Re-test:** `grep -n "l4\|lineage" webapp/e2e/walk/responsive.spec.ts` — empty means those
+  three are still unswept at every width.
 
 - **The same seam, the other direction: a browser predicate whose server twin never returns its
   verdict — and it has been closed once already, wrongly.**
@@ -66,29 +117,35 @@ it.
   became server-authored — the served per-node `permitted` set — but the ask was the VERDICT, and the
   server reaches it only inside `fork-cycle` dispatch, where it 404s rather than answers. So deleting
   the client copy costs the operator the warning entirely; what is owed is a dry-run on the fork
-  preview. **Re-test:** grep the served surface for a `steers_disallowed_model` field — while none is
-  served, the browser copy is load-bearing and must not be struck again.
+  preview. **Rides with:** the next change to fork or steer — `fork-cycle` dispatch, `SteerForkPanel`,
+  or anything adding a field to the fork preview response. **Re-test:** grep the served surface for a
+  `steers_disallowed_model` field — while none is served, the browser copy is load-bearing and must
+  not be struck again.
 
 - **Holistic reframes — larger chunks, noted so they aren't mistaken for done; don't slip one into a
   release.** (1) **Tooltip/overlay consolidation:** most of the webapp's DOM `title=` attributes are
   teaching prose the browser renders as an unstyled, unselectable blob that dies on touch. Migrate
   **by string source, not by file** — `lib/terms.ts::TERMS` first, then the `VerifyPane` /
   `RoundFileView` header glossaries; leave the `title={same truncated string}` sites, where
-  HoverCard is strictly worse. **Re-test:** `grep -rn "title={TERMS\[" webapp --include=*.tsx | wc -l`
-  — while it reads 0, nothing has migrated. (2) **Whether L4 should reach the escalation machinery.**
+  HoverCard is strictly worse. **Rides with:** any edit to `lib/terms.ts` or to a header glossary —
+  migrate the strings that file already made you read. **Re-test:**
+  `grep -rn "title={TERMS\[" webapp --include=*.tsx | wc -l` — while it reads 0, nothing has
+  migrated. (2) **Whether L4 should reach the escalation machinery.**
   Not "each is built from scratch" — L2 and L3 already share `dispatch/`, `escalation/`, `cycle.py`
   and `OPTIMIZER_RESPONSE_MODELS`, and `application/optimization/CLAUDE.md` already splits the
   conceptual family from the structural one, which leaves only L4 outside, at the connector seam.
   So the question is not whether three strangers should converge; it is whether the recursion
   belongs inside the ladder it recurses on. **Asked and DEFERRED by the operator**, on the ground
   that it is structural while what M13 still needs is empirical — so this is held by decision, not
-  by nobody having looked. **Re-test:** the preprint ships (`.scratch/m13-preprint.md` carries the
-  stage state); until then, do not open it and do not re-file it as unasked.
+  by nobody having looked. **Rides with nothing, deliberately** — it is the one item here that must
+  not be picked up on the way. **Re-test:** the preprint ships (`.scratch/m13-preprint.md` carries
+  the stage state); until then, do not open it and do not re-file it as unasked.
 
 - **Optimizer model repair-rate on heavy L2/L3 structured output — unmeasured.** What is owed is the
   measurement: a live cycle reaching L3, read under the model
   `promptpotter/assets/optimizer/pipeline.yaml` currently pins — read it off that file, never off
-  this entry.
+  this entry. **Rides with:** the next supervised campaign that escalates. The run is the expensive
+  part and someone is already paying for it; this is a read of what it wrote.
 
 - **Three mechanisms key on ground-truth LABELS and go silently inert on a verifier-graded
   backend.** One subject, three sites, each needing a design answer rather than a guard — which is
@@ -106,10 +163,12 @@ it.
   [`../developer/adding-a-surface.md`](../developer/adding-a-surface.md) § 5 — has no GUARD,
   and the obvious one is wrong: prompt fields in `optimizer.param_keys` ⇒ `prompt_info` required
   would trip on every L4 run, since `promptpotter-self` deliberately declares the first without
-  the second. **Re-test:** `.venv/Scripts/python.exe -m promptpotter
-  new spreadsheetbench-s10` past round 1 with `prompt_block_catalogue` on, then read the round file
-  for a COLLAPSED verdict and `earned_blocks` under `OPEN` — if either now discriminates, the entry
-  is stale.
+  the second. **Rides with:** the next verifier-graded run (Harbor, spreadsheetbench), or any edit
+  to `pobb/checks.py` or `intelligence/earned_blocks.py` — each site is inert exactly where someone
+  working there would otherwise assume it fires. **Re-test:** `.venv/Scripts/python.exe -m
+  promptpotter new spreadsheetbench-s10` past round 1 with `prompt_block_catalogue` on, then read
+  the round file for a COLLAPSED verdict and `earned_blocks` under `OPEN` — if either now
+  discriminates, the entry is stale.
 
 - **A Harbor run's roster never lands on disk.** `connectors/harbor.py::_registry_tasks` memoizes per
   `(dataset, version)` for reads outside a run, but a Harbor version names an EDITABLE registry entry:
@@ -117,21 +176,28 @@ it.
   from the current fetch rather than from the roster its run used. The run itself is consistent — its
   `InProcessWorkload` carries one resolution. Action: land the resolved roster beside
   `pipeline.resolved.yaml` when a cycle starts, and read it for that campaign; the memo is the
-  operator's chosen interim. **Re-test:** `ls .promptpotter/projects/*/campaigns/harbor-*/cycles/*/`
+  operator's chosen interim. **Rides with:** the next Harbor campaign, or any edit to
+  `connectors/harbor.py`. **Re-test:** `ls .promptpotter/projects/*/campaigns/harbor-*/cycles/*/`
   — no roster file beside `pipeline.resolved.yaml` means open.
 
-- **A web check-in Start declares no run limits; CLI `new <file>` does.**
-  `application/commands/payloads.py::StartCheckinPayload` carries only `campaign_id`, so the web Start
-  launches under `LaunchLimits()` while the CLI passes a halt target and both budgets — an
-  `<entry-point-parity>` gap. Action: `StartCheckinPayload` takes `LaunchLimits` as `StartRunPayload`
-  does, then the check-in Start surface offers the three fields. **Re-test:**
-  `grep -n "class StartCheckinPayload" promptpotter/application/commands/payloads.py` — any base but
-  `LaunchLimits` means open.
+- **The BROWSER still cannot bound a check-in run's spend; every other ingress now can.** The wire
+  half is closed — `StartCheckinPayload` inherits `LaunchLimits`, `api-openapi.yaml` declares the
+  three ceilings on it, and `start_checkin_campaign` admits under what was asked rather than under a
+  bare `LaunchLimits()`. What is left is the SURFACE: the Start button in
+  `webapp/components/ingest/IngestConversation.tsx` posts `campaign_id` alone
+  (`lib/api/ingest.ts::postStartCheckin`), so a web operator's only ceiling is the account's own, and
+  `e2e/spend/run.spec.ts` still clamps with `change-spend-budget` after the run is already live.
+  It is filed rather than done because WHERE three money fields belong in a chat-shaped check-in is a
+  design call, not a threading one. **Rides with:** any edit to the ingest Start surface — the
+  check-in panel, `useIngestFlow`, or the draft's own override controls, which already render
+  operator-set knobs beside this button. **Re-test:** `grep -n spend_budget_usd
+  webapp/lib/api/ingest.ts` — while it is absent, the browser sends no ceiling.
 
-- **L4 re-reads `inner_tasks.yaml` from disk during a run.** `application/runner/inner/ruler.py` and
+- **NEXT — L4 re-reads `inner_tasks.yaml` from disk during a run.** `application/runner/inner/ruler.py` and
   `spawn_context.py` each call `tasks.py::load_inner_tasks`, so an edit mid-run splits one run's cells
   across two panels — the per-run-state shape `InProcessWorkload` closed for in-process connectors.
   Action: the outer run resolves the panel once and hands it down through the spawn context.
+  **Rides with:** any edit under `runner/inner/` — both call sites are in that one directory.
   **Re-test:** `grep -rn "load_inner_tasks(" promptpotter/application/runner/inner/` — more than one
   call site means open.
 
@@ -140,8 +206,10 @@ it.
   `importlib.import_module` at call time — the deferral [`../developer/conventions.md`](../developer/conventions.md)
   refuses, counted in `complexity_ledger`'s `deferred_imports`. Action: time `python -m promptpotter
   --help` cold with the handlers imported eagerly, then hoist them or state the exemption beside the
-  table. **Re-test:** the operator answers whether that measured startup cost justifies the deferral;
-  until then `grep -n import_module promptpotter/presentation/cli/campaign_runner.py` hits.
+  table. **Rides with:** adding or renaming a CLI verb — you are in `COMMANDS` already, and the
+  timing is one cold `--help`. **Re-test:** the operator answers whether that measured startup cost
+  justifies the deferral; until then `grep -n import_module
+  promptpotter/presentation/cli/campaign_runner.py` hits.
 
 
 ## Blocked — named blocker

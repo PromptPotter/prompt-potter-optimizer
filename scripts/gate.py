@@ -270,6 +270,21 @@ def _eslint(sel: Sel) -> Outcome:
     return _run(_node("npm", "run", "lint", "--", *sel.web_files), _WEBAPP)
 
 
+def _playwright(_sel: Sel) -> Outcome:
+    """The browser, on the one world any machine can honestly walk: the COLD tier.
+
+    ``walk`` reads the operator's own ``.promptpotter/``, and every spec needing a campaign
+    skips itself when discovery finds none — so a ``walk`` where there is no workspace exits 0
+    having asserted almost nothing. ``spend`` costs real money. ``cold`` mints its throwaway
+    world at startup (``e2e/serve.mjs``), so it asserts the same thing here and on a runner:
+    the zero-campaign path a brand-new account meets.
+
+    Behind ``next-build`` because the browser only ever sees ``out/``. A missing Chromium is
+    named by Playwright's own error, with the install command in it.
+    """
+    return _run(_node("npx", "playwright", "test", "--project=cold"), _WEBAPP)
+
+
 def _lock_satisfies(requirer: str, dep: str, entries: frozenset[str]) -> bool:
     """npm walks node_modules up from the requirer, so a copy nested under an UNRELATED package
     does not satisfy it — which is exactly the shape that reaches CI looking present."""
@@ -479,6 +494,8 @@ CHECKS: tuple[Check, ...] = (
             _node("npm", "run", "build"), _WEBAPP, DEPLOY_BUILD="1", GATE_JOBS=str(_SLICE)
         ),
     ),
+    # Not `staged`: it opens a browser and boots two uvicorns, which no pre-commit should.
+    Check("playwright", "web", _playwright, after="next-build"),
     # Neither is `staged`, and neither runs by default: the everyday gate stays offline and the
     # pre-commit hook pays for nothing it cannot use. `--release` is what asks for them.
     Check("npm-audit", "release", _npm_audit),

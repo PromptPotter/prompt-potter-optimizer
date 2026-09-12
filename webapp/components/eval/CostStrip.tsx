@@ -93,7 +93,7 @@ export const CostStrip = memo(function CostStrip() {
           <Bar
             data={{ labels, datasets }}
             options={options}
-            aria-label="Spend per round, stacked by backend, optimizer loop and judge"
+            aria-label="Spend per round, stacked by the buckets that round carried"
           />
         )}
       </div>

@@ -102,8 +102,25 @@ jobs:
           key: eslint-${{ github.sha }}
           restore-keys: eslint-
 
+      # The `playwright` check walks the built export against the REAL API, which
+      # `e2e/serve.mjs` runs out of `.venv` — so this job needs the engine after
+      # all. Same extras as the `check` job: the app has to import before it can
+      # be walked. `--with-deps` because a bare runner has none of Chromium's
+      # shared libraries.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+
+      - name: Install the engine the walk serves
+        run: uv sync --extra stats --extra dev --extra api --frozen
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: webapp
+
       # Same one list as the `check` job — the webapp half of it. Runs from the
-      # repo root, and needs no uv: these checks drive node, so the interpreter
-      # they are launched from cannot change their answer.
+      # repo root; the checks that drive node cannot be changed by which
+      # interpreter launched them, and the one that drives Python finds `.venv`.
       - name: Gate
         run: python3 scripts/gate.py --web

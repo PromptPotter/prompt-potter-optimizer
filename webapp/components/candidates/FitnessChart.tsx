@@ -621,11 +621,17 @@ export const FitnessChart = memo(function FitnessChart({
     <div className="fitness-chart-frame">
       {/* Explicit type argument — `type="bar"` alone infers the bar-only generic and
           rejects the cache overlay's line dataset. */}
+      {/* A canvas has no text, so the name IS the whole reading for anyone not looking at it —
+          and it must say which measure the bars are on, because that is the one thing a glance
+          gets from the axis and a reader gets from nowhere. */}
       <Chart<"bar" | "line">
         type="bar"
         data={data}
         options={options}
         plugins={CHART_PLUGINS}
+        aria-label={`Candidates this round — ${views.length} bar${
+          views.length === 1 ? "" : "s"
+        } on ${showAbility ? "ability (θ)" : "composite fitness"}, each with its interval.`}
       />
     </div>
   );

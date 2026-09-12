@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readSpend } from "../spend";
+import { readSpend, roundCosts } from "../spend";
 import type { SpendBucket } from "@/lib/api/types";
 import type { DashboardSnapshot } from "@/lib/poll";
 
@@ -81,5 +81,34 @@ describe("readSpend prefix-cache shares", () => {
     expect(view.backendCacheShare).toBeNull();
     expect(view.loopCacheShare).toBeNull();
     expect(view.judgeCacheShare).toBeNull();
+  });
+});
+
+describe("roundCosts against a dashboard an older build wrote", () => {
+  it("drops a bucket that round's file never carried", () => {
+    // `dashboard.json` is served VERBATIM, so a round banked before `diagnostic` existed arrives
+    // with three buckets while the generated type declares four — 30 of 37 rounds on the machine
+    // this was found on. Reading the fourth through its annotation threw inside a `.map` and took
+    // the whole cost panel down with it; the type checker cannot see that, and only a walk against
+    // real history did.
+    const snapshot = {
+      spend_by_round: {
+        "0": {
+          backend: bucket({ used_usd: 0.5, input_tokens: 1_000, cache_read_tokens: 100 }),
+          loop: bucket({ used_usd: 0.01 }),
+          judge: bucket({ used_usd: 0.02 }),
+          total_used_usd: 0.53,
+          total_incurred_usd: 0.53,
+          total_tokens_used: 1_000,
+          unpriced_tokens: 0,
+        },
+      },
+    } as unknown as DashboardSnapshot;
+
+    const [round0] = roundCosts(snapshot);
+    expect(round0?.buckets.map((b) => b.key)).toEqual(["backend", "loop", "judge"]);
+    // The total is SERVED and needs no bucket to be present, so it survives the absence intact —
+    // which is what makes the missing row a gap the reader can see rather than a wrong number.
+    expect(round0?.totalUsd).toBe(0.53);
   });
 });

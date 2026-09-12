@@ -6,6 +6,10 @@
 // ChatPane (efficiency + ETA chips) consumes this. The *extraction* — the
 // bucket defaults, the `used_usd` type-guards, the total/fallback rule — lives
 // here once so every consuming surface agrees on the underlying numbers.
+//
+// **A bucket named below may be ABSENT from the served block** — owned by `../../CLAUDE.md` § A
+// wire shape is GENERATED — never hand-declared. `diagnostic` is the one missing from most rounds
+// a long-lived workspace holds, so index a rollup through a guard and not an annotation.
 
 import type { SpendBucket, SpendRollup } from "@/lib/api/types";
 import type { DashboardSnapshot } from "@/lib/poll";
@@ -167,7 +171,9 @@ export interface RoundCost {
  * `rounds[]` carried no cost at all, so every round-axis surface showed a round with no price.
  *
  * Rounds are sorted numerically and non-numeric keys dropped; a round that billed nothing is
- * simply absent, which is what a bar chart wants.
+ * simply absent, which is what a bar chart wants. A bucket the round's own file never carried is
+ * dropped the same way, per the header — it is not a zero this round measured, and the arithmetic
+ * that would make it one is the server's, not this file's.
  */
 export function roundCosts(dash: DashboardSnapshot | null): RoundCost[] {
   const by = dash?.spend_by_round;
@@ -179,15 +185,19 @@ export function roundCosts(dash: DashboardSnapshot | null): RoundCost[] {
     out.push({
       round,
       totalUsd: rollup.total_used_usd,
-      buckets: SPEND_BUCKETS.map(({ key: k, label }) => {
-        const b: SpendBucket = rollup[k];
-        return {
-          key: k,
-          label,
-          usd: b.used_usd,
-          prefix: prefixReading(cacheShare(b.cache_read_tokens, b.input_tokens, false), false),
-          write: b.cache_write_tokens,
-        };
+      buckets: SPEND_BUCKETS.flatMap(({ key: k, label }) => {
+        const b: SpendBucket | undefined = rollup[k];
+        return b == null
+          ? []
+          : [
+              {
+                key: k,
+                label,
+                usd: b.used_usd,
+                prefix: prefixReading(cacheShare(b.cache_read_tokens, b.input_tokens, false), false),
+                write: b.cache_write_tokens,
+              },
+            ];
       }),
     });
   }

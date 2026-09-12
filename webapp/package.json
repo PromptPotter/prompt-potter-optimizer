@@ -9,7 +9,11 @@
     "start": "next start",
     "lint": "eslint --cache --cache-strategy content",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e": "npm run build && playwright test",
+    "e2e:fast": "playwright test",
+    "e2e:watch": "playwright test --headed",
+    "e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.26",
@@ -25,6 +29,7 @@
     "undici": "^7.29.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^20",
