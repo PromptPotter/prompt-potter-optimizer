@@ -19,8 +19,6 @@ nodes:
     node_role: cache
     description: Checks the cache for previously resolved queries. Short-circuits the pipeline on hit.
     config: {}
-    optimizer:
-      langfuse_type: span
   fuzzy_matching:
     type: retriever
     runtime: frontend
@@ -41,7 +39,6 @@ nodes:
       param_descriptions:
         threshold: Minimum similarity score (0-100) to accept a fuzzy match
         scorer: Scoring algorithm for fuzzy string comparison
-      langfuse_type: span
   web_search:
     type: tool
     runtime: backend
@@ -178,7 +175,6 @@ nodes:
           output_field: status
         - pipeline_key: web_cost
           output_field: cost
-      langfuse_type: tool
   entity_profiling:
     type: llm
     runtime: backend
@@ -226,7 +222,6 @@ nodes:
         - pipeline_key: entity_profile
           output_field: null
           is_llm: true
-      langfuse_type: generation
   token_matching:
     type: retriever
     runtime: backend
@@ -249,7 +244,6 @@ nodes:
       observation_mappings:
         - pipeline_key: candidate_ranking
           output_field: candidates
-      langfuse_type: retriever
   llm_ranking:
     type: llm
     runtime: backend
@@ -299,7 +293,6 @@ nodes:
         - pipeline_key: final_ranking
           output_field: ranked_items
           is_llm: true
-      langfuse_type: generation
   direct_prompt:
     type: llm
     runtime: backend
@@ -311,8 +304,6 @@ nodes:
       max_tokens: null
       accept_threshold: 0.75
       correction_top_n: 10
-    optimizer:
-      langfuse_type: generation
 pipelines:
   default:
     - cache_lookup

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { ApiError, failureKind } from "@/lib/api";
+import { ApiError, failureKind, IngestApiError } from "@/lib/api";
 import { clearIncidents, formatDiagnostics, getIncidents, reportIncident } from "@/lib/diagnostics";
 
 // The classifier decides how a poll REACTS to a failure, so its direction of error
@@ -28,6 +28,16 @@ describe("failureKind", () => {
     expect(failureKind(new Error("Unexpected token < in JSON"))).toBe("transient");
     expect(failureKind(null)).toBe("transient");
     expect(failureKind(undefined)).toBe("transient");
+  });
+
+  it("classifies a WRITE failure by its status, like any other", () => {
+    // Every command and ingest write throws `IngestApiError`. Declared outside this family it
+    // read as `transient` at every status, so a refusal rendered as "could not reach it".
+    const write = (status: number) =>
+      failureKind(new IngestApiError(status, "/api/v1/commands/compact-archive", "no"));
+    expect(write(403)).toBe("denied");
+    expect(write(422)).toBe("invalid");
+    expect(write(500)).toBe("transient");
   });
 
   it("carries the server's envelope fields so a report can name the cause", () => {
@@ -77,6 +87,17 @@ describe("incident ring", () => {
       });
     }
     expect(getIncidents().length).toBeLessThanOrEqual(50);
+  });
+
+  it("records a write failure's trace handle, not a blank row", () => {
+    reportIncident(
+      new IngestApiError(500, "/api/v1/commands/start-run", "boom", "internal_error", "wid7"),
+      { surface: "run-control" },
+    );
+    const [only] = getIncidents();
+    expect(only?.errorId).toBe("wid7");
+    expect(only?.code).toBe("internal_error");
+    expect(only?.status).toBe(500);
   });
 
   it("ignores aborts — a cancelled in-flight request is the app working correctly", () => {

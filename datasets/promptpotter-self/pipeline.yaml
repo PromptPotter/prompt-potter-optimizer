@@ -43,7 +43,6 @@ nodes:
       param_allowed_values: {}
       observation_name: l1_generate
       observation_mappings: []
-      langfuse_type: generation
   l1_score:
     type: measurement
     runtime: in_process
@@ -75,7 +74,6 @@ nodes:
       observation_mappings:
         - pipeline_key: final_ranking
         - pipeline_key: mean_round_delta
-      langfuse_type: generation
   l2_context:
     type: llm
     runtime: in_process
@@ -94,7 +92,6 @@ nodes:
       param_allowed_values: {}
       observation_name: l2_context
       observation_mappings: []
-      langfuse_type: generation
   l3_plan:
     type: llm
     runtime: in_process
@@ -113,7 +110,6 @@ nodes:
       param_allowed_values: {}
       observation_name: l3_plan
       observation_mappings: []
-      langfuse_type: generation
   checkin:
     type: llm
     runtime: in_process
@@ -135,7 +131,6 @@ nodes:
       param_allowed_values: {}
       observation_name: checkin
       observation_mappings: []
-      langfuse_type: generation
 # Mirrors `promptpotter/assets/optimizer/pipeline.yaml::pipelines` node for node, because this
 # dataset IS that optimizer seen as a target: an edit evolved on one layer lifts onto the other
 # only while both declare the same graph — edit one, mirror it in the same commit. Not pinned by a

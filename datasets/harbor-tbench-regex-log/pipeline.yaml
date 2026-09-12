@@ -70,7 +70,6 @@ nodes:
         - pipeline_key: env_reward
           output_field: env_reward
           is_llm: true
-      langfuse_type: generation
 pipelines:
   default:
     - agent

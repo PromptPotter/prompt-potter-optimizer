@@ -41,7 +41,6 @@ nodes:
         - pipeline_key: final_ranking
           output_field: generated_text
           is_llm: true
-      langfuse_type: generation
 pipelines:
   default:
     - llm_only

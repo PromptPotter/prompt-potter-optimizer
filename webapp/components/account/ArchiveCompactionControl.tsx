@@ -58,10 +58,15 @@ export function ArchiveCompactionControl() {
       }
     } catch (err) {
       const kind = failureKind(err);
+      // Only a PREVIEW can promise nothing moved: each run swaps atomically, the batch does not,
+      // so a failed apply drops its preview too — that was consent for a state that may be gone.
+      if (apply) setPreview(null);
       setError(
         kind === "denied"
           ? "This account cannot run archive maintenance."
-          : "Could not reach the archive. Nothing was changed.",
+          : apply
+            ? "The archive did not finish. Some runs may already have been rewritten — preview again to see what stands."
+            : "Could not reach the archive. Nothing was changed.",
       );
     } finally {
       setBusy(false);
