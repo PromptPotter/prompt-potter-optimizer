@@ -121,16 +121,25 @@ grants (require unspoofable channel identity) and the babysat *subtree* model.
 ## user ↔ user — tenancy
 
 **Cross-tenant isolation is structural, not a check.** `build_stores`
-(`infrastructure/store/stores.py`) roots every leaf store at `projects_root / tenant_id`; a
-`Stores` object cannot name another tenant's directory, so cross-tenant reads are physically
-impossible. `Stores.tenant_id` is a derived property off the identity, never an independent
+(`infrastructure/store/stores.py`) roots every leaf store at `projects_root / tenant_id`, and the
+content-addressed caches at `shared_root / tenant_id`; a CONSTRUCTED `Stores` cannot name another
+tenant's directory. `Stores.tenant_id` is a derived property off the identity, never an independent
 field. Today `tenant_id == user_id` (one tenant per operator).
+
+**The guarantee is "no constructed `Stores` crosses a tenant", not "no read crosses a tenant"** —
+and the difference is the whole of it. A second `build_stores` under a different identity crosses
+freely, which is how the two deliberate cross-tenant readers work at all
+(`user_store.py::count_accounts`, `quota.py::is_host_tenant_dir`); so does `--tenant <any>` from a
+shell, which resolves to `default_identity` carrying `OWNER_COMMAND_CAPABILITIES`. **Through the
+served API the isolation holds absolutely** — `deps.py::resolve_identity` builds only from the
+session — and the local shell is the separate boundary § loop ↔ everything already concedes.
 
 **Ownership within a tenant is one rule:** `CampaignStore.load_owned(campaign_id, owner_user_id)`
 returns the campaign iff it exists *and* is owned, else `None` — a missing and a cross-owner
-campaign collapse to the same 404. Its four callers (the command dispatcher's
-`_load_owned_campaign`, and the campaign detail / config-map / storage read routes) keep their own
-error text; only the ownership predicate lives in `load_owned`.
+campaign collapse to the same 404. Its callers keep their own error text; only the ownership
+predicate lives there. **Two launch paths inline the same comparison instead** and raise
+`LaunchError` (422, not 404) — `jobs/launcher/mint_and_start.py` and `jobs/launcher/checkin.py`.
+Same existence-hiding effect, a second copy of the rule, and a third status code for one question.
 
 **One deliberate exception — not a bug:** `routers/origins.py` is **tenant-scoped, not
 owner-scoped** (documented in-code). A CLI-minted campaign is owned by the registered-developer

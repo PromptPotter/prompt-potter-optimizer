@@ -38,7 +38,7 @@ This file is the **index for AI/agent readers** over `docs/`. The operator-facin
 
 ## L4 — the recursion case
 
-L4 has exactly **two owners, split doc-says-what-is-TRUE ([`specs/l4-outer-loop.md`](specs/l4-outer-loop.md)) / skill-says-what-to-DO (`.claude/skills/potter-self/`)**, and **no other file under `docs/` may hold L4 prose.** Read the spec before trusting any outer number. The dataset side is [`../datasets/CLAUDE.md`](../datasets/CLAUDE.md) § L4.
+L4 has exactly **two owners, split doc-says-what-is-TRUE ([`specs/l4-outer-loop.md`](specs/l4-outer-loop.md)) / skill-says-what-to-DO (`.claude/skills/potter-self/`)**. Most files under `docs/` name L4 somewhere and that is correct — each says what the recursion does to ITS OWN subject. What no other file may hold is **L4's STATUS or its open list**, which is the half that re-goes-stale every slice. Read the spec before trusting any outer number. The dataset side is [`../datasets/CLAUDE.md`](../datasets/CLAUDE.md) § L4.
 
 ## What may live in `specs/`
 
@@ -52,6 +52,6 @@ Permanent constitutions live in [`adr/`](adr/) instead, and are never deleted on
 
 **The Recompute Test — docs hold rules, not state.** Could a reader six months from now recompute this line from the repo and get a *different* answer? Then it is state: it will go wrong and nothing will say so. Same answer? The doc is quoting code — name the symbol instead. Not recomputable at all? It is a decision or a war story, and it belongs.
 
-Write instead of — line numbers → `file.py::symbol` · a count of a code-owned set → the enumerator's name · a status word (`SHIPPED`, `gating`, `in flight`, `slice N`) → one link to the single status owner · a count of on-disk data → the command that counts it · an un-anchored `§ Name` → a heading that exists verbatim in the file just linked · a post-mortem of closed work → its standing rule, leaving the narrative in `git log`. A commit SHA or an event date may stay when all three hold: it is *provenance* (delete it and the rule still reads), *immutable*, and *subordinate* to the rule's own sentence.
+Write instead of — line numbers → `file.py::symbol` · a count of a code-owned set → the enumerator's name · a status word (`SHIPPED`, `gating`, `in flight`, `slice N`) → one link to the single status owner · a count of on-disk data → the command that counts it · an un-anchored `§ Name` → a string resolving to exactly ONE heading in the file just linked, which a unique prefix does and a phrase matching no heading does not · a post-mortem of closed work → its standing rule, leaving the narrative in `git log`. A commit SHA or an event date may stay when all three hold: it is *provenance* (delete it and the rule still reads), *immutable*, and *subordinate* to the rule's own sentence.
 
 **Documentation does not define behavior — code does.** Where a doc and the code disagree, the code wins and the doc gets updated. The one exception is [`architecture.md`](architecture.md) §0 / §0.5, which IS a contract: code disagreeing with it gets fixed instead. And the per-layer `CLAUDE.md` files under `promptpotter/*/` are per-package *contracts*, not docs — this index says which one holds which fact and never restates the fact itself.

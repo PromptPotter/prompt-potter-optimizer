@@ -147,7 +147,7 @@ writes, and why — [`docs/operations/persistence-and-state.md`](../../docs/oper
 
 Shared I/O in `store/io.py`, and **format follows authorship**: `write_json`/`read_json*` for what code writes and only code reads, `write_yaml`/`read_yaml*` for the operator-authored config tier under `datasets/`. There is deliberately no `read_yaml_tolerant` — a corrupt config degrading to "not there" attributes a measurement to the wrong fingerprint.
 
-Path helpers live in `store/layout.py`, the per-tenant active-session pointer in `store/session_pointer.py`, and derived reads are free functions in query modules (`store/archive_queries.py` is the template). `measurements/` is cross-cycle and cross-tenant; `MeasurementArchive` is the DB core and `store/archive_queries.py` its single-writer facade — a write not going through that facade is the bug.
+Path helpers live in `store/layout.py`, the per-tenant active-session pointer in `store/session_pointer.py`, and derived reads are free functions in query modules (`store/archive_queries.py` is the template). `measurements/` is cross-cycle and cross-campaign **within one tenant** — `build_stores` roots it and every `SHARED_CACHE_DIRS` peer at `shared_root / identity.tenant_id`, so content-addressing makes a row shareable across campaigns and into an L4 sandbox, never across accounts. `MeasurementArchive` is the DB core and `store/archive_queries.py` its single-writer facade — a write not going through that facade is the bug.
 
 The `CycleDir` / `WorkspaceDir` write-target newtypes live in `domain/cycle_paths.py` — projections and stores accept these, not raw `str`/`Path` — as does `CycleHop`, which every per-cycle `CampaignStore` method takes in place of a `(campaign_id, cycle_id)` pair (both `str`, so a swapped call read as "no data" rather than raising). Build it from the carrier that owns both, never by re-pairing.
 
@@ -199,8 +199,8 @@ fail the whole read. Use **optional** wherever the caller acts differently on th
 two, and say which in a comment: `try_delete_stub_cycle` (absent = a stub to
 delete, corrupt = a cycle we cannot vouch for), the SSE snapshot (corrupt serves
 a `dashboard_unreadable` reason), and the three identity readers, where absent
-and malformed are opposite security answers (`check_allowlist` allows on absent
-and denies on malformed — collapsing them would fail OPEN). Hand-rolling
+and malformed are opposite security answers (`check_blocklist` admits on absent
+and blocks everyone on malformed — collapsing them would fail OPEN). Hand-rolling
 `json.loads(path.read_text())` in a `try` is the bug; picking the stricter helper
 on purpose is not.
 
@@ -253,7 +253,7 @@ This note sits here rather than only in `mlflow_sink.py`'s docstring because the
 ## Identity — the OIDC foundation
 
 `identity/` holds the sign-in machinery: provider config + the two issuers
-(`google.py`, `github.py`), `verifier.py`/`jwks.py`, `allowlist.py`, `grants.py`,
+(`google.py`, `github.py`), `verifier.py`/`jwks.py`, `blocklist.py`, `grants.py`,
 browser `session.py`, `user.py`, and `migration.py` (the first web sign-in RENAMES
 `projects/default/` to `projects/{user_id}/`). It builds the Stage-0 `IdentityContext`
 that `build_stores` takes; the capability vocabulary that reads it lives one layer out

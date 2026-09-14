@@ -44,7 +44,7 @@ Cycle root: `.promptpotter/projects/{tenant}/campaigns/{campaign_id}/cycles/{cyc
 | 5 | `{cycle_dir}/dashboard.json` | Round-by-round composite trajectory + recent rules |
 | 6 | `{cycle_dir}/prompts/{node}.yaml` | Current `PromptTemplate` for each pipeline node — the *target* of L1's mutations (read-only here) |
 
-Reads happen by opening files; `evidence` is the one read VERB, because a comparison ACROSS campaigns is in no single file. The file tree is the dashboard.
+Reads happen by opening files; `evidence` is the one read VERB, because a comparison ACROSS subjects is in no single file. The file tree is the dashboard.
 
 ## Live-run supervision
 

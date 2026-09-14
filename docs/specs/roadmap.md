@@ -8,7 +8,7 @@
 
 ## Hard ordering (violate → rebuild)
 
-- **Build every new webapp data panel on `dashboard.json` polling + the SSE ledger-tail.** That pair is the design, not an interim seam awaiting a cutover; there is no `live-state` endpoint to wait for. **One exemption, and its shape is the rule: a ONE-SHOT TOPOLOGY read may sit beside the poll when the poll is its INVALIDATION signal rather than its transport.** `GET /campaigns/{id}/pipeline` is the only one — a pipeline resolution cannot change without a new cycle or a new searchpoint, and `dashboard.json` announces both. A panel whose content changes *while nothing else does* fails that test and rides the poll.
+- **Build every new webapp data panel on `dashboard.json` polling + the SSE ledger-tail.** That pair is the design, not an interim seam awaiting a cutover; there is no `live-state` endpoint to wait for. **One exemption, and its shape is the rule: a ONE-SHOT TOPOLOGY read may sit beside the poll when the poll is its INVALIDATION signal rather than its transport.** `GET /campaigns/{id}/pipeline` is the only PANEL-feeding one — a pipeline resolution cannot change without a new cycle or a new searchpoint, and `dashboard.json` announces both. A panel whose content changes *while nothing else does* fails that test and rides the poll. `POST /campaigns/{id}/fork-preview` (`manifests.py::preview_fork_steer`) is a read too, but it sits OUTSIDE this rule rather than under it: it is keyed on the operator's pending gesture, which no poll can invalidate because the run does not know about it. Feeding a panel is what puts a read under the rule.
 - **BYO per-user API keys — now the load-bearing half, and unbuilt.** Signup is open and each account is metered against `FREE_TIER_SPEND_CAP_USD` + `FREE_TIER_TOKEN_CAP` (lifetime, `quota.py::lifetime_ceilings`), so the host key is bounded — but a user who spends their ceiling has **nowhere to go**. That is the liability now, not the unbounded spend it replaced. Lane A2.
 - **HTTP-edge abuse protection is now due.** Cloudflare edge + the per-account ceiling + per-user `JobRegistry` quotas bound the public surface; with the approval queue gone, app-level rate-limiting (C6) is the remaining gap — nothing bounds the NUMBER of accounts, only what each one may spend.
 
@@ -79,9 +79,9 @@ Three invariants outlive the build: it reuses the `checkin/2` node (never a sepa
 ### Ingest + chat-first web
 > **Chat-first front door** (thread model, activity-stream translator, copilot decision buttons, campaign-scoped persistence) has its own contract: [`chat-foundation.md`](chat-foundation.md). This note keeps only the ingest / draft-campaign detail.
 
-Four nouns map to OIDC: Install=`iss`, User=`sub` (`user_id=f"{iss}:{sub}"`, SCIM 2.0 Core names verbatim), Project=`tenant_id` claim, Campaign=cycle 1:1.
+Four nouns map to OIDC: Install=`iss`, User=`sub` (`identity/user.py::derive_user_id` hashes the pair — not a concatenation, and the record carries no SCIM field name), Project=`tenant_id`, Campaign=cycle 1:1.
 
-**The committed artifact is a Dataset, not a campaign:** 4 content-hashed files at `projects/{tenant}/datasets/{slug}/` (`cache.json` rows, `pipeline.yaml` overlay, `task_description.md`, `prompts/default.yaml`) compose into `JobSearchPoint.content_hash`; the sibling `campaign.json` is NOT in the hash. Identical datasets → identical `cycle_{target_hash[:12]}` + a shared `measurements/`, so cross-tenant pooling is free.
+**The committed artifact is a Dataset, not a campaign:** 4 content-hashed files at `projects/{tenant}/datasets/{slug}/` (`cache.json` rows, `pipeline.yaml` overlay, `task_description.md`, `prompts/default.yaml`) compose into `JobSearchPoint.content_hash`; the sibling `campaign.json` is NOT in the hash. Identical datasets → identical `cycle_{target_hash[:12]}`, so two campaigns in ONE tenant pool their paid cells for free. Cross-TENANT pooling is not a thing today and would be a design change: `build_stores` roots the archive at `shared_root / tenant_id`.
 
 **The hash is dataset-scoped and pipeline resolution is campaign-scoped — owned by [`../architecture.md`](../architecture.md) § Two resolution seams**, which carries the census the decision was taken on. What this lane must not do is collapse them: the hash answers *are these the same measurement*, the resolution answers *what is this campaign doing*.
 
@@ -206,7 +206,7 @@ Parent selection — collapse `elect_round_winner`'s greedy promotion and `selec
 
 ## Identity — live forward gap (non-derivable)
 
-Identity is **Stage 0.5** — the OIDC wire is live but RLS / SCIM tenant isolation is **not yet enforced**.
+Identity is at **Stage 1** by [`ADR-0002`](../adr/0002-identity-foundation.md)'s own ladder, which has three rungs and no 0.5: Stage 1 IS "OIDC client, same file-based layout, tenant-prefixed for real", and that is what ships. Tenant isolation is enforced — structurally, by `build_stores` ([`../operations/access-model.md`](../operations/access-model.md) § user ↔ user — tenancy). PostgreSQL + RLS is **Stage 2**, so its absence is the definition of Stage 1 rather than a shortfall from it; there is no SQL driver and no SCIM vocabulary anywhere in the package. What is genuinely owed is ADR-0002's no-drift gate #6 (SCIM field names on the internal `User`), unimplemented.
 
 ## Non-functional requirements
 

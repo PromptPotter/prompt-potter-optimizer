@@ -64,12 +64,14 @@ Both are first-class:
   could still beat the leader. Otherwise it is eliminated and we
   move to the next candidate in the round. Concentrates query
   budget on candidates that might actually win.
-- **Hard-sample ordering (Rasch sort).** Samples are scored in order
-  of decreasing signal-to-noise — the most discriminating samples
-  first. Separates winners from losers with the fewest queries.
-  The same sort drives the operator's hard-sample leaderboard for
-  free, since "most discriminating" is exactly what an operator
-  wants to inspect.
+- **Hard-sample ordering (`build_round_order`).** ONE static order per
+  round, shared by every candidate: a three-strata partition on the
+  PARENT's per-sample grades — misses by ascending δ, hits by
+  descending, cells the parent never answered nearest the ruler's
+  centre — with every 4th slot a hit, the regression probe. Separates
+  winners from losers with the fewest queries. Owned by
+  [`methods/verdict-resolution.md`](methods/verdict-resolution.md)
+  § The round order.
 
 #### Three single-place-to-extend mechanisms
 
@@ -527,7 +529,8 @@ scopes from one query path: **campaign** (`campaign_id=…`),
 **dataset** (`dataset_name=…`), **workspace** (no filter). The
 archive is the Workspace datastore — a peer of `campaigns/`, never
 siloed into a campaign dir. **Cross-cycle, cross-session,
-cross-tenant.**
+cross-campaign, and shared into an L4 sandbox — but rooted per
+tenant** (`build_stores`: `shared_root / tenant_id`).
 
 The on-disk format is human-readable
 (operator can `cat` a row); programmatic reads go through two

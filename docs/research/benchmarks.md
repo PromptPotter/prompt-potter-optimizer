@@ -63,6 +63,7 @@ upward before trusting it.
 | BBEH mini | **28%** | ✅ headline |
 | `justlogic-d234` | **0.500–0.625** (floor 0.350) — the recon slice, not the current wiring; re-read off `noise-floor --k 3` on a cold workspace before quoting it | ✅ focus instrument |
 | AIME 2025 | **30%** | ✅ wired; too small to split |
+| `sealqa-longseal-12` | published no-skill **26.3–33.0%**, ceiling 39.4–44.7% (literature — the bar cannot screen it, being a judge-graded agent episode) | ✅ wired; one harbor episode per cell, graded by the `sealqa` judge |
 | PlanBench `task_1` | **36%** | 🟡 next-priority; needs a PDDL plan validator |
 | NaturalPlan | **36%** macro | 🟡 next-priority; `meeting_planning`-only (43%) is the clean cut |
 | MuSiQue | **60%** macro, **38%** 3hop | 🟡 3hop held; overlaps BBEH's RC subtasks |
@@ -78,7 +79,7 @@ upward before trusting it.
 | FOLIO | **80%** | ❌ saturated; reproduced across two providers |
 | MuSR | **81%** | ❌ ceiling — B-skewed binary golds, frequency-bias coast |
 | SATBench | **100%** | ❌ saturated at every filter the schema exposes |
-| GSM8K | **~78%** (literature — the one row here never measured at the bar) | ⏳ verdict withdrawn, see § Order of use |
+| GSM8K | **~78%** (literature — never measured at the bar, and unlike `sealqa` it could be) | ⏳ verdict withdrawn, see § Order of use |
 | BBEH @ `high` | ~25% naïve | ❌ the *effort* is rejected, not the dataset — the reasoning trace exhausts the visible-token budget |
 | IFBench · CRUXEval-O · MuSR (2-subtask) | — | ❌ desk-rejected / not measurable |
 

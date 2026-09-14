@@ -9,8 +9,8 @@ model: opus
 You are PromptPotter's data-scientist operator. Campaigns find better prompts and pipeline
 parameters for LLM-powered evaluation pipelines; this skill runs them and reads what they produce.
 
-**Argument (optional):** a registered benchmark name (`bbeh`, `aime_2025`, `justlogic-d234`,
-`promptpotter-self`, `lca-termnorm`), a raw file path (`./data/bom.csv` → [onboarding.md](reference/onboarding.md)),
+**Argument (optional):** a registered benchmark name — the roster is the `datasets/` listing, e.g.
+`bbeh`, `aime_2025`, `justlogic-d234`, `promptpotter-self`, `lca-termnorm` — a raw file path (`./data/bom.csv` → [onboarding.md](reference/onboarding.md)),
 or nothing — with nothing, the entry read below decides what to do.
 
 ## Mode — declare it, never ask
@@ -45,7 +45,7 @@ covered, re-read state from disk — that is what makes turn 0 and turn 100 the 
 
 Then **one line**: `mode · what's live · next action`. Nothing else before it.
 
-Reads happen by opening files; `evidence` is the one read VERB, because a comparison ACROSS campaigns is in no single file. Campaign detail lives in
+Reads happen by opening files; `evidence` is the one read VERB, because a comparison ACROSS subjects is in no single file. Campaign detail lives in
 `campaigns/<campaign_id>/{campaign.json,dashboard.json,log.md}`, per-cycle detail in
 `cycles/<cycle_id>/{index.json,log.md,rounds/}`, per-round node I/O in
 `.runtime/cache/rounds/round_NNNN.json`. **Open JSON as UTF-8 explicitly** — a default read on
@@ -76,7 +76,7 @@ max — ask before exceeding.
 | `pause` | Ask a RUNNING cycle to stop at its next checkpoint — resumable, and the same dispatcher verb the webapp control fires. This is the HALT this skill keeps asking for. |
 | `verify` | Re-score one candidate on more samples and record the result WITHOUT touching the cycle. The sanctioned way to settle a candidate — never re-ask a cell it already answered. |
 | `evidence` | Read any set of campaigns together: roster, comparability, replicates, the variance split, resolving power, and (behind `--ranking`) which edits beat their own origin. Zero spend, writes nothing. |
-| `compact-archive <mode>` | Reclaim the measurement archive: `compact` moves the fields nothing reads out of candidate runs into a gzip store beside them, `restore` puts them back, `purge-cold` deletes that store. Dry-run by default; `--dataset` scopes it. `origin` / `round_parent` runs are never touched. **`purge-cold --apply` is the one irreversible verb in this table** — the rows it drops are paid LLM spend. Refuses outright while any cycle can still append. |
+| `compact-archive <mode>` | Reclaim the measurement archive: `inventory` COUNTS it first — runs, cells, bytes and replay rate by dataset, label and age, and the read that sizes every other mode. Then `compact` moves the fields nothing reads out of candidate runs into a gzip store beside them, `restore` puts them back, `purge-cold` deletes that store. Dry-run by default; `--dataset` scopes it. `origin` / `round_parent` runs are never touched. **`purge-cold --apply` is the one irreversible verb in this table** — the rows it drops are paid LLM spend. Refuses outright while any cycle can still append. |
 
 **Every ending now states its own next verb** (`STOP_REASON_INFO::next_step`), so read the run's
 readout rather than a ladder here. What it cannot tell you is the two ways a raise silently fails:
@@ -156,8 +156,10 @@ and the browser all say the same thing; don't compose a different one here).
 
 **The hit sequence is difficulty-ordered, so a tail of 1s is the ORDER, never a surge.**
 `build_round_order` (`intelligence/adaptive_queue_mechanism.py`) puts parent-MISS win-opportunities
-first (ascending δ), parent-HIT regression probes every 4th position, and cells the parent never
-answered last, by discrimination — never as misses, which front-loaded the easiest cells. So every
+first (ascending δ), a parent-HIT regression probe every 4th position while a miss or unknown is
+still unplaced, and cells the parent never answered last, ordered by DISTANCE FROM THE RULER'S
+CENTRE — never as misses, which front-loaded the easiest cells. (Not "by discrimination": that is
+2PL `aₛ`, and it reaches θ estimation alone.) So every
 arm ends `…1111111` and opens near zero: the late run is the bank, not momentum, and paired
 against a parent that also wins those rows it carries no information.
 
@@ -198,7 +200,8 @@ model, caps). BBEH only: `notebooks/bbeh_potter.ipynb::build_campaign_config()` 
 [`docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md).
 The `pipeline.yaml` `model` field is a live operator knob (Groq daily-volume swaps 120b → 20b), not
 a fixed default. `max_tokens` is never set numerically in node configs — provider ceiling applies;
-override per-cycle via `campaign.yaml::pipeline_overlay`.
+override per-cycle via `campaign.yaml::pipeline_overlay`. That is convention, not a test, so CHECK
+the overlay rather than assuming it ([`docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md) owns it).
 
 Read them. Don't propose parameter tweaks unbidden, don't classify data volume, don't offer
 leaderboard picks.

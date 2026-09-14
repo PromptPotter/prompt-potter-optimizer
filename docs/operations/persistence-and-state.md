@@ -68,7 +68,9 @@ Reads happen by opening the on-disk artifact tree. `evidence` is the one read VE
           ledger.jsonl                 # append-only Decision/Phase/Snapshot/LLMCall/TokenUsage spine
           streams/round_NNNN_p_best.jsonl   # PoBB telemetry (sparkline in log.md)
           cache/rounds|candidates/     # per-round node I/O + pre-scoring checkpoint
-    measurements/                       # PAID — measurements. Cross-cycle/session/tenant, peer of campaigns/
+    measurements/                       # PAID — measurements. Cross-cycle/session/campaign and into an
+                                        #   L4 sandbox, but WITHIN this tenant: `build_stores` roots it at
+                                        #   `shared_root / tenant_id`. Peer of campaigns/
       index.jsonl                  # append-only, last-wins by run_id; `reindex` rebuilds it from runs/
       runs/{run_id}.jsonl          # one append-only log per run: a `k:"run"` header row + a `k:"m:{sample_id}"` row each
       derived/                     # read models folded FROM the runs (regenerable)

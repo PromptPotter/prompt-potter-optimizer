@@ -40,6 +40,8 @@ What this file owns, and where each rule is stated. Names only — the section i
 - Never commit or push unprompted → § Conventions
 - Reach for a doctrine by its trigger → § Working principles
 - A campaign does not own its measurements → § The archive is not scoped by campaign
+- Answer every question before adding a concept → § Pre-flight gate
+- Say which column a measured number is in → § The closing directive
 - Per-layer contracts — load only yours → § Pointers
 
 ## The archive is not scoped by campaign
@@ -62,7 +64,7 @@ Delete on sight — don't ask, don't TODO, don't "remove later":
 
 <root-fix>
 When a fix would compensate for something an upstream layer should already have made true, the fix belongs upstream — not at the site where the symptom shows up. Name the structural cause and propose the upstream fix <em>before</em> touching the visible surface. The operator can still pick the patch, but they pick it knowingly. Default to root, not to symptom.
-A fix at N sites is the model serving the wrong shape — realign it and let the sites fall out; net prose growth in a bug-fix diff proves it was a patch.
+A fix at N sites is the model serving the wrong shape — realign it and let the sites fall out. Net prose growth in a bug-fix diff is a SIGNAL to re-read the diff, never a proof: a root fix earns a test and states the corrected mechanism, and both are lines a patch never spends.
 </root-fix>
 
 ## Working principles
@@ -73,9 +75,9 @@ Six *situational* guardrails against recurring AI blind spots. The trigger and t
 
 - **the operator bounded ANY budget axis** → `<one-budget>`: a limit on one axis binds **all** of them, both directions — "don't spend more" bounds the clock, "we don't have five hours" bounds the dollars. Price a proposal in the axis they named *and* the ones they didn't; trading one for another is an increase, asked for explicitly. When the budget binds, get more from measurements already paid for.
 - **slow / costly / token-heavy LLM call, OR adding anything to a prompt** → `<simplify-the-problem>`: tighten the prompt so the model doesn't *need* the tokens — the timeout, cap and provider are safety rails, not the fix. **Length is a quality tax, not only a bill**, so this fires before anything is slow. Attribute a real payload per block before diagnosing, and count the response JSON Schema: it is prompt text.
-- **labelling a change "refactor" / LOC work** → `<surface-ledger>`: run `complexity_ledger`; a pass *called* refactor must move the total **down**. The ratchet asserts EQUALITY, so every move costs a baseline edit and a written reason.
+- **labelling a change "refactor" / LOC work** → `<surface-ledger>`: run `complexity_ledger`. It prices DECLARED surface, so it refuses a pass that adds a module, a knob, a served field or an injection while calling itself a simplification — and a FLAT total falsifies nothing, since folding helpers moves no name it can see. The ratchet asserts EQUALITY, so every move costs a baseline edit and a written reason.
 - **changed what the engine DECIDES, added a capability at one entry point, or CAUGHT one rule implemented twice** → `<entry-point-parity>`: five ways in — CLI, the `/potter-run` skill, the embedded launch (`application/embedded_run.py`), REST API, webapp — and a capability reaching only the one you were editing is half-built. Teach a new value, never dump it. **Periphery instead of parity is urgent the moment it is seen**, and its root is a layer boundary, so the fix moves the shared piece down into `application/` rather than patching the copy.
-- **reaching for the shell, a sub-agent, or a wait** → `<wall-clock>`: file tools answer in ~0.1s and a shell call costs a fixed toll (median 2.4s), so batch shell work and never spend it on something `Read`/`Grep`/`Edit` does. A sub-agent is ~5 minutes, so N searches go out in ONE message or not at all. Never `sleep`-poll — background it and let the notification arrive. Iterate on the one check that owns what you touched; the gate is what you run once.
+- **reaching for the shell, a sub-agent, or a wait** → `<wall-clock>`: a shell call carries a fixed toll the file tools do not, so batch shell work and never spend it on something `Read`/`Grep`/`Edit` does. A sub-agent costs minutes, so N searches go out in ONE message or not at all. Never `sleep`-poll — background it and let the notification arrive. Iterate on the one check that owns what you touched; the gate is what you run once.
 - **about to open a file you'll WORK in, or search across >3 files** → `<read-once>`: a narrow read *feels* frugal and isn't — the window keeps every line, so N pokes cost N times. Read whole at four-plus touches; never read file content through `sed`/`cat`/`head`; delegate a >3-file search and ask for the verdict, not the excerpts.
 
 ## Commands
@@ -84,7 +86,7 @@ Six *situational* guardrails against recurring AI blind spots. The trigger and t
 # Every `python` below is the repo venv (`.venv/Scripts/python.exe` | `.venv/bin/python`). Bare `python` fails SILENTLY:
 # a system interpreter imports promptpotter but not its deps, so a run starts, replays cache, and dies at the first live
 # LLM call. `gate.py` re-execs to dodge this; the CLI cannot, or it would break the Ctrl+C pause contract.
-pip install -e ".[all,dev]"                                  # add `,benchmarks` ONLY to fetch a public bank — opt-in, third-party surface
+pip install -e ".[all,dev]"                                  # `benchmarks` and `harbor` are OUT of `all` deliberately — add one only when you need it; harbor also wants a container runtime, so folding it in breaks working boxes
 python scripts/gate.py                                       # EVERY check CI runs, one invocation, nothing masking anything; re-execs itself into the locked env, so the verdict never depends on which python you had. --py / --web to halve it, --only NAME for the one check that owns what you touched
 python scripts/gate.py --release                             # BEFORE cutting a release: the dashboard lock against npm's advisory DB + every open Dependabot alert (both ecosystems, dismissals honoured). Network-bound, so never in the default run; `publish.yml` enforces the npm half
 git config core.hooksPath .githooks                           # one-time per clone: `gate.py --staged`, the same list scoped to what you staged
@@ -105,10 +107,10 @@ The **front door is a browser chat** — a human-in-the-loop copilot: the operat
 ## Conventions
 
 - Full style + code-shape + git rules, and the four banned words → [`docs/developer/conventions.md`](docs/developer/conventions.md).
-- **Git — don't commit by default:** **never `git commit` or `git push` unless the operator says so** (a commit ask is not a push ask). **Sole standing exception:** where a project instruction already grants autonomous commits. Ruff format + check before any commit (see Commands).
+- **Git — don't commit by default:** **never `git commit` or `git push` unless the operator says so** (a commit ask is not a push ask). **Sole standing exception:** where a project instruction already grants autonomous commits. Ruff format + check before any commit — `scripts/gate.py` runs both, and `--staged` is the pre-commit hook.
 - **Vocabulary:** say "node" never service/building-block; **"optimizer prompt" never "meta-prompt"** — a prompt the optimizer *runs on*, whose opposite is the **target prompt** it *produces* during optimization (`OptSearchPoint` vs `JobSearchPoint`); for L4 say **outer/inner** (position) and **self-optimization** (the arrangement), never "meta"; **"run init" / the INIT phase, never "bootstrap"** — the chain from `new`/`resume` to round 1 (`application/initialization/`), which the operator already sees as `INIT` / `✓ Initialized`, so a third word for it only hides the concept; the word survives ONLY for machine provisioning (`deploy-linux/bootstrap.sh`) and external proper nouns (DSPy `BootstrapFewShot`); domain framing = evolution (generation/population/fitness/mutation/selection/individual).
 - **Sample look-ahead is browser-only, and the ABSENCE is the boundary** — the one deliberate `<entry-point-parity>` inversion, so a missing CLI verb / config key / dataset knob is the gate, never an oversight to fix. Why it is declared rather than merely unimplemented: [`presentation/CLAUDE.md`](promptpotter/presentation/CLAUDE.md) § Sample look-ahead.
-- **Fewest dependencies possible** in both repos — reach for the stdlib or a small hand-rolled helper before adding a package; every new dependency must earn its place. **Core is the engine; a surface is an extra** — owned by [`ADR-0006`](docs/adr/0006-embeddable-core-and-extras.md): one that earns its place goes in an extra unless it is *measurably* reachable from `cli/campaign_runner.py` or `application/embedded_run.py`.
+- **Fewest dependencies possible** in both repos — reach for the stdlib or a small hand-rolled helper before adding a package; every new dependency must earn its place. **Core is the engine; a surface is an extra** — owned by [`ADR-0006`](docs/adr/0006-embeddable-core-and-extras.md), which settles the boundary on MEASURED reachability rather than on argument.
 
 ## Pre-flight gate
 
