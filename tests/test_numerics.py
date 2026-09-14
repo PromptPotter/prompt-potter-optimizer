@@ -2600,11 +2600,12 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
     # unexercised optimizer prompt reported as flawless, and a *high* outer fitness. Nothing errors.
     # The exclusion predicate must ask "produced evidence?", not "failed?" — the two answers
     # differ on every row below.
-    from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError, compute_outer_proxies
+    from promptpotter.domain.l4.proxies import compute_outer_proxies
+    from promptpotter.shared.errors import CellUnscoreableError
 
     # Zero L1 rounds, on a cycle that DID end on its own terms.
     empty = cycle_result([], 0.30, [], stop_reason=StopReason.TARGET_HIT)
-    with pytest.raises(InnerCycleUnscoreableError):
+    with pytest.raises(CellUnscoreableError):
         compute_outer_proxies(empty)
 
     # ONLY A SUCCESS OUTCOME IS A MEASUREMENT. The dangerous rows are the ones with rounds on
@@ -2622,7 +2623,7 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
         [round_result(1), round_result(2)],
         stop_reason=StopReason.TOKEN_BUDGET,
     )
-    with pytest.raises(InnerCycleUnscoreableError):
+    with pytest.raises(CellUnscoreableError):
         compute_outer_proxies(truncated)
 
     # ...and it is EXCLUDED, never floored: the floor is `after_N_rounds_delta = -1`, which zeroes
@@ -2635,14 +2636,14 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
         [round_result(1, parse_failure="l1_provider_empty_response")],
         stop_reason=StopReason.TOKEN_BUDGET,
     )
-    with pytest.raises(InnerCycleUnscoreableError):
+    with pytest.raises(CellUnscoreableError):
         compute_outer_proxies(railed_and_empty)
 
     # Rounds ran, but the trajectory is empty → nothing to difference against origin. Without
     # the guard `first`/`after_N_rounds_delta` would both read a flat 0.0: "no lift" is a
     # plausible-looking number for "no measurement", which is what makes it dangerous.
     levelless = cycle_result([], 0.30, [round_result(1)])
-    with pytest.raises(InnerCycleUnscoreableError):
+    with pytest.raises(CellUnscoreableError):
         compute_outer_proxies(levelless)
 
     # Rounds AND levels, but the origin was never scored. Every delta here is measured against
@@ -2650,7 +2651,7 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
     # was scored) reports the whole trajectory as an enormous lift over nothing — and it does so
     # for the CHEAPEST rows, since a crash at round 0 is what leaves the origin unscored.
     floorless = cycle_result([0.40, 0.55], None, [round_result(1), round_result(2)])
-    with pytest.raises(InnerCycleUnscoreableError):
+    with pytest.raises(CellUnscoreableError):
         compute_outer_proxies(floorless)
 
     # ...and a cycle that DID produce evidence still scores, on the same predicate.

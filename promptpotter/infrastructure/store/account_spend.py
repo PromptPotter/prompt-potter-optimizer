@@ -4,7 +4,6 @@ block is cumulative-from-seed, so summing those snapshots double-counts a fork's
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -16,6 +15,7 @@ from promptpotter.infrastructure.llm.pricing import compute_usd
 from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import iter_jsonl
+from promptpotter.shared.clock import epoch_seconds
 
 if TYPE_CHECKING:
     # Type-only: the campaign store imports THIS module to bank a spend before it destroys the
@@ -40,10 +40,8 @@ def _iter_dated_records(
     malformed CONTENT is skipped."""
     for ledger_path in ledgers:
         for rec in iter_jsonl(ledger_path):
-            ts_str = rec.get("timestamp", "")
-            try:
-                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).timestamp()
-            except (ValueError, TypeError, AttributeError):
+            ts = epoch_seconds(rec.get("timestamp"))
+            if ts is None:
                 continue
             if since <= ts < until:
                 yield {**rec, "ts": ts}

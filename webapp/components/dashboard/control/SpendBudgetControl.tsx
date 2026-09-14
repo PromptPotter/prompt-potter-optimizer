@@ -3,6 +3,7 @@ import { useState } from "react";
 import { postChangeSpendBudget, IngestApiError } from "@/lib/api";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { fmtUsd, fmtTokens } from "@/lib/format";
+import { parseCap } from "@/lib/run-limits";
 import { useWorkspace } from "@/lib/workspace";
 import { Modal } from "@/components/shell/Modal";
 
@@ -59,19 +60,13 @@ export function SpendBudgetControl({
 
   const disabled = !campaignId || !cycleId;
 
-  const parsedUsd = Number.parseFloat(usdDraft);
-  const usdValid = usdDraft.trim() !== "" && Number.isFinite(parsedUsd) && parsedUsd >= 0;
-  const usdChanged = usdValid && parsedUsd !== currentBudgetUsd;
-
-  const parsedTok = Number.parseInt(tokDraft, 10);
-  const tokValid =
-    tokDraft.trim() !== "" && Number.isInteger(parsedTok) && parsedTok >= 0;
-  const tokChanged = tokValid && parsedTok !== currentBudgetTokens;
-
-  // Send only the ceilings the operator actually changed; the applier merges,
-  // so an untouched ceiling is left exactly as it was on disk.
-  const nextUsd = usdChanged ? parsedUsd : null;
-  const nextTok = tokChanged ? parsedTok : null;
+  // Send only the caps the operator actually changed; the applier merges, so an untouched cap is
+  // left exactly as it was on disk. `null` covers both ways there is nothing to send — `parseCap`
+  // refusing a blank or half-typed draft, and a parsed value equal to the cap already standing.
+  const usd = parseCap(usdDraft);
+  const tok = parseCap(tokDraft, { int: true });
+  const nextUsd = usd !== currentBudgetUsd ? usd : null;
+  const nextTok = tok !== currentBudgetTokens ? tok : null;
   const hasChange = nextUsd != null || nextTok != null;
   const isHalt = nextUsd === 0 || nextTok === 0;
 

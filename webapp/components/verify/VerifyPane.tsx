@@ -9,7 +9,7 @@ import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { ageText, fmtFitness, fmtPct0 } from "@/lib/format";
 import { useFetch } from "@/lib/hooks/useFetch";
-import { ErrorNote, HoverCard, Loading, SignInPrompt } from "@/components/ui";
+import { ErrorNote, Loading, SignInPrompt, Term } from "@/components/ui";
 
 export function VerifyPane() {
   const { status } = useAuth();
@@ -83,41 +83,13 @@ export function VerifyPane() {
           <thead>
             <tr>
               <th>Source</th>
-              <th>
-                <HoverCard content="Samples requested at the CLI; how many were newly measured (the rest were already in the cross-cycle archive).">
-                  <span className="term-hint" tabIndex={0}>Samples</span>
-                </HoverCard>
-              </th>
-              <th>
-                <HoverCard content="Total samples this candidate has measurements for across the dataset's archive.">
-                  <span className="term-hint" tabIndex={0}>Workspace n</span>
-                </HoverCard>
-              </th>
-              <th>
-                <HoverCard content="Source campaign's accuracy for this candidate, as persisted on the round file.">
-                  <span className="term-hint" tabIndex={0}>Campaign acc</span>
-                </HoverCard>
-              </th>
-              <th>
-                <HoverCard content="Workspace accuracy = mean hit rate over the workspace measurement set.">
-                  <span className="term-hint" tabIndex={0}>Workspace acc</span>
-                </HoverCard>
-              </th>
-              <th>
-                <HoverCard content="Source campaign's composite for this candidate, as persisted on the round file.">
-                  <span className="term-hint" tabIndex={0}>Campaign cf</span>
-                </HoverCard>
-              </th>
-              <th>
-                <HoverCard content="Composite recomputed under the campaign's scorer over every workspace measurement for this candidate's config.">
-                  <span className="term-hint" tabIndex={0}>Workspace cf</span>
-                </HoverCard>
-              </th>
-              <th>
-                <HoverCard content="Grey = source-campaign accuracy. Red overlay = workspace accuracy. A red bar shorter than the grey one means the verdict didn't hold.">
-                  <span className="term-hint" tabIndex={0}>Trend</span>
-                </HoverCard>
-              </th>
+              <th><Term content="Samples requested at the CLI; how many were newly measured (the rest were already in the cross-cycle archive).">Samples</Term></th>
+              <th><Term content="Total samples this candidate has measurements for across the dataset's archive.">Workspace n</Term></th>
+              <th><Term content="Source campaign's accuracy for this candidate, as persisted on the round file.">Campaign acc</Term></th>
+              <th><Term content="Workspace accuracy = mean hit rate over the workspace measurement set.">Workspace acc</Term></th>
+              <th><Term content="Source campaign's composite for this candidate, as persisted on the round file.">Campaign cf</Term></th>
+              <th><Term content="Composite recomputed under the campaign's scorer over every workspace measurement for this candidate's config.">Workspace cf</Term></th>
+              <th><Term content="Grey = source-campaign accuracy. Red overlay = workspace accuracy. A red bar shorter than the grey one means the verdict didn't hold.">Trend</Term></th>
               <th>When</th>
             </tr>
           </thead>
@@ -170,6 +142,8 @@ function TrendBar({ source, workspace }: { source: number; workspace: number }) 
   const clamp = (v: number) => Math.max(0, Math.min(1, v));
   const s = clamp(source);
   const w = clamp(workspace);
+  // The one verdict on this pane the browser authors: `DiagnosticRunRecord` serves both rates and
+  // no held/dropped answer, so the float tolerance is ours until it does.
   const held = workspace + 1e-9 >= source;
   return (
     <div className="verify-bar" role="img" aria-label={`workspace ${held ? "≥" : "<"} campaign accuracy`}>

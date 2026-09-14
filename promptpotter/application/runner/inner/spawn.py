@@ -39,7 +39,6 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.proxies import (
     INNER_RESULT_KEY,
     PARENT_LEVEL_SE_KEY,
-    InnerCycleUnscoreableError,
     compute_outer_proxies,
     floor_reason,
     inner_cell_facts,
@@ -72,7 +71,7 @@ from promptpotter.infrastructure.store.layout import (
 )
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import build_stores
-from promptpotter.shared.errors import graceful
+from promptpotter.shared.errors import CellUnscoreableError, graceful
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.instrument import (
     MAX_INSTRUMENT_DEPTH,
@@ -379,13 +378,13 @@ def _open_inner_campaign(
         is_terminal=bool(existing.get("finished_at")),
     )
     if phase in (RunPhase.RUNNING, RunPhase.GATE, RunPhase.CHECKIN):
-        raise InnerCycleUnscoreableError(
+        raise CellUnscoreableError(
             f"its campaign {campaign_id}/{plan.cycle_id} reads {phase} — another producer "
             "owns it, and two runs writing one cycle is not a measurement"
         )
     session_id = str(existing.get("parent_session_id") or "")
     if not session_id:
-        raise InnerCycleUnscoreableError(
+        raise CellUnscoreableError(
             f"its campaign {campaign_id}/{plan.cycle_id} names no parent session, so there "
             "is no session record to continue under"
         )
@@ -674,7 +673,7 @@ async def _measure_inner_cell(
         with contextlib.suppress(asyncio.CancelledError):
             await heartbeat_task
     elapsed = time.monotonic() - start
-    # No exclusion decision here: `compute_outer_proxies` raises `InnerCycleUnscoreableError`,
+    # No exclusion decision here: `compute_outer_proxies` raises `CellUnscoreableError`,
     # which `measure_sample` resolves to this cell's UNSCOREABLE row.
     proxies = compute_outer_proxies(result)
     facts = inner_cell_facts(result, campaign_id)

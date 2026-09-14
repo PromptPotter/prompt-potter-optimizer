@@ -23,7 +23,6 @@ from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.l4.proxies import (
     INNER_FACT_KEYS,
     PARENT_LEVEL_SE_KEY,
-    InnerCycleUnscoreableError,
 )
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results_health import classify_result, terminal_node
@@ -33,7 +32,11 @@ from promptpotter.domain.scoring import QueryMeasurement, extract_item_label, is
 from promptpotter.domain.spend import StepTokenUsage, TokenAccount
 from promptpotter.infrastructure.llm.rate_limit import is_quota_rate_limit
 from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, emit_token_usage
-from promptpotter.shared.errors import ErrorCategory, has_pipeline_warnings
+from promptpotter.shared.errors import (
+    CellUnscoreableError,
+    ErrorCategory,
+    has_pipeline_warnings,
+)
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
@@ -552,7 +555,7 @@ async def measure_sample(
         return _error_result(sample, error_msg, category=ErrorCategory.CONNECTION)
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise
-    except InnerCycleUnscoreableError as exc:
+    except CellUnscoreableError as exc:
         # The cell RAN and there is nothing to grade. Its own category, so no reader takes a cut
         # we made, or a reward the backend never produced, for the configuration under test.
         logger.warning("measure_sample unscoreable for %s: %s", query[:60], exc)

@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import traceback
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -22,7 +22,6 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     set_determinism_clamp,
     set_optimizer_prompt_overrides,
 )
-from promptpotter.application.optimization.l1.stats import round_clocks
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     _mint_fork,
     cleanup_stub_fork_if_empty,
@@ -55,7 +54,7 @@ from promptpotter.domain.pipeline_overlay import (
     overlay_sets_model_outside_allowed,
     permitted_models_from_narrowing,
 )
-from promptpotter.domain.results import CycleResult, RoundResult
+from promptpotter.domain.results import CycleResult, RoundResult, round_clocks
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import (
     ConfigOverrides,
@@ -903,14 +902,9 @@ def _finalize_run(
             "wall_clock": wall_clock.model_dump(),
             # Spread rather than re-spelled, so the served key IS the field a reader greps for —
             # and every clock names its own question, because a bare round count on this block
-            # is what gets quoted as the result.
-            **asdict(
-                round_clocks(
-                    rounds,
-                    accuracy_ceiling=accuracy_ceiling,
-                    round_ended_s=wall_clock.round_ended_s,
-                )
-            ),
+            # is what gets quoted as the result. Seconds are the `wall_clock.round_ended_s` entry
+            # under the same round number, never a second copy banked beside it.
+            **round_clocks(rounds, accuracy_ceiling=accuracy_ceiling)._asdict(),
             "prompt_hashes": compute_optimizer_prompt_hashes(),
             # On the origin's OWN samples — never `rounds[0].matched_parent_composite`, which
             # is round 1's winner's matched floor on a different sample basis.

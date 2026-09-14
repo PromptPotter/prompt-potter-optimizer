@@ -23,6 +23,11 @@ class ErrorCategory(enum.StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
+class CellUnscoreableError(RuntimeError):
+    """Raised where a cell is CUT or answers with no verdict; ``measure_sample`` is the one catcher
+    and banks :attr:`ErrorCategory.UNSCOREABLE`, so the configuration under test is never charged."""
+
+
 class PotterError(Exception):
     """Base for every API error — ONE flat wire envelope at ONE seam, the single FastAPI handler.
     A subclass fixes the status FAMILY; ``code`` is the stable string, overridable per raise site."""
@@ -317,6 +322,7 @@ def error_category(result: Mapping[str, Any]) -> ErrorCategory | None:
 
 __all__ = [
     "BadRequestError",
+    "CellUnscoreableError",
     "ConflictError",
     "ContentTooLargeError",
     "DatasetIdentityError",

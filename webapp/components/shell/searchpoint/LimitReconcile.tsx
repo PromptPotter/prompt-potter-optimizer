@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { RunLimitOverrides } from "@/lib/api";
 import { forkReconcileDefaults } from "@/lib/derivations";
 import { fmtUsd, fmtTokens } from "@/lib/format";
+import { parseCap } from "@/lib/run-limits";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 
 // The run-limit reconcile half of the steer flow (decision E). A fork numbers
@@ -50,29 +51,19 @@ export function LimitReconcile({
 
   const set = (next: Fields) => {
     setF(next);
-    const limits: RunLimitOverrides = {};
     // 0 is meaningful on every one of these, so the floor is 0, not 1: `max_rounds: 0` means
-    // "measure the origin and stop", `l1_patience: 0` makes L1 stall after round 1. A value
-    // below the floor drops its key, and the fork silently INHERITS the parent's value.
-    const intGte0 = (s: string) => {
-      const n = Number.parseInt(s, 10);
-      return s.trim() !== "" && Number.isInteger(n) && n >= 0 ? n : null;
+    // "measure the origin and stop", `l1_patience: 0` makes L1 stall after round 1. `parseCap`
+    // drops anything blank or out of range, and the fork then INHERITS the parent's value.
+    const count = { int: true } as const;
+    const limits: RunLimitOverrides = {
+      max_rounds: parseCap(next.rounds, count) ?? undefined,
+      spend_budget_usd: parseCap(next.spend) ?? undefined,
+      token_budget: parseCap(next.tokens, count) ?? undefined,
+      l1_patience: parseCap(next.l1, count) ?? undefined,
+      l2_patience: parseCap(next.l2, count) ?? undefined,
+      l3_patience: parseCap(next.l3, count) ?? undefined,
+      pobb_epsilon: parseCap(next.eps, { max: 1 }) ?? undefined,
     };
-    const r = intGte0(next.rounds);
-    if (r != null) limits.max_rounds = r;
-    const s = Number.parseFloat(next.spend);
-    if (next.spend.trim() !== "" && Number.isFinite(s) && s >= 0) limits.spend_budget_usd = s;
-    const tk = Number.parseInt(next.tokens, 10);
-    if (next.tokens.trim() !== "" && Number.isInteger(tk) && tk >= 0) limits.token_budget = tk;
-    const l1 = intGte0(next.l1);
-    if (l1 != null) limits.l1_patience = l1;
-    const l2 = intGte0(next.l2);
-    if (l2 != null) limits.l2_patience = l2;
-    const l3 = intGte0(next.l3);
-    if (l3 != null) limits.l3_patience = l3;
-    const eps = Number.parseFloat(next.eps);
-    if (next.eps.trim() !== "" && Number.isFinite(eps) && eps >= 0 && eps <= 1)
-      limits.pobb_epsilon = eps;
     onChange(limits);
   };
 

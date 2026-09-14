@@ -4,7 +4,3 @@
 
 body{font-family:var(--font-sans);background:var(--color-background-tertiary);color:var(--color-text-primary);font-size:var(--text-base)}
 
-/* Advertises a HoverCard trigger with a dotted rule, NOT `cursor:help` — the OS
-   glyph reads as an error state. Focus ring comes from the global rule above. */
-.term-hint{text-decoration:underline dotted var(--color-border);text-underline-offset:3px}
-

@@ -15,13 +15,15 @@ from promptpotter.application.knobs import DiffScope, classify_config_diff
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     _mint_fork,
     mint_operator_fork,
-    permitted_models,
-    steer_is_babysit,
 )
 from promptpotter.application.runner.entry import RunMode
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.pipeline_overlay import (
+    permitted_models_for_campaign,
+    steers_disallowed_model,
+)
 from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ForkSpec, ForkTrigger
 from promptpotter.infrastructure.runtime_flags import is_checkin
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
@@ -301,10 +303,12 @@ def _maybe_fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx, sessio
 
     overlay = _steer_overlay(specs, session.pipeline_schema)
 
-    # The SAME question the web fork-cycle applier asks, of the same list — the origin's frozen
-    # per-node permitted set, off the campaign manifest. `ctx.campaign_config` is a different list,
-    # one the inherited overlay and the cycle seed have already moved.
-    disallowed = steer_is_babysit(session.store, ctx.campaign_id, overlay)
+    # The SAME function the web fork-cycle applier and `fork-preview` call, over the same list —
+    # the origin's frozen per-node permitted set, off the campaign manifest. `ctx.campaign_config`
+    # is a different list, one the inherited overlay and the cycle seed have already moved.
+    campaign = session.store.campaigns.load_campaign(ctx.campaign_id)
+    frozen_config = campaign.config if campaign else None
+    disallowed = steers_disallowed_model(frozen_config, overlay)
     if disallowed:
         # Same capability gate the web fork-cycle applier runs. The terminal owner
         # holds it; a delegated sub-principal without it is refused here.
@@ -313,7 +317,7 @@ def _maybe_fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx, sessio
                 f"ERROR: steering to a gateway, or to a model the node does not permit, "
                 f"requires the {CAMPAIGN_BABYSIT_CAP} capability."
             )
-        permitted = permitted_models(session.store, ctx.campaign_id)
+        permitted = permitted_models_for_campaign(frozen_config)
         steered = ", ".join(
             f"{node}.{param}={value!r}"
             for node, cfg in sorted(overlay.items())

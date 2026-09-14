@@ -14,6 +14,7 @@ import { memo, useMemo } from "react";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import type { RoundSummary, RoundSummaryCandidate } from "@/lib/api/types";
 import { CardFrame, Badge } from "@/components/ui";
+import { NOT_SEPARABLE, liftSeparates } from "@/lib/fitness";
 
 const AXIS_W = 220;
 const ROW_H = 18;
@@ -56,8 +57,8 @@ function liftsOf(rounds: RoundSummary[]): Lift[] {
 }
 
 function LiftRow({ d, x }: { d: Lift; x: (v: number) => number }) {
-  // Sign-coloured, but the number and the "spans 0" wording always carry the meaning on their own.
-  const clears = d.lo > 0 || d.hi < 0;
+  // Sign-coloured, but the number and the verdict wording always carry the meaning on their own.
+  const clears = liftSeparates(d.lo, d.hi);
   const stroke = d.lo > 0
     ? "var(--color-success)"
     : d.hi < 0
@@ -75,7 +76,7 @@ function LiftRow({ d, x }: { d: Lift; x: (v: number) => number }) {
         height={ROW_H}
         viewBox={`0 0 ${AXIS_W} ${ROW_H}`}
         role="img"
-        aria-label={`Round ${d.round}: ${value}${clears ? "" : ", spans zero"}`}
+        aria-label={`Round ${d.round}: ${value}${clears ? "" : `, ${NOT_SEPARABLE}`}`}
       >
         <line x1={x(0)} y1={2} x2={x(0)} y2={ROW_H - 2} stroke="var(--color-border)" strokeWidth={1} />
         <line

@@ -16,9 +16,9 @@ from promptpotter.application.campaign_config import (
     LivesConfig,
 )
 from promptpotter.config.settings import DEFAULT_ORIGIN_BUDGET
-from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import read_yaml_optional
+from promptpotter.shared.errors import CellUnscoreableError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -234,16 +234,14 @@ def load_inner_tasks(path: Path) -> InnerTasks:
     """Read + validate the panel. It is the source of truth: an unreadable one is unscoreable, never defaulted."""
     raw = read_yaml_optional(path)
     if raw is None:
-        raise InnerCycleUnscoreableError(
+        raise CellUnscoreableError(
             f"{path} is missing — the inner benchmark, its sample count and its round cap are "
             "all declared there. There is no default to run."
         )
     try:
         return InnerTasks.model_validate(raw)
     except ValidationError as exc:
-        raise InnerCycleUnscoreableError(
-            f"{path} does not declare a runnable panel: {exc}"
-        ) from exc
+        raise CellUnscoreableError(f"{path} does not declare a runnable panel: {exc}") from exc
 
 
 def resolve_inner_task(ctx: InnerSpawnContext, query: str) -> InnerTaskSpec:
@@ -253,7 +251,7 @@ def resolve_inner_task(ctx: InnerSpawnContext, query: str) -> InnerTaskSpec:
     Off the panel the CONTEXT carries, so every cell of one run resolves against the panel that
     run opened with."""
     if (panel := ctx.panel) is None:
-        raise InnerCycleUnscoreableError(
+        raise CellUnscoreableError(
             f"{inner_tasks_path(ctx.dataset_config_dir)} is missing — the inner benchmark, its "
             "sample count and its round cap are all declared there. There is no default to run."
         )
@@ -291,7 +289,7 @@ def inner_instrument_config(
         # await — which inside an outer sample is a deadlock nothing but the sample wall clock
         # can end, and the operator is never shown a prompt because the gate belongs to a cycle
         # buried in `.inner/`. A bad inner origin is not lost either way: it lands as a poor
-        # trajectory or an `InnerCycleUnscoreableError`, which is exactly the measurement the
+        # trajectory or a `CellUnscoreableError`, which is exactly the measurement the
         # outer loop is there to take.
         "origin_gate": "off",
         # ONE RULER UNIT ACROSS THE PANEL. Under 1PL the ruler is δ alone and the unit is pinned

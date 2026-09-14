@@ -109,10 +109,12 @@ const server = spawn(
     cwd: REPO,
     stdio: ["inherit", "pipe", "pipe"],
     env: {
+      // PROMPTPOTTER_AUTH is INHERITED, never set here. Both Playwright servers pass `off`, so
+      // `deps.py::resolve_identity` short-circuits to the CLI's resolver and every auth-gated
+      // read resolves to the on-disk workspace with no OIDC round-trip. `fake_issuer.ts` is the
+      // one caller that leaves it unset, which is the whole of how it closes auth — deciding it
+      // here instead is what forced that harness to re-spawn uvicorn itself.
       ...process.env,
-      // `deps.py::resolve_identity` short-circuits to the CLI's resolver, so every
-      // auth-gated read resolves to the on-disk workspace with no OIDC round-trip.
-      PROMPTPOTTER_AUTH: "off",
       // This interpreter is cp1252; the live display writes box-drawing characters.
       PYTHONUTF8: "1",
     },

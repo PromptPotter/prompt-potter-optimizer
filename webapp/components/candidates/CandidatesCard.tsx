@@ -579,13 +579,11 @@ export function CandidatesCard() {
                   }}
                 />
                 <MenuSep />
-                <MenuCheck
-                  on={maskOpen}
-                  onClick={() => setScoringMask({ open: !maskOpen })}
-                  title="Pick evaluators and reweight them to recompute every score under a criterion you choose."
-                >
-                  Scoring mask
-                </MenuCheck>
+                <HoverCard content="Pick evaluators and reweight them to recompute every score under a criterion you choose.">
+                  <MenuCheck on={maskOpen} onClick={() => setScoringMask({ open: !maskOpen })}>
+                    Scoring mask
+                  </MenuCheck>
+                </HoverCard>
                 {/* Never disabled — the origin is normally the cached one, so greying out
                     when only C0 was replayed hides the case this is opened for. */}
                 <HoverCard content={TERMS.cache_replayed}>

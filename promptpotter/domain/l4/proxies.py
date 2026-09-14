@@ -8,14 +8,10 @@ from pydantic import ConfigDict, Field
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import L1_PARSE_FAILURE_TOOLING, CycleResult, RoundResult
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.shared.errors import CellUnscoreableError
 from promptpotter.shared.statistics import sample_sd
 
 logger = logging.getLogger(__name__)
-
-
-class InnerCycleUnscoreableError(RuntimeError):
-    """Also raised by the panel resolver on a missing declaration, not only by the law here.
-    The caller drops the cell loudly — an excluded cycle is never scored on zeros."""
 
 
 class OuterSampleProxies(StrictModel):
@@ -178,8 +174,9 @@ def _floor_proxies() -> OuterSampleProxies:
 
 
 def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
-    """Raises :class:`InnerCycleUnscoreableError` on a no-fault evidence kill; an optimizer
-    prompt-OWNED one returns the floor. Origin and rounds share one fit, so the ruler cancels."""
+    """Raises :class:`~promptpotter.shared.errors.CellUnscoreableError` on a no-fault evidence kill;
+    an optimizer prompt-OWNED one returns the floor. Origin and rounds share one fit, so the ruler
+    cancels."""
     if (floor := floor_reason(result)) is not None:
         logger.warning("inner cycle scored at the floor: %s", floor)
         return _floor_proxies()
@@ -187,7 +184,7 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
         # Loud, never silent: this drops a panel cell, and a dropped cell that reads as "covered"
         # is worse than no cell at all.
         logger.warning("inner cycle EXCLUDED (no evidence about the optimizer prompt): %s", reason)
-        raise InnerCycleUnscoreableError(reason)
+        raise CellUnscoreableError(reason)
 
     assert result.origin_level is not None  # guaranteed by no_evidence_reason
     # Every level is an ability in LOGITS on the fixed ruler, so a delta is a difference of two
@@ -266,7 +263,6 @@ __all__ = [
     "OUTER_PROXY_KEYS",
     "PARENT_LEVEL_SE_KEY",
     "InnerCellFacts",
-    "InnerCycleUnscoreableError",
     "OuterSampleProxies",
     "PanelPrecision",
     "cell_values",

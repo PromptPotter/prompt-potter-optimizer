@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Badge, CardFrame, HoverCard } from "@/components/ui";
+import { Badge, CardFrame, Term } from "@/components/ui";
 import type { RoundResult } from "@/lib/api/types";
 import { fmtNum, fmtPct1 } from "@/lib/format";
 import { isHit } from "@/lib/fitness";
@@ -56,13 +56,13 @@ export function RoundFileView({ doc, raw }: Props) {
       <div className="round-file-summary">
         <div className="round-file-summary-row">
           <Badge>round {doc.round ?? "—"}</Badge>
-          <span>accuracy {fmtPct1(doc.accuracy)} {parentShown != null && (<span style={{ color: "var(--color-text-tertiary)" }} title={matched != null ? "The parent — the origin at round 0, the prior round's winner after — re-scored on the samples this round's winner measured. The floor the promotion gate used." : "The parent's full-set rate. This round carries no matched floor, so it is not directly comparable to a partially-scored winner."}>({parentLabel} {fmtPct1(parentShown)})</span>)}</span>
+          <span>accuracy {fmtPct1(doc.accuracy)} {parentShown != null && (<span style={{ color: "var(--color-text-tertiary)" }}><Term content={matched != null ? "The parent — the origin at round 0, the prior round's winner after — re-scored on the samples this round's winner measured. The floor the promotion gate used." : "The parent's full-set rate. This round carries no matched floor, so it is not directly comparable to a partially-scored winner."}>({parentLabel} {fmtPct1(parentShown)})</Term></span>)}</span>
           <span>composite {fmtNum(doc.composite_fitness)}</span>
           <span>n {doc.total ?? "—"}</span>
           {typeof doc.ability?.theta === "number" && (
-            <span title="Ability of the adopted lineage on the cycle's fixed δ ruler — the subset-invariant series the round was won on. The cell count is how much of that ruler was real when this round was read.">
+            <Term content="Ability of the adopted lineage on the cycle's fixed δ ruler — the subset-invariant series the round was won on. The cell count is how much of that ruler was real when this round was read.">
               θ {fmtTheta(doc.ability.theta)}{doc.ability.ruler_n > 0 ? ` (${doc.ability.ruler_n} cells)` : ""}
-            </span>
+            </Term>
           )}
           {typeof doc.p_value === "number" && <span>p {fmtNum(doc.p_value, 3)}</span>}
           {doc.improved ? <span className="pass">improved</span> : <span style={{ color: "var(--color-text-tertiary)" }}>no improvement</span>}
@@ -88,16 +88,8 @@ export function RoundFileView({ doc, raw }: Props) {
                   <th>Candidate</th>
                   <th>Accuracy</th>
                   <th>Composite</th>
-                  <th>
-                    <HoverCard content="Difficulty-adjusted Rasch ability on the cycle's fixed δ ruler — the metric the round winner is elected on, which is what explains a lower-accuracy winner. Empty outside the election fit, and for every row while the ruler is cold.">
-                      <span className="term-hint" tabIndex={0}>θ</span>
-                    </HoverCard>
-                  </th>
-                  <th>
-                    <HoverCard content="The candidate's blocked lift over the parent on the cells both measured, with its 95% interval. An interval spanning 0 means the round could not separate them.">
-                      <span className="term-hint" tabIndex={0}>Lift vs parent</span>
-                    </HoverCard>
-                  </th>
+                  <th><Term content="Difficulty-adjusted Rasch ability on the cycle's fixed δ ruler — the metric the round winner is elected on, which is what explains a lower-accuracy winner. Empty outside the election fit, and for every row while the ruler is cold.">θ</Term></th>
+                  <th><Term content="The candidate's blocked lift over the parent on the cells both measured, with its 95% interval. An interval spanning 0 means the round could not separate them.">Lift vs parent</Term></th>
                   <th>Win</th>
                 </tr>
               </thead>
@@ -131,31 +123,11 @@ export function RoundFileView({ doc, raw }: Props) {
             <table>
               <thead>
                 <tr>
-                  <th>
-                    <HoverCard content="Sample ID — stable identifier from the project.">
-                      <span className="term-hint" tabIndex={0}>ID</span>
-                    </HoverCard>
-                  </th>
-                  <th>
-                    <HoverCard content="Hit / miss for this sample.">
-                      <span className="term-hint" tabIndex={0}>Status</span>
-                    </HoverCard>
-                  </th>
-                  <th>
-                    <HoverCard content="Input given to the pipeline for this sample.">
-                      <span className="term-hint" tabIndex={0}>Query</span>
-                    </HoverCard>
-                  </th>
-                  <th>
-                    <HoverCard content="Top-1 prediction returned by the pipeline.">
-                      <span className="term-hint" tabIndex={0}>Predicted</span>
-                    </HoverCard>
-                  </th>
-                  <th>
-                    <HoverCard content="Ground-truth answer from the project.">
-                      <span className="term-hint" tabIndex={0}>Ground</span>
-                    </HoverCard>
-                  </th>
+                  <th><Term content="Sample ID — stable identifier from the project.">ID</Term></th>
+                  <th><Term content="Hit / miss for this sample.">Status</Term></th>
+                  <th><Term content="Input given to the pipeline for this sample.">Query</Term></th>
+                  <th><Term content="Top-1 prediction returned by the pipeline.">Predicted</Term></th>
+                  <th><Term content="Ground-truth answer from the project.">Ground</Term></th>
                 </tr>
               </thead>
               <tbody>

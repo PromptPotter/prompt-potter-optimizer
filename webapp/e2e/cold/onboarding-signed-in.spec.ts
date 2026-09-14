@@ -2,11 +2,11 @@ import { test, expect, ready } from "../harness";
 import { startFakeIssuer, type FakeIssuer } from "../fake_issuer";
 
 // `AccessGate` and `AllowanceSpent` render only for a signed-in, NON-host identity, and the
-// shared cold/walk servers can never produce one: `serve.mjs` sets `PROMPTPOTTER_AUTH=off` for
-// both, which makes `deps.py::resolve_identity` return the terminal identity unconditionally —
-// a session cookie is never even read. That is a structural absence, not a missing fixture
-// (`code-debt-cleanup.md`), so this file runs its own throwaway server with auth genuinely
-// closed instead, and mints a session directly rather than completing a real OIDC round trip.
+// shared cold/walk servers can never produce one: `playwright.config.ts` passes
+// `PROMPTPOTTER_AUTH=off` to both, which makes `deps.py::resolve_identity` return the terminal
+// identity unconditionally — a session cookie is never even read. That is a structural absence,
+// not a missing fixture (`code-debt-cleanup.md`), so this file raises the SAME `serve.mjs` with
+// that one variable unset, and mints a session directly rather than completing an OIDC round trip.
 //
 // One assertion per surface — not a suite over the onboarding gates, just the two that were
 // unreachable.

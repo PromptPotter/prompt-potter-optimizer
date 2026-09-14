@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from enum import StrEnum
 from typing import Any, Literal, NamedTuple, NotRequired, TypedDict, overload
 
@@ -28,6 +28,7 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 __all__ = [
     "ABORT_LENS_LABELS",
+    "CEILING_FRACTION",
     "L1_PARSE_FAILURE_MALFORMED",
     "L1_PARSE_FAILURE_TOOLING",
     "L1_PARSE_FAILURE_WRONG_TYPE",
@@ -43,6 +44,7 @@ __all__ = [
     "OverlapMember",
     "OverlapReading",
     "ParentStep",
+    "RoundClocks",
     "RoundParent",
     "RoundResult",
     "ScoreboardRankKey",
@@ -64,6 +66,7 @@ __all__ = [
     "parent_line",
     "parse_candidate_label",
     "resolved_fitness",
+    "round_clocks",
     "scoreboard_rank_key",
     "unscoreable_cells",
 ]
@@ -706,6 +709,49 @@ def origin_panel(
     no longer buy, or a member could be short a cell with no way to be topped up.
     """
     return sorted(set(origin_cells) & set(poolable))[:size]
+
+
+# The share of a dataset's declared accuracy ceiling that counts as having reached it.
+CEILING_FRACTION = 0.95
+
+
+class RoundClocks(NamedTuple):
+    """When the campaign reached each of three marks, in ROUNDS, plus the ceiling the third was
+    read against. The wall-clock beside them is ``WallClock.round_ended_s`` keyed by the same
+    round number — banked in the same ``index.json::final`` block, so the seconds are a join a
+    reader makes and never a second copy this record carries.
+
+    ``rounds_to_improved`` says when the loop ADOPTED an arm, on ``lift > 0.0`` with no interval
+    and no multiplicity correction, so ``rounds_to_separable`` beside it is the one a result
+    quotes."""
+
+    rounds_to_separable: int | None
+    rounds_to_improved: int | None
+    rounds_to_ceiling: int | None
+    accuracy_ceiling: float | None
+
+
+def round_clocks(rounds: Sequence[RoundResult], *, accuracy_ceiling: float | None) -> RoundClocks:
+    """Every round clock a cycle reports, from this one function: finalize banks it, and
+    ``review.md``, which renders at every round close before any banked block exists, calls it
+    against the cycle's own ceiling.
+
+    An undeclared ceiling leaves ``rounds_to_ceiling`` unset rather than reading
+    ``CEILING_FRACTION`` as an absolute bar — that would be a target no dataset owner chose."""
+
+    def first(holds: Callable[[RoundResult], bool]) -> int | None:
+        return next((r.round for r in rounds if holds(r)), None)
+
+    to_ceiling: int | None = None
+    if accuracy_ceiling is not None:
+        target = CEILING_FRACTION * accuracy_ceiling
+        to_ceiling = first(lambda r: r.accuracy is not None and r.accuracy >= target)
+    return RoundClocks(
+        rounds_to_separable=first(lambda r: r.separable is True),
+        rounds_to_improved=first(lambda r: r.improved),
+        rounds_to_ceiling=to_ceiling,
+        accuracy_ceiling=accuracy_ceiling,
+    )
 
 
 # The reasons `RoundResult.l1_parse_failure` can carry. Opposite kinds of evidence, so no

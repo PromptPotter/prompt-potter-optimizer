@@ -15,7 +15,7 @@
 // grid commits per click, which is the same rule — a toggle is not a half-value.
 
 import type { ReactNode } from "react";
-import { CommitInput, HoverCard, SegmentedControl } from "@/components/ui";
+import { CommitInput, SegmentedControl, Term } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { TERMS } from "@/lib/terms";
 import { maskIconFor } from "@/components/candidates/icons";
@@ -218,11 +218,12 @@ function WeightGrid({
                       <path d="M2.5 8.5 L6.5 12.5 L13.5 3.5" />
                     </svg>
                   </span>
-                  <HoverCard content={down ? TERMS.mask_down : TERMS.mask_up}>
-                    <span className={cx("mask-dir term-hint", down ? "down" : "up")} tabIndex={0}>
-                      {down ? "↓" : "↑"}
-                    </span>
-                  </HoverCard>
+                  <Term
+                    className={cx("mask-dir", down ? "down" : "up")}
+                    content={down ? TERMS.mask_down : TERMS.mask_up}
+                  >
+                    {down ? "↓" : "↑"}
+                  </Term>
                   <span className="mask-ico">{maskIconFor(r.displayName, r.registryName)}</span>
                   <span className="mask-name">{r.displayName}</span>
                 </div>

@@ -8,11 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from promptpotter.application.optimization.l1.stats import (
-    CEILING_FRACTION,
-    L1Stats,
-    compute_l1_stats,
-)
+from promptpotter.application.optimization.l1.stats import L1Stats, compute_l1_stats
 from promptpotter.application.optimization.validators.behavior_base import (
     CheckResult,
     ValidatorContext,
@@ -30,12 +26,15 @@ from promptpotter.application.views.render.optimizer_prompt_text import (
 from promptpotter.domain.escalation_signals import exploration_budget
 from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
 from promptpotter.domain.results import (
+    CEILING_FRACTION,
     DegradationHealth,
+    RoundClocks,
     RoundResult,
     ScoredCandidate,
     candidate_label,
     is_round_winner,
     overlap_series,
+    round_clocks,
 )
 
 __all__ = ["render_review_md"]
@@ -67,9 +66,7 @@ def render_review_md(
     stats = compute_l1_stats(
         list(rounds),
         origin_composite_fitness=origin_composite_fitness,
-        accuracy_ceiling=accuracy_ceiling,
         behavior_results=behavior_per_round,
-        round_ended_s=_float_map(clock.get("round_ended_s")),
         l2_behavior_results=l2_behavior_per_round,
     )
 
@@ -78,7 +75,13 @@ def render_review_md(
     halt = _halt_info(index, rounds)
     parts: list[str] = []
     parts += _render_header(index, final, stats, halt)
-    parts += _render_stats_block(stats, repairs_per_round, calls_per_round, halt)
+    # Counted here and not read off `final`: this renders at every round close, long before
+    # finalize banks a `final` block. Only the minutes need the banked clock.
+    clocks = round_clocks(rounds, accuracy_ceiling=accuracy_ceiling)
+    round_ended_s = _float_map(clock.get("round_ended_s"))
+    parts += _render_stats_block(
+        clocks, round_ended_s, stats, repairs_per_round, calls_per_round, halt
+    )
     parts += _render_wall_clock(clock)
     parts += _render_behavior_summary(behavior_per_round)
     parts += ["## Rounds", ""]
@@ -244,6 +247,8 @@ def _render_header(
 
 
 def _render_stats_block(
+    clocks: RoundClocks,
+    round_ended_s: dict[str, float],
     stats: L1Stats,
     repairs_per_round: list[int],
     calls_per_round: list[int],
@@ -253,10 +258,14 @@ def _render_stats_block(
         """An unmeasured rate renders as ``—``, never as a number the cycle never produced."""
         return "—" if value is None else format(value, spec)
 
-    def _clock(value: int | None) -> str:
-        return "—" if value is None else str(value)
+    def _clock(rounds: int | None) -> str:
+        """A round count and the minute it landed at, joined on the round number. The rounds are
+        what a peer reports; the minutes are what a reader outside this project can price, because
+        a round is whatever the budget made it."""
+        if rounds is None:
+            return "— (—)"
+        return f"{rounds} ({_minutes(round_ended_s.get(str(rounds)))})"
 
-    clocks = stats.clocks
     # Two silences, rendered apart: no ceiling declared is a different fact from a declared one
     # the cycle never reached, and one glyph for both is the reading that gets passed on.
     basis = (
@@ -264,17 +273,12 @@ def _render_stats_block(
         if clocks.accuracy_ceiling is None
         else f"{CEILING_FRACTION:.0%} of {clocks.accuracy_ceiling:.2f}"
     )
-    # Every clock in both units on one line. The rounds are what a peer reports; the minutes are
-    # what a reader outside this project can price, because a round is whatever the budget made it.
     lines = [
         "## L1Stats",
         "",
-        f"- **rounds_to_separable**: {_clock(clocks.rounds_to_separable)}"
-        f" ({_minutes(clocks.seconds_to_separable)})",
-        f"- rounds_to_improved (promotion, no interval): {_clock(clocks.rounds_to_improved)}"
-        f" ({_minutes(clocks.seconds_to_improved)})",
-        f"- rounds_to_ceiling ({basis}): {_clock(clocks.rounds_to_ceiling)}"
-        f" ({_minutes(clocks.seconds_to_ceiling)})",
+        f"- **rounds_to_separable**: {_clock(clocks.rounds_to_separable)}",
+        f"- rounds_to_improved (promotion, no interval): {_clock(clocks.rounds_to_improved)}",
+        f"- rounds_to_ceiling ({basis}): {_clock(clocks.rounds_to_ceiling)}",
         f"- yield_rate: {_rate(stats.yield_rate)}",
         f"- top_lift_mean: {_rate(stats.top_lift_mean, '+.4f')}",
         f"- behavior_pass_rate: {_rate(stats.behavior_pass_rate)}",

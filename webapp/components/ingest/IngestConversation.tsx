@@ -306,19 +306,19 @@ export function IngestConversation({
 // and pipeline are shown expanded + prefilled for confirmation — they're the
 // origin the operator is about to evolve. Only the meta-optimizer knobs (which
 // model drives the search, run bounds) collapse into an optional expander.
-// The three launch ceilings as TEXT, because a half-typed "0." is not a number and coercing per
+// The three launch caps as TEXT, because a half-typed "0." is not a number and coercing per
 // keystroke arms a value on the way to the one the operator meant — the same reason
-// `ui/CommitInput` exists. Blank is a real answer: "no ceiling of mine", leaving the account's own.
-interface Ceilings {
+// `ui/CommitInput` exists. Blank is a real answer: "no cap of mine", leaving the account's own.
+interface CapDrafts {
   halt: string;
   usd: string;
   tokens: string;
 }
-const NO_CEILINGS: Ceilings = { halt: "", usd: "", tokens: "" };
+const NO_CAPS: CapDrafts = { halt: "", usd: "", tokens: "" };
 
 // Anything finite is SENT, range and all: `StartCheckinPayload` declares the bounds and refuses
 // what it must, and a 422 naming the field teaches where a silently dropped key would not.
-function launchLimits(c: Ceilings): StartCheckinLimits {
+function launchLimits(c: CapDrafts): StartCheckinLimits {
   const num = (s: string) => {
     const n = Number(s);
     return s.trim() !== "" && Number.isFinite(n) ? n : undefined;
@@ -330,39 +330,39 @@ function launchLimits(c: Ceilings): StartCheckinLimits {
   };
 }
 
-function LaunchCeilings({
-  ceilings,
+function LaunchCaps({
+  caps,
   onChange,
 }: {
-  ceilings: Ceilings;
-  onChange: (next: Ceilings) => void;
+  caps: CapDrafts;
+  onChange: (next: CapDrafts) => void;
 }) {
   return (
     <>
       <label className="new-campaign-field">
-        <span>Spend ceiling (USD)</span>
+        <span>Spend cap (USD)</span>
         <input
           type="number"
           min={0}
           step={0.5}
           inputMode="decimal"
-          value={ceilings.usd}
+          value={caps.usd}
           placeholder="account's own"
-          aria-label="Spend ceiling in USD"
-          onChange={(e) => onChange({ ...ceilings, usd: e.target.value })}
+          aria-label="Spend cap in USD"
+          onChange={(e) => onChange({ ...caps, usd: e.target.value })}
         />
       </label>
       <label className="new-campaign-field">
-        <span>Token ceiling</span>
+        <span>Token cap</span>
         <input
           type="number"
           min={0}
           step={1000}
           inputMode="numeric"
-          value={ceilings.tokens}
+          value={caps.tokens}
           placeholder="account's own"
-          aria-label="Token ceiling"
-          onChange={(e) => onChange({ ...ceilings, tokens: e.target.value })}
+          aria-label="Token cap"
+          onChange={(e) => onChange({ ...caps, tokens: e.target.value })}
         />
       </label>
       <label className="new-campaign-field">
@@ -373,18 +373,18 @@ function LaunchCeilings({
           max={1}
           step={0.05}
           inputMode="decimal"
-          value={ceilings.halt}
+          value={caps.halt}
           placeholder="never halt on accuracy"
           aria-label="Halt at accuracy"
-          onChange={(e) => onChange({ ...ceilings, halt: e.target.value })}
+          onChange={(e) => onChange({ ...caps, halt: e.target.value })}
         />
       </label>
       {/* Bare `<small>`, the register `ChoiceField`'s own hint uses — one note for all three,
           because "not saved" is the fact that separates them from the knobs below. */}
       <small>
         What THIS launch may spend — not saved with the setup, so a reopened check-in starts
-        from blank. Whichever ceiling is met first stops the run; your account&apos;s own
-        allowance still binds underneath.
+        from blank. Whichever cap trips first stops the run; your account&apos;s own allowance
+        still binds underneath.
       </small>
     </>
   );
@@ -392,7 +392,7 @@ function LaunchCeilings({
 
 function ReadyBlock({ flow }: { flow: IngestFlow }) {
   const blockersId = useId();
-  const [ceilings, setCeilings] = useState<Ceilings>(NO_CEILINGS);
+  const [caps, setCaps] = useState<CapDrafts>(NO_CAPS);
   if (flow.phase.stage !== "ready") return null;
   const { draft, resolution, raised, degradedCause } = flow.phase;
   // `blocked` mirrors the server gate alone — adding `gaps.length` is a second
@@ -466,12 +466,12 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         {/* Bounds on the RUN, not the optimizer's wiring — that is the section above. Nothing
             here is a node's. Two persistence classes, deliberately in one place because they
             answer one question: the knobs below are campaign policy (`OptimizationConfig`) and
-            patch the draft, while the three ceilings ride the Start press and are saved nowhere,
-            which is what the ceilings' own note says. Splitting them into two expanders asks
+            patch the draft, while the three caps ride the Start press and are saved nowhere,
+            which is what the caps' own note says. Splitting them into two expanders asks
             "how far does this go" twice. */}
         <summary>Run bounds (optional)</summary>
         <div className="new-campaign-optional-body">
-          <LaunchCeilings ceilings={ceilings} onChange={setCeilings} />
+          <LaunchCaps caps={caps} onChange={setCaps} />
           <NumberField
             label="Max rounds"
             value={draft.optimization_overrides.max_rounds}
@@ -546,7 +546,7 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         className="chat-cta-btn"
         disabled={blocked || flow.busy}
         aria-describedby={blocked ? blockersId : undefined}
-        onClick={() => flow.startFromReady(launchLimits(ceilings))}
+        onClick={() => flow.startFromReady(launchLimits(caps))}
       >
         {flow.busy ? "Starting…" : flow.saving ? "Saving…" : "Start campaign"}
       </button>

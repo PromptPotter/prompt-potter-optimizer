@@ -8,7 +8,7 @@ import { useAuth } from "@/lib/auth-context";
 import { postLogout } from "@/lib/api";
 import { BRAND } from "@/lib/brand";
 import { TERMS } from "@/lib/terms";
-import { HoverCard } from "@/components/ui";
+import { Term } from "@/components/ui";
 import { encodeCyclePath, rootCycleId, type CyclePath } from "@/lib/ids";
 import { useNodeToggle } from "@/lib/view-memory";
 import { applyTheme, readStoredTheme } from "@/lib/theme";
@@ -195,11 +195,7 @@ export function Sidebar({
           <span className="brand-name">PromptPotter</span>
         </div>
         <div className="brand-sub">
-          <HoverCard content={TERMS.brand_live_preview}>
-            <span className="term-hint" tabIndex={0}>
-              LIVE PREVIEW
-            </span>
-          </HoverCard>
+          <Term content={TERMS.brand_live_preview}>LIVE PREVIEW</Term>
         </div>
       </div>
       <div className="sidebar-primary">

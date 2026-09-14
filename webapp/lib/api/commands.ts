@@ -256,24 +256,16 @@ export async function postChangeSpendBudget(
   if (typeof caps.maxTokens === "number") payload.max_tokens = caps.maxTokens;
   return postCommand("change-spend-budget", payload);
 }
+// No cap args. A cap is declared where there is a surface to declare it on — the check-in's own
+// Start (`start-checkin`) for a fresh launch, `change-spend-budget` for a run already going — and
+// a resume inherits what the cycle already carries. The two optional ones that stood here reached
+// `useRunControl`, the sole caller, which has never passed either.
 export async function postStartRun(
   campaignId: string,
   cycleId: string,
   kind: "new" | "resume",
-  opts: { haltAtAccuracy?: number; spendBudgetUsd?: number } = {},
 ): Promise<CommandAcceptedBody> {
-  const payload: Record<string, unknown> = {
-    campaign_id: campaignId,
-    cycle_id: cycleId,
-    kind,
-  };
-  if (opts.haltAtAccuracy !== undefined) {
-    payload.halt_at_accuracy = opts.haltAtAccuracy;
-  }
-  if (opts.spendBudgetUsd !== undefined) {
-    payload.spend_budget_usd = opts.spendBudgetUsd;
-  }
-  return postCommand("start-run", payload);
+  return postCommand("start-run", { campaign_id: campaignId, cycle_id: cycleId, kind });
 }
 
 // Archive maintenance — the one command whose PREVIEW is the product. Every mode defaults to a

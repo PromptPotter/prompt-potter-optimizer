@@ -236,6 +236,7 @@ async def test_cell_envelope_cancels_the_inner_campaign(tmp_path: Path, monkeypa
     from promptpotter.domain.results import CycleResult
     from promptpotter.infrastructure.llm import telemetry as llm_telemetry
     from promptpotter.infrastructure.store.io import write_json
+    from promptpotter.shared.errors import CellUnscoreableError
 
     class _RecordingLedger:
         def __init__(self) -> None:
@@ -320,7 +321,7 @@ async def test_cell_envelope_cancels_the_inner_campaign(tmp_path: Path, monkeypa
     # this while the seam bounded nothing.
     query = "justlogic-d234/seed-0"
     envelope = CellEnvelope(spawn.inner_cell_envelope_s(query, {}), label=query)
-    with pytest.raises(spawn.InnerCycleUnscoreableError, match="wall-clock envelope"):
+    with pytest.raises(CellUnscoreableError, match="wall-clock envelope"):
         async with envelope:
             await spawn.run_inner_cycle(query, {})
 

@@ -149,7 +149,7 @@ test.describe("a campaign, end to end", () => {
     // missing field is a real failure rather than a race with the check-in's own reopen fetch.
     // `locator("summary")` rather than `getByText`, which can resolve the `<details>` too.
     await page.locator("summary", { hasText: "Run bounds" }).click();
-    await page.getByRole("spinbutton", { name: "Spend ceiling in USD" }).fill(String(BUDGET_USD));
+    await page.getByRole("spinbutton", { name: "Spend cap in USD" }).fill(String(BUDGET_USD));
 
     await start.click();
 
@@ -181,7 +181,7 @@ test.describe("a campaign, end to end", () => {
     // pausing there verified the control plane and none of the search. `WANT_ROUNDS` says what
     // each round above it buys.
     //
-    // Two outcomes remain a pass — the rounds land, or the run stops on the ceiling we set. The
+    // Two outcomes remain a pass — the rounds land, or the run stops on the cap we set. The
     // budget gate working is the other thing worth knowing. What fails is NEITHER, inside the
     // window.
     test.setTimeout(1_500_000);
@@ -257,16 +257,16 @@ test.describe("a campaign, end to end", () => {
     await expect(page.getByRole("img", { name: "Pipeline graph" })).toBeVisible();
   });
 
-  test("it is running under a ceiling, and the browser renders one", async ({ page, request }) => {
-    // SOME finite ceiling is in force and no higher than we asked for — never "OUR number". The
-    // launch composes against the ACCOUNT first, precisely so a ceiling asked for here cannot
+  test("it is running under a cap, and the browser renders one", async ({ page, request }) => {
+    // SOME finite cap is in force and no higher than we asked for — never "OUR number". The
+    // launch composes against the ACCOUNT first, precisely so a cap asked for here cannot
     // become the way around the host-wallet gate, so a tighter allowance (a fresh account ran at
     // $0.025) is the safest configuration and must not read as a failure. This is also what
-    // proves the Start surface's ceiling reached the run.
+    // proves the Start surface's cap reached the run.
     const limits = (await dashboard(request, made!))?.run_limits as
       | { spend_budget_usd?: number | null }
       | undefined;
-    expect(limits?.spend_budget_usd, "the run has no USD ceiling at all").not.toBeNull();
+    expect(limits?.spend_budget_usd, "the run has no USD cap at all").not.toBeNull();
     expect(limits?.spend_budget_usd).toBeLessThanOrEqual(BUDGET_USD);
 
     await open(page, `${made!.addr}/dashboard`);

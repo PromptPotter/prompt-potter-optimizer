@@ -37,7 +37,6 @@ from promptpotter.config.settings import (
 )
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
 from promptpotter.domain.pipeline_overlay import fold_output_contract, node_config_items
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response, parse_resolved_schema
 from promptpotter.domain.pipeline_schema import (
@@ -65,7 +64,7 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.io import read_yaml_optional
 from promptpotter.judges import get as get_judge
-from promptpotter.shared.errors import PayloadInvalidError
+from promptpotter.shared.errors import CellUnscoreableError, PayloadInvalidError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -492,7 +491,7 @@ def nested_pipeline_ref(dataset_dir: Path, view: PipelineView | None) -> NestedP
     no name test recognises one. Here because both read doors need it and neither imports a router."""
     try:
         panel = load_inner_tasks(inner_tasks_path(dataset_dir))
-    except InnerCycleUnscoreableError:
+    except CellUnscoreableError:
         # A read-only view must not raise where the runner would.
         return None
     node = next((n for n in (view.nodes if view else []) if n.kind == "measurement"), None)

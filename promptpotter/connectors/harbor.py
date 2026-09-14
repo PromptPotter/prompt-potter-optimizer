@@ -25,10 +25,10 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.connectors.protocol import Connector, InProcessWorkload
 from promptpotter.domain.connector import BackendUnreachableError
-from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.spend import StepTokenUsage
+from promptpotter.shared.errors import CellUnscoreableError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -904,17 +904,14 @@ async def _in_process_run(
     # denominator, so the number below would describe fewer steps than the task declared, and
     # describe it as a success.
     if unscoreable := _unscoreable_step(result):
-        raise InnerCycleUnscoreableError(f"harbor task {query!r}: {unscoreable}.")
+        raise CellUnscoreableError(f"harbor task {query!r}: {unscoreable}.")
 
     rewards = result.verifier_result.rewards if result.verifier_result else None
     reward = (rewards or {}).get(reward_key)
     if reward is None:
         # Nothing to grade, and a 0.0 here would be indistinguishable from an episode that ran
         # and failed. The campaign excludes the cell instead.
-        # NOTE: this error's name and home are wrong now that it has a non-L4 consumer;
-        # generalizing it outside `domain/l4/` is a rename across 23 sites.
-
-        raise InnerCycleUnscoreableError(
+        raise CellUnscoreableError(
             f"harbor task {query!r} produced no reward under key {reward_key!r} "
             f"(rewards={rewards}); the episode is unscoreable, not a zero."
         )

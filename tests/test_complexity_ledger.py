@@ -172,7 +172,16 @@ LEDGER_BASELINE = {
     # and the number is the WINNER's, which the rows at this altitude cannot say. Without it a round
     # that graded six of ten reads as one that graded ten. Distinct from `not_attempted` because the
     # remedies invert: a cell never sent is re-run, an ungraded one re-graded off the banked row.
-    "cycle_result_fields": 166,
+    # 166 -> 213: the COUNTER was corrected, not the package — no surface moved for this raise, so
+    # the total is not comparable across it and the ROWS are what to read. `_count_leaves` deduped
+    # on one `seen` set shared across sibling branches, so a model reached at a second field
+    # contributed ZERO leaves: `SpendBucket` is declared four times on `SpendRollup`
+    # (backend/loop/judge/diagnostic) and was priced once; `RuntimeFailure` and `ValidationFailure`
+    # twice each, on `OptSearchPoint` and on `RoundResult`. A row whose whole purpose is to price
+    # nested surface was blind at exactly the sites that have it — deleting one of the four buckets
+    # lowered it by nothing, and adding a fifth would have raised it by nothing. The guard is the
+    # walk PATH now, so a genuine cycle still returns 0 and a second declaration costs what it is.
+    "cycle_result_fields": 213,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same

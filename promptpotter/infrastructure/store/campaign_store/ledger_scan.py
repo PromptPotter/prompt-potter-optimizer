@@ -16,7 +16,6 @@ during an admissibility check.
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +33,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.spend import TOKEN_KIND_BUCKET
 from promptpotter.infrastructure.store.read_model import iter_jsonl
+from promptpotter.shared.clock import epoch_seconds
 
 # The `ScoredCandidate` keys the fold copies verbatim — `LedgerCandidate`'s own field list
 # minus the ones identity and the fold itself supply. DERIVED from `model_fields`, the same
@@ -212,17 +212,6 @@ def scan_ledger_round_closes(ledger_path: Path) -> dict[int, LedgerRoundClose]:
     return out
 
 
-def _epoch(value: object) -> float | None:
-    """An RFC 3339 stamp as epoch seconds, or ``None`` where it will not parse. Every ledger
-    timestamp mints through ``shared/clock.py::iso_z``, so a failure is a torn line, not a format."""
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return None
-
-
 def _phase_seconds(rows: list[dict[str, Any]]) -> dict[str, float]:
     """Bracketed clock per :class:`CampaignPhase`, paired on ``(phase, round)``.
 
@@ -237,7 +226,7 @@ def _phase_seconds(rows: list[dict[str, Any]]) -> dict[str, float]:
         phase = rec.get("phase")
         if rec.get("record_type") != "phase" or phase not in brackets:
             continue
-        if (at := _epoch(rec.get("timestamp"))) is None:
+        if (at := epoch_seconds(rec.get("timestamp"))) is None:
             continue
         key = (str(phase), rec.get("round"))
         if rec.get("event") == "enter":
@@ -258,7 +247,7 @@ def _gate_seconds(rows: list[dict[str, Any]], *, until: float | None) -> float:
     for rec in rows:
         if rec.get("record_type") != "phase" or rec.get("phase") != "control":
             continue
-        if (at := _epoch(rec.get("timestamp"))) is None:
+        if (at := epoch_seconds(rec.get("timestamp"))) is None:
             continue
         if opened is not None:
             total += max(0.0, at - opened)
@@ -298,7 +287,7 @@ def _round_ended_seconds(rows: list[dict[str, Any]], *, opened: float | None) ->
         rnd = rec.get("round")
         if rec.get("event") != "complete" or not isinstance(rnd, int) or isinstance(rnd, bool):
             continue
-        if (at := _epoch(rec.get("timestamp"))) is not None:
+        if (at := epoch_seconds(rec.get("timestamp"))) is not None:
             out.setdefault(str(rnd), max(0.0, at - opened))
     return out
 
@@ -336,12 +325,16 @@ def scan_ledger_wall_clock(ledger_path: Path, *, started_at: str, finished_at: s
     rows = iter_jsonl(
         ledger_path, record_types=frozenset({"phase", "token_usage", "sample_scored"})
     )
-    opened, closed = _epoch(started_at), _epoch(finished_at)
+    opened, closed = epoch_seconds(started_at), epoch_seconds(finished_at)
     # A resumed cycle's ledger holds every earlier launch, while both endpoints are THIS launch's —
     # so the folds read this launch alone, and a round an earlier one closed reports no clock
     # rather than an instant one.
     if opened is not None:
-        rows = [r for r in rows if (at := _epoch(r.get("timestamp"))) is not None and at >= opened]
+        rows = [
+            r
+            for r in rows
+            if (at := epoch_seconds(r.get("timestamp"))) is not None and at >= opened
+        ]
     elapsed = None if opened is None or closed is None else max(0.0, closed - opened)
     phase_s = _phase_seconds(rows)
     gate_s = _gate_seconds(rows, until=closed)
