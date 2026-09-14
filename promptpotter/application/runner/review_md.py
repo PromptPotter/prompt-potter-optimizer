@@ -63,11 +63,13 @@ def render_review_md(
     # drops round 0's lift rather than measuring it against a bar nothing established.
     origin_cf = final.get("origin_composite_fitness")
     origin_composite_fitness = float(origin_cf) if isinstance(origin_cf, int | float) else None
+    clock = final.get("wall_clock") or {}
     stats = compute_l1_stats(
         list(rounds),
         origin_composite_fitness=origin_composite_fitness,
         accuracy_ceiling=accuracy_ceiling,
         behavior_results=behavior_per_round,
+        round_ended_s=_float_map(clock.get("round_ended_s")),
         l2_behavior_results=l2_behavior_per_round,
     )
 
@@ -77,6 +79,7 @@ def render_review_md(
     parts: list[str] = []
     parts += _render_header(index, final, stats, halt)
     parts += _render_stats_block(stats, repairs_per_round, calls_per_round, halt)
+    parts += _render_wall_clock(clock)
     parts += _render_behavior_summary(behavior_per_round)
     parts += ["## Rounds", ""]
 
@@ -261,12 +264,17 @@ def _render_stats_block(
         if clocks.accuracy_ceiling is None
         else f"{CEILING_FRACTION:.0%} of {clocks.accuracy_ceiling:.2f}"
     )
+    # Every clock in both units on one line. The rounds are what a peer reports; the minutes are
+    # what a reader outside this project can price, because a round is whatever the budget made it.
     lines = [
         "## L1Stats",
         "",
-        f"- **rounds_to_separable**: {_clock(clocks.rounds_to_separable)}",
-        f"- rounds_to_improved (promotion, no interval): {_clock(clocks.rounds_to_improved)}",
-        f"- rounds_to_ceiling ({basis}): {_clock(clocks.rounds_to_ceiling)}",
+        f"- **rounds_to_separable**: {_clock(clocks.rounds_to_separable)}"
+        f" ({_minutes(clocks.seconds_to_separable)})",
+        f"- rounds_to_improved (promotion, no interval): {_clock(clocks.rounds_to_improved)}"
+        f" ({_minutes(clocks.seconds_to_improved)})",
+        f"- rounds_to_ceiling ({basis}): {_clock(clocks.rounds_to_ceiling)}"
+        f" ({_minutes(clocks.seconds_to_ceiling)})",
         f"- yield_rate: {_rate(stats.yield_rate)}",
         f"- top_lift_mean: {_rate(stats.top_lift_mean, '+.4f')}",
         f"- behavior_pass_rate: {_rate(stats.behavior_pass_rate)}",
@@ -287,6 +295,66 @@ def _render_stats_block(
             f"- schema_repair_retries: {repairs_total}/{calls_total} optimizer calls "
             f"({rate_pct:.0f}% paid a second round-trip)"
         )
+    lines.append("")
+    return lines
+
+
+def _float_map(raw: object) -> dict[str, float]:
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(k): float(v)
+        for k, v in raw.items()
+        if isinstance(v, int | float) and not isinstance(v, bool)
+    }
+
+
+def _minutes(seconds: object) -> str:
+    """``—`` where the number is absent, which is a different fact from zero minutes."""
+    if not isinstance(seconds, int | float) or isinstance(seconds, bool):
+        return "—"
+    return f"{float(seconds) / 60.0:.1f} min"
+
+
+def _render_wall_clock(clock: dict[str, Any]) -> list[str]:
+    """**Where this block's claim stops — owned by** ``docs/operations/observability.md`` § The wall
+    clock, and where the claim stops. Render the two denominators APART; they are not one number."""
+    if not clock:
+        return []
+    lines = [
+        "## Wall clock",
+        "",
+        "_From the ledger's first record, never from a clean machine: install, image pull and row"
+        " materialization are observed by nothing, so `init` below is preflight, not setup._",
+        "",
+        f"- elapsed (ledger open → finish): {_minutes(clock['elapsed_s'])}",
+    ]
+    for phase, seconds in sorted(_float_map(clock.get("phase_s")).items(), key=lambda kv: -kv[1]):
+        lines.append(f"- {phase}: {_minutes(seconds)}")
+    lines.append(f"- origin gate (a human waiting): {_minutes(clock['gate_s'])}")
+    # Named by what is IN it, not as a remainder: the round's tail holds the overlap series (real
+    # backend cells) and the critique call (real optimizer time), and neither has a bracket.
+    lines.append(
+        f"- unattributed — the overlap series, the election, the critique call, the persist: "
+        f"{_minutes(clock['unattributed_s'])}"
+    )
+    # Rendered as a state, never suppressed on truthiness: no envelope observed a wait and every
+    # enveloped cell waited for nothing are opposite readings, and only one of them is 0.0.
+    unworked = clock.get("unworked_s")
+    lines.append(
+        f"- cells not ALLOWED to spend: "
+        f"{'no envelope observed one' if unworked is None else _minutes(unworked)}"
+    )
+    worked = _float_map(clock.get("worked_s"))
+    if worked:
+        lines += [
+            "",
+            "_Summed CALL time per spend bucket, not a share of the clock above: concurrent cells"
+            " overshoot it, and replayed calls are excluded._",
+            "",
+        ]
+        for bucket, seconds in sorted(worked.items(), key=lambda kv: -kv[1]):
+            lines.append(f"- {bucket}: {_minutes(seconds)}")
     lines.append("")
     return lines
 

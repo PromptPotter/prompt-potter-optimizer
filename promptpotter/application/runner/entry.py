@@ -76,6 +76,7 @@ from promptpotter.infrastructure.runtime_flags import (
     read_spend_caps,
     write_spend_caps,
 )
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_wall_clock
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ResumeDivergenceError
@@ -886,12 +887,30 @@ def _finalize_run(
         round_formula = resolve_cell_formula(
             session.scoring.scorer_cell_formula, session.pipeline_schema
         )[0]
+        # The run's own two endpoints, which `output.py::from_disk_log` reads off THIS block to
+        # build the digest's status view — the campaign index carries no other copy of `started_at`.
+        wall_clock = scan_ledger_wall_clock(
+            CycleLayout(session.store.campaigns.cycle_dir(session.hop)).ledger,
+            started_at=cycle_result.started_at,
+            finished_at=cycle_result.finished_at,
+        )
         final_block: dict[str, Any] = {
             "stop_reason": stop_reason,
+            "started_at": cycle_result.started_at,
+            "finished_at": cycle_result.finished_at,
+            # WHERE that span went, folded from the chronology and banked because the records it
+            # is read from are compactable and no round document carries a timestamp.
+            "wall_clock": wall_clock.model_dump(),
             # Spread rather than re-spelled, so the served key IS the field a reader greps for —
             # and every clock names its own question, because a bare round count on this block
             # is what gets quoted as the result.
-            **asdict(round_clocks(rounds, accuracy_ceiling=accuracy_ceiling)),
+            **asdict(
+                round_clocks(
+                    rounds,
+                    accuracy_ceiling=accuracy_ceiling,
+                    round_ended_s=wall_clock.round_ended_s,
+                )
+            ),
             "prompt_hashes": compute_optimizer_prompt_hashes(),
             # On the origin's OWN samples — never `rounds[0].matched_parent_composite`, which
             # is round 1's winner's matched floor on a different sample basis.

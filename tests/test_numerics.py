@@ -3030,6 +3030,7 @@ def test_a_theta_stall_verdict_must_clear_its_own_error() -> None:
 
     Silent harm: nothing distinguishes "L2 keeps firing because it is working" from "L2 keeps
     firing because noise keeps clearing its stall counter"."""
+    from promptpotter.application.campaign_config import EscalationLadder
     from promptpotter.application.optimization.escalation.state import EscalationFSM, NextAction
 
     # (composite, θ, θ_se) per round, from the live run: composite frozen from round 2 on, θ
@@ -3048,6 +3049,7 @@ def test_a_theta_stall_verdict_must_clear_its_own_error() -> None:
                 current_composite_fitness=comp,
                 current_theta=theta,
                 current_theta_se=se if with_se else None,
+                escalation_ladder=EscalationLadder.FULL,
                 l2_patience=2,
                 l3_patience=1,
             )
@@ -3079,6 +3081,7 @@ def test_the_campaign_ends_only_where_the_objective_is_spent_and_the_round_resol
     cells at p=0.33, `separable: false`, ended at 27% of budget, `index.json` then naming round 8
     its best. Silent by construction: `perfect_score` is a SUCCESS outcome and every number
     renders."""
+    from promptpotter.application.campaign_config import EscalationLadder
     from promptpotter.application.optimization.escalation.state import EscalationFSM, NextAction
 
     def outcome(objective: float, separable: bool | None) -> NextAction:
@@ -3090,6 +3093,7 @@ def test_the_campaign_ends_only_where_the_objective_is_spent_and_the_round_resol
                 separable=separable,
                 current_objective=objective,
                 l1_patience=3,
+                escalation_ladder=EscalationLadder.FULL,
             )
             .next_action
         )
@@ -3336,3 +3340,65 @@ def test_mcts_backprop_does_not_double_count_a_fork_inherited_prefix():
     # Nothing above round 0 — the caller must NOT fork, or a rewind to nowhere mints a
     # duplicate cycle and burns a whole run.
     assert select_rewind_round(collapsed, cycle_id="root", current_round=0) is None
+
+
+def test_the_l1_only_arm_can_reach_no_layer_above_it() -> None:
+    """The ablation switch, and why it is a switch rather than a large ``l1_patience``: a deferral
+    that never fires *in this run* is not a suppression, and the arm it produces is only as clean
+    as the round budget that happened to bound it. The L1 / L1+L2 / full comparison is the
+    sharpest result the preprint carries, so an arm that escalates once measured a different
+    thing under the arm's name.
+
+    Silent by construction: every arm completes, every round file renders, and an L2 fire that
+    should not have happened reads exactly like one that should. Unrecoverable because the number
+    is what gets published — a re-run does not un-report it.
+
+    Proved over the WHOLE predicate space rather than a sample, because the harm is one rule
+    nobody thought about."""
+    from itertools import product
+
+    from promptpotter.application.campaign_config import EscalationLadder
+    from promptpotter.application.optimization.escalation.rules import (
+        EscalationInputs,
+        decide_escalation,
+    )
+    from promptpotter.application.optimization.escalation.state import NextAction
+
+    grid = list(
+        product(
+            [None, 0.5, 1.0],  # current_objective
+            [0, 1, 5],  # l1_stall_count
+            [0, 3],  # l1_patience
+            [None, True, False],  # separable
+            [None, 0, 2],  # axes_with_positive_yield
+            [False, True],  # l1_mandatory_breach
+            [False, True],  # l1_zero_candidates
+            [False, True],  # evidence_starved
+        )
+    )
+
+    def actions(ladder: EscalationLadder) -> set[NextAction]:
+        return {
+            decide_escalation(
+                EscalationInputs(
+                    current_objective=objective,
+                    l1_stall_count=stall,
+                    l1_patience=patience,
+                    escalation_ladder=ladder,
+                    separable=separable,
+                    axes_with_positive_yield=yield_axes,
+                    l1_mandatory_breach=mandatory,
+                    l1_zero_candidates=zero,
+                    evidence_starved=starved,
+                )
+            ).next_action
+            for objective, stall, patience, separable, yield_axes, mandatory, zero, starved in grid
+        }
+
+    # The arm's whole claim. `escalate_l2` has one caller and it is gated on FIRE_L2, so no
+    # `l2_context` / `l3_plan` prompt is composable from any state in this space. A stall is
+    # simply another L1 round; the objective ceiling still ends a resolved run.
+    assert actions(EscalationLadder.L1) == {NextAction.CONTINUE, NextAction.STOP_PERFECT}
+    # Not vacuous: the same states fire L2 on the full ladder, so this passes because the rule
+    # preempts and not because the grid missed every firing shape.
+    assert NextAction.FIRE_L2 in actions(EscalationLadder.FULL)

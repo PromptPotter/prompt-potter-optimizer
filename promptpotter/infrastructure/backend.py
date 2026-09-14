@@ -22,6 +22,7 @@ QUERY_TIMEOUT: float = 120.0  # HTTP timeout for /matches endpoint
 if TYPE_CHECKING:
     from promptpotter.connectors.protocol import Connector, InProcessRun, InProcessWorkload
     from promptpotter.domain.connector import (
+        CellEnvelopeSeconds,
         ConnectorExecution,
         MeasuredUnit,
         SessionProtocol,
@@ -50,6 +51,7 @@ def build_backend_client(
         in_process_run=connector.in_process_run,
         workload=workload,
         max_cells_in_flight=connector.max_cells_in_flight,
+        cell_envelope=connector.cell_envelope_s,
         measured_unit=connector.measured_unit,
         answer_key=connector.answer_key,
         prompt_delivery=connector.prompt_delivery,
@@ -87,6 +89,7 @@ class BackendClient:
         in_process_run: InProcessRun | None = None,
         workload: InProcessWorkload,
         max_cells_in_flight: int = 2,
+        cell_envelope: CellEnvelopeSeconds | None = None,
         measured_unit: MeasuredUnit = "sample",
         answer_key: str | None = None,
         prompt_delivery: Delivery = "request",
@@ -108,6 +111,7 @@ class BackendClient:
         # What one sample COSTS, which the transport above does not answer — two `in_process`
         # connectors want opposite depths.
         self._max_cells_in_flight = max_cells_in_flight
+        self._cell_envelope: CellEnvelopeSeconds | None = cell_envelope
         self._measured_unit: MeasuredUnit = measured_unit
         # Which channel the candidate's prompt travels, so `PipelineSchema.value_tree` can say
         # whether a value being optimized can even arrive. A wire fact like the three above it,
@@ -139,6 +143,11 @@ class BackendClient:
     @property
     def max_cells_in_flight(self) -> int:
         return self._max_cells_in_flight
+
+    def cell_envelope_s(self, query: str, pipeline_params: dict[str, Any] | None) -> float | None:
+        """Seconds this cell may spend, or ``None`` where the backend declares no bound — see
+        :attr:`Connector.cell_envelope_s`. A method, not a property: it is resolved per cell."""
+        return None if self._cell_envelope is None else self._cell_envelope(query, pipeline_params)
 
     @property
     def measured_unit(self) -> MeasuredUnit:

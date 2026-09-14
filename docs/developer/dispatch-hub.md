@@ -173,7 +173,7 @@ This is where the reader's mental model of a round usually starts: candidates we
   - Fenced (echoes arbitrary LLM output + pipeline warnings). Renderer `_r_l1_wounds`.
 - ¹² **`guard_breaches`** ← `opt_sp.wounds.{l2_guard_breaches, l3_guard_breaches}` · post-parse breaches, both owner=L3 (replan)
   - Plain: `validator_id`🧩 plus its `evidence`, whose values render only where they name a signal or a slot — both closed vocabularies. An LLM-authored placeholder or plan reports its size, so no untrusted content reaches the unfenced block. Renderer `_r_guard_breaches`.
-  - Set by L2/L3 post-parse validators. A non-empty L2 block force-triggers an immediate L3 fire (read off the stream by `escalate_l2`, not this render); L3 also reads its own past breaches to avoid repeating them.
+  - Set by L2/L3 post-parse validators. A REFUSED L2 layout edit force-triggers an immediate L3 fire (§ Wound 4 — off `TransitionResult`, never off this stream, two of whose members are inert); L3 also reads its own past breaches to avoid repeating them.
 - ⁸ **`critique`** ← `bundle.digest.critique` (L1_CRITIQUE output, consumes ⁴ + ⁵)
   - Compact view via `format_l1_critique_for_prompt`
   - `summary`🧩, `priority_fix`🧩, `suggested_axes`🧩, `failure_highlights`🧩 (top 5)
@@ -273,7 +273,7 @@ Trigger gate: `escalation.escalate_l2`; the decision is recorded as `ResumeCheck
 
 ## Inputs — L2 via the hub
 
-L2's injection set **is** `NODE_LAYOUTS["l2_context"].floor` (`domain/l1_layout.py`) — read the membership there, never from a copy on this page, because the copy is what went stale when the capability directives were wired in. It lives in that layout rather than as `{{tokens}}` in the template — its `l2_context/1` `problem_description` body is now empty. No L2-only surface object exists. L2 does not see `l2_guard_breaches` / `l3_guard_breaches` — when those appear, Wound 4 fires L3 immediately, so by L2's next fire L3 has already replanned and L2 reads the new `plan`.
+L2's injection set **is** `NODE_LAYOUTS["l2_context"].floor` (`domain/l1_layout.py`) — read the membership there, never from a copy on this page, because the copy is what went stale when the capability directives were wired in. It lives in that layout rather than as `{{tokens}}` in the template — its `l2_context/1` `problem_description` body is now empty. No L2-only surface object exists. L2 does not see `l2_guard_breaches` / `l3_guard_breaches` — when its layout edit is refused, Wound 4 fires L3 immediately, so by L2's next fire L3 has already replanned and L2 reads the new `plan`.
 
 One injection is L2-only: `l1_signal_catalogue` — the cross-slot mandatory rule, which `l1_layout`'s schema cannot express. The vocabulary itself (legal slots, signal enum) is on that schema, not here: while it was prose-only, L2 answered the gap by inventing a shape and the edit rolled back. Absent from `L1_POSSIBLE` so L2 cannot accidentally inject its own catalogue into L1.
 
@@ -327,9 +327,9 @@ That is the whole of `_apply_l2`. The OSP is mutable Pydantic; writes happen in 
 
 ## Wound 4 — L2 self-healing via L3
 
-`l2_guard_breaches` holds L2's HARD layout breaches — the § Validation set above, plus `l1_layout_unparseable`, which `_parse_l2` emits when a non-empty edit coerces to no slot at all and the validator therefore never runs — and **any** breach after `_apply_l2` force-triggers L3 to heal. L2's own thrashing is observable to L3 via the `l2_guard_breaches` injection on its next fire.
+`l2_guard_breaches` holds every outcome `validate_l1_layout` returned, plus `l1_layout_unparseable`, which `_parse_l2` emits when a non-empty edit coerces to no slot at all and the validator therefore never runs. L2's own thrashing is observable to L3 via the `l2_guard_breaches` injection on its next fire.
 
-**Every breach is hard — there is no soft-reject tier, and no `task_context` validator.** `task_context` framing is frozen for the run (`TaskDecomposition.merge` refuses a rewrite), so a stale-repeat breach is not representable and there is nothing inert to except: `escalation/firing.py` is an unconditional `if breaches:`. Do not add a tier to re-admit one.
+**The force-trigger reads the REFUSAL, not the stream** (`TransitionResult.l1_layout_refused`): L3 heals L2 when L2's layout edit was rejected — a HARD breach or an unparseable one — and the stream is prompt evidence that also carries two inert members, `l1_layout_voids_prefix` (a cache-cost report on an ACCEPTED layout) and `l1_layout_unchanged_from_prior` (a no-op). Reading the stream replanned the cycle on both. There is no `task_context` validator either: the framing is frozen for the run (`TaskDecomposition.merge` refuses a rewrite), so a stale-repeat breach is not representable.
 
 **L2 file-line anchors** — `_parse_l2`, `_apply_l2`, `escalate_l2`, `TransitionResult`: `escalation/firing.py` (trigger gates in `escalation/rules.py`) · L2 prompt template: `assets/optimizer/pipeline.yaml::resolved_prompts['l2_context/1']` · OSP mutation surface: `domain/opt_search_point.py` (`task_context`, `l1_layout`, `l1_overrides`, `l2_guard_breaches`).
 

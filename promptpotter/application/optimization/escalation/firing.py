@@ -89,6 +89,9 @@ class TransitionResult:
     l3_note: str = ""
     axis_targeted: str = ""
     l1_layout: L1Layout | None = None
+    # L2 proposed a layout and it was REFUSED — the L3 force-trigger, and the reason the trigger
+    # does not read ``l2_guard_breaches``: that stream is prompt evidence and carries SOFT reports.
+    l1_layout_refused: bool = False
     l2_guard_breaches: list[ValidatorOutcome] = field(default_factory=list)
     l3_guard_breaches: list[ValidatorOutcome] = field(default_factory=list)
     fork_proposal: ForkProposal | None = None
@@ -125,6 +128,7 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint) -> TransitionResult:
     proposed_layout = coerce_l1_layout(raw.l1_layout, base=opt_sp.memory.l1_layout)
     layout_outcomes: list[ValidatorOutcome] = []
     accepted_layout: L1Layout | None = None
+    layout_refused = False
     if proposed_layout is not None:
         layout_result = validate_l1_layout(
             proposed_layout,
@@ -134,6 +138,8 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint) -> TransitionResult:
         layout_outcomes = list(layout_result.outcomes)
         if layout_result.is_valid:
             accepted_layout = proposed_layout
+        else:
+            layout_refused = True
     elif raw.l1_layout:
         # `{}` is "no layout edit"; a non-empty dict that coerces to nothing is L2 asking for one
         # in a shape no slot can hold. Both reach here as None, and treating them alike is what let
@@ -145,21 +151,22 @@ def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint) -> TransitionResult:
                 evidence={"keys": sorted(raw.l1_layout)},
             )
         ]
+        layout_refused = True
 
-    failures = list(layout_outcomes)
-    if failures:
-        failed_ids = ", ".join(o.validator_id for o in failures)
+    if layout_outcomes:
         logger.warning(
-            "L2 output failed %d validator(s): %s",
-            len(failures),
-            failed_ids,
+            "L2 layout %s — %d outcome(s): %s",
+            "REFUSED" if layout_refused else "accepted with reports",
+            len(layout_outcomes),
+            ", ".join(o.validator_id for o in layout_outcomes),
         )
 
     return TransitionResult(
         opt_sp=opt_sp.mutate(source="l2_context", **changes),
         axis_targeted=raw.axis_targeted,
         l1_layout=accepted_layout,
-        l2_guard_breaches=failures,
+        l1_layout_refused=layout_refused,
+        l2_guard_breaches=layout_outcomes,
         fork_proposal=raw.fork_proposal,
         terminate_proposal=raw.terminate_proposal,
     )
@@ -297,9 +304,9 @@ async def _run_transition(
     *,
     obs: ObservabilityBridge | None,
     tracing_campaign_id: str,
-) -> None:
-    """enter → LLM → parse → adopt → side-effects → exit.
-    Layer-agnostic — everything layer-specific reads off the `LayerStrategy` spec."""
+) -> TransitionResult | None:
+    """enter → LLM → parse → adopt → side-effects → exit; ``None`` when the layer's output never
+    parsed. Layer-agnostic — everything layer-specific reads off the `LayerStrategy` spec."""
     assert cycle.tracking.current_sp is not None
     current_pp = cycle.tracking.current_sp.pipeline_params
 
@@ -365,7 +372,7 @@ async def _run_transition(
                 view=None,
                 data={"action": "parse_failure", "node": transition.template_name},
             )
-            return
+            return None
 
     # Same adoption seam as an L1 win: identity advances (fresh lineage, parent = the outgoing
     # parent) and the persistent memory carries forward. The frame surfaces L2/L3 own are
@@ -445,6 +452,8 @@ async def _run_transition(
             )
         elif _stash_rebase_request(cycle, transition.layer_id, result.fork_proposal, round_num):
             raise StopLoop(StopReason.REBASED)
+
+    return result
 
 
 def _stash_rebase_request(
@@ -532,6 +541,7 @@ async def escalate_l2(
         current_composite_fitness=cycle.tracking.best_composite_fitness,
         current_theta=cycle.tracking.best_theta,
         current_theta_se=cycle.tracking.best_theta_se,
+        escalation_ladder=opt.escalation_ladder,
         l2_patience=opt.l2_patience,
         l3_patience=opt.l3_patience,
     )
@@ -548,7 +558,7 @@ async def escalate_l2(
     )
 
     if event.next_action == NextAction.FIRE_L2:
-        await _run_transition(
+        result = await _run_transition(
             L2,
             cycle,
             config,
@@ -558,16 +568,14 @@ async def escalate_l2(
             obs=obs,
             tracing_campaign_id=tracing_campaign_id,
         )
-        # Wound 4: post-L2 validator failure → L3 force-trigger, deterministic from L2 output
-        # so resume reproduces it without a decision record. Every breach reaching here is a
-        # HARD l1_layout failure — a real signal that L2 is thrashing inside the plan — so
-        # there is no inert breach to except.
-        breaches = cycle.opt_sp.memory.wounds.l2_guard_breaches
-        if breaches:
+        # Wound 4: L2's layout edit was REFUSED → L3 force-trigger, deterministic from L2 output
+        # so resume reproduces it without a decision record. It reads the refusal and not
+        # `wounds.l2_guard_breaches`: that stream is prompt EVIDENCE and two of its members are
+        # inert — `l1_layout_voids_prefix` is a cache-cost report and
+        # `l1_layout_unchanged_from_prior` a no-op, and both used to replan the cycle.
+        if opt.escalation_ladder.fires_l3 and result is not None and result.l1_layout_refused:
             logger.warning(
-                "L3 force-triggered by %d L2-output validator failure(s) at round %d",
-                len(breaches),
-                round_num,
+                "L3 force-triggered — L2's l1_layout edit was refused at round %d", round_num
             )
             await _run_transition(
                 L3,

@@ -9,7 +9,7 @@ Every wound is two axes, not a four-item taxonomy:
 
 The **nurse is not the producer**: L1 tends its own malformed proposal because it owns `pipeline_params`, and a break whose only fix is a locked surface escalates to the operator rather than churning at a layer that cannot reach the lever. L2 produces wounds and heals none. The producer-keyed `nurse_target` field is **retired** — gone from the code entirely, and no test guards this ([`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)), so do not reintroduce it.
 
-Three detection points but **four** typed `WoundChannels` lists: post-parse splits `l2_guard_breaches` from `l3_guard_breaches` because `escalate_l2` reads L2's stream as its L3-fire trigger while L3 self-reads its own — distinct consumers, so merging them would need a discriminator. A fifth channel, `l3_note`, is a sticky free-text L3→L2 steer, not a failure record.
+Three detection points but **four** typed `WoundChannels` lists: post-parse splits `l2_guard_breaches` from `l3_guard_breaches` because each is read by the OTHER layer on its next fire — distinct consumers, so merging them would need a discriminator. A fifth channel, `l3_note`, is a sticky free-text L3→L2 steer, not a failure record.
 
 **Healing is gradual.** One nurse firing is one nudge, not a guaranteed fix. Soft pointers toward the right region beat hard one-shot briefs ("do NOT propose X"), because the nurse is built to retry — wounds 1 and 4 retrigger on the new evidence, wound 2's trail accumulates so L2 must change angle if ACCUMULATED survives, and wound 3 fires only on stall but reshapes both L1 and L2.
 
@@ -22,7 +22,7 @@ Storage stays four typed lists (+ `l3_note`); **rendering collapses to two owner
 |  | Wound 1 | Wound 2 | Wound 3 | Wound 4 |
 |---|---|---|---|---|
 | **Producer → Nurse** (owner-keyed, not producer-keyed) | L1 → **L1** | L1 → **L1 / OPERATOR** | L2 → L3 | L2 → L3 |
-| **Owner source** | structural (L1's own output) | `RuntimeFailure.owner`: `L1` (rate) · `OPERATOR` (fatal) | (patience event) | structural (guard stream → L3) |
+| **Owner source** | structural (L1's own output) | `RuntimeFailure.owner`: `L1` (rate) · `OPERATOR` (fatal) | (patience event) | structural (layout refusal → L3) |
 | **Detector** | `L1_SCHEMA_COMPLIANCE` (`validators/l1_strict.py`), at `parse_population()` | `DegradationCheck` (`pobb/checks.py`), mid-eval | `escalate_l2` patience (`escalation/firing.py`) | `validate_l1_layout` (post-parse) |
 | **Failure record class** | `ValidationFailure` | `RuntimeFailure` | (patience event, no record) | `ValidatorOutcome` |
 | **OSP storage** | `validation_failures` | `runtime_failures` | `escalation.l2.stall_count` | `l2_guard_breaches` |
@@ -55,9 +55,9 @@ L3 fires when `esc.l2.stall_count >= opt.l2_patience`, subject to its own `l3_pa
 
 ## Wound 4 — immediate, never patient
 
-**Any** breach after L2 runs makes `escalate_l2` invoke `L3ModifyPlan` *immediately*, bypassing `l2_patience` and `l3_patience`: broken L2 output is not "wait and see". The trigger is deterministic from L2's output, already on the round file, so resume reproduces it without a separate decision record. Breaches are written by `apply_side_effects` off `TransitionResult.l2_guard_breaches`.
+A REFUSED L2 layout edit makes `escalate_l2` invoke `L3ModifyPlan` *immediately*, bypassing `l2_patience` and `l3_patience`: broken L2 output is not "wait and see". The trigger is deterministic from L2's output, already on the round file, so resume reproduces it without a separate decision record. It is suppressed on an `escalation_ladder` that stops short of L3.
 
-**Every breach is hard** — owned by [`dispatch-hub.md`](dispatch-hub.md) § Wound 4, which also holds the breach set. This layer routes every breach straight to L3 and has no soft-reject tier.
+**The trigger reads the refusal, not the breach stream** — owned by [`dispatch-hub.md`](dispatch-hub.md) § Wound 4, which also holds the breach set. This layer must route off `TransitionResult.l1_layout_refused`.
 
 ## Validators are Evaluator-shaped
 

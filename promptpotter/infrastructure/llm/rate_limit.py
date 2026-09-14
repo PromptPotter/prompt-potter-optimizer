@@ -49,8 +49,8 @@ _THROTTLE_STALL_SINK: ContextVar[Callable[[float], None] | None] = ContextVar(
 
 
 def set_throttle_stall_sink(sink: Callable[[float], None] | None) -> None:
-    """Bind who is told about time this task spent queued behind the shared throttle. An L4 cell
-    binds it (``runner/inner/spawn.py``) so its wall-clock deadline measures its OWN work."""
+    """Bind who is told about time this task spent queued behind the shared throttle. A measured
+    cell binds it (``scoring/cell_envelope.py``) so its wall-clock envelope measures its OWN work."""
     _THROTTLE_STALL_SINK.set(sink)
 
 

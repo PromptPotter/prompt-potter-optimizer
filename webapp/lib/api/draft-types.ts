@@ -42,6 +42,9 @@ export interface OptimizationOverridesWire {
   // How the reusable prompt building-block library reaches the optimizer:
   // suggest-but-may-invent (default), library-only, or no library at all.
   prompt_block_catalogue: "guidance" | "restrict" | "off";
+  // How far the loop may escalate when L1 stalls: the whole ladder, no replan, or
+  // no escalation at all — the L1-only ablation arm.
+  escalation_ladder: "full" | "l1_l2" | "l1";
   // Pluggable orchestration mechanism toggles (sorting/selection + early-abort
   // groups). Nested {group:{toggle:bool}}; seeded with the stock defaults.
   mechanisms: Record<string, Record<string, boolean>>;

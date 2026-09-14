@@ -127,10 +127,9 @@ test.describe("a campaign, end to end", () => {
     await open(page, made!.addr);
     await passConsent(page);
 
-    // The only bound a draft can carry — `OptimizationOverrides` declares `max_rounds` and
-    // nothing about spend — and the reason this tier stays affordable. The candidate WIDTH is
-    // not ours to set here: it rides `datasets/{name}/campaign.yaml` (`n_variants: 3` for
-    // email-tagging), which is the dataset's own declaration.
+    // The round bound the draft carries. The candidate WIDTH is not ours to set here: it rides
+    // `datasets/{name}/campaign.yaml` (`n_variants: 3` for email-tagging), which is the dataset's
+    // own declaration.
     const capped = await command(request, "edit-draft-campaign", {
       draft_id: made!.id,
       patch: { optimization_overrides: { max_rounds: WANT_ROUNDS - 1 } },
@@ -138,37 +137,26 @@ test.describe("a campaign, end to end", () => {
     expect(capped.status, `capping the draft to ${WANT_ROUNDS - 1} search round(s): ${capped.body}`).toBeLessThan(300);
 
     await open(page, made!.addr);
+
     const start = page.getByRole("button", { name: /Start campaign/ });
     await expect(start).toBeEnabled({ timeout: 120_000 });
+
+    // The money bound, declared BEFORE the press rather than clamped after it — which is what
+    // kept this tier affordable only for however long the launch took to notice. It rides the
+    // Start verb, so the run is born under it and there is no uncapped window at all.
+    //
+    // AFTER the enabled wait, not before: the ready panel is provably rendered by then, so a
+    // missing field is a real failure rather than a race with the check-in's own reopen fetch.
+    // `locator("summary")` rather than `getByText`, which can resolve the `<details>` too.
+    await page.locator("summary", { hasText: "Run bounds" }).click();
+    await page.getByRole("spinbutton", { name: "Spend ceiling in USD" }).fill(String(BUDGET_USD));
+
     await start.click();
 
-    // Wait for the cycle, then clamp the money — but only DOWNWARD.
-    //
-    // The account's own allowance already binds (a fresh account ran at $0.025), and the
-    // ceiling composes against the account first precisely so that raising one here cannot
-    // become the way around the host-wallet gate. Asking for more than the account permits is
-    // refused, so a test that "clamps" to a number above the allowance is not tightening
-    // anything — it is requesting a raise, and being told no.
     await expect
       .poll(async () => (await campaigns(request))[0]?.cycleId ?? "", { timeout: 300_000 })
       .toBeTruthy();
     made = (await campaigns(request))[0]!;
-
-    const served = (await dashboard(request, made))?.run_limits as
-      | { spend_budget_usd?: number | null }
-      | undefined;
-    const current = served?.spend_budget_usd ?? null;
-    if (current === null || current > BUDGET_USD) {
-      const clamp = await command(request, "change-spend-budget", {
-        campaign_id: made.id,
-        cycle_id: made.cycleId,
-        max_usd: BUDGET_USD,
-      });
-      expect(clamp.status, `clamping to $${BUDGET_USD}: ${clamp.body}`).toBeLessThan(300);
-      console.log(`[e2e] clamped $${current ?? "none"} → $${BUDGET_USD}`);
-    } else {
-      console.log(`[e2e] the account already binds tighter ($${current}) — left alone`);
-    }
 
     // Live means the SERVED phase says so — the route derives `run_phase` rather than trusting
     // what the producer last wrote.
@@ -270,8 +258,11 @@ test.describe("a campaign, end to end", () => {
   });
 
   test("it is running under a ceiling, and the browser renders one", async ({ page, request }) => {
-    // SOME finite ceiling is in force and no higher than we asked for — never "OUR number",
-    // which would fail on exactly the configuration that is safest (see the clamp above).
+    // SOME finite ceiling is in force and no higher than we asked for — never "OUR number". The
+    // launch composes against the ACCOUNT first, precisely so a ceiling asked for here cannot
+    // become the way around the host-wallet gate, so a tighter allowance (a fresh account ran at
+    // $0.025) is the safest configuration and must not read as a failure. This is also what
+    // proves the Start surface's ceiling reached the run.
     const limits = (await dashboard(request, made!))?.run_limits as
       | { spend_budget_usd?: number | null }
       | undefined;

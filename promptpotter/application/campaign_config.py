@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 __all__ = [
     "CampaignConfig",
     "DeterminismClamp",
+    "EscalationLadder",
     "Estimand",
     "Knob",
     "LivesConfig",
@@ -167,7 +168,8 @@ class EliminationMechanisms(StrictModel):
 
 class MechanismConfig(StrictModel):
     """Add a mechanism by adding a bool to the right group — it auto-surfaces to the webapp via
-    the schema. Patience-driven L1/L2/L3 escalation is governed separately (``None`` disarms L2/L3)."""
+    the schema. Which LAYERS the loop may escalate to is ``OptimizationConfig.escalation_ladder``;
+    the patiences beside it only PACE a ladder, they never shorten one."""
 
     selection: SelectionMechanisms = Field(default_factory=SelectionMechanisms)
     elimination: EliminationMechanisms = Field(default_factory=EliminationMechanisms)
@@ -232,6 +234,23 @@ class DeterminismClamp(StrictModel):
 PromptBlockCatalogue = Literal["guidance", "restrict", "off"]
 
 
+class EscalationLadder(StrEnum):
+    """How far up the L1 → L2 → L3 ladder a cycle may climb. The two predicates are the ONE
+    question every fire site asks, so no site re-derives depth from a patience."""
+
+    L1 = "l1"
+    L1_L2 = "l1_l2"
+    FULL = "full"
+
+    @property
+    def fires_l2(self) -> bool:
+        return self is not EscalationLadder.L1
+
+    @property
+    def fires_l3(self) -> bool:
+        return self is EscalationLadder.FULL
+
+
 class OptimizationConfig(StrictModel):
     max_rounds: Annotated[int | None, Knob(Scope.POLICY, Estimand.ESCALATION, Estimand.SPEND)] = (
         Field(
@@ -274,8 +293,40 @@ class OptimizationConfig(StrictModel):
         ),
     )
 
-    l2_patience: Annotated[int | None, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(2)
-    l3_patience: Annotated[int | None, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(1)
+    escalation_ladder: Annotated[EscalationLadder, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(
+        EscalationLadder.FULL,
+        description=(
+            "How far up the L1 → L2 → L3 ladder this campaign may climb — the ablation "
+            "switch. ``full`` (default) is the whole ladder. ``l1_l2`` lets L2 re-frame "
+            "but never reaches L3, including the post-L2 layout-breach force-trigger. "
+            "``l1`` is the L1-only arm: no escalation rule can return a fire, so "
+            "``escalate_l2`` is never called and neither the ``l2_context`` nor the "
+            "``l3_plan`` prompt is ever composed. A patience PACES a ladder and can "
+            "never shorten one, so a large ``l1_patience`` is a deferral bounded by the "
+            "round budget rather than a suppression. L1's own prompt is bit-for-bit "
+            "identical across all three arms (the property "
+            "``rebase_capability`` / ``terminate_capability`` also have), so the arms "
+            "differ in what the loop DOES and in nothing it says: a stalled ``l1`` round "
+            "simply continues until ``max_rounds`` / ``lives`` / spend binds."
+        ),
+    )
+    l2_patience: Annotated[int, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(
+        2,
+        ge=0,
+        description=(
+            "Consecutive non-improving L2 fires before the cycle escalates to L3. "
+            "How DEEP the ladder runs is ``escalation_ladder``, never a patience."
+        ),
+    )
+    l3_patience: Annotated[int | None, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(
+        1,
+        ge=0,
+        description=(
+            "Consecutive non-improving L3 fires before the cycle stops on "
+            "``L3_PATIENCE``. ``None`` replans without limit, leaving the round and "
+            "spend ceilings as the only stops."
+        ),
+    )
     degradation_threshold: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(...)
 
     elimination_n_min: Annotated[

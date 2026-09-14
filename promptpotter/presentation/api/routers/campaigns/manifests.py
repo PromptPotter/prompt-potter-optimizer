@@ -27,6 +27,7 @@ from promptpotter.application.pipeline_resolve import (
     resolve_pipeline_for_campaign,
 )
 from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.pipeline_overlay import steers_disallowed_model
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import descend_store
 from promptpotter.presentation.api.deps import StoresDep, decode_descend
@@ -291,6 +292,44 @@ def get_campaign_pipeline(
     if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
     return resolve_pipeline_for_campaign(leaf, campaign, at=spec, workspace=leaf.base_dir)
+
+
+class ForkPreviewRequest(StrictModel):
+    pipeline_overlay: dict[str, Any] = Field(
+        description="The `nodes.*.config` overlay the fork would carry, as `OperatorForkOverride` sends it"
+    )
+
+
+class ForkPreviewResponse(StrictModel):
+    """What `POST /commands/fork-cycle` would decide about this steer, asked without forking."""
+
+    steers_disallowed_model: bool = Field(
+        description=(
+            "The overlay picks a responder the campaign's frozen `optimizer_narrowing` never "
+            "sanctioned, or touches a cost lever, which no permitted set can sanction. True means "
+            "the fork is the ADR-0005 babysit act: it needs `campaign.babysit` (404 without it) "
+            "and stamps the branch grade C."
+        )
+    )
+
+
+@campaigns_router.post("/campaigns/{campaign_id}/fork-preview", response_model=ForkPreviewResponse)
+def preview_fork_steer(
+    stores: StoresDep, campaign_id: str, body: ForkPreviewRequest
+) -> ForkPreviewResponse:
+    """Would this steer take the babysit path? — the fork gate's own verdict, asked without forking.
+
+    A READ despite the POST: the subject is an overlay that exists nowhere on disk yet, so it
+    cannot be a query string. Nothing is written — no `CommandRecord`, no ack — which is why this
+    is its own endpoint rather than a `dry_run` flag on `fork-cycle`. Capability-free: it reports
+    what the gate WOULD say, and `campaign.babysit` is what decides whether the fork lands.
+    """
+    campaign = stores.campaigns.load_owned(campaign_id, str(stores.identity.user_id))
+    if campaign is None:
+        raise NotFoundError(f"Campaign not found: {campaign_id}")
+    return ForkPreviewResponse(
+        steers_disallowed_model=steers_disallowed_model(campaign.config, body.pipeline_overlay)
+    )
 
 
 def _pipeline_subject(at: str, campaign_id: str) -> SubjectSpec:

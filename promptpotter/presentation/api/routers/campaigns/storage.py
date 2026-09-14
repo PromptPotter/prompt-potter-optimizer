@@ -5,22 +5,19 @@ from __future__ import annotations
 
 import functools
 import json
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import Field
 
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.io import read_json_tolerant
+from promptpotter.infrastructure.store.io import iter_files, read_json_tolerant
 from promptpotter.infrastructure.store.layout import SHARED_CACHE_DIRS, FileKind, classify
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-
     from promptpotter.domain.campaign import Campaign
     from promptpotter.infrastructure.store.stores import Stores
 
@@ -55,47 +52,13 @@ def _connector_bytes_of(_path: str, _mtime_ns: int, _size: int) -> int:
     return sum(len(json.dumps(doc[k])) for k in _CONNECTOR_ROUND_KEYS if k in doc)
 
 
-def _walk(
-    root: Path, *, skip: frozenset[str] = frozenset()
-) -> Iterator[tuple[Path, os.stat_result]]:
-    """Every file under *root*, with the stat the directory scan already read.
-
-    ``os.scandir`` rather than ``rglob`` + ``stat``: on Windows a ``DirEntry`` carries the size from
-    the directory scan it already did, so this is one syscall per file where the glob spent three.
-    Over a workspace this size that is the difference between a panel that opens and one the
-    operator watches spin. ONE walker for both readers below — the taxonomy split and the plain
-    total differ in what they do with a file, never in how they find one, and the glob half of that
-    pair was the whole reason a full workspace scan cost what it did.
-
-    *skip* is what stops the two biggest directories being walked TWICE — once for their own figure
-    and again inside the tenant total."""
-    stack = [root]
-    first = True
-    while stack:
-        current = stack.pop()
-        try:
-            with os.scandir(current) as it:
-                for entry in it:
-                    try:
-                        if entry.is_dir(follow_symlinks=False):
-                            if not (first and entry.name in skip):
-                                stack.append(Path(entry.path))
-                        elif entry.is_file(follow_symlinks=False):
-                            yield Path(entry.path), entry.stat(follow_symlinks=False)
-                    except OSError:
-                        continue
-        except OSError:
-            continue
-        first = False
-
-
 def _campaign_split(root: Path) -> dict[str, int]:
     """One walk of a campaign tree → ``{leaf: bytes}`` over the six MECE leaves, which sum exactly to the on-disk total.
     ``ROUND_PUBLIC`` is the lone straddler — backend arrays to ``connector``, the searchpoint remainder to ``state``."""
     acc = dict.fromkeys(_LEAVES, 0)
     if not root.is_dir():
         return acc
-    for path, st in _walk(root):
+    for path, st in iter_files(root):
         kind = classify(path.relative_to(root))
         if kind is FileKind.ROUND_PUBLIC:
             conn = min(_connector_bytes_of(str(path), st.st_mtime_ns, st.st_size), st.st_size)
@@ -108,7 +71,7 @@ def _campaign_split(root: Path) -> dict[str, int]:
 
 def _dir_size(root: Path, *, skip: frozenset[str] = frozenset()) -> int:
     """Bytes under *root*, skipping the top-level names in *skip*."""
-    return sum(st.st_size for _, st in _walk(root, skip=skip))
+    return sum(st.st_size for _, st in iter_files(root, skip=skip))
 
 
 def _owned_campaign_splits(stores: Stores) -> list[tuple[Campaign, dict[str, int]]]:

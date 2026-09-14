@@ -13,6 +13,7 @@ import type {
   ResolveOriginResponse,
   StartCheckinResponse,
 } from "./draft-types";
+import type { StartCheckinPayload } from "./types.generated";
 
 export async function postIngestDataset(
   file: File,
@@ -109,16 +110,40 @@ export async function postEditDraftCampaign(
     patch,
   });
 }
+// What THIS launch may spend, which is not a draft field: the draft says what the campaign IS,
+// and it survives a reopen, while a ceiling is declared per press. DERIVED off the payload the
+// server declares, so a fourth `LaunchLimits` field arrives here by regeneration rather than by
+// somebody remembering to spell it.
+export type StartCheckinLimits = Partial<Omit<StartCheckinPayload, "campaign_id">>;
+
+// The ceilings SPELLED OUT, as a map TOTAL over that type: a fourth `LaunchLimits` field makes
+// this literal a type error rather than a budget the browser quietly stops sending. Spread
+// generically instead, the three names appear nowhere in this file — and "does the browser send a
+// ceiling at all" stops being a question anyone can answer with a grep.
+const CEILING_KEYS: { [K in keyof Required<StartCheckinLimits>]: true } = {
+  halt_at_accuracy: true,
+  spend_budget_usd: true,
+  token_budget: true,
+};
+
 // Start a durable check-in campaign: gate the origin, commit the dataset, mint +
 // spawn the run, flipping `checkin` → `active`. `campaignId` is the draft's
 // `draft_id` (which IS the campaign id). Same response shape the old
 // mint-campaign-from-draft returned. Wire: `POST /commands/start-checkin`.
+//
+// An omitted ceiling is "no ceiling of mine" — the account's own still binds, and admission
+// clamps whatever is asked for down to what the wallet covers. Sent sparsely so the
+// `CommandRecord` says which ones the operator actually declared.
 export async function postStartCheckin(
   campaignId: string,
+  limits: StartCheckinLimits = {},
 ): Promise<StartCheckinResponse> {
-  return postCommand<StartCheckinResponse>("start-checkin", {
-    campaign_id: campaignId,
-  });
+  const payload: Record<string, unknown> = { campaign_id: campaignId };
+  for (const key of Object.keys(CEILING_KEYS) as (keyof StartCheckinLimits)[]) {
+    const value = limits[key];
+    if (typeof value === "number") payload[key] = value;
+  }
+  return postCommand<StartCheckinResponse>("start-checkin", payload);
 }
 export async function getCampaignCheckin(
   campaignId: string,

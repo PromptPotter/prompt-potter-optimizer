@@ -90,7 +90,15 @@ LEDGER_BASELINE = {
     # instead of subsystems — an Agent Skill is a directory of instructions, resources and programs,
     # and an MCP tool is a name, a description and a schema. It PAYS for itself: `node_param_keys`
     # projects off it instead of walking the same declarations again.
-    "modules": 355,
+    # +1: `application/scoring/cell_envelope.py` — the wall clock ONE measured cell may spend,
+    # enforced at the single seam a cell is measured. It is a module and not a helper beside
+    # `sample_measurement.py` because three things move together and none of them is measurement:
+    # an `asyncio.timeout` scope, the give-back that keeps it measuring the cell rather than the
+    # box (the shared limiter's queue, a machine sleep), and the UNSCOREABLE resolution that stops
+    # a truncated trajectory being graded. It PAID for itself: `runner/inner/spawn.py` held all
+    # three for L4 alone, so harbor's container episodes and every remote cell were unbounded in
+    # sum, and it is now a connector declaration any backend can make.
+    "modules": 356,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     "init_files": 53,
@@ -123,7 +131,12 @@ LEDGER_BASELINE = {
     # BACKEND nodes. `Scope.POLICY` because past rounds stay valid; `Estimand.SEARCH` because what
     # moves is the optimizer's trajectory. They replace `InstrumentMode.optimizer_clamp`, which was
     # reachable only from inside an L4 inner asyncio task.
-    "config_leaf_fields": 43,
+    # +1: `OptimizationConfig.escalation_ladder` — which LAYERS a campaign may escalate to. It
+    # folds into no neighbour: the three patiences PACE a ladder and can only defer a fire, and
+    # the L1 / L1+L2 / full ablation needs an arm where L2 cannot fire at all. Every earlier
+    # attempt at it was a patience set high enough to outlast the round budget, which is a
+    # property of the budget rather than of the arm.
+    "config_leaf_fields": 44,
     # +1: `QUEUE_MAX_WAIT_S` — how long a launch may wait in line before it is withdrawn. It is a
     # setting and not a constant because it is the one queue number a HOST has to be able to
     # answer for: on a shared box it decides when someone else's waiting launch is given up on.
@@ -184,11 +197,26 @@ LEDGER_BASELINE = {
     # (an unmeasured `Sample`, where the fact is `None`, and a measured row, where it is `""`), so
     # a row signature could only ever serve one of them and the other would have re-derived it.
     # Its set arity `all_verifier_graded` takes labels for the same reason and adds none back.
-    "domain_any_maps": 88,
+    # +1: `connector.py::CellEnvelopeSeconds.__call__(…, pipeline_params: dict[str, Any] | None)` —
+    # the SAME pair `WireAdapter` beside it takes, and deliberately so: what a cell may spend is
+    # decided by the query and the candidate's params, which is exactly what the request is built
+    # from. A narrower annotation here would be one the connector's own adapter cannot honour.
+    # +2: `pipeline_overlay.py::steers_disallowed_model` — the frozen campaign config and the
+    # overlay, which is the pair the babysit verdict is a function of. Both are genuinely
+    # untyped maps: `Campaign.config` is a `dict[str, Any]` snapshot and an overlay is
+    # `{node: {param: value}}`, the same spelling every function in this module already takes.
+    # Naming the two-step ONCE is what let the browser's copy of the rule be deleted; it had
+    # answered off a different permitted list than `fork-cycle` dispatch did. Taking `Campaign`
+    # instead would buy one of these back and couple a pipeline-SHAPE module to the manifest
+    # entity, which is the worse structure of the two.
+    "domain_any_maps": 91,
     "models_lax": 3,
     "prompt_string_fields": 6,
     "injections": 32,
-    "escalation_rules": 6,
+    # +1: `l1_only_ladder`. The L1 / L1+L2 / full ablation needs an arm where L2 PROVABLY never
+    # fires, and a rule is the only place that can be true of: the router is the whole policy, so
+    # a gate at the caller would leave the policy saying FIRE_L2 while the loop quietly did not.
+    "escalation_rules": 7,
     # DEBT, and the only row here whose whole purpose is to fall. A function-local import of our
     # own package is habit, and the habit is the defect: unmarked, it cannot be told from a
     # load-bearing one, so nobody can hoist safely or add one knowingly. The three reasons people
@@ -202,14 +230,18 @@ LEDGER_BASELINE = {
     # `domain/l4/inner_origin.py`, so no cycle closes through `evidence`.
     # +3: an own-package `importlib.import_module` counts too, which the `import` statements alone
     # never showed — the two registries' member walks and the CLI's `COMMANDS` table.
-    # Of the 11, 10 are deliberate: `complexity_ledger`'s own 7 (it counts every layer, so it may
+    # -1: `campaign_runner.py::COMMANDS` now names each handler at module scope instead of
+    # resolving `"module:attr"` through `importlib.import_module` on dispatch. Its own startup
+    # justification measured false: `_shared`/`reaper` already ride most handlers' own module-scope
+    # imports, so `--help` paid their cost either way; hoisting the 24 handlers adds only their
+    # verb-specific tail (numpy for `ab`, httpx for `new`).
+    # Of the 10, all are deliberate: `complexity_ledger`'s own 7 (it counts every layer, so it may
     # import none at module scope), `escalation/state` (1, documented there) and the two walks,
-    # which import each member when the table completes. `COMMANDS` defers for startup, the reason
-    # `conventions.md` § Code shape measured and refused. Count cycles with care: an
+    # which import each member when the table completes. Count cycles with care: an
     # `if TYPE_CHECKING:` import sits in the module body and reads as top-level to an AST walk,
     # which made three "pairs" that were never runtime edges. The files whose cycle is invisible
     # until the build breaks say so at the import.
-    "deferred_imports": 11,
+    "deferred_imports": 10,
     # +1: `judges/CLAUDE.md` — the per-layer contract for a new top-level package, indexed from
     # `promptpotter/CLAUDE.md` like every other. It earns a page rather than a section in
     # `connectors/CLAUDE.md` because its load-bearing rule is the OPPOSITE concern: a connector
@@ -326,7 +358,11 @@ LEDGER_BASELINE = {
     # `hash_call` or one host's answer is replayed under another's name. Silent both ways — every
     # number renders — and the banked row cannot be told from one the pinned route produced.
     # (test_integrity § 1)
-    "test_functions": 184,
+    # +1: an L1-only ablation arm that escalates once has measured something else under the arm's
+    # name, and nothing on any surface tells the two apart. (test_numerics § 10)
+    # +1: a resumed cycle's wall clock folded every earlier launch against this launch's endpoints,
+    # so each round closed before the resume read as instant in the published clock. (test_resume)
+    "test_functions": 186,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -355,7 +391,14 @@ LEDGER_BASELINE = {
     # none. `labels` is the display projection of the same walk and IS read, so the dotted paths
     # beside it were the raw form of a thing already answered; `estimand` is the grouping key the
     # panel never groups by. Dropping them narrows what a browser can start depending on.
-    "served_fields": 577,
+    # +2: `ForkPreviewRequest.pipeline_overlay` + `ForkPreviewResponse.steers_disallowed_model` —
+    # the ADR-0005 babysit verdict, which `fork-cycle` dispatch reached and never returned. Two
+    # served fields buy the DELETION of the browser's own copy of the rule
+    # (`overlaySetsModelOutsideAllowed`, `costLeverKeys` and 13 vitest cases), which answered
+    # off a different permitted list than the gate did. It folds into no neighbour: every other
+    # campaign read is addressed by id, and this one's subject is an overlay that exists nowhere
+    # on disk until the fork is confirmed.
+    "served_fields": 579,
 }
 
 

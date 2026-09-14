@@ -254,10 +254,18 @@ backend ([`../../docs/methods/verdict-resolution.md`](../../docs/methods/verdict
 
 **And `cell` implies NOTHING about the run's CONTROL LOOP — a flag reasoning "a cell is expensive,
 therefore…" is the one to refuse.** A connector declares what a row costs (`max_cells_in_flight`,
-the ceiling it may be run at); how long an operator's look-ahead arming lasts is the round's to
-spend, and no connector can see the round it is inside. The shape to watch for is a second flag
-that ships beside `measured_unit` and is set by RESEMBLING the recursion rather than by any fact
-about the run — which is how a declaration reaches every backend whose cells merely look alike.
+the ceiling it may be run at; `cell_envelope_s`, the wall clock ONE of them may spend); how long an
+operator's look-ahead arming lasts is the round's to spend, and no connector can see the round it
+is inside. The shape to watch for is a second flag that ships beside `measured_unit` and is set by
+RESEMBLING the recursion rather than by any fact about the run — which is how a declaration reaches
+every backend whose cells merely look alike.
+
+**`cell_envelope_s` is the test passing, and the template for anything that wants to join it:** it
+is a fact about one cell of THIS backend, resolved from the same pair the request is built from,
+and it decides nothing — the round it sits in is neither consulted nor changed.
+`application/scoring/cell_envelope.py` enforces it. **A ceiling on measured COUNTS would fail the
+same test** — tokens and dollars jitter run to run, so the same cell is cut on one run and not the
+next, which is a property of the weather rather than of the backend.
 
 ## Registering a connector
 

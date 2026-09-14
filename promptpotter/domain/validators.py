@@ -1,5 +1,5 @@
 """Two distinct contracts: ``LLMOutputValidator`` checks one parsed node output, ``StopRule`` checks the running results
-stream. A guard breach carries no owner — post-parse breaches always route to L3, structurally."""
+stream. An outcome is EVIDENCE, never a control signal — what one costs is decided at the site that raised it."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class ValidatorOutcome:
     """One issue found in an LLM-node output; a clean output returns ``None`` instead. No ``passed`` (an outcome only exists
-    for a failure), no ``score``, and no owner field (a guard breach routes to L3 structurally)."""
+    for an issue), no ``score`` and no severity: a SOFT report rides the same stream, so no consumer may escalate on the stream alone."""
 
     validator_id: str
     evidence: dict[str, Any] = field(default_factory=dict)

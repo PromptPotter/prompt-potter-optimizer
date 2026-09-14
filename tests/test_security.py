@@ -218,22 +218,21 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
         ), f"selection at budget {budget} left a fence open"
 
 
-async def test_outer_sample_deadline_cancels_the_inner_campaign(
-    tmp_path: Path, monkeypatch: Any
-) -> None:
-    """An inner campaign that outlives its deadline is a SILENT spend leak.
+async def test_cell_envelope_cancels_the_inner_campaign(tmp_path: Path, monkeypatch: Any) -> None:
+    """A cell that outlives its envelope is a SILENT spend leak.
 
-    The deadline only bounds spend because the inner campaign is awaited directly,
+    The envelope only bounds spend because the work is awaited directly all the way down,
     making it the awaiting coroutine's ``_fut_waiter`` so the timeout's cancellation
     reaches it. Detach that await — ``asyncio.shield``, ``asyncio.wait``, a ``gather``
     — and the timed-out campaign keeps running, keeps calling the optimizer, and keeps
     billing tokens against a sample nobody will read. Nothing errors; the run just
-    costs more and ends later. So this pins the PROPERTY (the campaign stops), not the
+    costs more and ends later. So this pins the PROPERTY (the work stops), not the
     shape of the code that achieves it.
     """
     from promptpotter.application.optimization.dispatch.llm_call import heartbeat as heartbeat_mod
     from promptpotter.application.runner.inner import spawn, spawn_context
     from promptpotter.application.runner.inner.tasks import load_inner_tasks
+    from promptpotter.application.scoring.cell_envelope import CellEnvelope
     from promptpotter.domain.results import CycleResult
     from promptpotter.infrastructure.llm import telemetry as llm_telemetry
     from promptpotter.infrastructure.store.io import write_json
@@ -260,7 +259,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
         spawned_by: dict[str, Any],
         spawn_role: Any,
     ) -> CycleResult:
-        """Models the campaign as it BEHAVED, not as it should: it outlives the deadline and
+        """Models the campaign as it BEHAVED, not as it should: it outlives the envelope and
         then SWALLOWS the cancellation, returning a normal result.
 
         That is what the real inner chain did for months — three seams answered
@@ -272,7 +271,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
         """
         started.set()
         try:
-            await asyncio.sleep(30)  # far past the deadline
+            await asyncio.sleep(30)  # far past the envelope
         except asyncio.CancelledError:
             cancelled.set()
         return CycleResult(
@@ -316,11 +315,17 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
     )
     llm_telemetry._CYCLE_LEDGER.set(_RecordingLedger())  # type: ignore[arg-type]
 
-    with pytest.raises(spawn.InnerCycleUnscoreableError, match="wall-clock deadline"):
-        await spawn.run_inner_cycle("justlogic-d234/seed-0", {})
+    # The connector DECLARES the seconds and the scoring seam PUTS THEM IN FORCE — driven apart
+    # here exactly as `measure_sample` drives them, so a cell keeping its own timeout would pass
+    # this while the seam bounded nothing.
+    query = "justlogic-d234/seed-0"
+    envelope = CellEnvelope(spawn.inner_cell_envelope_s(query, {}), label=query)
+    with pytest.raises(spawn.InnerCycleUnscoreableError, match="wall-clock envelope"):
+        async with envelope:
+            await spawn.run_inner_cycle(query, {})
 
-    assert started.is_set(), "the inner campaign never started — the deadline proved nothing"
-    assert cancelled.is_set(), "the inner campaign outlived its deadline and kept spending"
+    assert started.is_set(), "the inner campaign never started — the envelope proved nothing"
+    assert cancelled.is_set(), "the inner campaign outlived its envelope and kept spending"
 
 
 def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path: Path) -> None:

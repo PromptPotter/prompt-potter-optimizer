@@ -70,10 +70,7 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.launch_limits import LaunchLimits
-from promptpotter.domain.pipeline_overlay import (
-    overlay_sets_model_outside_allowed,
-    permitted_models_from_narrowing,
-)
+from promptpotter.domain.pipeline_overlay import steers_disallowed_model
 from promptpotter.domain.results import parse_candidate_label
 from promptpotter.domain.run_records import CommandAckRecord, CommandRecord, CycleSeed
 from promptpotter.domain.spend import BudgetChange
@@ -547,16 +544,13 @@ class CommandDispatcher:
             seed = _parse_cycle_seed(payload.seed)
             # Steering the model OUTSIDE what the node permits (nothing declared = nothing
             # sanctioned) is the ADR-0005 §4 babysit action, a distinct cap above the
-            # `campaign.run` fork. A PERMITTED steer is a clean human fork.
-            permitted = permitted_models_from_narrowing(
-                campaign.config.get("optimizer_narrowing") if campaign else None
+            # `campaign.run` fork. A PERMITTED steer is a clean human fork. The same call
+            # answers `POST /campaigns/{id}/fork-preview`, so the pre-confirm warning and this
+            # gate cannot disagree.
+            disallowed = steers_disallowed_model(
+                campaign.config if campaign else None, seed.pipeline_overlay
             )
-            steers_disallowed_model = seed is not None and overlay_sets_model_outside_allowed(
-                seed.pipeline_overlay, permitted
-            )
-            if steers_disallowed_model and not has_capability(
-                self._stores.identity, CAMPAIGN_BABYSIT_CAP
-            ):
+            if disallowed and not has_capability(self._stores.identity, CAMPAIGN_BABYSIT_CAP):
                 logger.warning(
                     "fork-cycle disallowed-model steer denied for principal %s (missing %s)",
                     acting_principal_id(self._stores.identity),

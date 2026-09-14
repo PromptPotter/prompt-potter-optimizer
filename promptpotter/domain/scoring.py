@@ -92,6 +92,12 @@ class LedgerPipelineData(TypedDict, total=False):
     step_timings: dict[str, Any]
     step_tokens: dict[str, dict[str, Any]]
     diagnostics: dict[str, Any]
+    # Seconds this cell was BLOCKED rather than working — machine suspend plus time queued behind
+    # the shared rate limiter — handed back to its wall-clock envelope by the seam that holds one
+    # (``application/scoring/cell_envelope.py``). ABSENT where the backend declares no envelope: no
+    # give-back is installed there, so nothing watched, and 0.0 would be a reading nobody took.
+    # It rides the LEDGER half because the campaign's wall clock is summed off the chronology.
+    unworked_s: float
     # L4: one outer sample IS a whole inner campaign, so its "answer" is a lift.
     mean_round_delta: float
     error: str | None
@@ -140,7 +146,6 @@ class PipelineData(LedgerPipelineData, total=False):
     inner_rounds_ran: int
     inner_round_budget: int
     inner_stop_reason: str
-    inner_unworked_s: float
     inner_spend_usd: float | None
     inner_tokens: int | None
     inner_campaign_id: str

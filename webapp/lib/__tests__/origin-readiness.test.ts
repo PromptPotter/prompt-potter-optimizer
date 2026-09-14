@@ -13,6 +13,7 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
     optimization_overrides: {
       max_rounds: 5,
       prompt_block_catalogue: "guidance",
+      escalation_ladder: "full",
       mechanisms: {
         selection: { per_round_resubset: true },
         elimination: {

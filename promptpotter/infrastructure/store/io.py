@@ -6,7 +6,7 @@ import shutil
 import stat
 import tempfile
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import IO, Any
 
@@ -81,6 +81,33 @@ def rmtree_robust(path: Path) -> None:
             if attempt == 3:
                 raise
             time.sleep(0.1 * (attempt + 1))
+
+
+def iter_files(
+    root: Path, *, skip: frozenset[str] = frozenset()
+) -> Iterator[tuple[Path, os.stat_result]]:
+    """Every FILE under *root*, paired with the ``os.stat_result`` its directory scan already
+    produced — ``os.scandir`` rather than ``rglob`` + ``.stat()``, one syscall per file where the
+    glob spends three. *skip* names top-level directory names to exclude, so a caller does not
+    walk a directory once for its own figure and again inside a parent total."""
+    stack = [root]
+    first = True
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as it:
+                for entry in it:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            if not (first and entry.name in skip):
+                                stack.append(Path(entry.path))
+                        elif entry.is_file(follow_symlinks=False):
+                            yield Path(entry.path), entry.stat(follow_symlinks=False)
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+        first = False
 
 
 def _atomic_replace(tmp: str, path: Path) -> None:
@@ -286,6 +313,7 @@ def newest_mtime_ns(*paths: Path) -> int | None:
 __all__ = [
     "append_jsonl",
     "ensure_parent_dir",
+    "iter_files",
     "newest_mtime_ns",
     "read_bytes_optional",
     "read_json",

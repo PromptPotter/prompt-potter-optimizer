@@ -12,6 +12,7 @@ Mechanism lives at its definition site, not here — `l1/generate.py` and `escal
 
 - Fix a bad prompt in the dispatch, not downstream → `<dispatch-first>` above
 - Every tunable starts at its FLOOR → § Origin = conservative floor
+- A patience paces the ladder, never shortens it → § The ladder's DEPTH is a knob, and it is a real suppression
 - Editing renderer prose is a measurement change → § Editing a renderer's PROSE
 - A validator rejects or scores, never both → § A validator either REJECTS or SCORES
 - No round-number thresholds inside the loops → § Signals come from measurement
@@ -24,7 +25,11 @@ Mechanism lives at its definition site, not here — `l1/generate.py` and `escal
 
 ## Cycle stop conditions
 
-Boundary stops are `max_rounds` and its opt-in measurement-driven twin `OptimizationConfig.lives` — "hearts", +1 per improving round, −1 per stall, banked, stop at 0 → `LIVES_EXHAUSTED`. It banks `improved` alone, where the stall counter beside it also requires `RoundResult.separable`, so a round crowning a winner no arm's interval cleared 0 spends patience but not a life. On top of those, **L2 and L3 may end the cycle themselves** — through the escalation rules (goal reached / infinite stall) or by emitting `terminate_proposal`.
+Boundary stops are `max_rounds` and its opt-in measurement-driven twin `OptimizationConfig.lives` — "hearts", +1 per improving round, −1 per stall, banked, stop at 0 → `LIVES_EXHAUSTED`. It banks `improved` alone, where the stall counter beside it also requires `RoundResult.separable`, so a round crowning a winner no arm's interval cleared 0 spends patience but not a life. Two more sit in the rule set and the FSM, and neither is a layer's doing: `objective_exhausted` → `STOP_PERFECT`, and `l3_patience` spent → `STOP_L3_PATIENCE`. **The only stop a LAYER authors is `terminate_proposal`** (→ `StopReason.ABORT`, § The layer-control channel) — deterministic rules route and never diagnose, so no rule is a layer's exit.
+
+## The ladder's DEPTH is a knob, and it is a real suppression
+
+`OptimizationConfig.escalation_ladder` is `full` / `l1_l2` / `l1` — the ablation arms. At `l1` the `l1_only_ladder` rule preempts every `FIRE_L2` rule, so `escalate_l2` is never called and no `l2_context` / `l3_plan` prompt is ever composed; at `l1_l2` the L3 gate and the post-L2 force-trigger both stand down. **A patience never shortens the ladder** — it paces one. L1's own prompt is bit-for-bit identical across the three arms, which is what makes them comparable at all.
 
 ## L1 — what `l1_generate` may propose
 

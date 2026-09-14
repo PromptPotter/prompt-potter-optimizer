@@ -9,7 +9,6 @@ import {
   nodeOverlayPatch,
   nodeSchemaPatch,
   overlayEdits,
-  overlaySetsModelOutsideAllowed,
   permittedModels,
   seedOverlayFromRows,
   type ConfigRow,
@@ -475,73 +474,9 @@ describe("overlayEdits + applyFlatEdits", () => {
   });
 });
 
-// Mirrors the Python truth table (`domain/pipeline_overlay.py`): the client warning and the server
-// babysit gate must agree. The permitted set is per NODE now — one campaign-wide list was the
-// second spelling of what `param_allowed_values["model"]` already said.
-describe("overlaySetsModelOutsideAllowed", () => {
-  const param = (over: Partial<NodeConfigParam>): NodeConfigParam => ({
-    key: "model",
-    value: null,
-    kind: "model",
-    options: [],
-    description: "",
-    never_axis: "",
-    movable_by: [],
-    held: false,
-    source: "campaign",
-    permitted: null,
-    ...over,
-  });
-  // The SERVED document both halves are projected from — the permitted models and the cost levers.
-  const schema = { l1_generate: [param({ permitted: ["openai/gpt-oss-120b"] })] };
-  const ds = { l1_generate: { model: "deepseek/deepseek-v4-flash:nitro" } };
-  const oss = { l1_generate: { model: "openai/gpt-oss-120b" } };
-  const out = overlaySetsModelOutsideAllowed;
-
-  it("taints a model the node does not permit", () => expect(out(ds, schema)).toBe(true));
-  it("is clean for a permitted model", () => expect(out(oss, schema)).toBe(false));
-  it("is restrictive when nothing is declared", () => expect(out(ds, {})).toBe(true));
-  it("treats an absent schema as nothing permitted", () => expect(out(ds, null)).toBe(true));
-  it("is per NODE — another node's grant does not carry", () =>
-    expect(out(oss, { l2_context: [param({ permitted: ["openai/gpt-oss-120b"] })] })).toBe(true));
-  it("ignores a non-model edit", () =>
-    expect(out({ l1_generate: { temperature: 0.9 } }, schema)).toBe(false));
-  it("always taints a provider edit", () =>
-    expect(out({ l1_generate: { provider: "openrouter" } }, schema)).toBe(true));
-  it("always taints a route edit — the SET of cost levers, not one member of it", () =>
-    expect(out({ l1_generate: { route_order: ["a", "b"] } }, schema)).toBe(true));
-  it("taints a cost lever it was never told about, because the SERVER named it", () =>
-    expect(
-      out(
-        { l1_generate: { gateway_tier: "premium" } },
-        {
-          l1_generate: [
-            ...schema.l1_generate,
-            param({ key: "gateway_tier", kind: "enum", never_axis: "cost_lever" }),
-          ],
-        },
-      ),
-    ).toBe(true));
-  it("leaves a schema-owned key alone — only a cost lever is unsanctionable", () =>
-    expect(
-      out(
-        { l1_generate: { output_schema: { a: 1 } } },
-        {
-          l1_generate: [
-            ...schema.l1_generate,
-            param({ key: "output_schema", kind: "nested", never_axis: "schema_owned" }),
-          ],
-        },
-      ),
-    ).toBe(false));
-  it("is clean for an empty overlay", () => expect(out({}, schema)).toBe(false));
-  it("handles a null overlay", () => expect(out(null, schema)).toBe(false));
-  it("skips non-object node entries", () =>
-    expect(out({ steps: ["a", "b"], l1_generate: oss.l1_generate }, schema)).toBe(false));
-});
-
-// Feeds the predicate above, so its `null`-is-not-`[]` reading is what decides whether an
-// un-narrowed node taints every steer or none.
+// What the babysit warning NAMES as permitted. The verdict itself is served
+// (`POST /campaigns/{id}/fork-preview`), so `null`-is-not-`[]` decides only what the sentence
+// lists, never whether the steer taints.
 describe("permittedModels", () => {
   const modelRow = (over: Partial<NodeConfigParam>): NodeConfigParam[] => [
     {

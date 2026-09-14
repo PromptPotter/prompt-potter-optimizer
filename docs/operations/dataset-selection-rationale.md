@@ -111,7 +111,8 @@ Three things the table is for, none of them the headline number:
 - **The tail is the operational fact, not the median.** `sealqa` reads a comfortable 48.6 s at p50
   and 710.7 s at its worst — a 25× spread *inside one dataset at one setting*. A budget gate that
   polls at the sample edge cannot see inside an episode, so the tail is unbounded spend between
-  polls. That is what a per-cell wall-clock and spend ceiling exists to bound.
+  polls. `Connector.cell_envelope_s` is what bounds it, and harbor declares none — the tail here is
+  the measurement that would set one.
 - **`n = 1` is not a distribution.** `harbor-tbench-regex-log` has one measured cell. It is quoted
   here so the omission is checkable, and it is why that dataset gets no cost anchor below.
 - **Turns are the prompt's; seconds are partly the weather.** On `sealqa`, 730 of 861 episodes end

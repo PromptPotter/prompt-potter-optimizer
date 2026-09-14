@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import importlib
 import json
 import sys
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 # Windows consoles default to cp1252 which can't print Unicode symbols.
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
@@ -22,49 +23,69 @@ from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
 from promptpotter.infrastructure.store.layout import tenant_workspace
 from promptpotter.infrastructure.store.session_pointer import active_pointer_exists
 from promptpotter.presentation.cli.commands._shared import (
+    CommandResult,
     identity_from_args,
     launch_limits_from_args,
     set_verbose,
 )
+from promptpotter.presentation.cli.commands.ab import cmd_ab
+from promptpotter.presentation.cli.commands.evidence import cmd_evidence
+from promptpotter.presentation.cli.commands.lifecycle import (
+    cmd_archive,
+    cmd_cancel_queued,
+    cmd_cleanup_empty_cycles,
+    cmd_delete,
+    cmd_delete_cycle,
+    cmd_pause,
+    cmd_rename,
+    cmd_replace_dataset,
+    cmd_set_budget,
+    cmd_skip_searchpoint,
+    cmd_step_cycle,
+    cmd_unarchive,
+)
+from promptpotter.presentation.cli.commands.maintenance import cmd_compact_archive
+from promptpotter.presentation.cli.commands.new import cmd_new
+from promptpotter.presentation.cli.commands.noise_floor import cmd_noise_floor
+from promptpotter.presentation.cli.commands.probe_reasoning import cmd_probe_reasoning
+from promptpotter.presentation.cli.commands.reindex import cmd_reindex
+from promptpotter.presentation.cli.commands.reset import cmd_reset
+from promptpotter.presentation.cli.commands.restamp import cmd_restamp
+from promptpotter.presentation.cli.commands.resume_command import cmd_resume
+from promptpotter.presentation.cli.commands.seed_screen import cmd_seed_screen
+from promptpotter.presentation.cli.commands.verify import cmd_verify
 from promptpotter.presentation.cli.parsers import build_parser, parser_verbs
 from promptpotter.shared.errors import PotterError, RequestTooLargeError
 
 __all__ = ["main"]
 
 
-# Verb -> "module:attr", resolved on dispatch rather than bound at module scope. Importing every
-# command body up front made each invocation pay for every other verb's dependency tree before
-# argparse had looked at argv — `ab` alone dragged in numpy, `new` dragged in httpx — so `pause`
-# cost the same second of imports as a full campaign launch.
-COMMANDS = {
-    "new": "promptpotter.presentation.cli.commands.new:cmd_new",
-    "resume": "promptpotter.presentation.cli.commands.resume_command:cmd_resume",
-    "ab": "promptpotter.presentation.cli.commands.ab:cmd_ab",
-    "reset": "promptpotter.presentation.cli.commands.reset:cmd_reset",
-    "reindex": "promptpotter.presentation.cli.commands.reindex:cmd_reindex",
-    "restamp": "promptpotter.presentation.cli.commands.restamp:cmd_restamp",
-    "compact-archive": "promptpotter.presentation.cli.commands.maintenance:cmd_compact_archive",
-    "verify": "promptpotter.presentation.cli.commands.verify:cmd_verify",
-    "noise-floor": "promptpotter.presentation.cli.commands.noise_floor:cmd_noise_floor",
-    "seed-screen": "promptpotter.presentation.cli.commands.seed_screen:cmd_seed_screen",
-    "evidence": "promptpotter.presentation.cli.commands.evidence:cmd_evidence",
-    "probe-reasoning": (
-        "promptpotter.presentation.cli.commands.probe_reasoning:cmd_probe_reasoning"
-    ),
-    "archive": "promptpotter.presentation.cli.commands.lifecycle:cmd_archive",
-    "delete": "promptpotter.presentation.cli.commands.lifecycle:cmd_delete",
-    "unarchive": "promptpotter.presentation.cli.commands.lifecycle:cmd_unarchive",
-    "pause": "promptpotter.presentation.cli.commands.lifecycle:cmd_pause",
-    "rename": "promptpotter.presentation.cli.commands.lifecycle:cmd_rename",
-    "set-budget": "promptpotter.presentation.cli.commands.lifecycle:cmd_set_budget",
-    "skip-searchpoint": "promptpotter.presentation.cli.commands.lifecycle:cmd_skip_searchpoint",
-    "step-cycle": "promptpotter.presentation.cli.commands.lifecycle:cmd_step_cycle",
-    "delete-cycle": "promptpotter.presentation.cli.commands.lifecycle:cmd_delete_cycle",
-    "cleanup-empty-cycles": (
-        "promptpotter.presentation.cli.commands.lifecycle:cmd_cleanup_empty_cycles"
-    ),
-    "replace-dataset": "promptpotter.presentation.cli.commands.lifecycle:cmd_replace_dataset",
-    "cancel-queued": "promptpotter.presentation.cli.commands.lifecycle:cmd_cancel_queued",
+# Verb -> handler, one command, one ledger record, either surface.
+COMMANDS: dict[str, Callable[[argparse.Namespace], Coroutine[Any, Any, CommandResult]]] = {
+    "new": cmd_new,
+    "resume": cmd_resume,
+    "ab": cmd_ab,
+    "reset": cmd_reset,
+    "reindex": cmd_reindex,
+    "restamp": cmd_restamp,
+    "compact-archive": cmd_compact_archive,
+    "verify": cmd_verify,
+    "noise-floor": cmd_noise_floor,
+    "seed-screen": cmd_seed_screen,
+    "evidence": cmd_evidence,
+    "probe-reasoning": cmd_probe_reasoning,
+    "archive": cmd_archive,
+    "delete": cmd_delete,
+    "unarchive": cmd_unarchive,
+    "pause": cmd_pause,
+    "rename": cmd_rename,
+    "set-budget": cmd_set_budget,
+    "skip-searchpoint": cmd_skip_searchpoint,
+    "step-cycle": cmd_step_cycle,
+    "delete-cycle": cmd_delete_cycle,
+    "cleanup-empty-cycles": cmd_cleanup_empty_cycles,
+    "replace-dataset": cmd_replace_dataset,
+    "cancel-queued": cmd_cancel_queued,
 }
 
 # A verb is one row here plus one `sub.add_parser` in `parsers.py`, and nothing made the two
@@ -190,8 +211,7 @@ def main() -> None:
         _validate_run_limits(args)
         ensure_api_key()
 
-    module_path, _, attr = COMMANDS[args.command].partition(":")
-    handler = getattr(importlib.import_module(module_path), attr)
+    handler = COMMANDS[args.command]
 
     try:
         result = asyncio.run(handler(args))

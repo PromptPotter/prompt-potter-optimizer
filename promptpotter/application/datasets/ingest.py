@@ -257,6 +257,9 @@ def draft_from_dataset(
             "optimization_overrides": {
                 **OptimizationOverrides().model_dump(mode="json"),
                 "max_rounds": max_rounds,
+                # An ablation arm that silently reset to the full ladder on reuse would
+                # measure a different thing under the same Origin's name.
+                "escalation_ladder": cc.optimization.escalation_ladder.value,
                 "mechanisms": cc.optimization.mechanisms.model_dump(mode="json"),
             },
             "pipeline_overlay": pipeline_overlay,

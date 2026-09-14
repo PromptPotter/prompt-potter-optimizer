@@ -10,7 +10,7 @@ from promptpotter.application.optimization.validators.behavior_base import Check
 from promptpotter.domain.results import L1_PARSE_FAILURE_CHARGED, RoundResult
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
 __all__ = ["CEILING_FRACTION", "L1Stats", "RoundClocks", "compute_l1_stats", "round_clocks"]
 
@@ -25,29 +25,56 @@ CEILING_FRACTION = 0.95
 
 @dataclass(frozen=True)
 class RoundClocks:
-    """Three round counts and the ceiling the third was read against. ``rounds_to_improved`` says
-    when the loop ADOPTED an arm, on ``lift > 0.0`` with no interval and no multiplicity
-    correction, so ``rounds_to_separable`` beside it is the one a result quotes."""
+    """Three clocks, each in BOTH units, and the ceiling the third was read against.
+
+    ``rounds_to_improved`` says when the loop ADOPTED an arm, on ``lift > 0.0`` with no interval and
+    no multiplicity correction, so ``rounds_to_separable`` beside it is the one a result quotes.
+
+    A round count is the cheap unit and the one every peer reports; the seconds beside it are the
+    expensive one and the only unit a reader outside this project can price, because a round is
+    whatever a campaign's budget made it. A ``seconds_*`` unset where its ``rounds_*`` is not means
+    the round's close carried no readable timestamp, never that it was instant."""
 
     rounds_to_separable: int | None
     rounds_to_improved: int | None
     rounds_to_ceiling: int | None
+    seconds_to_separable: float | None
+    seconds_to_improved: float | None
+    seconds_to_ceiling: float | None
     accuracy_ceiling: float | None
 
 
-def round_clocks(rounds: list[RoundResult], *, accuracy_ceiling: float | None) -> RoundClocks:
-    """Every round count a finished cycle reports, derived once so no surface computes its own.
+def round_clocks(
+    rounds: list[RoundResult],
+    *,
+    accuracy_ceiling: float | None,
+    round_ended_s: Mapping[str, float],
+) -> RoundClocks:
+    """Every clock a finished cycle reports, derived once so no surface computes its own.
 
     An undeclared ceiling leaves ``rounds_to_ceiling`` unset rather than reading ``CEILING_FRACTION``
-    as an absolute bar — that would be a target no dataset owner chose, above every admitted one."""
+    as an absolute bar — that would be a target no dataset owner chose, above every admitted one.
+
+    *round_ended_s* is ``WallClock.round_ended_s``, keyed by round number as a string: the times
+    come off the LEDGER because no round document carries one, and passing the map rather than
+    reading it keeps this pure over the rounds."""
     to_ceiling: int | None = None
     if accuracy_ceiling is not None:
         target = CEILING_FRACTION * accuracy_ceiling
         to_ceiling = _first_round(rounds, lambda r: r.accuracy is not None and r.accuracy >= target)
+    to_separable = _first_round(rounds, lambda r: r.separable is True)
+    to_improved = _first_round(rounds, lambda r: r.improved)
+
+    def _seconds(round_num: int | None) -> float | None:
+        return None if round_num is None else round_ended_s.get(str(round_num))
+
     return RoundClocks(
-        rounds_to_separable=_first_round(rounds, lambda r: r.separable is True),
-        rounds_to_improved=_first_round(rounds, lambda r: r.improved),
+        rounds_to_separable=to_separable,
+        rounds_to_improved=to_improved,
         rounds_to_ceiling=to_ceiling,
+        seconds_to_separable=_seconds(to_separable),
+        seconds_to_improved=_seconds(to_improved),
+        seconds_to_ceiling=_seconds(to_ceiling),
         accuracy_ceiling=accuracy_ceiling,
     )
 
@@ -75,6 +102,7 @@ def compute_l1_stats(
     origin_composite_fitness: float | None,
     accuracy_ceiling: float | None,
     behavior_results: list[list[CheckResult]],
+    round_ended_s: Mapping[str, float],
     l2_behavior_results: list[list[CheckResult]] | None = None,
 ) -> L1Stats:
     yield_rate = _mean_yield_rate(rounds)
@@ -89,7 +117,7 @@ def compute_l1_stats(
         round_1_behavior=behavior_results[0] if behavior_results else [],
     )
     return L1Stats(
-        clocks=round_clocks(rounds, accuracy_ceiling=accuracy_ceiling),
+        clocks=round_clocks(rounds, accuracy_ceiling=accuracy_ceiling, round_ended_s=round_ended_s),
         yield_rate=yield_rate,
         top_lift_mean=top_lift_mean,
         behavior_pass_rate=behavior_pass_rate,

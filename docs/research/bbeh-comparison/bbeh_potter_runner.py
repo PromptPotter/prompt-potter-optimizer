@@ -53,9 +53,9 @@ def build_campaign_config(
     (``promptpotter/assets/optimizer/pipeline.yaml``) — edit that to change the optimizer
     model/provider, not the campaign config.
     """
-    # Rasch-validation run scaffolding (git log): a large l1_patience defers L2/L3 firing for the
-    # run window so the per-round adaptive queue accumulates δ evidence.
-    optimization: dict[str, Any] = {"max_rounds": 5, "l1_patience": 99}
+    # Rasch-validation scaffolding: the L1-only arm, so the per-round adaptive queue accumulates
+    # δ evidence with no L2/L3 fire in the window.
+    optimization: dict[str, Any] = {"max_rounds": 5, "escalation_ladder": "l1"}
     optimization.update(
         {k: v for k, v in {"max_rounds": max_rounds, "n_variants": n_variants}.items() if v}
     )

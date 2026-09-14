@@ -17,6 +17,9 @@ class ErrorCategory(enum.StrEnum):
     SERVER = "SERVER"
     CONNECTION = "CONNECTION"
     PIPELINE = "PIPELINE"
+    # The cell ran and produced nothing gradeable: its envelope expired, or the backend answered
+    # with no verdict. Not the configuration under test failing, so never a fatal code.
+    UNSCOREABLE = "UNSCOREABLE"
     UNKNOWN = "UNKNOWN"
 
 

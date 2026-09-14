@@ -2578,6 +2578,38 @@
         "title": "ForkDirection",
         "type": "string"
       },
+      "ForkPreviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "pipeline_overlay": {
+            "additionalProperties": true,
+            "description": "The `nodes.*.config` overlay the fork would carry, as `OperatorForkOverride` sends it",
+            "title": "Pipeline Overlay",
+            "type": "object"
+          }
+        },
+        "required": [
+          "pipeline_overlay"
+        ],
+        "title": "ForkPreviewRequest",
+        "type": "object"
+      },
+      "ForkPreviewResponse": {
+        "additionalProperties": false,
+        "description": "What `POST /commands/fork-cycle` would decide about this steer, asked without forking.",
+        "properties": {
+          "steers_disallowed_model": {
+            "description": "The overlay picks a responder the campaign's frozen `optimizer_narrowing` never sanctioned, or touches a cost lever, which no permitted set can sanction. True means the fork is the ADR-0005 babysit act: it needs `campaign.babysit` (404 without it) and stamps the branch grade C.",
+            "title": "Steers Disallowed Model",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "steers_disallowed_model"
+        ],
+        "title": "ForkPreviewResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -6440,6 +6472,59 @@
           }
         },
         "summary": "Get Lineage Tree",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/fork-preview": {
+      "post": {
+        "description": "Would this steer take the babysit path? — the fork gate's own verdict, asked without forking.\n\nA READ despite the POST: the subject is an overlay that exists nowhere on disk yet, so it\ncannot be a query string. Nothing is written — no `CommandRecord`, no ack — which is why this\nis its own endpoint rather than a `dry_run` flag on `fork-cycle`. Capability-free: it reports\nwhat the gate WOULD say, and `campaign.babysit` is what decides whether the fork lands.",
+        "operationId": "preview_fork_steer_api_v1_campaigns__campaign_id__fork_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForkPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForkPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Fork Steer",
         "tags": [
           "Campaigns"
         ]

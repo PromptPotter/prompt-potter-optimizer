@@ -144,7 +144,7 @@ Two different facts, and conflating them is the costliest mistake here. **`decla
 | `running` | A process is attached and driving | producer is fresh |
 | `detached` | Active lifecycle, **no live producer** | producer is stale — the one phase using the freshness heuristic |
 
-**Three ways into `paused`** — the pause button (writes the flag), Ctrl+C, and an `asyncio.CancelledError` (typically an L4 outer sample deadline cancelling its inner campaign). Only the first writes a flag; the other two are derived off the runner's declaration at the finalize seam. Leaving that to each raise site is what once let a deliberately-cancelled inner cycle read `detached` and get stamped `producer_vanished`.
+**Three ways into `paused`** — the pause button (writes the flag), Ctrl+C, and an `asyncio.CancelledError` (typically a cell envelope cancelling the backend work it bounds). Only the first writes a flag; the other two are derived off the runner's declaration at the finalize seam. Leaving that to each raise site is what once let a deliberately-cancelled inner cycle read `detached` and get stamped `producer_vanished`.
 
 **`detached` ≠ `paused` ≠ wedged.** `paused` is a clean, deliberate, resumable exit; `detached` means nobody is driving; **wedged** is a producer attached and heartbeating but no longer *progressing* — `run_phase` cannot express that one, and it is derived separately from non-heartbeat ledger appends ([`../specs/frontend-surface-contract.md`](../specs/frontend-surface-contract.md)).
 
@@ -170,7 +170,7 @@ A fresh launch clears every polled run-control flag: a flag surviving the gestur
 
 ### Where the error text is
 
-Error prefixes — `[CLIENT]` / `[SERVER]` / `[CONNECTION]` / `[PIPELINE]` — land in the latest `rounds/round_NNNN.json`, alongside the mirrored `logs/latest.log`. The optimizer-call path carries a hard wall-clock (`_chat_under_deadline` → `OPTIMIZER_TIMEOUT`), so a hung optimizer call terminates itself. **An overnight death with no terminal record is machine-sleep or session-end class, not a code fault** — do not go looking for a bug in the loop.
+A failed cell's typed `error_category` (`shared/errors.py::ErrorCategory`) and its message land in the latest `rounds/round_NNNN.json`, alongside the mirrored `logs/latest.log`. The optimizer-call path carries a hard wall-clock (`_chat_under_deadline` → `OPTIMIZER_TIMEOUT`), so a hung optimizer call terminates itself. **An overnight death with no terminal record is machine-sleep or session-end class, not a code fault** — do not go looking for a bug in the loop.
 
 ## Recovery: resume, rewind, fork
 

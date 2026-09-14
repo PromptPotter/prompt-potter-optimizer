@@ -21,6 +21,7 @@ sys.path.insert(0, str(_REPO))
 from promptpotter.application.commands.payloads import (
     CommandAcceptedBody,
     OriginGateDecisionPayload,
+    StartCheckinPayload,
 )
 from promptpotter.application.evidence.comparison import (
     ArmReplicate,
@@ -144,6 +145,7 @@ from promptpotter.presentation.api.routers.campaigns.manifests import (
     ConfigEstimandGroup,
     ConfigKnob,
     ConfigMapResponse,
+    ForkPreviewResponse,
     MechanismGroup,
     MechanismSchemaResponse,
     MechanismToggle,
@@ -231,11 +233,16 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     CyclesResponse,
     # --- commands middleware ---
     CommandAcceptedBody,
+    # The Start verb's payload, so the browser's launch ceilings are the wire's own three fields
+    # rather than a hand-kept list that a fourth `LaunchLimits` field would not reach.
+    StartCheckinPayload,
     # --- campaigns/manifests router ---
     CampaignSummary,
     CampaignListResponse,
     # What ONE campaign runs at one searchpoint (`frontend-surface-contract.md::I9`).
     CampaignPipelineResponse,
+    # The fork gate's own babysit verdict, so the browser never re-derives it.
+    ForkPreviewResponse,
     # --- cross-subject evidence (application/evidence) — nested types first ---
     EffectProvenance,
     EditSpread,

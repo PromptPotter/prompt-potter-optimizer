@@ -40,30 +40,6 @@ it.
 
 A leading `NEXT` marks the one to take up cold when nothing else is in hand.
 
-- **Four hand-rolled tree walks, and the one that was measured was three syscalls per file.** The
-  repo has ONE deleter (`store/io.py::rmtree_robust`, and a bare `shutil.rmtree` is a bug) and no
-  walker, so every reader that needs "the files under here, with their sizes" writes its own.
-  `cli/commands/reset.py:129-130` walks the same tree TWICE — once summing `p.stat().st_size`, once
-  counting — with `rglob` + `stat`, the exact pattern whose replacement in the storage report is
-  measurable; `campaign_store/store.py:173,187` hand-rolls two more. Meanwhile
-  `measurement_archive.py:177` already uses `(st_mtime_ns, st_size)` as a content-identity
-  signature, so the primitive's two halves both exist in the tree and neither has a home. Action:
-  lift the `os.scandir` walker out of `routers/campaigns/storage.py` into `store/io.py` beside the
-  one deleter, and point the four sites at it — the size-summing ones get the syscall win for free.
-  **Rides with:** any edit to `reset.py`, `store.py`'s delete paths, or the storage report.
-  **Re-test:** `grep -rn 'rglob("\*")' promptpotter/ --include=*.py` — more than zero hits outside a
-  directory-only walk means open.
-
-- **A workspace walk nobody is waiting for still runs to completion.** The three storage endpoints
-  are sync `def`, so Starlette cannot cancel one when the client disconnects: an abandoned
-  account-pane load holds a threadpool thread for its whole walk. Whether a read with no reader
-  should still be running is a design call — the answer decides whether these become `async def`
-  over a cancellable thread, or keep running and are simply made cheap enough not to matter.
-  **Rides with:** any work on the account modal's panes or on `storage.py` — and any report that the
-  dashboard "hangs" after a visit to Account, which is the operator-visible form of this.
-  **Re-test:** `npx playwright test --project=walk e2e/walk/account.spec.ts
-  e2e/walk/dashboard.spec.ts`, then read the chronology test's DURATION against its 60s bound.
-
 - **`AccessGate` and `AllowanceSpent` render only for a NON-HOST account, and the browser walk has
   no way to be one.** Two of the four onboarding surfaces are now covered — `ConsentGate` because a
   throwaway `PROMPTPOTTER_HOME` is unaccepted by construction, `WelcomeLockoutModal` through the
@@ -95,22 +71,6 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   next time a spec has a campaign of the right shape to hand (the spend tier mints one).
   **Re-test:** `grep -n "l4\|lineage" webapp/e2e/walk/responsive.spec.ts` — empty means those
   three are still unswept at every width.
-
-- **The same seam, the other direction: a browser predicate whose server twin never returns its
-  verdict — and it has been closed once already, wrongly.**
-  `webapp/lib/derivations/nodeConfig.ts::overlaySetsModelOutsideAllowed` mirrors
-  `domain/pipeline_overlay.py::overlay_sets_model_outside_allowed` rule for rule and drives
-  `SteerForkPanel`'s pre-confirm warning. It was struck as fixed when the predicate's INPUT became
-  server-authored — the served per-node `permitted` set — but the ask was the VERDICT, and the server
-  reaches it only inside `fork-cycle` dispatch, where it 404s rather than answers. So deleting the
-  client copy costs the operator the warning entirely; what is owed is a dry-run on the fork preview.
-  **It carries a design fork:** a dry-run needs the in-progress overlay, so it is a POST, and whether
-  that is a new read-only endpoint or a `dry_run` flag on the existing `fork-cycle` command decides
-  whether it writes a `CommandRecord` — a control-plane shape question, not a threading one.
-  **Rides with:** the
-  next change to fork or steer — `fork-cycle` dispatch, `SteerForkPanel`, or anything adding a field
-  to the fork preview response. **Re-test:** grep the served surface for a `steers_disallowed_model`
-  field — while none is served, the browser copy is load-bearing and must not be struck again.
 
 - **Holistic reframes — larger chunks, noted so they aren't mistaken for done; don't slip one into a
   release.** (1) **Tooltip/overlay consolidation:** most of the webapp's DOM `title=` attributes are
@@ -145,39 +105,6 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   design answer rather than a check. **Rides with:** the next connector added, or any edit to where
   a node's `param_keys` are validated. **Re-test:** grep `promptpotter/` for a raise naming
   `prompt_info`; while none exists, the no-skill shape still passes silently.
-
-- **The BROWSER still cannot bound a check-in run's spend; every other ingress now can.** The wire
-  half is closed — `StartCheckinPayload` inherits `LaunchLimits`, `api-openapi.yaml` declares the
-  three ceilings on it, and `start_checkin_campaign` admits under what was asked rather than under a
-  bare `LaunchLimits()`. What is left is the SURFACE: the Start button in
-  `webapp/components/ingest/IngestConversation.tsx` posts `campaign_id` alone
-  (`lib/api/ingest.ts::postStartCheckin`), so a web operator's only ceiling is the account's own, and
-  `e2e/spend/run.spec.ts` still clamps with `change-spend-budget` after the run is already live.
-  It is filed rather than done because WHERE three money fields belong in a chat-shaped check-in is a
-  design call, not a threading one. **Rides with:** any edit to the ingest Start surface — the
-  check-in panel, `useIngestFlow`, or the draft's own override controls, which already render
-  operator-set knobs beside this button. **Re-test:** `grep -n spend_budget_usd
-  webapp/lib/api/ingest.ts` — while it is absent, the browser sends no ceiling.
-
-- **The CLI defers the LEAVES and imports the TRUNK eagerly, so its one convention-refused
-  mechanism buys almost nothing.** `presentation/cli/campaign_runner.py::COMMANDS` resolves each
-  handler through `importlib.import_module` at call time — the deferral
-  [`../developer/conventions.md`](../developer/conventions.md) refuses, counted in
-  `complexity_ledger`'s `deferred_imports`. But the same module imports `jobs.reaper` (line 17) and
-  `commands/_shared` (line 24) at MODULE level, and `_shared` pulls `initialization.wiring`,
-  `runner.entry`, `run_observers` and the campaign store — the whole engine — before argparse has
-  looked at a single argument. So the 13 handler modules are cheap *because* everything expensive is
-  already loaded.
-
-  Measured cumulative import: `_shared` 2.59s, `reaper` 1.25s, `parsers` alone 1.18s; a cold
-  `python -m promptpotter --help` is 1.87s and importing all 13 handlers eagerly adds only +0.12s.
-  `sweep_dead_cycles` is called at line 185, after parsing, so `--help` never reaches the thing it
-  paid 1.25s to import. Action: **hoist the handlers** — the deferral is on the wrong layer and its
-  own number says so. Then, if startup is worth anything, move `_shared` and `reaper` behind the
-  dispatch, which is where the ~0.7s actually is; `parsers` at 1.18s is the floor that work would
-  hit next. **Rides with:** adding or renaming a CLI verb. **Re-test:** `grep -n import_module
-  promptpotter/presentation/cli/campaign_runner.py` hits.
-
 
 ## Blocked — named blocker
 

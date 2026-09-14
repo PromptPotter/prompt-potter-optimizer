@@ -395,7 +395,7 @@ export interface L1Layout {
   problem_description: string[];
 }
 
-/** L2/L3-authored state that travels with the candidate. */
+/** The candidate's persistent frame — the three surfaces the escalation layers author */
 export interface L2L3Memory {
   /** Four wound streams (validation/runtime/l2-guard/l3-guard) + sticky L3 note.
    * Rendered by dispatch-hub injections; absorbed by L2 next round. */
@@ -408,9 +408,11 @@ export interface L2L3Memory {
    * (``persona``, ``instruction``, …). L2 writes here to nudge L1 without
    * rewriting the shared optimizer prompt. */
   l1_overrides: Record<string, unknown>;
-  /** Persistent task-framing dict refined by ``l2_context`` and spliced around
-   * ``problem_description`` at render time. Accumulative: each L2 fire merges
-   * deltas rather than rewriting wholesale. */
+  /** Operator-authored task framing, spliced around ``problem_description`` at
+   * render time. The five ``FRAMING_FIELDS`` are frozen for the run —
+   * ``TaskDecomposition.merge`` refuses them and the L2 wire schema declares
+   * none of them; only ``upstream_context`` / ``downstream_context`` are
+   * mutable. */
   task_context: unknown;
 }
 
@@ -924,6 +926,14 @@ export interface CommandAcceptedBody {
   ledger_sequence: number;
 }
 
+/** The draft says what the campaign IS; these limits bound what THIS launch spends. */
+export interface StartCheckinPayload {
+  halt_at_accuracy: number | null;
+  spend_budget_usd: number | null;
+  token_budget: number | null;
+  campaign_id: string;
+}
+
 export interface CampaignSummary {
   /** Campaign id ({dataset}__{rand6}) — one RUN of an origin */
   campaign_id: string;
@@ -984,6 +994,15 @@ export interface CampaignPipelineResponse {
   /** The inner pipeline this chain nests, if any — the L4 drill-in, on this read */
   nests: NestedPipelineRef | null;
   is_single_node: boolean;
+}
+
+/** What `POST /commands/fork-cycle` would decide about this steer, asked without forking. */
+export interface ForkPreviewResponse {
+  /** The overlay picks a responder the campaign's frozen `optimizer_narrowing`
+   * never sanctioned, or touches a cost lever, which no permitted set can
+   * sanction. True means the fork is the ADR-0005 babysit act: it needs
+   * `campaign.babysit` (404 without it) and stamps the branch grade C. */
+  steers_disallowed_model: boolean;
 }
 
 /** Where one occurrence of an edit was measured on disk. */

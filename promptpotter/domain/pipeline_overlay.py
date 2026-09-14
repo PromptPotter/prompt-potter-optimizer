@@ -32,6 +32,7 @@ __all__ = [
     "overlay_is_locked_axis_only",
     "overlay_sets_model_outside_allowed",
     "permitted_models_from_narrowing",
+    "steers_disallowed_model",
 ]
 
 
@@ -116,6 +117,18 @@ def overlay_sets_model_outside_allowed(
         if model is not None and model not in set((permitted or {}).get(node, ())):
             return True
     return False
+
+
+def steers_disallowed_model(
+    campaign_config: Mapping[str, Any] | None, overlay: dict[str, Any] | None
+) -> bool:
+    """The babysit verdict a fork draws, from the campaign manifest the gate reads it off.
+
+    The two steps below are one question, and splitting them is what let the browser answer it
+    against a different list than ``fork-cycle`` dispatch did."""
+    return overlay_sets_model_outside_allowed(
+        overlay, permitted_models_from_narrowing((campaign_config or {}).get("optimizer_narrowing"))
+    )
 
 
 def fold_output_contract(pp: dict[str, Any] | None, schema: PipelineSchema) -> None:

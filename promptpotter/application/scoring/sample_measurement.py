@@ -14,12 +14,17 @@ import httpx
 from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
 from promptpotter.application.optimization.pobb.classification import terminal_ranking
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
+from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.evaluators import materialize_sample_values
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.formula.compiler import ScoringFormulaError
 from promptpotter.application.scoring.row_diagnostics import rank_ground_truth
 from promptpotter.config.settings import NO_RESULT
-from promptpotter.domain.l4.proxies import INNER_FACT_KEYS, PARENT_LEVEL_SE_KEY
+from promptpotter.domain.l4.proxies import (
+    INNER_FACT_KEYS,
+    PARENT_LEVEL_SE_KEY,
+    InnerCycleUnscoreableError,
+)
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results_health import classify_result, terminal_node
 from promptpotter.domain.run_records import PhaseRecord
@@ -396,36 +401,40 @@ async def measure_sample(
             except Exception:
                 logger.exception("backend warning ledger emit failed; continuing")
 
-        ledger = session.state.ledger
-        heartbeat_task: asyncio.Task[None] | None = None
-        if ledger is not None:
-            heartbeat_task = asyncio.create_task(
-                heartbeat(
-                    ledger,
-                    call_id=f"scoring:{sample.id}",
-                    node="backend_scoring",
-                    round_num=_CURRENT_ROUND.get(),
-                    start_monotonic=time.monotonic(),
-                )
+        client = session.backend_client
+        envelope = CellEnvelope(
+            client.cell_envelope_s(query, wire_params), label=f"{sample.id}:{query[:40]}"
+        )
+        # Created UNCONDITIONALLY and OUTSIDE the envelope scope: this loop carries the envelope's
+        # only sighting of a machine sleep, and its teardown must not unwind inside the timeout.
+        heartbeat_task = asyncio.create_task(
+            heartbeat(
+                session.state.ledger,
+                call_id=f"scoring:{sample.id}",
+                node="backend_scoring",
+                round_num=_CURRENT_ROUND.get(),
+                start_monotonic=time.monotonic(),
+                on_suspend=envelope.on_suspend,
             )
+        )
         try:
-            resp = await session.backend_client.run_query(
-                query, pipeline_params=wire_params, on_warning=_emit_backend_warning
-            )
+            async with envelope:
+                resp = await client.run_query(
+                    query, pipeline_params=wire_params, on_warning=_emit_backend_warning
+                )
         finally:
             # Cancel whether the query succeeded or raised — an in-flight task survives and
             # keeps appending progress records against a closed call.
-            if heartbeat_task is not None:
-                heartbeat_task.cancel()
-                try:
-                    await heartbeat_task
-                except asyncio.CancelledError:
-                    pass
-                except Exception:
-                    logger.warning(
-                        "heartbeat task for backend scoring raised on teardown",
-                        exc_info=True,
-                    )
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.warning(
+                    "heartbeat task for backend scoring raised on teardown",
+                    exc_info=True,
+                )
         data = resp.get("data", {})
 
         # The head of the TERMINAL ranker's output, read through the schema rather than a
@@ -468,6 +477,11 @@ async def measure_sample(
                     terminal_node = node.name
         if terminal_node is not None:
             pd["terminal_node"] = terminal_node
+
+        # The envelope's own final reading, taken AFTER its scope closed. Here and not in a
+        # connector: this is the one seam that HOLDS an envelope, so every backend gets the answer.
+        if envelope.budget_s is not None:
+            pd["unworked_s"] = envelope.unworked
 
         # The bare question, where the dataset declared one distinct from `query` — banked so a
         # JUDGE can read it, since a judge is handed this row and never the `Sample`. Absent on
@@ -538,6 +552,11 @@ async def measure_sample(
         return _error_result(sample, error_msg, category=ErrorCategory.CONNECTION)
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise
+    except InnerCycleUnscoreableError as exc:
+        # The cell RAN and there is nothing to grade. Its own category, so no reader takes a cut
+        # we made, or a reward the backend never produced, for the configuration under test.
+        logger.warning("measure_sample unscoreable for %s: %s", query[:60], exc)
+        return _error_result(sample, str(exc), category=ErrorCategory.UNSCOREABLE)
     except Exception as exc:
         logger.warning("measure_sample failed for %s: %s", query[:60], exc)
         return _error_result(sample, str(exc), category=ErrorCategory.UNKNOWN)

@@ -131,7 +131,7 @@ off a doc.
 
 Constants moved out of `campaign.yaml` (they live next to their consumer): L1 candidate-generation temperature (the `creativity` arg in `l1/generate.py`, driven by `l1_overrides.creativity`, defaulting to the `l1_generate` node temperature), L2/L3 transition temperatures (the `l2_context`/`l3_plan` node temperatures), runaway-loop ceiling (`runner/loop.py::HARD_CAP`), stale-data recovery ladder (`scoring/sample_measurement.py`). PoBB lock-in went the other way and stayed campaign config — `pobb_lock_in` / `pobb_lock_in_n_min` / `mechanisms.elimination.leader_lock_in`.
 
-The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no opt-in flag. L2 and L3 are always-on architecture.
+The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no opt-in flag. Which LAYERS the loop may reach is `optimization.escalation_ladder` (`full` / `l1_l2` / `l1`), the ablation switch; the individual rules are not separately toggleable.
 
 ### Other files
 

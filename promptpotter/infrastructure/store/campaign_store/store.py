@@ -37,6 +37,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_rulers,
 )
 from promptpotter.infrastructure.store.io import (
+    iter_files,
     read_json,
     read_json_optional,
     read_json_tolerant,
@@ -184,8 +185,8 @@ def _strip_to_keepsake(campaign_dir: Path) -> None:
                 continue
             for p in [
                 f
-                for f in cdir.rglob("*")
-                if f.is_file() and not classify(f.relative_to(campaign_dir)).keepsake
+                for f, _st in iter_files(cdir)
+                if not classify(f.relative_to(campaign_dir)).keepsake
             ]:
                 unlink_robust(p)
             _prune_empty_dirs(cdir)

@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.connector import (
+    CellEnvelopeSeconds,
     ConnectorExecution,
     MeasuredUnit,
     SessionProtocol,
@@ -103,6 +104,18 @@ class Connector:
     ``_bind_run_controls`` binds an arming only under ``run_optimization``, so the round spends
     every press, and a screen declares its depth at launch instead
     (``application/diagnostics/seed_screen.py``)."""
+
+    cell_envelope_s: CellEnvelopeSeconds | None = None
+    """Seconds ONE cell of this backend may SPEND, resolved per cell. ``None`` (default) = this
+    backend's cells carry no wall-clock bound.
+
+    **It bounds the SUM.** Every await inside a cell is bounded on its own and nothing bounds them
+    together, so a throttle storm stretches one cell across tens of minutes with no surface saying
+    so. Time the cell was not ALLOWED to spend is handed back at the seam that enforces this
+    (``application/scoring/cell_envelope.py``), leaving the cell's OWN work.
+
+    **Reaching it is UNSCOREABLE, never a zero** — a cut we made is not an answer, so the row
+    carries :attr:`~promptpotter.shared.errors.ErrorCategory.UNSCOREABLE` and no verdict."""
 
     measured_unit: MeasuredUnit = "sample"
     """What one measured row of this backend is CALLED: ``cell`` where it is a whole inner campaign

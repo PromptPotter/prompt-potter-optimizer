@@ -12,6 +12,7 @@ from pydantic import Field
 from promptpotter import connectors
 from promptpotter.application.campaign_config import (
     CampaignConfig,
+    EscalationLadder,
     MechanismConfig,
     OptimizationConfig,
     PromptBlockCatalogue,
@@ -55,6 +56,12 @@ class OptimizationOverrides(StrictModel):
         description="How the reusable prompt block library reaches the "
         "optimizer: ``guidance`` (suggest blocks, it may still invent), "
         "``restrict`` (blocks only), ``off`` (no library).",
+    )
+    escalation_ladder: EscalationLadder = Field(
+        OptimizationConfig.model_fields["escalation_ladder"].default,
+        description="How far the loop may escalate: ``full`` (L1→L2→L3), "
+        "``l1_l2`` (no replan), ``l1`` (no escalation at all — the L1-only "
+        "ablation arm, where a stall is simply another L1 round).",
     )
     mechanisms: MechanismConfig = Field(
         default_factory=MechanismConfig,
@@ -399,6 +406,7 @@ def default_campaign_config(draft: DraftCampaign) -> CampaignConfig:
     optimization: dict[str, Any] = {"max_rounds": overrides["max_rounds"]}
     optimization.update(dict(connector.default_optimization))
     optimization["prompt_block_catalogue"] = overrides["prompt_block_catalogue"]
+    optimization["escalation_ladder"] = overrides["escalation_ladder"]
     optimization["mechanisms"] = dict(overrides["mechanisms"])
     return load_campaign_config(
         {

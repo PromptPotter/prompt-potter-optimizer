@@ -83,65 +83,13 @@ export function effortLadder(row: ConfigRow, caps: ModelCapability | undefined):
   return caps?.reasoning_efforts ?? row.options;
 }
 
-/** The cost-lever keys, read off the SERVED rows — the client's half of the Python
- *  `PARAM_FORBIDDEN_KEYS`.
- *
- *  A UNION across nodes, not a per-node map, because the server's set is a module constant applied
- *  to every node alike (`domain/search_point.py`); derived per node, a node the schema has not
- *  served would test against an empty set and let a cost lever through.
- *
- *  The two literals are a FLOOR, not the answer. They cover the window where the schema has not
- *  loaded and the panel is still showing the seed overlay; everything above them comes from
- *  `never_axis`, which is what stops this drifting the way it already did once — `route_order` was
- *  added server-side and stayed locked in the browser and free on the wire, because the client had
- *  spelled `provider` by hand and nothing made it spell the second. */
-export function costLeverKeys(
-  schema: Record<string, NodeConfigParam[]> | null | undefined,
-): Set<string> {
-  const out = new Set(["provider", "route_order"]);
-  for (const params of Object.values(schema ?? {})) {
-    for (const p of params) if (p.never_axis === "cost_lever") out.add(p.key);
-  }
-  return out;
-}
-
-/** Client twin of the Python `overlay_sets_model_outside_allowed`
- *  (`promptpotter/domain/pipeline_overlay.py`). True iff a fork's `pipeline_overlay` steers a node
- *  to a responder the origin has NOT permitted — the ADR-0005 babysit (grade-C) trigger. Keeps the
- *  client warning on the SAME predicate the server gate enforces at `fork-cycle`.
- *
- *  It takes the SERVED schema rather than two derived arguments so both halves come off one
- *  document and cannot be passed from different reads: the permitted sets per node
- *  (`permittedModels`) and the cost-lever keys (`costLeverKeys`) are two projections of it.
- *
- *  *permitted* is per NODE — the frozen `config.optimizer_narrowing[node].param_allowed_values
- *  .model`, which is the ONE permitted set. A node absent from it permits nothing, the restrictive
- *  default. A cost lever has no permitted set that could sanction it, so an edit to one always
- *  counts.
- *
- *  **This is a WARNING, not the gate.** The verdict belongs to the server, which reaches it only
- *  inside `fork-cycle` dispatch — so until a fork preview serves it, deleting this costs the
- *  operator the pre-confirm warning entirely. */
-export function overlaySetsModelOutsideAllowed(
-  overlay: Record<string, unknown> | null | undefined,
-  schema: Record<string, NodeConfigParam[]> | null | undefined,
-): boolean {
-  const permitted = permittedModels(schema);
-  const levers = costLeverKeys(schema);
-  for (const [node, cfg] of Object.entries(overlay ?? {})) {
-    if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) continue;
-    const c = cfg as Record<string, unknown>;
-    if (Object.keys(c).some((k) => levers.has(k))) return true;
-    const model = c.model;
-    if (model != null && !new Set(permitted[node] ?? []).has(String(model))) return true;
-  }
-  return false;
-}
-
 /** The per-node permitted model sets, read off the SERVED rows — `permitted` when the gate accepts
  *  something narrower than the menu, and `options` when it does not. That `null` is not `[]` is the
  *  whole distinction: `[]` says nothing may be picked, while `null` says `options` IS the permitted
  *  set (`domain/pipeline_schema.py::NodeConfigParam.permitted`).
+ *
+ *  DISPLAY of a served set, never a verdict over it: whether a steer is the babysit act is
+ *  answered by `POST /campaigns/{id}/fork-preview` and nothing here.
  *
  *  Off THESE rows and never off the campaign's frozen `config.optimizer_narrowing`: that one
  *  answers for the mint, so a fork or a cycle seed that moved the set steers against the wrong
@@ -342,8 +290,8 @@ export function configRows(
           baseValue,
           locked: false,
           // The whole MENU, not the permitted subset: a babysit-capable operator may steer a fork
-          // outside it deliberately, taking the grade-C taint. `SteerForkPanel` warns off
-          // `permittedModels` instead — restricting here would delete the act.
+          // outside it deliberately, taking the grade-C taint. `SteerForkPanel` warns off the
+          // SERVED verdict instead — restricting here would delete the act.
           allowed: p.options,
           stated: false,
           fromCandidate,

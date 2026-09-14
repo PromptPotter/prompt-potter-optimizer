@@ -237,6 +237,9 @@ _CHANNEL_READERS: dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], flo
     # is the synonym the root CLAUDE.md forbids.
     "ground_truth_rank": lambda row, _pd: _number(row.get("ground_truth_rank")),
     "latency": lambda row, _pd: recorded_cost_s(cast("QueryMeasurement", row)),
+    # Beside `latency` and not with the L4 block below, because the envelope that measures it bounds
+    # EVERY backend's cell: a slow reading means nothing until read against the box it ran on.
+    "unworked": lambda _row, pd: _number(pd.get("unworked_s")),
     # The seed's own trajectory. `lift` is what the outer loop SCORES — the mean over the round
     # budget — while `final_lift` is where it actually ended and `peak_lift` the best it reached;
     # a run can score well and end badly, and only carrying all three can show it.
@@ -246,7 +249,6 @@ _CHANNEL_READERS: dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], flo
     "peak_lift": lambda _row, pd: _number(pd.get("inner_peak_lift")),
     "rounds": lambda _row, pd: _number(pd.get("inner_rounds_ran")),
     "round_budget": lambda _row, pd: _number(pd.get("inner_round_budget")),
-    "unworked": lambda _row, pd: _number(pd.get("inner_unworked_s")),
     "cost": lambda _row, pd: _own_else_steps(
         _number(pd.get("inner_spend_usd")), _step_tokens_sum(pd, "cost_usd")
     ),
