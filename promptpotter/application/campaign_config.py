@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CampaignConfig",
+    "DeterminismClamp",
     "Estimand",
     "Knob",
     "LivesConfig",
@@ -185,6 +186,42 @@ class LivesConfig(StrictModel):
         4,
         ge=1,
         description="Bank ceiling — lives never exceed this no matter how long the improving streak runs.",
+    )
+
+
+class DeterminismClamp(StrictModel):
+    """What a campaign PINS on every optimizer call — how the draw is made and which host makes
+    it. Applied last, so it beats the node's file config and any per-call override alike."""
+
+    temperature: Annotated[float | None, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+        None,
+        ge=0.0,
+        le=2.0,
+        description=(
+            "Sampling temperature EVERY optimizer node runs at, overriding its own — including "
+            "`l1_generate`'s `temperature: creativity`, the dominant run-to-run noise source. "
+            "`None` (default) leaves each node the value its pipeline file declares."
+        ),
+    )
+    seed: Annotated[int | None, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+        None,
+        description=(
+            "Sampling seed every optimizer node sends. Temperature 0 pins the distribution and "
+            "not the draw, so without a seed the provider is still free to sample differently "
+            "on identical input. It rides `hash_call`, so two campaigns differing only here "
+            "bank separate replies rather than serving one campaign's answer under the other's "
+            "name. `None` (default) sends none."
+        ),
+    )
+    route_order: Annotated[list[str] | None, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+        None,
+        description=(
+            "The upstream HOSTS behind the gateway, in order, every optimizer call is routed "
+            "to (the gateway's own `provider_name`s — read them off `served_by` in the ledger, "
+            "never from a catalogue). Hosts of one model disagree systematically, so an "
+            "unpinned route makes a measurement whose producer nothing can name. `None` "
+            "(default) lets the gateway re-rank per call."
+        ),
     )
 
 
@@ -442,6 +479,17 @@ class OptimizationConfig(StrictModel):
             "switch is gated — cold/non-discriminating datasets stay 1PL — so this "
             "only ever changes the ruler where 2PL provably fits better out-of-sample; "
             "it can never regress a dataset. Off → always 1PL (the slice-2 behaviour)."
+        ),
+    )
+    # No `Knob` — the walk descends into DeterminismClamp, so its three fields are the knobs.
+    determinism: DeterminismClamp | None = Field(
+        None,
+        description=(
+            "Pin the optimizer's decoding and its route so a re-run reproduces this "
+            "campaign's trajectory and can name the host that produced each number. `None` "
+            "(default) → every node runs at its own file settings and the gateway routes per "
+            "call. An L4 inner cell is one caller among the rest: its panel's "
+            "`inner_optimizer_temperature` and its cell seed arrive here."
         ),
     )
     mechanisms: MechanismConfig = Field(default_factory=MechanismConfig)

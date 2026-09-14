@@ -44,7 +44,7 @@ What this file owns, and where each rule is stated. Names only — the section i
 
 ## The archive is not scoped by campaign
 
-**`measurements/` is ONE content-addressed tree per workspace, it outlives the campaigns that filled it, and a row is filed under the dataset it MEASURED — never under the campaign that paid for it.** So "what did this campaign cost on disk" is not a question the archive answers, and **counting beats recalling**: `compact-archive compact --dataset <name>` dry-runs and prints the split by label. The three consequences that have each been read backwards, and the reversibility that makes them survivable, are [`infrastructure/CLAUDE.md`](promptpotter/infrastructure/CLAUDE.md) § The archive is not scoped by campaign.
+**`measurements/` is ONE content-addressed tree per workspace, it outlives the campaigns that filled it, and a row is filed under the dataset it MEASURED — never under the campaign that paid for it.** So "what did this campaign cost on disk" is not a question the archive answers, and **counting beats recalling**: `compact-archive inventory --dataset <name>` prints runs, cells, bytes and replay rate by dataset, label and age. The three consequences that have each been read backwards, and the reversibility that makes them survivable, are [`infrastructure/CLAUDE.md`](promptpotter/infrastructure/CLAUDE.md) § The archive is not scoped by campaign.
 
 ## STOP — no backward compatibility, ever
 

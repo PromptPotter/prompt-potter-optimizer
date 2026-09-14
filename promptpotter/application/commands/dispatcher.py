@@ -665,17 +665,26 @@ class CommandDispatcher:
         return {"slug": result.slug}
 
     def _apply_compact_archive(self, payload: CompactArchivePayload) -> dict[str, Any]:
-        """Three modes, one application-layer function each — this arm only picks and reports.
+        """The three WRITE modes, one application-layer function each — this arm only picks and
+        reports. The verb's fourth mode, ``inventory``, is a census and reaches the terminal alone:
+        this highway records a `CommandRecord` per call, which would bill an act changing nothing.
 
         A refusal is an OUTCOME, not an exception: ``archive_writers`` is on the response either
         way, so a client learns "a cycle is still appending" from the same shape as a success
         rather than from an error it has to special-case."""
-        run = {
-            "compact": compact_measurement_archive,
-            "restore": restore_measurement_archive,
-            "purge-cold": purge_cold_store,
-        }[payload.mode]
-        report = run(self._stores, dataset=payload.dataset, apply=payload.apply)
+        match payload.mode:
+            case "compact":
+                report = compact_measurement_archive(
+                    self._stores, dataset=payload.dataset, apply=payload.apply
+                )
+            case "restore":
+                report = restore_measurement_archive(
+                    self._stores, dataset=payload.dataset, apply=payload.apply
+                )
+            case "purge-cold":
+                report = purge_cold_store(
+                    self._stores, dataset=payload.dataset, apply=payload.apply
+                )
         return report.model_dump(mode="json")
 
     def _apply_register_backend(self, payload: RegisterBackendPayload) -> None:

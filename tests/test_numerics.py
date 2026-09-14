@@ -943,7 +943,7 @@ def test_an_instrument_reads_on_the_scale_its_spawner_fixed(tmp_path: Path) -> N
     assert _given_ruler(session) is None
 
     def _inside_instrument() -> Any:
-        enter_instrument_mode(evidence_epoch=frozenset(), optimizer_clamp=None, ruler=given)
+        enter_instrument_mode(evidence_epoch=frozenset(), ruler=given)
         return _given_ruler(session)
 
     # Its own context, as a real spawn binds it — so the scale cannot leak back to the spawner.

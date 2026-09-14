@@ -426,9 +426,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_compact = sub.add_parser(
         "compact-archive",
-        help="Move the fields nothing reads out of candidate measurement rows into a gzip cold "
-        "store beside them (`compact`), put them back (`restore`), or delete the store "
-        "(`purge-cold`). A measurement row is paid LLM spend, so `compact` never drops a field — "
+        help="Count what the archive holds (`inventory`), move the fields nothing reads out of "
+        "candidate measurement rows into a gzip cold store beside them (`compact`), put them back "
+        "(`restore`), or delete the store (`purge-cold`). `inventory` writes nothing and refuses "
+        "nothing: runs, cells, bytes and replay rate by dataset, run-label family and age, plus "
+        "the index rows carrying no detail file, which is what makes every other count an upper "
+        "bound. It is what a reclaim is sized against, so it is taken BEFORE a bulk delete — the "
+        "delete destroys its own evidence. "
+        "A measurement row is paid LLM spend, so `compact` never drops a field — "
         "it moves `hit`/`scored`/`objective` plus pipeline_data's `reasoning_trace`, "
         "`result_ranking`, `final_ranking` and `total_time`, and stamps the run header with what "
         "left. `origin` and `round_parent` runs are never touched: they serve the overwhelming "
@@ -437,7 +442,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_compact.add_argument(
         "mode",
-        choices=["compact", "restore", "purge-cold"],
+        choices=["inventory", "compact", "restore", "purge-cold"],
         help="Which step to run.",
     )
     p_compact.add_argument(
@@ -445,7 +450,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Scope to one dataset (default: every dataset).",
     )
-    p_compact.add_argument("--apply", action="store_true", help="Write (default: report only).")
+    p_compact.add_argument(
+        "--apply",
+        action="store_true",
+        help="Write (default: report only). `inventory` never writes and ignores it.",
+    )
 
     p_restamp = sub.add_parser(
         "restamp",

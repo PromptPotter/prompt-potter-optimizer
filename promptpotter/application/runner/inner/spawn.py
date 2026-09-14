@@ -439,18 +439,11 @@ async def _run_inner_campaign(
 
     # THE declaration: this cycle is a measurement instrument, not a campaign. ONE call binds
     # every hermetic property in this task's context copy, so none can be forgotten piecemeal by
-    # a future code path. The clamp's seed is the cell's, matching the target model's, so every
-    # candidate for a cell shares one random stream (CRN).
-    clamp = (
-        None
-        if spec.inner_optimizer_temperature is None
-        else {"temperature": spec.inner_optimizer_temperature, "seed": spec.seed}
-    )
+    # a future code path.
     # THE scale, not a scale: the outer round fixed one, so every candidate measured against this
     # cell reads its origin at the same θ.
     enter_instrument_mode(
         evidence_epoch=capture_evidence_epoch(store),
-        optimizer_clamp=clamp,
         ruler=ctx.rulers.get(spec.inner_dataset),
     )
 

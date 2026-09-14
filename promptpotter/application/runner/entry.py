@@ -19,6 +19,7 @@ from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     compute_optimizer_prompt_hashes,
     load_optimizer_set_overrides,
+    set_determinism_clamp,
     set_optimizer_prompt_overrides,
 )
 from promptpotter.application.optimization.l1.stats import round_clocks
@@ -780,6 +781,9 @@ async def run_optimization(
         set_optimizer_prompt_overrides(
             load_optimizer_set_overrides(campaign_config.optimization.optimizer_set)
         )
+    # UNCONDITIONAL, unlike the set above: this task may be an inner cell carrying the outer
+    # campaign's pin in its context copy, and a cell measures under its own panel's clamp or none.
+    set_determinism_clamp(campaign_config.optimization.determinism)
     try:
         prep = await _prepare_run(
             dataset,

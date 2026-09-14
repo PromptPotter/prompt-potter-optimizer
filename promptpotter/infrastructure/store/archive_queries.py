@@ -41,6 +41,7 @@ __all__ = [
     "replace_measurement_detail",
     "reset_measurement_run",
     "reusable_results",
+    "run_signatures",
     "runs_since",
     "sample_fold_rows",
     "write_cold_payload",

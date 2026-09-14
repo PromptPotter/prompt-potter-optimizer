@@ -114,7 +114,16 @@ LEDGER_BASELINE = {
     # may this node run" and "which models may a human steer a fork to un-tainted" stopped being
     # two questions, and the second field could only disagree with the first. Its command kind,
     # store method, CLI verb and dashboard panel went with it.
-    "config_leaf_fields": 40,
+    # +3: `DeterminismClamp.{temperature,seed,route_order}` — what a campaign pins on every
+    # optimizer call. Three leaves and not one: the draw and the HOST are different decisions with
+    # different evidence behind them (a temperature is read off the noise it removes, a route off
+    # `served_by` in the ledger), and pinning either without the other is a real, common state.
+    # They fold into no neighbour — the node's pipeline file is install content shared by every
+    # campaign, so a per-campaign pin has nowhere else to live, and `pipeline_overlay` addresses
+    # BACKEND nodes. `Scope.POLICY` because past rounds stay valid; `Estimand.SEARCH` because what
+    # moves is the optimizer's trajectory. They replace `InstrumentMode.optimizer_clamp`, which was
+    # reachable only from inside an L4 inner asyncio task.
+    "config_leaf_fields": 43,
     # +1: `QUEUE_MAX_WAIT_S` — how long a launch may wait in line before it is withdrawn. It is a
     # setting and not a constant because it is the one queue number a HOST has to be able to
     # answer for: on a shared box it decides when someone else's waiting launch is given up on.
@@ -312,7 +321,12 @@ LEDGER_BASELINE = {
     # cuts both ways: a cell left unsolved convicts, and an arm that solves every cell alike is
     # degenerate and CORRECT, so the ceiling exemption is what stops the fix eating the best arm.
     # (test_numerics § PoBB elimination)
-    "test_functions": 183,
+    # +1: a campaign that pins its draw and its route RUNS pinned, and two pins bank apart. The
+    # clamp merges last or `l1_generate`'s per-call `temperature` survives it; the route reaches
+    # `hash_call` or one host's answer is replayed under another's name. Silent both ways — every
+    # number renders — and the banked row cannot be told from one the pinned route produced.
+    # (test_integrity § 1)
+    "test_functions": 184,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

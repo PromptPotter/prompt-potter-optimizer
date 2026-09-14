@@ -305,12 +305,12 @@ class OpenAICompatibleClient(LLMClientBase):
             # first attempts returned 27,939 / 32 / 28,778 chars had repairs come back at
             # 18 / 0 / 0 — the retry was likelier to fail than the call it was repairing.
             #
-            # So a size- or emptiness-driven failure gets a CLEAN RE-ASK: the identical
-            # request, once more. No optimizer node pins a seed and all run at temperature
-            # 0.3-0.5, so that is a second independent sample — which both stands a real
-            # chance of succeeding AND answers the question the classifier would otherwise
-            # have to guess at. Fails the same way twice ⇒ a property of the prompt. Fails
-            # differently, or succeeds ⇒ the moment, not the prompt (`.reproduced`).
+            # So a size- or emptiness-driven failure gets a CLEAN RE-ASK: the same request
+            # with any pinned seed ADVANCED, so it stays a second independent sample at every
+            # temperature above 0 — which both stands a real chance of succeeding AND answers
+            # the question the classifier would otherwise have to guess at. Fails the same way
+            # twice ⇒ a property of the prompt. Fails differently, or succeeds ⇒ the moment,
+            # not the prompt (`.reproduced`).
             #
             # Genuine schema-noncompliance — substantial content that parsed but did not
             # bind — keeps the repair: there, showing the model its own error is the
@@ -346,12 +346,17 @@ class OpenAICompatibleClient(LLMClientBase):
             # also gives this branch a `reproduced` reading, which is what separates a bad
             # prompt from a bad moment. A size- or emptiness-driven failure still gets the clean
             # re-ask alone: the repair is the move that cannot help there.
+            # The clamp's pin is ADVANCED rather than dropped: dropping it would take the rescue
+            # measurement off the route the campaign declared, which is the validity the pin buys.
+            reask_params = dict(request_params)
+            if (pinned_seed := reask_params.get("seed")) is not None:
+                reask_params["seed"] = pinned_seed + 1
             ladder = (
-                [(RETRY_CLEAN_REASK, dict(request_params))]
+                [(RETRY_CLEAN_REASK, reask_params)]
                 if clean_reask
                 else [
                     (RETRY_SCHEMA_REPAIR, repair_params),
-                    (RETRY_CLEAN_REASK, dict(request_params)),
+                    (RETRY_CLEAN_REASK, reask_params),
                 ]
             )
             for attempt_no, (retry_kind, retry_params) in enumerate(ladder, start=1):

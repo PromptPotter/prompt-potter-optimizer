@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from promptpotter.application.campaign_config import DeterminismClamp
 from promptpotter.application.optimization.dispatch.injections.registry import validate_template
 from promptpotter.config.paths import optimizer_assets_root, optimizer_pipeline_path
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
@@ -24,7 +25,6 @@ from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.store.io import read_json, read_yaml
 from promptpotter.shared.hashing import shapes_optimizer_prompt
-from promptpotter.shared.instrument import instrument_mode
 
 shapes_optimizer_prompt(__name__)
 
@@ -46,6 +46,7 @@ __all__ = [
     "resolve_node_layout",
     "resolve_node_override",
     "resolved_overrides",
+    "set_determinism_clamp",
     "set_optimizer_prompt_overrides",
 ]
 
@@ -89,11 +90,24 @@ def set_optimizer_prompt_overrides(overrides: dict[str, dict[str, Any]] | None) 
     _OPTIMIZER_PROMPT_OVERRIDES.set(overrides or None)
 
 
+# This cycle's `OptimizationConfig.determinism`, bound at `runner/entry.py::run_optimization`. A
+# ContextVar like its neighbour: each L4 level runs in its own task, so no pin crosses a level.
+_DETERMINISM: contextvars.ContextVar[DeterminismClamp | None] = contextvars.ContextVar(
+    "determinism_clamp", default=None
+)
+
+
+def set_determinism_clamp(clamp: DeterminismClamp | None) -> None:
+    _DETERMINISM.set(clamp)
+
+
 def get_optimizer_config_overrides() -> dict[str, Any] | None:
-    """The optimizer decoding clamp, applied LAST so it beats both the node's file config and any
-    per-call override. Only instrument mode sets it — that is what makes an inner cycle near-deterministic."""
-    mode = instrument_mode()
-    return mode.optimizer_clamp if mode is not None else None
+    """The campaign's decoding + route clamp, applied LAST so it beats both the node's file config
+    and any per-call override. An unpinned field is ABSENT, never a ``None`` that would erase one."""
+    clamp = _DETERMINISM.get()
+    if clamp is None:
+        return None
+    return clamp.model_dump(exclude_none=True) or None
 
 
 def load_optimizer_set_overrides(opt_set: str) -> dict[str, dict[str, Any]]:

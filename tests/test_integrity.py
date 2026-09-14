@@ -219,6 +219,74 @@ def test_layout_only_override_moves_optimizer_prompt_hash() -> None:
         set_optimizer_prompt_overrides(None)
 
 
+async def test_the_determinism_clamp_outranks_every_other_layer_and_keys_the_bank(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A campaign that PINS its draw and its route must actually run pinned, and two pins must
+    not share a banked reply.
+
+    Both halves are silent and both destroy a measurement's identity. `l1_generate` passes
+    `temperature=creativity` as a per-call override, so a clamp merged anywhere but last leaves
+    the loudest noise source running while every surface reports the campaign as pinned — the
+    run is then unreproducible and nothing says so. And hosts of one model disagree
+    SYSTEMATICALLY rather than randomly (measured: on a `justlogic-d234` query Groq answered
+    FALSE 28/28 where every other host answered Uncertain), so a `route_order` that reached the
+    wire without reaching `hash_call` would replay one route's answer under the other's name for
+    the life of the cache — unrecoverable, because the row on disk is indistinguishable from one
+    the pinned route really produced.
+    """
+    from promptpotter.application.campaign_config import DeterminismClamp
+    from promptpotter.application.optimization.dispatch.llm_call import call as call_mod
+    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+        set_determinism_clamp,
+    )
+    from promptpotter.infrastructure.llm.response import LLMResponse
+    from promptpotter.infrastructure.store.stores import LLMReuseCache
+
+    sent: list[dict[str, Any]] = []
+
+    class _Recorder:
+        async def chat(self, **kwargs: Any) -> LLMResponse:
+            sent.append(kwargs)
+            return LLMResponse(content="ok", model="m")
+
+    monkeypatch.setattr(call_mod, "get_llm_client", lambda _provider: _Recorder())
+    cache = LLMReuseCache(tmp_path, "optimizer_reuse")
+    ctx = call_mod.LLMCallContext(cache=cache)
+
+    async def ask(clamp: DeterminismClamp | None) -> None:
+        set_determinism_clamp(clamp)
+        await call_mod.llm_call(
+            [{"role": "user", "content": "q"}],
+            config={"provider": "openrouter", "model": "m", "temperature": 0.9},
+            context=ctx,
+            temperature=0.7,
+        )
+
+    try:
+        pinned = DeterminismClamp(temperature=0.0, seed=7, route_order=["Alibaba"])
+        await ask(pinned)
+        assert sent[0]["temperature"] == 0.0, (
+            "the node's file value or the per-call override beat the clamp — the campaign "
+            "reports itself pinned and runs unpinned"
+        )
+        assert sent[0]["seed"] == 7
+        assert sent[0]["route_order"] == ["Alibaba"]
+
+        # Same prompt, same model, a different host: a second measurement, so a second entry.
+        await ask(pinned.model_copy(update={"route_order": ["Baidu"]}))
+        assert len(sent) == 2, "the second route replayed the first route's banked answer"
+        assert len(list((tmp_path / "optimizer_reuse").glob("*.json"))) == 2
+
+        # And an unpinned campaign is left alone rather than handed a `None` for every key.
+        await ask(None)
+        assert sent[2]["temperature"] == 0.7
+        assert sent[2]["seed"] is None
+        assert "route_order" not in sent[2]
+    finally:
+        set_determinism_clamp(None)
+
+
 def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
     """A cell's inner campaign is addressed by CONTENT, and two candidates must not collide.
 
@@ -1098,7 +1166,7 @@ def test_earned_block_mining_is_blind_inside_an_instrument() -> None:
         mine_earned_blocks(store)
 
     def _inside_instrument() -> dict[str, Any]:
-        enter_instrument_mode(evidence_epoch=frozenset(), optimizer_clamp=None, ruler=None)
+        enter_instrument_mode(evidence_epoch=frozenset(), ruler=None)
         return mine_earned_blocks(store)
 
     # Own context, exactly as a real spawn binds it — and so the mode cannot leak sideways.

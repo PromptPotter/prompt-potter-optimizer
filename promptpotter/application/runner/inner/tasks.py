@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING, Any
 from pydantic import ConfigDict, Field, ValidationError, model_validator
 
 from promptpotter import connectors
-from promptpotter.application.campaign_config import CampaignConfig, LivesConfig
+from promptpotter.application.campaign_config import (
+    CampaignConfig,
+    DeterminismClamp,
+    LivesConfig,
+)
 from promptpotter.config.settings import DEFAULT_ORIGIN_BUDGET
 from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
 from promptpotter.domain.strict_model import StrictModel
@@ -304,6 +308,12 @@ def inner_instrument_config(
         opt_update["n_variants"] = spec.n_variants
     if spec.lives is not None:
         opt_update["lives"] = spec.lives
+    if spec.inner_optimizer_temperature is not None:
+        # The clamp's seed is the CELL's, matching the target model's, so every candidate measured
+        # on a cell draws one random stream (CRN). Laid ONTO the inner dataset's own declaration.
+        opt_update["determinism"] = (
+            base.optimization.determinism or DeterminismClamp()
+        ).model_copy(update={"temperature": spec.inner_optimizer_temperature, "seed": spec.seed})
     po: dict[str, Any] = {k: dict(v) for k, v in (base.pipeline_overlay or {}).items()}
     node = dict(po.get(llm_node, {}))
     node["seed"] = spec.seed

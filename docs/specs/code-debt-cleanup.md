@@ -181,14 +181,13 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
 
 ## Blocked — named blocker
 
-**Archive hygiene — the corpus it was sized against is gone again:**
-- **Re-test: `ls .promptpotter/projects/*/measurements`, plus `compact-archive compact --dataset
-  <name>` for the per-dataset split.** Operator-confirmed 2026-09-02: most of the measurement data
-  was deleted, so the four pieces below have nothing to be built or verified against — the same
-  state that stranded them the first time. **Build them BEFORE the next bulk delete, never after:**
-  that is the one moment both halves exist at once, something to measure and a delete about to
-  strand it. Order is fixed by the pieces themselves — inventory sizes the reclaim, and the map
-  needs both.
+**Archive hygiene — the reclaim, its attribution, and the map over both:**
+- **Re-test: `compact-archive inventory`**, which is what sizes the three below: runs, cells, bytes
+  and replay rate by dataset / label family / age, plus the index rows carrying no detail file,
+  which is what makes every other count an upper bound. It supersedes the 2026-09-02 reading that
+  most of the measurement data was gone — run it before concluding a piece has nothing to be built
+  against. **Build them BEFORE the next bulk delete, never after:** that is the one moment both
+  halves exist at once, something to measure and a delete about to strand it.
 - **Reclaim** — the destructive counterpart of `delete`, dataset-scoped, dry-run by default,
   refusing while a producer can append, and NAMING what it would strand for a dataset whose rows
   another dataset's inner runs may share. Nothing does this today: `delete` leaves the shared
@@ -201,12 +200,12 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   survives the sandbox being reclaimed. Decide it before the next L4 run banks rows nothing can name.
   ⚠️ **Do not re-file a backfill** — refused once on the merits (the schema a hash covers is
   persisted nowhere), and there is nothing left to backfill from.
-- **Inventory, then the map** — run counts, byte split and replay rate by dataset / label / age off
-  `MeasurementArchive`; then the selector, whose shape is settled and is a REACH MAP rather than a
-  tree of checkboxes: the campaign family on the LEFT (`candidates/Forest` over
-  `iter_family_courses`, which already descends `.inner/`), the archive partitions that selection
-  REACHES on the RIGHT, load-bearing column = what is SHARED with campaigns outside the selection,
-  because an `sp_hash` is not owned by a campaign.
+- **The reach map** — the selector, whose shape is settled and is a REACH MAP rather than a tree of
+  checkboxes: the campaign family on the LEFT (`candidates/Forest` over `iter_family_courses`,
+  which already descends `.inner/`), the archive partitions that selection REACHES on the RIGHT,
+  load-bearing column = what is SHARED with campaigns outside the selection, because an `sp_hash`
+  is not owned by a campaign. The partitions are now countable; which of them a given family
+  reaches is what nothing answers, and it is the join `sp_hash` → `prompt_fields_id` would buy.
 
 **Cross-repo (TermNorm sibling at `OfficeAddinApps/TermNorm-excel/backend-api`):**
 - **The TermNorm `/version` endpoint** is what remains genuinely owed on that side; this repo then

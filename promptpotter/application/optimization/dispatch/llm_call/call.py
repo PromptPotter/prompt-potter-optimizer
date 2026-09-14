@@ -183,15 +183,16 @@ async def llm_call(
     merged = {**_LLM_DEFAULTS, **config, **overrides}
     # The outer L4 cycle evolving the inner OPTIMIZER's model as a searchpoint: ONE model the
     # outer carrier node set, fanned onto every inner node. Beats the node's file config, stays
-    # UNDER the instrument clamp below, which pins only temperature+seed. `hash_call` already
-    # keys on `merged["model"]`, so the swap gets its own cache key for free.
+    # UNDER the determinism clamp below, which pins no model. `hash_call` already keys on
+    # `merged["model"]`, so the swap gets its own cache key for free.
     if node and (specimen := resolve_node_override(node)).model:
         merged["model"] = specimen.model
         if specimen.provider:
             merged["provider"] = specimen.provider
-    # The inner-cycle determinism clamp, applied LAST so it beats both the node's file config
-    # and any per-call override — notably `l1_generate`'s `temperature=creativity`, the
-    # dominant run-to-run noise source. Bound only inside an inner asyncio task.
+    # The campaign's determinism clamp, applied LAST so it beats both the node's file config and
+    # any per-call override — notably `l1_generate`'s `temperature=creativity`, the dominant
+    # run-to-run noise source. Before `route_kwargs` and `hash_call`: a pinned route must reach
+    # the wire AND key the reply it banks.
     if config_overrides := get_optimizer_config_overrides():
         merged = {**merged, **config_overrides}
     llm_client = get_llm_client(merged["provider"])
