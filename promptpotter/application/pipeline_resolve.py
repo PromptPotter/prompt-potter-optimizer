@@ -322,20 +322,6 @@ def _apply_starting_prompts(
     """Assumes the caller checked ``has_dataset_prompts``."""
 
     prompt_nodes = [n for n in filtered.prompt_node_names() if n in active]
-    if not prompt_nodes:
-        # The dataset ships starting prompts but no active node declares
-        # `prompt_info` — so the rendered prompt has nowhere to land and is
-        # dropped before the wire. Silent here = every backend call runs with
-        # an empty system prompt (the bug that made an ingested dataset score
-        # 0% on email-replies). Fail loud: an LLM node must advertise
-        # `prompt_info` in GET /pipeline (or the dataset overlay).
-        logger.warning(
-            "configure_and_apply_pipeline: dataset %r has starting prompts but NO "
-            "prompt-bearing node in the active pipeline %s — the prompt will "
-            "NOT reach the backend. An LLM node must declare `prompt_info`.",
-            dataset_name,
-            active,
-        )
     prompt_info_by_node = {n.name: n.prompt_info for n in filtered.nodes}
     for pnode in prompt_nodes:
         template = load_node_prompt(dataset_dir, pnode, "default")
@@ -365,6 +351,43 @@ def _apply_starting_prompts(
         # config above — never on `current_config`.
         pipeline_params.setdefault(pnode, {})["prompt"] = rendered
         log(f"Starting prompt: {dataset_name}/prompts/[{pnode}|default].yaml → {pnode}")
+
+
+def _validate_prompt_reach(
+    *,
+    filtered: PipelineSchema,
+    active: list[str],
+    has_starting_prompts: bool,
+    dataset_name: str,
+) -> None:
+    """Where this campaign's prompt LANDS, asked before the first call rather than read off a flat
+    scoreboard after it. **Two channels carry one and a dataset needs exactly one:** a node
+    declaring ``prompt_info`` receives the searchpoint's render, or a node naming prompt fields in
+    ``optimizer.param_keys`` mutates its own template — which is why prompt fields in
+    ``param_keys`` cannot be the test (``promptpotter-self`` declares them and no ``prompt_info``,
+    deliberately). With neither open every candidate is byte-identical on the wire."""
+    if any(n in active for n in filtered.prompt_node_names()):
+        return
+    if has_starting_prompts:
+        raise PayloadInvalidError(
+            f"dataset {dataset_name!r} ships starting prompts but no active node in {active} "
+            f"declares `prompt_info`, so the rendered prompt is dropped before the wire and "
+            f"every cell runs with an empty system prompt. An LLM node must declare it, in "
+            f"GET /pipeline or in the dataset's pipeline.yaml.",
+            code="pipeline_config_invalid",
+        )
+    if not any(
+        node.param_keys & set(PROMPT_STRING_FIELDS)
+        for name in active
+        if (node := filtered.get_node(name)) is not None
+    ):
+        raise PayloadInvalidError(
+            f"dataset {dataset_name!r}: no active node in {active} can receive a prompt — none "
+            f"declares `prompt_info` and none names a prompt field in `optimizer.param_keys`, so "
+            f"every candidate scores as the same no-skill call and the round reports a tie it "
+            f"never measured. Declare one of the two on the node the prompt is meant for.",
+            code="pipeline_config_invalid",
+        )
 
 
 def _validate_model_ownership(
@@ -653,7 +676,11 @@ def resolve_pipeline_for_campaign(
         dataset_dir,
         filtered,
         judges=cfg.judges,
-        experiment=experiment_outside_run(dataset_dir),
+        # WHAT THE ADDRESSED CYCLE MEASURED, on the same preference as the declaration above and
+        # for a sharper reason: this feeds the instrument fingerprint, so resolving it live would
+        # recompute a banked campaign's identity off a roster it never ran.
+        experiment=stores.campaigns.read_resolved_experiment(hop)
+        or experiment_outside_run(dataset_dir),
         provenance=provenance,
     )
     if seed is not None and seed.pipeline_overlay:
@@ -729,8 +756,16 @@ def configure_and_apply_pipeline(
         experiment=session.backend_client.workload.experiment,
     )
 
+    ships_prompts = dataset_dir is not None and has_dataset_prompts(dataset_dir)
+    _validate_prompt_reach(
+        filtered=filtered,
+        active=active,
+        has_starting_prompts=ships_prompts,
+        dataset_name=dataset_name,
+    )
+
     # Starting prompts from `{dataset_dir}/prompts/[<node>|default].yaml`, per prompt-bearing node.
-    if dataset_dir is not None and has_dataset_prompts(dataset_dir):
+    if dataset_dir is not None and ships_prompts:
         _apply_starting_prompts(
             pipeline_params,
             filtered=filtered,

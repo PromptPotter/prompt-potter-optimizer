@@ -203,6 +203,16 @@ class CycleLayout:
         return self.cycle_dir / "pipeline.resolved.yaml"
 
     @property
+    def resolved_experiment(self) -> Path:
+        """The panel this cycle actually MEASURED — the connector's ``experiment_file`` with
+        everything it only NAMES resolved to what it named. Beside the declaration because they
+        answer the same question about different halves: that file is the search SPACE, this is the
+        set of CELLS. Landed because a named roster can move under its own name — a Harbor version
+        is an editable registry entry — and a campaign whose cells changed mid-flight is measuring
+        two things under one id."""
+        return self.cycle_dir / "experiment.resolved.yaml"
+
+    @property
     def optimized_surface(self) -> Path:
         """What this cycle OPTIMIZES, and the channel each value reaches the model by — the reading
         of the declaration beside it that the declaration itself cannot give, since it names a key

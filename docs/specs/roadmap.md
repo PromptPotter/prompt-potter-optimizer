@@ -158,7 +158,7 @@ Why the schema steers at all is [`../concepts/structured-output.md`](../concepts
 Open: the **cross-round headline surfaces** + the lineage `/N` badge, and **feeding graduated discrimination `aₛ` into `select_round_subset`**, which is still 1PL ([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md)).
 
 ### Exit gate
-`rounds_to_95 ≤ 5` on `llm_only` AND TermNorm under the same `l1_generate_hash`; `behavior_pass_rate = 1.0` seeded; `proxy_lift_corr ≥ 0.6` over ≥4 paired branches (or modify the rules).
+`rounds_to_separable ≤ 5` on `llm_only` AND TermNorm under the same `l1_generate_hash`; `behavior_pass_rate = 1.0` seeded; `proxy_lift_corr ≥ 0.6` over ≥4 paired branches (or modify the rules). **The clock is separability, never an absolute accuracy** — the admission bar takes datasets scoring 15–40% at origin, so a fixed accuracy target sits above their ceiling by construction and closes on nothing.
 
 ### Host coupon + BYO per-user API keys
 **The whole mechanism is owned by [`ADR-0003`](../adr/0003-spend-and-tenancy.md) § Host coupon + BYO keys** — `grant.json`, `key_source`, the three-step resolution order and its two 422s, `TenantApiKeyStore`, and the auth-router verbs. In one line: the host runs users on its own keys up to a per-user coupon; past it a user uploads their own key and continues on their own money. The coupon protects the host wallet, `jobs/quota.py` protects the machine, and the two stay separate.

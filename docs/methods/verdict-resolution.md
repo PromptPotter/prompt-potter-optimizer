@@ -176,7 +176,8 @@ provisional, and say so rather than passing it on.
   multiplicity correction — and `winner.py` sets `improved = bool(winner_id)`. With three arms,
   P(at least one positive | every arm identical to the parent) is **0.875 per round**.
 - **Almost nothing separates.** `separable=True` in 6 of 508 banked rounds; `round_not_separable`
-  fired 362 times. `separable` gates the L1 patience reset — it does NOT gate adoption.
+  fired 362 times. `separable` gates the L1 patience reset and is the clock a result quotes
+  (`index.json::final.rounds_to_separable`) — it does NOT gate adoption, which stays `improved`.
 - **The posterior did no work, and that half is FIXED.** The quasi-likelihood dispersion φ was
   floored at a constant, which caught 8 of 9 outer arms (raw median 0.0127) and left θ_se not
   varying with the arm at all — `p_exceeds` reduced to a monotone map of the raw gap, so

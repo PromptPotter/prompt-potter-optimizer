@@ -535,6 +535,19 @@ class CampaignConfig(StrictModel):
         "READS and never what the engine scores, which is `build_round_order` and reaches no "
         "knob. Client-overridable per session, like `headline_metric`.",
     )
+    accuracy_ceiling: Annotated[float | None, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
+        None,
+        gt=0.0,
+        le=1.0,
+        description="The accuracy a best-reachable prompt would score on this dataset at this "
+        "campaign's model. `index.json::final.rounds_to_ceiling` counts rounds against "
+        "`CEILING_FRACTION` of it, and the value is banked beside that count so a reader never "
+        "has to guess the denominator. `None` (default) → the clock reports nothing, which is the "
+        "honest reading: a ceiling is a joint claim about the dataset AND the model, so only the "
+        "dataset owner can declare one (`datasets/{slug}/campaign.yaml::campaign_config`) and a "
+        "guessed value makes every campaign on it publish a round count nobody can defend. "
+        "DISPLAY config — it moves no gate, no selection and no stop.",
+    )
     # Carries a `Knob`, so the walk STOPS here: the split is one knob, not two.
     dataset_split: Annotated[DatasetSplit | None, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
         None,

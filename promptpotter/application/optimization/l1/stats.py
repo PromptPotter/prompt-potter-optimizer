@@ -4,20 +4,52 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from promptpotter.application.optimization.validators.behavior_base import CheckResult
 from promptpotter.domain.results import L1_PARSE_FAILURE_CHARGED, RoundResult
 
-__all__ = ["HEADLINE_ACC", "L1Stats", "compute_l1_stats", "first_round_at_threshold"]
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+__all__ = ["CEILING_FRACTION", "L1Stats", "RoundClocks", "compute_l1_stats", "round_clocks"]
 
 # The four the verdict can take, typed rather than described: the L4 outer loop reads this, so an
 # arm nothing emits is a measurement nobody can get and one nothing checks is a typo that ships.
 RoundOneVerdict = Literal["healthy", "degraded", "broken", "unknown"]
 
 
-# Headline-accuracy threshold for ``rounds_to_95``.
-HEADLINE_ACC = 0.95
+# The share of a dataset's declared accuracy ceiling that counts as having reached it.
+CEILING_FRACTION = 0.95
+
+
+@dataclass(frozen=True)
+class RoundClocks:
+    """Three round counts and the ceiling the third was read against. ``rounds_to_improved`` says
+    when the loop ADOPTED an arm, on ``lift > 0.0`` with no interval and no multiplicity
+    correction, so ``rounds_to_separable`` beside it is the one a result quotes."""
+
+    rounds_to_separable: int | None
+    rounds_to_improved: int | None
+    rounds_to_ceiling: int | None
+    accuracy_ceiling: float | None
+
+
+def round_clocks(rounds: list[RoundResult], *, accuracy_ceiling: float | None) -> RoundClocks:
+    """Every round count a finished cycle reports, derived once so no surface computes its own.
+
+    An undeclared ceiling leaves ``rounds_to_ceiling`` unset rather than reading ``CEILING_FRACTION``
+    as an absolute bar — that would be a target no dataset owner chose, above every admitted one."""
+    to_ceiling: int | None = None
+    if accuracy_ceiling is not None:
+        target = CEILING_FRACTION * accuracy_ceiling
+        to_ceiling = _first_round(rounds, lambda r: r.accuracy is not None and r.accuracy >= target)
+    return RoundClocks(
+        rounds_to_separable=_first_round(rounds, lambda r: r.separable is True),
+        rounds_to_improved=_first_round(rounds, lambda r: r.improved),
+        rounds_to_ceiling=to_ceiling,
+        accuracy_ceiling=accuracy_ceiling,
+    )
 
 
 @dataclass(frozen=True)
@@ -25,7 +57,7 @@ class L1Stats:
     """``None`` on any rate means NOT MEASURED and renders as a dash. Never 0.0 (nothing yielded) or 1.0 (all passed): a
     cycle with no rounds did not fail to yield, and a rate over zero checks is not a clean bill of health."""
 
-    rounds_to_95: int | None
+    clocks: RoundClocks
     yield_rate: float | None
     top_lift_mean: float | None
     behavior_pass_rate: float | None
@@ -41,10 +73,10 @@ def compute_l1_stats(
     rounds: list[RoundResult],
     *,
     origin_composite_fitness: float | None,
+    accuracy_ceiling: float | None,
     behavior_results: list[list[CheckResult]],
     l2_behavior_results: list[list[CheckResult]] | None = None,
 ) -> L1Stats:
-    rounds_to_95 = first_round_at_threshold(rounds, HEADLINE_ACC)
     yield_rate = _mean_yield_rate(rounds)
     top_lifts = _top_lifts(rounds, origin_composite_fitness)
     top_lift_mean = sum(top_lifts) / len(top_lifts) if top_lifts else None
@@ -57,7 +89,7 @@ def compute_l1_stats(
         round_1_behavior=behavior_results[0] if behavior_results else [],
     )
     return L1Stats(
-        rounds_to_95=rounds_to_95,
+        clocks=round_clocks(rounds, accuracy_ceiling=accuracy_ceiling),
         yield_rate=yield_rate,
         top_lift_mean=top_lift_mean,
         behavior_pass_rate=behavior_pass_rate,
@@ -100,13 +132,8 @@ def _compute_round_1_verdict(
 # --- aggregation helpers ---------------------------------------------------
 
 
-def first_round_at_threshold(rounds: list[RoundResult], threshold: float) -> int | None:
-    """First round whose accuracy clears *threshold* — ``rounds_to_95``'s one
-    definition, shared with the ``index.json::final`` writer. A round that measured nothing
-    readable clears nothing."""
-    return next(
-        (r.round for r in rounds if r.accuracy is not None and r.accuracy >= threshold), None
-    )
+def _first_round(rounds: list[RoundResult], holds: Callable[[RoundResult], bool]) -> int | None:
+    return next((r.round for r in rounds if holds(r)), None)
 
 
 def _mean_yield_rate(rounds: list[RoundResult]) -> float | None:

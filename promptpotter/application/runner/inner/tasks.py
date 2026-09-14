@@ -244,8 +244,15 @@ def load_inner_tasks(path: Path) -> InnerTasks:
 
 def resolve_inner_task(ctx: InnerSpawnContext, query: str) -> InnerTaskSpec:
     """Map an outer query to its inner-campaign spec — the top-level benchmark + budget, overlaid by the
-    matching cell. A query with no matching cell runs the panel's default."""
-    panel = load_inner_tasks(inner_tasks_path(ctx.dataset_config_dir))
+    matching cell. A query with no matching cell runs the panel's default.
+
+    Off the panel the CONTEXT carries, so every cell of one run resolves against the panel that
+    run opened with."""
+    if (panel := ctx.panel) is None:
+        raise InnerCycleUnscoreableError(
+            f"{inner_tasks_path(ctx.dataset_config_dir)} is missing — the inner benchmark, its "
+            "sample count and its round cap are all declared there. There is no default to run."
+        )
     cfg = panel.inner_benchmark_config
     cell = next((t for t in panel.tasks if t.id == query), None)
     return InnerTaskSpec(

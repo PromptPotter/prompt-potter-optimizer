@@ -233,6 +233,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
     """
     from promptpotter.application.optimization.dispatch.llm_call import heartbeat as heartbeat_mod
     from promptpotter.application.runner.inner import spawn, spawn_context
+    from promptpotter.application.runner.inner.tasks import load_inner_tasks
     from promptpotter.domain.results import CycleResult
     from promptpotter.infrastructure.llm import telemetry as llm_telemetry
     from promptpotter.infrastructure.store.io import write_json
@@ -287,8 +288,9 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
         )
 
     monkeypatch.setattr(spawn, "_run_inner_campaign", _hanging_inner)
-    # `_resolve_inner_task` has no default ladder — the benchmark, its sample count,
-    # round cap and target score are declared, or the spawn raises.
+    # `resolve_inner_task` has no default ladder — the benchmark, its sample count,
+    # round cap and target score are declared, or the spawn raises. Written, then loaded
+    # through the real validator, because the run resolves its panel ONCE and carries it.
     write_json(
         tmp_path / "inner_tasks.yaml",
         {
@@ -309,6 +311,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
             spawn_campaign_id="ppself__aaaaaa",
             spawn_cycle_id="cycle_deadbeef0000",
             asking_cycle_id="cycle_deadbeef0000",
+            panel=load_inner_tasks(tmp_path / "inner_tasks.yaml"),
         )
     )
     llm_telemetry._CYCLE_LEDGER.set(_RecordingLedger())  # type: ignore[arg-type]

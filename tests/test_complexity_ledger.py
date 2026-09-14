@@ -103,12 +103,18 @@ LEDGER_BASELINE = {
     # whatever its shape, and how a campaign grades a cell IS one decision however many steps it
     # takes. `Scope.DATA` because swapping a judge invalidates every verdict taken under the old
     # one; `Estimand.GATE` because it decides what counts as a correct answer.
+    # +1: `CampaignConfig.accuracy_ceiling` — the accuracy a best-reachable prompt would score on
+    # this dataset at this model, which `rounds_to_ceiling` counts rounds against. It folds into no
+    # neighbour: `dataset_split` is a fold SIZE and `headline_metric` picks which existing number
+    # renders, while this one is a claim no code can derive — only the dataset owner holds it, and
+    # the clock reported nothing on any benchmark until a field existed to say it. `Scope.POLICY` /
+    # `Estimand.DISPLAY`: it moves no gate, no selection and no stop.
     # −1: `CampaignConfig.allowed_models` — folded into `optimizer_narrowing`, which already
     # carried a per-node `param_allowed_values`. With `model` a real search axis, "which models
     # may this node run" and "which models may a human steer a fork to un-tainted" stopped being
     # two questions, and the second field could only disagree with the first. Its command kind,
     # store method, CLI verb and dashboard panel went with it.
-    "config_leaf_fields": 39,
+    "config_leaf_fields": 40,
     # +1: `QUEUE_MAX_WAIT_S` — how long a launch may wait in line before it is withdrawn. It is a
     # setting and not a constant because it is the one queue number a HOST has to be able to
     # answer for: on a shared box it decides when someone else's waiting launch is given up on.
@@ -296,7 +302,17 @@ LEDGER_BASELINE = {
     # +1: whether a harbor episode OPENED the skill its prompt IS. Unopened is a no-skill episode,
     # so a round of them is arms-all-identical read as a tie — and a silent layout drift reads 0.0
     # on every cell, which is indistinguishable from exactly that finding. (test_integrity § 1)
-    "test_functions": 181,
+    # +1: the panel L1 rewrites offers each field's OWN value — shown the spliced
+    # `problem_description`, a faithful rewrite hands the operator's framing back as the raw field
+    # and the next render splices it around that copy, once per elected round. Silent, and every
+    # candidate after it is scored on the grown prompt. (test_integrity § 3)
+    # +1: the COLLAPSED cut on a bank with no labels — the gate keyed on a truth SET, so on every
+    # benchmark the preprint runs it was permanently False and the constant answerer bought its
+    # whole budget. Both directions are pinned in one function because the verifier's evidence
+    # cuts both ways: a cell left unsolved convicts, and an arm that solves every cell alike is
+    # degenerate and CORRECT, so the ceiling exemption is what stops the fix eating the best arm.
+    # (test_numerics § PoBB elimination)
+    "test_functions": 183,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

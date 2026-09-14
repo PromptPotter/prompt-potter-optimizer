@@ -118,10 +118,10 @@ export function SteerForkPanel({
   const permittedList = [
     ...new Set(Object.values(permittedModels).flatMap((m) => [...m])),
   ];
-  const steersDisallowedModel = overlaySetsModelOutsideAllowed(
-    pickedOverlay ?? overlay,
-    permittedModels,
-  );
+  // The SCHEMA, not the flattened permitted map: the predicate needs the cost-lever keys off the
+  // same document, and handing it two separately-derived arguments is how they came from
+  // different reads.
+  const steersDisallowedModel = overlaySetsModelOutsideAllowed(pickedOverlay ?? overlay, schema);
 
   // Captured working copies, read at confirm. Refs (not state) so a textarea
   // blur that fires immediately before the Confirm click is already reflected

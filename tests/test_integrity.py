@@ -938,6 +938,65 @@ def test_render_does_not_leak_l3_plan_into_target_prompt() -> None:
     assert sentinel not in opt_sp.render()
 
 
+def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing() -> None:
+    """The panel IS the text L1 replaces, so whatever it shows comes back as the raw field. Showing
+    a SPLICED ``problem_description`` therefore returns the operator's context inside it, and the
+    next render splices the context around that copy — a strict accumulator, no error, and every
+    candidate after it scored on the grown prompt. Ten banked rounds of one campaign carried the
+    same 58-char ``upstream_context`` while ``problem_description`` ran 906 → 5,024 chars."""
+    from promptpotter.application.optimization.dispatch.bundle import (
+        CycleSlice,
+        InjectionBundle,
+        RoundDigest,
+    )
+    from promptpotter.application.optimization.dispatch.injections.layer_state import (
+        _r_rendered_prompt,
+        _r_task_context,
+    )
+    from promptpotter.domain.opt_search_point import L2L3Memory
+    from promptpotter.domain.round_diagnostics import RoundDiagnostics
+    from promptpotter.domain.search_point import TaskDecomposition
+
+    upstream = "Raw invoice text is provided directly as the input column."
+    opt_sp = OptSearchPoint(
+        persona="You assign Swiss account codes.",
+        problem_description="Assign the four-digit account code for the invoice.",
+        memory=L2L3Memory(
+            task_context=TaskDecomposition(
+                upstream_context=upstream,
+                downstream_context="The assigned code books a ledger entry.",
+            )
+        ),
+    )
+    bundle = InjectionBundle(
+        opt_sp=opt_sp,
+        pipeline_schema=None,
+        cycle_slice=CycleSlice(
+            round_num=1,
+            l1_stall_count=0,
+            l2_round=0,
+            l2_stall_count=0,
+            l3_round=0,
+            l3_stall_count=0,
+            exploration_budget="tight",
+        ),
+        digest=RoundDigest(diagnostics=RoundDiagnostics(n_valid=0, samples=[]), critique=None),
+        axes=None,
+    )
+    panel = "\n\n".join(i.text for i in _r_rendered_prompt(bundle))
+    shown = {
+        label.removeprefix("[").removesuffix("]"): body
+        for label, _, body in (s.partition("\n") for s in panel.split("\n\n"))
+        if label.startswith("[")
+    }
+    # A generator that replaces every field with exactly what it was shown changes nothing.
+    assert opt_sp.mutate(**shown).render() == opt_sp.render()
+    # The framing still reaches the target prompt, and L1 still sees it — as context, not as the
+    # field it is being asked to rewrite. Dropping either half trades this bug for a blinder one.
+    assert upstream in opt_sp.render()
+    assert upstream in "".join(i.text for i in _r_task_context(bundle))
+
+
 def test_earned_blocks_gate_on_credible_lift_and_task_fit() -> None:
     """The earned-block library must never feed the optimizer a noise-win or a cross-task block
     — both are wrong-content-forward with no error. Built from real ``ScoredCandidate.model_dump()``
@@ -2360,7 +2419,7 @@ def test_the_l4_dataset_is_recognized_as_one() -> None:
 
     # The SHIPPED config, not a hand-built one — the question is what the panel runs under.
     base = load_campaign_config(read_yaml(d / "campaign.yaml")["campaign_config"])
-    ctx = types.SimpleNamespace(dataset_config_dir=d)
+    ctx = types.SimpleNamespace(dataset_config_dir=d, panel=panel)
     for task in panel.tasks:
         derived = inner_instrument_config(
             resolve_inner_task(ctx, task.id),

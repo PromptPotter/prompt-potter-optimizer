@@ -400,6 +400,7 @@ def write_review_md(session: Session, cycle: Cycle) -> None:
             rounds,
             round_audits=round_audits,
             context_object=context_object,
+            accuracy_ceiling=cycle.config.accuracy_ceiling,
             l1_patience=cycle.config.optimization.l1_patience,
         )
         write_text(CycleLayout(cycle_dir).review_md, content)

@@ -597,6 +597,16 @@ def is_floor_pinned(rows: Sequence[Mapping[str, Any]]) -> bool:
     simply an arm getting everything wrong, which is measurable, electable, and still not a θ.
     Errored cells are excluded: they are absence, and ``graded_response`` raises on an unstamped
     row rather than reading it as a zero, so a 0.0 reaching here was really scored 0.0.
+
+    **It reads ``objective``, so it inherits one property of the per-cell formula: that the
+    composite is zero exactly where ``fitness`` is.** Every shipped ``per_cell`` SCALES
+    (``fitness * anchor / (anchor + penalty)``), so the product is zero iff the fitness is and this
+    reads the arm. A formula that instead SUBTRACTS a cost would clamp an expensive-but-correct
+    cell to 0.0 (``formula/compiler.py::clamp_unit_score``, which gates per-cell as well as
+    per-sample), and this would report an arm that answered everything right as having got
+    everything wrong; one that ADDS an unconditional bonus term breaks it the other way, staying
+    positive on a cell the arm failed and suppressing a caveat that should fire. Keep the composite
+    multiplicative in ``fitness``, or give this its own ``fitness``-keyed read.
     """
     graded = [r for r in rows if not is_error_result(r) and "objective" in r]
     return bool(graded) and all(float(r["objective"] or 0.0) <= 0.0 for r in graded)

@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import traceback
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -21,7 +21,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     load_optimizer_set_overrides,
     set_optimizer_prompt_overrides,
 )
-from promptpotter.application.optimization.l1.stats import HEADLINE_ACC, first_round_at_threshold
+from promptpotter.application.optimization.l1.stats import round_clocks
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     _mint_fork,
     cleanup_stub_fork_if_empty,
@@ -666,6 +666,7 @@ async def _run_single_cycle(
         session,
         observers,
         cycle_result,
+        accuracy_ceiling=campaign_config.accuracy_ceiling,
         winner=_winning_round(cycle, cycle_result),
         diag=mode.diag,
     )
@@ -842,6 +843,7 @@ def _finalize_run(
     observers: RunObservers,
     cycle_result: CycleResult,
     *,
+    accuracy_ceiling: float | None,
     winner: RoundResult | None = None,
     diag: bool,
 ) -> str | None:
@@ -877,13 +879,15 @@ def _finalize_run(
         cycle_status = str(stop_reason)
 
         rounds = cycle_result.rounds
-        rounds_to_95 = first_round_at_threshold(rounds, HEADLINE_ACC)
         round_formula = resolve_cell_formula(
             session.scoring.scorer_cell_formula, session.pipeline_schema
         )[0]
         final_block: dict[str, Any] = {
             "stop_reason": stop_reason,
-            "rounds_to_95": rounds_to_95,
+            # Spread rather than re-spelled, so the served key IS the field a reader greps for —
+            # and every clock names its own question, because a bare round count on this block
+            # is what gets quoted as the result.
+            **asdict(round_clocks(rounds, accuracy_ceiling=accuracy_ceiling)),
             "prompt_hashes": compute_optimizer_prompt_hashes(),
             # On the origin's OWN samples — never `rounds[0].matched_parent_composite`, which
             # is round 1's winner's matched floor on a different sample basis.

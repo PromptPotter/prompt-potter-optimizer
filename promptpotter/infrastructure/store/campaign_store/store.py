@@ -4,7 +4,7 @@ import contextlib
 import json
 import logging
 import shutil
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -1102,6 +1102,42 @@ class CampaignStore:
         overlay, written once at run init. Not the ledger: it is a fact about the whole cycle, not
         an event in it, and a reader that only wants "what may move here" should not scan a log."""
         write_yaml(self._layout(hop).resolved_pipeline, declaration)
+
+    def write_resolved_experiment(
+        self, hop: CycleHop, experiment: Mapping[str, Any] | None
+    ) -> None:
+        """Land the panel this cycle measures — FIRST write wins, unlike the declaration above.
+
+        The two have opposite cadences on purpose. A declaration is re-written every resume because
+        what it owes the operator is what the NEXT round will search; a roster is written once
+        because what it owes is what every round ALREADY measured, and re-pinning it mid-campaign
+        would change what the cells are without changing the campaign's name.
+
+        A later resolution that DISAGREES is the whole reason this file exists, so it is reported
+        rather than dropped: the roster moved under a name that was supposed to be fixed, and every
+        round banked before now was measured on the other one."""
+        if experiment is None:
+            return
+        doc = dict(experiment)
+        path = self._layout(hop).resolved_experiment
+        held = read_yaml_optional(path)
+        if held is None:
+            write_yaml(path, doc)
+        elif held != doc:
+            logger.warning(
+                "%s resolves a DIFFERENT panel than the one %s measured — the landed roster "
+                "stands and this run's rows are not comparable to the earlier ones. Pin the "
+                "backend's roster, or run this as a new campaign.",
+                hop.campaign_id,
+                path.name,
+            )
+
+    def read_resolved_experiment(self, hop: CycleHop) -> dict[str, Any] | None:
+        """The panel this cycle measured, or ``None`` where it never ran — a read outside a run
+        resolves the dataset's own file then, which is the honest answer for a campaign that has
+        yet to pin anything."""
+        raw = read_yaml_optional(self._layout(hop).resolved_experiment)
+        return raw if isinstance(raw, dict) else None
 
     def write_optimized_surface(self, hop: CycleHop, leaves: Sequence[ValueLeaf]) -> None:
         """Record WHAT this cycle optimizes, and how each value reaches the model.

@@ -18,6 +18,10 @@ datasets/{name}/
 └── cache.json             # The dataset ITEM BANK (write-managed; don't hand-edit)
 ```
 
+## A ceiling is DECLARED, or the clock that needs it reports nothing
+
+`campaign_config.accuracy_ceiling` is the accuracy a best-reachable prompt would score on this dataset at this campaign's model, and only the dataset owner can state it — it is a joint claim about the two, so it is not derivable from the bank, the schema or a literature number. Declaring one turns on `index.json::final.rounds_to_ceiling`; leaving it unset (the default on every dataset here) leaves that clock unset too, which is the honest reading and costs nothing else. **Declare it only where you can say what measured it** — a saturation screen on the same model, a published ceiling for the same split. A guessed value makes every campaign on the dataset publish a round count nobody can defend, and no run says so.
+
 ## Sole route for backend tunable changes
 
 **Backend overlay (`nodes.{name}.config` in `pipeline.yaml`) is the only way to switch model, provider, temperature, or anything in a node's `optimizer.param_keys`.** Never edit the backend repo (including the co-owned TermNorm backend) to achieve a tunable switch. Pipeline-agnostic is a §0 commitment.

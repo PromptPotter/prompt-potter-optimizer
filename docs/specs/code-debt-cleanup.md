@@ -40,41 +40,29 @@ it.
 
 A leading `NEXT` marks the one to take up cold when nothing else is in hand.
 
-- **Nine account-pane page loads put the server 45 SECONDS behind, and every other surface waits
-  there.** Reproduced twice by running `e2e/walk/account.spec.ts` before `e2e/walk/dashboard.spec.ts`:
-  the dashboard's `/cycles`, its poll and `/ray` all fire together and none of the three answers for
-  **45.8s**, so the chronology — `TimeRay` renders null until the ray reports `loaded` — is simply
-  absent for three quarters of a minute on a page that otherwise looks finished. **It is not one
-  slow read**: measured against this workspace, `/ray` is 0.08s, the dashboard 0.01s, `/cycles`
-  0.04s, `/workspace/storage` 0.50s, `/workspace/storage-by-dataset` 0.40s, `/auth/activity` 0.35s.
-  **And it is not generic load**: `dashboard.spec.ts --repeat-each=3` is 21 page loads and stays
-  green, while nine ACCOUNT page loads do it every time. What those panes add is whole-workspace
-  directory walks (`routers/campaigns/storage.py` — both `def`, so each holds a threadpool thread
-  for its whole walk) that keep running after the browser that asked for them has gone. Action:
-  bound or cache the workspace walk, and decide whether a read nobody is waiting for should still be
-  running at all. **Rides with:** any work on the account modal's panes or on `storage.py` — and any
-  report that the dashboard "hangs" after a visit to Account, which is the operator-visible form of
-  this. **Re-test:** `npx playwright test --project=walk e2e/walk/account.spec.ts
-  e2e/walk/dashboard.spec.ts`, then read the chronology test's DURATION — it carries a 60s bound for
-  exactly this reason, and anything near it means the backlog is still there.
+- **Four hand-rolled tree walks, and the one that was measured was three syscalls per file.** The
+  repo has ONE deleter (`store/io.py::rmtree_robust`, and a bare `shutil.rmtree` is a bug) and no
+  walker, so every reader that needs "the files under here, with their sizes" writes its own.
+  `cli/commands/reset.py:129-130` walks the same tree TWICE — once summing `p.stat().st_size`, once
+  counting — with `rglob` + `stat`, the exact pattern whose replacement in the storage report is
+  measurable; `campaign_store/store.py:173,187` hand-rolls two more. Meanwhile
+  `measurement_archive.py:177` already uses `(st_mtime_ns, st_size)` as a content-identity
+  signature, so the primitive's two halves both exist in the tree and neither has a home. Action:
+  lift the `os.scandir` walker out of `routers/campaigns/storage.py` into `store/io.py` beside the
+  one deleter, and point the four sites at it — the size-summing ones get the syscall win for free.
+  **Rides with:** any edit to `reset.py`, `store.py`'s delete paths, or the storage report.
+  **Re-test:** `grep -rn 'rglob("\*")' promptpotter/ --include=*.py` — more than zero hits outside a
+  directory-only walk means open.
 
-- **Pointed out, NOT investigated — each needs a look before it is a claim.** Filed together
-  because they were all passed while working on something else, and none has been measured.
-  (1) **The winner's prompt duplicates itself.** By round 8 of `swiss-invoices-eval__b1b4f5` the
-  winner's `problem_description` carried three literal copies of *"Raw invoice text is provided
-  directly as the input column."* and two of another sentence — both are
-  `upstream_context`/`downstream_context`, already injected, being re-absorbed by L1's rewrite one
-  copy per round (0 repeats through round 5, 3 by round 8). Mechanical, not semantic, and a real
-  part of that cycle's 3.2x token growth. (2) **`domain/results.py::is_floor_pinned` reads
-  `objective`** — under a formula that SUBTRACTS cost rather than scaling,
-  a correct-but-expensive arm could read as "0.0 on every cell", which is a caveat about a
-  degenerate reading claiming the arm got everything wrong. Harmless under the house formula, which
-  clamps at `fitness`.
-  **Rides with:** (1) any work on L1's prompt composition or a token-growth reading — the repeats
-  are visible in any winner's `problem_description` you already have open; (2) any edit to a
-  scoring formula or to `domain/results.py`.
-  **Re-test:** each is a fresh measurement; none carries a verdict yet, so do not act on one
-  without re-deriving it.
+- **A workspace walk nobody is waiting for still runs to completion.** The three storage endpoints
+  are sync `def`, so Starlette cannot cancel one when the client disconnects: an abandoned
+  account-pane load holds a threadpool thread for its whole walk. Whether a read with no reader
+  should still be running is a design call — the answer decides whether these become `async def`
+  over a cancellable thread, or keep running and are simply made cheap enough not to matter.
+  **Rides with:** any work on the account modal's panes or on `storage.py` — and any report that the
+  dashboard "hangs" after a visit to Account, which is the operator-visible form of this.
+  **Re-test:** `npx playwright test --project=walk e2e/walk/account.spec.ts
+  e2e/walk/dashboard.spec.ts`, then read the chronology test's DURATION against its 60s bound.
 
 - **`AccessGate` and `AllowanceSpent` render only for a NON-HOST account, and the browser walk has
   no way to be one.** Two of the four onboarding surfaces are now covered — `ConsentGate` because a
@@ -111,16 +99,18 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
 - **The same seam, the other direction: a browser predicate whose server twin never returns its
   verdict — and it has been closed once already, wrongly.**
   `webapp/lib/derivations/nodeConfig.ts::overlaySetsModelOutsideAllowed` mirrors
-  `domain/pipeline_overlay.py::overlay_sets_model_outside_allowed` rule for rule (a provider edit
-  always taints; a model must sit in the node's permitted set; an absent node sanctions nothing) and
-  drives `SteerForkPanel`'s pre-confirm warning. It was struck as fixed when the predicate's INPUT
-  became server-authored — the served per-node `permitted` set — but the ask was the VERDICT, and the
-  server reaches it only inside `fork-cycle` dispatch, where it 404s rather than answers. So deleting
-  the client copy costs the operator the warning entirely; what is owed is a dry-run on the fork
-  preview. **Rides with:** the next change to fork or steer — `fork-cycle` dispatch, `SteerForkPanel`,
-  or anything adding a field to the fork preview response. **Re-test:** grep the served surface for a
-  `steers_disallowed_model` field — while none is served, the browser copy is load-bearing and must
-  not be struck again.
+  `domain/pipeline_overlay.py::overlay_sets_model_outside_allowed` rule for rule and drives
+  `SteerForkPanel`'s pre-confirm warning. It was struck as fixed when the predicate's INPUT became
+  server-authored — the served per-node `permitted` set — but the ask was the VERDICT, and the server
+  reaches it only inside `fork-cycle` dispatch, where it 404s rather than answers. So deleting the
+  client copy costs the operator the warning entirely; what is owed is a dry-run on the fork preview.
+  **It carries a design fork:** a dry-run needs the in-progress overlay, so it is a POST, and whether
+  that is a new read-only endpoint or a `dry_run` flag on the existing `fork-cycle` command decides
+  whether it writes a `CommandRecord` — a control-plane shape question, not a threading one.
+  **Rides with:** the
+  next change to fork or steer — `fork-cycle` dispatch, `SteerForkPanel`, or anything adding a field
+  to the fork preview response. **Re-test:** grep the served surface for a `steers_disallowed_model`
+  field — while none is served, the browser copy is load-bearing and must not be struck again.
 
 - **Holistic reframes — larger chunks, noted so they aren't mistaken for done; don't slip one into a
   release.** (1) **Tooltip/overlay consolidation:** most of the webapp's DOM `title=` attributes are
@@ -147,38 +137,14 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   this entry. **Rides with:** the next supervised campaign that escalates. The run is the expensive
   part and someone is already paying for it; this is a read of what it wrote.
 
-- **Three mechanisms key on ground-truth LABELS and go silently inert on a verifier-graded
-  backend.** One subject, three sites, each needing a design answer rather than a guard — which is
-  why they are filed together and not fixed in the pass that found them. The wrong-number half of
-  this class (fabricated recall, fabricated rank statistics, `exact_match("", "")` scoring 1.0) was
-  fixed; these three are the half that *reports nothing* rather than something false. (1)
-  `pobb/checks.py::is_answer_collapsed` — `enumerable_truth_labels` returns `None` with no labels,
-  so the COLLAPSED elimination gate is permanently `False` and an L4 candidate driving every inner
-  cell to one lift is invisible to it; what collapse MEANS without labels is the open question. (2)
-  `intelligence/earned_blocks.py::answer_space_signature` — an empty label set returns
-  `OPEN_ANSWER_SPACE`, the same key a free-text labelled task gets, so Harbor's mined Agent-Skill
-  blocks pool with L4's optimizer-prompt blocks and with any open-answer benchmark's; separating
-  them needs an answer to what actually makes framing blocks transferable, not just a second
-  constant. (3) The `prompt_info` trap — stated at the decision point in
-  [`../developer/adding-a-surface.md`](../developer/adding-a-surface.md) § 5 — has no GUARD,
-  and the obvious one is wrong: prompt fields in `optimizer.param_keys` ⇒ `prompt_info` required
-  would trip on every L4 run, since `promptpotter-self` deliberately declares the first without
-  the second. **Rides with:** the next verifier-graded run (Harbor, spreadsheetbench), or any edit
-  to `pobb/checks.py` or `intelligence/earned_blocks.py` — each site is inert exactly where someone
-  working there would otherwise assume it fires. **Re-test:** `.venv/Scripts/python.exe -m
-  promptpotter new spreadsheetbench-s10` past round 1 with `prompt_block_catalogue` on, then read
-  the round file for a COLLAPSED verdict and `earned_blocks` under `OPEN` — if either now
-  discriminates, the entry is stale.
-
-- **A Harbor run's roster never lands on disk.** `connectors/harbor.py::_registry_tasks` memoizes per
-  `(dataset, version)` for reads outside a run, but a Harbor version names an EDITABLE registry entry:
-  a long-lived process keeps the first roster it read, and a served campaign's identity is recomputed
-  from the current fetch rather than from the roster its run used. The run itself is consistent — its
-  `InProcessWorkload` carries one resolution. Action: land the resolved roster beside
-  `pipeline.resolved.yaml` when a cycle starts, and read it for that campaign; the memo is the
-  operator's chosen interim. **Rides with:** the next Harbor campaign, or any edit to
-  `connectors/harbor.py`. **Re-test:** `ls .promptpotter/projects/*/campaigns/harbor-*/cycles/*/`
-  — no roster file beside `pipeline.resolved.yaml` means open.
+- **The `prompt_info` trap has no GUARD, and the obvious one is wrong.** A node that omits it scores
+  every variant identically as no-skill and raises nothing — stated at the decision point,
+  [`../developer/adding-a-surface.md`](../developer/adding-a-surface.md) § 5. Requiring
+  `prompt_info` whenever `optimizer.param_keys` names a prompt field would trip on every L4 run,
+  since `promptpotter-self` deliberately declares the first without the second, so what is owed is a
+  design answer rather than a check. **Rides with:** the next connector added, or any edit to where
+  a node's `param_keys` are validated. **Re-test:** grep `promptpotter/` for a raise naming
+  `prompt_info`; while none exists, the no-skill shape still passes silently.
 
 - **The BROWSER still cannot bound a check-in run's spend; every other ingress now can.** The wire
   half is closed — `StartCheckinPayload` inherits `LaunchLimits`, `api-openapi.yaml` declares the
@@ -193,22 +159,23 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   operator-set knobs beside this button. **Re-test:** `grep -n spend_budget_usd
   webapp/lib/api/ingest.ts` — while it is absent, the browser sends no ceiling.
 
-- **NEXT — L4 re-reads `inner_tasks.yaml` from disk during a run.** `application/runner/inner/ruler.py` and
-  `spawn_context.py` each call `tasks.py::load_inner_tasks`, so an edit mid-run splits one run's cells
-  across two panels — the per-run-state shape `InProcessWorkload` closed for in-process connectors.
-  Action: the outer run resolves the panel once and hands it down through the spawn context.
-  **Rides with:** any edit under `runner/inner/` — both call sites are in that one directory.
-  **Re-test:** `grep -rn "load_inner_tasks(" promptpotter/application/runner/inner/` — more than one
-  call site means open.
+- **The CLI defers the LEAVES and imports the TRUNK eagerly, so its one convention-refused
+  mechanism buys almost nothing.** `presentation/cli/campaign_runner.py::COMMANDS` resolves each
+  handler through `importlib.import_module` at call time — the deferral
+  [`../developer/conventions.md`](../developer/conventions.md) refuses, counted in
+  `complexity_ledger`'s `deferred_imports`. But the same module imports `jobs.reaper` (line 17) and
+  `commands/_shared` (line 24) at MODULE level, and `_shared` pulls `initialization.wiring`,
+  `runner.entry`, `run_observers` and the campaign store — the whole engine — before argparse has
+  looked at a single argument. So the 13 handler modules are cheap *because* everything expensive is
+  already loaded.
 
-- **The CLI's verb table defers every handler import, for startup speed.**
-  `presentation/cli/campaign_runner.py::COMMANDS` resolves each handler through
-  `importlib.import_module` at call time — the deferral [`../developer/conventions.md`](../developer/conventions.md)
-  refuses, counted in `complexity_ledger`'s `deferred_imports`. Action: time `python -m promptpotter
-  --help` cold with the handlers imported eagerly, then hoist them or state the exemption beside the
-  table. **Rides with:** adding or renaming a CLI verb — you are in `COMMANDS` already, and the
-  timing is one cold `--help`. **Re-test:** the operator answers whether that measured startup cost
-  justifies the deferral; until then `grep -n import_module
+  Measured cumulative import: `_shared` 2.59s, `reaper` 1.25s, `parsers` alone 1.18s; a cold
+  `python -m promptpotter --help` is 1.87s and importing all 13 handlers eagerly adds only +0.12s.
+  `sweep_dead_cycles` is called at line 185, after parsing, so `--help` never reaches the thing it
+  paid 1.25s to import. Action: **hoist the handlers** — the deferral is on the wrong layer and its
+  own number says so. Then, if startup is worth anything, move `_shared` and `reaper` behind the
+  dispatch, which is where the ~0.7s actually is; `parsers` at 1.18s is the floor that work would
+  hit next. **Rides with:** adding or renaming a CLI verb. **Re-test:** `grep -n import_module
   promptpotter/presentation/cli/campaign_runner.py` hits.
 
 

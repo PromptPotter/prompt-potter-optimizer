@@ -136,20 +136,26 @@ Definition only; instance assembly TBD. PromptPotter is the reference solver.
   PopQA, FEVER · multi-step agent: GAIA, τ-bench · code pipeline: SWE-bench · long-context: LongBench,
   FRAMES. Aspiration: ship our own procedurally-generated instances.
 
-## The four metrics we report
+## What we report
 
-Absolute accuracy is meaningful only against a known base model and origin prompt: 60 → 75 and 90 → 93 look comparable until you know the first captured 75% of the available headroom and the second 33%. A published table reports all four per (method, model), from `results_*.json`.
+**Absolute Accuracy** — `correct / total` on test — per (method, model), from `results_*.json`. It is
+the raw performance of the best prompt found, and the standard comparison point.
 
-| Metric | Symbol | Formula | What it separates |
-|---|---|---|---|
-| **Absolute Accuracy** | Acc | `correct / total` on test | Raw performance of the best prompt found — the standard comparison point |
-| **Headroom Captured** | HC | `(Acc_opt − Acc_base) / (Acc_ceil − Acc_base)` | Fraction of available improvement realized; normalizes across models |
-| **Sample Efficiency** | SE | `HC / N_queries` | Headroom captured per optimization query spent |
-| **Convergence Profile** | R₉₀ | queries to reach 90% of final HC | "Finds good prompts" from "finds them fast" |
+Beside it, two of the round counts a cycle banks in `index.json::final`, which say how *fast* rather
+than how *high*: **`rounds_to_separable`**, the first round whose arms could be told apart at all,
+and **`rounds_to_improved`**, the first round that crowned a winner. Quote the first. The second is
+a promotion verdict on `lift > 0.0` with no interval and no multiplicity correction
+([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § The crowning bar), so the
+two are routinely far apart and a claim that does not name which one it rests on is not a result.
+
+A query denominator is deliberately absent from all of them. Nearly all of a campaign's wall clock
+and spend is backend scoring, and the optimizer's own calls are a few percent of it, so "per
+optimization query" prices the cheap part and hides the bill the operator actually pays. Price a
+lift in wall clock and dollars.
 
 ### The winner's own number is biased upward
 
-All four are read off the **selected** candidate, and selection and estimation must not come from the same rows. Where they do, the reported figure overstates what the prompt will do on deployment: the argmax of noisy means is optimistic, and PoBB compounds it, because elimination stops an arm at a data-dependent time, so the survivor's mean is already biased before a max is taken over it. Being Bayesian is not an exemption — the selected arm's posterior mean still conditions on the selection that chose it. Neither is subset-invariant θ, which corrects for *which samples* were scored rather than *which candidate was chosen*; reaching for θ here is the plausible wrong move.
+Accuracy is read off the **selected** candidate, and selection and estimation must not come from the same rows. Where they do, the reported figure overstates what the prompt will do on deployment: the argmax of noisy means is optimistic, and PoBB compounds it, because elimination stops an arm at a data-dependent time, so the survivor's mean is already biased before a max is taken over it. Being Bayesian is not an exemption — the selected arm's posterior mean still conditions on the selection that chose it. Neither is subset-invariant θ, which corrects for *which samples* were scored rather than *which candidate was chosen*; reaching for θ here is the plausible wrong move.
 
 **Published head-to-head figures are clean** — the split that makes them so is owned by [`bbeh-comparison/README.md`](bbeh-comparison/README.md) § The protocol. **In-campaign figures are not:** the winner's `composite_fitness`, the round banner, the dashboard headline and `export.json`'s fitness are all computed on the rows that selected the winner. The fix is a reserved partition the loop never scores on, tracked in [`../specs/roadmap.md`](../specs/roadmap.md) § Selection-clean reporting.
 

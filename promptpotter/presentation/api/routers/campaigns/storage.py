@@ -3,9 +3,11 @@ is a cross-cutting SUBSET — surface it as a note, never a summed figure, or th
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import Field
 
@@ -15,6 +17,12 @@ from promptpotter.infrastructure.store.layout import SHARED_CACHE_DIRS, FileKind
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from promptpotter.domain.campaign import Campaign
+    from promptpotter.infrastructure.store.stores import Stores
 
 # Per-sample arrays inside a public round file that the backend produced → ``connector``.
 _CONNECTOR_ROUND_KEYS = (
@@ -29,47 +37,38 @@ _LOOP_LEAVES = ("state", "trace", "history", "reports")
 _LEAVES = ("dataset", "connector", *_LOOP_LEAVES)
 
 
-def _round_connector_bytes(path: Path) -> int:
-    doc = read_json_tolerant(path)
+@functools.lru_cache(maxsize=2048)
+def _connector_bytes_of(_path: str, _mtime_ns: int, _size: int) -> int:
+    """The backend's share of one round file, memoized on the file's CONTENT IDENTITY.
+
+    Keyed on ``(path, mtime, size)`` rather than path alone, so it can never serve a stale figure:
+    a round rewritten by a repair or replaced by a rewind arrives under a different key and is
+    re-read. That exactness is what lets it be cached at all — this panel reports disk usage, where
+    a number that lags the disk is the bug rather than the optimisation.
+
+    Worth caching because the read is the expensive half of the walk and the answer never moves:
+    every storage request re-parsed and re-serialized every banked round document, which on this
+    workspace was 18 MB of JSON for a figure that had not changed since the round closed."""
+    doc = read_json_tolerant(Path(_path))
     if not isinstance(doc, dict):
         return 0
     return sum(len(json.dumps(doc[k])) for k in _CONNECTOR_ROUND_KEYS if k in doc)
 
 
-def _campaign_split(root: Path) -> dict[str, int]:
-    """One walk of a campaign tree → ``{leaf: bytes}`` over the six MECE leaves, which sum exactly to the on-disk total.
-    ``ROUND_PUBLIC`` is the lone straddler — backend arrays to ``connector``, the searchpoint remainder to ``state``."""
-    acc = dict.fromkeys(_LEAVES, 0)
-    if not root.is_dir():
-        return acc
-    for p in root.rglob("*"):
-        try:
-            if not p.is_file():
-                continue
-            size = p.stat().st_size
-        except OSError:
-            continue
-        kind = classify(p.relative_to(root))
-        if kind is FileKind.ROUND_PUBLIC:
-            conn = min(_round_connector_bytes(p), size)
-            acc["connector"] += conn
-            acc["state"] += size - conn
-        else:
-            acc[kind.leaf] += size
-    return acc
-
-
-def _dir_size(root: Path, *, skip: frozenset[str] = frozenset()) -> int:
-    """Bytes under *root*, skipping the top-level names in *skip*.
+def _walk(
+    root: Path, *, skip: frozenset[str] = frozenset()
+) -> Iterator[tuple[Path, os.stat_result]]:
+    """Every file under *root*, with the stat the directory scan already read.
 
     ``os.scandir`` rather than ``rglob`` + ``stat``: on Windows a ``DirEntry`` carries the size from
     the directory scan it already did, so this is one syscall per file where the glob spent three.
     Over a workspace this size that is the difference between a panel that opens and one the
-    operator watches spin.
+    operator watches spin. ONE walker for both readers below — the taxonomy split and the plain
+    total differ in what they do with a file, never in how they find one, and the glob half of that
+    pair was the whole reason a full workspace scan cost what it did.
 
     *skip* is what stops the two biggest directories being walked TWICE — once for their own figure
     and again inside the tenant total."""
-    total = 0
     stack = [root]
     first = True
     while stack:
@@ -82,13 +81,46 @@ def _dir_size(root: Path, *, skip: frozenset[str] = frozenset()) -> int:
                             if not (first and entry.name in skip):
                                 stack.append(Path(entry.path))
                         elif entry.is_file(follow_symlinks=False):
-                            total += entry.stat(follow_symlinks=False).st_size
+                            yield Path(entry.path), entry.stat(follow_symlinks=False)
                     except OSError:
                         continue
         except OSError:
             continue
         first = False
-    return total
+
+
+def _campaign_split(root: Path) -> dict[str, int]:
+    """One walk of a campaign tree → ``{leaf: bytes}`` over the six MECE leaves, which sum exactly to the on-disk total.
+    ``ROUND_PUBLIC`` is the lone straddler — backend arrays to ``connector``, the searchpoint remainder to ``state``."""
+    acc = dict.fromkeys(_LEAVES, 0)
+    if not root.is_dir():
+        return acc
+    for path, st in _walk(root):
+        kind = classify(path.relative_to(root))
+        if kind is FileKind.ROUND_PUBLIC:
+            conn = min(_connector_bytes_of(str(path), st.st_mtime_ns, st.st_size), st.st_size)
+            acc["connector"] += conn
+            acc["state"] += st.st_size - conn
+        else:
+            acc[kind.leaf] += st.st_size
+    return acc
+
+
+def _dir_size(root: Path, *, skip: frozenset[str] = frozenset()) -> int:
+    """Bytes under *root*, skipping the top-level names in *skip*."""
+    return sum(st.st_size for _, st in _walk(root, skip=skip))
+
+
+def _owned_campaign_splits(stores: Stores) -> list[tuple[Campaign, dict[str, int]]]:
+    """Every campaign the caller owns, each with its six-leaf split — the ONE scan both workspace
+    readers below project from. They pool it differently (by dataset, by campaign) and neither owns
+    the walk; two copies of this loop is two chances for the two panels to disagree about the same
+    bytes."""
+    owner = str(stores.identity.user_id)
+    return [
+        (campaign, _campaign_split(stores.campaigns.campaign_root_dir(campaign.campaign_id)))
+        for campaign in stores.campaigns.list_campaigns(lifecycle="all", owner_user_id=owner)
+    ]
 
 
 def _leaf_fields(acc: dict[str, int]) -> dict[str, int]:
@@ -142,11 +174,9 @@ def get_storage_by_dataset(stores: StoresDep) -> DatasetStorageResponse:
     """Per-dataset on-disk leaf breakdown (the Files-view 'cake') — every campaign of a
     dataset pooled, then split into the six MECE leaves. Includes archived campaigns; the
     shared measurement store is excluded (it's not per-dataset-owned)."""
-    owner = str(stores.identity.user_id)
     by_dataset: dict[str, dict[str, int]] = {}
-    for campaign in stores.campaigns.list_campaigns(lifecycle="all", owner_user_id=owner):
+    for campaign, split in _owned_campaign_splits(stores):
         acc = by_dataset.setdefault(campaign.dataset_name, dict.fromkeys(_LEAVES, 0))
-        split = _campaign_split(stores.campaigns.campaign_root_dir(campaign.campaign_id))
         for k in _LEAVES:
             acc[k] += split[k]
     entries = [
@@ -196,11 +226,9 @@ def get_workspace_storage(stores: StoresDep) -> WorkspaceStorageResponse:
     plus the shared caches and a residual ``other`` slice so the grand total equals the
     tenant's real footprint — answers "where did the bucket sizes go?", nothing excluded.
     Includes archived campaigns — they stay in ``campaigns/``, flagged, not moved."""
-    owner = str(stores.identity.user_id)
     entries: list[WorkspaceStorageEntry] = []
     campaigns_total = 0
-    for campaign in stores.campaigns.list_campaigns(lifecycle="all", owner_user_id=owner):
-        acc = _campaign_split(stores.campaigns.campaign_root_dir(campaign.campaign_id))
+    for campaign, acc in _owned_campaign_splits(stores):
         on_disk = sum(acc.values())
         campaigns_total += on_disk
         entries.append(

@@ -20,7 +20,6 @@ from promptpotter.application.runner.inner.spawn_context import (
     inner_spawn_context,
     set_inner_rulers,
 )
-from promptpotter.application.runner.inner.tasks import inner_tasks_path, load_inner_tasks
 from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
 from promptpotter.shared.errors import RulerCoverageError
 
@@ -42,13 +41,9 @@ def refresh_inner_rulers(
     At run init and each outer round boundary, where the prior round's cells are all banked. A
     no-op for a campaign that spawns nothing."""
     ctx = inner_spawn_context()
-    if ctx is None or not session.state.cycle_id:
+    if ctx is None or ctx.panel is None or not session.state.cycle_id:
         return
-    panel_path = inner_tasks_path(ctx.dataset_config_dir)
-    if not panel_path.is_file():
-        return
-    panel = load_inner_tasks(panel_path)
-    datasets = {panel.dataset_for(cell) for cell in panel.tasks}
+    datasets = {ctx.panel.dataset_for(cell) for cell in ctx.panel.tasks}
     rulers = {
         name: ruler
         for name in sorted(datasets)

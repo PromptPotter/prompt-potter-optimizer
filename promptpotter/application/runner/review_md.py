@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from promptpotter.application.optimization.l1.stats import L1Stats, compute_l1_stats
+from promptpotter.application.optimization.l1.stats import (
+    CEILING_FRACTION,
+    L1Stats,
+    compute_l1_stats,
+)
 from promptpotter.application.optimization.validators.behavior_base import (
     CheckResult,
     ValidatorContext,
@@ -43,6 +47,7 @@ def render_review_md(
     *,
     round_audits: list[dict[str, Any] | None] | None = None,
     context_object: list[str] | None = None,
+    accuracy_ceiling: float | None,
     l1_patience: int,
 ) -> str:
     audits = list(round_audits or [None] * len(rounds))
@@ -61,6 +66,7 @@ def render_review_md(
     stats = compute_l1_stats(
         list(rounds),
         origin_composite_fitness=origin_composite_fitness,
+        accuracy_ceiling=accuracy_ceiling,
         behavior_results=behavior_per_round,
         l2_behavior_results=l2_behavior_per_round,
     )
@@ -244,10 +250,23 @@ def _render_stats_block(
         """An unmeasured rate renders as ``—``, never as a number the cycle never produced."""
         return "—" if value is None else format(value, spec)
 
+    def _clock(value: int | None) -> str:
+        return "—" if value is None else str(value)
+
+    clocks = stats.clocks
+    # Two silences, rendered apart: no ceiling declared is a different fact from a declared one
+    # the cycle never reached, and one glyph for both is the reading that gets passed on.
+    basis = (
+        "no accuracy_ceiling declared"
+        if clocks.accuracy_ceiling is None
+        else f"{CEILING_FRACTION:.0%} of {clocks.accuracy_ceiling:.2f}"
+    )
     lines = [
         "## L1Stats",
         "",
-        f"- **rounds_to_95**: {'—' if stats.rounds_to_95 is None else stats.rounds_to_95}",
+        f"- **rounds_to_separable**: {_clock(clocks.rounds_to_separable)}",
+        f"- rounds_to_improved (promotion, no interval): {_clock(clocks.rounds_to_improved)}",
+        f"- rounds_to_ceiling ({basis}): {_clock(clocks.rounds_to_ceiling)}",
         f"- yield_rate: {_rate(stats.yield_rate)}",
         f"- top_lift_mean: {_rate(stats.top_lift_mean, '+.4f')}",
         f"- behavior_pass_rate: {_rate(stats.behavior_pass_rate)}",

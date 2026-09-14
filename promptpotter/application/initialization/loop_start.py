@@ -73,6 +73,10 @@ def init_cycle(
     # panel owes the operator is what the NEXT round will search, not what the first one did.
     if session.pipeline_declaration:
         store.write_resolved_pipeline(hop, session.pipeline_declaration)
+    # The CELLS beside the search space, and write-once where that one is re-written — a roster a
+    # connector only NAMES (a Harbor dataset version) can move under its name, and every read of
+    # this campaign after today must see what it measured rather than what the registry now says.
+    store.write_resolved_experiment(hop, session.backend_client.workload.experiment)
     # Beside the declaration and on the same cadence: the declaration says which keys exist, this
     # says which the optimizer MOVES and whether the model can even see them. The connector owns
     # the channel, so it is read off the client rather than assumed.

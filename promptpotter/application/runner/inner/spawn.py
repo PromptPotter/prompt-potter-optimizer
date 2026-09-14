@@ -52,7 +52,6 @@ from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.results import candidate_label
-from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.llm.rate_limit import set_throttle_stall_sink
 from promptpotter.infrastructure.llm.telemetry import (
     _CURRENT_ROUND,
@@ -473,16 +472,7 @@ async def _run_inner_campaign(
     train_data = draw_bank(all_samples, n, spec.seed)
     # Computed here because this is the first moment the drawn rows exist. `seed-screen` owns
     # the disqualifier but is hand-run, so nothing recomputes it for the seats actually seated.
-    #
-    # ``None`` on a verifier-graded bank, and that is a different fact from a floor of 0.0: with no
-    # labels there is no constant answer to score, so the collapse question is undefined rather
-    # than answered cheaply. `class_floor` RAISES on such a bank — correctly, since the screen owns
-    # that verdict — and this is not the screen: an inner benchmark graded by its own verifier
-    # (`pp-self` over a harbor panel, which is the point of the recursion) would otherwise die
-    # mid-spawn quoting a collapse verdict from a path that was only ever reporting one.
-    bank_floor = (
-        None if all_verifier_graded(s.ground_truth for s in train_data) else class_floor(train_data)
-    )
+    bank_floor = class_floor(train_data)
 
     file_config: dict[str, Any] = {}
     if session.dataset_config_dir is not None:

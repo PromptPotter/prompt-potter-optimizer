@@ -42,19 +42,33 @@ async def cmd_seed_screen(args: argparse.Namespace) -> CommandResult:
         raise SystemExit(f"ERROR: {exc}") from exc
 
     # Sorted by reasoning margin, and DISQUALIFIED banks first regardless of it: a bank where
-    # collapse outscores the origin is not a weak cell to rank, it is one to reject.
-    rows = sorted(outcome.readings, key=lambda r: (not r.rewards_collapse, -r.reasoning_margin))
+    # collapse outscores the origin is not a weak cell to rank, it is one to reject. A bank with
+    # no floor to rank against sorts last rather than at a margin of zero, which would read as a
+    # bank measured to sit exactly on its floor.
+    rows = sorted(
+        outcome.readings,
+        key=lambda r: (
+            r.rewards_collapse is not True,
+            r.reasoning_margin is None,
+            -(r.reasoning_margin or 0.0),
+        ),
+    )
     # Speed and cost ride the same row as the margin, because choosing a target model is one
     # decision over all three and reading them from separate places is how a model gets picked
     # on quality it cannot afford. Median and mean are both shown: a gap between them is a
     # route stalling, which no single number says.
+    # THREE collapse states, never two: a bank with no labels has no constant answer to score, and
+    # rendering that as `ok` reports a verdict the screen never took.
+    collapse = {True: "REWARDS COLLAPSE", False: "ok              ", None: "no floor        "}
+    settled = {True: "settled  ", False: "UNSETTLED", None: "--       "}
     table = "\n".join(
-        f"  seed {r.seed:<4d} {'REWARDS COLLAPSE' if r.rewards_collapse else 'ok              '}"
-        f"  margin {r.reasoning_margin:+.3f} +/-{r.margin_se:.3f}"
-        f"  {'settled' if r.verdict_settled else 'UNSETTLED'}"
+        f"  seed {r.seed:<4d} {collapse[r.rewards_collapse]}"
+        f"  margin {'--    ' if r.reasoning_margin is None else f'{r.reasoning_margin:+.3f}'}"
+        f" +/-{r.margin_se:.3f}"
+        f"  {settled[r.verdict_settled]}"
         f"  origin {r.origin_accuracy:.3f} (spread {r.origin_spread:.3f} over {len(r.origin_reads)})"
         f"  hedge {'--' if r.answer_modal_share is None else f'{r.answer_modal_share:.0%}'}"
-        f"  floor {r.class_floor:.3f}"
+        f"  floor {'--   ' if r.class_floor is None else f'{r.class_floor:.3f}'}"
         f"  {'--' if r.latency_median is None else f'{r.latency_median:.1f}s'} med"
         f"/{'--' if r.latency_mean is None else f'{r.latency_mean:.1f}s'} mean"
         f"  {'--' if r.cost_per_pass is None else f'${r.cost_per_pass:.4f}'}/pass"
@@ -65,8 +79,10 @@ async def cmd_seed_screen(args: argparse.Namespace) -> CommandResult:
     # that is how this tool condemned seed-5 on a margin its own second read reversed. A
     # suspected bank is NAMED, never rejected.
     bad = [r.seed for r in rows if r.rewards_collapse and r.verdict_settled]
-    suspect = [r.seed for r in rows if r.rewards_collapse and not r.verdict_settled]
-    unsettled = [r.seed for r in rows if not r.verdict_settled]
+    suspect = [r.seed for r in rows if r.rewards_collapse and r.verdict_settled is False]
+    # `is False`, never falsy: a bank with no floor took no verdict, so telling the operator to
+    # raise `--repeat` on it advises a spend that cannot settle anything.
+    unsettled = [r.seed for r in rows if r.verdict_settled is False]
     verdict = (
         f"REJECT {bad} — a candidate that stops reasoning and answers one label outscores the "
         f"origin there, by more than the measurement's own error bar.\n"

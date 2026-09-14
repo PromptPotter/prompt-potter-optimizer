@@ -440,40 +440,34 @@ def test_a_labelless_round_reports_absence_not_zero() -> None:
 
 
 def test_the_constant_answer_floor_is_undefined_without_labels() -> None:
-    """A verifier-graded bank has no constant answer, so it has no floor — and the two readers of
-    that fact must not conflate "undefined" with "0.0".
+    """A verifier-graded bank has no constant answer, so it has no floor — ABSENT, never 0.0, and
+    never a refusal of the whole reading either: the level half (accuracy, spread, latency, cost)
+    is exactly what such an instrument is screened on, and every M13 benchmark is one.
 
-    `class_floor` REFUSES such a bank rather than returning a number: `reasoning_margin`,
-    `rewards_collapse` and `verdict_settled` all derive from it, so the screen's whole verdict is
-    undefined, which is what a `None` would fail to say.
+    A bank that MIXES the two is the case that still raises. Its floor would be the labelled part's
+    majority share reported as the whole bank's, which is a wrong number rather than a missing one.
 
-    Its second caller is the one that made this worth pinning. `runner/inner/spawn.py` computes the
-    floor for every seat it seats, then REPORTS collapse risk — it is not the screen and owns no
-    verdict. Unguarded it would take the refusal and die mid-spawn on the arrangement the recursion
-    exists for (`pp-self` over a verifier-graded inner benchmark), with a message about a collapse
-    reading from a path that was only ever logging one.
-    """
-    import inspect
-
-    from promptpotter.application.diagnostics.seed_screen import SeedScreenError, class_floor
-    from promptpotter.application.runner.inner import spawn
+    Silent harm: each of the three verdicts derived from the floor has a false reading available at
+    0.0 — a margin equal to accuracy, `rewards_collapse` False, `verdict_settled` decided — so the
+    screen would condemn or clear a bank on a line it never had."""
+    from promptpotter.application.diagnostics.seed_screen import (
+        SeedReading,
+        SeedScreenError,
+        class_floor,
+    )
 
     labelled = [Sample(id=i, query=f"q{i}", ground_truth="A" if i else "B") for i in range(4)]
     assert class_floor(labelled) == 0.75
+    assert class_floor([Sample(id=i, query=f"q{i}", ground_truth=None) for i in range(4)]) is None
 
-    with pytest.raises(SeedScreenError, match="verifier-graded"):
-        class_floor([Sample(id=i, query=f"q{i}", ground_truth=None) for i in range(4)])
+    with pytest.raises(SeedScreenError, match="mixes"):
+        class_floor([*labelled, Sample(id=9, query="q9", ground_truth=None)])
 
-    # The guard at the caller, asserted on the source rather than by driving a whole inner spawn:
-    # reaching that call needs a container backend, an inner campaign and real spend, and what is
-    # actually load-bearing is that the refusal is not entered and its result is not compared.
-    src = inspect.getsource(spawn._run_inner_campaign)
-    assert "all_verifier_graded" in src, (
-        "the class_floor call must not be reached on a labelless bank"
-    )
-    assert "bank_floor is not None and bank_floor >=" in src, (
-        "a None floor must SKIP the collapse comparison, never compare as 0.0"
-    )
+    floorless = SeedReading(seed=1, n=4, class_floor=None, origin_reads=(0.5, 0.75))
+    assert floorless.origin_accuracy == 0.625, "the level half still reads"
+    assert floorless.reasoning_margin is None
+    assert floorless.rewards_collapse is None
+    assert floorless.verdict_settled is None
 
 
 def test_terminal_ranking_sources_the_prediction():
@@ -1658,6 +1652,46 @@ def test_a_collapse_cut_is_never_reported_as_an_epsilon_cut() -> None:
     assert "NOT a verdict" in epsilon_cut
     assert "NOT a verdict" not in collapsed and "VERDICT" in collapsed
     assert "ε" not in collapsed and "P(best)" not in collapsed
+
+
+def test_the_collapse_gate_reads_the_answer_not_the_labels() -> None:
+    """A verifier-graded round carries no ground truths, and the gate that cuts a constant answerer
+    at `n_min` keyed on a truth SET — so on every benchmark the preprint runs it was permanently
+    False, and an arm that had stopped answering measured its whole budget before `l1_score`
+    dropped it anyway.
+
+    Labels only ever PROVED that one answer to every cell must be wrong. A verifier proves the same
+    thing by leaving a cell unsolved — which is why an arm answering alike and solving every cell
+    is NOT collapsed: that one is degenerate and correct, and cutting it would cost the round its
+    best arm.
+
+    Silent harm: nothing errors in either direction. The cut never fires, the θ posterior spends
+    the arm's full budget establishing what six cells had shown, and the L1 panel that renders a
+    COLLAPSED cut as a verdict on the idea (rather than as a stopped measurement) has none to
+    render, so the idea comes back next round."""
+    from promptpotter.domain.results import EliminationGate
+    from promptpotter.shared.errors import ErrorCategory
+
+    def rows(fitness: list[float], **over: Any) -> list[Any]:
+        return [
+            {"sample_id": i, "ground_truth": "", "predicted": "done", "fitness": f, **over}
+            for i, f in enumerate(fitness)
+        ]
+
+    def cut(rs: list[Any]) -> Any:
+        return PoBBCheck(PoBBConfig(), n_samples=28, ruler=None).check(rs, 0, 1)
+
+    signal = cut(rows([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]))
+    assert signal is not None, "a constant answerer must be cut at n_min with no labels to read"
+    assert signal.check_result["gate"] == EliminationGate.COLLAPSED
+
+    assert cut(rows([1.0] * 6)) is None, "one answer that solves every cell is not a collapse"
+    assert cut(rows([1.0, 0.0, 0.0, 1.0, 0.0, 0.0], predicted="NO_RESULT")) is None, (
+        "an agent that wrote no answer file answered nothing, which is not one answer"
+    )
+    assert cut(rows([0.0] * 6, error_category=ErrorCategory.PIPELINE)) is None, (
+        "a backend that broke on every cell is not a verdict on the idea"
+    )
 
 
 def test_only_an_epsilon_cut_banks_an_idea_as_measured_and_lost() -> None:

@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import re
 import uuid
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Self
 
 from pydantic import ConfigDict, Field, field_validator
@@ -111,9 +112,8 @@ class PromptTemplate(SearchPoint):
     ahead of the boundary (`l1_layout_voids_prefix`) rather than the order alone guaranteeing it.
 
     A constant ahead of the boundary is free, and the exemption is declared rather than assumed —
-    `PREFIX_STABLE_PANELS`. `task_context` is the only member: its five rendered fields are
-    `FRAMING_FIELDS`, which `TaskDecomposition.merge` refuses to overwrite, so the shared prefix
-    measurably survives all of `task_intent`."""
+    `PREFIX_STABLE_PANELS`, whose one member is `task_context`; the shared prefix measurably
+    survives all of `task_intent`."""
 
     persona: str = ""
     task_intent: str = ""
@@ -132,11 +132,21 @@ class PromptTemplate(SearchPoint):
     )
 
     @shapes_optimizer_prompt
-    def render_fields(self) -> list[tuple[str, str]]:
-        pairs = [(f, v) for f in type(self).RENDER_ORDER if (v := self._field_value(f))]
+    def _ordered_pairs(self, value_of: Callable[[str], str]) -> list[tuple[str, str]]:
+        pairs = [(f, v) for f in type(self).RENDER_ORDER if (v := value_of(f))]
         if block := self._render_few_shot_block():
             pairs.append(("few_shot_examples", block))
         return pairs
+
+    @shapes_optimizer_prompt
+    def render_fields(self) -> list[tuple[str, str]]:
+        return self._ordered_pairs(self._field_value)
+
+    @shapes_optimizer_prompt
+    def stored_fields(self) -> list[tuple[str, str]]:
+        """Each field's OWN value, on the walk ``render()`` joins — for a surface offering the
+        fields for replacement, where a spliced value is text the replacement would absorb."""
+        return self._ordered_pairs(lambda name: getattr(self, name))
 
     @shapes_optimizer_prompt
     def render(self) -> str:
