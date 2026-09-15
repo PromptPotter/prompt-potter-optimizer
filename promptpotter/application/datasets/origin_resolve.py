@@ -173,7 +173,7 @@ async def resolve_origin_turn(
     try:
         async with observed_node(
             "origin_checkin",
-            "llm/optimizer",
+            "llm",
             obs=None,
             campaign_id=draft.draft_id,
             round_num=0,

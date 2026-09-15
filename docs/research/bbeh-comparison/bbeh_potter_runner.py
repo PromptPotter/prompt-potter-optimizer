@@ -19,12 +19,14 @@ from promptpotter.application.embedded_run import (
     run_campaign,
 )
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
+from promptpotter.application.runner.entry import RunMode
 from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
+from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.sample import Sample
-from promptpotter.presentation.views.completion import report_completion
-from promptpotter.presentation.views.display import set_display_tags
-from promptpotter.presentation.views.live.display import LiveDisplay
+from promptpotter.presentation.terminal.completion import report_completion
+from promptpotter.presentation.terminal.live.display import LiveDisplay
+from promptpotter.presentation.terminal.primitives import set_display_tags
 
 # datasets/bbeh/ is the SoT for everything about the task — pipeline.yaml drives the
 # target-layer schema (read by open_session via dataset_name="bbeh"), campaign.yaml
@@ -123,6 +125,8 @@ async def run_bbeh_campaign(
             origin,
             campaign_config,
             session=session,
+            limits=LaunchLimits(),
+            mode=RunMode(),
         )
         report_completion(cycle_result, session=session)
         # Ask the outcome table, never a hand-authored string: the export below is only

@@ -78,7 +78,7 @@ IS the mean logit lift — a number to read, not merely to order by.
 arms still prints a leader, and reading that leader as a finding is the failure mode this phase is most
 exposed to.
 
-- **Served at zero spend** by `application/evidence.py` (`python -m promptpotter
+- **Served at zero spend** by `application/evidence/` (`python -m promptpotter
   evidence promptpotter-self --ranking`, `GET /evidence?subject=campaign:…&ranking=`): each arm's
   anchor-to-origin paired
   effect with its own interval, plus `EditSpread` — how far apart those effects are. Beside them, and

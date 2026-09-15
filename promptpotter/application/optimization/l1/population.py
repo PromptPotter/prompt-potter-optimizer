@@ -12,6 +12,7 @@ from promptpotter.application.optimization.validators.l1_strict import (
     L1_INNER_STEER_IS_LEGAL,
     L1_PROMPT_BLOCKS_IN_LIBRARY,
     L1_PROMPT_FIELD_NOT_GUTTED,
+    L1_PROMPT_FIELDS_OPEN,
     L1_PROMPT_PLACEHOLDERS_INTACT,
     L1_SCHEMA_COMPLIANCE,
 )
@@ -89,6 +90,11 @@ def parse_population(
             )
             if block_outcome is not None:
                 failures.extend(block_outcome.evidence["failures"])
+            held_outcome = L1_PROMPT_FIELDS_OPEN.run(
+                cp.prompt_fields_updates, pipeline_schema=schema
+            )
+            if held_outcome is not None:
+                failures.extend(held_outcome.evidence["failures"])
             if pipeline_overlay:
                 outcome = L1_SCHEMA_COMPLIANCE.run(
                     pipeline_overlay,

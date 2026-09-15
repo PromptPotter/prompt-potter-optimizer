@@ -10,7 +10,7 @@ available_models:
   - openai/gpt-oss-20b
 nodes:
   llm_only:
-    type: generation
+    type: llm
     runtime: backend
     node_role: ranker
     description: >-
@@ -72,7 +72,6 @@ nodes:
         - pipeline_key: final_ranking
           output_field: generated_text
           is_llm: true
-      langfuse_type: generation
 pipelines:
   default:
     - llm_only

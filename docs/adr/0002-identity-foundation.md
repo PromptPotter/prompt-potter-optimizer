@@ -97,7 +97,7 @@ The tenant boundary is enforced **at the data engine**, not by every `WHERE tena
 - **Today's file-based layout is the degenerate case.** `projects/{tenant_id}/` is a one-tenant-per-directory isolation primitive enforced by the OS. The contract shape — "every storage operation is scoped to `IdentityContext.tenant_id`, no exceptions" — is the same.
 - **Stage-2 form** — every tenant-scoped table carries a `tenant_id` column; an RLS policy of the form `USING (tenant_id = current_setting('app.tenant_id')::uuid)` is attached; the application sets `SET LOCAL app.tenant_id = …` at the start of each request inside a transaction. The store adapter (below) is the single place this happens.
 - **Store adapter** — `infrastructure/store/stores.py::build_stores(identity: IdentityContext, …)` is the single construction route. Stage 0 returns file-backed stores rooted at `projects/{tenant_id}/`. Stage 2 returns Postgres-backed stores that set the RLS session variable. **No application caller knows which.** The RLS adapter is a swap, not a rewrite.
-- **Cross-tenant primitives.** `measurements/` is dataset-scoped + cross-campaign by design (per `docs/architecture.md` §0), as are its peers under `store/layout.py::SHARED_CACHE_DIRS` — all are keyed by content hash, which is what makes them shareable at all. They stay cross-tenant within a single install; cross-*install* sharing is an explicit non-goal (per `../specs/roadmap.md`). The RLS policy on the measurement tables omits the tenant filter; install-level isolation comes from running separate databases per install.
+- **Cross-tenant primitives.** `measurements/` is dataset-scoped + cross-campaign by design (per `docs/architecture.md` § Measurement archive (the actual database)), as are its peers under `store/layout.py::SHARED_CACHE_DIRS` — all are keyed by content hash, which is what makes them shareable at all. They stay cross-tenant within a single install; cross-*install* sharing is an explicit non-goal (per `../specs/roadmap.md`). The RLS policy on the measurement tables omits the tenant filter; install-level isolation comes from running separate databases per install.
 
 ### Data model — SCIM 2.0 Core + EnterpriseUser
 
@@ -174,7 +174,7 @@ Enforceable rules. A PR violating any of these is a block. The **(test)** marker
 
 ### Minimal-deps invariant
 
-- **Stage 0 — zero new deps.** Stdlib only. `IdentityContext` (`shared/identity.py`) + four newtypes (`domain/identity.py`) ship without any library.
+- **Stage 0 — zero new deps.** Stdlib only. `IdentityContext` + four newtypes (`shared/identity.py`) ship without any library.
 - **Stage 1 — one new Python dep: `cryptography`** for JWT/JWS signature verification against JWKS. Everything else (HTTP discovery fetch, session cookies, opaque token generation, PKCE) is stdlib. The OIDC client is ~200 LoC we write ourselves.
 - **Stage 2 — zero new Python deps.** Open-source IdPs (Ory / Zitadel / Keycloak / Authentik) are **sibling processes** — we call them over HTTP/OIDC, we do not import a Python auth library. The PostgreSQL adapter rides our existing storage abstractions plus the `psycopg` binding we'd already need for any DB store.
 - **Never** add a Python auth library (no `python-jose`, no `authlib`, no `python-social-auth`, no `flask-login`-shape framework). Either we implement OIDC client ourselves (Stage 1) or we call out to a sibling IdP (Stage 2).

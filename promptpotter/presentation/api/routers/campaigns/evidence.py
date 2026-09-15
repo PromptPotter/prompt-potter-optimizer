@@ -11,14 +11,13 @@ from typing import Annotated
 
 from fastapi import Query
 
-from promptpotter.application.evidence import (
+from promptpotter.application.evidence.metric_catalogue import MEASURAND
+from promptpotter.application.evidence.read import (
     Evidence,
-    SubjectSpec,
     campaigns_on_dataset,
-    parse_subject,
     subject_evidence,
 )
-from promptpotter.application.evidence_metrics import MEASURAND
+from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import BadRequestError

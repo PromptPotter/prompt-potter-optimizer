@@ -37,7 +37,7 @@ from promptpotter.infrastructure.store.session_pointer import (
     save_active_pointer,
 )
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import graceful
+from promptpotter.shared.errors import PayloadInvalidError, graceful
 
 if TYPE_CHECKING:
     from promptpotter.domain.run_records import CycleSeed
@@ -70,8 +70,6 @@ def _fork_sibling_setup(
     *,
     from_round: int,
     payload: ForkSpec,
-    sweep_batch_id: str | None = None,
-    source_file: str | None = None,
 ) -> str:
     parent_dir = campaign_store.cycle_dir(parent)
     new_dir = campaign_store.cycle_dir(parent.model_copy(update={"cycle_id": new_cycle_id}))
@@ -84,10 +82,6 @@ def _fork_sibling_setup(
         "forked_at": now,
         "fork": payload.model_dump(mode="json"),
     }
-    if source_file is not None:
-        record_data["source_file"] = source_file
-    if sweep_batch_id is not None:
-        record_data["sweep_batch_id"] = sweep_batch_id
 
     with graceful("FORK_CUT decision append failed"):
         record_decision(
@@ -167,8 +161,6 @@ def _mint_fork(
     payload: ForkSpec,
     *,
     surviving_rounds: list[RoundResult] | None = None,
-    sweep_batch_id: str | None = None,
-    sweep_source_file: str | None = None,
 ) -> str:
     """Single entry point, dispatching on ``payload.trigger``. ``fork_from_round`` is MECHANICAL (how many
     parent rounds this lifts); ``ForkSpec.from_round`` is PROVENANCE (which round the cut came from)."""
@@ -259,32 +251,6 @@ def _mint_fork(
             campaign_store.write_cycle_seed(
                 CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id), payload.seed
             )
-    elif payload.trigger is ForkTrigger.OPERATOR_SWEEP:
-        if sweep_batch_id is None or sweep_source_file is None:
-            raise ValueError(
-                "_mint_fork(OPERATOR_SWEEP) requires sweep_batch_id + sweep_source_file"
-            )
-        if "_" in sweep_batch_id:
-            raise ValueError(f"sweep_batch_id must not contain underscores; got {sweep_batch_id!r}")
-        suffix = _fork_suffix(parent.cycle_id, sweep_source_file)
-        new_cycle_id = f"{parent.cycle_id}_sweep_{sweep_batch_id}_{suffix}"
-        now = _fork_sibling_setup(
-            campaign_store,
-            parent,
-            session_id,
-            new_cycle_id,
-            from_round=0,
-            payload=payload,
-            sweep_batch_id=sweep_batch_id,
-            source_file=sweep_source_file,
-        )
-        campaign_store.write_fresh_sibling(
-            parent.campaign_id,
-            parent.cycle_id,
-            new_cycle_id,
-            sweep_batch_id=sweep_batch_id,
-            forked_at=now,
-        )
     # The lineage-read fork block — serialized from the one typed ForkSpec (no
     # hand-built per-trigger dict). The heavy `seed` payload is excluded; it rides
     # the fork's ledger as its own read-once `CycleSeedRecord`.
@@ -412,7 +378,7 @@ def mint_operator_fork(
         # Two different origins asked for at once: the lifted round 0 is already the origin, so a
         # declared one would either be ignored or overwrite measured rows. Refused rather than
         # silently dropped — the caller meant one of the two acts and this says which it cannot be.
-        raise ValueError(
+        raise PayloadInvalidError(
             "keep_rounds lifts the parent's round 0 as its origin, so the seed must not "
             "declare origin_prompt_fields; fork without keep_rounds to start from an edited origin"
         )

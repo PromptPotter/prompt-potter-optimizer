@@ -29,7 +29,7 @@
 /* ONE wrapping row: the pipeline picture takes the first, the round pills and the two
    mini strips share the next. Two rows for two inline controls was the hero's own empty
    space, and the picture's size is untouched by the change. */
-.wf-hero{position:relative;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:var(--space-6) var(--space-10);padding:var(--space-16) var(--space-16) var(--space-18);max-width:980px;margin:0 auto;width:100%}
+.wf-hero{position:relative;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:var(--space-6) var(--space-10);padding:var(--space-16) var(--space-16) var(--space-18);max-width:var(--dash-narrow-max);margin:0 auto;width:100%}
 /* Two that need the whole row back. NodeDetail is a 560px column and would otherwise sit
    BESIDE the pills; the expanded heat table breaks out full-bleed off its own wrap's box
    (`margin-left:calc(50% - 50vw)`), which a shrink-to-fit wrap resolves against nothing.
@@ -291,8 +291,10 @@
 .wf-hero:has(> .bnode),.wf-hero:has(.hs-expand-wrap){overflow-y:auto}
 /* ONE column at every width. The 360px settings rail that used to sit beside the
    thread is gone — its switches are the composer's Tools popover now, which is
-   reachable without scrolling past the input on a phone. */
-.chat-grid{display:grid;grid-template-columns:minmax(0,600px);gap:var(--space-24);justify-content:center;flex:1 0 240px;min-height:0;padding:0 var(--space-18)}
+   reachable without scrolling past the input on a phone. The masthead's width, like the
+   hero above it: at 600px a check-in's editor rows were squeezed down the middle of an
+   empty screen. */
+.chat-grid{display:grid;grid-template-columns:minmax(0,var(--dash-narrow-max));gap:var(--space-24);justify-content:center;flex:1 0 240px;min-height:0;padding:0 var(--space-18)}
 /* No height floor at ANY width, and no band where the tab scrolls instead of the thread.
    The panel takes the height the tab has left, so its input row lands at the bottom of the
    screen; a floor is what pushed that row below the fold. No header either — a title bar
@@ -419,6 +421,9 @@
 .ingest-pick-btn:disabled{opacity:.55;cursor:not-allowed}
 .ingest-pick-meta{flex-shrink:0;font-size:var(--text-sm);color:var(--color-text-tertiary)}
 .ingest-ready{display:flex;flex-direction:column;gap:var(--space-12)}
+/* The chat panel is the check-in's one frame, so a section here is a heading over a
+   hairline — never a second card inside it, with a third nested in the optimizer's. */
+.ingest-ready > :is(.setup-preview,.origin-checkin){padding:var(--space-14) 0 0;border:0;border-top:0.5px solid var(--color-border);border-radius:0;background:none}
 /* Degraded check-in banner in the ready panel — the resolver turn hiccuped, so
    the draft carries a re-run affordance beside the Start button. */
 .ingest-degraded{display:flex;flex-direction:column;gap:var(--space-8);align-items:flex-start;border:1px solid var(--color-warn-border);background:var(--color-warn-bg);color:var(--color-warn);border-radius:8px;padding:var(--space-10) var(--space-12);font-size:var(--text-base);line-height:1.5}

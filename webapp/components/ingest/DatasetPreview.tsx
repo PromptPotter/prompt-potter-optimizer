@@ -22,10 +22,10 @@ export function DatasetPreview({ draft }: { draft: DraftCampaignWire }) {
     !h ? null : h === draft.column_query ? "input" : h === draft.column_ground_truth ? "target" : null;
 
   return (
-    <section className="ds-preview">
-      <header className="ds-preview-head">
-        <span className="ds-preview-title">Your data</span>
-        <span className="ds-preview-meta">
+    <section className="setup-preview">
+      <header className="setup-preview-head">
+        <span className="setup-preview-title">Your data</span>
+        <span className="setup-preview-sub">
           {draft.n_samples.toLocaleString()} row{draft.n_samples === 1 ? "" : "s"} ·{" "}
           {headers.length} column{headers.length === 1 ? "" : "s"} · first {rows.length} shown
         </span>

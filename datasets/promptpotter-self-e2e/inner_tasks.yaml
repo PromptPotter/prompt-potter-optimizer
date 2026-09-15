@@ -1,0 +1,28 @@
+# The DEGENERATE panel — a plumbing fixture for the browser walk, not an instrument.
+#
+# `promptpotter-self/inner_tasks.yaml` is the real one and this is not a cheaper version of it:
+# every property that makes that panel MEASURE something has been removed here on purpose. One
+# cell, so PoBB can never reach its elimination floor of 4 and nothing is ever eliminated. One
+# inner round, so `mean_round_delta` is a single difference with no series behind it. One inner
+# variant, so there is no candidate field to select from. Two samples, so the inner θ is noise.
+#
+# READ NOTHING OFF A RUN OF THIS. It answers exactly one question — does the L4 spawn path still
+# work end to end — and any number it emits is an artefact of the geometry above.
+#
+# What a cell costs, what the cost floor is, and why the benchmark below is not a shallower cut:
+# `dataset.md` beside this file owns all three. Do not restate them here — they are one argument
+# and it drifts the moment it has two homes.
+inner_benchmark: justlogic-d234
+inner_benchmark_config:
+  n_samples_per_inner_round: 2
+  n_samples_origin: 2
+  max_inner_rounds: 1
+  inner_n_variants: 1
+  # No `inner_lives`: with one round there is nothing for a life to stop early.
+  inner_optimizer_temperature: 0.0
+tasks:
+  # Seed 0 only. The real panel's six seeds were each chosen against a measured
+  # constant-answer floor; one seed is not a sample of that work, it is a single cell that
+  # makes the machinery turn over.
+  - id: justlogic-d234/seed-0
+    inner_dataset_seed: 0

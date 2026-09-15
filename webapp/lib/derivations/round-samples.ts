@@ -1,6 +1,6 @@
 // What the `l1_score` block says about each candidate: the ROWS it measured, and WHY it has
 // them. One module because it is one array — `nodes.l1_score.{input,output}.candidates[]`,
-// built in one loop over one `RoundBuffer` (`live_dashboard/render.py`). Two readers of one
+// built in one loop over one `RoundBuffer` (`live_dashboard/blocks.py`). Two readers of one
 // source in two files is how the same shape gets read two ways.
 //
 // Per-sample: two strict functions, one per source — `liveSamplesFor` reads the in-flight
@@ -29,7 +29,7 @@ import { cacheShare, foldStepTokens } from "./token-account";
 
 // Live-mode samples for one candidate in the in-flight round. Reads
 // `dashboard.json::current_round.nodes.l1_score.output.candidates[].samples[]`, which the
-// producer serves already graded (`render.py::sample_row`), so its `HIT`/`MISS`/`ERR` IS
+// producer serves already graded (`blocks.py::sample_row`), so its `HIT`/`MISS`/`ERR` IS
 // the verdict and nothing re-derives one. Returns rows in source order; the caller decides
 // if it wants newest-first.
 function liveSamplesFor(
@@ -213,7 +213,7 @@ function isFailure(v: unknown): v is ValidationFailure {
 
 // Takes the RESOLVED block rather than reaching for the live snapshot, and that is what makes it
 // work on a HISTORICAL round: `useRoundNodes` is the single resolver that picks the live block vs
-// the audit twin, and `AuditTrailView.set_l1_score` deposits the identical object into the twin.
+// the audit twin, and `AuditTrailProjection.set_l1_score` deposits the identical object into the twin.
 //
 // It deliberately does NOT answer whether a candidate is invalid — `ElectedRow.invalid` does, off
 // the candidate row every other surface already reads. This only EXPLAINS a rejection the row has

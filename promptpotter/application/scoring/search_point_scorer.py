@@ -16,7 +16,7 @@ from promptpotter.application.scoring.selection import mean_fitness_ci
 from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
 from promptpotter.domain.scoring import CellScorer, QueryMeasurement
 from promptpotter.domain.validators import StopRule
-from promptpotter.infrastructure.store import archive_views
+from promptpotter.infrastructure.store import archive_queries
 from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 from promptpotter.infrastructure.tracing.events import DatasetRun
 from promptpotter.shared.errors import (
@@ -163,7 +163,7 @@ def _resolve_prior_cache(
         node_configs = pipeline_schema.node_configs(search_point.pipeline_params)
         cached_sample_results = cast(
             "dict[int, QueryMeasurement]",
-            archive_views.reusable_results(
+            archive_queries.reusable_results(
                 store,
                 node_configs,
                 is_fatal=is_deprecated,
@@ -320,11 +320,11 @@ async def score_search_point(
     )
     if force_fresh and store:
         # An append-only log does not overwrite: force_fresh means REPLACE these rows.
-        archive_views.reset_measurement_run(store, run_id)
+        archive_queries.reset_measurement_run(store, run_id)
     elif store:
         # Drop a previous walk's dead header rows before appending more (a no-op on a log
         # that closed cleanly — the end-of-walk compaction already tightened it).
-        archive_views.compact_measurement_run(store, run_id)
+        archive_queries.compact_measurement_run(store, run_id)
 
     # How many of ``results`` are already appended to the run's log, and whether the priors
     # have been. The log is append-only, so each save writes only what is new.
@@ -374,7 +374,7 @@ async def score_search_point(
             priors_appended = True
         new_rows.extend(results[appended:])
         appended = len(results)
-        archive_views.record_measurement_run(
+        archive_queries.record_measurement_run(
             store, run_id, run_data, cast("list[dict[str, Any]]", new_rows)
         )
 
@@ -422,7 +422,7 @@ async def score_search_point(
 
     _save_run(results, scores)
     if store:
-        archive_views.compact_measurement_run(store, run_id)
+        archive_queries.compact_measurement_run(store, run_id)
     _emit_dataset_run(
         session,
         run_id=run_id,

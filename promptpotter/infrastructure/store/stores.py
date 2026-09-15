@@ -12,7 +12,6 @@ from typing import Any
 
 from promptpotter.config.paths import benchmark_datasets_root
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, WorkspaceDir
-from promptpotter.domain.identity import TenantId
 from promptpotter.infrastructure.store.backend_store import BackendStore
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.checkin_draft_store import CheckinDraftStore
@@ -30,12 +29,11 @@ from promptpotter.infrastructure.store.layout import (
 )
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 from promptpotter.infrastructure.store.session_store import SessionStore
-from promptpotter.infrastructure.store.sweep_store import SweepStore
 from promptpotter.infrastructure.store.tenant_dataset_store import TenantDatasetStore
 from promptpotter.infrastructure.store.user_store import UserStore
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 from promptpotter.shared.hashing import HASH_TRUNCATE
-from promptpotter.shared.identity import IdentityContext
+from promptpotter.shared.identity import IdentityContext, TenantId
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +132,6 @@ class Stores:
     sessions: SessionStore
     campaigns: CampaignStore
     checkin: CheckinDraftStore
-    sweeps: SweepStore
     archive: MeasurementArchive
     optimizer_reuse: LLMReuseCache
     # Scoring's own reuse cache, and a SECOND instance rather than a shared one: see
@@ -175,7 +172,6 @@ def build_stores(
         sessions=SessionStore(tenant_dir),
         campaigns=CampaignStore(tenant_dir),
         checkin=CheckinDraftStore(tenant_dir),
-        sweeps=SweepStore(tenant_dir),
         archive=MeasurementArchive(shared_tenant),
         optimizer_reuse=LLMReuseCache(shared_tenant, OPTIMIZER_REUSE_DIR),
         judge_reuse=LLMReuseCache(shared_tenant, JUDGE_REUSE_DIR),

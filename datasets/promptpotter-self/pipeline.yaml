@@ -24,7 +24,7 @@ available_models:
 # surface it cannot reach.
 nodes:
   l1_generate:
-    type: optimizer_prompt
+    type: llm
     runtime: in_process
     node_role: candidate_source
     description: >-
@@ -43,7 +43,6 @@ nodes:
       param_allowed_values: {}
       observation_name: l1_generate
       observation_mappings: []
-      langfuse_type: generation
   l1_score:
     type: measurement
     runtime: in_process
@@ -55,7 +54,7 @@ nodes:
       why it does not re-key banked measurements.
     config: {}
   l1_critique:
-    type: optimizer_prompt
+    type: llm
     runtime: in_process
     node_role: ranker
     description: >-
@@ -75,9 +74,8 @@ nodes:
       observation_mappings:
         - pipeline_key: final_ranking
         - pipeline_key: mean_round_delta
-      langfuse_type: generation
   l2_context:
-    type: optimizer_prompt
+    type: llm
     runtime: in_process
     node_role: enricher
     description: Inner cycle's L2 optimizer prompt — refines task_context on inner-L1 stall.
@@ -94,9 +92,8 @@ nodes:
       param_allowed_values: {}
       observation_name: l2_context
       observation_mappings: []
-      langfuse_type: generation
   l3_plan:
-    type: optimizer_prompt
+    type: llm
     runtime: in_process
     node_role: enricher
     description: Inner cycle's L3 optimizer prompt — replans strategy on inner-L2 stall.
@@ -113,9 +110,8 @@ nodes:
       param_allowed_values: {}
       observation_name: l3_plan
       observation_mappings: []
-      langfuse_type: generation
   checkin:
-    type: optimizer_prompt
+    type: llm
     runtime: in_process
     node_role: enricher
     description: >-
@@ -135,7 +131,6 @@ nodes:
       param_allowed_values: {}
       observation_name: checkin
       observation_mappings: []
-      langfuse_type: generation
 # Mirrors `promptpotter/assets/optimizer/pipeline.yaml::pipelines` node for node, because this
 # dataset IS that optimizer seen as a target: an edit evolved on one layer lifts onto the other
 # only while both declare the same graph — edit one, mirror it in the same commit. Not pinned by a

@@ -6,7 +6,7 @@
 //     in-flight current round's candidates, so opening mid-run shows the
 //     candidate being scored, not the last finished round.
 //   • projectionToActivity() — maps each live tailed record to one item, 1:1 with
-//     the CLI's LiveDisplay handlers (presentation/views/live/display.py).
+//     the CLI's LiveDisplay handlers (presentation/terminal/live/display.py).
 //   • sampleScoredCandidate() — updates the in-flight candidate's fitness from the
 //     running composite the scorer rides on each sample (result._running), so the
 //     candidate line moves in real time instead of sitting at 0 until it completes.
@@ -40,7 +40,7 @@ import type { NonActivityKind, ProjectionEnvelope } from "@/lib/api/types";
 //
 // `sample_order_preview` is emitted once per candidate start (`l1/score/loop.py`)
 // with the shared order the scorer will walk. It is deliberately NOT an activity item
-// — nothing happened — it feeds "which sample comes next". `LiveDashboardView` also
+// — nothing happened — it feeds "which sample comes next". `LiveDashboardProjection` also
 // absorbs it into `dashboard.json::declared_sample_order`, so this is the FASTER
 // source, not the only one: emitted once, a reader that joined mid-candidate never
 // sees it, and the walk used to lose its whole forward half on a reload.
@@ -231,7 +231,7 @@ export function projectionToActivity(env: ActivitySource): ActivityItem | null {
       else if (prefix.share != null) bits.push(`${Math.round(prefix.share * 100)}% prefix cached`);
       // "replayed", not "cached": OUR archive served this call and no provider saw it. The word
       // `cached` names the provider-side discount one line up, and the terminal renders the same
-      // record with the same two words (`presentation/views/live/display.py`).
+      // record with the same two words (`presentation/terminal/live/display.py`).
       if (inner.cached) bits.push("replayed");
       return { id, kind: "done", icon: "✓", label: nodeLabel(p), detail: bits.join(" · ") || undefined, tone: "muted" };
     }

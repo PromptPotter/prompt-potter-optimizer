@@ -9,6 +9,9 @@ from typing import Annotated, Any
 from fastapi import File, Form, Header, Request, UploadFile
 from pydantic import Field
 
+from promptpotter.application.commands.checkin_dispatch import dispatch_draft_patch
+from promptpotter.application.commands.dispatcher import CommandCall
+from promptpotter.application.commands.payloads import EditDraftCampaignPayload
 from promptpotter.application.datasets.csv_ingest import (
     MAX_SAMPLES,
     IngestError,
@@ -35,7 +38,6 @@ from promptpotter.infrastructure.store.dataset_access import (
 from promptpotter.presentation.api.deps import (
     StoresDep,
 )
-from promptpotter.presentation.api.middleware.command_dispatcher import dispatch_draft_patch
 from promptpotter.presentation.api.routers.commands import ensure_idempotency_key
 from promptpotter.presentation.api.routers.datasets._router import datasets_router
 from promptpotter.shared.errors import (
@@ -44,6 +46,13 @@ from promptpotter.shared.errors import (
     NotFoundError,
     PayloadInvalidError,
 )
+
+
+def _candidate_library_call(
+    draft_id: str, terms: tuple[str, ...], idempotency_key: str
+) -> CommandCall[EditDraftCampaignPayload]:
+    patch = EditDraftPatch(candidate_library=list(terms))
+    return CommandCall(EditDraftCampaignPayload(draft_id=draft_id, patch=patch), idempotency_key)
 
 
 def _too_large(observed: int | str) -> ContentTooLargeError:
@@ -148,19 +157,14 @@ async def upload_candidate_library(
             code="ingest_failed",
             details={"reason": "empty"},
         )
-    return await dispatch_draft_patch(
-        stores,
-        draft_id=draft_id,
-        patch=EditDraftPatch(candidate_library=terms),
-        idempotency_key=idemp,
-    )
+    return await dispatch_draft_patch(stores, _candidate_library_call(draft_id, terms, idemp))
 
 
 class _BuildLibraryBody(StrictModel):
     """Body for building a candidate library from one of the draft's own columns."""
 
     # `draft_id` IS the owning `campaign_id`; bound it exactly as every other check-in payload
-    # does (`command_dispatcher.py::_CheckinPayload` and its subclasses), not 64.
+    # does (`commands/payloads.py::_CheckinPayload` and its subclasses), not 64.
     draft_id: str = Field(min_length=8, max_length=128)
     column: str = Field(min_length=1, max_length=256)
 
@@ -200,12 +204,7 @@ async def build_candidate_library_from_column(
             code="ingest_failed",
             details={"reason": "empty"},
         )
-    return await dispatch_draft_patch(
-        stores,
-        draft_id=body.draft_id,
-        patch=EditDraftPatch(candidate_library=terms),
-        idempotency_key=idemp,
-    )
+    return await dispatch_draft_patch(stores, _candidate_library_call(body.draft_id, terms, idemp))
 
 
 @datasets_router.post("/{name}/draft")

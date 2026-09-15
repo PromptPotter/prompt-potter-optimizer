@@ -7,23 +7,23 @@ per-layer `CLAUDE.md` files say *what* the rules are; this page says *where you
 type* and *which test catches you* if you miss a half.
 
 The pattern every recipe shares: **one registry is the source of truth, and an
-import-time assert proves nothing fell out of it.** A capability can't silently
+import- or init-time assert proves nothing fell out of it.** A capability can't silently
 disappear because the registry is code-derived and the assert walks it.
 
 **Where the guard lives.** Per [`tests/CLAUDE.md`](../../tests/CLAUDE.md) a test
 earns its place only if it catches *silent* harm; the structural / wire / shape
 suites were deliberately cut because those failures break loud. So most guards
-below are **import-time asserts beside the registry they validate**, not standing
+below are **import- or init-time asserts beside the registry they validate**, not standing
 tests. Add new ones the same way — never as a `test_structure` scan.
 
 | You want to add… | Recipe | What actually catches you |
 |---|---|---|
 | A telemetry event / ledger record | [§1](#1-a-ledger-record--telemetry-event) | Breaks loud in use — a union member with no `on_record` arm never reaches `dashboard.json`; on the tracing half, `ObservabilityBridge.__init__` raises on an unrouted `Event` |
-| A prompt injection (`{{slot}}`) | [§2](#2-a-prompt-injection) | Import-time: the `registry.py` guard + `validate_template()` |
+| A prompt injection (`{{slot}}`) | [§2](#2-a-prompt-injection) | Init-time: the `injection_table()` guard + `validate_template()` |
 | A dashboard / view field | [§3](#3-a-dashboard--view-field) | Breaks loud — a wrong/empty dashboard |
 | A resume / decision checkpoint | [§4](#4-a-resume--decision-checkpoint-kind) | Import-time: `decisions.py` + `replayers.py` asserts |
-| A connector (backend) | [§5](#5-a-connector-backend) | Import-time: the `CONNECTORS` registry guard |
-| An optimizer node | [§6](#6-an-optimizer-node) | Import-time: `validate_template()` at prompt load |
+| A connector (backend) | [§5](#5-a-connector-backend) | Init-time: the `registered()` registry guard |
+| An optimizer node | [§6](#6-an-optimizer-node) | `validate_template()` at prompt load |
 | A CLI verb | [§7](#7-a-cli-verb) | Import-time: the `COMMANDS` ↔ `parser_verbs` assert |
 | A control-plane command kind | [§8](#8-a-control-plane-command-kind) | Import-time: three asserts over `ALL_DISPATCHED_KINDS` — cap, payload model, **and the CLI verb** |
 | A served READ (a GET) | [§9](#9-a-served-read) | `gate.py --only openapi` / `--only ts-types`, but **only once the route carries a `response_model`** — a read without one is invisible to both, which is how several shipped undeclared |
@@ -49,8 +49,8 @@ impossible (the deep sites have nothing to call it on).
 
 The step-by-step is [`application/CLAUDE.md`](../../promptpotter/application/CLAUDE.md)
 § Conventions' canonical template. The one step it does not spell out: **override `_handle_xxx`
-on each projection that surfaces the fact** (`LiveDashboardView` for `dashboard.json`,
-`AuditTrailView` for `round_NNNN.json`, `LiveDisplay` for the CLI). Unhandled = silently dropped,
+on each projection that surfaces the fact** (`LiveDashboardProjection` for `dashboard.json`,
+`AuditTrailProjection` for `round_NNNN.json`, `LiveDisplay` for the CLI). Unhandled = silently dropped,
 which is exactly what the guard prevents.
 
 **Guard (an import-time raise, not a standing test — see
@@ -84,7 +84,7 @@ Contract: [`application/CLAUDE.md`](../../promptpotter/application/CLAUDE.md) §
 
 ## 2. A prompt injection
 
-A `{{slot}}` the optimizer LLM sees. The registry is `INJECTIONS`
+A `{{slot}}` the optimizer LLM sees. The registry is `injection_table()`
 (`application/optimization/dispatch/injections/registry.py`); every renderer
 is a pure `(InjectionBundle) -> str`.
 
@@ -94,15 +94,15 @@ is a pure `(InjectionBundle) -> str`.
    (returns `""` when its source field is empty — empty injections are skipped).
 2. Decorate it with `@signal("<name>", kind=…, char_cap=…, citable=…)` — registration
    happens at the definition site; key and body are co-located, no separate
-   `INJECTIONS` edit.
+   registry edit.
 3. To make it reachable, add it to the node's `NODE_LAYOUTS[node].possible`
    (and `.floor` to put it on by default — for `l1_generate` these alias
    `L1_POSSIBLE`/`L1_MANDATORY`), or use `{{<name>}}` directly in a template.
 
-**Guard (import-time, no standing test):** the registry guard in `registry.py`
-fails loud at import if a `possible` name has no registered renderer, and
-`validate_template()` (at `load_optimizer_prompt`) raises at module load on any
-`{{slot}}` not in `INJECTIONS` — typos fail loud.
+**Guard (at registry completion, no standing test):** `injection_table()` fails loud if a
+`possible` name has no registered renderer, and
+`validate_template()` (at `load_optimizer_prompt`) raises at template load on any
+`{{slot}}` not in the registry — typos fail loud.
 
 Contract: [`dispatch-hub.md`](dispatch-hub.md) § L1 layout.
 
@@ -121,12 +121,12 @@ reconstructor to keep in sync** — that synchronized third edit is gone.
    `application/views/view_models.py`.
 2. Set it in the live builder `_<phase>_<event>` in
    `application/views/ingress.py` (`from_phase_event`).
-3. Render it in `presentation/views/render.py` (`to_text`) /
+3. Render it in `presentation/terminal/ansi.py` (`to_text`) /
    `application/views/render/` (`to_markdown`) and/or
-   read it where the fact is surfaced — `LiveDashboardView._apply_phase` reads
+   read it where the fact is surfaced — `LiveDashboardProjection._apply_phase` reads
    the typed view by attribute (`getattr`, presentation-agnostic).
 4. If the field also appears in post-hoc `log.md`, set it in `from_disk_log`
-   (`application/output.py`) — that builder reads on-disk `index.json` for
+   (`application/runner/output.py`) — that builder reads on-disk `index.json` for
    **cross-cycle** rendering and is a genuinely separate source, not a roundtrip shim.
 
 **A field on the ROUND document is not this recipe — it is one edit.** Declare it on
@@ -197,12 +197,12 @@ has one; `cli/commands/_shared.py` asserts the divergence hint lists every kind.
 
 ## 5. A connector (backend)
 
-A new backend kind — one file under `connectors/` plus a row in its `CONNECTORS` dict, owned
-step by step by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md).
+A new backend kind — one file under `connectors/` defining `CONNECTOR`, owned step by step by
+[`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md).
 
 **The usual reader here is not us** — it is someone with a backend already running who wants it
 optimized, working through it in one conversation. **The wiring is the easy half**: four required
-fields, and the guard below catches a half-wired one at import. Step 2 is what decides whether the
+fields, and the guard below catches a half-wired one before a run spends. Step 2 is what decides whether the
 campaign is worth running, and nothing about their backend tells you the answer. Each step's output
 is the next one's input.
 
@@ -262,9 +262,9 @@ instruments and neither is visible from a single cell. `seed-screen`, `noise-flo
 answer the sharper versions of this, and `evidence` answers whether two readings can be compared
 at all — [`persistence-and-state.md`](../operations/persistence-and-state.md).
 
-**Guard (import-time, no standing test):** the registry guard at the bottom of
-`connectors/__init__.py` raises at import if any row is half-wired, and its own raise
-enumerates every half-wiring it rejects — read the list there rather than a copy here.
+**Guard (at registry completion, no standing test):** `connectors/__init__.py::_validate` raises
+if any connector is half-wired, and its own raise enumerates every half-wiring it rejects — read
+the list there rather than a copy here.
 
 Three things the recipe cannot show you:
 
@@ -294,8 +294,8 @@ and registry live in [`developer/node-standard.md`](node-standard.md). A node re
 `PromptTemplate` through the same `DispatchHub` fill path as every other node —
 adding a slot it needs is §2.
 
-**Guard (import-time):** `validate_template()` at `load_optimizer_prompt` rejects any
-`{{slot}}` the node's template references that isn't in `INJECTIONS`. Keep every
+**Guard (at template load):** `validate_template()` at `load_optimizer_prompt` rejects any
+`{{slot}}` the node's template references that isn't in `injection_table()`. Keep every
 optimizer LLM call on the one `dispatch/llm_call/call.py::llm_call` path — an
 unwrapped LLM call is an automatic block at review (pre-flight gate), not a test.
 
@@ -320,7 +320,8 @@ and leaves the tree and every measurement where they are), **diagnostic** (`ab` 
 **maintenance** (`reindex` / `restamp` / `compact-archive`, which rewrite stored artifacts on
 purpose). A maintenance verb owes two things a diagnostic does not: it is dry-run by default,
 and it refuses while a producer could still be writing what it rewrites
-(`application/archive_maintenance.py::archive_writers`). And do
+(`application/maintenance/archive_maintenance.py::archive_writers`) — except `reindex`, which
+rebuilds a derived index from the detail files and deletes nothing, so it owes neither. And do
 **not** add a read verb: reads happen by opening the artifact tree, and raw-file ingest is
 `new <file.csv>`, not an `ingest` verb.
 
@@ -344,8 +345,8 @@ Join the right `Literal` and three import-time asserts start demanding the rest 
 
 | Add | Where | The assert that demands it |
 |---|---|---|
-| a capability | `CAP_FOR_KIND` (`api/middleware/command_dispatcher.py`) | `set(CAP_FOR_KIND) != ALL_DISPATCHED_KINDS` — a kind with no cap is a silent unguarded verb |
-| a payload model | `PAYLOAD_MODEL_FOR_KIND` (same file) | the sibling raise beside it |
+| a capability | `CAP_FOR_KIND` (`application/commands/dispatcher.py`) | `set(CAP_FOR_KIND) != ALL_DISPATCHED_KINDS` — a kind with no cap is a silent unguarded verb |
+| a payload model | `PAYLOAD_MODEL_FOR_KIND` (`application/commands/payloads.py`) | the sibling raise beside it |
 | **the terminal's half** | `CLI_VERB_FOR_KIND` (`cli/campaign_runner.py`) | totality over `ALL_DISPATCHED_KINDS`, plus every named verb being a real `COMMANDS` key |
 
 `CLI_VERB_FOR_KIND` is the `<entry-point-parity>` guard, and it is the one that had to be written
@@ -364,7 +365,7 @@ Then declare it on the wire: `docs/specs/api-openapi.yaml`, *before* the handler
 ## 9. A served read
 
 A new `GET`. **Not a Control-remote command and not a sixth I/O kind** — that kind is defined by
-MUTATION, so a read adds no ingress and no writer (`architecture.md` §0 — Control-remote). Reads
+MUTATION, so a read adds no ingress and no writer (`architecture.md` § Control-remote). Reads
 having had no bucket is exactly why several shipped undeclared, `api-openapi.yaml` says so at its
 own head, and this recipe is the fix.
 

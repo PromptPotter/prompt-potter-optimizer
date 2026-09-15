@@ -14,29 +14,30 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.archive_maintenance import (
+from promptpotter.application.initialization.session import Session
+from promptpotter.application.initialization.wiring import init_services
+from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
+from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
     purge_cold_store,
     reindex_measurement_archive,
     restore_measurement_archive,
 )
-from promptpotter.application.initialization.session import Session
-from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
 from promptpotter.application.origin import CampaignOrigin, prepare_scoring_context
 from promptpotter.application.run_observers import RunObservers, build_run_observers
 from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.application.runner.origin_gate import submit_gate_decision
+from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.settings import DEFAULT_BACKEND_ID, DEFAULT_BACKEND_URL
-from promptpotter.domain.rendering import fmt_pct
 from promptpotter.domain.results import CycleResult
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.domain.launch_limits import LaunchLimits
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.stores import Stores
-    from promptpotter.presentation.views.live.display import LiveDisplay
+    from promptpotter.presentation.terminal.live.display import LiveDisplay
     from promptpotter.shared.identity import IdentityContext
 
 # `submit_gate_decision` is re-exported under its OWN name because this module IS the embedded
@@ -71,10 +72,10 @@ async def open_session(
     on_status: StatusFn | None = None,
     identity: IdentityContext | None = None,
     stores: Stores | None = None,
+    program: object | None = None,
 ) -> Session:
-    """``identity`` and ``stores`` pass straight through to :func:`init_services`. Dropping them
-    here pinned every embedded host to ``projects/default/`` — this is an adapter over that call,
-    so a parameter it declines to forward is a capability the host cannot reach at all."""
+    """``identity``, ``stores`` and ``program`` pass straight through to :func:`init_services`: a
+    parameter this adapter declines to forward is a capability no host can reach."""
     setup_logging()
     session = await init_services(
         dataset_name=dataset_name,
@@ -83,6 +84,7 @@ async def open_session(
         on_status=on_status,
         identity=identity,
         stores=stores,
+        program=program,
     )
     if on_status is not None:
         on_status(f"Dataset    : {dataset_name} ({len(session.samples)} queries)")
@@ -141,13 +143,11 @@ async def run_campaign(
     *,
     session: Session,
     langfuse_session_id: str | None = None,
-    spend_budget_usd: float | None = None,
-    token_budget: int | None = None,
-    mode: RunMode | None = None,
+    limits: LaunchLimits,
+    mode: RunMode,
 ) -> CycleResult:
-    """Run the loop over an origin this caller already scored. The two ceilings and ``mode`` are the
-    same flags the web launcher passes — an embedded run that omits a ceiling keeps the campaign's
-    own value for it."""
+    """Run the loop over an origin this caller already scored. With no slot there is no admission:
+    a declared budget may only LOWER the campaign's own, and ``LaunchLimits()`` declares none."""
     return await run_optimization(
         dataset,
         campaign_config,
@@ -155,7 +155,6 @@ async def run_campaign(
         observers=observers,
         origin=origin,
         langfuse_session_id=langfuse_session_id,
-        spend_budget_usd=spend_budget_usd,
-        token_budget=token_budget,
+        limits=limits,
         mode=mode,
     )

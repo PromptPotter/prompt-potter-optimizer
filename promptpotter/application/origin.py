@@ -4,7 +4,7 @@ import json
 import logging
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import (
@@ -18,7 +18,10 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimization.l1.population import INVALID_SCORES, build_score_report
 from promptpotter.application.optimization.l1.score.signal_effect import is_transient_scoring_abort
 from promptpotter.application.optimization.task_context import committed_task_context
-from promptpotter.application.pipeline_resolve import resolve_pipeline_config_params
+from promptpotter.application.pipeline_resolve import (
+    experiment_outside_run,
+    resolve_pipeline_config_params,
+)
 from promptpotter.application.runner.campaign_ids import build_origin_cycle_id
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.application.scoring.search_point_scorer import score_search_point
@@ -102,7 +105,7 @@ async def rescore_parent(
     )
     return RoundParent(
         opt_sp=cycle.opt_sp,
-        results=results,
+        results=cast("list[dict[str, Any]]", results),
         # The gateway's OWN answer — never re-run `compute_composite_fitness` over the same
         # rows, which drops the evaluator namespace on the way.
         report=build_score_report(
@@ -506,7 +509,12 @@ def prospective_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) 
         if not active:
             return None
         base_pp = resolve_pipeline_config_params(
-            active, cfg.pipeline_overlay, dataset_dir, schema, judges=cfg.judges
+            active,
+            cfg.pipeline_overlay,
+            dataset_dir,
+            schema,
+            judges=cfg.judges,
+            experiment=experiment_outside_run(dataset_dir),
         )
         opt_sp = resolve_origin_opt_search_point(
             prompt_node_names=schema.prompt_node_names(),

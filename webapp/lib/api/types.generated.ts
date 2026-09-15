@@ -70,7 +70,7 @@ export interface DashboardSample {
    * the order. Null where the row carries none. */
   sample_id: number | null;
   /** The grading verdict. */
-  status: 'HIT' | 'MISS' | 'ERR';
+  status: 'HIT' | 'MISS' | 'ERR' | 'UNSC';
   /** The graded per-cell score `status` is the verdict OF — the same number
    * `MeasurementDot.fitness` carries, so the live round's cells join the
    * served series and a heat cell can shade a partial grade `status` rounds
@@ -145,6 +145,7 @@ export interface DegradationHealth {
   no_result_count: number;
   hole_count: number;
   not_attempted: number;
+  unscored: number;
   answer_modal_share: number | null;
   degraded_rate: number;
   consecutive_degraded_rounds: number;
@@ -209,7 +210,7 @@ export interface DiagnosticRunRecord {
   workspace_n: number;
   workspace_accuracy: number;
   workspace_composite: number;
-  source_campaign_accuracy: number;
+  source_campaign_accuracy: number | null;
   source_campaign_composite: number;
   source_campaign_n: number;
   noise_floor_k: number | null;
@@ -333,7 +334,7 @@ export interface ScoreboardRow {
   rank: number;
   candidate_id: string;
   changes_description: string;
-  accuracy: number;
+  accuracy: number | null;
   composite_fitness: number;
   total: number;
   escalation_aborted: boolean;
@@ -443,6 +444,7 @@ export interface RoundResult {
   verdict_reason: string | null;
   degraded_samples: number;
   not_attempted: number;
+  unscored: number;
   deprecated: number;
   escalation_signal: unknown | null;
   matched_parent_accuracy: number | null;
@@ -454,7 +456,7 @@ export interface RoundResult {
   ability: AbilityReading | null;
   prompt_fields: Record<string, unknown>;
   pipeline_params: Record<string, unknown> | null;
-  parent_accuracy: number;
+  parent_accuracy: number | null;
   results: Record<string, unknown>[];
   all_candidate_results: Record<string, Record<string, unknown>[]>;
   parent_results: Record<string, unknown>[];
@@ -557,7 +559,7 @@ export interface RunLimits {
   lives_cap: number | null;
 }
 
-/** One paired-PoBB backfill event appended by ``LiveDashboardView._append_backfill``. */
+/** One paired-PoBB backfill event appended by ``LiveDashboardProjection._append_backfill``. */
 export interface BackfillLogEntry {
   round: number;
   candidate_idx: number;
@@ -865,8 +867,8 @@ export interface CycleListEntry {
   campaign_id: string;
   cycle_id: string;
   parent_session_id: string;
-  /** Immediate parent for siblings (forks/sweeps/diag); null for roots. Sidebar
-   * uses this to nest siblings. */
+  /** Immediate parent for siblings (forks/diag); null for roots. Sidebar uses this
+   * to nest siblings. */
   parent_cycle_id: string | null;
   dataset_name: string;
   backend_id: string;
@@ -1393,7 +1395,7 @@ export interface LineageNode {
   superseded_by: string | null;
   /** Courses, and the candidates a fork contributed here — on those it is the ⑂
    * stamp marking an attempt the operator cut. */
-  course_kind: 'root' | 'fork' | 'diag' | 'sweep' | 'inner' | null;
+  course_kind: 'root' | 'fork' | 'diag' | 'inner' | null;
   /** Courses only — the ONE server-owned run-state (`derive_run_phase`), the same
    * value `/cycles` serves. Null on a candidate, which has no run of its own. */
   run_phase: 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal' | null;
@@ -1923,7 +1925,6 @@ export const STOP_REASON_LABELS: Record<string, string> = {
   'target_hit': 'Target reached',
   'lives_exhausted': 'Out of lives',
   'hard_cap_reached': 'Round cap',
-  'sweep_complete': 'Sweep complete',
   'diag_complete': 'Diagnostic complete',
   'l3_patience_exhausted': 'Converged (L3 patience)',
   'rebased_to_fork': 'Rebased to fork',
@@ -1950,6 +1951,32 @@ export const STOP_REASON_NEXT_STEPS: Record<string, string> = {
   'spend_budget': '`set-budget --max-usd <above what is already spent>` then `resume`.',
   'token_budget': '`set-budget --max-tokens <above what is already spent>` then `resume`.',
   'diverged': '`resume --fork-on-divergence` to branch here, or revert the config edit to continue.',
+};
+
+// Whether a stop SUCCEEDED, and the only half of the table that decides anything —
+// `StopOutcome`, where `paused` is the one non-terminal member. TOTAL over the reasons,
+// so ask it rather than matching names: a hand-listed set of crash names rots in both
+// directions, missing the reason added yesterday and keeping one that was renamed.
+export const STOP_REASON_OUTCOMES: Record<string, string> = {
+  'perfect_score': 'success',
+  'max_rounds': 'success',
+  'target_hit': 'success',
+  'lives_exhausted': 'success',
+  'hard_cap_reached': 'success',
+  'diag_complete': 'success',
+  'l3_patience_exhausted': 'success',
+  'rebased_to_fork': 'success',
+  'paused': 'paused',
+  'escalation_abort': 'halted',
+  'spend_budget': 'halted',
+  'token_budget': 'halted',
+  'origin_gate': 'halted',
+  'backend_unreachable': 'halted',
+  'crashed': 'failed',
+  'producer_vanished': 'failed',
+  'render_error': 'failed',
+  'diverged': 'failed',
+  'optimizer_timeout': 'failed',
 };
 
 // Abort-lens variant -> operator label, in picklist order. Mirror of

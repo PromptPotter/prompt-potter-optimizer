@@ -45,7 +45,9 @@ from promptpotter.domain.run_records import SnapshotRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.search_point import JobSearchPoint
-from promptpotter.infrastructure.projections.live_dashboard.view import LiveDashboardView
+from promptpotter.infrastructure.projections.live_dashboard.projection import (
+    LiveDashboardProjection,
+)
 from promptpotter.infrastructure.store.io import read_yaml, write_yaml
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 from promptpotter.shared.errors import DatasetIdentityError
@@ -169,6 +171,7 @@ def test_sp_hash_is_not_recoverable_from_the_stripped_config() -> None:
                 node_type="",
                 param_keys=[],
                 prompt_info=NodePromptInfo(),
+                tunes_llm=False,
             )
         ],
     )
@@ -325,9 +328,7 @@ def test_judge_identity_moves_the_searchpoint_hash() -> None:
 
     schema = parse_pipeline_response(
         {
-            "nodes": {
-                "llm_only": {"type": "generation", "config": {"model": "m", "provider": "p"}}
-            },
+            "nodes": {"llm_only": {"type": "llm", "config": {"model": "m", "provider": "p"}}},
             "pipelines": {"default": ["llm_only"]},
         }
     )
@@ -335,7 +336,7 @@ def test_judge_identity_moves_the_searchpoint_hash() -> None:
 
     def sp_hash(judges: dict[str, JudgeSpec]) -> str:
         return schema.sp_hash(
-            resolve_pipeline_config_params(active, {}, None, schema, judges=judges)
+            resolve_pipeline_config_params(active, {}, None, schema, judges=judges, experiment=None)
         )
 
     def spec(name: str, model: str) -> JudgeSpec:
@@ -404,10 +405,7 @@ def test_a_conversation_reaches_the_formula_only_as_projected_scalars() -> None:
     from factories import measurement
 
     from promptpotter.application.scoring.formula import compile_scorer, rescore_results
-    from promptpotter.application.scoring.formula.compiler import (
-        CELL_INTRINSIC_NAMES,
-        ScoringTermMissingError,
-    )
+    from promptpotter.application.scoring.formula.compiler import CELL_INTRINSIC_NAMES
     from promptpotter.domain.scoring import TURN_SCALAR_KEYS, turn_scalars
 
     assert not (TURN_SCALAR_KEYS & CELL_INTRINSIC_NAMES), (
@@ -442,17 +440,87 @@ def test_a_conversation_reaches_the_formula_only_as_projected_scalars() -> None:
     rescore_results([row], scorer)
     assert row["fitness"] == 1.0
 
-    # Indexing and attribute access are refused at compile; `len` is a bare Call, so it compiles
-    # and fails at eval. Both are stops — pinned here so adding `len` to SAFE_BUILTINS is caught.
+    # All three are refused at COMPILE, before a cell is bought — indexing and attribute access on
+    # node kind, `len` on its call target. `len` matters most: a bare Call reaches eval as a
+    # NameError, which the classifier reads as a missing TERM, so a mistyped function becomes a
+    # campaign that grades nothing and reports measuring fine. Pinned so adding `len` to
+    # SAFE_BUILTINS is caught.
     for formula in ("turns[0]", "turns.index"):
         with pytest.raises(ValueError, match="disallowed syntax"):
             compile_scorer(formula, None, verifier_graded=True)
+    with pytest.raises(ValueError, match="not a scoring helper"):
+        compile_scorer("len(turns)", None, verifier_graded=True)
 
-    with pytest.raises(ScoringTermMissingError):
-        rescore_results(
-            [measurement(sample_id=0, fitness=0.0, pipeline_data={"turns": turns})],
-            compile_scorer("len(turns)", None, verifier_graded=True),
+
+def test_whether_the_episode_opened_the_injected_skill_is_measured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``skill_opened`` decides whether a harbor round measured anything at all, and every way it
+    can go wrong is silent.
+
+    The candidate's prompt is the skill's BODY and the model is shown only the frontmatter, so an
+    unopened skill is a NO-SKILL episode — and a round whose arms all ran one is
+    arms-all-identical, a δ ruler flat by construction, and a tie nobody measured.
+
+    The silence is the point. Harbor's trial layout is PRIVATE and upstream's to move
+    (``pyproject.toml`` upper-bounds the pin for exactly this). If it moves, the derivation reads
+    ``0.0`` on every cell and warns on every cell — nothing raises, every number still renders, and
+    the result is INDISTINGUISHABLE from the real finding this term exists to make. The fabricated
+    ``0.0`` is then banked on the archived row, so no re-run re-attributes it.
+
+    A namespace stands in for ``TrialResult`` deliberately, which the usual rule forbids: it
+    carries ONLY ``trial_name`` and ``step_results``, the two real declared fields at their
+    declared types, both read through ``getattr`` with a default. Nothing asserts a shape Harbor
+    could not produce, and the trajectory — the part that could drift — is read off disk exactly as
+    production reads it, with no Docker and no ``harbor`` import.
+    """
+    import json
+    import re
+    from types import SimpleNamespace
+
+    from promptpotter.connectors import harbor
+
+    monkeypatch.setattr(harbor, "_TRIALS_ROOT", tmp_path)
+    skill_path = f"/harbor/skills/task-approach/{harbor.SKILL_FILENAME}"
+
+    def trial(name: str, *steps: dict[str, Any]) -> SimpleNamespace:
+        agent_dir = tmp_path / name / "agent"
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        (agent_dir / "trajectory.json").write_text(
+            json.dumps({"steps": list(steps)}), encoding="utf-8"
         )
+        return SimpleNamespace(trial_name=name, step_results=None)
+
+    def ran(cmd: str) -> dict[str, Any]:
+        return {"tool_calls": [{"function_name": "bash", "arguments": {"cmd": cmd}}]}
+
+    assert harbor._skill_opened(trial("opened", ran("ls /x"), ran(f"cat {skill_path}"))) == 1.0
+    assert harbor._skill_opened(trial("ignored", ran("ls /app"), ran("python solve.py"))) == 0.0
+
+    # The false positive that would make this term useless while every number still rendered:
+    # `terminus-2` appends an `<available_skills>` block naming the skill's own PATH to the
+    # instruction, which arrives as a turn MESSAGE. Scanning turn text would score every episode
+    # 1.0 — the term would be a constant, separate no arms, and read as "the skill is always read".
+    told = trial("told", {"source": "user", "message": f"<location>{skill_path}</location>"})
+    assert harbor._skill_opened(told) == 0.0
+
+    # ABSENT, never 0.0: an episode that wrote no trajectory has not declined to open the skill,
+    # it has said nothing — and 0.0 would discount the arm for our own blindness.
+    assert harbor._skill_opened(SimpleNamespace(trial_name="gone", step_results=None)) is None
+
+    # And the OTHER half of the same subject: the skill has to be legible once it arrives.
+    # `terminus_2.py::_parse_skill_frontmatter` matches `r"^---\n(.*?)\n---"` and the agent drops
+    # a skill it cannot parse in SILENCE, so a CRLF-terminated file means the model is never told
+    # a skill exists — every arm runs the identical no-skill episode and every round is a tie
+    # measured on noise. `write_text` translates newlines to the platform default, so on Windows
+    # this happened on every cell ever bought here until `newline="\n"`.
+    written = tmp_path / "skill-root"
+    harbor._write_skill(written, "BODY LINE ONE\nBODY LINE TWO")
+    raw = (written / "task-approach" / harbor.SKILL_FILENAME).read_bytes()
+    assert b"\r" not in raw, "a CRLF SKILL.md is dropped by the agent without a word"
+    assert re.match(rb"^---\n(.*?)\n---\n", raw, re.DOTALL), (
+        "the frontmatter must satisfy the agent's own parser, or the skill is skipped silently"
+    )
 
 
 def test_a_judge_never_grades_a_cell_that_has_no_answer() -> None:
@@ -507,7 +575,7 @@ def test_the_provenance_sink_cannot_move_the_merge_it_observes(tmp_path: Path) -
     from promptpotter.application.pipeline_resolve import resolve_pipeline_config_params
 
     schema = parse_pipeline_response(
-        {"nodes": {"llm_only": {"type": "generation"}}, "pipelines": {"default": ["llm_only"]}}
+        {"nodes": {"llm_only": {"type": "llm"}}, "pipelines": {"default": ["llm_only"]}}
     )
     write_yaml(
         tmp_path / "pipeline.yaml",
@@ -515,9 +583,9 @@ def test_the_provenance_sink_cannot_move_the_merge_it_observes(tmp_path: Path) -
     )
     overlay = {"llm_only": {"model": "campaign-model"}}
     sink: dict[str, dict[str, str]] = {}
-    plain = resolve_pipeline_config_params(["llm_only"], overlay, tmp_path, schema)
+    plain = resolve_pipeline_config_params(["llm_only"], overlay, tmp_path, schema, experiment=None)
     observed = resolve_pipeline_config_params(
-        ["llm_only"], overlay, tmp_path, schema, provenance=sink
+        ["llm_only"], overlay, tmp_path, schema, experiment=None, provenance=sink
     )
     assert plain == observed
     assert sink["llm_only"] == {"model": "campaign", "temperature": "dataset"}
@@ -649,7 +717,7 @@ def test_a_grade_C_run_is_never_replayed_from_either_entry(tmp_path: Path) -> No
     nothing, and reaching the core directly was enough to launder a C cell into the ruler."""
     import types
 
-    from promptpotter.infrastructure.store import archive_views
+    from promptpotter.infrastructure.store import archive_queries
 
     archive = MeasurementArchive(tmp_path)
     _seed_graded(archive, run_id="clean", grade="A", terminal_node="llm_only", sample_id=7)
@@ -662,7 +730,7 @@ def test_a_grade_C_run_is_never_replayed_from_either_entry(tmp_path: Path) -> No
     assert set(from_core) == {7}, "the DB core served a grade-C run without being asked to exclude"
     assert from_core[7]["query"] == "q_clean"
 
-    served = archive_views.reusable_results(
+    served = archive_queries.reusable_results(
         types.SimpleNamespace(archive=archive), node_configs, dataset_name="aime"
     )
     assert set(served) == {7}, "the reuse facade served a grade-C run as a cache hit"
@@ -812,7 +880,7 @@ def test_unscoreable_cells_counts_holes_but_not_stops_or_deprecated_rows() -> No
     The row that motivated this guard was NOT of that kind: it carried ``content_empty`` and
     answered on the retry, and only reached here because ``classify_result`` read an
     attempt-level advisory as a verdict on the result. That is fixed at the predicate now
-    (``domain/rendering.py``), so a recovered retry is an ordinary scored row and never needs
+    (``domain/results_health.py``), so a recovered retry is an ordinary scored row and never needs
     this protection — which stays, for samples that really did come back empty.
     """
     from promptpotter.application.optimization.pobb.classification import is_deprecated
@@ -1118,22 +1186,109 @@ def test_l1_is_offered_no_slot_whose_panel_it_never_saw() -> None:
         )
 
 
+def test_a_held_prompt_field_is_neither_offered_nor_accepted() -> None:
+    """A prompt field the campaign left out of `param_keys` is the operator's text. Offered or
+    accepted anyway, the rewrite is scored like any variant and can win the round, while the
+    check-in still shows the field locked."""
+    from promptpotter.application.optimization.dispatch.l1_wire_schema import (
+        build_l1_response_schema,
+    )
+    from promptpotter.application.optimization.l1.population import parse_population
+    from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
+    from promptpotter.domain.results import CandidateProposal
+
+    base = _pipeline_schema("sealqa-longseal-12")
+    node = base.prompt_node_names()[0]
+    assert "persona" in base.open_prompt_fields(), "fixture no longer opens the field held below"
+    keys = sorted(cast(Any, base.get_node(node)).param_keys - {"persona"})
+    schema = base.narrow({node: NodeSearchNarrowing(param_keys=keys)})
+
+    slot = build_l1_response_schema(schema, citable_fields=())["properties"]["variants"]["items"][
+        "properties"
+    ]["prompt_fields_updates"]["properties"]
+    assert "persona" not in slot and "instruction" in slot
+
+    parent = OptSearchPoint(persona="Expert", instruction="Solve.")
+
+    def forbidden(updates: dict[str, str]) -> list[str]:
+        cp = CandidateProposal(opt_sp=parent.mutate(**updates), prompt_fields_updates=updates)
+        [opt_sp], _ = parse_population([cp], None, schema)
+        failures = opt_sp.memory.wounds.validation_failures
+        return [f.axis for f in failures if f.reason == "forbidden_axis"]
+
+    assert forbidden({"persona": "Pirate", "instruction": "Solve fast."}) == [f"{node}.persona"]
+    assert forbidden({"instruction": "Solve fast."}) == []
+
+
+def test_a_description_lock_holds_its_subtree_and_the_fold_reaches_nested_fields() -> None:
+    """Each output-schema field's prose is its own param, so a lock on one is a `param_keys`
+    membership: held, L1 is not offered it; open, the fold writes it onto the nested field it
+    names. A field ADDED under a held one stays held — opened by default, it would hand L1 prose
+    inside a subtree the operator locked, and the round would score it as an ordinary mutation."""
+    from promptpotter.application.datasets.draft_patch import _narrowing_follows_schema
+    from promptpotter.application.optimization.dispatch.l1_wire_schema import (
+        build_l1_response_schema,
+    )
+    from promptpotter.domain.pipeline_overlay import fold_output_contract
+    from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, description_key
+
+    def pipeline(line_fields: list[str]) -> PipelineSchema:
+        items = {"type": "object", "properties": {f: {"type": "string"} for f in line_fields}}
+        out = {"lines": {"type": "array", "items": items}, "total": {"type": "number"}}
+        config = {"model": "m", "output_schema": {"type": "object", "properties": out}}
+        return parse_pipeline_response(
+            {
+                "nodes": {"llm_only": {"type": "llm", "config": config, "optimizer": {}}},
+                "pipelines": {"default": ["llm_only"]},
+            }
+        )
+
+    before = pipeline(["amount"])
+    lines, amount, total = (description_key(p) for p in ("lines", "lines.amount", "total"))
+    assert cast(Any, before.get_node("llm_only")).description_keys == [lines, amount, total]
+
+    held = before.narrow({"llm_only": NodeSearchNarrowing(param_keys=[amount, total])})
+    offered = build_l1_response_schema(held, citable_fields=())["properties"]["variants"]["items"][
+        "properties"
+    ]["pipeline_overlay"]["properties"]["llm_only"]["properties"]
+    assert amount in offered and lines not in offered
+
+    pp = copy.deepcopy({"llm_only": {**cast(Any, before.get_node("llm_only")).current_config}})
+    pp["llm_only"][amount] = "Net, in CHF."
+    fold_output_contract(pp, before)
+    line = pp["llm_only"]["output_schema"]["properties"]["lines"]["items"]["properties"]["amount"]
+    assert line["description"] == "Net, in CHF." and amount not in pp["llm_only"]
+
+    after = pipeline(["amount", "currency"])
+
+    def follows(keys: list[str]) -> list[str]:
+        overlay = {"llm_only": {"optimizer": {"param_keys": keys}}}
+        return _narrowing_follows_schema(overlay, before, after)["llm_only"]["optimizer"][
+            "param_keys"
+        ]
+
+    currency = description_key("lines.currency")
+    assert currency not in follows([amount, total])
+    assert currency in follows([lines, amount, total])
+
+
 def test_nested_param_override_accumulates_instead_of_reverting_its_parent() -> None:
     """A `param_types: object` param merges one level; siblings the child did not name survive.
 
     A nested param is ONE key in the node config, so a node-level `{**existing, **incoming}`
-    spread replaces it whole: a candidate that improves a single `output_schema_descriptions`
-    entry silently reverts every entry its parent earned, and the axis cannot accumulate
-    across generations. The `object` declaration is what buys the depth, so every nested
-    param the schema grafts must carry one. An `array` must NOT merge — a list is an ordering.
+    spread replaces it whole: a candidate that improves a single `layout` slot silently reverts
+    every slot its parent earned, and the axis cannot accumulate across generations. The
+    `object` declaration is what buys the depth, so every nested param the schema grafts must
+    carry one. An `array` must NOT merge — a list is an ordering.
     """
     from promptpotter.application.optimization.l1.population import merge_pipeline_params
+    from promptpotter.domain.pipeline_schema import description_key
 
     schema = _pipeline_schema("promptpotter-self")
 
     # Every nested param a node's schema can graft accumulates, not just the first one:
-    # `output_schema_field_names` + `layout` on the optimizer's own nodes (pp-self),
-    # `output_schema_descriptions` on any target node (justlogic-d234's `llm_only`, below).
+    # `output_schema_field_names` + `layout` on the optimizer's own nodes (pp-self). The
+    # description keys, one per field, accumulate on any target node (below).
     for node, nested in (("l1_generate", "output_schema_field_names"), ("l1_critique", "layout")):
         got = merge_pipeline_params(
             {node: {nested: {"a": "A", "b": "B"}}},
@@ -1146,22 +1301,14 @@ def test_nested_param_override_accumulates_instead_of_reverting_its_parent() -> 
             f"its parent's siblings"
         )
 
-    # The description axis accumulates on the TARGET node, keyed by that node's fields.
     just = _pipeline_schema("justlogic-d234")
-    base = {
-        "llm_only": {
-            "temperature": 0.7,
-            "output_schema_descriptions": {"reasoning": "A", "answer": "B"},
-        }
-    }
-    merged = merge_pipeline_params(
-        base, {"llm_only": {"output_schema_descriptions": {"reasoning": "A2"}}}, just
-    )
+    reasoning, answer = description_key("reasoning"), description_key("answer")
+    base = {"llm_only": {"temperature": 0.7, reasoning: "A", answer: "B"}}
+    merged = merge_pipeline_params(base, {"llm_only": {reasoning: "A2"}}, just)
     assert merged is not None
-    assert merged["llm_only"]["output_schema_descriptions"] == {"reasoning": "A2", "answer": "B"}
-    assert merged["llm_only"]["temperature"] == 0.7
+    assert merged["llm_only"] == {"temperature": 0.7, reasoning: "A2", answer: "B"}
     # The origin is never aliased or mutated by a candidate's merge.
-    assert base["llm_only"]["output_schema_descriptions"]["reasoning"] == "A"
+    assert base["llm_only"][reasoning] == "A"
 
     # A named slot's list REPLACES; an unnamed slot keeps the floor.
     lay_base = {
@@ -1193,7 +1340,7 @@ def test_a_schema_copy_answers_for_itself_not_for_the_schema_it_was_copied_from(
 
     schema = parse_pipeline_response(
         {
-            "nodes": {"a": {"type": "generation"}, "b": {"type": "generation"}},
+            "nodes": {"a": {"type": "llm"}, "b": {"type": "llm"}},
             "pipelines": {"default": ["a", "b"]},
         }
     )
@@ -1211,11 +1358,11 @@ def test_a_reused_origin_seeds_exactly_the_config_it_ran() -> None:
     from promptpotter.application.campaign_config import load_campaign_config
     from promptpotter.application.datasets.draft_campaign import split_overlay
     from promptpotter.application.jobs.launcher.draft_build import overlay_from_campaign_config
-    from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
+    from promptpotter.connectors import DEFAULT_CONNECTOR, get
 
     config = load_campaign_config(
         {
-            "optimization": dict(CONNECTORS[DEFAULT_CONNECTOR].default_optimization),
+            "optimization": dict(get(DEFAULT_CONNECTOR).default_optimization),
             "pipeline_overlay": {"llm_only": {"model": "upstage/solar-pro4:nitro"}},
             "optimizer_narrowing": {
                 "llm_only": {"param_keys": [], "param_allowed_values": {"model": ["upstage/x"]}}
@@ -1231,7 +1378,7 @@ def test_a_reused_origin_seeds_exactly_the_config_it_ran() -> None:
 def _draft(overlay: dict[str, Any]) -> Any:
     from promptpotter.application.datasets.draft_campaign import DraftCampaign
     from promptpotter.connectors import DEFAULT_CONNECTOR
-    from promptpotter.domain.identity import TenantId
+    from promptpotter.shared.identity import TenantId
 
     now = "2026-09-08T00:00:00Z"
     return DraftCampaign(
@@ -1309,32 +1456,22 @@ def test_the_drafts_CHAIN_reaches_the_mint_on_a_reused_dataset(tmp_path: Path) -
     commits its own `pipeline.yaml`, so `pipelines.default` IS the chosen chain; a REUSED dataset
     writes no file, and nothing else carried `draft.pipeline_steps` to the run."""
     from promptpotter.application.jobs.launcher.mint_and_start import build_cycle_config
-    from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
+    from promptpotter.connectors import DEFAULT_CONNECTOR, get
     from promptpotter.infrastructure.store.io import write_yaml
 
     root = tmp_path / "ds"
     root.mkdir()
     write_yaml(
         root / "campaign.yaml",
-        {
-            "campaign_config": {
-                "optimization": dict(CONNECTORS[DEFAULT_CONNECTOR].default_optimization)
-            }
-        },
+        {"campaign_config": {"optimization": dict(get(DEFAULT_CONNECTOR).default_optimization)}},
     )
     schema = parse_pipeline_response(
         {
-            "nodes": {n: {"type": "generation"} for n in ("llm_only", "web_search", "rerank")},
+            "nodes": {n: {"type": "llm"} for n in ("llm_only", "web_search", "rerank")},
             "pipelines": {"default": ["web_search", "rerank", "llm_only"]},
         }
     )
-    session = types.SimpleNamespace(
-        store=types.SimpleNamespace(
-            backends=types.SimpleNamespace(load_connector_profile=lambda _id: {})
-        ),
-        backend_id="b",
-        pipeline_schema=schema,
-    )
+    session = types.SimpleNamespace(pipeline_schema=schema)
 
     chosen = build_cycle_config(cast(Any, session), root, pipeline_steps=["llm_only"])
     assert sorted(chosen.exclude_nodes) == ["rerank", "web_search"]
@@ -1461,7 +1598,7 @@ def test_an_axis_the_model_REFUSES_offers_only_the_value_it_runs() -> None:
             "steps": ["llm_only"],
             "nodes": {
                 "llm_only": {
-                    "type": "generation",
+                    "type": "llm",
                     "runtime": "backend",
                     "config": {
                         "model": "m",
@@ -1500,22 +1637,20 @@ def test_an_axis_the_model_REFUSES_offers_only_the_value_it_runs() -> None:
 
 def test_a_measured_point_is_served_the_SCHEMA_it_ran_under() -> None:
     """The structured output is an AXIS, so the contract a surface shows must be resolved like any
-    other value. `output_schema_descriptions` is always on: L1 rewrites the prose of any node
+    other value. The description keys are open by default: L1 rewrites the prose of any node
     shipping a schema, `to_job_search_point` folds it into the wire, and the served contract read
     the parsed DECLARATION — so the axis moved every round and every reader went on showing the
     prose the run had already replaced, with nothing to say the two had parted.
     """
     from promptpotter.application.pipeline_resolve import resolved_output_schemas
+    from promptpotter.domain.pipeline_schema import description_key
 
     schema = _pipeline_schema("justlogic-d234")
     base = {n.name: dict(n.current_config) for n in schema.config_nodes}
     declared = resolved_output_schemas(schema, base)["llm_only"]
     assert declared is not None
 
-    evolved = {
-        **base,
-        "llm_only": {**base["llm_only"], "output_schema_descriptions": {"answer": "MOVED"}},
-    }
+    evolved = {**base, "llm_only": {**base["llm_only"], description_key("answer"): "MOVED"}}
     served = resolved_output_schemas(schema, evolved)["llm_only"]
     assert served is not None
     assert served.field_descriptions["answer"] == "MOVED"
@@ -1526,7 +1661,7 @@ def test_a_measured_point_is_served_the_SCHEMA_it_ran_under() -> None:
     assert served.fields == declared.fields
 
 
-def test_every_llm_node_is_offered_the_text_or_structured_toggle() -> None:
+def test_every_tuned_llm_node_is_offered_the_text_or_structured_toggle() -> None:
     """Whether the request carries a schema AT ALL is a lever, and it is ours: PromptPotter
     composes the wire config, so a connector declaring the axis would be a second declaration of
     one thing — which is how TermNorm's own `response_format` came to be searched while its
@@ -1534,7 +1669,8 @@ def test_every_llm_node_is_offered_the_text_or_structured_toggle() -> None:
 
     Two bounds ride the value space rather than a badge, because L1 is SHOWN the space, emits into
     it and is validated against it. A node with no schema has nothing to switch to; one value is
-    the pin. And the axis is only offered where an LLM answers — a cache lookup has no format.
+    the pin. And the axis is offered only on a thinking node its declaration opens to search — a
+    model call declaring no axis (the optimizer's own) and a cache lookup get none.
     """
     from promptpotter.domain.pipeline_schema import (
         ANSWER_AS_JSON,
@@ -1546,7 +1682,7 @@ def test_every_llm_node_is_offered_the_text_or_structured_toggle() -> None:
         {
             "nodes": {
                 "structured": {
-                    "type": "generation",
+                    "type": "llm",
                     "config": {
                         "model": "m",
                         "output_schema": {
@@ -1555,17 +1691,23 @@ def test_every_llm_node_is_offered_the_text_or_structured_toggle() -> None:
                         },
                         "answer_field": "answer",
                     },
-                    "optimizer": {"param_keys": []},
+                    "optimizer": {"param_keys": ["temperature"]},
                 },
-                "prose": {"type": "generation", "config": {"model": "m"}, "optimizer": {}},
+                "prose": {
+                    "type": "llm",
+                    "config": {"model": "m"},
+                    "optimizer": {"param_keys": ["temperature"]},
+                },
+                "pinned": {"type": "llm", "config": {"model": "m"}, "optimizer": {}},
                 "lookup": {"type": "cache", "config": {}, "optimizer": {}},
             },
-            "pipelines": {"default": ["structured", "prose", "lookup"]},
+            "pipelines": {"default": ["structured", "prose", "pinned", "lookup"]},
         }
     )
     opts = {n.name: schema.param_options(n, SCHEMA_TOGGLE_PARAM) for n in schema.config_nodes}
     assert opts["structured"] == [ANSWER_AS_TEXT, ANSWER_AS_JSON]
     assert opts["prose"] == [ANSWER_AS_TEXT]
+    assert opts["pinned"] is None
     assert opts["lookup"] is None
 
     # Open by default: an LLM node's toggle is an L1 axis without anyone opting in, and the two
@@ -1615,7 +1757,7 @@ def test_answering_in_TEXT_sends_no_contract_to_answer_INTO() -> None:
     """
     from promptpotter.application.pipeline_resolve import resolved_output_schemas
     from promptpotter.domain.pipeline_overlay import fold_output_contract
-    from promptpotter.domain.pipeline_schema import ANSWER_AS_TEXT
+    from promptpotter.domain.pipeline_schema import ANSWER_AS_TEXT, description_key
 
     schema = _pipeline_schema("justlogic-d234")
     base = {n.name: dict(n.current_config) for n in schema.config_nodes}
@@ -1627,13 +1769,13 @@ def test_answering_in_TEXT_sends_no_contract_to_answer_INTO() -> None:
 
     chose_text = copy.deepcopy(base)
     chose_text["llm_only"][SCHEMA_TOGGLE_PARAM] = ANSWER_AS_TEXT
-    chose_text["llm_only"]["output_schema_descriptions"] = {"answer": "IGNORED"}
+    chose_text["llm_only"][description_key("answer")] = "IGNORED"
     fold_output_contract(chose_text, schema)
     assert "output_schema" not in chose_text["llm_only"]
     assert "answer_field" not in chose_text["llm_only"]
     # The description lever reaches nothing under text and must not resolve a registry schema
     # back onto a node that just said it wants none.
-    assert "output_schema_descriptions" not in chose_text["llm_only"]
+    assert description_key("answer") not in chose_text["llm_only"]
 
     # The served contract follows the same fold, so the panel says "free text" instead of showing
     # a schema the searchpoint is not answering under.
@@ -1740,7 +1882,9 @@ def test_composition_selects_round_robin_so_no_panel_starves_the_frame() -> None
         Item,
     )
     from promptpotter.application.optimization.dispatch.compose import select
-    from promptpotter.application.optimization.dispatch.injections.registry import INJECTIONS
+    from promptpotter.application.optimization.dispatch.injections.registry import (
+        injection_table,
+    )
 
     # One panel that would eat any budget, and the short frame panels behind it in layout order.
     big = [Item(f"row {i}: " + "x" * 400, trusted=False) for i in range(12)]
@@ -1788,7 +1932,7 @@ def test_composition_selects_round_robin_so_no_panel_starves_the_frame() -> None
         **rendered,
         "rendered_prompt": [Item(f"[{f}] " + "y" * 300) for f in fields],
     }
-    whole = frozenset(n for n in edit_order if not INJECTIONS[n].kind.divisible)
+    whole = frozenset(n for n in edit_order if not injection_table()[n].kind.divisible)
     assert "rendered_prompt" in whole, "the artifact under edit must never arrive truncated"
     for squeeze in (400, 900, 1_600, 3_000, 6_000):
         _, cov = select(edit_rendered, edit_order, budget=squeeze, exempt=whole)
@@ -1852,6 +1996,7 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
                 node_type="",
                 param_keys=fields,
                 param_types=dict.fromkeys(fields, "string"),
+                tunes_llm=False,
             )
             for name in NODE_LAYOUTS
         ],
@@ -2204,11 +2349,11 @@ def test_the_l4_dataset_is_recognized_as_one() -> None:
         load_inner_tasks,
         resolve_inner_task,
     )
-    from promptpotter.connectors import CONNECTORS
+    from promptpotter.connectors import get
     from promptpotter.infrastructure.store.io import read_yaml
 
     d = Path(__file__).resolve().parents[1] / "datasets" / "promptpotter-self"
-    spec = d / CONNECTORS["promptpotter"].experiment_file
+    spec = d / get("promptpotter").experiment_file
     assert spec.is_file(), f"the L4 probe would read {d.name} as a plain dataset ({spec})"
     panel = load_inner_tasks(spec)
     assert panel.tasks
@@ -2319,7 +2464,7 @@ def test_a_rate_belongs_to_the_provider_model_pair_not_the_model_alone(
     on CI and on every fresh clone, with its own "table unavailable" guard unable to see
     the difference. Upstream re-keying a model must not be able to red this.
     """
-    import promptpotter.shared.pricing as spend_mod
+    import promptpotter.infrastructure.llm.pricing as spend_mod
 
     table = {
         # The defect in one row: DeepSeek's own first-party key, character-for-character
@@ -2582,7 +2727,7 @@ async def test_a_grading_reports_the_providers_prefix_cache(
     the one that matters most: its rubric is a module constant, so ~1.2k of a ~1.6k-token prompt is
     byte-identical on every cell of every campaign, and a live probe on the shipped grader model
     read 92.8% of its input off the provider's cache. Asserted on the WIRE call — a replay reached
-    no provider, and the rollup already excludes it (`live_dashboard/view.py::_handle_token_usage`).
+    no provider, and the rollup already excludes it (`live_dashboard/projection.py::_handle_token_usage`).
     """
     _client, metered, _score = await _grade_twice(tmp_path, monkeypatch, reply="A")
 
@@ -2710,7 +2855,7 @@ def test_every_prefix_state_says_which_one_it_is() -> None:
     Pinned here, and its browser peer in `derivations/__tests__/token-account.test.ts`, because the
     badge strings must match byte for byte: an operator reads the terminal tape and the sample row
     as one vocabulary."""
-    from promptpotter.domain.rendering import prefix_reading
+    from promptpotter.application.views.render.prefix_reading import prefix_reading
 
     assert prefix_reading(0.39, replayed=False) == ("discounted", 0.39, "c39%")
     # A reported zero is a MEASUREMENT — it is what proves a provider has no prefix cache at all.
@@ -3007,7 +3152,7 @@ def test_the_parent_rescore_ticks_the_run_without_minting_a_candidate(tmp_path: 
     ``NO_ROUND_SLOT`` as ``C{round}.0`` — a row naming a candidate nobody proposed. The run's
     own scalars must move; the round's population must not grow.
     """
-    view = LiveDashboardView(
+    view = LiveDashboardProjection(
         CycleDir(tmp_path),
         state_path=None,
         hop=CycleHop(campaign_id="c", cycle_id="cy"),

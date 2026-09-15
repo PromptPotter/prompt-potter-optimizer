@@ -8,6 +8,8 @@ import threading
 from collections.abc import Mapping, Sequence
 from typing import Literal
 
+from promptpotter.shared.hashing import shapes_optimizer_prompt
+
 
 def warm_stats_backend() -> None:
     """Import ``scipy.stats`` on a daemon thread so the round loop never pays for it — otherwise the first PoBB check of round 1
@@ -31,6 +33,7 @@ def t_critical(df: int, alpha: float = 0.05) -> float:
     return float(t.ppf(1 - alpha / 2, df))
 
 
+@shapes_optimizer_prompt
 def min_detectable_effect(se: float, alpha: float = 0.05, power: float = 0.8) -> float:
     """Smallest effect detectable given the estimator's OWN standard error — takes the SE, never a sample count. The ``n``-form assumes
     binomial worst case, wrong for every caller here, and overstated the panel's MDE 3.8x."""

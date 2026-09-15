@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { DraftPatch } from "@/lib/api";
 import { cx } from "@/lib/cx";
 import { PROMPT_STRING_FIELDS, promptFieldLabel } from "@/lib/prompt-fields";
+import { LockButton } from "./NodeConfigEditor";
 
 // The starting-prompt control panel. The check-in's decomposition (or an
 // authored dataset's prompt) lands on `draft.origin_prompt_fields` as a
@@ -12,7 +13,8 @@ import { PROMPT_STRING_FIELDS, promptFieldLabel } from "@/lib/prompt-fields";
 // (the minted-campaign node panel shows the origin prompt with no draft to
 // write to).
 
-// AUTHORING layout per field — the placeholder hint and how tall the box starts.
+// AUTHORING layout per field — the placeholder hint, and the box's height where the browser
+// cannot size it to its text (`field-sizing`).
 // The field's NAME is not here: `promptFieldLabel` owns it, beside the canonical
 // key list (the TS/Py seam, `lib/prompt-fields.ts`), because the run card's
 // "changed vs origin" summary names the same fields and two labels for one field is
@@ -45,9 +47,15 @@ export function PromptFieldsEditor({
   onApply,
   readOnly = false,
   compact = false,
+  locks,
+  onLock,
 }: {
   value: Record<string, unknown>;
   onApply?: (patch: DraftPatch) => void;
+  // Each field's lock off its SERVED row — whether the optimizer may rewrite it is a `param_keys`
+  // membership like any param's. Present exactly where the host can emit one (`onLock`).
+  locks?: Record<string, boolean>;
+  onLock?: (field: string, locked: boolean) => void;
   // When true, disable every field — the minted-campaign node panel shows the
   // origin prompt read-only (no draft to persist to).
   readOnly?: boolean;
@@ -105,21 +113,35 @@ export function PromptFieldsEditor({
     <section className={cx("prompt-editor", compact && "is-compact")}>
       <span className="prompt-editor-title">Starting prompt</span>
       <div className="prompt-editor-grid">
-        {shown.map((f) => (
-          <label key={f.key} className="prompt-field">
-            <span className="prompt-field-label">{f.label}</span>
-            <textarea
-              className="prompt-field-input"
-              rows={compact ? 2 : f.rows}
-              value={fields[f.key]}
-              placeholder={f.hint}
-              readOnly={readOnly}
-              disabled={readOnly}
-              onChange={(e) => setField(f.key, e.target.value)}
-              onBlur={commit}
-            />
-          </label>
-        ))}
+        {shown.map((f) => {
+          const locked = locks?.[f.key];
+          return (
+            // A div, not a label: the lock beside the name must not join the box's accessible name.
+            <div key={f.key} className="prompt-field">
+              <span className="prompt-field-label">
+                {f.label}
+                {onLock && locked !== undefined ? (
+                  <LockButton
+                    locked={locked}
+                    readOnly={readOnly}
+                    onClick={() => onLock(f.key, !locked)}
+                  />
+                ) : null}
+              </span>
+              <textarea
+                className="prompt-field-input"
+                aria-label={f.label}
+                rows={compact ? 2 : f.rows}
+                value={fields[f.key]}
+                placeholder={f.hint}
+                readOnly={readOnly}
+                disabled={readOnly}
+                onChange={(e) => setField(f.key, e.target.value)}
+                onBlur={commit}
+              />
+            </div>
+          );
+        })}
       </div>
       {fewShot > 0 ? (
         <p className="prompt-editor-fewshot">

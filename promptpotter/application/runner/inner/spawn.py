@@ -17,6 +17,7 @@ from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     read_campaign_config_file,
 )
+from promptpotter.application.diagnostics.seed_screen import class_floor, draw_bank
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.mint import prepare_fresh_cycle, resolve_cycle_plan
 from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
@@ -35,7 +36,7 @@ from promptpotter.application.runner.inner.tasks import (
     inner_instrument_config,
     resolve_inner_task,
 )
-from promptpotter.application.seed_screen import class_floor, draw_bank
+from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.proxies import (
     INNER_RESULT_KEY,
@@ -47,9 +48,9 @@ from promptpotter.domain.l4.proxies import (
     mean_parent_level_se,
     parent_level_series,
 )
+from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_schema import stable_hash
-from promptpotter.domain.rendering import fmt_pct
 from promptpotter.domain.results import candidate_label
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.llm.rate_limit import set_throttle_stall_sink
@@ -65,7 +66,7 @@ from promptpotter.infrastructure.store.account_spend import (
     billed_spend,
     forwarded_mark,
 )
-from promptpotter.infrastructure.store.archive_views import capture_evidence_epoch
+from promptpotter.infrastructure.store.archive_queries import capture_evidence_epoch
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import read_json_optional, write_json
 from promptpotter.infrastructure.store.layout import (
@@ -76,6 +77,7 @@ from promptpotter.infrastructure.store.layout import (
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.shared.errors import graceful
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.instrument import (
     MAX_INSTRUMENT_DEPTH,
     MeasurementRole,
@@ -139,6 +141,7 @@ def _spawn_provenance(ctx: InnerSpawnContext, round_num: int | None, query: str)
     }
 
 
+@shapes_optimizer_prompt
 def _clip(text: str, cap: int) -> str:
     text = " ".join(text.split())
     if len(text) <= cap:
@@ -146,6 +149,7 @@ def _clip(text: str, cap: int) -> str:
     return text[: cap - 1].rsplit(" ", 1)[0] + "…"
 
 
+@shapes_optimizer_prompt
 def _lift_shape(result: CycleResult) -> str:
     """Which rounds LIFTED, read off ``RoundResult.improved`` — a within-round paired verdict that
     touches neither noise term the scalar carries. Denominator is the ROUND BUDGET it divides by."""
@@ -158,6 +162,7 @@ def _lift_shape(result: CycleResult) -> str:
     return f"lifts: {marks} ({n}/{budget}; target: early and often, thinning late)"
 
 
+@shapes_optimizer_prompt
 def _inner_narrative(result: CycleResult, spec: InnerTaskSpec) -> str:
     """Human-grade digest of one inner campaign — the outer loop's MODEL REASONING, riding the
     ``reasoning_trace`` infra key. Authored under ``TRANSCRIPT_REASONING_CAP`` so the render never clips."""
@@ -484,10 +489,9 @@ async def _run_inner_campaign(
         cfg_path = dataset_campaign_path(session.dataset_config_dir)
         if cfg_path.exists():
             file_config = read_campaign_config_file(cfg_path)
-    profile = session.store.backends.load_connector_profile(session.backend_id) or {}
     campaign_config = inner_instrument_config(
         spec,
-        load_campaign_config({**profile, **file_config}),
+        load_campaign_config(file_config),
         llm_node=session.llm_node_name(),
         n_scored=len(train_data),
     )
@@ -519,9 +523,9 @@ async def _run_inner_campaign(
             campaign_config,
             session=session,
             observers=observers,
-            # No `spend_budget_usd=`: that argument is the RUN-SCOPED override, and restating the
-            # config's own value through it is a second spelling of the same cap. Omitted, the
-            # inner cycle is bound by `campaign_config.optimization.spend_budget_usd` directly.
+            # Declares none: restating the config's own cap here would be a second spelling of
+            # it, so the inner cycle binds on `campaign_config.optimization` alone.
+            limits=LaunchLimits(),
             mode=RunMode(),
         )
     finally:
@@ -537,7 +541,8 @@ async def _run_inner_campaign(
     # A bank paying MORE for answering one label than for reasoning cannot measure an optimizer
     # prompt. REPORTED, never enforced: one origin pass sits inside its own error bar, so
     # rejecting a seat on it is the single-pass error the screen itself stopped making.
-    if bank_floor is not None and bank_floor >= result.origin_accuracy:
+    origin_acc = result.origin_accuracy
+    if origin_acc is not None and bank_floor is not None and bank_floor >= origin_acc:
         logger.warning(
             "inner cell %s/seed-%d MAY REWARD COLLAPSE: constant-answer floor %.3f >= this "
             "run's origin %.3f over %d rows. One pass sits inside its own error bar — re-screen "
@@ -545,7 +550,7 @@ async def _run_inner_campaign(
             spec.inner_dataset,
             spec.seed,
             bank_floor,
-            result.origin_accuracy,
+            origin_acc,
             len(train_data),
         )
     return result

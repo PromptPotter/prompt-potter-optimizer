@@ -14,14 +14,14 @@ import httpx
 from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
 from promptpotter.application.optimization.pobb.classification import terminal_ranking
 from promptpotter.application.run_phase_control import declare_run_phase, pause_requested
-from promptpotter.application.scoring.diagnostics import rank_ground_truth
 from promptpotter.application.scoring.evaluators import materialize_sample_values
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.formula.compiler import ScoringFormulaError
+from promptpotter.application.scoring.row_diagnostics import rank_ground_truth
 from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.l4.proxies import INNER_FACT_KEYS, PARENT_LEVEL_SE_KEY
 from promptpotter.domain.phases import RunPhase
-from promptpotter.domain.rendering import classify_result, terminal_node
+from promptpotter.domain.results_health import classify_result, terminal_node
 from promptpotter.domain.run_records import PhaseRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import QueryMeasurement, extract_item_label, is_hit, turn_scalars
@@ -49,7 +49,7 @@ SAMPLESWITCH_MIN_DEGRADATION_RATE: float = 0.5
 cached deprecated answer instead of re-evaluating."""
 
 # TARGET-prompt interpolation — the `{{var}}` slots a dataset row fills on its way to the
-# backend. NOT the dispatch-hub `INJECTIONS` registry, which fills `{{slot}}`s in the
+# backend. NOT the dispatch-hub `injection_table()` registry, which fills `{{slot}}`s in the
 # OPTIMIZER's prompts. Same syntax, two populations, two regexes (the other is
 # `dispatch/facade.py`); a signal for an L1/L2/L3 prompt goes there, never here.
 _TEMPLATE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
@@ -341,7 +341,7 @@ def _classify_http_error(exc: httpx.HTTPStatusError) -> tuple[ErrorCategory, str
         # A throttle is only the CALLER's fault when it is a quota no retry can outlast. A
         # per-minute window that just closed is transient, and CLIENT is read by two consumers that
         # both punish the candidate for the provider's load: ``query_loop._classify_abort`` voided
-        # the whole panel on the first occurrence, and ``rendering.py::classify_result`` adds
+        # the whole panel on the first occurrence, and ``results_health.py::classify_result`` adds
         # ``backend:client_error`` to ``fatal_codes``, which PoBB fast-eliminates on one sighting.
         # A quota still reaches both — that one IS the operator's to act on.
         quota = is_quota_rate_limit(exc.response.headers, exc.response.text)
@@ -519,11 +519,11 @@ async def measure_sample(
         try:
             rescore_results([result], session.scoring.scorer)
         except ScoringFormulaError as exc:
-            # The measurement succeeded and only the SCORE failed — typically a judge that could
-            # not grade, leaving its term absent from a formula that names it. Unscorable is not
-            # unmade: `pipeline_data` is kept, so the backend call stays in the archive and a
-            # re-grade recovers it. The outer catch-all would have banked `pipeline_data=None` and
-            # thrown a paid cell away.
+            # A formula CONTRACT bug — it raised, or returned a non-finite. Deterministic, so every
+            # cell fails it, and the row is marked so the run stops rather than grading a campaign
+            # against a broken formula. A judge that merely could not grade never arrives here:
+            # `rescore_results` resolves that row to UNSCORED, keeping the paid measurement.
+            # The outer catch-all would have banked `pipeline_data=None` and thrown a paid cell away.
             logger.warning("measure_sample could not score %s: %s", query[:60], exc)
             result["error"] = str(exc)
             result["error_category"] = ErrorCategory.PIPELINE

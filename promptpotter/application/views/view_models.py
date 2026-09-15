@@ -31,8 +31,6 @@ __all__ = [
     "RoundStartView",
     "ScoreEntry",
     "SpDiffView",
-    "SweepPayloadRow",
-    "SweepSummaryView",
     "ViewContext",
     "WarningEntry",
 ]
@@ -100,7 +98,12 @@ class InitExitView:
     """Post-origin init exit. ``resumed_from_round`` is the NEXT L1 round; ``cached_rounds_count`` is a literal count of
     round artifacts, kept independent so "Resumed from N (M cached)" can be truthful."""
 
-    origin_acc: float
+    # ``None`` where the origin graded no cell on accuracy — the same absence as
+    # ``RoundCompleteView.winner_accuracy`` below, reached first by an L4 outer cycle, whose
+    # measurand is ``mean_round_delta``. The builder reads it off a ``cycle`` typed ``Any``, so a
+    # declaration narrower than the ``RoundResult`` feeding it is invisible to the checker and
+    # surfaces as a formatted ``None``.
+    origin_acc: float | None
     cycle_id_short: str
     samples: int
     obs_on: bool
@@ -171,7 +174,7 @@ class ScoreEntry:
     mean_fitness_ci_hi: float | None
     escalation_aborted: bool = False
     # Why this row scored fewer cells than the panel: "" (whole panel) | "skip" (operator cut the
-    # walk short). Carried because the display RANKS on it (`domain/rendering.py::display_rank_key`)
+    # walk short). Carried because the display RANKS on it (`domain/results.py::scoreboard_rank_key`)
     # and a view cannot demote what it was never told.
     partial_reason: str = ""
     # First-validation-failure reason for synthetic-zeroed variants (e.g. ``no_op_variant``);
@@ -199,7 +202,12 @@ class RoundCompleteView:
     parent_acc: float
     scores: tuple[ScoreEntry, ...]
     winner_label: str
-    winner_accuracy: float
+    # ``None`` where the round graded no cell on accuracy — every arm errored, or the backend is
+    # verifier-graded. It matches ``RoundResult.accuracy``, which has always been optional; this
+    # field narrowed it to ``float`` and the builder bridged the gap with a ``float()`` that
+    # RAISES, taking the whole round loop down (`stop_reason: crashed`) on a round whose only
+    # fault was having nothing to report.
+    winner_accuracy: float | None
     winner_composite_fitness: float | None
     winner_evaluators: dict[str, float]
     winner_total: int
@@ -318,7 +326,7 @@ class DigestStatusView:
     rounds_completed: int
     started_at: str | None
     finished_at: str | None
-    # ``generation_only`` rounds (diag preview / sweep no-score follow-up) —
+    # ``generation_only`` rounds (the diag preview) —
     # counted into ``rounds_completed`` but rendered separately.
     gen_only_rounds: int = 0
 
@@ -408,25 +416,6 @@ class LogMdView:
     family_best: tuple[float, str] | None = None
 
 
-@dataclass(frozen=True)
-class SweepPayloadRow:
-    source_file: str
-    status: str
-    cycle_id: str
-
-
-@dataclass(frozen=True)
-class SweepSummaryView:
-    batch_id: str
-    parent_cycle_id: str
-    family_root: str
-    started_at: str
-    completed_at: str
-    n_minted: int
-    n_payloads: int
-    payloads: tuple[SweepPayloadRow, ...]
-
-
 AnyView = (
     InitEnterView
     | InitExitView
@@ -442,5 +431,4 @@ AnyView = (
     | LogMdView
     | FinalWinnerView
     | ForkSummaryView
-    | SweepSummaryView
 )

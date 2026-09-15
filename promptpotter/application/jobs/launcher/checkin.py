@@ -37,6 +37,7 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
 from promptpotter.application.jobs.mint import resolve_cycle_plan
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.infrastructure.runtime_flags import is_checkin
 from promptpotter.infrastructure.store.dataset_access import readable_dataset_dir
@@ -199,22 +200,15 @@ async def start_checkin_campaign(
     *,
     stores: Stores,
     job_registry: JobRegistry,
-    campaign_id: str,
-    halt_at_accuracy: float | None = None,
-    spend_budget_usd: float | None = None,
-    token_budget: int | None = None,
+    hop: CycleHop,
+    draft: DraftCampaign,
+    limits: LaunchLimits,
     backend_url: str = DEFAULT_BACKEND_URL,
-) -> Any:
+) -> dict[str, str]:
     """Transition (b), web tail — take the machine slot (or a place in line), then spawn the runner
-    as a detached task. The CLI ``new <file>`` shares :func:`prepare_checkin_run` but runs the loop
-    inline.
-
-    It calls :func:`launch` itself rather than being handed a job, because the gate that decides
-    whether this check-in may start AT ALL is :func:`load_checkin_for_start`, and that is also
-    where its dataset name comes from. Requesting a slot before it would put an incomplete origin
-    in the queue."""
-    hop, draft = load_checkin_for_start(stores, campaign_id)
-    return await launch(
+    as a detached task. ``(hop, draft)`` come from :func:`load_checkin_for_start`: a slot requested
+    before that gate queues an incomplete origin."""
+    job = await launch(
         stores=stores,
         job_registry=job_registry,
         dataset_name=draft.slug,
@@ -225,12 +219,11 @@ async def start_checkin_campaign(
             job=job,
             hop=hop,
             draft=draft,
-            halt_at_accuracy=halt_at_accuracy,
-            spend_budget_usd=spend_budget_usd,
-            token_budget=token_budget,
+            limits=limits,
             backend_url=backend_url,
         ),
     )
+    return {"campaign_id": hop.campaign_id, "cycle_id": job.cycle_id, "job_id": job.job_id}
 
 
 async def _start_checkin_run(
@@ -240,15 +233,13 @@ async def _start_checkin_run(
     job: Job,
     hop: CycleHop,
     draft: DraftCampaign,
-    halt_at_accuracy: float | None,
-    spend_budget_usd: float | None,
-    token_budget: int | None,
+    limits: LaunchLimits,
     backend_url: str,
 ) -> None:
     """Everything a check-in Start does once its slot is HELD — which, for a queued launch, is
     after the wait. Nothing before this point touches the campaign, so a launch sitting in the
     queue leaves the check-in exactly as the operator left it."""
-    spend_budget_usd, token_budget = await admit_and_hold(
+    held = await admit_and_hold(
         stores=stores,
         job_registry=job_registry,
         job=job,
@@ -256,8 +247,7 @@ async def _start_checkin_run(
         dataset_name=draft.slug,
         backend_type=draft.connector,
         backend_url=backend_url,
-        requested_cap_usd=spend_budget_usd,
-        requested_cap_tokens=token_budget,
+        requested=limits,
     )
 
     async def make_session(dataset_name: str) -> Session:
@@ -292,9 +282,7 @@ async def _start_checkin_run(
             train_data=prepared.train_data,
             job_registry=job_registry,
             job_id=job.job_id,
-            halt_at_accuracy=halt_at_accuracy,
-            spend_budget_usd=spend_budget_usd,
-            token_budget=token_budget,
+            limits=held,
         ),
         name=f"job-{job.job_id}",
     )

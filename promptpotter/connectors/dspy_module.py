@@ -5,11 +5,10 @@ from __future__ import annotations
 
 import logging
 import time
-from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.connectors.protocol import Connector
+from promptpotter.connectors.protocol import Connector, InProcessWorkload
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.spend import StepTokenUsage
 
@@ -50,21 +49,6 @@ class DspyProgram:
     examples: dict[str, Any]
     """``dspy.Example`` per query text — the join a scored row uses to find its own row back.
     Keyed by query because that is the only field a :class:`Sample` and an example share."""
-
-
-# A ContextVar rather than an argument: ``in_process_run`` is a module-level hook the loop calls
-# with no call-site state, which is the same reason the `promptpotter` connector publishes its
-# inner-spawn context. Set by `PromptPotterOpt.acompile`, reset by it on the way out.
-_PROGRAM: ContextVar[DspyProgram | None] = ContextVar("dspy_program", default=None)
-
-
-def publish_dspy_program(program: DspyProgram) -> Token[DspyProgram | None]:
-    """Bind *program* for this compile; the caller resets the returned token when the run ends."""
-    return _PROGRAM.set(program)
-
-
-def reset_dspy_program(token: Token[DspyProgram | None]) -> None:
-    _PROGRAM.reset(token)
 
 
 def dspy_wire_adapter(query: str, pipeline_params: dict[str, Any] | None) -> dict[str, Any]:
@@ -147,15 +131,17 @@ async def _acall(student: Any, example: Any) -> Any:
     return await dspy.asyncify(student)(**inputs)
 
 
-async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]:
+async def _in_process_run(
+    workload: InProcessWorkload, query: str, payload: dict[str, Any]
+) -> dict[str, Any]:
     """Score one example under one candidate, projected onto the ``{"data": {…}}`` shape
     ``measure_sample`` parses from an HTTP body — so the scorer reads a DSPy result identically
     to a remote one."""
-    program = _PROGRAM.get()
-    if program is None:
+    program = workload.program
+    if not isinstance(program, DspyProgram):
         raise RuntimeError(
-            "dspy connector: no program published — PromptPotterOpt.acompile publishes the "
-            "student before it scores anything, so this ran outside a compile."
+            "dspy connector: this run's workload carries no program — PromptPotterOpt.acompile "
+            "hands the student to open_session(program=...), so something else opened it."
         )
     example = program.examples.get(query)
     if example is None:
@@ -237,6 +223,4 @@ __all__ = [
     "SCORE_KEY",
     "DspyProgram",
     "DspySession",
-    "publish_dspy_program",
-    "reset_dspy_program",
 ]

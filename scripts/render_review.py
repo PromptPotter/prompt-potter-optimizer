@@ -1,5 +1,5 @@
 """Render ``review.md`` for any finished cycle dir, on demand — the offline twin of
-``application/output.py::write_review_md``: same renderer, same typed round
+``application/runner/output.py::write_review_md``: same renderer, same typed round
 shape, same frozen config snapshot, so a backfilled review.md agrees with a live one."""
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from promptpotter.application.campaign_config import load_campaign_config
-from promptpotter.application.review_md import render_review_md
+from promptpotter.application.runner.review_md import render_review_md
 from promptpotter.domain.results import RoundResult
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
 from promptpotter.infrastructure.store.layout import CycleLayout

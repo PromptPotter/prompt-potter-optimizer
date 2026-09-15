@@ -51,10 +51,9 @@ export function LimitReconcile({
   const set = (next: Fields) => {
     setF(next);
     const limits: RunLimitOverrides = {};
-    // 0 is meaningful on every one of these, so the floor is 0, not 1. `max_rounds: 0` means
-    // "measure the origin and stop"; `l1_patience: 0` is what the CLI sweep sets to make L1
-    // stall after round 1. A `>= 1` floor did not reject those — it dropped the key, so the
-    // fork silently INHERITED the parent's value instead.
+    // 0 is meaningful on every one of these, so the floor is 0, not 1: `max_rounds: 0` means
+    // "measure the origin and stop", `l1_patience: 0` makes L1 stall after round 1. A value
+    // below the floor drops its key, and the fork silently INHERITS the parent's value.
     const intGte0 = (s: string) => {
       const n = Number.parseInt(s, 10);
       return s.trim() !== "" && Number.isInteger(n) && n >= 0 ? n : null;

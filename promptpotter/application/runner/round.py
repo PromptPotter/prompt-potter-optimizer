@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 
 from promptpotter.application.campaign_config import CampaignConfig
+from promptpotter.application.diagnostics.verify import verify_on_saturation
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.indexes.axis import NOISE_THRESHOLD
 from promptpotter.application.optimization.cycle import Cycle
@@ -14,14 +15,13 @@ from promptpotter.application.optimization.escalation.state import NextAction
 from promptpotter.application.optimization.l1.critique import run_l1_critique
 from promptpotter.application.optimization.round_analysis import compute_round_diagnostics
 from promptpotter.application.optimization.validators.l1_strict import DROPPED_MANDATORY_PLACEHOLDER
-from promptpotter.application.output import (
+from promptpotter.application.run_observers import RunCallbacks
+from promptpotter.application.runner.output import (
     write_hard_samples_artifacts,
     write_log_md,
     write_review_md,
 )
-from promptpotter.application.run_observers import RunCallbacks
 from promptpotter.application.runner.termination import BudgetGate
-from promptpotter.application.verify import verify_on_saturation
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.results import RoundResult
@@ -50,7 +50,7 @@ async def emit_origin_round(
     # critique only at round end (``l1/execute.py``), so without this seed round 1
     # opens blind — it never sees the per-sample failure pattern (here: predicted
     # material vs ground-truth process) and falls back to surface-axis guesses.
-    # Sweep/diag forks inherit round 0 and never call this path, so the seed is
+    # Diag forks inherit round 0 and never call this path, so the seed is
     # automatically off there (round 1 stays bit-identical across cheap forks).
     if round_result.results:
         round_result.diagnostics = compute_round_diagnostics(
@@ -61,7 +61,7 @@ async def emit_origin_round(
         with graceful("Origin critique failed; round 1 proceeds without seeded feedback"):
             async with observed_node(
                 "l1_critique_r0",
-                "llm/optimizer",
+                "llm",
                 obs=session.state.obs,
                 campaign_id=session.state.tracing_campaign_id,
                 round_num=0,
@@ -186,6 +186,7 @@ async def close_round(
         prior_healths=assemble_prior_healths(cycle.rounds, round_num),
         is_origin=round_num == 0,
         not_attempted=round_result.not_attempted,
+        unscored=round_result.unscored,
     )
     cb.on_round_complete(round_result, cycle.escalation.l1_stall_count, cycle.escalation.lives)
     persist_round(cycle, round_result, session, cb)

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import hashlib
 
-from promptpotter.domain.identity import UserId, safe_name
+from promptpotter.shared.identity import UserId, safe_name
 
 
 def derive_user_id(issuer: str, subject: str) -> UserId:

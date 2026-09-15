@@ -29,7 +29,7 @@ Every key is ABSENT when the backend reported nothing, and PromptPotter reads ab
 | `served_by` | host attribution unavailable; nothing else changes. **This is the one key no in-repo connector writes** — the read side is now pinned by a test, but whether a `backend` row names its upstream host is entirely the remote backend's to answer |
 | `finish_reason` | a truncation cannot be told from an empty response, and every empty terminal grades as the fatal `empty_response` |
 | `reasoning` | the share of output spent thinking is unreadable, so a slow node reads as a slow provider |
-| `cache_read` | the prefix-cache reading is `unreported` — every surface renders `c?`, distinct from a reported `c0%` (`domain/rendering.py::prefix_reading`) |
+| `cache_read` | the prefix-cache reading is `unreported` — every surface renders `c?`, distinct from a reported `c0%` (`application/views/render/prefix_reading.py::prefix_reading`) |
 
 **Deploying the pair.** The Linux box co-hosts both — `deploy.config::BACKEND_DIR` / `BACKEND_SERVICE` — and `deploy-linux/update.sh` already syncs the backend checkout, reinstalls its requirements and restarts its unit alongside the optimizer. A backend-side change therefore reaches production through the ordinary update, provided it is pushed first; there is no separate download step to add.
 

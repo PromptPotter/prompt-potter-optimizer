@@ -1,4 +1,4 @@
-"""``Campaign`` — one declared effort, holding a root cycle plus fork/diag/sweep descendants FLAT under ``cycles/``. Two
+"""``Campaign`` — one declared effort, holding a root cycle plus fork/diag descendants FLAT under ``cycles/``. Two
 ``new`` calls on an unchanged declaration share the root cycle id and origin score, then diverge from round 1."""
 
 from __future__ import annotations

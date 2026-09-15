@@ -120,7 +120,7 @@ collects everything else.
   edge from `grep`, so "is this method live?" costs a multi-hop tour.
   Fix by template: key is internal → explicit `match` with literal calls;
   key is a cross-file contract → registration decorator at the handler's
-  definition site (the `@signal` `INJECTIONS` pattern); enum-keyed dict +
+  definition site (the `@signal` `injection_table()` pattern); enum-keyed dict +
   import-time completeness assert is the third acceptable form. String-keyed
   *data* tables are fine.
 - **A function-local import of our OWN package goes to module scope.** All three

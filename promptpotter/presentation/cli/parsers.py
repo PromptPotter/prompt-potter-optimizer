@@ -126,17 +126,7 @@ def _add_new_args(p_new: argparse.ArgumentParser) -> None:
     p_new.add_argument("--backend-url", default=DEFAULT_BACKEND_URL)
     p_new.add_argument("--backend-id", default=DEFAULT_BACKEND_ID)
 
-    mode_group = p_new.add_mutually_exclusive_group()
-    mode_group.add_argument(
-        "--sweep-batch",
-        dest="sweep",
-        action="store_true",
-        help="DEPRECATED, removal pending — declare `axes:` in the dataset's inner_tasks.yaml "
-        "instead and read it with `evidence --grid`, which crosses DATASET as well and generates a "
-        "balanced product that cannot alias. Multi-fork batch from datasets/<name>/sweep/*.yaml: "
-        "mint one sweep fork per payload, run each.",
-    )
-    mode_group.add_argument(
+    p_new.add_argument(
         "--diag",
         dest="diag",
         action="store_true",
@@ -386,13 +376,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_resume_args(p_resume)
 
-    sub.add_parser(
+    p_ab = sub.add_parser(
         "ab",
-        help="Deterministic A/B replay of the active cycle's campaign: re-derive every "
-        "recorded decision (winner / eliminations / L2-L3 triggers) under the CURRENT "
-        "engine + scorer, and report where the change stops carrying over — which "
-        "branches survive it and where a fork is needed. Zero LLM calls — run a cycle "
-        "under one engine/scorer, then `ab` under another to diff.",
+        help="Deterministic A/B replay of a campaign (the active one, or --campaign): "
+        "re-derive every recorded decision (winner / eliminations / L2-L3 triggers) under "
+        "the CURRENT engine + scorer, and report where the change stops carrying over — "
+        "which branches survive it and where a fork is needed. Zero LLM calls — run a "
+        "cycle under one engine/scorer, then `ab` under another to diff.",
+    )
+    p_ab.add_argument(
+        "--campaign",
+        default="",
+        help="Campaign id, 6-hex suffix, or unambiguous prefix (default: the active one).",
+    )
+    p_ab.add_argument(
+        "--cycle",
+        default="",
+        help="Cycle whose round 0 calibrates the δ ruler (default: the active cycle, or the "
+        "named campaign's root cycle).",
     )
     _add_reset_args(
         sub.add_parser(

@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import logging
 
-from promptpotter.application.archive_maintenance import reindex_measurement_archive
+from promptpotter.application.maintenance.archive_maintenance import reindex_measurement_archive
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import CommandResult, identity_from_args

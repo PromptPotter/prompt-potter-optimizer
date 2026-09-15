@@ -7,16 +7,15 @@ import json
 from typing import Any
 
 from promptpotter.application.views.render.heatmap import render_hard_sample_heatmap
+from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct as _fmt_pct
+from promptpotter.application.views.render.prefix_reading import prefix_reading
 from promptpotter.application.views.view_models import (
     ForkSummaryView,
     HardSamplesView,
     LogMdView,
     RoundDigestView,
-    SweepSummaryView,
 )
 from promptpotter.domain.phases import STOP_REASON_INFO, StopReason, StopReasonInfo
-from promptpotter.domain.rendering import fmt_pct as _fmt_pct
-from promptpotter.domain.rendering import prefix_reading
 from promptpotter.domain.results import overlap_series
 from promptpotter.domain.spend import TOKEN_KIND_BUCKET, TokenAccount
 from promptpotter.shared.composite import render_composite_fitness_block
@@ -256,24 +255,4 @@ def to_markdown(view: LogMdView) -> str:
     return "\n".join(parts).rstrip() + "\n"
 
 
-def render_sweep_summary(view: SweepSummaryView) -> str:
-    lines = [
-        f"# Sweep batch {view.batch_id}",
-        "",
-        f"- Parent cycle: `{view.parent_cycle_id}`",
-        f"- Family root: `{view.family_root}`",
-        f"- Started: {view.started_at}",
-        f"- Completed: {view.completed_at}",
-        f"- Forks minted: {view.n_minted} of {view.n_payloads}",
-        "",
-        "## Payloads",
-        "",
-        "| Source | Status | Cycle |",
-        "|---|---|---|",
-    ]
-    for row in view.payloads:
-        lines.append(f"| `{row.source_file}` | {row.status} | `{row.cycle_id}` |")
-    return "\n".join(lines) + "\n"
-
-
-__all__ = ["render_sweep_summary", "to_markdown"]
+__all__ = ["to_markdown"]

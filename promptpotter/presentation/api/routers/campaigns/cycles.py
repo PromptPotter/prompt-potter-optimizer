@@ -8,6 +8,7 @@ from typing import NamedTuple
 from fastapi import Query, Request, Response
 from fastapi.responses import JSONResponse
 
+from promptpotter.application.evidence.subjects import LENS_SCORE_PREFIX
 from promptpotter.application.mask.divergence import Verdict, find_divergences
 from promptpotter.application.mask.load import load_mask_record, parse_sample_ids
 from promptpotter.application.mask.record import MaskRecord
@@ -17,11 +18,11 @@ from promptpotter.application.scoring.metrics import value_with_mask_applied
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop, CyclePath, WorkspaceDir
 from promptpotter.domain.results import ABORT_LENS_LABELS, EliminationGate
 from promptpotter.domain.scoring import RoundScorer
+from promptpotter.infrastructure.projections.live_dashboard.projection import fold_at
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     LiveDashboardState,
     warming_payload,
 )
-from promptpotter.infrastructure.projections.live_dashboard.view import fold_at
 from promptpotter.infrastructure.runtime_flags import (
     derive_run_phase,
     overlay_armed_controls,
@@ -33,7 +34,7 @@ from promptpotter.infrastructure.store.layout import (
     course_validator_ns,
     cycle_dir_for,
 )
-from promptpotter.infrastructure.store.lineage_views import (
+from promptpotter.infrastructure.store.lineage_queries import (
     LineageDivergence,
     LineageNode,
     build_lineage_tree,
@@ -160,7 +161,7 @@ def get_cycle_dashboard(
 ) -> Response:
     """Live telemetry for the viewed cycle — its own ``dashboard.json``.
 
-    ``dashboard.json`` is per-cycle: every cycle (root, fork, sweep, diag, or an
+    ``dashboard.json`` is per-cycle: every cycle (root, fork, diag, or an
     L4 inner descendant) owns its own live file, stamped with its own
     ``cycle_id``. The path ids address the top-level (root) cycle; the optional
     ``descend`` query walks into the previous hop's ``.inner/<key>`` sandbox one
@@ -205,12 +206,12 @@ def _resolve_lens(lens: str | None) -> _Lens:
                 f"Unknown abort lens: {variant!r} (expected one of {sorted(_ABORT_SUPPRESS)})"
             )
         return _Lens(make_abort_verdict(suppress), None)
-    if lens and not lens.startswith("score:"):
+    if lens and not lens.startswith(LENS_SCORE_PREFIX):
         raise BadRequestError(
-            f"Unknown lens: {lens!r} (expected 'score:<formula>' or 'abort:<variant>')"
+            f"Unknown lens: {lens!r} (expected '{LENS_SCORE_PREFIX}<formula>' or 'abort:<variant>')"
         )
     try:
-        criterion = compile_round_scorer(lens.removeprefix("score:") if lens else None)
+        criterion = compile_round_scorer(lens.removeprefix(LENS_SCORE_PREFIX) if lens else None)
     except (ValueError, SyntaxError) as exc:
         raise BadRequestError(f"Invalid mask scoring formula: {exc}") from exc
     # No lens at all ⇒ a samples-only mask: the accuracy default folds, but nothing is served
@@ -226,7 +227,7 @@ def _mask_records(
     Keyed on ``campaign_id`` this served the wrong sandbox's numbers: an inner campaign id is
     content-addressed on the CELL, not on who asked, so one id is minted into several sibling
     ``.inner/`` sandboxes and the first visited won. ``cycle_id`` is no safer; the path is the
-    only address that separates them, which is what ``lineage_views`` already applies."""
+    only address that separates them, which is what ``lineage_queries`` already applies."""
     out: dict[CyclePath, MaskRecord] = {}
 
     def visit(node: LineageNode) -> None:
@@ -341,7 +342,7 @@ def get_lineage_tree(
     Nodes alternate ``course -> candidate -> (course | sample)`` forever, so an L4 inner
     run is the same shape one level down rather than a special case, and L5+ needs no new
     tier. There is no ``depth`` parameter: one tree per campaign serves every consumer,
-    and the recursion bound is ``lineage_views._MAX_COURSE_DEPTH``.
+    and the recursion bound is ``lineage_queries._MAX_COURSE_DEPTH``.
 
     An optional **lens** decorates the nodes with a counterfactual. ``lens=score:<formula>``
     = an alternative scoring formula (each candidate's ``lens_value``, plus a ``divergence``
@@ -351,7 +352,7 @@ def get_lineage_tree(
     re-score over only those samples. No lens + no samples ⇒ the tree is the raw read.
 
     A shell, deliberately: resolve the path, build the view, serve it. The assembly rules
-    live in ``store/lineage_views.py``.
+    live in ``store/lineage_queries.py``.
     """
     path = (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
     stores, leaf = resolve_cycle_path(stores, path)

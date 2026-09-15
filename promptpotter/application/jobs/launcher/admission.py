@@ -13,11 +13,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, NoReturn
 
 from promptpotter import connectors
-from promptpotter.application.jobs.quota import (
-    SpendCeilings,
-    admit_launch,
-    check_launch_quotas,
-)
+from promptpotter.application.jobs.quota import admit_launch, check_launch_quotas
 from promptpotter.application.jobs.registry import (
     UNRESOLVED_HOP,
     Job,
@@ -26,6 +22,7 @@ from promptpotter.application.jobs.registry import (
 )
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import User
@@ -236,11 +233,10 @@ async def admit_and_hold(
     dataset_name: str,
     backend_type: str,
     backend_url: str,
-    requested_cap_usd: float | None = None,
-    requested_cap_tokens: int | None = None,
-) -> SpendCeilings:
-    """Hold *job*'s slot through the irreversible half of a launch, and return the ceilings it was
-    admitted at. A queued job waits here for its turn first.
+    requested: LaunchLimits,
+) -> LaunchLimits:
+    """Hold *job*'s slot through the irreversible half of a launch, and return the limits it HOLDS —
+    *requested*, budgets resolved against the account. A queued job waits here for its turn first.
 
     Nothing here touches a cycle, so a failure answers for the machine slot alone and leaves the
     campaign re-startable once the account has room again — which is why the whole prologue runs
@@ -255,18 +251,21 @@ async def admit_and_hold(
         t_probe = time.perf_counter()
         # The wallet read globs + reads every cycle ledger — offload so the scan never blocks the
         # single event loop on the launch path.
-        ceilings = await asyncio.to_thread(
-            admit_launch,
-            requested_cap_usd=requested_cap_usd,
-            requested_cap_tokens=requested_cap_tokens,
-            user=user,
-            stores=stores,
-            job_registry=job_registry,
-            job_id=job.job_id,
+        held = requested.holding(
+            await asyncio.to_thread(
+                admit_launch,
+                requested=requested,
+                user=user,
+                stores=stores,
+                job_registry=job_registry,
+                job_id=job.job_id,
+            )
         )
         # Before the caller's first await, so a concurrent launch on this account reads a stamped
         # reservation rather than an unquotable one.
-        job_registry.set_caps(job.job_id, cap_usd=ceilings.usd, cap_tokens=ceilings.tokens)
+        job_registry.set_caps(
+            job.job_id, cap_usd=held.spend_budget_usd, cap_tokens=held.token_budget
+        )
         t_caps = time.perf_counter()
     except BaseException as exc:
         release_slot(job_registry, job.job_id, exc, admitted=False)
@@ -282,7 +281,7 @@ async def admit_and_hold(
         t_caps - t_probe,
         job.job_id,
     )
-    return ceilings
+    return held
 
 
 __all__ = [

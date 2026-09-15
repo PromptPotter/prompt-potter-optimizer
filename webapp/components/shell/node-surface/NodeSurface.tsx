@@ -3,10 +3,20 @@ import type { DraftPatch, ModelCapability, NodeConfigParam, NodeOutputSchema } f
 import type { NodeSearchNarrowing } from "@/lib/api/types";
 import type { PipelineStatus } from "@/lib/types";
 import type { CandidateSearchPoint, ConfigMode } from "@/lib/derivations";
-import { outputContract } from "@/lib/derivations";
+import {
+  authoredAnswerField,
+  authoredOutputSchema,
+  DESCRIPTION_PREFIX,
+  descriptionSubtree,
+  nodeLockPatch,
+  nodeSchemaPatch,
+  outputContract,
+} from "@/lib/derivations";
+import { Button } from "@/components/ui";
 import type { PipelineViewNode } from "@/components/workflow";
 import { PromptFieldsEditor } from "./PromptFieldsEditor";
-import { NodeConfigEditor } from "./NodeConfigEditor";
+import { LockButton, NodeConfigEditor } from "./NodeConfigEditor";
+import { SchemaTreeEditor } from "./SchemaTreeEditor";
 
 // The one node surface: config → prompt → output, rendered as an inseparable unit so
 // config can never be gated away from its prompt. It renders exactly ONE runnable
@@ -94,6 +104,49 @@ export function NodeSurface({
   const readOnly = !onApply;
   const configReadOnly = mode === "search-space" ? !onApply : !onConfigChange;
 
+  // A check-in AUTHORS the contract; every other host reads it. The box surfaces once `json` is
+  // ticked on a node with no schema — ticking it IS asking for one — and stays to edit what the
+  // draft wrote. A registry schema (`schema_family`) is the backend's: an inline one written over
+  // it is ignored at parse.
+  const nodeId = node?.id;
+  const author = mode === "search-space" ? onApply : undefined;
+  const authored = nodeId ? authoredOutputSchema(overlay, nodeId) : undefined;
+  const rows = nodeId ? schema?.[nodeId] : undefined;
+  const toggle = rows?.find((p) => p.key === "response_format");
+  const asksForSchema = (toggle?.permitted ?? toggle?.options)?.includes("json") === true;
+  const onAuthor =
+    author &&
+    nodeId &&
+    kind === "llm" &&
+    rows?.some((p) => p.key === "schema_family") !== true &&
+    (authored !== undefined || (!ownOutput && asksForSchema))
+      ? (next: Record<string, unknown>, answer?: string) =>
+          author(nodeSchemaPatch(overlay, nodeId, next, answer))
+      : undefined;
+  // Locks the grid does not draw — each prompt field, each output-schema field — all flipped
+  // through the grid's own emitter, so no surface can disagree with it about the rest.
+  const lockKeys =
+    author && nodeId
+      ? (keys: readonly string[], locked: boolean) =>
+          author(nodeLockPatch(schema, overlay, nodeId, keys, locked))
+      : undefined;
+  const ofKind = (kind: string) => (rows ?? []).filter((p) => p.kind === kind);
+  const locksOf = (kind: string, prefix = "") =>
+    Object.fromEntries(
+      ofKind(kind).map((p) => [p.key.slice(prefix.length), p.movable_by.length === 0]),
+    );
+  const described = ofKind("description").map((p) => p.key);
+  const tree = {
+    authored,
+    answer: nodeId ? authoredAnswerField(overlay, nodeId) : undefined,
+    // Keyed by PATH, the tree's own address for a field.
+    locks: lockKeys ? locksOf("description", DESCRIPTION_PREFIX) : undefined,
+    onLock: lockKeys
+      ? (path: string, locked: boolean) => lockKeys(descriptionSubtree(described, path), locked)
+      : undefined,
+    onAuthor,
+  };
+
   return (
     <>
       {label ? <p className="setup-preview-sub">{label}</p> : null}
@@ -113,6 +166,7 @@ export function NodeSurface({
         onApply={onApply}
         onChange={onConfigChange}
         onNarrowing={onNarrowing}
+        keysAskedElsewhere={onAuthor && authored ? described : undefined}
       />
 
       {showPrompt ? (
@@ -123,6 +177,8 @@ export function NodeSurface({
             readOnly={readOnly}
             compact={compact}
             onApply={readOnly ? undefined : onApply}
+            locks={rows ? locksOf("prompt") : undefined}
+            onLock={lockKeys ? (field, locked) => lockKeys([field], locked) : undefined}
           />
         </>
       ) : null}
@@ -130,10 +186,10 @@ export function NodeSurface({
       {compact ? (
         <details className="node-output-fold">
           <summary>Output contract</summary>
-          <OutputContract schema={nodeOutput} />
+          <OutputContract schema={nodeOutput} {...tree} />
         </details>
       ) : (
-        <OutputContract schema={nodeOutput} />
+        <OutputContract schema={nodeOutput} {...tree} />
       )}
     </>
   );
@@ -145,13 +201,20 @@ export function NodeSurface({
 // same schema. `outputContract` flattens it; this lays the rows out.
 //
 // RESOLVED at this searchpoint — descriptions folded in, nothing at all where the point answers in
-// text — which is why `resolved_output_schemas` exists. Read-only: `never_axis` fences the
-// OPTIMIZER off the schema and never the operator, so authoring one belongs in this tree and is
-// UNBUILT (`webapp/CLAUDE.md`), which is what pins `response_format` to text on a schema-less node.
+// text — which is why `resolved_output_schemas` exists. `never_axis` fences the OPTIMIZER off the
+// schema and never the operator, so a check-in authors one here: where the host passes `onAuthor`,
+// `SchemaAuthor` REPLACES this reading rather than sitting beside it, one reading of one schema.
 function OutputContract({
   schema,
+  onAuthor,
+  ...tree
 }: {
   schema: Record<string, NodeOutputSchema | null> | null;
+  authored?: Record<string, unknown>;
+  answer?: string;
+  locks?: Record<string, boolean>;
+  onLock?: (path: string, locked: boolean) => void;
+  onAuthor?: (schema: Record<string, unknown>, answer?: string) => void;
 }) {
   const entries = Object.entries(schema ?? {});
   const nodes = entries
@@ -161,6 +224,7 @@ function OutputContract({
   // line repeating it is noise. An ANSWERED read with no schema is a fact ABOUT the node, so it
   // gets a sentence: returning null there rendered "answers in free text" as nothing at all.
   if (schema === null) return null;
+  if (onAuthor) return <SchemaAuthor {...tree} onAuthor={onAuthor} />;
   if (nodes.length === 0) {
     return (
       <p className="config-hint">
@@ -200,6 +264,64 @@ function OutputContract({
           ))}
         </dl>
       ))}
+    </div>
+  );
+}
+
+// Written in the justlogic-d234 shape: reasoning first, so it is in context before the answer.
+const STARTER = {
+  type: "object",
+  properties: {
+    reasoning: { type: "string", description: "" },
+    answer: { type: "string", description: "" },
+  },
+  required: ["reasoning", "answer"],
+  additionalProperties: false,
+};
+
+// The one place a node is GIVEN a contract: the field tree once there is one, a single button while
+// there is not. A lock per field, and one on the head for the whole schema (path `""`).
+function SchemaAuthor({
+  authored,
+  answer,
+  locks,
+  onLock,
+  onAuthor,
+}: {
+  authored?: Record<string, unknown>;
+  answer?: string;
+  locks?: Record<string, boolean>;
+  onLock?: (path: string, locked: boolean) => void;
+  onAuthor: (schema: Record<string, unknown>, answer?: string) => void;
+}) {
+  const fields = Object.values(locks ?? {});
+  const open = fields.filter((locked) => !locked).length;
+  return (
+    <div className="node-output-schema">
+      <div className="schema-head">
+        <span className="node-output-title">Structured output</span>
+        {onLock && fields.length > 0 ? (
+          <>
+            <LockButton locked={open === 0} readOnly={false} onClick={() => onLock("", open > 0)} />
+            <small className="config-hint">
+              {open}/{fields.length} descriptions tunable
+            </small>
+          </>
+        ) : null}
+      </div>
+      {authored ? (
+        <SchemaTreeEditor
+          schema={authored}
+          answer={answer}
+          locks={onLock ? locks : undefined}
+          onLock={onLock}
+          onChange={onAuthor}
+        />
+      ) : (
+        <Button className="schema-add" onClick={() => onAuthor(STARTER)}>
+          Define the structure
+        </Button>
+      )}
     </div>
   );
 }

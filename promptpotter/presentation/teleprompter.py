@@ -34,15 +34,15 @@ from promptpotter.application.embedded_run import (
     run_campaign,
 )
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
+from promptpotter.application.runner.entry import RunMode
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.connectors.dspy_module import (
     PROGRAM_NODE,
     RESULT_KEY,
     SCORE_KEY,
     DspyProgram,
-    publish_dspy_program,
-    reset_dspy_program,
 )
+from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
 from promptpotter.infrastructure.store.io import write_text, write_yaml
@@ -184,8 +184,7 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
             )
 
         self._write_dataset_dir()
-        session = await open_session(self.dataset_name)
-        token = publish_dspy_program(program)
+        session = await open_session(self.dataset_name, program=program)
         try:
             # No overrides: the file this compile just wrote IS the projection of `loop` and
             # `nodes`, so passing them again would be a second path to the same values.
@@ -200,11 +199,13 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
                 origin,
                 config,
                 session=session,
-                spend_budget_usd=self.loop.spend_budget_usd,
-                token_budget=self.loop.token_budget,
+                limits=LaunchLimits(
+                    spend_budget_usd=self.loop.spend_budget_usd,
+                    token_budget=self.loop.token_budget,
+                ),
+                mode=RunMode(),
             )
         finally:
-            reset_dspy_program(token)
             await session.backend_client.aclose()
 
         if stop_reason_outcome(result.stop_reason) is not StopOutcome.SUCCESS:
@@ -254,7 +255,6 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
                     {"pipeline_key": RESULT_KEY, "is_llm": True},
                     {"pipeline_key": SCORE_KEY},
                 ],
-                "langfuse_type": "generation",
             },
         }
         write_yaml(

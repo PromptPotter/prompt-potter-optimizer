@@ -18,13 +18,13 @@ from promptpotter.application.campaign_config import (
     load_campaign_config,
 )
 from promptpotter.connectors import DEFAULT_CONNECTOR
-from promptpotter.domain.identity import TenantId, safe_name
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.identity import TenantId, safe_name
 
 if TYPE_CHECKING:
     from promptpotter.connectors.protocol import Connector

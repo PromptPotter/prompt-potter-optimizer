@@ -15,8 +15,8 @@ from typing import Literal
 # series "oscillating" is "elected before, not lately", which `plateau` already names.
 #
 # **Not "trajectory".** This is the election series CLASSIFIED — while a trajectory in this repo
-# is a walk of points that each carry their own reading (`evidence.py::TrajectoryPoint`,
-# `p_best_trajectory`, the Sample-trajectory grid). Two meanings under one word, and the reader
+# is a walk of points that each carry their own reading (`p_best_trajectory`, the
+# Sample-trajectory grid). Two meanings under one word, and the reader
 # could tell them apart from neither name.
 TrendClass = Literal["healthy", "plateau", "ceiling"]
 

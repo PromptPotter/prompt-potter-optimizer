@@ -31,7 +31,7 @@ persona → task_intent → problem_description → instruction
 → thinking_style → answer_format → few_shot_examples → plan
 ```
 
-**Invariant:** no prompt site summarizes its own data. If a name isn't in `INJECTIONS`, it doesn't enter a prompt. **The render chain, the per-layer composition paths and the per-placeholder source map are owned by** [`dispatch-hub.md`](dispatch-hub.md) — read them there.
+**Invariant:** no prompt site summarizes its own data. If a name isn't in `injection_table()`, it doesn't enter a prompt. **The render chain, the per-layer composition paths and the per-placeholder source map are owned by** [`dispatch-hub.md`](dispatch-hub.md) — read them there.
 
 ### Field channels between layers
 
@@ -107,7 +107,7 @@ Both files are append-only logs folded last-wins (`store/read_model.py`). The in
 
 **Read paths** (both return `list[Measurement]`):
 
-- `measurements_for_sample(sample_id)` — *"history of training example X"*. Exposed through `archive_views.measurements_for_sample()`; **no caller today**, and kept anyway because architecture.md §0 declares both keys first-class read surfaces of the archive.
+- `measurements_for_sample(sample_id)` — *"history of training example X"*. Exposed through `archive_queries.measurements_for_sample()`; **no caller today**, and kept anyway because architecture.md § Measurement archive (the actual database) declares both keys first-class read surfaces of the archive.
 - `measurements_for_config(predicate)` — *"runs whose config matches this subset"*. Optional `run_ids` hint keeps the scan O(K + matches).
 
 The archive is tenant-global and **never backend-scoped** — no read or write takes a `backend_id`.
@@ -119,7 +119,7 @@ The archive is tenant-global and **never backend-scoped** — no read or write t
 | Change | Files |
 |---|---|
 | New field on every measurement | `Measurement` (`domain/sample.py`), `build_dataset_run_data()` (`application/datasets/loaders.py`), `_to_measurement()` (`infrastructure/store/measurement_archive.py`) |
-| New retrieval view | Method on `MeasurementArchive` parallel to `for_sample/for_config`. Pair with an index class if filtering must stay efficient. |
+| New retrieval query | Method on `MeasurementArchive` parallel to `for_sample/for_config`. Pair with an index class if filtering must stay efficient. |
 | New derived index | Class with `_seen_runs` cursor + `ingest_run()` returning its per-run row, applied through ONE `replay_row()` both live and on replay; register on `AxisIndex.refresh()`. Persist via `read_model` (`infrastructure/store/read_model.py`) — never a second mechanism |
 
 **The one rule:** `node_configs` is canonical identity — must be deterministic from pipeline params. Don't break determinism.
@@ -132,7 +132,7 @@ The archive is tenant-global and **never backend-scoped** — no read or write t
 
 Order for a contributor who wants to follow L1/L2/L3 end-to-end:
 
-1. [`dispatch-hub.md`](dispatch-hub.md) — signal routing, `INJECTIONS`, `L1Layout`, slot composition, the mermaid flow.
+1. [`dispatch-hub.md`](dispatch-hub.md) — signal routing, `injection_table()`, `L1Layout`, slot composition, the mermaid flow.
 2. [`dispatch-hub.md`](dispatch-hub.md) § Outputs — what L2 writes, and the layout edits it makes.
 3. [`../../promptpotter/application/optimization/CLAUDE.md`](../../promptpotter/application/optimization/CLAUDE.md) — L3 plan + per-layer agent contracts.
 4. [`self-healing-internals.md`](self-healing-internals.md) — wound channels, heal-trigger ladder.

@@ -11,8 +11,15 @@ campaign_config:
     # and $0.0020 — and one cell is not a distribution, so an anchor drawn from it would grade
     # every arm against a single draw and would be indistinguishable from a measured one on the
     # round file. The figure is written here so the omission is checkable rather than asserted.
-    # Add the term once a real campaign has priced the panel; `sealqa-longseal-12` and
-    # `spreadsheetbench-s10` carry the form to copy, and the census and its recompute path are
+    #
+    # That one cell is also STALE in the same way its siblings' anchors are: it was measured while
+    # the injected skill was silently dropped (CRLF frontmatter, fixed 2026-09-12), so 292.2 s and
+    # $0.0020 price a NO-SKILL episode. On `spreadsheetbench-s10` the correction roughly doubled
+    # the tokens, so treat it as a floor rather than an estimate. The refusal above stands either
+    # way — one stale cell is no more a distribution than one fresh one.
+    #
+    # Add the term once a real campaign has priced the panel; `spreadsheetbench-s10` carries the
+    # form to copy, and the census and its recompute path are
     # `docs/operations/dataset-selection-rationale.md` § What a cell costs.
   optimization:
     # Deliberately the smallest geometry that can produce a round at all: this campaign's job is

@@ -652,7 +652,7 @@
       },
       "CampaignPipelineResponse": {
         "additionalProperties": false,
-        "description": "One campaign's pipeline at one searchpoint — the body of ``GET /campaigns/{id}/pipeline``.\nThe peer of ``readable_dataset_dir`` one question up: that seam answers which bytes are on disk,\nthis one which values a campaign runs (``architecture.md`` §0, two resolution seams).",
+        "description": "One campaign's pipeline at one searchpoint — the body of ``GET /campaigns/{id}/pipeline``.\nThe peer of ``readable_dataset_dir`` one question up: that seam answers which bytes are on disk,\nthis one which values a campaign runs (``architecture.md`` § Two resolution seams).",
         "properties": {
           "backend_type": {
             "title": "Backend Type",
@@ -1272,7 +1272,7 @@
                 "type": "null"
               }
             ],
-            "description": "Immediate parent for siblings (forks/sweeps/diag); null for roots. Sidebar uses this to nest siblings.",
+            "description": "Immediate parent for siblings (forks/diag); null for roots. Sidebar uses this to nest siblings.",
             "title": "Parent Cycle Id"
           },
           "parent_session_id": {
@@ -1882,8 +1882,15 @@
             "type": "string"
           },
           "source_campaign_accuracy": {
-            "title": "Source Campaign Accuracy",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Campaign Accuracy"
           },
           "source_campaign_composite": {
             "title": "Source Campaign Composite",
@@ -2679,7 +2686,6 @@
                   "root",
                   "fork",
                   "diag",
-                  "sweep",
                   "inner"
                 ],
                 "type": "string"
@@ -3773,7 +3779,7 @@
       },
       "NodeConfigParam": {
         "additionalProperties": false,
-        "description": "One param a node carries — the COMPLETE per-node list, which is what lets a reader sum\n`movable_by` into the node's whole search space.\n\n`kind` names the surface that OWNS the param: `model`/`enum` → a select,\n`number`/`bool`/`string` → a typed input, `prompt` → the prompt editor's (a\n`PromptTemplate` decomposition field), `nested` → structured, read as text and typed by\nnobody (`NESTED_PARAM_TYPES`). Every kind but `prompt` is a config row; do not re-filter\nthis list at the source, and do not read `nested` as unrenderable — the schema-description\naxis and L2's layout are both nested, and both are axes an operator may be shown.\n\n**A lock is (axis, AGENT), never an axis alone.** `movable_by` names the agents that may\nmove this param right now — the vocabulary is `MOVABLE_AGENTS` — and the empty list is the\nonly true lock: nobody may, and changing it costs a fork.\n\nTwo fields say WHY a shut axis is shut, and the difference is the whole point:\n`never_axis` = it could never be one, naming WHICH construction forbids it — `cost_lever`\n(`PARAM_FORBIDDEN_KEYS`: `provider`, `route_order`, set against a measured capture) or\n`schema_owned` (`SCHEMA_OWNED_FIELDS`: the structured-output contract, which the LLM cannot\nemit a key of at all). `held` = the dataset offered it and this campaign closed it\n(`param_keys_held` — somebody's decision, and reversible). Neither = plain configuration.\n**`model` is in none of them**: it is an ordinary axis whose openness is its node's own\n`param_keys` answer, and its permitted values are `param_allowed_values[\"model\"]` (see\n`PipelineSchema.model_options`).\n\nA reason rather than a flag because the browser had to guess it from the key's name to say\nanything, and every guess it could make was the cost-lever sentence.",
+        "description": "One param a node carries — the COMPLETE per-node list, which is what lets a reader sum\n`movable_by` into the node's whole search space.\n\n`kind` names the surface that OWNS the param: `model`/`enum` → a select,\n`number`/`bool`/`string` → a typed input, `prompt` → the prompt editor's (a\n`PromptTemplate` decomposition field), `description` → one output-schema field's prose, which\nthe schema tree draws where a host has one, `nested` → structured, read as text and typed by\nnobody (`NESTED_PARAM_TYPES`). Do not re-filter this list at the source, and do not read\n`nested` as unrenderable — L2's layout is nested, and an axis an operator may be shown.\n\n**A lock is (axis, AGENT), never an axis alone.** `movable_by` names the agents that may\nmove this param right now — the vocabulary is `MOVABLE_AGENTS` — and the empty list is the\nonly true lock: nobody may, and changing it costs a fork.\n\nTwo fields say WHY a shut axis is shut, and the difference is the whole point:\n`never_axis` = it could never be one, naming WHICH construction forbids it — `cost_lever`\n(`PARAM_FORBIDDEN_KEYS`: `provider`, `route_order`, set against a measured capture) or\n`schema_owned` (`SCHEMA_OWNED_FIELDS`: the structured-output contract, which the LLM cannot\nemit a key of at all). `held` = the dataset offered it and this campaign closed it\n(`param_keys_held` — somebody's decision, and reversible). Neither = plain configuration.\n**`model` is in none of them**: it is an ordinary axis whose openness is its node's own\n`param_keys` answer, and its permitted values are `param_allowed_values[\"model\"]` (see\n`PipelineSchema.model_options`).\n\nA reason rather than a flag because the browser had to guess it from the key's name to say\nanything, and every guess it could make was the cost-lever sentence.",
         "properties": {
           "description": {
             "default": "",
@@ -3858,7 +3864,7 @@
       },
       "NodeOutputSchema": {
         "additionalProperties": false,
-        "description": "Resolved output schema for a TARGET pipeline node — the structured output the\nbackend node produces, parsed from ``GET /pipeline``.\n\nThis is the ``output_schema`` the word belongs to. NOT the optimizer's own\nresponse schema (``dispatch/l1_wire_schema.py::build_l1_response_schema``), which\ndescribes what ``l1_generate`` returns. The L4 levers named ``output_schema_*``\nact on the optimizer side; the target-side axis is spec-only today.",
+        "description": "Resolved output schema for a TARGET pipeline node — the structured output the\nbackend node produces, parsed from ``GET /pipeline``.\n\nThis is the ``output_schema`` the word belongs to. NOT the optimizer's own\nresponse schema (``dispatch/l1_wire_schema.py::build_l1_response_schema``), which\ndescribes what ``l1_generate`` returns. The rename lever (``SCHEMA_RENAME_PARAM``) acts on that\noptimizer side; the description keys act on this one.",
         "properties": {
           "field_descriptions": {
             "additionalProperties": {
@@ -5358,7 +5364,7 @@
     },
     "/api/v1/auth/activity": {
       "get": {
-        "description": "Time-bucketed spend / requests / tokens over the requested window.\n\nWalks every per-cycle ``.runtime/ledger.jsonl`` under the user's\n`campaigns/*/cycles/*/` and projects ``TokenUsageRecord`` rows whose\n`timestamp` lands in the window onto ``_N_BUCKETS`` evenly-spaced\nbins. ``cost_usd`` may be null on disk (Groq doesn't return wire\ncost); we fall back to ``shared.pricing.lookup_rate`` × tokens so\nhistorical spend isn't silently zero.\n\n``group_by`` selects the colour axis: ``model`` = exact model string,\n``api_key`` = derived provider slug (``openai`` / ``groq`` /\n``anthropic`` / ``openrouter``).",
+        "description": "Time-bucketed spend / requests / tokens over the requested window.\n\nWalks every per-cycle ``.runtime/ledger.jsonl`` under the user's\n`campaigns/*/cycles/*/` and projects ``TokenUsageRecord`` rows whose\n`timestamp` lands in the window onto ``_N_BUCKETS`` evenly-spaced\nbins. ``cost_usd`` may be null on disk (Groq doesn't return wire\ncost); we fall back to ``infrastructure.llm.pricing.lookup_rate`` × tokens so\nhistorical spend isn't silently zero.\n\n``group_by`` selects the colour axis: ``model`` = exact model string,\n``api_key`` = derived provider slug (``openai`` / ``groq`` /\n``anthropic`` / ``openrouter``).",
         "operationId": "activity_api_v1_auth_activity_get",
         "parameters": [
           {
@@ -5367,7 +5373,17 @@
             "required": false,
             "schema": {
               "default": "1d",
-              "pattern": "^(15m|30m|1h|3h|1d|2d|1w|1mo|1y)$",
+              "enum": [
+                "15m",
+                "30m",
+                "1h",
+                "3h",
+                "1d",
+                "2d",
+                "1w",
+                "1mo",
+                "1y"
+              ],
               "title": "Window",
               "type": "string"
             }
@@ -5378,7 +5394,10 @@
             "required": false,
             "schema": {
               "default": "model",
-              "pattern": "^(model|api_key)$",
+              "enum": [
+                "model",
+                "api_key"
+              ],
               "title": "Group By",
               "type": "string"
             }
@@ -5925,7 +5944,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard": {
       "get": {
-        "description": "Live telemetry for the viewed cycle — its own ``dashboard.json``.\n\n``dashboard.json`` is per-cycle: every cycle (root, fork, sweep, diag, or an\nL4 inner descendant) owns its own live file, stamped with its own\n``cycle_id``. The path ids address the top-level (root) cycle; the optional\n``descend`` query walks into the previous hop's ``.inner/<key>`` sandbox one\n``campaign::cycle`` hop at a time, so ONE route serves a top-level cycle, an\ninner cycle, or an L5+ descendant (:func:`resolve_cycle_path`). Absent/empty\n``descend`` is a plain per-cycle read — no session-root collapse.\n\nHonors ``If-Modified-Since`` and returns ``304 Not Modified`` when nothing the\nbody depends on has advanced — keeps the 2 s webapp poll cheap during quiescent\nstretches. The validator is :func:`run_phase_validator_epoch`, which covers the\nderived phase: it turns ``detached`` on the clock, so an mtime-only validator\nwould 304 a dead producer at ``running``. A cycle that exists but has not yet flushed its first\n``dashboard.json`` answers ``warming_up`` at 200 so the webapp renders\n\"initialising\" rather than appearing offline; a cycle that does not exist\nanswers 404, because those are different facts.\n\n``at`` is a ledger offset in the LEAF cycle's own ledger and asks for the state as of\nthat moment — the same fold, replayed off disk. It is the address a ray item carries,\nso a chronology step and a dashboard are the same coordinate rather than two.",
+        "description": "Live telemetry for the viewed cycle — its own ``dashboard.json``.\n\n``dashboard.json`` is per-cycle: every cycle (root, fork, diag, or an\nL4 inner descendant) owns its own live file, stamped with its own\n``cycle_id``. The path ids address the top-level (root) cycle; the optional\n``descend`` query walks into the previous hop's ``.inner/<key>`` sandbox one\n``campaign::cycle`` hop at a time, so ONE route serves a top-level cycle, an\ninner cycle, or an L5+ descendant (:func:`resolve_cycle_path`). Absent/empty\n``descend`` is a plain per-cycle read — no session-root collapse.\n\nHonors ``If-Modified-Since`` and returns ``304 Not Modified`` when nothing the\nbody depends on has advanced — keeps the 2 s webapp poll cheap during quiescent\nstretches. The validator is :func:`run_phase_validator_epoch`, which covers the\nderived phase: it turns ``detached`` on the clock, so an mtime-only validator\nwould 304 a dead producer at ``running``. A cycle that exists but has not yet flushed its first\n``dashboard.json`` answers ``warming_up`` at 200 so the webapp renders\n\"initialising\" rather than appearing offline; a cycle that does not exist\nanswers 404, because those are different facts.\n\n``at`` is a ledger offset in the LEAF cycle's own ledger and asks for the state as of\nthat moment — the same fold, replayed off disk. It is the address a ray item carries,\nso a chronology step and a dashboard are the same coordinate rather than two.",
         "operationId": "get_cycle_dashboard_api_v1_campaigns__campaign_id__cycles__cycle_id__dashboard_get",
         "parameters": [
           {
@@ -6328,7 +6347,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/tree": {
       "get": {
-        "description": "The lineage tree rooted at this cycle — the single served genealogy.\n\nNodes alternate ``course -> candidate -> (course | sample)`` forever, so an L4 inner\nrun is the same shape one level down rather than a special case, and L5+ needs no new\ntier. There is no ``depth`` parameter: one tree per campaign serves every consumer,\nand the recursion bound is ``lineage_views._MAX_COURSE_DEPTH``.\n\nAn optional **lens** decorates the nodes with a counterfactual. ``lens=score:<formula>``\n= an alternative scoring formula (each candidate's ``lens_value``, plus a ``divergence``\nmarker where that criterion would have elected someone else); ``lens=abort:<variant>``,\nvariant ∈ ``_ABORT_SUPPRESS`` (one ``<gate>_off`` per ``EliminationGate``, plus\n``all_off``) = switch off a PoBB abort contributor. ``samples`` = a comma-separated sample-id list (the **sample-set mask**):\nre-score over only those samples. No lens + no samples ⇒ the tree is the raw read.\n\nA shell, deliberately: resolve the path, build the view, serve it. The assembly rules\nlive in ``store/lineage_views.py``.",
+        "description": "The lineage tree rooted at this cycle — the single served genealogy.\n\nNodes alternate ``course -> candidate -> (course | sample)`` forever, so an L4 inner\nrun is the same shape one level down rather than a special case, and L5+ needs no new\ntier. There is no ``depth`` parameter: one tree per campaign serves every consumer,\nand the recursion bound is ``lineage_queries._MAX_COURSE_DEPTH``.\n\nAn optional **lens** decorates the nodes with a counterfactual. ``lens=score:<formula>``\n= an alternative scoring formula (each candidate's ``lens_value``, plus a ``divergence``\nmarker where that criterion would have elected someone else); ``lens=abort:<variant>``,\nvariant ∈ ``_ABORT_SUPPRESS`` (one ``<gate>_off`` per ``EliminationGate``, plus\n``all_off``) = switch off a PoBB abort contributor. ``samples`` = a comma-separated sample-id list (the **sample-set mask**):\nre-score over only those samples. No lens + no samples ⇒ the tree is the raw read.\n\nA shell, deliberately: resolve the path, build the view, serve it. The assembly rules\nlive in ``store/lineage_queries.py``.",
         "operationId": "get_lineage_tree_api_v1_campaigns__campaign_id__cycles__cycle_id__tree_get",
         "parameters": [
           {
@@ -6586,7 +6605,7 @@
     },
     "/api/v1/commands/edit-draft-campaign": {
       "post": {
-        "description": "Sparse-patch a `DraftCampaign`. Returns the post-mutation full shape.\n\nPer ``docs/specs/api-openapi.yaml::editDraftCampaign``. The mutation rides\n`CommandDispatcher` (architecture.md §0: sole writer of `CommandRecord`); only\nthe response shape differs from the generic 202 verbs, never the ingress.",
+        "description": "Sparse-patch a `DraftCampaign`. Returns the post-mutation full shape.\n\nPer ``docs/specs/api-openapi.yaml::editDraftCampaign``. The mutation rides\n`CommandDispatcher` (architecture.md § Control-remote: sole writer of `CommandRecord`);\nonly the response shape differs from the generic 202 verbs, never the ingress.",
         "operationId": "edit_draft_campaign_api_v1_commands_edit_draft_campaign_post",
         "parameters": [
           {

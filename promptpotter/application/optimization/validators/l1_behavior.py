@@ -3,15 +3,19 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 from typing import Any
 
 from pydantic import ValidationError
 
+from promptpotter.application.optimization.dispatch.injections.layer_state import (
+    HELD_PROMPT_FIELD_MARK,
+)
 from promptpotter.application.optimization.dispatch.injections.registry import (
-    INJECTIONS,
     STALL_EXPLORATION,
     citable_fields,
+    injection_table,
 )
 from promptpotter.application.optimization.validators.behavior_base import (
     CheckFn,
@@ -117,7 +121,7 @@ def _check_param_scope_discipline(round_dict: dict[str, Any], ctx: ValidatorCont
         return CheckResult("param_scope_discipline", True, "no variants emitted")
 
     early = ctx.round_num < PARAM_UNLOCK_ROUND
-    stale_field = _stale_prompt_field(ctx)
+    stale_field = _stale_prompt_field(ctx, _held_prompt_fields(round_dict))
     if not early and stale_field is None:
         return CheckResult(
             "param_scope_discipline",
@@ -204,6 +208,8 @@ def _check_not_only_param_variants(
     variants = extract_l1_variants(round_dict)
     if not variants:
         return CheckResult("not_only_param_variants", True, "no variants emitted")
+    if _held_prompt_fields(round_dict) >= set(PROMPT_STRING_FIELDS):
+        return CheckResult("not_only_param_variants", True, "every prompt field is held")
 
     for v in variants:
         if variant_prose_written(v):
@@ -304,13 +310,14 @@ def _round_citable_fields(ctx: ValidatorContext) -> tuple[str, ...]:
     # A COMPLETE stored layout, NOT an edit — the snapshot names every slot — so it is parsed as
     # one. Routing it through `coerce_l1_layout` reads it as a `{panel: slot}` edit, which a dump
     # of per-slot lists is not, and every round then falls open to the whole citable registry.
-    if not isinstance(raw, dict) or not raw:
-        return tuple(sorted([n for n, i in INJECTIONS.items() if i.citable] + [STALL_EXPLORATION]))
-    try:
-        layout = L1Layout.model_validate(raw)
-    except ValidationError:
-        return tuple(sorted([n for n, i in INJECTIONS.items() if i.citable] + [STALL_EXPLORATION]))
-    return citable_fields(layout, exploration_budget=ctx.exploration_budget)
+    if isinstance(raw, dict) and raw:
+        with contextlib.suppress(ValidationError):
+            return citable_fields(
+                L1Layout.model_validate(raw), exploration_budget=ctx.exploration_budget
+            )
+    return tuple(
+        sorted([n for n, i in injection_table().items() if i.citable] + [STALL_EXPLORATION])
+    )
 
 
 _NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
@@ -350,7 +357,7 @@ def _uncitable_reason(field_name: str, ctx: ValidatorContext) -> str:
         return "no_field"
     if field_name == STALL_EXPLORATION:
         return "stall_exploration_when_tight"
-    injection = INJECTIONS.get(field_name)
+    injection = injection_table().get(field_name)
     if injection is None:
         return f"bad_field={field_name!r}"
     if not injection.citable:
@@ -419,7 +426,16 @@ def _touches_param_scope(pipeline_overlay: dict[str, Any]) -> bool:
     return False
 
 
-def _stale_prompt_field(ctx: ValidatorContext) -> str | None:
+def _held_prompt_fields(round_dict: dict[str, Any]) -> frozenset[str]:
+    """The prompt fields THIS round showed L1 as held, read off the prompt it rendered — a score
+    judges the generator against what it was shown, and a held field is not stale."""
+    node = ((round_dict.get("nodes") or {}).get("l1_generate")) or {}
+    fields = ((node.get("input") or {}).get("template_fields")) or {}
+    shown = " ".join(str(v) for v in fields.values() if isinstance(v, str))
+    return frozenset(f for f in PROMPT_STRING_FIELDS if f"[{f}{HELD_PROMPT_FIELD_MARK}]" in shown)
+
+
+def _stale_prompt_field(ctx: ValidatorContext, held: frozenset[str]) -> str | None:
     """A field appearing in zero variants for two rounds is stale and triggers the param-scope lock."""
     if len(ctx.prior_rounds) < 2:
         return None
@@ -430,6 +446,6 @@ def _stale_prompt_field(ctx: ValidatorContext) -> str | None:
             # Leaf of `field` / `node.field` — same axis either carrier wrote it through.
             mutated_fields.update(k.rpartition(".")[2] for k in variant_prose_written(v))
     for field_name in PROMPT_STRING_FIELDS:
-        if field_name not in mutated_fields:
+        if field_name not in mutated_fields and field_name not in held:
             return field_name
     return None

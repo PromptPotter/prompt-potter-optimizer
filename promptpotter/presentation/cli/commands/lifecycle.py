@@ -12,18 +12,14 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable
 
-from promptpotter.application.jobs.capacity import resolve_run_capacity
-from promptpotter.application.jobs.registry import JobRegistry, default_jobs_dir
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
-from promptpotter.domain.command_kinds import CycleScopedKind, LifecycleKind
-from promptpotter.infrastructure.store.session_pointer import read_active_pointer
-from promptpotter.infrastructure.store.stores import Stores, build_stores
-from promptpotter.presentation.api.middleware.command_dispatcher import (
+from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.commands.payloads import (
+    ArchiveCampaignPayload,
     CancelQueuedRunPayload,
     ChangeSpendBudgetPayload,
     CleanupEmptyCyclesPayload,
-    CommandDispatcher,
     CyclePayload,
+    DeleteCampaignPayload,
     DeleteCyclePayload,
     LifecyclePayload,
     PauseCyclePayload,
@@ -31,11 +27,18 @@ from promptpotter.presentation.api.middleware.command_dispatcher import (
     SetCampaignLabelPayload,
     SkipSearchpointPayload,
     StepCyclePayload,
+    UnarchiveCampaignPayload,
 )
+from promptpotter.application.jobs.capacity import resolve_run_capacity
+from promptpotter.application.jobs.registry import JobRegistry, default_jobs_dir
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.infrastructure.store.session_pointer import read_active_pointer
+from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
     identity_from_args,
     resolve_campaign_hint,
+    resolve_cycle,
 )
 from promptpotter.shared.errors import ConflictError, NotFoundError
 
@@ -58,17 +61,17 @@ __all__ = [
 
 
 def _resolve_target(args: argparse.Namespace, store: Stores) -> tuple[str, str]:
-    """The ``--campaign``/``--cycle`` pair, falling back to the active pointer. Shared by every
-    cycle-scoped verb here so they cannot resolve "which cycle" two different ways."""
+    """The ``--campaign``/``--cycle`` pair, else the active pointer's — never half of each: the
+    pointer's cycle belongs to the pointer's campaign, so a named one resolves its own."""
     campaign_id: str = getattr(args, "campaign", None) or ""
     cycle_id: str = getattr(args, "cycle", None) or ""
-    if not (campaign_id and cycle_id):
+    if not campaign_id:
         _sid, pointer_cid, pointer_cyid = read_active_pointer(store.base_dir)
-        campaign_id = campaign_id or pointer_cid
-        cycle_id = cycle_id or pointer_cyid
-    # The pointer already holds a full id; a hand-typed `--campaign` gets the same reach here as
-    # it does for `verify`, through the one matcher rather than a second rule.
-    return (resolve_campaign_hint(store, campaign_id) if campaign_id else ""), cycle_id
+        return pointer_cid, cycle_id or pointer_cyid
+    # A hand-typed `--campaign` gets the same reach here as it does for `verify`, through the one
+    # matcher rather than a second rule.
+    campaign_id = resolve_campaign_hint(store, campaign_id)
+    return campaign_id, cycle_id or resolve_cycle(store, campaign_id, None)
 
 
 async def _refused(awaitable: Awaitable[object], ids: dict[str, str]) -> CommandResult | None:
@@ -91,21 +94,16 @@ async def _refused(awaitable: Awaitable[object], ids: dict[str, str]) -> Command
     return None
 
 
-async def _dispatch(args: argparse.Namespace, kind: LifecycleKind) -> CommandResult | None:
-    """Run *kind* through the dispatcher. ``None`` on success; a result when the campaign is absent or not the caller's
+async def _dispatch(
+    args: argparse.Namespace, payload_for: Callable[[str], LifecyclePayload]
+) -> CommandResult | None:
+    """Dispatch what *payload_for* builds. ``None`` on success; a result when the campaign is absent or not the caller's
     (existence-leak gate: not_found, never 403), or when the target is the active campaign."""
     stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
     campaign_id = resolve_campaign_hint(stores, args.campaign_id)
-    dispatcher = CommandDispatcher(stores)
     return await _refused(
-        dispatcher.dispatch_lifecycle(
-            kind=kind,
-            payload=LifecyclePayload(
-                campaign_id=campaign_id,
-                reason=getattr(args, "reason", None) or "",
-                keep_results=bool(getattr(args, "keep_results", False)),
-            ),
-            idempotency_key=uuid.uuid4().hex,
+        CommandDispatcher(stores).dispatch_lifecycle(
+            CommandCall(payload_for(campaign_id), uuid.uuid4().hex)
         ),
         {"campaign_id": campaign_id},
     )
@@ -117,7 +115,9 @@ def _reason_suffix(args: argparse.Namespace) -> str:
 
 
 async def cmd_archive(args: argparse.Namespace) -> CommandResult:
-    refusal = await _dispatch(args, "archive-campaign")
+    refusal = await _dispatch(
+        args, lambda c: ArchiveCampaignPayload(campaign_id=c, reason=args.reason)
+    )
     if refusal is not None:
         return refusal
     campaign_id: str = args.campaign_id
@@ -129,7 +129,7 @@ async def cmd_archive(args: argparse.Namespace) -> CommandResult:
 
 
 async def cmd_unarchive(args: argparse.Namespace) -> CommandResult:
-    refusal = await _dispatch(args, "unarchive-campaign")
+    refusal = await _dispatch(args, lambda c: UnarchiveCampaignPayload(campaign_id=c))
     if refusal is not None:
         return refusal
     campaign_id: str = args.campaign_id
@@ -142,7 +142,6 @@ async def cmd_unarchive(args: argparse.Namespace) -> CommandResult:
 
 async def _cycle_scoped(
     args: argparse.Namespace,
-    kind: CycleScopedKind,
     payload_for: Callable[[str, str], CyclePayload],
     noun: str,
 ) -> tuple[CommandResult | None, str, str]:
@@ -165,9 +164,7 @@ async def _cycle_scoped(
         )
     refused = await _refused(
         CommandDispatcher(store).dispatch_cycle_command(
-            kind=kind,
-            payload=payload_for(campaign_id, cycle_id),
-            idempotency_key=uuid.uuid4().hex,
+            CommandCall(payload_for(campaign_id, cycle_id), uuid.uuid4().hex),
             expected_version=None,
         ),
         {"campaign_id": campaign_id, "cycle_id": cycle_id},
@@ -180,7 +177,6 @@ async def cmd_pause(args: argparse.Namespace) -> CommandResult:
     lands on the ledger naming who asked — writing ``.runtime/pause.flag`` by hand leaves no such record."""
     refused, campaign_id, cycle_id = await _cycle_scoped(
         args,
-        "pause-cycle",
         lambda c, cy: PauseCyclePayload(
             campaign_id=c, cycle_id=cy, reason=getattr(args, "reason", None) or ""
         ),
@@ -235,12 +231,7 @@ async def cmd_set_budget(args: argparse.Namespace) -> CommandResult:
     refused = await _refused(
         CommandDispatcher(
             store, JobRegistry(default_jobs_dir(), capacity=resolve_run_capacity)
-        ).dispatch_cycle_command(
-            kind="change-spend-budget",
-            payload=payload,
-            idempotency_key=uuid.uuid4().hex,
-            expected_version=None,
-        ),
+        ).dispatch_cycle_command(CommandCall(payload, uuid.uuid4().hex), expected_version=None),
         {"campaign_id": campaign_id, "cycle_id": cycle_id},
     )
     if refused is not None:
@@ -273,9 +264,9 @@ async def cmd_rename(args: argparse.Namespace) -> CommandResult:
     dispatcher = CommandDispatcher(stores)
     refused = await _refused(
         dispatcher.dispatch_campaign_config(
-            kind="set-campaign-label",
-            payload=SetCampaignLabelPayload(campaign_id=campaign_id, label=label),
-            idempotency_key=uuid.uuid4().hex,
+            CommandCall(
+                SetCampaignLabelPayload(campaign_id=campaign_id, label=label), uuid.uuid4().hex
+            )
         ),
         {"campaign_id": campaign_id},
     )
@@ -301,7 +292,6 @@ async def cmd_skip_searchpoint(args: argparse.Namespace) -> CommandResult:
     """
     refused, campaign_id, cycle_id = await _cycle_scoped(
         args,
-        "skip-searchpoint",
         lambda c, cy: SkipSearchpointPayload(campaign_id=c, cycle_id=cy),
         "skip a searchpoint in",
     )
@@ -322,7 +312,6 @@ async def cmd_step_cycle(args: argparse.Namespace) -> CommandResult:
     rounds = max(1, int(getattr(args, "rounds", 1) or 1))
     refused, campaign_id, cycle_id = await _cycle_scoped(
         args,
-        "step-cycle",
         lambda c, cy: StepCyclePayload(campaign_id=c, cycle_id=cy, rounds=rounds),
         "step",
     )
@@ -341,7 +330,6 @@ async def cmd_delete_cycle(args: argparse.Namespace) -> CommandResult:
     a mess you cannot. Both refuse a cycle that holds rounds, and both refuse a live producer."""
     refused, campaign_id, cycle_id = await _cycle_scoped(
         args,
-        "delete-cycle",
         lambda c, cy: DeleteCyclePayload(campaign_id=c, cycle_id=cy),
         "delete",
     )
@@ -358,7 +346,6 @@ async def cmd_cleanup_empty_cycles(args: argparse.Namespace) -> CommandResult:
     """Reap the stub cycles a mint left behind when it never reached round 0."""
     refused, campaign_id, cycle_id = await _cycle_scoped(
         args,
-        "cleanup-empty-cycles",
         lambda c, cy: CleanupEmptyCyclesPayload(campaign_id=c, cycle_id=cy),
         "clean up under",
     )
@@ -382,9 +369,7 @@ async def cmd_replace_dataset(args: argparse.Namespace) -> CommandResult:
     stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
     refused = await _refused(
         CommandDispatcher(stores).dispatch_workspace_command(
-            kind="replace-dataset",
-            payload=ReplaceDatasetPayload(slug=slug),
-            idempotency_key=uuid.uuid4().hex,
+            CommandCall(ReplaceDatasetPayload(slug=slug), uuid.uuid4().hex)
         ),
         {"slug": slug},
     )
@@ -409,9 +394,7 @@ async def cmd_cancel_queued(args: argparse.Namespace) -> CommandResult:
         CommandDispatcher(
             stores, JobRegistry(default_jobs_dir(), capacity=resolve_run_capacity)
         ).dispatch_workspace_command(
-            kind="cancel-queued-run",
-            payload=CancelQueuedRunPayload(job_id=job_id),
-            idempotency_key=uuid.uuid4().hex,
+            CommandCall(CancelQueuedRunPayload(job_id=job_id), uuid.uuid4().hex)
         ),
         {"job_id": job_id},
     )
@@ -426,11 +409,16 @@ async def cmd_cancel_queued(args: argparse.Namespace) -> CommandResult:
 
 async def cmd_delete(args: argparse.Namespace) -> CommandResult:
     """Destructively remove a campaign. ``--keep-results`` spares the keepsake tier."""
-    refusal = await _dispatch(args, "delete-campaign")
+    keep_results: bool = args.keep_results
+    refusal = await _dispatch(
+        args,
+        lambda c: DeleteCampaignPayload(
+            campaign_id=c, reason=args.reason, keep_results=keep_results
+        ),
+    )
     if refusal is not None:
         return refusal
     campaign_id: str = args.campaign_id
-    keep_results = bool(getattr(args, "keep_results", False))
     mode = "deleted (keepsake kept)" if keep_results else "deleted (removed)"
     logger.info("lifecycle: %s -> %s", campaign_id, mode)
     return CommandResult(

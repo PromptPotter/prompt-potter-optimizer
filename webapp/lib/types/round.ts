@@ -29,7 +29,7 @@ export interface RawResultRow {
 }
 
 // The AUDIT TWIN of a round — `.runtime/cache/rounds/round_NNNN.json`, written by
-// `AuditTrailView`. Same basename as the round document, different tree, different
+// `AuditTrailProjection`. Same basename as the round document, different tree, different
 // shape: this one carries the per-node LLM I/O, which the round document does NOT.
 // Not generated — the audit trail is written as a plain dict, with no Pydantic model.
 export interface RoundAuditDoc {
@@ -40,7 +40,7 @@ export interface RoundAuditDoc {
 }
 
 // `dashboard.json::current_round.nodes[id]` / the audit twin's `nodes[id]`.
-// Both surfaces share this shape — written by AuditTrailView
+// Both surfaces share this shape — written by AuditTrailProjection
 // (`promptpotter/infrastructure/projections/audit_trail.py`).
 // `input`/`output` are loose dicts whose contents vary by node.
 // `output.reasoning` (when present) is the model's own thinking channel — prose for a

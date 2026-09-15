@@ -73,6 +73,13 @@ def init_cycle(
     # panel owes the operator is what the NEXT round will search, not what the first one did.
     if session.pipeline_declaration:
         store.write_resolved_pipeline(hop, session.pipeline_declaration)
+    # Beside the declaration and on the same cadence: the declaration says which keys exist, this
+    # says which the optimizer MOVES and whether the model can even see them. The connector owns
+    # the channel, so it is read off the client rather than assumed.
+    store.write_optimized_surface(
+        hop,
+        session.pipeline_schema.value_tree(prompt_delivery=session.backend_client.prompt_delivery),
+    )
     if resume_from_round_override is not None:
         store.rewind_to_round(hop, resume_from_round_override)
     existing = store.load(hop)

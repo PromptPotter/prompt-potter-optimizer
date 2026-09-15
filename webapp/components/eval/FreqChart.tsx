@@ -91,7 +91,15 @@ export function FreqChart() {
       }
     >
       <div style={{ position: "relative", height: 140 }}>
-        <Bar ref={chartRef} data={chartData} options={options} />
+        {/* A canvas has no text, so the name IS the whole reading for anyone not looking at it. */}
+        <Bar
+          ref={chartRef}
+          data={chartData}
+          options={options}
+          aria-label={`Per-cell fitness for ${
+            isLiveView ? "the live round" : `round ${effectiveRound}`
+          }, in ten bands from 0 to 1 — how many cells landed in each.`}
+        />
       </div>
     </CardFrame>
   );

@@ -6,10 +6,11 @@ from __future__ import annotations
 import ast
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Any, NamedTuple, NotRequired, TypedDict, cast
+from typing import Annotated, Any, NamedTuple, NotRequired, TypedDict, cast
 
 from promptpotter.config.settings import ANSWER_SPACE_CAP
 from promptpotter.shared.errors import ErrorCategory
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
 class TurnRecord(TypedDict, total=False):
@@ -167,6 +168,12 @@ class QueryMeasurement(TypedDict):
     # Typed error channel: the category owns "this sample errored"; ``error`` is a
     # plain human message (no ``[TAG]`` prefix). ``None``/absent ⇒ clean measurement.
     error_category: NotRequired[ErrorCategory | None]
+    # The measurement LANDED and the active formula cannot grade it — a third state beside scored
+    # and errored, carrying the missing term's own message. Presence IS the state; ``fitness`` and
+    # ``objective`` are then absent, which is what keeps a stale archived verdict from reading as
+    # this formula's. Never an error: the backend answered and the row is worth keeping, so it must
+    # not reach the walk's abort classifier (`query_loop.py::_classify_abort`).
+    unscored: NotRequired[str]
     pipeline_data: PipelineData | None
     # ---- Stamped after measurement, by the scorer and the walk -------------------
     # Where the ground truth landed in the terminal ranking, and how many candidates it
@@ -178,7 +185,7 @@ class QueryMeasurement(TypedDict):
     # (``query_loop._with_running``) so a file-tree or chat reader watches it converge.
     _running: NotRequired[dict[str, Any]]
     # The stale-data ladder's per-sample verdicts. Each renders one annotation under the
-    # HIT/MISS line (``views/live/sample.py``) and nothing else reads them, so they are the
+    # HIT/MISS line (``terminal/live/sample.py``) and nothing else reads them, so they are the
     # ladder's only report: a dropped flag makes a re-measurement look like a plain score.
     retry_of_deprecated_cache: NotRequired[bool]
     retry_of_degraded: NotRequired[bool]
@@ -193,8 +200,8 @@ class QueryMeasurement(TypedDict):
 
 
 # The ledger's per-sample view: the UNION of what its two subscribers render — the terminal
-# tape (`views/live/sample.py::fmt_query_result` + `classify_result`) and the dashboard
-# (`live_dashboard/view.py::_absorb_sample_scored` → `RoundBuffer.append_sample` → the SSE
+# tape (`terminal/live/sample.py::fmt_query_result` + `classify_result`) and the dashboard
+# (`live_dashboard/projection.py::_absorb_sample_scored` → `RoundBuffer.append_sample` → the SSE
 # chat's `sampleScoredCandidate`). A superset of both, so the ledger holds exactly what the
 # operator was shown and there is one definition to keep in sync instead of two.
 _LEDGER_PIPELINE_KEYS: frozenset[str] = frozenset(
@@ -211,9 +218,9 @@ _PIPELINE_KEYS: frozenset[str] = frozenset(
 
 # -- what an archive row may lose ---------------------------------------------
 #
-# `application/archive_maintenance.py` moves these into the cold store; they live HERE because the
-# question they answer — which of a row's keys does anything read — is about the two types above,
-# and a set of key names sitting anywhere else is a second contract nobody declared.
+# `application/maintenance/archive_maintenance.py` moves these into the cold store; they live HERE
+# because the question they answer — which of a row's keys does anything read — is about the two
+# types above, and a set of key names sitting anywhere else is a second contract nobody declared.
 #
 # Two sets rather than one, because the asserts below run in OPPOSITE directions and a flat set
 # could not carry either.
@@ -300,9 +307,10 @@ RoundScorer = Callable[[dict[str, float]], float]
 
 DEFAULT_SCORER_ID = "default_hit"
 
-HIT_THRESHOLD = 1.0
+HIT_THRESHOLD: Annotated[float, shapes_optimizer_prompt] = 1.0
 
 
+@shapes_optimizer_prompt
 def extract_item_label(c: Any) -> str:
     """Canonical label of a ranked item (dict ``{candidate: ...}``, list/tuple, or string) — what a
     rank walk compares against ground truth and what a display line prints."""
@@ -311,10 +319,24 @@ def extract_item_label(c: Any) -> str:
     return c[0] if isinstance(c, (list, tuple)) else str(c)
 
 
+@shapes_optimizer_prompt
 def is_hit(fitness: float | None) -> bool:
     """Per-sample display and stratification ONLY — never a rate, an interval or a comparison:
     graded formulas never reach the ceiling, and on a binary one the mean is ``accuracy``."""
     return fitness is not None and fitness >= HIT_THRESHOLD
+
+
+@shapes_optimizer_prompt
+def is_unscored(result: Mapping[str, object]) -> bool:
+    """Whether the active formula could not grade a measurement that LANDED — the sibling of
+    :func:`~promptpotter.shared.errors.is_error_result`, where the backend never answered.
+
+    **The one place that fact is asked**, on the ``unscored`` channel that
+    ``rescore_results`` owns. Ask this, never ``"fitness" not in row``: a row arrives at the
+    scorer carrying an archived verdict from whatever formula was active when it was banked
+    (``query_loop.py::_materialize_cached`` copies the row whole), so the key's presence answers
+    a question about some earlier campaign."""
+    return bool(result.get("unscored"))
 
 
 def recorded_elapsed_s(result: QueryMeasurement) -> float | None:
@@ -422,6 +444,7 @@ def weighted_sum_weights(formula: str | None) -> dict[str, float] | None:
     return weights or None
 
 
+@shapes_optimizer_prompt
 def is_verifier_graded(ground_truth: str | None) -> bool:
     """Whether this cell was graded with NO label — the backend answered with a number and the
     task's own verifier (or L4's outer proxies) decided it, so there is no truth string for
@@ -441,6 +464,7 @@ def is_verifier_graded(ground_truth: str | None) -> bool:
     return not (ground_truth or "")
 
 
+@shapes_optimizer_prompt
 def all_verifier_graded(labels: Iterable[str | None]) -> bool:
     """The SET arity: whether a whole round, bank or dataset carries no labels.
 
@@ -461,6 +485,7 @@ def all_verifier_graded(labels: Iterable[str | None]) -> bool:
     return seen
 
 
+@shapes_optimizer_prompt
 def enumerable_truth_labels(rows: Sequence[Mapping[str, Any]]) -> Counter[str] | None:
     """The ground-truth label tally, or ``None`` where collapse is not a meaningful question —
     above ``ANSWER_SPACE_CAP`` truths, or one truth per row, every prediction is its own bucket."""
@@ -470,6 +495,7 @@ def enumerable_truth_labels(rows: Sequence[Mapping[str, Any]]) -> Counter[str] |
     return truth
 
 
+@shapes_optimizer_prompt
 def modal_answer_share(rows: Sequence[Mapping[str, Any]]) -> float | None:
     """Over PREDICTIONS — the ``answer_distribution`` panel's ``constant`` is over GROUND TRUTHS.
     Reports and never gates: below 1.0 this measures hedging, the gradient the loop climbs."""
@@ -508,6 +534,7 @@ __all__ = [
     "enumerable_truth_labels",
     "is_answer_collapsed",
     "is_hit",
+    "is_unscored",
     "is_verifier_graded",
     "ledger_sample_view",
     "modal_answer_share",

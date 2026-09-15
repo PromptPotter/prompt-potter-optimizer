@@ -18,10 +18,6 @@ datasets/{name}/
 └── cache.json             # The dataset ITEM BANK (write-managed; don't hand-edit)
 ```
 
-Optional:
-
-- `sweep/` — sweep-mode sibling cycle outputs.
-
 ## Sole route for backend tunable changes
 
 **Backend overlay (`nodes.{name}.config` in `pipeline.yaml`) is the only way to switch model, provider, temperature, or anything in a node's `optimizer.param_keys`.** Never edit the backend repo (including the co-owned TermNorm backend) to achieve a tunable switch. Pipeline-agnostic is a §0 commitment.
@@ -37,12 +33,12 @@ The roster is the directory listing; each dataset's connector is read off its ow
 - **`lca-termnorm`** (`termnorm`) — the multi-node retrieval pipeline. Every other benchmark declares a single `llm_only` **node**: all of them are `backend_type: "termnorm"` and route over HTTP to the server exactly as `lca-termnorm` does. `llm_only` is a node name only, never a connector.
 - **`aime_2025`** — its overlay routes to OpenRouter+Mistral, off the Groq default.
 - **`email-tagging`** — the built-in try-and-learn demo. `User.demo_mode_enabled` is a stored preference with **no reader**: nothing surfaces this dataset from it yet ([`../docs/specs/roadmap.md`](../docs/specs/roadmap.md) lane A1).
-- **`justlogic-d234`** — the L4 inner benchmark, an iid mix of depths 2-4 ([§ L4 below](#l4--promptpotter-self)); **`promptpotter-self`** (`promptpotter` connector) — the one L4 dataset.
-- **The optimizer's own prompt homes are not in this directory.** They are package install content, shipped in the wheel: `promptpotter/assets/optimizer/pipeline.yaml` + `sets/*.yaml`. Still **operator-owned files** — nothing writes them. `evidence.py` ranks the measured edits; graduating a winner into `assets/optimizer/pipeline.yaml` is a deliberate hand-edit, and an installed operator shadows that one file via `config/paths.py::optimizer_pipeline_path`.
+- **`justlogic-d234`** — the L4 inner benchmark, an iid mix of depths 2-4 ([§ L4 below](#l4--promptpotter-self)); **`promptpotter-self`** (`promptpotter` connector) — the L4 dataset, and the only one to read a result off, because **`promptpotter-self-e2e`** beside it is a degenerate one-cell twin the browser walk runs for cents. A fixture, never a second instrument (`promptpotter-self-e2e/dataset.md`).
+- **The optimizer's own prompt homes are not in this directory.** They are package install content, shipped in the wheel: `promptpotter/assets/optimizer/pipeline.yaml` + `sets/*.yaml`. Still **operator-owned files** — nothing writes them. `application/evidence/read.py` ranks the measured edits; graduating a winner into `assets/optimizer/pipeline.yaml` is a deliberate hand-edit, and an installed operator shadows that one file via `config/paths.py::optimizer_pipeline_path`.
 
 ## Re-cutting a dataset needs a NEW name
 
-**A `sample_id` identifies a sample only *within* a `dataset_name` — the row's text is not in the key.** So changing which rows a dataset holds, or what a row says, while keeping the name serves the OLD measurement for the new sample, silently and with no error anywhere. Cut the new version under a new `datasets/{name}/` and leave the old directory in place for as long as anything is still keyed to it. Key + the requirement that scopes it: `infrastructure/store/archive_views.py::reusable_results`.
+**A `sample_id` identifies a sample only *within* a `dataset_name` — the row's text is not in the key.** So changing which rows a dataset holds, or what a row says, while keeping the name serves the OLD measurement for the new sample, silently and with no error anywhere. Cut the new version under a new `datasets/{name}/` and leave the old directory in place for as long as anything is still keyed to it. Key + the requirement that scopes it: `infrastructure/store/archive_queries.py::reusable_results`.
 
 ## L4 — `promptpotter-self`
 
@@ -69,7 +65,7 @@ operator's, written to `.promptpotter/{tenant}/benchmark-rows/{name}.json` by
 read-only under a wheel. Both resolve through `readable_dataset_rows`. It is **not** an
 origin score cache: measurements
 live in the tenant-global content-addressed `measurements/` archive
-(`infrastructure/store/archive_views.py`), which is what replays origin rows across
+(`infrastructure/store/archive_queries.py`), which is what replays origin rows across
 cycles, forks and resumes. `sp_budget_origin` breadth is cheap *because* of that archive,
 never because of this file.
 

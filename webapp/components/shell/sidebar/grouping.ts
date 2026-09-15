@@ -11,14 +11,14 @@
 //             two measurements of the same spec — at L4 that means two candidates
 //             produced an identical optimizer prompt (mode collapse), which is why the
 //             origin tier is worth seeing rather than a flat run list.
-//   Cycle   ≡ a run's root cycle plus the forks/diags/sweeps descending from it.
+//   Cycle   ≡ a run's root cycle plus the forks/diags descending from it.
 //   A cycle can open its own inner forest (`.inner/<cycle_id>`) — the recursion
 //   closes, and L5 is the same loop one turn deeper. Nothing here is depth-aware.
 
 import type { CampaignSummary, CycleListEntry } from "@/lib/api";
 
-// One run: the campaign manifest, its single root cycle, and every fork / diag /
-// sweep descending from it. A campaign mints exactly one root (`{dataset}__{rand6}`
+// One run: the campaign manifest, its single root cycle, and every fork / diag
+// descending from it. A campaign mints exactly one root (`{dataset}__{rand6}`
 // per `new`), so there is no session tier.
 //
 // The ⋯ menu is campaign-scoped, so `root` is named apart from its forks — not

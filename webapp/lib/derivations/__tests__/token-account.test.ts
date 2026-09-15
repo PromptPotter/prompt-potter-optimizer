@@ -40,8 +40,8 @@ describe("prefixReading", () => {
   });
 
   it("carries the badge the terminal prints, byte for byte", () => {
-    // `domain/rendering.py::prefix_reading` emits these same three strings; an operator reading
-    // the tape and the sample row must not have to learn two vocabularies.
+    // `application/views/render/prefix_reading.py::prefix_reading` emits these same three strings; an
+    // operator reading the tape and the sample row must not have to learn two vocabularies.
     expect([0.39, 0, null].map((s) => prefixReading(s, false).label)).toEqual([
       "c39%",
       "c0%",

@@ -47,6 +47,9 @@ export interface ConfigRow {
   // (for `model`) what a human may steer a fork to without grading the branch C — ONE set,
   // because they were one question asked twice.
   allowed: string[];
+  // search-space: the server STATED `permitted` — an absent entry would not resolve to it — so the
+  // emit writes the set out even where it equals the menu.
+  stated: boolean;
   // values: present in the candidate overlay (vs the config floor) — keep it in
   // the emitted overlay even when the operator leaves it untouched.
   fromCandidate: boolean;
@@ -169,6 +172,82 @@ export function parseNested(raw: string): unknown {
   }
 }
 
+/** The schema a check-in AUTHORED on this node — the draft's own overlay, never the served
+ *  resolution, which answers nothing while the node is set to `text`. */
+export function authoredOutputSchema(
+  overlay: Record<string, unknown>,
+  node: string,
+): Record<string, unknown> | undefined {
+  const schema = asObj(asObj(asObj(overlay[node]).config).output_schema);
+  return Object.keys(schema).length > 0 ? schema : undefined;
+}
+
+/** The slot that authored contract names as the answer, off the same overlay. */
+export function authoredAnswerField(
+  overlay: Record<string, unknown>,
+  node: string,
+): string | undefined {
+  const field = asObj(asObj(overlay[node]).config).answer_field;
+  return typeof field === "string" ? field : undefined;
+}
+
+/** The server's `description_key` spelling (`domain/pipeline_schema.py::SCHEMA_DESCRIPTION_PREFIX`):
+ *  one served `description` row per output-schema field, keyed by the field's dotted path. */
+export const DESCRIPTION_PREFIX = "output_schema_descriptions.";
+
+/** The description keys one click on a schema-tree row flips: the field's and every one beneath it,
+ *  `""` being the whole schema. That gesture IS the lock's inheritance — a descendant unlocked
+ *  afterwards holds for its own subtree, because nothing else ever writes these keys. */
+export function descriptionSubtree(keys: readonly string[], path: string): string[] {
+  const key = DESCRIPTION_PREFIX + path;
+  return path === "" ? [...keys] : keys.filter((k) => k === key || k.startsWith(`${key}.`));
+}
+
+/** search-space emit for an AUTHORED output contract, in one patch: the schema and the slot that IS
+ *  the answer — `answer` (the tree's chip) where given, else the one already chosen while it still
+ *  exists, else a field called `answer`, else the LAST: fields generate in order, so the reasoning
+ *  comes first (`docs/concepts/structured-output.md`).
+ *
+ *  A FIRST schema also sets `response_format: json` — one nothing answers under is a declaration
+ *  nothing reads — and re-opens the toggle: a narrowing saved before a schema existed shut it
+ *  (`param_keys` is a set that replaces the node's own, and it could only be ticked `text`). The
+ *  description keys are the server's to keep in step with the fields (`draft_patch.py`). A re-edit
+ *  leaves the toggle and the narrowing alone: by then they are the operator's. */
+export function nodeSchemaPatch(
+  base: Record<string, unknown>,
+  node: string,
+  schema: Record<string, unknown>,
+  answer?: string,
+): DraftPatch {
+  const overlay = JSON.parse(JSON.stringify(base)) as Record<string, Record<string, unknown>>;
+  const prev = asObj(overlay[node]);
+  const fields = Object.keys(asObj(schema.properties));
+  const first = authoredOutputSchema(base, node) === undefined;
+  const chosen = [answer, authoredAnswerField(base, node)].find(
+    (f) => f !== undefined && fields.includes(f),
+  );
+  const optimizer = { ...asObj(prev.optimizer) };
+  if (prev.optimizer !== undefined && first) {
+    const allowed = { ...asObj(optimizer.param_allowed_values) };
+    delete allowed.response_format;
+    optimizer.param_allowed_values = allowed;
+    if (Array.isArray(optimizer.param_keys)) {
+      optimizer.param_keys = [...new Set([...optimizer.param_keys, "response_format"])];
+    }
+  }
+  overlay[node] = {
+    ...prev,
+    ...(prev.optimizer === undefined ? {} : { optimizer }),
+    config: {
+      ...asObj(prev.config),
+      output_schema: schema,
+      answer_field: chosen ?? (fields.includes("answer") ? "answer" : fields[fields.length - 1]),
+      ...(first ? { response_format: "json" } : {}),
+    },
+  };
+  return { pipeline_overlay: overlay };
+}
+
 // Build rows from the served schema. `node` scopes to one node (search-space, per-node); omit for
 // whole-pipeline (values).
 //
@@ -193,9 +272,9 @@ export function configRows(
     const nodeSeed = asObj(valuesSeed[n]);
     for (const p of params) {
       // The served list is COMPLETE per node — that is what makes `movable_by` summable into
-      // "where does the search reach here" — and exactly one kind is subtracted: a `prompt` field
-      // belongs to the prompt editor, which the same surface renders directly below.
-      if (p.kind === "prompt") continue;
+      // "where does the search reach here" — and nothing is subtracted: a `prompt` field's lock is
+      // a `param_keys` membership like any param's, so every emit must list it. The prompt editor,
+      // not the grid, DRAWS it.
       const baseValue = asRowValue(p.kind, p.value);
       // `permitted` is `null` when it does not differ from the menu — NOT `[]`, which says
       // nothing may be picked at all. `??` is what keeps those two apart.
@@ -210,6 +289,7 @@ export function configRows(
           baseValue,
           locked: p.movable_by.length === 0,
           allowed: permitted,
+          stated: p.permitted !== null,
           fromCandidate: false,
           neverAxis: p.never_axis,
           movableBy: p.movable_by,
@@ -233,6 +313,7 @@ export function configRows(
           // outside it deliberately, taking the grade-C taint. `SteerForkPanel` warns off
           // `permittedModels` instead — restricting here would delete the act.
           allowed: p.options,
+          stated: false,
           fromCandidate,
           neverAxis: p.never_axis,
           movableBy: p.movable_by,
@@ -258,8 +339,9 @@ function sameMembers(a: readonly string[], b: readonly string[]): boolean {
 }
 
 /** WHAT THE OPTIMIZER MAY DO on one node, from its rows — `param_keys` (the open axes) and
- *  `param_allowed_values` (each enumerable axis's permitted set, stated whenever it differs from
- *  the declared one).
+ *  `param_allowed_values` (each enumerable axis's permitted set, written whenever it differs from
+ *  the menu or the server `stated` it: an absent entry resolves to the DECLARATION, which a
+ *  widening or the schema toggle's whole space is not).
  *
  *  Its own function because the two hosts that emit it want DIFFERENT things around it: the draft
  *  origin wraps it in a `DraftPatch` alongside the config values, while the steer fork sends it
@@ -274,7 +356,7 @@ export function nodeNarrowing(rows: ConfigRow[]): NodeSearchNarrowing {
     const enumerable = r.kind === "enum" || r.kind === "model";
     const locked = enumerable ? r.allowed.length <= 1 : r.locked;
     if (!locked) paramKeys.push(r.key);
-    if (enumerable && r.allowed.length > 0 && !sameMembers(r.allowed, r.options)) {
+    if (enumerable && r.allowed.length > 0 && (r.stated || !sameMembers(r.allowed, r.options))) {
       // Written even when the axis is PINNED: the permitted set is what a human fork may steer
       // to un-tainted, which outlives whether the optimizer may move it.
       allowedValues[r.key] = r.allowed;
@@ -311,6 +393,25 @@ export function nodeOverlayPatch(
     ...(Object.keys(config).length > 0 ? { config: { ...prevConfig, ...config } } : {}),
   };
   return { pipeline_overlay: overlay };
+}
+
+/** The ONE lock emitter for a surface outside the grid — a prompt field, an output-schema path: the
+ *  served rows with `keys` set to `locked`, through the grid's own emitter, so a lock clicked
+ *  there cannot disagree with the rest of the narrowing. */
+export function nodeLockPatch(
+  schema: Record<string, NodeConfigParam[]> | null,
+  overlay: Record<string, unknown>,
+  node: string,
+  keys: readonly string[],
+  locked: boolean,
+): DraftPatch {
+  return nodeOverlayPatch(
+    overlay,
+    node,
+    configRows(schema, overlay, "search-space", node).map((r) =>
+      keys.includes(r.key) ? { ...r, locked } : r,
+    ),
+  );
 }
 
 /** The flat `node.param` spelling, minted in ONE place. `seedOverlayFromRows` keys its edit map
@@ -386,6 +487,7 @@ export function seedOverlayFromRows(
 ): Record<string, Record<string, unknown>> {
   const overlay: Record<string, Record<string, unknown>> = {};
   for (const r of rows) {
+    if (r.kind === "prompt") continue; // the fork's prompt rides `origin_prompt_fields`, never config
     const edit = edits[flatConfigKey(r.node, r.key)];
     if (!r.fromCandidate && (edit === undefined || edit === r.value)) continue; // inherited + untouched
     const raw = edit ?? r.value;

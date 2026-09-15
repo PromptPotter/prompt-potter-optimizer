@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   applyFlatEdits,
   configRows,
+  DESCRIPTION_PREFIX,
+  descriptionSubtree,
   effortLadder,
+  nodeLockPatch,
   nodeOverlayPatch,
+  nodeSchemaPatch,
   overlayEdits,
   overlaySetsModelOutsideAllowed,
   permittedModels,
@@ -20,6 +24,7 @@ function row(over: Partial<ConfigRow> & { key: string; kind: string }): ConfigRo
     baseValue: "",
     locked: false,
     allowed: [],
+    stated: false,
     fromCandidate: false,
     neverAxis: "",
     movableBy: [],
@@ -51,7 +56,7 @@ describe("nodeOverlayPatch (search-space emit)", () => {
     expect(opt.param_allowed_values).toEqual({});
   });
 
-  it("states an enum's permitted set whenever it DIFFERS from the declared one", () => {
+  it("states an enum's permitted set whenever it DIFFERS from the menu, or the server stated it", () => {
     const patch = nodeOverlayPatch({}, "llm", [
       row({
         key: "reasoning_effort",
@@ -59,14 +64,25 @@ describe("nodeOverlayPatch (search-space emit)", () => {
         allowed: ["low", "medium"],
         options: ["low", "medium", "high"],
       }),
-      row({ key: "response_format", kind: "enum", allowed: ["t", "j"], options: ["t", "j"] }),
+      row({ key: "scorer", kind: "enum", allowed: ["t", "j"], options: ["t", "j"] }),
+      // The menu, but an absent entry would resolve to the declaration: ticking `json` on a node
+      // with no schema bounced back unticked until this was written out.
+      row({
+        key: "response_format",
+        kind: "enum",
+        allowed: ["text", "json"],
+        options: ["text", "json"],
+        stated: true,
+      }),
     ]);
     const opt = (patch.pipeline_overlay!.llm as Record<string, unknown>).optimizer as Record<
       string,
       string[]
     >;
-    // differs → stated; same members → omitted
-    expect(opt.param_allowed_values).toEqual({ reasoning_effort: ["low", "medium"] });
+    expect(opt.param_allowed_values).toEqual({
+      reasoning_effort: ["low", "medium"],
+      response_format: ["text", "json"],
+    });
   });
 
   it("writes a WIDENED set too — an operator may add a value the node never declared", () => {
@@ -281,14 +297,14 @@ describe("configRows (values mode)", () => {
     expect(configRows(null, {}, "values")).toEqual([]);
   });
 
-  // A structured param is an AXIS (`output_schema_descriptions` is `movable_by: ["l1"]`), so a
+  // A structured param is an AXIS (an inner node's `layout` is `movable_by: ["l1"]`), so a
   // surface that drops it hides who may move it. It draws as JSON text, and an edit emits the
   // OBJECT the text stands for — never the text itself, which would put a string where the
   // object was; a draft that does not parse yet emits nothing at all.
   it("round-trips a nested param through JSON, and emits the OBJECT", () => {
     const nested: NodeConfigParam = {
-      key: "output_schema_descriptions",
-      value: { answer: "the account code" },
+      key: "layout",
+      value: { instruction: ["plan"] },
       kind: "nested",
       options: [],
       description: "",
@@ -300,23 +316,19 @@ describe("configRows (values mode)", () => {
     };
     const withNested = { llm_only: [...schema.llm_only!, nested] };
     const rows = configRows(withNested, {}, "values");
-    const drawn = rows.find((r) => r.key === "output_schema_descriptions")!;
+    const drawn = rows.find((r) => r.key === "layout")!;
     expect(drawn.movableBy).toEqual(["l1"]);
-    expect(JSON.parse(drawn.value)).toEqual({ answer: "the account code" });
+    expect(JSON.parse(drawn.value)).toEqual({ instruction: ["plan"] });
     // Untouched stays out, as any row does.
     expect(seedOverlayFromRows(rows, {})).toEqual({});
     // Edited, it emits the parsed OBJECT — never the text that rendered it. Writing a string
     // where an object belongs is the harm the row used to be withheld to prevent; the widget
     // and this coercion prevent it instead, so the operator can actually set the value.
-    const edited = seedOverlayFromRows(rows, {
-      "llm_only.output_schema_descriptions": '{"answer":"EDITED"}',
-    });
-    expect(edited.llm_only!.output_schema_descriptions).toEqual({ answer: "EDITED" });
+    const edited = seedOverlayFromRows(rows, { "llm_only.layout": '{"instruction":["critique"]}' });
+    expect(edited.llm_only!.layout).toEqual({ instruction: ["critique"] });
 
     // A draft that is not yet parseable emits NOTHING, rather than a broken string.
-    expect(
-      seedOverlayFromRows(rows, { "llm_only.output_schema_descriptions": '{"answer": ' }),
-    ).toEqual({});
+    expect(seedOverlayFromRows(rows, { "llm_only.layout": '{"instruction": ' })).toEqual({});
   });
 
   // `answer_field` names the slot the executor destructures. `schema_owned` says the OPTIMIZER may
@@ -363,21 +375,37 @@ describe("configRows (values mode)", () => {
     expect(optimizer.param_keys).not.toContain("answer_field");
   });
 
-  it("leaves a prompt field to the prompt editor", () => {
-    const prompt: NodeConfigParam = {
-      key: "instruction",
-      value: null,
+  // A prompt field's lock is a `param_keys` membership like any param's, so every emit must carry
+  // it — a row left out of the emission reads as the operator holding it.
+  it("carries a prompt field's lock in every emit, and keeps its text out of a fork seed", () => {
+    const prompt = (key: string, open: boolean): NodeConfigParam => ({
+      key,
+      value: "text",
       kind: "prompt",
       options: [],
       description: "",
       never_axis: "",
-      movable_by: ["l1"],
-      held: false,
+      movable_by: open ? ["l1"] : [],
+      held: !open,
       source: "dataset",
       permitted: null,
+    });
+    const withPrompt = {
+      llm_only: [...schema.llm_only!, prompt("instruction", true), prompt("persona", false)],
     };
-    const rows = configRows({ llm_only: [...schema.llm_only!, prompt] }, {}, "values");
-    expect(rows.find((r) => r.key === "instruction")).toBeUndefined();
+    const keysOf = (p: ReturnType<typeof nodeOverlayPatch>) =>
+      (p.pipeline_overlay!.llm_only as { optimizer: { param_keys: string[] } }).optimizer
+        .param_keys;
+    const emitted = keysOf(
+      nodeOverlayPatch({}, "llm_only", configRows(withPrompt, {}, "search-space", "llm_only")),
+    );
+    expect(emitted).toContain("instruction");
+    expect(emitted).not.toContain("persona");
+    expect(keysOf(nodeLockPatch(withPrompt, {}, "llm_only", ["instruction"], true))).not.toContain(
+      "instruction",
+    );
+    const seed = configRows(withPrompt, { llm_only: { instruction: "evolved" } }, "values");
+    expect(seedOverlayFromRows(seed, {})).toEqual({});
   });
 
   it("scopes rows to one node when `node` is given (OBSERVE drill-in vs whole-pipeline)", () => {
@@ -557,6 +585,71 @@ describe("effortLadder", () => {
   it("leaves every other axis alone", () => {
     const model = row({ key: "model", kind: "model", options: ["a", "b"] });
     expect(effortLadder(model, caps({ reasoning_efforts: ["high"] }))).toEqual(["a", "b"]);
+  });
+});
+
+describe("nodeSchemaPatch (an authored output contract)", () => {
+  const props = (...names: string[]) =>
+    Object.fromEntries(names.map((n) => [n, { type: "string" }]));
+
+  it("answers under a first schema in one patch, re-opening the toggle a prior narrowing shut", () => {
+    const patch = nodeSchemaPatch(
+      {
+        llm_only: {
+          config: { model: "m", response_format: "text" },
+          optimizer: {
+            param_keys: ["temperature"],
+            param_allowed_values: { model: ["m"], response_format: ["text"] },
+          },
+        },
+      },
+      "llm_only",
+      { type: "object", properties: props("reasoning", "code") },
+    );
+    const block = patch.pipeline_overlay!.llm_only as Record<string, Record<string, unknown>>;
+    expect(block.config).toMatchObject({
+      model: "m",
+      response_format: "json",
+      answer_field: "code",
+    });
+    expect(block.optimizer).toEqual({
+      param_keys: ["temperature", "response_format"],
+      param_allowed_values: { model: ["m"] },
+    });
+  });
+
+  it("keeps the chosen answer slot while it exists, takes a picked one, and leaves the toggle on a re-edit", () => {
+    const base = {
+      n: {
+        config: { output_schema: { properties: props("code") }, answer_field: "code", response_format: "text" },
+      },
+    };
+    const cfg = (p: ReturnType<typeof nodeSchemaPatch>) =>
+      (p.pipeline_overlay!.n as Record<string, Record<string, unknown>>).config;
+    expect(cfg(nodeSchemaPatch(base, "n", { properties: props("answer", "code") }))).toMatchObject({
+      answer_field: "code",
+      response_format: "text",
+    });
+    expect(cfg(nodeSchemaPatch(base, "n", { properties: props("answer", "notes") }))).toMatchObject({
+      answer_field: "answer",
+    });
+    expect(
+      cfg(nodeSchemaPatch(base, "n", { properties: props("answer", "notes") }, "notes")),
+    ).toMatchObject({ answer_field: "notes" });
+  });
+});
+
+describe("descriptionSubtree (one click on a schema-tree row)", () => {
+  const keys = ["lines", "lines.amount", "lines.amount_net", "lines.tax.rate", "total"].map(
+    (p) => DESCRIPTION_PREFIX + p,
+  );
+
+  // The lock's inheritance is this gesture alone: a field and everything beneath it, never a
+  // sibling whose name merely starts the same way.
+  it("takes a field and every key beneath it, the whole schema at the head", () => {
+    expect(descriptionSubtree(keys, "lines.amount")).toEqual([DESCRIPTION_PREFIX + "lines.amount"]);
+    expect(descriptionSubtree(keys, "lines")).toEqual(keys.slice(0, 4));
+    expect(descriptionSubtree(keys, "")).toEqual(keys);
   });
 });
 

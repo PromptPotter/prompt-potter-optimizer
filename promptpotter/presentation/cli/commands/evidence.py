@@ -7,14 +7,13 @@ import argparse
 import logging
 from typing import get_args
 
-from promptpotter.application.evidence import (
+from promptpotter.application.evidence.metric_catalogue import MEASURAND, MetricUnit
+from promptpotter.application.evidence.read import (
     Evidence,
-    SubjectSpec,
     campaigns_on_dataset,
-    parse_subject,
     subject_evidence,
 )
-from promptpotter.application.evidence_metrics import MEASURAND, MetricUnit
+from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.infrastructure.store.stores import build_stores
@@ -24,7 +23,7 @@ from promptpotter.presentation.cli.commands._shared import (
     identity_from_args,
     resolve_campaign_hint,
 )
-from promptpotter.presentation.views.display import fmt_ci, fmt_pvalue
+from promptpotter.presentation.terminal.primitives import fmt_ci, fmt_pvalue
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 

@@ -10,15 +10,29 @@ from fastapi import APIRouter, Header, Path, Request
 from fastapi.routing import APIRoute
 from pydantic import Field, ValidationError
 
-from promptpotter.application.archive_maintenance import ArchiveReport
-from promptpotter.application.datasets.draft_campaign import load_checkin_draft
-from promptpotter.application.jobs.launcher.checkin import (
-    save_checkin_draft,
-    start_checkin_campaign,
+from promptpotter.application.commands.checkin_dispatch import (
+    dispatch_draft_patch,
+    dispatch_origin_resolution,
+    dispatch_start_checkin,
 )
-from promptpotter.application.jobs.launcher.mint_and_start import OriginIncompleteError
+from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.commands.payloads import (
+    PAYLOAD_MODEL_FOR_KIND,
+    CampaignPayload,
+    CommandAcceptedBody,
+    CommandPayload,
+    CompactArchivePayload,
+    CyclePayload,
+    DescendableCyclePayload,
+    EditDraftCampaignPayload,
+    LifecyclePayload,
+    ReplaceDatasetPayload,
+    ResolveOriginPayload,
+    StartCheckinPayload,
+)
+from promptpotter.application.jobs.launcher.checkin import start_checkin_campaign
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.connectors import BackendUnreachableError
+from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
 from promptpotter.domain.command_kinds import (
     ALL_DISPATCHED_KINDS,
     CampaignConfigKind,
@@ -31,23 +45,6 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import resolve_cycle_path
 from promptpotter.presentation.api.deps import StoresDep, decode_descend
-from promptpotter.presentation.api.middleware.command_dispatcher import (
-    PAYLOAD_MODEL_FOR_KIND,
-    CampaignPayload,
-    CommandAcceptedBody,
-    CommandDispatcher,
-    CommandPayload,
-    CompactArchivePayload,
-    CyclePayload,
-    DescendableCyclePayload,
-    EditDraftCampaignPayload,
-    LifecyclePayload,
-    ReplaceDatasetPayload,
-    ResolveOriginPayload,
-    StartCheckinPayload,
-    dispatch_draft_patch,
-    dispatch_origin_resolution,
-)
 from promptpotter.shared.errors import (
     BadRequestError,
     NotFoundError,
@@ -122,20 +119,15 @@ async def edit_draft_campaign(
     """Sparse-patch a `DraftCampaign`. Returns the post-mutation full shape.
 
     Per ``docs/specs/api-openapi.yaml::editDraftCampaign``. The mutation rides
-    `CommandDispatcher` (architecture.md §0: sole writer of `CommandRecord`); only
-    the response shape differs from the generic 202 verbs, never the ingress.
+    `CommandDispatcher` (architecture.md § Control-remote: sole writer of `CommandRecord`);
+    only the response shape differs from the generic 202 verbs, never the ingress.
     """
     _require_kind(envelope, "edit-draft-campaign")
     idemp = ensure_idempotency_key(idempotency_key)
     payload = cast(
         EditDraftCampaignPayload, _validated_payload("edit-draft-campaign", envelope.payload)
     )
-    return await dispatch_draft_patch(
-        stores,
-        draft_id=payload.draft_id,
-        patch=payload.patch,
-        idempotency_key=idemp,
-    )
+    return await dispatch_draft_patch(stores, CommandCall(payload, idemp))
 
 
 @commands_router.post("/resolve-origin")
@@ -153,10 +145,7 @@ async def resolve_origin(
     _require_kind(envelope, "resolve-origin")
     payload = cast(ResolveOriginPayload, _validated_payload("resolve-origin", envelope.payload))
     return await dispatch_origin_resolution(
-        stores,
-        draft_id=payload.draft_id,
-        message=payload.message,
-        idempotency_key=ensure_idempotency_key(idempotency_key),
+        stores, CommandCall(payload, ensure_idempotency_key(idempotency_key))
     )
 
 
@@ -178,52 +167,18 @@ async def start_checkin(
     _require_kind(envelope, "start-checkin")
     idemp = ensure_idempotency_key(idempotency_key)
     payload = cast(StartCheckinPayload, _validated_payload("start-checkin", envelope.payload))
-    campaign_id = payload.campaign_id
-
-    draft = load_checkin_draft(stores, campaign_id)
-    if draft is None:
-        raise NotFoundError(f"check-in {campaign_id!r} not found.", code="command_target_not_found")
-
     job_registry: JobRegistry | None = getattr(request.app.state, "job_registry", None)
     if job_registry is None:
         raise ServiceUnavailableError(
             "job registry not initialised", code="job_registry_unavailable"
         )
-
-    async def _apply() -> dict[str, Any]:
-        try:
-            job = await start_checkin_campaign(
-                stores=stores,
-                job_registry=job_registry,
-                campaign_id=campaign_id,
-            )
-        except OriginIncompleteError:
-            # Lifecycle stays ``checkin`` so the operator can resolve the gaps and retry; the
-            # exception already carries code=origin_incomplete + details.gaps.
-            save_checkin_draft(stores, draft)
-            raise
-        except BackendUnreachableError as exc:
-            # Preflight ran before any irreversible write, so the check-in survives and the
-            # operator retries without re-authoring.
-            exc.details["campaign_id"] = campaign_id
-            raise
-        # LaunchError is a PayloadInvalidError — the central PotterError handler maps it to
-        # 422 with its own message, so no per-case arm here.
-        return {"campaign_id": campaign_id, "cycle_id": job.cycle_id, "job_id": job.job_id}
-
-    dispatcher = CommandDispatcher(stores, job_registry=job_registry)
-    outcome = await dispatcher.dispatch_checkin_command(
-        kind="start-checkin",
-        campaign_id=campaign_id,
-        payload=payload.model_dump(mode="json"),
-        idempotency_key=idemp,
-        applier=_apply,
-        # `job_id` has no disk home, so a deduped retry could only fabricate one;
-        # the `checkin → active` flip is already the retry guard (second Start →
-        # LaunchError → 422).
-        dedupe=False,
+    return await dispatch_start_checkin(
+        stores,
+        CommandCall(payload, idemp),
+        start=lambda hop, draft: start_checkin_campaign(
+            stores=stores, job_registry=job_registry, hop=hop, draft=draft, limits=payload
+        ),
     )
-    return cast("dict[str, Any]", outcome.result)
 
 
 @commands_router.post("/compact-archive")
@@ -243,11 +198,7 @@ async def compact_archive(
     idemp = ensure_idempotency_key(idempotency_key)
     payload = cast(CompactArchivePayload, _validated_payload("compact-archive", envelope.payload))
     dispatcher = CommandDispatcher(stores)
-    outcome = await dispatcher.dispatch_workspace_command(
-        kind="compact-archive",
-        payload=payload,
-        idempotency_key=idemp,
-    )
+    outcome = await dispatcher.dispatch_workspace_command(CommandCall(payload, idemp))
     result = cast("dict[str, Any]", outcome.result)
     # The applier hands back a dump so the dispatcher can carry it like every other payload, and a
     # dump carries COMPUTED fields. `ArchiveReport` is a `StrictModel`, so feeding one straight back
@@ -275,11 +226,7 @@ async def replace_dataset(
     idemp = ensure_idempotency_key(idempotency_key)
     payload = cast(ReplaceDatasetPayload, _validated_payload("replace-dataset", envelope.payload))
     dispatcher = CommandDispatcher(stores)
-    outcome = await dispatcher.dispatch_workspace_command(
-        kind="replace-dataset",
-        payload=payload,
-        idempotency_key=idemp,
-    )
+    outcome = await dispatcher.dispatch_workspace_command(CommandCall(payload, idemp))
     # Echo the subject, nothing more — `version_and_repoint` records the counts + the
     # versioned slug itself, and no caller reads them off the wire.
     return cast("dict[str, Any]", outcome.result)
@@ -314,30 +261,19 @@ async def post_command(
     dispatcher = CommandDispatcher(stores, job_registry=job_registry)
 
     if kind in _WORKSPACE_SCOPED_KINDS:
-        workspace_kind: WorkspaceScopedKind = kind  # type: ignore[assignment]
-        workspace_outcome = await dispatcher.dispatch_workspace_command(
-            kind=workspace_kind,
-            payload=payload,
-            idempotency_key=idemp,
-        )
+        workspace_outcome = await dispatcher.dispatch_workspace_command(CommandCall(payload, idemp))
         return workspace_outcome.accepted
 
     if kind in _CAMPAIGN_CONFIG_KINDS:
         # In-place manifest edit — campaign-scoped, no cycle.
-        config_kind: CampaignConfigKind = kind  # type: ignore[assignment]
         config_outcome = await dispatcher.dispatch_campaign_config(
-            kind=config_kind,
-            payload=cast(CampaignPayload, payload),
-            idempotency_key=idemp,
+            CommandCall(cast(CampaignPayload, payload), idemp)
         )
         return config_outcome.accepted
 
     if kind in _LIFECYCLE_KINDS:
-        lifecycle_kind: LifecycleKind = kind  # type: ignore[assignment]
         lifecycle_outcome = await dispatcher.dispatch_lifecycle(
-            kind=lifecycle_kind,
-            payload=cast(LifecyclePayload, payload),
-            idempotency_key=idemp,
+            CommandCall(cast(LifecyclePayload, payload), idemp)
         )
         return lifecycle_outcome.accepted
 
@@ -357,12 +293,8 @@ async def post_command(
     # Rebuilt on the RESOLVED store: a descent hands back a different workspace root, and the
     # one above was bound to the caller's own.
     dispatcher = CommandDispatcher(stores, job_registry=job_registry)
-    cycle_kind: CycleScopedKind = kind  # type: ignore[assignment]
     cycle_outcome = await dispatcher.dispatch_cycle_command(
-        kind=cycle_kind,
-        payload=cycle_payload,
-        idempotency_key=idemp,
-        expected_version=expected_version,
+        CommandCall(cycle_payload, idemp), expected_version=expected_version
     )
     return cycle_outcome.accepted
 

@@ -1,4 +1,4 @@
-"""``cmd_verify`` — re-score one campaign candidate on MORE samples. Not a cycle, fork or sweep: no ledger event, no round id, and
+"""``cmd_verify`` — re-score one campaign candidate on MORE samples. Not a cycle or a fork: no ledger event, no round id, and
 persistence lands in the workspace ``diagnostics/`` tree only."""
 
 from __future__ import annotations
@@ -6,7 +6,8 @@ from __future__ import annotations
 import argparse
 import logging
 
-from promptpotter.application.verify import VerifyError, verify_candidate
+from promptpotter.application.diagnostics.verify import VerifyError, verify_candidate
+from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.cycle_paths import CycleHop
@@ -62,7 +63,8 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
 
     record = outcome.record
     human = (
-        f"{args.label}: acc {record.source_campaign_accuracy:.3f}→{record.workspace_accuracy:.3f} "
+        f"{args.label}: acc {fmt_pct(record.source_campaign_accuracy, '{:.3f}')}"
+        f"→{record.workspace_accuracy:.3f} "
         f"(cf {record.source_campaign_composite:.3f}→{record.workspace_composite:.3f}) "
         f"on {record.workspace_n} samples (+{record.samples_added} new from "
         f"{record.source_campaign_n} in campaign"

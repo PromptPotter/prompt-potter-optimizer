@@ -21,8 +21,11 @@ from promptpotter.config.settings import settings
 from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
 from promptpotter.infrastructure.store.layout import tenant_workspace
 from promptpotter.infrastructure.store.session_pointer import active_pointer_exists
-from promptpotter.presentation.api.middleware.command_dispatcher import RunLimitsPayload
-from promptpotter.presentation.cli.commands._shared import identity_from_args, set_verbose
+from promptpotter.presentation.cli.commands._shared import (
+    identity_from_args,
+    launch_limits_from_args,
+    set_verbose,
+)
 from promptpotter.presentation.cli.parsers import build_parser, parser_verbs
 from promptpotter.shared.errors import PotterError, RequestTooLargeError
 
@@ -84,7 +87,7 @@ assert _declared == COMMANDS.keys(), (
 # same vocabulary to authorization and payload shape; the terminal was the one consumer nothing
 # checked, which is why five verbs had to be found one at a time before this existed.
 CLI_VERB_FOR_KIND: dict[str, str | None] = {
-    # Verbs that POST the kind itself — one command, one ledger record, either surface.
+    # Verbs that dispatch the kind itself — one command, one ledger record, either surface.
     "archive-campaign": "archive",
     "delete-campaign": "delete",
     "unarchive-campaign": "unarchive",
@@ -92,27 +95,28 @@ CLI_VERB_FOR_KIND: dict[str, str | None] = {
     "cleanup-empty-cycles": "cleanup-empty-cycles",
     "skip-searchpoint": "skip-searchpoint",
     "step-cycle": "step-cycle",
-    "verify-candidate": "verify",
     "pause-cycle": "pause",
     "change-spend-budget": "set-budget",
     "set-campaign-label": "rename",
     "replace-dataset": "replace-dataset",
     "edit-draft-campaign": "new",
     "resolve-origin": "new",
+    "start-checkin": "new",
+    "cancel-queued-run": "cancel-queued",
     # Reached by the verb named, but through an IN-PROCESS path rather than the command — the
     # terminal changes the same state and writes no `CommandRecord` naming who asked. Each is its
     # own standing finding; they are named here so the next reader inherits them instead of
     # rediscovering them. `new`/`resume` mint and run inline (`--steer` is the fork),
     # `register-backend` is written by init wiring, `origin-gate-decision` is answered by the
-    # in-run stdin prompt, and `compact-archive` calls the maintenance pass direct.
+    # in-run stdin prompt, `verify` calls `verify_candidate` and `compact-archive` the maintenance
+    # pass direct.
+    "verify-candidate": "verify",
     "mint-campaign": "new",
-    "start-checkin": "new",
     "register-backend": "new",
     "start-run": "resume",
     "fork-cycle": "resume",
     "origin-gate-decision": "resume",
     "compact-archive": "compact-archive",
-    "cancel-queued-run": "cancel-queued",
     # Browser-only ON PURPOSE, and the absence IS the boundary: look-ahead spends the box's shared
     # provider rate bucket, so an assistant may recommend the control but never press it. Root
     # `CLAUDE.md` § Conventions; `docs/operations/access-model.md` § host-admin ↔ user.
@@ -133,11 +137,7 @@ def _validate_run_limits(args: argparse.Namespace) -> None:
     from pydantic import ValidationError
 
     try:
-        RunLimitsPayload(
-            halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
-            spend_budget_usd=getattr(args, "spend_budget_usd", None),
-            token_budget=getattr(args, "token_budget", None),
-        )
+        launch_limits_from_args(args)
     except ValidationError as exc:
         bad = ", ".join(f"--{str(e['loc'][0]).replace('_', '-')}: {e['msg']}" for e in exc.errors())
         raise SystemExit(f"invalid run limit — {bad}") from None

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from promptpotter.application.optimization.dispatch.injections.registry import validate_template
 from promptpotter.config.paths import optimizer_assets_root, optimizer_pipeline_path
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.l1_layout import (
@@ -22,7 +23,10 @@ from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.store.io import read_json, read_yaml
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.instrument import instrument_mode
+
+shapes_optimizer_prompt(__name__)
 
 logger = logging.getLogger(__name__)
 
@@ -233,14 +237,8 @@ def effective_optimizer_prompts(
 
 
 def load_optimizer_prompt(name: str) -> PromptTemplate:
-    """Every load runs ``validate_template``, so a template naming a slot outside ``INJECTIONS`` and
-    the per-template extras raises at load time rather than silently rendering empty."""
-    # Deferred against a real loop, and moving `validate_template` here would not break it: the
-    # check needs `INJECTIONS`, and `registry` BUILDS that table at import, having imported every
-    # renderer — one of which (`injections/layer_state.py`) imports this module. One of the three
-    # sites of the import-time-registry shape filed in `docs/specs/code-debt-cleanup.md`.
-    from promptpotter.application.optimization.dispatch.facade import validate_template
-
+    """Every load runs ``validate_template``, so a template naming a slot outside ``injection_table()``
+    and the per-template extras raises at load time rather than silently rendering empty."""
     template = base_optimizer_template(name)
     if fields := resolve_node_override(name).prompt_fields:
         template = template.model_copy(update=fields)

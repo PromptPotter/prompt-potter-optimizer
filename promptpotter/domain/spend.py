@@ -10,7 +10,7 @@ from __future__ import annotations
 import operator
 from collections.abc import Iterable, Mapping
 from functools import reduce
-from typing import Literal, NotRequired, TypedDict, get_args
+from typing import Literal, NamedTuple, NotRequired, TypedDict, get_args
 
 from pydantic import ConfigDict, Field, ValidationError
 
@@ -18,7 +18,9 @@ from promptpotter.domain.strict_model import StrictModel
 
 __all__ = [
     "TOKEN_KIND_BUCKET",
+    "BudgetChange",
     "SpendBucket",
+    "SpendCeilings",
     "SpendRollup",
     "StepTokenUsage",
     "TokenAccount",
@@ -126,7 +128,7 @@ class TokenAccount(StrictModel):
 
         REPLAYED rows are excluded: their counts are the banked call's, so folding them in reports
         a prefix discount this run never bought. Same exclusion the spend buckets fold under
-        (``live_dashboard/view.py::_bank_call``). ``None`` where no measured row carried one."""
+        (``live_dashboard/projection.py::_bank_call``). ``None`` where no measured row carried one."""
         accounts = [
             a
             for r in rows
@@ -174,6 +176,20 @@ candidate as the cost of finding one. It is a bucket and not an exemption: a dia
 every ceiling, always, because the loop can fire one itself."""
 
 
+class SpendCeilings(NamedTuple):
+    """A ceiling in the two units spend is metered in; ``None`` on an arm means unmetered."""
+
+    usd: float | None
+    tokens: int | None
+
+
+class BudgetChange(NamedTuple):
+    """A move of those two ceilings; ``None`` leaves the arm untouched."""
+
+    usd: float | None
+    tokens: int | None
+
+
 class SpendBucket(StrictModel):
     """One spend sub-bucket (backend, optimizer-loop, or judge). Mutated only by
     ``_handle_token_usage``. ``used_usd`` is the BILL; ``incurred_usd`` prices cache hits too."""
@@ -219,7 +235,7 @@ class SpendRollup(StrictModel):
     # Billed tokens with no resolvable USD rate. >0 means ``total_used_usd`` UNDERSTATES real spend
     # — it is a floor, not the total.
     unpriced_tokens: int = 0
-    # Both are FOLDED beside the USD totals (`live_dashboard/view.py::_handle_token_usage`), never
+    # Both are FOLDED beside the USD totals (`live_dashboard/projection.py::_handle_token_usage`), never
     # derived on read: a `@computed_field` serializes but does not round-trip, and a resume
     # re-folds this whole state off the ledger (`resolve_resume_state`) before carrying it.
     # Serving them is also what keeps the gauge and the halt gate one computation.

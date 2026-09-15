@@ -29,6 +29,7 @@ __all__ = [
     "L1_INNER_LAYOUT_APPLIES",
     "L1_INNER_STEER_IS_LEGAL",
     "L1_PROMPT_BLOCKS_IN_LIBRARY",
+    "L1_PROMPT_FIELDS_OPEN",
     "L1_PROMPT_FIELD_NOT_GUTTED",
     "L1_PROMPT_PLACEHOLDERS_INTACT",
     "L1_SCHEMA_COMPLIANCE",
@@ -218,6 +219,42 @@ def _check_l1_prompt_blocks_in_library(
 L1_PROMPT_BLOCKS_IN_LIBRARY: LLMOutputValidator = LLMOutputValidator(
     id="l1_prompt_blocks_in_library",
     check=_check_l1_prompt_blocks_in_library,
+)
+
+
+def _check_l1_prompt_fields_open(
+    source_output: Mapping[str, Any],
+    *,
+    pipeline_schema: PipelineSchema,
+    **_: Any,
+) -> ValidatorOutcome | None:
+    """The twin of the wire slot, which offers only ``open_prompt_fields()``: a field the campaign
+    HELD is the operator's, and a proposal rewriting it is rejected rather than scored."""
+    prompt_nodes = pipeline_schema.prompt_node_names()
+    if not source_output or not prompt_nodes:
+        return None
+    open_fields = pipeline_schema.open_prompt_fields()
+    failures = [
+        ValidationFailure(
+            axis=f"{prompt_nodes[0]}.{field}",
+            value=str(value)[:300],
+            allowed=open_fields,
+            reason="forbidden_axis",
+        )
+        for field, value in source_output.items()
+        if field not in open_fields
+    ]
+    if not failures:
+        return None
+    return ValidatorOutcome(
+        validator_id=L1_PROMPT_FIELDS_OPEN.id,
+        evidence={"failures": failures},
+    )
+
+
+L1_PROMPT_FIELDS_OPEN: LLMOutputValidator = LLMOutputValidator(
+    id="l1_prompt_fields_open",
+    check=_check_l1_prompt_fields_open,
 )
 
 

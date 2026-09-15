@@ -1,6 +1,6 @@
 """Compose and parse one L1_GENERATE call.
 
-The prompt is built by ``DispatchHub.fill`` over the ``INJECTIONS`` registry: ``fill`` takes no
+The prompt is built by ``DispatchHub.fill`` over the ``injection_table()`` registry: ``fill`` takes no
 layout and resolves the node's own via ``node_layout(node, opt_sp)``, which routes to
 ``opt_sp.memory.l1_layout`` for this node and to the override channel for the ``editor="l4"``
 nodes. Two homes because the two edits have different lifetimes; one reader, so no caller

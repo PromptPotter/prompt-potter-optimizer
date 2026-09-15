@@ -8,7 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.connectors.protocol import MeasuredUnit
+from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import (
@@ -49,11 +49,11 @@ OPTIMIZER_PROMPT_FIELD_MAX_CHARS: dict[str, int] = {
 SCHEMA_DESCRIPTION_MAX_CHARS = 400
 
 SCHEMA_DESCRIPTIONS_INSTRUCTION = (
-    "Rewrite the JSON-Schema `description` of a field on this node's OWN output "
-    "schema. This prose sits adjacent to the slot it governs, inside the field-"
-    "filling loop, so it steers the model harder per token than the instruction "
-    "does. Keys are the node's existing field names and are FIXED — you describe a "
-    "field, you never rename or add one. Describe only where the current prose "
+    "Each `output_schema_descriptions.<path>` key rewrites the JSON-Schema "
+    "`description` of that field on this node's OWN output schema. This prose sits "
+    "adjacent to the slot it governs, inside the field-filling loop, so it steers the "
+    "model harder per token than the instruction does. Paths are FIXED — you describe "
+    "a field, you never rename or add one. Describe only where the current prose "
     "underspecifies what the field should hold."
 )
 
@@ -152,7 +152,7 @@ def fence_untrusted(rendered: str) -> str:
 
 
 class InjectionKind(enum.StrEnum):
-    """Kind tag for each :data:`INJECTIONS` entry. See package docstring."""
+    """Kind tag for each registered injection. See package docstring."""
 
     MEASUREMENT = "measurement"
     DERIVED = "derived"
@@ -175,7 +175,7 @@ class InjectionKind(enum.StrEnum):
 
 @dataclass(frozen=True)
 class _Injection:
-    """One INJECTIONS entry. Neither ``char_cap`` nor ``citable`` has a default — a new signal must decide both.
+    """One registry entry. Neither ``char_cap`` nor ``citable`` has a default — a new signal must decide both.
     ``citable`` is False for the value-space menus and the prompt under edit: citing those grounds a mutation in itself."""
 
     name: str
@@ -328,8 +328,8 @@ class Item:
 
 Renderer = Callable[[InjectionBundle], list[Item]]
 
-# Filled by the @signal decorator at each renderer's definition site. registry.py imports the
-# renderer modules to trigger registration, then snapshots this into the public INJECTIONS dict.
+# Filled by the @signal decorator at each renderer's definition site. `registry.injection_table()`
+# imports the renderer modules to trigger registration, then snapshots this.
 _REGISTRY: dict[str, _Injection] = {}
 
 
@@ -353,8 +353,8 @@ def signal(
 
 
 def injection_registry() -> dict[str, _Injection]:
-    """Snapshot of every ``@signal``-registered injection. Call only after every renderer module is imported — the
-    registry diffs this against ``INJECTIONS`` six lines away and raises on an orphan, at import rather than in a test."""
+    """Snapshot of every ``@signal``-registered injection. Call only after every renderer module is imported — which
+    ``registry.injection_table()`` does, then raises on an orphan before anything reads the table."""
     return dict(_REGISTRY)
 
 

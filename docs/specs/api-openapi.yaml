@@ -41,7 +41,7 @@
 # once advertised `endorse-candidate` as live on the strength of this file alone.
 #
 # Permanent contract: docs/adr/0001-m12-control-plane.md
-# §0 definition: docs/architecture.md (§0 "State + persistence" — Five I/O kinds)
+# §0 definition: docs/architecture.md § State + persistence — the five I/O kinds
 
 openapi: 3.1.0
 
@@ -55,7 +55,7 @@ info:
     authored by a signed-in operator or signed-in client, appended to its
     target ledger (the per-cycle `.runtime/ledger.jsonl` or the workspace
     `.workspace/events.jsonl`, per command scope) as a `CommandRecord` by the
-    sole `CommandDispatcher` at the FastAPI seam.
+    sole `CommandDispatcher`.
 
     See `docs/adr/0001-m12-control-plane.md` for the permanent contract, the
     Profile gradient (A-E), and the 20-item security checklist that every
@@ -391,7 +391,7 @@ paths:
         The question a round's own panel cannot answer: a rate is read on the cells the
         acquisition bought that round, so a headline — 100% most of all — is a claim about a
         panel, not about the dataset. This re-scores one candidate on cells it has never seen
-        and writes the verdict to `diagnostics/runs/`. Not a cycle, fork or sweep: no ledger
+        and writes the verdict to `diagnostics/runs/`. Not a cycle or a fork: no ledger
         event on the cycle's own round series, no round id.
 
         **`samples` omitted is the answer, not an absence.** The count derives from the
@@ -402,7 +402,7 @@ paths:
 
         Spends, so it sits at `campaign.run` rather than with the step verbs. The loop fires the
         same application function by itself when a round reads 100%
-        (`application/verify.py::verify_on_saturation`), bounded in cadence as well as cells.
+        (`application/diagnostics/verify.py::verify_on_saturation`), bounded in cadence as well as cells.
       tags: [cycle-control]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -659,7 +659,7 @@ paths:
                   required: [kind, payload]
                   properties:
                     kind: { const: delete-campaign }
-                    payload: { $ref: '#/components/schemas/CampaignLifecyclePayload' }
+                    payload: { $ref: '#/components/schemas/DeleteCampaignPayload' }
       responses:
         '202': { $ref: '#/components/responses/CommandAccepted' }
         '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
@@ -1417,7 +1417,7 @@ paths:
           required: false
           description: |
             Which searchpoint to resolve, in the ONE subject grammar
-            (`application/evidence.py::parse_subject`): `campaign:<id>`,
+            (`application/evidence/subjects.py::parse_subject`): `campaign:<id>`,
             `course:<id>/<cycle>/<label>`, `candidate:<id>/<cycle>/<cand_id>`,
             each optionally suffixed `;in=<hop chain>` for an L4 inner point.
             Omitted defaults to `campaign:<campaign_id>`. `;lens=` and
@@ -1560,7 +1560,7 @@ paths:
         ONE tree per campaign, and every consumer reads it. There is no `depth` dial:
         two clients choosing different depths for the same served object is how they
         came to disagree. Course recursion is bounded by a server constant instead
-        (`lineage_views.py::_MAX_COURSE_DEPTH`) — a cost bound, not a caller knob.
+        (`lineage_queries.py::_MAX_COURSE_DEPTH`) — a cost bound, not a caller knob.
 
         Conditional-GET is a **weak ETag** over the newest mtime across the subtree's
         `ledger.jsonl` + `index.json` **plus the `lens`/`samples` query**. The ledger
@@ -1772,7 +1772,7 @@ paths:
         A *forest* is one store's whole content: campaigns (`GET /campaigns`,
         which takes the same `descend`) grouped by their `root_cycle_id` — their
         ORIGIN — each holding the runs on that origin, and each run's cycles: its
-        root plus every fork / diag / sweep, returned FLAT and related only by
+        root plus every fork / diag, returned FLAT and related only by
         `parent_cycle_id`. Whether a consumer nests them or lays them out as
         peers is the consumer's call; the wire asserts no hierarchy.
 
@@ -2445,7 +2445,7 @@ components:
         route body: both carriers are `additionalProperties: true` passthroughs
         (the file IS the contract per the folder-UI doctrine). Carried by
         `dashboard.json::current_round.nodes.l1_score.input.candidates[]` (live,
-        writer `projections/live_dashboard/render.py`) and
+        writer `projections/live_dashboard/blocks.py`) and
         `rounds/round_NNNN.json::candidate_scores[]` (historical, writer
         `domain/results.py::ScoredCandidate`, served via the generic file route).
         The webapp USED TO join `resolved_pipeline_params` values onto static
@@ -2689,7 +2689,7 @@ components:
           description: This node is inside the counterfactual subtree below a divergence; render dimmed.
         course_kind:
           type: [string, "null"]
-          enum: [root, fork, diag, sweep, inner, null]
+          enum: [root, fork, diag, inner, null]
           description: |
             Courses, and the candidates a FORK contributed to this timeline — on those it is
             the provenance stamp (⑂) marking an attempt the operator cut, apart from one L1
@@ -2915,7 +2915,7 @@ components:
         parent_session_id: { type: string, default: '' }
         parent_cycle_id:
           type: [string, 'null']
-          description: Immediate parent for siblings (forks/sweeps/diag); null for roots.
+          description: Immediate parent for siblings (forks/diag); null for roots.
         dataset_name: { type: string, default: '' }
         backend_id: { type: string, default: '' }
         mint_kind:
@@ -3052,6 +3052,9 @@ components:
       properties:
         job_id:
           type: string
+          pattern: '^[A-Za-z0-9_-]+$'
+          minLength: 1
+          maxLength: 128
           description: |
             The queued job to withdraw, from `GET /machine-status`'s `queue`. Not a
             `CycleRef`: the queue holds launch INTENT, and a queued mint names no
@@ -3079,7 +3082,7 @@ components:
           properties:
             label:
               type: string
-              pattern: '^C\d+(\.\d+)?$'
+              pattern: '^C(0|\d+\.[1-9]\d*)$'
               minLength: 2
               maxLength: 32
               description: >-
@@ -3297,10 +3300,12 @@ components:
             resolves it to its root and sweeps every empty stub under that
             root (matching `cleanup_empty_stubs` semantics).
 
-    # The three operator-set launch ceilings. Written out on BOTH payloads rather than $ref'd as
-    # one branch: `additionalProperties: false` only sees `properties` in its own schema object,
-    # so folding these in via `allOf` would close the payload against the very fields it declares.
-    # One validator serves both (`commands.py::_run_limits`) — keep the two copies identical.
+    # The three operator-set launch ceilings. Written out on EACH declaring payload rather than
+    # $ref'd as one branch: `additionalProperties: false` only sees `properties` in its own schema
+    # object, so folding these in via `allOf` would close the payload against the very fields it
+    # declares. One model serves all three (`domain/launch_limits.py::LaunchLimits`, which each
+    # payload inherits) — keep the copies identical. The set is mint-campaign, start-run and
+    # start-checkin: every verb that BEGINS spending, which is what makes it the whole set.
     MintCampaignPayload:
       type: object
       required: [dataset_name]
@@ -3311,17 +3316,17 @@ components:
           minimum: 0
           maximum: 1
           description: |
-            Stop once the best measured accuracy reaches this. Omitted leaves the
-            campaign's configured value. Must be FINITE — `NaN` satisfies a
+            Stop once the best measured accuracy reaches this. Omitted, the run
+            never halts on accuracy. Must be FINITE — `NaN` satisfies a
             `minimum`/`maximum` pair and then never compares true, so a halt that
             can never fire looks identical to no halt at all.
         spend_budget_usd:
           type: number
           minimum: 0
           description: |
-            USD ceiling for this run, composed as a `min` against what the host
-            wallet admits (ADR-0003 § D1) — a request may lower a ceiling, never
-            raise one. Must be FINITE, for the reason above: the `BudgetGate`
+            USD ceiling for this run. One the account cannot cover is refused
+            whole (ADR-0003 § D1); one it can may lower the campaign's ceiling,
+            never raise it. Must be FINITE, for the reason above: the `BudgetGate`
             probe is `spent >= cap`.
         token_budget:
           type: integer
@@ -3365,16 +3370,16 @@ components:
               minimum: 0
               maximum: 1
               description: |
-                Stop once the best measured accuracy reaches this. Omitted leaves
-                the campaign's configured value. Must be FINITE — `NaN` satisfies a
+                Stop once the best measured accuracy reaches this. Omitted, the run
+                never halts on accuracy. Must be FINITE — `NaN` satisfies a
                 `minimum`/`maximum` pair and then never compares true.
             spend_budget_usd:
               type: number
               minimum: 0
               description: |
-                USD ceiling for this run, composed as a `min` against what the host
-                wallet admits (ADR-0003 § D1) — a request may lower a ceiling, never
-                raise one. Must be FINITE: the `BudgetGate` probe is `spent >= cap`.
+                USD ceiling for this run. One the account cannot cover is refused
+                whole (ADR-0003 § D1); one it can may lower the campaign's ceiling,
+                never raise it. Must be FINITE: the `BudgetGate` probe is `spent >= cap`.
             token_budget:
               type: integer
               minimum: 0
@@ -3397,9 +3402,9 @@ components:
             `anyOf`, because the `minProperties: 1` this carried was satisfied by
             `campaign_id` alone and so asserted nothing (the handler enforced the
             real rule by itself). A field that is omitted leaves that ceiling
-            unchanged; the applier composes against the RUNNING JOB's pair, not the
-            file's, and writes both homes from it. Whichever ceiling is met first
-            halts the cycle.
+            unchanged, in the running job's reservation and the cycle's live file
+            alike, each from its own prior. Whichever ceiling is met first halts
+            the cycle.
           properties:
             max_usd:
               type: number
@@ -3506,17 +3511,35 @@ components:
                 Optional operator-supplied reason for the lifecycle
                 transition. Stored on ``campaign.json::lifecycle_reason``;
                 empty string is the unset form.
-            keep_results:
-              type: boolean
-              default: false
-              description: |
-                ``delete-campaign`` only (ignored by archive / unarchive).
-                When ``true`` the destructive delete spares the keepsake tier
-                (manifest + reports + the shallow ``langfuse/{traces,observations,
-                scores}`` loop trace) and drops only the heavy resume / audit /
-                mirror tiers. When ``false`` (default) the whole campaign tree is
-                removed. The cross-campaign measurement cache is never touched
-                either way.
+
+    # Written out rather than `allOf`'d onto `CampaignLifecyclePayload`, for the reason
+    # `MintCampaignPayload` gives — keep `campaign_id` and `reason` identical to it.
+    DeleteCampaignPayload:
+      type: object
+      required: [campaign_id]
+      additionalProperties: false
+      properties:
+        campaign_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Campaign id ({dataset}__{rand6_hex}), bounded as in `CampaignRef`.
+        reason:
+          type: string
+          maxLength: 512
+          description: |
+            Optional operator-supplied reason for the lifecycle transition. Stored
+            on ``campaign.json::lifecycle_reason``; empty string is the unset form.
+        keep_results:
+          type: boolean
+          default: false
+          description: |
+            When ``true`` the destructive delete spares the keepsake tier
+            (manifest + reports + the shallow ``langfuse/{traces,observations,
+            scores}`` loop trace) and drops only the heavy resume / audit /
+            mirror tiers. When ``false`` (default) the whole campaign tree is
+            removed. The cross-campaign measurement cache is never touched
+            either way.
 
     ArchiveCyclePayload:
       allOf:
@@ -4505,10 +4528,37 @@ components:
       required: [campaign_id]
       additionalProperties: false
       description: |
-        Start-verb payload — no field overrides at Start; the durable check-in
-        draft is the canonical source of truth. Tenant-scoped; 404 on a
-        cross-tenant `campaign_id` (or one with no check-in working state).
+        Start-verb payload. The durable check-in draft stays the canonical source
+        for everything the campaign IS — no field of it is overridable here. The
+        three launch ceilings are not draft fields: they bound what THIS launch
+        may spend, exactly as on `start-run` and `mint-campaign`, and omitting
+        them from this payload is what left the web Start unable to declare a
+        budget that CLI `new <file>` takes on the same three seams. Tenant-scoped;
+        404 on a cross-tenant `campaign_id` (or one with no check-in working state).
       properties:
+        halt_at_accuracy:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: |
+            Stop once the best measured accuracy reaches this. Omitted, the run
+            never halts on accuracy. Must be FINITE — `NaN` satisfies a
+            `minimum`/`maximum` pair and then never compares true.
+        spend_budget_usd:
+          type: number
+          minimum: 0
+          description: |
+            USD ceiling for this run. One the account cannot cover is refused
+            whole (ADR-0003 § D1); one it can may lower the campaign's ceiling,
+            never raise it. Must be FINITE: the `BudgetGate` probe is `spent >= cap`.
+        token_budget:
+          type: integer
+          minimum: 0
+          description: |
+            Cumulative-token ceiling (optimizer + backend, input + output), the
+            model-portable twin of `spend_budget_usd` and the one that still binds
+            when a model has no rate on file. Whichever ceiling is met first halts
+            the cycle.
         campaign_id:
           type: string
           minLength: 8

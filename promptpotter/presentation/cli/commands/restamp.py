@@ -1,11 +1,11 @@
-"""``restamp`` — a thin shell over ``application/restamp.py``, which carries the rationale and the two tree shapes.
-Dry-run by default; ``--apply`` rewrites."""
+"""``restamp`` — a thin shell over ``application/maintenance/restamp.py``, which carries the
+rationale and the two tree shapes. Dry-run by default; ``--apply`` rewrites."""
 
 from __future__ import annotations
 
 import argparse
 
-from promptpotter.application.restamp import (
+from promptpotter.application.maintenance.restamp import (
     check_round_documents,
     compact_cycle_ledgers,
     reproject_cycle_indexes,

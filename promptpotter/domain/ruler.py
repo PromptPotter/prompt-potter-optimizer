@@ -167,7 +167,7 @@ def anchor_id_of(
     Deliberately NOT a hash of the current membership. Anchored extension adds cells without
     moving the ones already there, so a θ read on the smaller ruler and one read on the larger
     are on the same scale and must share an id. Hashing the membership would churn the id every
-    round, make a cycle read as incomparable with ITSELF, and — because `evidence.py` reads round
+    round, make a cycle read as incomparable with ITSELF, and — because `evidence/` reads round
     0's `ruler_id` into `Comparability` — poison cross-campaign comparison too.
     """
     return stable_hash(

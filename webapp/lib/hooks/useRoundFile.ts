@@ -72,7 +72,7 @@ export function useRoundFile(path: CyclePath | null, round: number | null): UseR
 
 // The AUDIT TWIN — same basename, different tree. `rounds/round_NNNN.json` is the round
 // document (`RoundResult`) and carries NO `nodes` block; the per-node LLM I/O lives only
-// here, written by `AuditTrailView`. The node inspector used to read `nodes` off the round
+// here, written by `AuditTrailProjection`. The node inspector used to read `nodes` off the round
 // document, which meant it rendered nothing for every completed round.
 export function useRoundAudit(path: CyclePath | null, round: number | null): UseRoundAuditState {
   const { value, loading, error } = useCycleJson<RoundAuditDoc>(

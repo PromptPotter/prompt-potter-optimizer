@@ -29,9 +29,12 @@ __all__ = [
     "SampleStatus",
 ]
 
-#: The tape's three marks. ERR is a THIRD state, not a bad MISS — an errored row was never
-#: graded, so reading its absent fitness as one reports a backend fault as a wrong answer.
-SampleStatus = Literal["HIT", "MISS", "ERR"]
+#: The tape's four marks. ERR and UNSC are each a state of their OWN, not a bad MISS — neither row
+#: was graded, so reading an absent fitness as one reports a backend fault (ERR) or the active
+#: formula's own silence (UNSC) as a wrong answer. UNSC is the row the backend ANSWERED and the
+#: formula could not read, which is why it is not an error: the measurement is worth keeping and a
+#: re-grade recovers it (`domain/scoring.py::is_unscored`).
+SampleStatus = Literal["HIT", "MISS", "ERR", "UNSC"]
 
 
 class DashboardSample(StrictModel):

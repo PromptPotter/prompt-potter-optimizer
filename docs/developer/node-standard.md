@@ -21,7 +21,7 @@ Both backends and the optimizer loop declare pipelines as JSON. The optimizer's 
   "backend_type": "termnorm",
   "nodes": {
     "node_name": {
-      "type": "generation",
+      "type": "llm",
       "node_role": "cache | candidate_source | enricher | ranker",
       "config": {
         "prompt_family": "node_name",
@@ -93,7 +93,8 @@ The decisions the models cannot state:
   beside a wire copy. It is locked against the optimizer (`SCHEMA_OWNED_FIELDS`).
 - **`response_format` is PromptPotter's axis, and a connector must not declare it.** Whether the
   request carries a schema is decided here — PromptPotter composes the wire config — so the toggle
-  is synthesized onto every LLM node at parse time (`SCHEMA_TOGGLE_PARAM`) and resolved at the wire
+  (`SCHEMA_TOGGLE_PARAM`) is synthesized at parse time onto every node `PipelineNode.tunes_llm`
+  names — a thinking `type` whose `optimizer.param_keys` opens an axis — and resolved at the wire
   seam: `json` sends `output_schema` + `answer_field`, `text` sends NEITHER. A node declaring the
   key in its own `param_keys` makes two mechanisms for one thing, which is how TermNorm came to
   offer an axis its `output_schema` silently outranked — every arm produced the identical call and
@@ -124,7 +125,7 @@ Capabilities are opt-in. A deterministic node declares none; an LLM node in the 
 - **Warnings → search-point attachment** — failures pin to the exact configuration that caused them, not the round.
 - **Skip** — a candidate producing too many degraded or empty results is eliminated mid-run.
 - **Abort** — a candidate can signal the round should stop.
-- **Fatal fast-path** — fatal codes derived by `classify_result()` (`application/optimization/pobb/classification.py`) eliminate a candidate on the first query, with no rate threshold.
+- **Fatal fast-path** — fatal codes derived by `classify_result()` (`domain/results_health.py`) eliminate a candidate on the first query, with no rate threshold.
 
 ## How the prediction is read
 

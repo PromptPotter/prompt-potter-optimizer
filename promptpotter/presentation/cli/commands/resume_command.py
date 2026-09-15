@@ -20,7 +20,7 @@ from promptpotter.application.optimization.resume_and_fork.fork_siblings import 
 )
 from promptpotter.application.runner.entry import RunMode
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
-from promptpotter.connectors.protocol import BackendUnreachableError
+from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ForkSpec, ForkTrigger
 from promptpotter.infrastructure.runtime_flags import is_checkin
@@ -378,7 +378,6 @@ async def _drive_optimization(
             no_divergence_check=getattr(args, "no_divergence_check", False),
             fork_on_divergence=fork_on_divergence,
             diag=getattr(args, "diag", False),
-            halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
         ),
     )
     return cycle_result
@@ -510,10 +509,10 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
             task_text=None,
             backend_url=ctx.init_params.get("backend_url"),
             backend_id=ctx.init_params.get("backend_id"),
-            sweep=False,
             diag=False,
             halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
             spend_budget_usd=getattr(args, "spend_budget_usd", None),
+            token_budget=getattr(args, "token_budget", None),
             tenant=getattr(args, "tenant", None),
             verbose=getattr(args, "verbose", False),
             session=getattr(args, "session", None),

@@ -12,6 +12,17 @@ from typing import TYPE_CHECKING, Any, NoReturn
 from pydantic import ValidationError
 
 from promptpotter.application.campaign_config import load_campaign_config as _load_cfg
+from promptpotter.application.commands.checkin_dispatch import (
+    dispatch_draft_patch,
+    dispatch_origin_resolution,
+    dispatch_start_checkin,
+)
+from promptpotter.application.commands.dispatcher import CommandCall
+from promptpotter.application.commands.payloads import (
+    EditDraftCampaignPayload,
+    ResolveOriginPayload,
+    StartCheckinPayload,
+)
 from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     read_campaign_config_file,
@@ -26,11 +37,7 @@ from promptpotter.application.datasets.ingest import SlugTakenError, ingest_draf
 from promptpotter.application.datasets.origin_readiness import origin_readiness
 from promptpotter.application.initialization.session import mint_checkin_skeleton
 from promptpotter.application.jobs.launcher.admission import probe_backend
-from promptpotter.application.jobs.launcher.checkin import (
-    load_checkin_for_start,
-    prepare_checkin_run,
-)
-from promptpotter.application.jobs.launcher.mint_and_start import LaunchError
+from promptpotter.application.jobs.launcher.checkin import prepare_checkin_run
 from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
 from promptpotter.application.optimization.task_context import (
     checkin_call_context,
@@ -38,36 +45,27 @@ from promptpotter.application.optimization.task_context import (
     decompose_prompt_fields,
 )
 from promptpotter.application.runner.entry import RunMode
-from promptpotter.application.sweep_batch import (
-    load_sweep_payloads,
-    resolve_sweep_dir,
-    run_sweep_batch,
-)
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
-from promptpotter.connectors.protocol import BackendUnreachableError
+from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.stores import build_stores
-from promptpotter.presentation.api.middleware.command_dispatcher import (
-    dispatch_draft_patch,
-    dispatch_origin_resolution,
-)
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
     backend_reach_line,
     backend_unreachable_result,
     bind_session_identity,
-    build_observers,
     cycle_result_command,
     drive_cycle,
     get_verbose,
     identity_from_args,
     init_services_cli,
+    launch_limits_from_args,
     pipeline_summary,
 )
 from promptpotter.presentation.cli.session import load_session, no_dataset_hint
-from promptpotter.presentation.views.startup_checklist import checkin_line
-from promptpotter.shared.errors import PayloadInvalidError, PotterError
+from promptpotter.presentation.terminal.startup_checklist import checkin_line
+from promptpotter.shared.errors import PotterError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -76,7 +74,6 @@ if TYPE_CHECKING:
     from promptpotter.application.datasets.draft_campaign import DraftCampaign
     from promptpotter.application.datasets.origin_readiness import FieldGap
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.run_observers import RunObservers
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.stores import Stores
     from promptpotter.presentation.cli.session import SessionCtx
@@ -85,12 +82,6 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 
 
 # --- File-ingest branch: `new <file>` folds onto the durable check-in path ----
-# A raw file → durable check-in campaign → resolved origin → flip to active + run
-# inline. The CLI owns no ingest/resolve/commit logic of its own; every step is an
-# application-layer call shared with the web (`ingest_draft`, `resolve_origin_turn`,
-# `prepare_checkin_run`). The ONLY CLI/web difference is run-invocation: the CLI
-# runs the loop inline with `LiveDisplay`; the web detaches via `JobRegistry`.
-# Spec: ``docs/specs/roadmap.md``.
 
 # The CLI's ``--set`` vocabulary, DERIVED from the one patch model every ingress edits an origin
 # through (``application/datasets/draft_patch.py::EditDraftPatch``) — hand-listing it here would
@@ -213,9 +204,10 @@ async def _ingest_checkin(args: argparse.Namespace) -> str:
         if args.sets:
             await dispatch_draft_patch(
                 stores,
-                draft_id=campaign_id,
-                patch=_sets_to_patch(args.sets),
-                idempotency_key=uuid.uuid4().hex,
+                CommandCall(
+                    EditDraftCampaignPayload(draft_id=campaign_id, patch=_sets_to_patch(args.sets)),
+                    uuid.uuid4().hex,
+                ),
             )
             draft = _reload_draft(stores, campaign_id)
 
@@ -228,9 +220,7 @@ async def _ingest_checkin(args: argparse.Namespace) -> str:
             # rather than spinning more LLM turns.
             turn = await dispatch_origin_resolution(
                 stores,
-                draft_id=campaign_id,
-                message="",
-                idempotency_key=uuid.uuid4().hex,
+                CommandCall(ResolveOriginPayload(draft_id=campaign_id), uuid.uuid4().hex),
             )
             resolution = turn.get("resolution") or {}
             draft = _reload_draft(stores, campaign_id)
@@ -250,18 +240,11 @@ async def _ingest_checkin(args: argparse.Namespace) -> str:
 async def _ingest_and_prepare_checkin(
     args: argparse.Namespace,
 ) -> tuple[Session, CampaignConfig, str, str]:
-    """The CLI tail of check-in Start, sharing :func:`prepare_checkin_run` with the web detach path.
-    Backend reachability is not preflighted: a check-in is durable, so ``resume`` runs it later."""
+    """The CLI tail of check-in Start. Backend reachability is not preflighted: a check-in is
+    durable, so ``resume`` runs it later."""
 
     campaign_id = await _ingest_checkin(args)
     stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
-    # The SAME gate the web Start runs, and it owns three things a bare load does not: recovering
-    # a pending dataset replacement, the ownership check and the lifecycle check. Hand-rolling it
-    # lets the terminal start a campaign the browser would refuse.
-    try:
-        hop, draft = load_checkin_for_start(stores, campaign_id)
-    except LaunchError as exc:
-        raise SystemExit(f"ERROR: {exc}") from None
 
     async def make_session(dataset_name: str) -> Session:
         return await init_services_cli(
@@ -271,11 +254,20 @@ async def _ingest_and_prepare_checkin(
             identity=identity_from_args(args),
         )
 
-    prepared = await prepare_checkin_run(
+    # The ceilings ride the payload even though `drive_cycle` is what admits under them here: the
+    # `CommandRecord` is the only durable statement of what this Start asked for, and a terminal
+    # launch whose record says "no ceiling" reads as a different command from the web's.
+    prepared = await dispatch_start_checkin(
         stores,
-        hop=hop,
-        draft=draft,
-        make_session=make_session,
+        CommandCall(
+            StartCheckinPayload(
+                campaign_id=campaign_id, **launch_limits_from_args(args).model_dump()
+            ),
+            uuid.uuid4().hex,
+        ),
+        start=lambda hop, draft: prepare_checkin_run(
+            stores, hop=hop, draft=draft, make_session=make_session
+        ),
     )
     checkin_line("campaign", f"started check-in {campaign_id}")
     return (
@@ -339,9 +331,6 @@ async def _mint_fresh_session(
 ) -> tuple[Session, CampaignConfig, str, str]:
     """Find-or-create campaign + mint session + root cycle. No scoring — the origin is phase 0 of the loop."""
 
-    # Shared unwrap only — `new` validates AFTER merging with the connector
-    # profile ({**profile, **file_config}), a different composition order than
-    # the draft path, so it keeps its own validate-after-merge step below.
     file_config = read_campaign_config_file(Path(args.config)) if args.config else {}
     # Resolution order: positional dataset → --dataset-name → config["dataset_name"]
     dataset_name = (
@@ -360,7 +349,6 @@ async def _mint_fresh_session(
         dataset_name=dataset_name,
         identity=identity_from_args(args),
     )
-    backend_id = session.backend_id
 
     # Auto-load dataset's campaign.json from the resolved config dir (tenant-first
     # via session.dataset_config_dir) when --config wasn't given — else the session
@@ -371,8 +359,7 @@ async def _mint_fresh_session(
         if default_config_path.exists():
             file_config = read_campaign_config_file(default_config_path)
 
-    profile = session.store.backends.load_connector_profile(backend_id) or {}
-    campaign_config = _load_cfg({**profile, **file_config})
+    campaign_config = _load_cfg(file_config)
 
     train_data = session.samples
 
@@ -394,64 +381,6 @@ async def _mint_fresh_session(
     return session, campaign_config, dataset_name, minted.session_id
 
 
-async def _run_sweep_batch(
-    args: argparse.Namespace,
-    root_ctx: SessionCtx,
-    campaign_config: CampaignConfig,
-    train_data: list[Sample],
-    sweep_payloads: list[tuple[Path, Any]],
-) -> CommandResult:
-    """Thin shim → ``application.sweep_batch.run_sweep_batch``, binding the observer factory and the
-    active-pointer reload to CLI args so the application layer imports no ``argparse``."""
-
-    def observer_factory(session: Session, origin_acc: float) -> RunObservers:
-        return build_observers(session, campaign_config, train_data, origin_acc)
-
-    result = await run_sweep_batch(
-        lambda: load_session(args),
-        root_ctx,
-        campaign_config,
-        train_data,
-        sweep_payloads,
-        observer_factory=observer_factory,
-        verbose=get_verbose(),
-    )
-    return CommandResult(
-        data=result.model_dump(),
-        human=(
-            f"Sweep batch {result.batch_id}: {len(result.fork_cycle_ids)} forks under "
-            f"{result.parent_cycle_id}\n" + "\n".join(f"  - {c}" for c in result.fork_cycle_ids)
-        ),
-    )
-
-
-async def _maybe_dispatch_sweep_batch(
-    args: argparse.Namespace,
-    ctx: SessionCtx,
-    campaign_config: CampaignConfig,
-    train_data: list[Sample],
-    dataset_config_dir: Path | None,
-) -> CommandResult | None:
-    """``--sweep-batch`` mints one fork per ``OperatorSweepFile``. A missing or empty payload is a LOUD
-    setup error: running one unpaired cycle instead answers a different question than the one posed."""
-    if not getattr(args, "sweep", False):
-        return None
-
-    sweep_dir = resolve_sweep_dir(dataset_config_dir)
-    if sweep_dir is None:
-        raise PayloadInvalidError(
-            f"--sweep-batch needs a sweep/ directory of payloads, and {dataset_config_dir} "
-            "has none. Author one YAML OperatorSweepFile per arm there, or drop the flag."
-        )
-    sweep_payloads = load_sweep_payloads(sweep_dir)
-    if not sweep_payloads:
-        raise PayloadInvalidError(
-            f"--sweep-batch found {sweep_dir} but no *.yaml payloads in it. Author one "
-            "OperatorSweepFile per arm, or drop the flag."
-        )
-    return await _run_sweep_batch(args, ctx, campaign_config, train_data, sweep_payloads)
-
-
 async def _run_loop(
     args: argparse.Namespace,
     ctx: SessionCtx,
@@ -467,9 +396,7 @@ async def _run_loop(
         session,
         train_data,
         mode=RunMode(
-            sweep=getattr(args, "sweep", False),
             diag=getattr(args, "diag", False),
-            halt_at_accuracy=getattr(args, "halt_at_accuracy", None),
         ),
     )
     return cycle_result_command(ctx, session, cycle_result)
@@ -500,13 +427,6 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
 
     logger.info("Session: %s", session.store.sessions.session_dir(ctx.session_id))
     logger.info("Campaign: %s", session.store.campaigns.campaign_root_dir(ctx.campaign_id))
-
-    if (
-        sweep_result := await _maybe_dispatch_sweep_batch(
-            args, ctx, campaign_config, train_data, session.dataset_config_dir
-        )
-    ) is not None:
-        return sweep_result
 
     checkin_line("origin", "launching origin scoring")
     return await _run_loop(args, ctx, campaign_config, session, train_data)

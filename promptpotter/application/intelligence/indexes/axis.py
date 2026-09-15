@@ -4,17 +4,19 @@ import logging
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from itertools import combinations, pairwise
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
-from promptpotter.application.scoring.formula import ScoringTermMissingError, rescore_results
+from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.domain.measurement_provenance import entry_grade
-from promptpotter.domain.rendering import display_fitness
-from promptpotter.domain.scoring import CellScorer
+from promptpotter.domain.results import resolved_fitness
+from promptpotter.domain.scoring import CellScorer, is_unscored
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
-from promptpotter.infrastructure.store import archive_views
+from promptpotter.infrastructure.store import archive_queries
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
+@shapes_optimizer_prompt
 def _is_forbidden_axis(axis: str) -> bool:
     _, _, param = axis.partition(".")
     return param in PARAM_FORBIDDEN_KEYS
@@ -27,14 +29,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-NOISE_THRESHOLD = 0.02
+NOISE_THRESHOLD: Annotated[float, shapes_optimizer_prompt] = 0.02
 
 
+@shapes_optimizer_prompt
 def _value_preview(value: Any) -> str:
     s = str(value)
     return s[:80] if len(s) > 80 else s
 
 
+@shapes_optimizer_prompt
 def _fmt_axis_rankings(
     rankings: list[AxisImpact], peaked_axes: frozenset[str] | None = None
 ) -> str:
@@ -54,6 +58,7 @@ def _fmt_axis_rankings(
     return "; ".join(parts)
 
 
+@shapes_optimizer_prompt
 def _fmt_clusters(clusters: list[FailureCluster], *, with_counts: bool) -> str:
     if with_counts:
         return "; ".join(
@@ -62,12 +67,14 @@ def _fmt_clusters(clusters: list[FailureCluster], *, with_counts: bool) -> str:
     return "; ".join(f"{c.failure_mode} ({c.fraction:.0%})" for c in clusters)
 
 
+@shapes_optimizer_prompt
 def _fmt_bottleneck(bottleneck: dict[str, float] | None) -> str | None:
     if not bottleneck:
         return None
     return "; ".join(f"{step}: {frac:.0%}" for step, frac in bottleneck.items())
 
 
+@shapes_optimizer_prompt
 def _fmt_persistent_failures(persistent: list[SampleRecord]) -> str:
     intractable = [q for q in persistent if q.hit_rate == 0]
     chronic = [q for q in persistent if q.hit_rate > 0]
@@ -105,6 +112,7 @@ class RunRecord:
     total: int
 
 
+@shapes_optimizer_prompt
 def _collect(*items: tuple[str, str | None]) -> dict[str, str] | None:
     out = {k: v for k, v in items if v}
     return out or None
@@ -133,11 +141,13 @@ class AxisIndex:
 
     # ----- axis analytics -----
 
+    @shapes_optimizer_prompt
     def peaked_axes(self) -> frozenset[str]:
         return frozenset(
             axis for axis in self._axis_values if self._axis_value_trend(axis) == "peaked"
         )
 
+    @shapes_optimizer_prompt
     def axis_rankings(self) -> list[AxisImpact]:
         impacts = [
             i
@@ -146,6 +156,7 @@ class AxisIndex:
         ]
         return sorted(impacts, key=lambda a: -a.effect_size)
 
+    @shapes_optimizer_prompt
     def _exhausted_axes(self, min_values: int = 4, max_effect: float = 0.02) -> list[AxisImpact]:
         out = [
             i
@@ -157,6 +168,7 @@ class AxisIndex:
         ]
         return sorted(out, key=lambda a: a.effect_size)
 
+    @shapes_optimizer_prompt
     def _axis_value_trend(self, axis: str) -> str:
         pairs: list[tuple[float, float]] = []
         for v, accs in self._axis_values.get(axis, {}).items():
@@ -184,6 +196,7 @@ class AxisIndex:
 
     # ----- digest construction (single entry-point, layer-agnostic) -----
 
+    @shapes_optimizer_prompt
     def digest(self) -> dict[str, str] | None:
         """Layer-agnostic axis-keyed digest — one payload into every L1/L2/L3 prompt. Per-layer filtering,
         if it ever returns, lives in the renderers and not here."""
@@ -257,6 +270,7 @@ class AxisIndex:
             ("improvement_attribution", self._format_recent_attributions(limit=3)),
         )
 
+    @shapes_optimizer_prompt
     def _format_recent_attributions(self, limit: int = 5) -> str | None:
         positive = [f for f in self.sample_index.all_flips() if f["new_hit"] and not f["old_hit"]]
         if not positive:
@@ -319,11 +333,11 @@ class AxisIndex:
         all-or-nothing so the replay ORDER matches ingest — ``persistent_failures`` reads a tail streak."""
         if not dataset_name:
             return False
-        rows = archive_views.sample_fold_rows(stores, dataset_name=dataset_name)
+        rows = archive_queries.sample_fold_rows(stores, dataset_name=dataset_name)
         if not rows:
             return False
 
-        signatures = archive_views.run_signatures(stores)
+        signatures = archive_queries.run_signatures(stores)
         for row in rows:
             run_id = row.get("run_id") or ""
             if row.get("fk") != formula_key:
@@ -360,19 +374,21 @@ class AxisIndex:
         # Captured BEFORE the details are read, never after: a run whose log grows between the
         # two must end up stamped with the OLDER signature, so the next process re-derives it.
         # Stamping the newer one would leave a fold that silently omits the rows it gained.
-        signatures = archive_views.run_signatures(stores)
+        signatures = archive_queries.run_signatures(stores)
 
         added = 0
         skipped: list[str] = []
         folded: list[dict[str, Any]] = []
-        for run_id, detail in archive_views.runs_since(
+        for run_id, detail in archive_queries.runs_since(
             stores, self.sample_index._seen_runs, dataset_name=dataset_name
         ):
             stamp = {"fk": scorer_id, "sig": list(signatures.get(run_id) or ())}
             if scorer is not None:
-                try:
-                    rescore_results(detail.get("measurements") or [], scorer)
-                except ScoringTermMissingError as exc:
+                rows = rescore_results(detail.get("measurements") or [], scorer)
+                # The WHOLE run goes, on the first row that could not be graded. A per-row skip
+                # would fold a partial run under a `scorer_id` claiming it scored entire, and the
+                # digest cannot tell one from the other afterwards.
+                if unscored := next((r for r in rows if is_unscored(r)), None):
                     skipped.append(run_id)
                     self._unscoreable_runs.add(run_id)
                     self.sample_index.mark_seen(run_id)
@@ -381,7 +397,7 @@ class AxisIndex:
                         "axis refresh: archived run %r is unscoreable under the active formula "
                         "— skipping it (it predates the current observation vocabulary). %s",
                         run_id,
-                        exc,
+                        unscored.get("unscored"),
                     )
                     continue
             folded.append({**self.sample_index.ingest_run(detail), **stamp})
@@ -391,7 +407,7 @@ class AxisIndex:
         # Replace rather than append whenever the seed was rejected: what this process just
         # derived IS the whole fold, and appending would leave the rejected rows in front of it.
         if dataset_name and (folded or not self._fold_seeded):
-            archive_views.write_sample_fold(
+            archive_queries.write_sample_fold(
                 stores, dataset_name=dataset_name, rows=folded, append=self._fold_seeded
             )
             self._fold_seeded = True
@@ -409,7 +425,7 @@ class AxisIndex:
         # datapoints, not whichever connector replayed most. Unscoreable runs are dropped for the
         # same reason: a fitness from a dead vocabulary is not comparable to one from this run's.
         all_entries: list[dict[str, Any]] = []
-        for entry in archive_views.list_runs(stores, dataset_name=dataset_name):
+        for entry in archive_queries.list_runs(stores, dataset_name=dataset_name):
             run_id = entry.get("run_id", "")
             if entry_grade(entry) == "C" or run_id in self._unscoreable_runs:
                 continue
@@ -462,7 +478,7 @@ class AxisIndex:
                 run_id=run_id,
                 name=entry.get("name", ""),
                 accuracy=accuracy,
-                composite=display_fitness(scores.get("composite_fitness"), accuracy),
+                composite=resolved_fitness(scores.get("composite_fitness"), accuracy),
                 total=total,
             )
             prev = best_by_run.get(run_id)
@@ -516,11 +532,18 @@ class AxisIndex:
         entry: dict[str, Any],
     ) -> None:
         """Fold one entry into ``axis_values``. An entry with no accuracy is skipped, never folded as 0.0 —
-        a fabricated arm manufactures ``effect_size`` against every real arm on the same axis."""
+        a fabricated arm manufactures ``effect_size`` against every real arm on the same axis.
+
+        "No accuracy" is a statement about the VALUE, and testing the key alone was not the same
+        thing: a row carrying ``accuracy: null`` passed the guard and died in ``float(None)``,
+        taking the whole run down at init with a TypeError and no mention of the axis index. An
+        outer L4 cell is exactly that row — its measurand is ``mean_round_delta`` and it has no
+        accuracy to record — so the recursion could not enter its round loop at all."""
         scores = entry.get("scores") or {}
-        if "accuracy" not in scores:
+        recorded = scores.get("accuracy")
+        if recorded is None:
             return
-        accuracy = float(scores["accuracy"])
+        accuracy = float(recorded)
         for node_name, node_config in (entry.get("pipeline_params") or {}).items():
             if isinstance(node_config, dict):
                 for param, value in node_config.items():
@@ -529,6 +552,7 @@ class AxisIndex:
             else:
                 axis_values[node_name][_value_preview(node_config)].append(accuracy)
 
+    @shapes_optimizer_prompt
     def _compute_axis_impact(
         self,
         axis: str,

@@ -22,6 +22,7 @@ from promptpotter.domain.run_records import (
     MintKind,
     RulerRecord,
 )
+from promptpotter.domain.value_tree import ValueLeaf
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.runtime_flags import derive_run_phase, is_checkin
 from promptpotter.infrastructure.store.account_spend import (
@@ -84,9 +85,17 @@ def _index_round(rr: RoundResult) -> dict[str, Any]:
 
 def origin_accuracy_of(index: dict[str, Any]) -> float | None:
     """Round 0 IS the origin and there is no stored copy — every path that (re)scores it
-    (init, a diag fork, the origin gate) re-emits round 0 through ``save_round_file``."""
+    (init, a diag fork, the origin gate) re-emits round 0 through ``save_round_file``.
+
+    A round 0 that recorded NO accuracy answers ``None``, which is what this signature has
+    always promised and what an outer L4 cycle actually stores: its measurand is
+    ``mean_round_delta``, so the row carries ``accuracy: null``. Reading the key without asking
+    whether it held a value turned that into ``float(None)`` — and because this is folded by
+    every lineage and listing read, one L4 campaign with a completed round 500'd ``/cycles``,
+    ``/tree``, ``/ray`` and ``/origins`` at once, taking the campaign picker down with them."""
     rounds = index.get("rounds") or []
-    return next((float(r["accuracy"]) for r in rounds if r.get("round") == 0), None)
+    recorded = next((r.get("accuracy") for r in rounds if r.get("round") == 0), None)
+    return float(recorded) if recorded is not None else None
 
 
 def _apply_best(data: dict[str, Any]) -> None:
@@ -137,7 +146,8 @@ def _fresh_sibling_index_blob(
     parent_index: dict[str, Any],
     parent_cycle_id: str,
     forked_at: str,
-    **extras: Any,
+    *,
+    forked_at_offset: int,
 ) -> dict[str, Any]:
     # Deliberately no ``sibling_kind``: the id's separator IS the kind (``layout.py``), and a
     # stored copy is a second answer free to disagree with the id it sits under.
@@ -154,7 +164,7 @@ def _fresh_sibling_index_blob(
         "status": "active",
         "created_at": forked_at,
         "updated_at": forked_at,
-        **extras,
+        "forked_at_offset": forked_at_offset,
     }
 
 
@@ -179,9 +189,6 @@ def _strip_to_keepsake(campaign_dir: Path) -> None:
             ]:
                 unlink_robust(p)
             _prune_empty_dirs(cdir)
-    sweeps = campaign_dir / "sweeps"
-    if sweeps.exists():
-        rmtree_robust(sweeps)
 
 
 def _mint_kind(kind: str, fork_trigger: str | None) -> MintKind:
@@ -860,7 +867,7 @@ class CampaignStore:
         return True, ""
 
     # ------------------------------------------------------------------
-    # Fork-sibling ``index.json`` writers — rebase / diag / sweep
+    # Fork-sibling ``index.json`` writers — rebase / diag
     # ------------------------------------------------------------------
 
     def write_fresh_sibling(
@@ -870,10 +877,9 @@ class CampaignStore:
         new_cycle_id: str,
         *,
         forked_at: str,
-        **blob_kwargs: Any,
     ) -> Path:
-        """The single writer for the diag / steered / sweep triggers — numbering restarts at
-        round 1; parent-round inheritance is ``save_rebase_fork``'s job."""
+        """The single writer for the diag / steered triggers — numbering restarts at round 1;
+        parent-round inheritance is ``save_rebase_fork``'s job."""
         parent = CycleHop(campaign_id=campaign_id, cycle_id=parent_cycle_id)
         child = CycleHop(campaign_id=campaign_id, cycle_id=new_cycle_id)
         parent_index = read_json_optional(self._index_path(parent)) or {}
@@ -882,7 +888,6 @@ class CampaignStore:
             parent_cycle_id,
             forked_at,
             forked_at_offset=_branch_offset(self.cycle_dir(parent)),
-            **blob_kwargs,
         )
         path = self._index_path(child)
         write_json(path, blob)
@@ -1097,6 +1102,45 @@ class CampaignStore:
         overlay, written once at run init. Not the ledger: it is a fact about the whole cycle, not
         an event in it, and a reader that only wants "what may move here" should not scan a log."""
         write_yaml(self._layout(hop).resolved_pipeline, declaration)
+
+    def write_optimized_surface(self, hop: CycleHop, leaves: Sequence[ValueLeaf]) -> None:
+        """Record WHAT this cycle optimizes, and how each value reaches the model.
+
+        Beside the resolved declaration rather than inside it, because the two are different kinds:
+        that file is the declaration, this is the READING of it an operator needs and cannot derive
+        from it — a declaration names a key, never the channel it travels nor whether the model
+        will see it. Human-readable and on disk per the pre-flight gate; a material fact surfaced
+        only in stdout is one the operator had to have been watching for.
+
+        Written at init and re-written on resume, the same cadence and for the same reason as the
+        declaration above: what this owes the operator is what the NEXT round will search.
+        """
+        by_delivery: dict[str, list[ValueLeaf]] = {}
+        for leaf in leaves:
+            by_delivery.setdefault(leaf.delivery, []).append(leaf)
+        lines = [
+            "# What this cycle optimizes",
+            "",
+            "Derived at run init from `PipelineSchema.value_tree`, never hand-maintained.",
+            "**may-not-arrive** marks a channel the model reads only if it OPENS the artifact",
+            "carrying the value — there, a value can be mutated every round and reach nothing.",
+            "",
+            "These are the AXES. The VALUES they currently hold are in `pipeline.resolved.yaml`",
+            "beside this file, written on the same cadence — not copied here, because a second",
+            "copy of a value is one that can disagree with the declaration it came from.",
+            "",
+        ]
+        for delivery in sorted(by_delivery):
+            group = by_delivery[delivery]
+            caveat = " · **may-not-arrive**" if group[0].may_not_arrive else ""
+            lines.append(f"## {delivery} — {group[0].visibility}{caveat}")
+            lines.append("")
+            lines += [
+                f"- `{leaf.path}` ({leaf.kind}){'' if leaf.mutable else ' — PINNED'}"
+                for leaf in group
+            ]
+            lines.append("")
+        write_text(self._layout(hop).optimized_surface, "\n".join(lines))
 
     def read_resolved_pipeline(self, hop: CycleHop) -> dict[str, Any] | None:
         """``None`` where a campaign has never run — the committed dataset file answers then, and

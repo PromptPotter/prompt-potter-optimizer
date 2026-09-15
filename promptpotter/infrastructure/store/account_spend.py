@@ -12,10 +12,10 @@ from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.run_records import SpendTombstoneRecord
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.pricing import compute_usd
 from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import iter_jsonl
-from promptpotter.shared.pricing import compute_usd
 
 if TYPE_CHECKING:
     # Type-only: the campaign store imports THIS module to bank a spend before it destroys the

@@ -5,46 +5,43 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.connector import SessionProtocol, WireAdapter
+from promptpotter.domain.connector import (
+    ConnectorExecution,
+    MeasuredUnit,
+    SessionProtocol,
+    WireAdapter,
+)
 from promptpotter.domain.pipeline_schema import NodeType
-from promptpotter.shared.errors import PotterError
+from promptpotter.domain.value_tree import Delivery
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     import httpx
 
-# How a connector's backend runs, so the loop dispatches on a *declared*
-# capability instead of branching on the connector name. ``remote_http`` posts
-# to a live ``/matches`` endpoint (TermNorm + any external backend);
-# ``in_process`` runs the query in this process with no HTTP transport — today an
-# inner PromptPotter cycle (L4 self-recursion). ``BackendClient.run_query`` dispatches an
-# ``in_process`` connector to its ``in_process_run`` hook. A future hosted/worker
-# execution mode extends this enum without touching the loop.
-ConnectorExecution = Literal["remote_http", "in_process"]
 
-# What ONE MEASURED ROW is called on this backend: ``sample`` everywhere; ``cell`` on the
-# recursion, where one row is an entire inner campaign. DECLARED, never sniffed off a row.
-MeasuredUnit = Literal["sample", "cell"]
+@dataclass(frozen=True)
+class InProcessWorkload:
+    experiment: Mapping[str, Any] | None
+    program: object | None
 
 
-def unit_plural(unit: MeasuredUnit) -> str:
-    return f"{unit}s"
+# What a client built only to probe a backend holds: it runs no query.
+PROBE_WORKLOAD = InProcessWorkload(experiment=None, program=None)
 
 
-def unit_count(n: int, unit: MeasuredUnit) -> str:
-    """``1 cell`` / ``3 cells`` — the ONE place a measured row is counted in words."""
-    return f"{n} {unit if n == 1 else unit_plural(unit)}"
-
-
-# The in-process execution arm: ``(query, payload) -> resp`` where ``payload`` is
+# The in-process execution arm: ``(workload, query, payload) -> resp`` where ``payload`` is
 # the connector's ``wire_adapter`` output and ``resp`` is the same ``{"data": {…}}``
 # shape ``measure_sample`` parses from an HTTP ``/matches`` body (so the scorer
 # reads an in-process result identically to a remote one). Required on (and only
 # on) an ``in_process`` connector — the registry guard enforces the pairing.
-InProcessRun = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
+InProcessRun = Callable[[InProcessWorkload, str, dict[str, Any]], Awaitable[dict[str, Any]]]
+
+# Parsed ``experiment_file`` → the document every reader sees, with anything it only NAMES (a
+# published roster) resolved to what it names.
+ExperimentResolver = Callable[[Mapping[str, Any]], dict[str, Any]]
 
 # Run init calls a connector's version_check once, with the
 # BackendClient's live httpx client + base_url; the return is the backend's
@@ -60,24 +57,6 @@ PreflightFn = Callable[[str], Awaitable[None]]
 # The connector's wire credential, read at client-construction time (not at import,
 # so an env change lands without a reimport). ``None`` return = send no auth header.
 AuthTokenFn = Callable[[], str | None]
-
-
-class BackendUnreachableError(PotterError):
-    """The configured backend isn't responding (503). Carries backend type + URL on ``details`` so the ``PotterError`` seam
-    composes the envelope without re-parsing the message."""
-
-    http_status = 503
-    code = "backend_unreachable"
-
-    def __init__(self, backend_type: str, backend_url: str, detail: str = "") -> None:
-        self.backend_type = backend_type
-        self.backend_url = backend_url
-        self.detail = detail
-        super().__init__(
-            f"Backend '{backend_type}' at {backend_url} is not reachable. "
-            f"Start the backend and try again." + (f" ({detail})" if detail else ""),
-            details={"backend_type": backend_type, "backend_url": backend_url},
-        )
 
 
 @dataclass(frozen=True)
@@ -105,6 +84,9 @@ class Connector:
     its outer "samples" ARE the inner tasks declared there, not a sample table.
     Empty (default) = samples come from the loader registry / tenant upload only."""
 
+    resolve_experiment: ExperimentResolver | None = None
+    """Applied by ``dataset_access.py::dataset_experiment`` to every read of the file."""
+
     execution: ConnectorExecution = "remote_http"
     """How this connector's backend runs — the dispatch capability the loop
     reads instead of branching on ``name``. ``remote_http`` (default) posts to
@@ -120,10 +102,25 @@ class Connector:
     arming lasts.** A connector cannot see whether the walk in front of it sits inside a round;
     ``_bind_run_controls`` binds an arming only under ``run_optimization``, so the round spends
     every press, and a screen declares its depth at launch instead
-    (``application/seed_screen.py``)."""
+    (``application/diagnostics/seed_screen.py``)."""
 
     measured_unit: MeasuredUnit = "sample"
-    """What one measured row of this backend is CALLED — see :data:`MeasuredUnit`."""
+    """What one measured row of this backend is CALLED: ``cell`` where it is a whole inner campaign
+    or agent episode, else ``sample``. Declared, never sniffed off a row."""
+
+    prompt_delivery: Delivery = "request"
+    """The CHANNEL the candidate's rendered prompt reaches the model by, read by
+    ``PipelineSchema.value_tree``.
+
+    ``request`` — in the message that carries the task, so it always arrives. Three of the four
+    connectors, and the reason this is the default.
+
+    ``artifact_body`` — written into the environment as an Agent Skill, where the harness shows the
+    model only the frontmatter and the BODY arrives only if the model opens the file. A value on
+    this channel **may never arrive**, which no param name says and no roster of keys could; the
+    connector owes an arrival observation beside it (``harbor.py::SKILL_KEY``). Declared here and
+    not inferred from ``execution`` or ``measured_unit``: an in-process agent backend could just as
+    well put the prompt in the request, and a guess would be silently wrong exactly once."""
 
     required_observation_keys: tuple[str, ...] = ()
     """Observation keys this backend ALWAYS emits; ``wiring.py::_verify_required_observation_keys``
@@ -153,13 +150,19 @@ class Connector:
 
     auth_token: AuthTokenFn | None = None
 
-    identity_config: Callable[[Path], dict[str, dict[str, Any]]] | None = None
+    completion_check: Callable[[], None] | None = None
+    """Run where the table completes (``wiring.py::complete_registries``), so what it raises stops
+    the server at boot and a run at init; ``None`` checks nothing."""
+
+    identity_config: (
+        Callable[[Path, Mapping[str, Any] | None], dict[str, dict[str, Any]]] | None
+    ) = None
     """Per-node config entries that are part of MEASUREMENT IDENTITY but not
     wire tunables — folded into ``resolve_pipeline_config_params`` so the
     origin cycle id and the archive's node-config reuse key change whenever
     the backend's effective revision does. Receives the resolved dataset config
-    dir so a connector can fold dataset-scoped inner behavior into the
-    fingerprint. The canonical user is the in-process ``promptpotter``
+    dir and the resolved experiment, so a connector can fold dataset-scoped inner
+    behavior into the fingerprint. The canonical user is the in-process ``promptpotter``
     connector: its backend IS the inner optimizer (optimizer prompt origin +
     layouts + engine + the dataset's ``inner_tasks.yaml`` inner-run config), so
     without this an origin edit silently reuses stale measurements recorded
@@ -230,16 +233,12 @@ class Connector:
 
 
 __all__ = [
+    "PROBE_WORKLOAD",
     "AuthTokenFn",
-    "BackendUnreachableError",
     "Connector",
-    "ConnectorExecution",
+    "ExperimentResolver",
     "InProcessRun",
-    "MeasuredUnit",
+    "InProcessWorkload",
     "PreflightFn",
-    "SessionProtocol",
     "VersionCheck",
-    "WireAdapter",
-    "unit_count",
-    "unit_plural",
 ]

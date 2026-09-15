@@ -15,7 +15,7 @@ import inspect
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from functools import partial
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from promptpotter.application.optimization.pobb.classification import is_deprecated, scoreable_rows
 from promptpotter.application.scoring.formula.compiler import CELL_INTRINSIC_NAMES
@@ -27,6 +27,7 @@ from promptpotter.domain.scoring import (
 )
 from promptpotter.shared.composite import to_short_formula
 from promptpotter.shared.errors import has_pipeline_warnings, is_error_result
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
@@ -49,6 +50,7 @@ __all__ = [
 ]
 
 
+@shapes_optimizer_prompt
 def compute_accuracy(*, results: list[QueryMeasurement], **_: Any) -> float | None:
     """Mean fitness over SCOREABLE rows. A DEPRECATED row carries no verdict and an ERRORED one
     never happened; the latter surfaces via ``compute_error_rate``.
@@ -485,9 +487,10 @@ async def materialize_sample_values(
 # The composite a campaign declaring none is scored on: the cell's own score, so the decision
 # metric and the headline agree and adopting the machinery costs nothing. Degradation is gated by
 # the round ``health`` block, never folded into fitness.
-DEFAULT_CELL_FORMULA = "fitness"
+DEFAULT_CELL_FORMULA: Annotated[str, shapes_optimizer_prompt] = "fitness"
 
 
+@shapes_optimizer_prompt
 def resolve_cell_formula(
     explicit: str | None,
     schema: PipelineSchema | None,

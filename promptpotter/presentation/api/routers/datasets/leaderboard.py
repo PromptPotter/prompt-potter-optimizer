@@ -26,7 +26,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import HardSampleOrder
 from promptpotter.domain.scoring import is_hit
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.archive_views import (
+from promptpotter.infrastructure.store.archive_queries import (
     campaign_measurement_series,
     cycle_measurement_series,
     measurement_series_for_samples,

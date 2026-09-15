@@ -36,15 +36,55 @@ keeps the round-health grade from reading `predicted == NO_RESULT` as a broken e
 contract, and what routes the evidence panels away from a hit/miss contrast that would partition
 nothing (`domain/scoring.py::is_verifier_graded`).
 
+## Step schema — `open → adhere`
+
+**Fixed before a cell is bought, because the measurement identity folds it and retrofitting one
+re-pays for every row** (`promptpotter/judges/CLAUDE.md` § The step schema). The obligation is
+`../../docs/operations/dataset-selection-rationale.md` § Adding a dataset step 2b: this task is
+turn-structured, so the schema is named now and each step banks its own term.
+
+| step | graded by | what it separates |
+|---|---|---|
+| open | `connectors/harbor.py::_skill_opened` — no model call | did the candidate's prompt reach the model at all |
+| adhere | the task's own verifier, as `env_reward` | did the episode do the job |
+
+**Not `retrieve → ground → answer`.** That schema is for a search-augmented task and there is
+nothing here to retrieve; coining it on this panel would be a schema that is wrong rather than
+merely new. And the ANSWER step needs no judge on a verifier-graded backend — SpreadsheetBench
+recalculates the workbook and compares cell by cell, which is a stronger grader than a rubric.
+
+The `open` step exists because on this backend **injection is not consumption**: the prompt is
+written into the container as `SKILL.md` and the agent is shown only its frontmatter, so an episode
+that never opens the file ran as no-skill. A round of those is arms-all-identical and reports a tie
+it never measured. `campaign.yaml::scoring.per_cell` carries the term at a floored weight, and
+`fitness` is left alone so a right-but-unopened cell stays a HIT.
+
 ## Measured
 
-| | |
-|---|---|
-| origin accuracy | *not yet measured — this screen is what fills it* |
-| per-cell cost | one cell measured at **$0.0101** on `qwen/qwen3.5-9b:nitro` (9 turns, 47.6k in / 8.2k out) |
-| per-cell wall clock | **254s** for that cell: 183s agent, 71s floor (container start, LibreOffice recalc, teardown) |
+**The first reading this panel has ever taken with the candidate's prompt actually delivered**
+(2026-09-12, 10 cells, serial). Everything measured before it ran with the injected skill silently
+dropped, so it measured a no-skill episode — see § Step schema.
 
-The floor is irreducible — it does not move with the model — so a faster or cheaper model buys
-the agent half only. The model recorded in `pipeline.yaml` is the one this dataset measures on;
-changing it changes what every row means, and the reason for the current pin belongs beside it
+| | post-fix | the earlier screen |
+|---|---|---|
+| skill opened | **10 / 10** | 0 / 4 re-measured |
+| origin accuracy | **0.600** | 0.800 |
+| objective mean | **0.492** | — (no `per_cell` then) |
+| per-cell tokens | **56,844** median · 63,291 mean · 113,243 p90 | 29,924 median |
+| per-cell wall clock | **181.8 s** median, 31.4 min for the panel | 172 s mean |
+| per-cell cost | **$0.00146** median, $0.0184 for the panel | $0.00137 mean |
+
+**Reading the skill makes this panel WORSE and roughly doubles the tokens**, and that is a finding
+about the origin prompt rather than a defect: cell `109-21` flipped HIT→MISS once the prompt
+arrived. Cost is bimodal by OUTCOME — every miss is a high-token cell (77k / 113k / 163k) against
+every hit being lower — so an episode that flails is an episode that burns, which is a property a
+prompt moves.
+
+**Four cells of headroom, and that is still a verdict about the PANEL.** Under the admission bar
+(`../../docs/research/benchmarks.md` § The admission bar), so this cut can carry an instrument
+check and never a search. Widening is a new dataset name, never an edit here.
+
+The container floor is irreducible — it does not move with the model — so a faster or cheaper model
+buys the agent half only. The model recorded in `pipeline.yaml` is the one this dataset measures
+on; changing it changes what every row means, and the reason for the current pin belongs beside it
 there.

@@ -153,7 +153,8 @@ def _eval_result(
 def _single_node_schema() -> PipelineSchema:
     """Minimal schema with one generic node and no node_type assignments."""
     return PipelineSchema(
-        name="test", nodes=[PipelineNode(name="llm_only", node_type=NodeType.NONE)]
+        name="test",
+        nodes=[PipelineNode(name="llm_only", node_type=NodeType.NONE, tunes_llm=False)],
     )
 
 
@@ -260,10 +261,11 @@ def _recall_schema() -> PipelineSchema:
     return PipelineSchema(
         name="test_recall",
         nodes=[
-            PipelineNode(name="cache_lookup", node_type=NodeType.CACHE),
+            PipelineNode(name="cache_lookup", node_type=NodeType.CACHE, tunes_llm=False),
             PipelineNode(
                 name="fuzzy",
                 node_type=NodeType.CANDIDATE_SOURCE,
+                tunes_llm=False,
                 observation_mappings=[
                     ObservationMapping(
                         pipeline_key="candidate_ranking", output_field="candidate_ranking"
@@ -273,6 +275,7 @@ def _recall_schema() -> PipelineSchema:
             PipelineNode(
                 name="ranker",
                 node_type=NodeType.RANKER,
+                tunes_llm=False,
                 observation_mappings=[
                     ObservationMapping(pipeline_key="final_ranking", output_field="final_ranking")
                 ],
@@ -452,8 +455,8 @@ def test_the_constant_answer_floor_is_undefined_without_labels() -> None:
     """
     import inspect
 
+    from promptpotter.application.diagnostics.seed_screen import SeedScreenError, class_floor
     from promptpotter.application.runner.inner import spawn
-    from promptpotter.application.seed_screen import SeedScreenError, class_floor
 
     labelled = [Sample(id=i, query=f"q{i}", ground_truth="A" if i else "B") for i in range(4)]
     assert class_floor(labelled) == 0.75
@@ -606,7 +609,7 @@ def test_an_archive_row_is_graded_by_the_reading_scorer_not_its_stamp(monkeypatc
         build_archive_observations,
     )
     from promptpotter.domain.scoring import CellScorer
-    from promptpotter.infrastructure.store import archive_views
+    from promptpotter.infrastructure.store import archive_queries
 
     # Two cells the arm got RIGHT, banked before ``objective`` existed — and one stamped by a
     # formula that is not the reading campaign's, which must lose to the scorer just the same.
@@ -615,14 +618,14 @@ def test_an_archive_row_is_graded_by_the_reading_scorer_not_its_stamp(monkeypatc
         {"sample_id": 2, "fitness": 1.0, "objective": 0.0},
     ]
     monkeypatch.setattr(
-        archive_views,
+        archive_queries,
         "list_runs",
         lambda *_a, **_k: [
             {"run_id": "r1", "prompt_fields_id": "cand-a", "provenance": {"grade": "A"}}
         ],
     )
-    monkeypatch.setattr(archive_views, "run_signatures", lambda *_a, **_k: {"r1": (1, 1)})
-    monkeypatch.setattr(archive_views, "load_run", lambda *_a, **_k: {"measurements": rows})
+    monkeypatch.setattr(archive_queries, "run_signatures", lambda *_a, **_k: {"r1": (1, 1)})
+    monkeypatch.setattr(archive_queries, "load_run", lambda *_a, **_k: {"measurements": rows})
 
     stores = types.SimpleNamespace(
         archive=types.SimpleNamespace(base_dir="/nowhere-unique-to-this-test")
@@ -915,8 +918,8 @@ def test_ruler_id_names_the_scale_a_theta_was_read_on() -> None:
     # THE ANCHOR, NOT THE MEMBERSHIP. Anchored extension adds cells without moving the ones
     # already there, so a θ read before and after are on ONE scale and must share an id. Hashing
     # the membership would churn it every round, read a cycle as incomparable with ITSELF, and —
-    # since `evidence.py` reads round 0's id into `Comparability` — poison cross-campaign
-    # comparison too.
+    # since `evidence/` reads round 0's id into `Comparability` — poison cross-campaign comparison
+    # too.
     grown = extend_ruler(fitted, [Observation("arm", 1, 1.0), Observation("arm", 9, 0.0)])
     assert set(grown.delta) == {1, 2, 3, 9}
     assert grown.anchor_id == fitted.anchor_id
@@ -2763,7 +2766,9 @@ def test_parse_population_flags_dropped_optimizer_prompt_port():
 
     schema = PipelineSchema(
         name="promptpotter-self",
-        nodes=[PipelineNode(name="l1_generate", param_keys={"problem_description"})],
+        nodes=[
+            PipelineNode(name="l1_generate", param_keys={"problem_description"}, tunes_llm=False)
+        ],
     )
     parent = _parent()
     base_problem_description = base_optimizer_template("l1_generate").problem_description
@@ -2831,6 +2836,7 @@ def test_an_axis_is_bounded_by_the_model_that_would_run_it_not_by_the_yaml() -> 
                     param_allowed_values={"reasoning_effort": ["none", "low"]},
                     param_values_narrowed={"reasoning_effort"} if narrowed else set(),
                     current_config={"model": "m"},
+                    tunes_llm=False,
                 )
             ],
             model_capabilities={} if offers is None else {"m": _caps(offers)},
@@ -2870,7 +2876,7 @@ def test_classify_result_routes_structural_warning_to_fatal() -> None:
     grades it structural-critical off the same stamped field. A transient-stamped code
     stays advisory-only — NOT deprecated, since the measurement is still valid. An
     unstamped warning is NOT routed fatal (no guessing)."""
-    from promptpotter.domain.rendering import classify_result
+    from promptpotter.domain.results_health import classify_result
 
     structural = classify_result(
         {
@@ -2934,7 +2940,7 @@ def test_content_empty_on_a_result_that_answered_is_not_an_empty_response() -> N
     infra, where they deprecate the sample without fast-eliminating the arm.
     """
     from promptpotter.config.settings import NO_RESULT
-    from promptpotter.domain.rendering import classify_result
+    from promptpotter.domain.results_health import classify_result
 
     def result(predicted: str, *, reasoning: int = 0, finish: str = "stop") -> dict[str, object]:
         return {
@@ -3075,7 +3081,10 @@ def test_a_verify_is_bounded_by_the_budget_the_campaign_already_set() -> None:
     whatever was typed, and an AUTOMATIC verify with no cap would buy it every perfect round."""
     from types import SimpleNamespace
 
-    from promptpotter.application.verify import derive_verify_samples, rounds_since_verified
+    from promptpotter.application.diagnostics.verify import (
+        derive_verify_samples,
+        rounds_since_verified,
+    )
 
     def n(lift: int, unmeasured: int = 10_000) -> int:
         return derive_verify_samples(
@@ -3120,11 +3129,13 @@ def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
     # misses and the L4 origin arm reads as infinitely efficient.
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.domain.run_records import TokenUsageRecord
-    from promptpotter.infrastructure.projections.live_dashboard.view import LiveDashboardView
+    from promptpotter.infrastructure.projections.live_dashboard.projection import (
+        LiveDashboardProjection,
+    )
     from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 
     cycle_dir = CycleDir(cycle_dir_for(tmp_path, CycleHop(campaign_id="c1", cycle_id="cyc1")))
-    view = LiveDashboardView(
+    view = LiveDashboardProjection(
         cycle_dir=cycle_dir,
         state_path=CycleLayout(Path(cycle_dir)).dashboard,
         hop=CycleHop(campaign_id="c1", cycle_id="cyc1"),

@@ -54,17 +54,46 @@ LEDGER_BASELINE = {
     # cache, with no way to say which layer answered. It pays for itself immediately — the node
     # ladder and the model's are different sets, and conflating them let a campaign search
     # `reasoning_effort` on a model that does not take the parameter at all.
-    # +2: `application/probe_reasoning.py` + its `cli/commands/probe_reasoning.py` shell — the verb
-    # that FILLS the evidence table above. Without it `_MODEL_PROFILES` is a hand-list against a
-    # catalogue of hundreds, which is the shape that goes stale and then answers wrongly; the whole
-    # reason the table may narrow a search axis is that a human can cheaply re-measure it. It runs
-    # through `get_llm_client().chat`, not a raw request, so it reports what this repo SENDS.
+    # +2: `application/diagnostics/probe_reasoning.py` + its `cli/commands/probe_reasoning.py`
+    # shell — the verb that FILLS the evidence table above. Without it `_MODEL_PROFILES` is a
+    # hand-list against a catalogue of hundreds, which is the shape that goes stale and then answers
+    # wrongly; the whole reason the table may narrow a search axis is that a human can cheaply
+    # re-measure it. It runs through `get_llm_client().chat`, not a raw request, so it reports what
+    # this repo SENDS.
     # +1: `runner/inner/spawn_context.py`. One module bought 24 deferred imports, because the two
     # halves it separates point opposite ways: publishing an inner-spawn context is something the
     # ordinary runner does on its way past, while RUNNING an inner campaign reaches back down into
     # that runner. Sharing one file made `entry <-> spawn` mutual and `seed_screen` a third leg.
-    "modules": 344,
-    "init_files": 49,
+    # +1: `application/diagnostics/ab.py` — the `ab` verb's session half, beside `verify.py` /
+    # `noise_floor.py`. The CLI shell held it and opened the session off the ACTIVE pointer, which
+    # is why `ab` could not name a campaign. The replay core stays beside the replayers it shares
+    # with resume (`mask/verdicts.py`), and the half that calls `init_services` cannot join it
+    # there without a runtime `optimization -> initialization` edge.
+    # +3: `application/commands/` (an empty `__init__` plus three modules for one). The dispatcher
+    # imports no FastAPI and the CLI verbs dispatch through it, so it is application code. Split by
+    # importer: `payloads` alone serves the TS builder, `checkin_dispatch` serves dataset ingest
+    # and CLI `new`, and `dispatcher` holds the appliers.
+    # +6 (three of them `__init__`s): `application/evidence/` splits the evidence read into the
+    # address grammar (`subjects`, all an entry point that only ADDRESSES a subject imports), the
+    # disk walk (`read`) and the two pure statistics over its rows (`comparison`, `grid`); and
+    # `diagnostics/` + `maintenance/` gather the verbs loose at `application/`'s top level.
+    # -2: `application/sweep_batch.py` + `infrastructure/store/sweep_store.py` — the sweep batch goes.
+    # +1: `domain/rendering.py` leaves domain as two `application/views/render/` modules, each named
+    # for what it holds — `optimizer_prompt_text`, whose definitions shape the optimizer prompt, and
+    # `prefix_reading` — because no one name covers both.
+    # +1: `domain/launch_limits.py` — the one run-limit carrier the wire payloads, admission, the
+    # runner and every ingress import; it replaces `RunLimitsPayload` and `RunMode.halt_at_accuracy`.
+    # +1: `domain/value_tree.py` — the vocabulary for ONE addressable tree of every value an arm may
+    # hold. A module rather than fields on `PipelineSchema` because the two facts it adds are the
+    # CONNECTOR's: which channel a value travels, and whether the model sees it eagerly, on demand,
+    # or never because it is not text. That is what lets a prompt field, a tool and a step be leaves
+    # instead of subsystems — an Agent Skill is a directory of instructions, resources and programs,
+    # and an MCP tool is a name, a description and a schema. It PAYS for itself: `node_param_keys`
+    # projects off it instead of walking the same declarations again.
+    "modules": 355,
+    # +1: `application/commands/__init__.py`, empty — importers name the submodule.
+    # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
+    "init_files": 53,
     # +1: `judges/__init__.py` — flagged for the same reason `connectors/__init__.py` is, and by
     # the same text test: a registry module has both an `__all__` and imports. Named rather than
     # emptied; the protocol types are deliberately NOT re-exported through it.
@@ -109,7 +138,13 @@ LEDGER_BASELINE = {
     # the shape of failure. With the padding gone the counters are honest but the round can no
     # longer tell "measured badly" from "barely measured", which is the difference between grading
     # a pipeline and asking for a re-measure. One name, two arities — the round's and its verdict's.
-    "cycle_result_fields": 165,
+    # +1: `unscored`, at the same two arities and for the reason its neighbour exists: cells the
+    # walk DID send and measure, carrying no verdict because the formula names a term their rows do
+    # not. No subtraction finds them — an ungraded cell was attempted, so it is inside `samples` —
+    # and the number is the WINNER's, which the rows at this altitude cannot say. Without it a round
+    # that graded six of ten reads as one that graded ten. Distinct from `not_attempted` because the
+    # remedies invert: a cell never sent is re-run, an ungraded one re-graded off the banked row.
+    "cycle_result_fields": 166,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -117,7 +152,9 @@ LEDGER_BASELINE = {
     # -1: `pipeline_schema.py::PipelineSchema.model_post_init(self, __context: Any)` is GONE — it
     # cached `_node_map` at init and pydantic skips it on `model_copy`, so a narrowed schema
     # answered with pre-copy nodes. Derived on read now. A real subtraction, not a re-annotation.
-    "any_params": 50,
+    # -1: `candidate_diff.py::parent_param_value(…, proposed: Any)` — it read the proposal only to
+    # know which fields a nested description dict named; one key per path names its own.
+    "any_params": 49,
     # +1: `results.py::is_floor_pinned(rows: Sequence[Mapping[str, Any]])`, the same signature as
     # `measured_cells` and `is_answer_collapsed` beside it — a round row read off disk is a plain
     # mapping, so a narrower annotation here would be a claim the callers cannot honour.
@@ -145,21 +182,27 @@ LEDGER_BASELINE = {
     # -16 -8: the `spawn_context` split (see `modules` above) — one boundary move, and the two
     # biggest knots fell together, which is what a boundary being in the wrong place looks like.
     # -5: `runner/entry`, which was only ever entangled through `spawn`.
-    # Of the 23 left, 8 are deliberate: `complexity_ledger`'s own 7 (it counts every layer, so it
-    # may import none at module scope) and `escalation/state` (1, documented there). The other 15
-    # are ONE backbone shape at three sites — a registry that COMPLETES itself at import time, so a
-    # registered member reaching back up closes a loop on a half-initialised package. Filed in
-    # `code-debt-cleanup.md` with the fix (separate registration from completion) and with the
-    # predicate for which sites bite. Count cycles with care: an `if TYPE_CHECKING:` import sits in the
-    # module body and reads as top-level to an AST walk, which made three "pairs" that were never
-    # runtime edges. The files whose cycle is invisible until the build breaks say so at the import.
-    "deferred_imports": 23,
+    # -14: the connector and injection tables complete in cached accessors, at a declared step.
+    # -1: `connectors/promptpotter.py` imports `spawn` at top level: `instrument_of` lives in
+    # `domain/l4/inner_origin.py`, so no cycle closes through `evidence`.
+    # +3: an own-package `importlib.import_module` counts too, which the `import` statements alone
+    # never showed — the two registries' member walks and the CLI's `COMMANDS` table.
+    # Of the 11, 10 are deliberate: `complexity_ledger`'s own 7 (it counts every layer, so it may
+    # import none at module scope), `escalation/state` (1, documented there) and the two walks,
+    # which import each member when the table completes. `COMMANDS` defers for startup, the reason
+    # `conventions.md` § Code shape measured and refused. Count cycles with care: an
+    # `if TYPE_CHECKING:` import sits in the module body and reads as top-level to an AST walk,
+    # which made three "pairs" that were never runtime edges. The files whose cycle is invisible
+    # until the build breaks say so at the import.
+    "deferred_imports": 11,
     # +1: `judges/CLAUDE.md` — the per-layer contract for a new top-level package, indexed from
     # `promptpotter/CLAUDE.md` like every other. It earns a page rather than a section in
     # `connectors/CLAUDE.md` because its load-bearing rule is the OPPOSITE concern: a connector
     # says where a measurement comes from, a judge says a grader is a measurement and never a
     # formula term — and that rule is what stops six re-derivation sites re-billing the archive.
-    "claude_md": 8,
+    # +1: `application/evidence/CLAUDE.md` — the evidence rules, apart from `application/CLAUDE.md`
+    # so only a reader editing that package pays for them.
+    "claude_md": 9,
     # SIX by charter (`tests/CLAUDE.md` § What each file is for). This row never rises: a test
     # rides an existing file's existing section, or it is not written.
     "test_files": 6,
@@ -237,7 +280,23 @@ LEDGER_BASELINE = {
     # +1: a verify's SIZE, now that the loop fires one by itself and the count is no longer a
     # number a human typed. Behaviour-coupled and silent the same way: a wrong size still produces
     # a verdict, just an unaffordable or an empty one. (test_numerics § 10)
-    "test_functions": 176,
+    # +1: a prompt field the check-in locked is neither offered to L1 nor accepted from it. The
+    # engine force-kept all six open, so a lock drawn on one was honoured by nothing and a rewrite
+    # of the operator's text could win the round unreported. (test_integrity § 4)
+    # +1: an output-schema field's prose locks per field, and a field added under a held one stays
+    # held. One `object` param reached top-level fields only and locked all or none, so a nested
+    # field's prose was unreachable and a locked one could not be told apart. (test_integrity § 4)
+    # +1: moving one spend ceiling leaves the other at the cap its launch composed. Merged against
+    # the job's reservation instead, the untouched arm would land in `spend_cap.json`, which the
+    # gate prefers, and a USD raise would lift the token ceiling to the account's headroom.
+    # (test_security)
+    # +1: a cell the active formula cannot grade keeps its measurement rather than being banked a
+    # failure, which costs the candidate's whole remaining walk and kills every later replay of an
+    # archive that is fine on disk. (test_resume)
+    # +1: whether a harbor episode OPENED the skill its prompt IS. Unopened is a no-skill episode,
+    # so a round of them is arms-all-identical read as a tie — and a silent layout drift reads 0.0
+    # on every cell, which is indistinguishable from exactly that finding. (test_integrity § 1)
+    "test_functions": 181,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

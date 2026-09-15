@@ -15,7 +15,7 @@ from promptpotter.application.campaign_config import (
     knob_label,
 )
 from promptpotter.application.datasets.draft_campaign import load_checkin_draft
-from promptpotter.application.evidence import SubjectSpec, parse_subject
+from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
 from promptpotter.application.jobs.launcher.draft_build import draft_wire
 from promptpotter.application.knobs import (
     COUPLINGS,

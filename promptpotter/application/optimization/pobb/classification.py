@@ -6,14 +6,17 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.rendering import classify_result
+from promptpotter.domain.results_health import classify_result
+from promptpotter.domain.scoring import is_unscored
 from promptpotter.shared.errors import is_error_result
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import QueryMeasurement
 
 
+@shapes_optimizer_prompt
 def ranked_item_keys_from_schema(schema: PipelineSchema | None) -> list[str]:
     if not schema:
         return []
@@ -24,6 +27,7 @@ def ranked_item_keys_from_schema(schema: PipelineSchema | None) -> list[str]:
     return keys
 
 
+@shapes_optimizer_prompt
 def get_ranked_items(r: Mapping[str, Any], ranked_item_keys: list[str] | None = None) -> list[Any]:
     pd = r.get("pipeline_data") or {}
     for key in ranked_item_keys or []:
@@ -54,24 +58,33 @@ def extract_warning_types(result: Mapping[str, Any]) -> list[str]:
     return classify_result(result).all_codes
 
 
+@shapes_optimizer_prompt
 def is_deprecated(result: Mapping[str, Any]) -> bool:
     """True iff the classifier flagged the sample fatal or infra-truncated. Both deprecate it for accounting, but only
     ``fatal_codes`` participate in one-sighting fast-path elimination."""
     return classify_result(result).is_fatal
 
 
+@shapes_optimizer_prompt
 def scoreable_rows(results: list[QueryMeasurement]) -> list[QueryMeasurement]:
     """The EVIDENCE population — rows that carry a verdict. A deprecated row was measured and thrown
-    out, an errored one never happened, so neither belongs in a denominator.
+    out, an errored one never happened, and an UNSCORED one landed under a formula that cannot grade
+    it, so none of the three belongs in a denominator.
 
     **One definition, because every published rate needs its ``n`` and its mean drawn from the same
-    filter** — spelled per call site, a third exclusion added to one leaves the count describing a
+    filter** — spelled per call site, a fourth exclusion added to one leaves the count describing a
     different population than the value beside it, with nothing raised. Load-bearing at L4, where a
     cell is a whole inner campaign: a floored 0.0 there does not read as "scored nothing", it reads
     as "drove the inner loop maximally DOWN". Deliberately NOT applied inside
     ``selection.py::_mean_fitness_by_cell``, whose own docstring says why.
+
+    The unscored exclusion is also what keeps ``exploration.py::graded_response``'s raise armed for
+    the real bug: it reads ``objective`` off this population, so a row with no verdict is gone
+    before it gets there and an absent verdict on a row that SHOULD carry one still halts.
     """
-    return [r for r in results if not is_deprecated(r) and not is_error_result(r)]
+    return [
+        r for r in results if not is_deprecated(r) and not is_error_result(r) and not is_unscored(r)
+    ]
 
 
 __all__ = [

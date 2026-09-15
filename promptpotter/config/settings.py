@@ -4,10 +4,12 @@ persistence versioning and service-level defaults."""
 import math
 import tomllib
 from importlib.metadata import version
+from typing import Annotated
 
 from pydantic_settings import BaseSettings
 
 from promptpotter.config.paths import env_file_path, source_checkout_root
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
 def _app_version() -> str:
@@ -32,14 +34,14 @@ DEFAULT_BACKEND_URL = "http://127.0.0.1:8000"
 DEFAULT_BACKEND_ID = "local"
 
 DATASET_NAME: str = "ground_truth"
-NO_RESULT: str = "NO_RESULT"
+NO_RESULT: Annotated[str, shapes_optimizer_prompt] = "NO_RESULT"
 
 # stores/measurement_archive — file lock parameters
 LOCK_TIMEOUT: float = 5.0  # seconds before treating lock as stale
 
 
 # The decomposition field SET; the render ORDER is per class (`PromptTemplate.RENDER_ORDER`).
-PROMPT_STRING_FIELDS: list[str] = [
+PROMPT_STRING_FIELDS: Annotated[list[str], shapes_optimizer_prompt] = [
     "persona",
     "task_intent",
     "problem_description",
@@ -51,15 +53,17 @@ PROMPT_STRING_FIELDS: list[str] = [
 # Above this many distinct ground truths a task's answer space is "open" (free-text /
 # ranking) — no enumerable label identity. Shared by the answer_distribution collapse
 # detector and the earned-block library's task-fit signature, so both draw the same line.
-ANSWER_SPACE_CAP: int = 10
+ANSWER_SPACE_CAP: Annotated[int, shapes_optimizer_prompt] = 10
 
 # task_context sub-fields that L1 may emit alongside prompt/node overrides.
-TASK_CONTEXT_OVERRIDES: frozenset[str] = frozenset({"upstream_context", "downstream_context"})
+TASK_CONTEXT_OVERRIDES: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
+    {"upstream_context", "downstream_context"}
+)
 
 # Populates ``PipelineNode.param_types`` so a dataset overlay need not spell these out. An
 # overlay may add backend-specific types via the node's ``optimizer.param_types`` block, which
 # overrides these; inference from ``node.config`` Python types is the last-resort fallback.
-WELL_KNOWN_PARAM_TYPES: dict[str, str] = {
+WELL_KNOWN_PARAM_TYPES: Annotated[dict[str, str], shapes_optimizer_prompt] = {
     # Universal LLM-call params — same shape across every provider.
     "temperature": "number",
     "top_p": "number",
@@ -96,7 +100,7 @@ OPTIMIZER_CALL_DEADLINE_S: float = 180.0
 # ``CampaignConfig.pobb_epsilon``; this is the single default every entry point references so
 # the number cannot drift. Set at the most aggressive threshold before false-cuts of true
 # winners climb, measured on the archived round corpus.
-POBB_DEFAULT_EPSILON: float = 0.15
+POBB_DEFAULT_EPSILON: Annotated[float, shapes_optimizer_prompt] = 0.15
 
 DEFAULT_ORIGIN_BUDGET: int = 40
 

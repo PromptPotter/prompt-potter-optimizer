@@ -416,7 +416,7 @@ export function fetchConfigMap(
 // a press instead of a poll.
 //
 // Every shape is GENERATED from the Pydantic source (`Evidence` &c in
-// `application/evidence.py`) — hand-mirroring them here bypasses `build_ts_types.py`
+// `application/evidence/`) — hand-mirroring them here bypasses `build_ts_types.py`
 // and drifts behind the model silently.
 // `inside` is the sandbox chain the address lives in — the hops ABOVE the leaf, which for a
 // tree node is `coursePath.slice(0, -1)`. Empty for a top-level campaign; one hop per L4
@@ -525,7 +525,7 @@ export function fetchEvidence(
 // recomputing the whole tree on every poll while a lens is open.
 //
 // There is no `depth`: one tree per campaign serves every consumer, and the recursion
-// bound is the server's (`lineage_views._MAX_COURSE_DEPTH`). Two clients picking
+// bound is the server's (`lineage_queries._MAX_COURSE_DEPTH`). Two clients picking
 // different depths for the same served object is what let them disagree.
 //
 // `path` addresses the ROOT COURSE of the tree — the same CyclePath every other

@@ -112,7 +112,7 @@ class CycleListEntry(StrictModel):
     parent_session_id: str = ""
     parent_cycle_id: str | None = Field(
         default=None,
-        description="Immediate parent for siblings (forks/sweeps/diag); null for roots. Sidebar uses this to nest siblings.",
+        description="Immediate parent for siblings (forks/diag); null for roots. Sidebar uses this to nest siblings.",
     )
     dataset_name: str = ""
     backend_id: str = ""

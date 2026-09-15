@@ -4,7 +4,7 @@ in this repo: the backend destructures ``answer_field`` first, so check there wh
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Annotated, Any
 
 from promptpotter.shared import (
     extract_boxed_number,
@@ -12,6 +12,7 @@ from promptpotter.shared import (
     extract_last_bold,
     text_list_rank,
 )
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
 def _gsm8k_match(predicted: str, ground_truth: str) -> float:
@@ -82,7 +83,7 @@ SCORING_FUNCTIONS: dict[str, Callable[..., Any]] = {
 # gated: an empty format is a legal origin the optimizer evolves, and round-0
 # health is what catches an unscoreable one. Matchers that compare the raw text
 # (no extraction step) carry no entry — the output IS the label.
-EXTRACTION_NOTES: dict[str, str] = {
+EXTRACTION_NOTES: Annotated[dict[str, str], shapes_optimizer_prompt] = {
     "exact_match": (
         "Scoring exact-matches the answer after taking the LAST bolded span (the "
         "last **…** run) of the output, lowercased. Commit the final answer on its "
@@ -109,6 +110,7 @@ EXTRACTION_NOTES: dict[str, str] = {
 }
 
 
+@shapes_optimizer_prompt
 def extraction_note_for_scoring(scoring: str) -> str:
     """The answer-format contract the committed prompt must satisfy — the union of notes for every matcher the formula
     names. Empty when no extract-then-compare matcher is used, since the raw output is then compared as-is."""

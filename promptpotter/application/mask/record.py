@@ -47,7 +47,7 @@ class MaskRound(StrictModel):
     round: int
     candidates: list[MaskCandidate] = Field(default_factory=list)
     parent_evaluators: dict[str, float] = Field(default_factory=dict)
-    parent_accuracy: float = 0.0
+    parent_accuracy: float | None = None
     # The recorded round itself, and the pool of known per-sample outcomes as it stood
     # BEFORE this round ran — the substrate a REPLAY verdict re-derives from, and the only
     # thing on this model that is a raw measurement rather than a summary of one. Carried

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Collection, Mapping, Sequence
 from enum import StrEnum
-from typing import Any, Literal, NamedTuple, NotRequired, TypedDict
+from typing import Any, Literal, NamedTuple, NotRequired, TypedDict, overload
 
 from pydantic import ConfigDict, Field, computed_field
 
@@ -15,7 +16,6 @@ from promptpotter.domain.escalation_signals import (
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import stable_hash
-from promptpotter.domain.rendering import display_rank_key
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.run_records import ErrorRecord
@@ -24,6 +24,7 @@ from promptpotter.domain.search_point import strip_rendered_prompt
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import is_error_result
+from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 __all__ = [
     "ABORT_LENS_LABELS",
@@ -42,12 +43,11 @@ __all__ = [
     "OverlapMember",
     "OverlapReading",
     "ParentStep",
-    "PayloadOutcome",
     "RoundParent",
     "RoundResult",
+    "ScoreboardRankKey",
     "ScoreboardRow",
     "ScoredCandidate",
-    "SweepBatchResult",
     "WarningDict",
     "best_round_on_shared_cells",
     "candidate_label",
@@ -63,6 +63,8 @@ __all__ = [
     "parent_key",
     "parent_line",
     "parse_candidate_label",
+    "resolved_fitness",
+    "scoreboard_rank_key",
     "unscoreable_cells",
 ]
 
@@ -335,6 +337,7 @@ def unscoreable_cells(results: Sequence[Mapping[str, Any]]) -> int:
     return sum(1 for r in results if is_error_result(r))
 
 
+@shapes_optimizer_prompt
 def merge_known_outcomes(
     prior: list[dict[str, Any]], incoming: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -348,6 +351,57 @@ def merge_known_outcomes(
         if sid is not None:
             by_sid[sid] = r
     return list(by_sid.values())
+
+
+@overload
+def resolved_fitness(composite_fitness: float | None, accuracy: float) -> float: ...
+@overload
+def resolved_fitness(composite_fitness: float | None, accuracy: float | None) -> float | None: ...
+def resolved_fitness(composite_fitness: float | None, accuracy: float | None) -> float | None:
+    """THE composite-or-accuracy rule, one implementation: an honest ``0.0`` is a real score, so
+    only genuine absence degrades to ``accuracy``. Every display and ranking site routes here.
+
+    ``None`` out only when BOTH are absent — an unscoreable candidate has no number rather than a
+    low one. Overloaded so a caller that has already established a real accuracy keeps a ``float``
+    and needs no cast: the two arms are a fact about the input, not something to re-assert."""
+    return composite_fitness if composite_fitness is not None else accuracy
+
+
+# Declared once: a caller restating the tuple misses the next term added to the key.
+ScoreboardRankKey = tuple[bool, bool, float, float, float]
+
+
+def scoreboard_rank_key(
+    composite_fitness: float | None,
+    accuracy: float | None,
+    theta: float | None = None,
+    *,
+    is_winner: bool = False,
+    is_partial: bool = False,
+) -> ScoreboardRankKey:
+    """``resolved_fitness``'s argmax form: the order ``RoundResult.scoreboard`` persists in.
+
+    On a warm round rank 1 IS the crown, by construction: the round is won on Rasch θ-lift over
+    the parent (``elect_round_winner``), so a table ordered on the composite could seat the winner
+    anywhere and offer no column that explained it. Both leading terms DEFAULT OFF, so a cold
+    round — no candidate carrying a θ, nothing crowned yet — orders on the composite alone.
+
+    ⚠️ A mask lens must keep passing two arguments (``mask/verdicts.py``). It exists to show a
+    DIFFERENT ordering under a masked formula, and pinning the active-formula winner to rank 1
+    there would leave it unable to disagree."""
+    # An UNSCOREABLE arm is no score, not a low one, so it sorts to the bottom on the device a
+    # missing θ uses — it must never outrank a candidate that was actually read.
+    shown = resolved_fitness(composite_fitness, accuracy)
+    return (
+        is_winner,
+        # A rate the operator CUT SHORT never outranks one measured on the whole panel: the round
+        # order is stratified, so the cells a stopped walk kept are a biased slice rather than a
+        # smaller sample of the same thing.
+        not is_partial,
+        theta if theta is not None else -math.inf,
+        shown if shown is not None else -math.inf,
+        accuracy if accuracy is not None else -math.inf,
+    )
 
 
 # ``ScoredCandidate``'s display subset, spelled once and deliberately narrower than the
@@ -388,7 +442,10 @@ class ScoreboardRow(StrictModel):
     rank: int
     candidate_id: str
     changes_description: str
-    accuracy: float
+    # ``None`` is UNSCOREABLE and is not ``0.0`` — see ``ScoredCandidate.accuracy``: a candidate
+    # whose every row errored was never read. Omitted here, the round document's own
+    # ``model_dump()`` raised building this row out of exactly such a candidate.
+    accuracy: float | None
     composite_fitness: float
     total: int
     escalation_aborted: bool
@@ -694,6 +751,12 @@ class RoundResult(StrictModel):
     # round's degradation verdict, which without it cannot tell a round that measured badly from
     # one that barely measured at all.
     not_attempted: int = 0
+    # Cells of the winner's panel that WERE measured and could not be graded — the formula named a
+    # term the row did not carry. Beside ``not_attempted`` because the two are the only ways a round
+    # ends with fewer verdicts than cells, and they call for opposite remedies: a cell never sent is
+    # re-run, an ungraded one is re-graded off the row already banked. Without it a round that
+    # graded six of ten reads exactly like one that graded ten.
+    unscored: int = 0
     # Fatal-warning samples discarded from total/accuracy on the winner's run.
     deprecated: int = 0
     escalation_signal: EscalationSignal | None = None
@@ -722,7 +785,7 @@ class RoundResult(StrictModel):
     # --- raw payload ---
     prompt_fields: dict[str, Any]
     pipeline_params: dict[str, Any] | None = None
-    parent_accuracy: float = 0.0
+    parent_accuracy: float | None = None
     # Per-sample rows — ``QueryMeasurement`` + stale-data markers (see ``RoundParent.results``).
     results: list[dict[str, Any]] = Field(default_factory=list)
     # Per-candidate scored results — lets resume rescore under a changed scorer + replay decisions.
@@ -797,7 +860,7 @@ class RoundResult(StrictModel):
     # IDENTITY, NOT A FIRE RECORD — every optimizer node is named on every round, including ones
     # that never run. Which node RAN, and what each panel cost it, is the ledger's `llm_call`.
     optimizer_prompt_hashes: dict[str, str] = Field(default_factory=dict)
-    # "generation_only" for a sweep round (L1 variants generated, never scored — every
+    # "generation_only" for a diag round (L1 variants generated, never scored — every
     # scoring scalar below is a structural zero, not a measurement); "" for a scored round.
     status: str = ""
 
@@ -852,7 +915,7 @@ class RoundResult(StrictModel):
         winner_id = self.winner_id
         ranked = sorted(
             self.candidate_scores,
-            key=lambda c: display_rank_key(
+            key=lambda c: scoreboard_rank_key(
                 c.composite_fitness,
                 c.accuracy,
                 c.theta,
@@ -892,15 +955,14 @@ class CycleResult(StrictModel):
     rounds: list[RoundResult]
     # Origin-EXCLUSIVE, unlike the persisted `index.json::n_rounds`, which counts round 0.
     n_l1_rounds: int
-    best_accuracy: float
+    best_accuracy: float | None
     best_round: int
     # They travel together because a consumer reading one against a composite computed on some
     # other basis is comparing two different measurements.
-    origin_accuracy: float
-    # `None`, not 0.0, on a cycle that never started: the same rule `origin_level` below states,
-    # and the pair was violated and honoured in this one constructor call. A stand-in 0.0 becomes
-    # round 0's lift bar in `l1/stats.py::_top_lifts`, which reports the first round's whole
-    # composite as its improvement over an origin nothing ever scored.
+    origin_accuracy: float | None
+    # `None`, not 0.0, on a cycle that never started — the rule every accuracy and level here
+    # follows. A stand-in 0.0 becomes round 0's lift bar in `l1/stats.py::_top_lifts`, which
+    # reports the first round's whole composite as its improvement over an origin nothing scored.
     origin_composite_fitness: float | None = None
     # The L4 outer proxy's inner-search signal: the origin's level and the ability each round
     # The PARENT each round ended on — the winner it crowned, or the one carried forward when it
@@ -973,7 +1035,7 @@ class DiagnosticRunRecord(StrictModel):
     workspace_n: int
     workspace_accuracy: float
     workspace_composite: float
-    source_campaign_accuracy: float
+    source_campaign_accuracy: float | None
     source_campaign_composite: float
     source_campaign_n: int
     # ``noise-floor`` only: the backend's own run-to-run noise, not a comparison to history.
@@ -1054,6 +1116,12 @@ class DegradationHealth(StrictModel):
     # a verdict can say "the origin was not measured" instead of grading a pipeline on cells that
     # never ran — which is what the abort's fabricated error rows made it do.
     not_attempted: int = 0
+    # Cells that WERE sent and measured and carry no verdict, because the active formula named a
+    # term the row did not carry. In ``samples`` — they were attempted — and absent from every rate
+    # above, so without this field a round holding four of them reads exactly like one that graded
+    # everything. Threaded from ``RoundResult`` rather than recounted here, the way
+    # ``not_attempted`` is: one owner (`l1/score/winner.py`), one number.
+    unscored: int = 0
     # Share of this round's predictions on its single commonest label; ``None`` where the answer
     # space makes collapse meaningless. REPORTED, never graded — hedging to one label is the
     # addressable failure the loop exists to correct, so grading it critical would halt the
@@ -1076,24 +1144,3 @@ class DegradationHealth(StrictModel):
     # field there was no surface in the product that showed it: the text is in the round file, and
     # the operator was left to open it by hand or guess. ``None`` when no cell errored.
     last_error: str | None = None
-
-
-class PayloadOutcome(StrictModel):
-    source_file: str
-    # A ``StopOutcome`` value for every payload the batch ATTEMPTED — never a sweep-private
-    # vocabulary. The two batch states both mean not-attempted: ``skipped_already_forked`` (an
-    # earlier batch took it) and ``skipped`` (this batch halted first). Whether a cycle survived
-    # is ``cycle_id`` below — a separate fact, and never what decides this one.
-    status: str
-    cycle_id: str
-
-
-class SweepBatchResult(StrictModel):
-    batch_id: str
-    parent_cycle_id: str
-    family_root: str
-    started_at: str
-    completed_at: str
-    fork_cycle_ids: list[str]
-    payload_outcomes: list[PayloadOutcome]
-    interrupted: bool

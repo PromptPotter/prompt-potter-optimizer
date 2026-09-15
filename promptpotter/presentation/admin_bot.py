@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 
 from promptpotter.application.jobs.install_spend import read_install_spend
+from promptpotter.application.jobs.quota import overrun
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import settings
@@ -107,7 +108,7 @@ def _render_install_spend() -> str:
         if r.unreadable:
             lines.append(f"{who}: unreadable — {r.unreadable}")
             continue
-        over_usd, over_tokens = r.ceilings.overrun(r.spent)
+        over_usd, over_tokens = overrun(r.ceilings, r.spent)
         flags = []
         if r.ceilings.usd is None:
             flags.append("host, unmetered")

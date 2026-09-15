@@ -301,12 +301,13 @@ class LangfuseSink:
         trace_id = self._trace_ids.get(event.campaign_id)
         if not trace_id:
             return
-        self._lf.create_score(
-            trace_id=trace_id,
-            name="best_accuracy",
-            value=event.best_accuracy,
-            comment=f"Best at round {event.best_round}, stop: {event.stop_reason}",
-        )
+        if event.best_accuracy is not None:
+            self._lf.create_score(
+                trace_id=trace_id,
+                name="best_accuracy",
+                value=event.best_accuracy,
+                comment=f"Best at round {event.best_round}, stop: {event.stop_reason}",
+            )
         self._lf.update_trace(
             trace_id=trace_id,
             output={

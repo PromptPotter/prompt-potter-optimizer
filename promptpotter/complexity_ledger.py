@@ -206,12 +206,30 @@ def _count_lax_models(py_files: list[Path]) -> int:
     )
 
 
-# A function-local import of our OWN package. Sanctioned for one reason, which the import must
+# A function-local import of our OWN package, `importlib.import_module` included unless its
+# argument is a literal naming another package. Sanctioned for one reason, which the import must
 # declare: it gates an optional extra, so hoisting it would make the core un-importable without
 # that extra (ADR-0006). Mark those `# extras: <name>` on the import line or the one above; the
 # rest are debt and count here. Why startup and cycles do not excuse one:
 # `docs/developer/conventions.md` § Code shape.
 _EXTRAS_MARKER = "# extras:"
+
+
+def _imports_own_package(node: ast.AST) -> typing.TypeGuard[ast.stmt | ast.expr]:
+    if isinstance(node, ast.ImportFrom):
+        return (node.module or "").startswith("promptpotter")
+    if isinstance(node, ast.Import):
+        return any(a.name.startswith("promptpotter") for a in node.names)
+    if not (isinstance(node, ast.Call) and node.args):
+        return False
+    func = node.func
+    name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+    if name != "import_module":
+        return False
+    target = node.args[0]
+    return not (isinstance(target, ast.Constant) and isinstance(target.value, str)) or (
+        target.value.startswith("promptpotter")
+    )
 
 
 def _count_deferred_imports(py_files: list[Path]) -> int:
@@ -226,13 +244,7 @@ def _count_deferred_imports(py_files: list[Path]) -> int:
             if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 continue
             for inner in ast.walk(node):
-                if isinstance(inner, ast.ImportFrom):
-                    named = (inner.module or "").startswith("promptpotter")
-                elif isinstance(inner, ast.Import):
-                    named = any(a.name.startswith("promptpotter") for a in inner.names)
-                else:
-                    continue
-                if not named:
+                if not _imports_own_package(inner):
                     continue
                 context = lines[max(0, inner.lineno - 2) : inner.end_lineno or inner.lineno]
                 total += not any(_EXTRAS_MARKER in line for line in context)
@@ -251,7 +263,7 @@ def _is_reexport_shim(init_file: Path) -> bool:
 def compute_ledger() -> dict[str, int]:
     from promptpotter.application.knobs import KNOBS
     from promptpotter.application.optimization.dispatch.injections.registry import (
-        INJECTIONS,
+        injection_table,
     )
     from promptpotter.application.optimization.escalation.rules import DEFAULT_ESCALATION_RULES
     from promptpotter.config import settings as settings_mod
@@ -277,7 +289,7 @@ def compute_ledger() -> dict[str, int]:
         "domain_any_maps": _count_domain_any_maps(py_files),
         "models_lax": _count_lax_models(py_files),
         "prompt_string_fields": len(PROMPT_STRING_FIELDS),
-        "injections": len(INJECTIONS),
+        "injections": len(injection_table()),
         "escalation_rules": len(DEFAULT_ESCALATION_RULES),
         "deferred_imports": _count_deferred_imports(py_files),
         "claude_md": len(_package_files("CLAUDE.md")),

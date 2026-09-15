@@ -4,13 +4,34 @@ Stage-0 framing in ADR-0003. Stage 1 replaces only the resolver, never this type
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from typing import NewType
 
-from promptpotter.domain.identity import Issuer, TenantId, UserId, safe_name
 from promptpotter.shared.errors import NotFoundError
 
 logger = logging.getLogger(__name__)
+
+TenantId = NewType("TenantId", str)
+UserId = NewType("UserId", str)
+Issuer = NewType("Issuer", str)
+SafeName = NewType("SafeName", str)
+
+_SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9_\-]+$")
+_MAX_SAFE_NAME_LEN = 64
+
+
+def safe_name(raw: str) -> SafeName:
+    """Validate *raw* as a slug-style path segment. Stricter than ``validate_path_component`` (no dots): tenant slugs and
+    user ids are URL-safe identifiers, not free-form path tokens."""
+    if not raw or not _SAFE_NAME_RE.match(raw) or len(raw) > _MAX_SAFE_NAME_LEN:
+        raise ValueError(
+            f"Invalid identity slug: {raw!r}. "
+            f"Must match [a-zA-Z0-9_-]+ with length <= {_MAX_SAFE_NAME_LEN}."
+        )
+    return SafeName(raw)
+
 
 # ── Host privilege is a CHANNEL, not an API capability ─────────────────────
 # What the HOST admin (the person who runs the box) can do that a tenant owner cannot
@@ -167,6 +188,10 @@ __all__ = [
     "OWNER_COMMAND_CAPABILITIES",
     "TERMINAL_IDENTITY_ID",
     "IdentityContext",
+    "Issuer",
+    "SafeName",
+    "TenantId",
+    "UserId",
     "acting_principal_id",
     "capabilities_from_names",
     "claim_access_state",
@@ -174,4 +199,5 @@ __all__ = [
     "default_identity",
     "has_capability",
     "require_capability",
+    "safe_name",
 ]

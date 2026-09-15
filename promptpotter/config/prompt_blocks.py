@@ -7,6 +7,10 @@ import json
 from functools import cache
 from pathlib import Path
 
+from promptpotter.shared.hashing import shapes_optimizer_prompt
+
+shapes_optimizer_prompt(__name__)
+
 BUNDLED_PATH = Path(__file__).parent / "prompt_variants.json"
 
 # The imported Self-Discover reasoning modules — task-AGNOSTIC strategies ("break the problem
@@ -21,19 +25,25 @@ def general_reasoning_blocks() -> dict[str, tuple[str, ...]]:
     return {field: texts[:8] for field, texts in prompt_blocks(GENERAL_SOURCE).items()}
 
 
+def block_library() -> dict[str, list[dict[str, str]]]:
+    """Field name → its entries as authored, each with the ``source`` that decides whether the
+    guidance fallback offers it — what the L4 fingerprint hashes."""
+    library: dict[str, list[dict[str, str]]] = json.loads(BUNDLED_PATH.read_text(encoding="utf-8"))[
+        "prompt_fields"
+    ]
+    return library
+
+
 @cache
 def prompt_blocks(source: str | None = None) -> dict[str, tuple[str, ...]]:
     """Field name → its reusable block texts, in authored order. Unfiltered this is the library's DECLARED VALUE SPACE —
     what ``restrict`` admits and the L1 validator checks against."""
-    raw: dict[str, list[dict[str, str]]] = json.loads(BUNDLED_PATH.read_text(encoding="utf-8"))[
-        "prompt_fields"
-    ]
     blocks = {
         field: tuple(
             text
             for v in variants
             if (source is None or v["source"] == source) and (text := v["text"].strip())
         )
-        for field, variants in raw.items()
+        for field, variants in block_library().items()
     }
     return {field: texts for field, texts in blocks.items() if texts}

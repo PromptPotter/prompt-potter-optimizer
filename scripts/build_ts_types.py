@@ -18,29 +18,39 @@ from pydantic.fields import ComputedFieldInfo, FieldInfo
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO))
 
-from promptpotter.application.archive_maintenance import ArchiveReport
-from promptpotter.application.evidence import (
+from promptpotter.application.commands.payloads import (
+    CommandAcceptedBody,
+    OriginGateDecisionPayload,
+)
+from promptpotter.application.evidence.comparison import (
     ArmReplicate,
     Comparability,
-    EditSpread,
-    EffectProvenance,
-    Evidence,
     EvidencePower,
     EvidenceVariance,
+    MetricReading,
+    OrderConfound,
+    PairwiseComparison,
+)
+from promptpotter.application.evidence.grid import (
     FactorCell,
     FactorGridReading,
     FactorLevel,
     FactorReading,
-    MetricReading,
-    OrderConfound,
-    PairwiseComparison,
+)
+from promptpotter.application.evidence.metric_catalogue import MetricSpec
+from promptpotter.application.evidence.read import (
+    EditSpread,
+    EffectProvenance,
+    Evidence,
     RankedEdit,
+)
+from promptpotter.application.evidence.subjects import (
     ScenarioReading,
     SubjectMask,
     SubjectReading,
     WinnerChainPoint,
 )
-from promptpotter.application.evidence_metrics import MetricSpec
+from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
 from promptpotter.application.pipeline_resolve import CampaignPipelineResponse
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import (
@@ -94,14 +104,10 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     PobbBlock,
     RunLimits,
 )
-from promptpotter.infrastructure.store.family_ray_views import RayItem, RayResponse
-from promptpotter.infrastructure.store.lineage_views import (
+from promptpotter.infrastructure.store.family_ray_queries import RayItem, RayResponse
+from promptpotter.infrastructure.store.lineage_queries import (
     LineageDivergence,
     LineageNode,
-)
-from promptpotter.presentation.api.middleware.command_dispatcher import (
-    CommandAcceptedBody,
-    OriginGateDecisionPayload,
 )
 from promptpotter.presentation.api.routers.active import (
     ActiveSessionResponse,
@@ -255,11 +261,11 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     FileEntry,
     FilesResponse,
     FileContentResponse,
-    # --- the lineage tree (store/lineage_views) ---
+    # --- the lineage tree (store/lineage_queries) ---
     CycleHop,  # nested in LineageNode.path AND RayItem.path — the emitter does not recurse
     LineageDivergence,
     LineageNode,
-    # --- the time-ray (store/family_ray_views) ---
+    # --- the time-ray (store/family_ray_queries) ---
     RayItem,
     RayResponse,
     # --- the SSE frame. Hand-mirrored in `chat/activity.ts` until now, with `kind: string`,
@@ -440,7 +446,7 @@ def _emit_enum_union(enum_cls: type[enum.Enum], note: str) -> str:
 def _emit_command_kinds() -> str:
     """Emit ``ALL_DISPATCHED_KINDS`` as a named union so ``postCommand`` can be narrowed.
 
-    Same argument as ``_emit_stop_reason_labels``: against a `kind: string` parameter a renamed
+    Same argument as ``_emit_stop_reason_tables``: against a `kind: string` parameter a renamed
     verb reaches the operator as a runtime ``command_kind_unknown`` 404, not a compile error."""
     from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
 
@@ -465,11 +471,20 @@ def _emit_non_activity_kinds() -> str:
     return f"// {note}\nexport type NonActivityKind = {members};"
 
 
-def _emit_stop_reason_labels() -> str:
-    """Emit ``STOP_REASON_INFO`` (domain/phases.py) as TS consts — the single label AND next-step
-    source, mirrored to the webapp without hand-maintained drift. Both ride the mirror rather than
-    ``dashboard.json`` because they are properties of the REASON, not of a cycle; serving them per
-    poll would ship the same twenty strings every two seconds. ``""`` next steps are omitted."""
+def _emit_stop_reason_tables() -> str:
+    """Emit ``STOP_REASON_INFO`` (domain/phases.py) as TS consts — the single label, next-step AND
+    outcome source, mirrored to the webapp without hand-maintained drift. All three ride the mirror
+    rather than ``dashboard.json`` because they are properties of the REASON, not of a cycle;
+    serving them per poll would ship the same twenty strings every two seconds. ``""`` next steps
+    are omitted.
+
+    **``outcome`` is the load-bearing third and was the one missing.** The two decorative halves
+    reached the browser while the half that says whether a stop SUCCEEDED did not, so every
+    consumer that had to tell a crash from a clean finish hand-authored a name set instead — the
+    exact shape `promptpotter/CLAUDE.md` § Ask the typed predicate calls a bug, and the browser
+    walk's spend tier was carrying one. Emitted TOTAL over the table, so a new `StopReason`
+    arrives classified rather than silently absent.
+    """
     from promptpotter.domain.phases import STOP_REASON_INFO
 
     rows = "\n".join(
@@ -479,6 +494,9 @@ def _emit_stop_reason_labels() -> str:
         f"  {reason.value!r}: {info.next_step!r},"
         for reason, info in STOP_REASON_INFO.items()
         if info.next_step
+    )
+    outcomes = "\n".join(
+        f"  {reason.value!r}: {info.outcome.value!r}," for reason, info in STOP_REASON_INFO.items()
     )
     return (
         "// Operator-facing label per terminal reason (StopReason). Mirror of\n"
@@ -491,6 +509,13 @@ def _emit_stop_reason_labels() -> str:
         "// here states that nothing is owed; it is not a gap.\n"
         "export const STOP_REASON_NEXT_STEPS: Record<string, string> = {\n"
         f"{steps}\n"
+        "};\n\n"
+        "// Whether a stop SUCCEEDED, and the only half of the table that decides anything —\n"
+        "// `StopOutcome`, where `paused` is the one non-terminal member. TOTAL over the reasons,\n"
+        "// so ask it rather than matching names: a hand-listed set of crash names rots in both\n"
+        "// directions, missing the reason added yesterday and keeping one that was renamed.\n"
+        "export const STOP_REASON_OUTCOMES: Record<string, string> = {\n"
+        f"{outcomes}\n"
         "};"
     )
 
@@ -665,7 +690,7 @@ def main() -> int:
     )
     blocks.append(_emit_command_kinds())
     blocks.append(_emit_non_activity_kinds())
-    blocks.append(_emit_stop_reason_labels())
+    blocks.append(_emit_stop_reason_tables())
     blocks.append(_emit_abort_lens_labels())
     blocks.append(_emit_evaluator_meta())
     blocks.append(_emit_cycle_path_grammar())

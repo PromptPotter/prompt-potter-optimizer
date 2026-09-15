@@ -8,7 +8,6 @@ import logging
 from fastapi import FastAPI, Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from promptpotter.domain.identity import Issuer, TenantId, UserId
 from promptpotter.infrastructure.identity.blocklist import check_blocklist
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
 from promptpotter.infrastructure.identity.grants import (
@@ -22,6 +21,9 @@ from promptpotter.shared.identity import (
     ACCESS_BLOCKED,
     OWNER_COMMAND_CAPABILITIES,
     IdentityContext,
+    Issuer,
+    TenantId,
+    UserId,
 )
 
 logger = logging.getLogger(__name__)

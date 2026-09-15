@@ -43,7 +43,7 @@ class ExportMeasurement(StrictModel):
     # called "".
     formula: str | None
     composite_fitness: float
-    accuracy: float
+    accuracy: float | None
     n: int
     # ``None`` on a round that crowned nobody, and on the origin round, whose lift over itself is
     # not a measurement. A consumer reading a lift must be able to tell "zero" from "not asked".
@@ -53,7 +53,7 @@ class ExportMeasurement(StrictModel):
     # Subset-invariant ability, with the δ scale it was read on — an exported θ naming no ruler
     # is a level nothing outside this cycle can be compared against. ``None`` when never fit.
     ability: AbilityReading | None = None
-    origin_accuracy: float
+    origin_accuracy: float | None
     # ``None`` where the origin was never scored — the bar the exported lift is read against, so a
     # stand-in 0.0 hands another program a lift measured off nothing.
     origin_composite_fitness: float | None
@@ -122,7 +122,7 @@ def build_prompt_export(
     stop_reason: str,
     finished_at: str,
     formula: str | None,
-    origin_accuracy: float,
+    origin_accuracy: float | None,
     origin_composite_fitness: float | None,
 ) -> PromptExport:
     """Project the round that crowned the winner into the artifact.

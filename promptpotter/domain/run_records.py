@@ -29,7 +29,6 @@ __all__ = [
     "LLMCallStartRecord",
     "LedgerCandidate",
     "LedgerRoundClose",
-    "OperatorSweepFile",
     "PhaseRecord",
     "ResumeCheckpointKind",
     "ResumeCheckpointRecord",
@@ -93,7 +92,12 @@ def as_view_mapping(view: Any) -> dict[str, Any]:
     the frozen dataclass, so `getattr` works on one and silently returns the default on the
     other — reporting a fact that is present as absent. Lives beside `PhaseRecord` because both
     an `application/` reader and an `infrastructure/` projection need it; owning it in either
-    would invert a layer."""
+    would invert a layer.
+
+    **Every value comes back `Any`, so the VIEW's own field type is the contract.** No checker can
+    follow a key back to the dataclass it came from, and an accuracy is `float | None` at every
+    producer here — so a reader spending one on `float()` or an f-string format spec raises on
+    exactly the runs that had nothing to report. `fmt_pct` is the rendering side of the same rule."""
     if is_dataclass(view) and not isinstance(view, type):
         return asdict(view)
     return view if isinstance(view, dict) else {}
@@ -134,8 +138,9 @@ class TokenUsageRecord(StrictModel):
     provider: str | None = None
     """Who billed the call. Not decoration beside ``model``: a rate belongs to the PAIR,
     and the rate table registers the same model under many vendors at prices that differ
-    several-fold, so a model alone cannot be priced (``shared/pricing.py::lookup_rate``).
-    ``None`` on a row written before this field, where only an exact key resolves."""
+    several-fold, so a model alone cannot be priced
+    (``infrastructure/llm/pricing.py::lookup_rate``). ``None`` on a row written before this
+    field, where only an exact key resolves."""
     served_by: str | None = None
     """WHICH upstream host answered, where the one above is a GATEWAY that routes onward. The pair
     is the point: ``provider`` is who bills, this is whose silicon ran it, and hosts of one model
@@ -249,14 +254,14 @@ class LLMCallRecord(StrictModel):
     candidate_idx: int | None = None
     payload_kind: Literal["llm_call", "synthesized"] = "llm_call"
     call_id: str = ""
-    # Opaque action-dict consumed by AuditTrailView — new fields don't churn the schema.
+    # Opaque action-dict consumed by AuditTrailProjection — new fields don't churn the schema.
     payload: dict[str, Any] = Field(default_factory=dict)
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
 class CommandRecord(StrictModel):
-    """Sole writer at the API seam is ``CommandDispatcher``. Three target ledgers: the
-    target cycle's, its campaign root's, or the workspace's — never a fourth."""
+    """Sole writer is ``CommandDispatcher``. Three target ledgers: the target cycle's, its campaign
+    root's, or the workspace's — never a fourth."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -350,7 +355,6 @@ class RoundWarningRecord(StrictModel):
 class ForkTrigger(enum.StrEnum):
     """One value per caller of :func:`_mint_fork`."""
 
-    OPERATOR_SWEEP = "operator_sweep"
     OPERATOR_DIAG = "operator_diag"
     OPERATOR_REWIND = "operator_rewind"
     OPERATOR_STEERED = "operator_steered"
@@ -389,7 +393,6 @@ class ForkDirection(enum.StrEnum):
 # Exhaustiveness is checked at import below — a new trigger must not land without an answer.
 FORK_DIRECTION: dict[ForkTrigger, ForkDirection] = {
     # Exploring beside a line that keeps its meaning; nothing about the parent is invalidated.
-    ForkTrigger.OPERATOR_SWEEP: ForkDirection.OFFSHOOT,
     ForkTrigger.OPERATOR_DIAG: ForkDirection.OFFSHOOT,
     ForkTrigger.OPERATOR_STEERED: ForkDirection.OFFSHOOT,
     # Each retargets the active pointer and abandons the tail it cut from. The parent keeps
@@ -418,7 +421,6 @@ MINT_KIND_FOR_TRIGGER: dict[ForkTrigger, MintKind] = {
     ForkTrigger.SCORING_DIVERGENCE: "divergent_resume",
     ForkTrigger.L2_REBASE: "auto_rebase",
     ForkTrigger.L3_REBASE: "auto_rebase",
-    ForkTrigger.OPERATOR_SWEEP: "user_fork",
     ForkTrigger.OPERATOR_DIAG: "user_fork",
     ForkTrigger.OPERATOR_STEERED: "user_fork",
     ForkTrigger.OPERATOR_REWIND: "user_fork",
@@ -683,7 +685,6 @@ class ForkSpec(StrictModel):
     issued_by: str
     from_round: int | None = None
     from_candidate_id: str | None = None
-    l1_layout: dict[str, str] | None = None
     seed: CycleSeed | None = None
     # The MEASURED direction, for a cut taken before its consequence was known — only a
     # correction needs it. `None` ⇒ the trigger implies the direction (`FORK_DIRECTION`),
@@ -702,31 +703,3 @@ class RebaseRequest(StrictModel):
     reason: str
     issued_by: str
     config_overrides: ConfigOverrides | None = None
-
-
-class OperatorSweepFile(StrictModel):
-    """DEPRECATED, removal pending — superseded by ``InnerTasks``' ``axes:``, which declares the
-    same contrast as a generated product, reaches DATASET (a fork cannot, being inside one
-    campaign), and is read back by ``evidence --grid``. Kept only until a grid has run for real.
-
-    Operator YAML under ``datasets/{name}/sweep/``; the dispatcher widens it to a ``ForkSpec``.
-    Every field but ``reason`` is a CONTRAST LEVER — ``reason`` is provenance and changes nothing
-    the fork runs."""
-
-    model_config = ConfigDict(frozen=True)
-
-    reason: str = ""
-    l1_layout: dict[str, str] | None = None
-
-    @model_validator(mode="after")
-    def _arm_pulls_a_lever(self) -> OperatorSweepFile:
-        """A lever-less arm forks a COPY of its parent and pays a full scored round to measure it, so
-        it fails here rather than at the end of the batch. The set is derived, never listed twice, and
-        the test is EMPTINESS — an empty ``l1_layout`` moves no panel and coerces back to its base."""
-        levers = sorted(set(type(self).model_fields) - {"reason"})
-        if not any(getattr(self, lever) for lever in levers):
-            raise ValueError(
-                "pulls no contrast lever, so it forks a copy of its parent and pays a full "
-                f"scored round to measure it; set one of: {', '.join(levers)}"
-            )
-        return self

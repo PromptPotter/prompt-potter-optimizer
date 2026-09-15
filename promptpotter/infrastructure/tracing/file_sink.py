@@ -391,7 +391,8 @@ class FileSink:
                     "stop_reason": event.stop_reason,
                 }
                 write_json(trace_path, trace_data)
-            self._write_score(trace_id, "best_accuracy", event.best_accuracy)
+            if event.best_accuracy is not None:
+                self._write_score(trace_id, "best_accuracy", event.best_accuracy)
 
         self._log_event(
             {

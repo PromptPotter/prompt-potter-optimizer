@@ -100,8 +100,8 @@ harbor = [
     "harbor>=0.22.0,<0.23",
 ]
 jupyter = [
-    "jupyterlab>=4.0",  # why kept: notebook UI for `notebooks/optimization_campaign.ipynb`
-    "ipython>=8.0",     # why kept: in-notebook HTML rendering (presentation/views/completion.py)
+    "jupyterlab>=4.0",  # why kept: notebook UI for `notebooks/bbeh_potter.ipynb`
+    "ipython>=8.0",     # why kept: in-notebook HTML rendering (presentation/terminal/completion.py)
 ]
 stats = [
     "scipy>=1.12.0",    # why kept: Rasch fit + Wilson/normal-CI statistics
@@ -202,7 +202,7 @@ include = ["promptpotter*"]
 [tool.setuptools.package-data]
 promptpotter = [
     "py.typed",
-    "shared/data/rates.json",
+    "infrastructure/llm/data/rates.json",
     "config/prompt_variants.json",  # config/prompt_blocks.py::BUNDLED_PATH
     "connectors/resources/*.json",  # n8n workflow templates
     "assets/optimizer/*.yaml",      # the optimizer's own pipeline manifest
@@ -235,6 +235,10 @@ namespace_packages = false
 # One SQLite DB instead of ~12.5k tiny JSON files — kills the Windows small-file
 # stat() tax that dominated every warm run.
 sqlite_cache = true
+
+# Without it a model's `__init__` takes `**Any`, so no constructor call is type-checked.
+[tool.pydantic-mypy]
+init_typed = true
 
 # Deps we never type-check through. `follow_imports = "skip"` (not just
 # ignore_missing_imports, a no-op when the package is installed + typed) stops

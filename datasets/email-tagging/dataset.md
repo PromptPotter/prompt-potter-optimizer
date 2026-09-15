@@ -6,7 +6,7 @@ into one of four routing categories: `financial`, `actionable`, `informational`,
 
 ## Type
 
-Single `llm_only` generation node, no retrieval. Reads an email and emits one category label against a
+Single `llm_only` node, no retrieval. Reads an email and emits one category label against a
 running TermNorm backend.
 
 ## Data — provenance & anonymization

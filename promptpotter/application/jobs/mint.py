@@ -15,8 +15,8 @@ from promptpotter.application.pipeline_resolve import (
     resolved_dataset_name,
 )
 from promptpotter.application.runner.campaign_ids import build_origin_cycle_id, mint_campaign_id
-from promptpotter.connectors.promptpotter import instrument_of
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.l4.inner_origin import instrument_of
 from promptpotter.domain.run_records import CycleSeed
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir

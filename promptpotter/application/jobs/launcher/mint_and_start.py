@@ -13,7 +13,6 @@ from typing import Any
 
 from promptpotter.application.campaign_config import (
     CampaignConfig,
-    apply_inherited_overlay,
     load_campaign_config,
 )
 from promptpotter.application.datasets.authored import (
@@ -43,14 +42,20 @@ from promptpotter.application.jobs.launcher.draft_build import (
 from promptpotter.application.jobs.mint import fresh_campaign_id, prepare_fresh_cycle
 from promptpotter.application.jobs.quota import QuotaExceededError
 from promptpotter.application.jobs.registry import Job, JobRegistry
-from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
+from promptpotter.application.pipeline_resolve import (
+    configure_and_apply_pipeline,
+    resolve_campaign_config,
+)
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.infrastructure.llm.telemetry import set_cycle_ledger
-from promptpotter.infrastructure.projections.live_dashboard.view import LiveDashboardView
+from promptpotter.infrastructure.projections.live_dashboard.projection import (
+    LiveDashboardProjection,
+)
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
     dataset_pipeline_path,
@@ -77,7 +82,7 @@ def _record_launch_stop(
     interrupted = launch_interrupted(exc)
     try:
         cycle_dir = CycleDir(stores.campaigns.cycle_dir(hop))
-        LiveDashboardView.write_launch_stop(
+        LiveDashboardProjection.write_launch_stop(
             cycle_dir,
             hop=hop,
             session_id=session_id,
@@ -142,9 +147,9 @@ def build_cycle_config(
     channel a campaign already has; a second `pipeline_steps` knob would be `exclude_nodes` spelled
     twice (measured: they have identical expressive power, and `filter_to_steps` preserves the
     schema's own order, so a step list cannot even reorder)."""
-    file_config = read_campaign_config_file(dataset_campaign_path(dataset_root))
-    profile = session.store.backends.load_connector_profile(session.backend_id) or {}
-    campaign_config = load_campaign_config({**profile, **file_config})
+    campaign_config = load_campaign_config(
+        read_campaign_config_file(dataset_campaign_path(dataset_root))
+    )
     if pipeline_overlay:
         overrides, narrowing = split_overlay(pipeline_overlay)
         campaign_config = campaign_config.model_copy(
@@ -171,9 +176,7 @@ async def mint_campaign_command(
     dataset_name: str,
     job_registry: JobRegistry,
     job: Job,
-    halt_at_accuracy: float | None = None,
-    spend_budget_usd: float | None = None,
-    token_budget: int | None = None,
+    limits: LaunchLimits,
     origin_override: dict[str, Any] | None = None,
     pipeline_overlay: dict[str, Any] | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
@@ -193,7 +196,7 @@ async def mint_campaign_command(
 
     backend_type = _read_backend_type_from_dataset(dataset_root, dataset_name)
 
-    spend_budget_usd, token_budget = await admit_and_hold(
+    held = await admit_and_hold(
         stores=stores,
         job_registry=job_registry,
         job=job,
@@ -201,8 +204,7 @@ async def mint_campaign_command(
         dataset_name=dataset_name,
         backend_type=backend_type,
         backend_url=backend_url,
-        requested_cap_usd=spend_budget_usd,
-        requested_cap_tokens=token_budget,
+        requested=limits,
     )
 
     # SETUP — the ids bind only once the mint resolves; init them so the failure handler can tell
@@ -261,9 +263,7 @@ async def mint_campaign_command(
             train_data=train_data,
             job_registry=job_registry,
             job_id=job.job_id,
-            halt_at_accuracy=halt_at_accuracy,
-            spend_budget_usd=spend_budget_usd,
-            token_budget=token_budget,
+            limits=held,
         ),
         name=f"job-{job.job_id}",
     )
@@ -324,9 +324,7 @@ async def start_run_command(
     job: Job,
     hop: CycleHop,
     kind: str,
-    halt_at_accuracy: float | None = None,
-    spend_budget_usd: float | None = None,
-    token_budget: int | None = None,
+    limits: LaunchLimits,
     stop_after_rounds: int | None = None,
     backend_url: str = DEFAULT_BACKEND_URL,
 ) -> Job:
@@ -349,7 +347,7 @@ async def start_run_command(
     backend_type = _read_backend_type_from_dataset(dataset_root, campaign.dataset_name)
     dataset_name = campaign.dataset_name
 
-    spend_budget_usd, token_budget = await admit_and_hold(
+    held = await admit_and_hold(
         stores=stores,
         job_registry=job_registry,
         job=job,
@@ -357,8 +355,7 @@ async def start_run_command(
         dataset_name=dataset_name,
         backend_type=backend_type,
         backend_url=backend_url,
-        requested_cap_usd=spend_budget_usd,
-        requested_cap_tokens=token_budget,
+        requested=limits,
     )
 
     try:
@@ -370,15 +367,7 @@ async def start_run_command(
         )
         logger.info("start[%s]: init_services=%.2fs", dataset_name, time.perf_counter() - _t0)
 
-        # Resume/fork rebuild config from the LIVE dataset file so declaration edits stay
-        # drift-detected, then re-apply the per-campaign overlay that file never holds —
-        # origin-floor values + param locks — off the frozen `Campaign.config` snapshot, a
-        # steered-fork seed's lock edits overriding per node. Without it locks silently reopen.
-        campaign_config = apply_inherited_overlay(
-            build_cycle_config(session, dataset_root),
-            campaign.config,
-            stores.campaigns.read_cycle_seed(hop),
-        )
+        campaign_config = resolve_campaign_config(stores, campaign, hop)
 
         train_data = session.samples
         configure_and_apply_pipeline(session, campaign_config, log=lambda *_a, **_k: None)
@@ -406,9 +395,7 @@ async def start_run_command(
             train_data=train_data,
             job_registry=job_registry,
             job_id=job.job_id,
-            halt_at_accuracy=halt_at_accuracy,
-            spend_budget_usd=spend_budget_usd,
-            token_budget=token_budget,
+            limits=held,
             stop_after_rounds=stop_after_rounds,
         ),
         name=f"job-{job.job_id}",
@@ -424,9 +411,7 @@ async def _run_in_background(
     train_data: list[Any],
     job_registry: JobRegistry,
     job_id: str,
-    halt_at_accuracy: float | None,
-    spend_budget_usd: float | None,
-    token_budget: int | None,
+    limits: LaunchLimits,
     stop_after_rounds: int | None = None,
 ) -> None:
 
@@ -451,9 +436,8 @@ async def _run_in_background(
             campaign_config,
             session=session,
             observers=observers,
-            mode=RunMode(halt_at_accuracy=halt_at_accuracy, stop_after_rounds=stop_after_rounds),
-            spend_budget_usd=spend_budget_usd,
-            token_budget=token_budget,
+            mode=RunMode(stop_after_rounds=stop_after_rounds),
+            limits=limits,
         )
         stop_reason = result.stop_reason
         # The SAME classification index.json / dashboard.json / the webapp read.

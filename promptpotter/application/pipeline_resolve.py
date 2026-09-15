@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import Field
 
+from promptpotter import connectors
 from promptpotter.application.campaign_config import (
     CampaignConfig,
     apply_inherited_overlay,
@@ -29,12 +30,12 @@ from promptpotter.application.datasets.prompts import (
     load_dataset_node_overlay,
     load_node_prompt,
 )
-from promptpotter.application.evidence import SubjectSpec
+from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.runner.inner.tasks import inner_tasks_path, load_inner_tasks
 from promptpotter.config.settings import (
     PROMPT_STRING_FIELDS,
 )
-from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
+from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
 from promptpotter.domain.pipeline_overlay import fold_output_contract, node_config_items
@@ -58,6 +59,7 @@ from promptpotter.infrastructure.llm.capabilities import resolve_schema_menu
 from promptpotter.infrastructure.runtime_flags import is_checkin
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
+    dataset_experiment,
     dataset_pipeline_path,
     readable_dataset_dir,
 )
@@ -88,6 +90,7 @@ __all__ = [
     "apply_node_overlay",
     "configure_and_apply_pipeline",
     "missing_template_vars",
+    "resolve_campaign_config",
     "resolve_pipeline_config_params",
     "resolve_pipeline_for_campaign",
     "resolve_pipeline_for_draft",
@@ -150,6 +153,7 @@ def resolve_pipeline_config_params(
     schema: PipelineSchema,
     judges: Mapping[str, JudgeSpec] | None = None,
     *,
+    experiment: Mapping[str, Any] | None,
     base_config: Mapping[str, Any] | None = None,
     provenance: MutableMapping[str, dict[str, ParamSource]] | None = None,
 ) -> dict[str, Any]:
@@ -203,7 +207,7 @@ def resolve_pipeline_config_params(
     # enter the archive key.
     identity = {
         node: cfg
-        for node, cfg in _identity_contributions(dataset_dir, judges, active).items()
+        for node, cfg in _identity_contributions(dataset_dir, experiment, judges, active).items()
         if node in active
     }
     if identity:
@@ -213,8 +217,25 @@ def resolve_pipeline_config_params(
     return pipeline_params
 
 
+def _dataset_connector(dataset_dir: Path) -> connectors.Connector | None:
+    raw = read_yaml_optional(dataset_pipeline_path(dataset_dir))
+    return connectors.registered().get(str((raw or {}).get("backend_type") or ""))
+
+
+def experiment_outside_run(dataset_dir: Path | None) -> Mapping[str, Any] | None:
+    """The experiment a read OUTSIDE a run fingerprints, resolved now; a run passes the one its
+    workload holds instead."""
+    if dataset_dir is None:
+        return None
+    connector = _dataset_connector(dataset_dir)
+    return None if connector is None else dataset_experiment(dataset_dir, connector)
+
+
 def _identity_contributions(
-    dataset_dir: Path | None, judges: Mapping[str, JudgeSpec] | None, active: list[str]
+    dataset_dir: Path | None,
+    experiment: Mapping[str, Any] | None,
+    judges: Mapping[str, JudgeSpec] | None,
+    active: list[str],
 ) -> dict[str, dict[str, Any]]:
     """What this measurement was taken UNDER, beyond the node configs themselves — the CONNECTOR's
     contribution and the JUDGES', which answer the same question and so share one channel.
@@ -225,10 +246,9 @@ def _identity_contributions(
     agreeing by construction rather than by both remembering to."""
     out: dict[str, dict[str, Any]] = {}
     if dataset_dir is not None:
-        raw = read_yaml_optional(dataset_pipeline_path(dataset_dir))
-        connector = CONNECTORS.get(str((raw or {}).get("backend_type") or ""))
+        connector = _dataset_connector(dataset_dir)
         if connector is not None and connector.identity_config is not None:
-            out.update(connector.identity_config(dataset_dir))
+            out.update(connector.identity_config(dataset_dir, experiment))
     if judges and active:
         # Attached to the TERMINAL step: a judge grades the pipeline's answer, and that is the
         # node the answer comes out of. Any stable node would move the hash, but this one says
@@ -307,12 +327,12 @@ def _apply_starting_prompts(
         # `prompt_info` — so the rendered prompt has nowhere to land and is
         # dropped before the wire. Silent here = every backend call runs with
         # an empty system prompt (the bug that made an ingested dataset score
-        # 0% on email-replies). Fail loud: a generation node must advertise
+        # 0% on email-replies). Fail loud: an LLM node must advertise
         # `prompt_info` in GET /pipeline (or the dataset overlay).
         logger.warning(
             "configure_and_apply_pipeline: dataset %r has starting prompts but NO "
             "prompt-bearing node in the active pipeline %s — the prompt will "
-            "NOT reach the backend. A generation node must declare `prompt_info`.",
+            "NOT reach the backend. An LLM node must declare `prompt_info`.",
             dataset_name,
             active,
         )
@@ -378,7 +398,7 @@ def resolved_dataset_name(session: Session, campaign_config: CampaignConfig) -> 
 class CampaignPipelineResponse(StrictModel):
     """One campaign's pipeline at one searchpoint — the body of ``GET /campaigns/{id}/pipeline``.
     The peer of ``readable_dataset_dir`` one question up: that seam answers which bytes are on disk,
-    this one which values a campaign runs (``architecture.md`` §0, two resolution seams)."""
+    this one which values a campaign runs (``architecture.md`` § Two resolution seams)."""
 
     campaign_id: str
     cycle_id: str
@@ -462,7 +482,7 @@ def resolved_output_schemas(
     """The structured output each node ANSWERS UNDER at this searchpoint — never the one its file
     declares.
 
-    ``output_schema_descriptions`` is always on (`docs/concepts/structured-output.md`), so L1 moves
+    The description keys are open by default (`docs/concepts/structured-output.md`), so L1 moves
     the prose on any node shipping a schema. The WIRE folds it through ``fold_output_contract``, and
     so must every reader — off the parsed DECLARATION a surface shows the prose the run replaced,
     with nothing to say the two have parted. The same fold answers the other lever: a point that
@@ -493,8 +513,23 @@ def _config_floor(campaign: Campaign, dataset_dir: Path | None) -> CampaignConfi
         return load_dataset_campaign_config(template)
     if campaign.config:
         return load_campaign_config(campaign.config)
-    defaults = CONNECTORS[campaign.backend_type or DEFAULT_CONNECTOR].default_optimization
+    defaults = connectors.get(campaign.backend_type or DEFAULT_CONNECTOR).default_optimization
     return load_campaign_config({"optimization": dict(defaults)})
+
+
+def resolve_campaign_config(
+    stores: Stores, campaign: Campaign, hop: CycleHop | None
+) -> CampaignConfig:
+    """What a campaign RUNS under: its frozen declaration over the live dataset file, a cycle seed's
+    narrowing last (``hop=None`` reads none). Resume, ``ab`` and the served pipeline all ask it."""
+    try:
+        dataset_dir: Path | None = readable_dataset_dir(stores, campaign.dataset_name)
+    except DatasetAccessError:
+        dataset_dir = None
+    seed = stores.campaigns.read_cycle_seed(hop) if hop is not None else None
+    return apply_inherited_overlay(
+        _config_floor(campaign, dataset_dir), campaign.config or {}, seed
+    )
 
 
 def resolve_pipeline_for_draft(
@@ -528,6 +563,7 @@ def resolve_pipeline_for_draft(
         None,
         filtered,
         judges=cfg.judges,
+        experiment=None,
         base_config={n.name: dict(n.current_config) for n in filtered.config_nodes},
         provenance=provenance,
     )
@@ -600,9 +636,8 @@ def resolve_pipeline_for_campaign(
         raw = read_yaml_optional(dataset_pipeline_path(dataset_dir))
     schema = parse_pipeline_response(raw or {"nodes": {}, "pipelines": {"default": []}})
 
-    live = _config_floor(campaign, dataset_dir)
     seed = stores.campaigns.read_cycle_seed(hop) if at.cycle_id else None
-    cfg = apply_inherited_overlay(live, campaign.config or {}, seed)
+    cfg = resolve_campaign_config(stores, campaign, hop if at.cycle_id else None)
 
     active, filtered = _resolve_active_schema(
         schema,
@@ -618,6 +653,7 @@ def resolve_pipeline_for_campaign(
         dataset_dir,
         filtered,
         judges=cfg.judges,
+        experiment=experiment_outside_run(dataset_dir),
         provenance=provenance,
     )
     if seed is not None and seed.pipeline_overlay:
@@ -690,6 +726,7 @@ def configure_and_apply_pipeline(
         dataset_dir,
         filtered,
         judges=campaign_config.judges,
+        experiment=session.backend_client.workload.experiment,
     )
 
     # Starting prompts from `{dataset_dir}/prompts/[<node>|default].yaml`, per prompt-bearing node.

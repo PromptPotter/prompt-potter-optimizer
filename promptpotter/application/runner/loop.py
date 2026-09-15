@@ -55,7 +55,6 @@ async def run_round_loop(
     session: Session,
     cb: RunCallbacks,
     *,
-    sweep: bool = False,
     diag: bool = False,
     halt_at_accuracy: float | None = None,
     stop_after_rounds: int | None = None,
@@ -78,9 +77,9 @@ async def run_round_loop(
     try:
         # Origin is round 0 — emit it through the standard completion path before
         # the L1 loop on a fresh start (clean_rounds == 0) when it isn't already on
-        # disk. Resume (round 0 present) and divergence/sweep forks (clean_rounds >
-        # 0, round 0 inherited from the parent lane) skip it.
-        if not sweep and not diag and clean_rounds == 0:
+        # disk. Resume (round 0 present) and divergence forks (clean_rounds > 0,
+        # round 0 inherited from the parent lane) skip it.
+        if not diag and clean_rounds == 0:
             round0_present = bool(
                 session.state.cycle_id and session.store.campaigns.load_round_file(session.hop, 0)
             )
@@ -159,7 +158,6 @@ async def run_round_loop(
                 round_scoring_data,
                 cb,
                 degradation_checks=round_checks,
-                skip_critique=sweep,
                 is_final_round=is_final_round,
             )
             # A cold ruler warms during the round, and the warm fit gives round 0 the θ it could
@@ -229,18 +227,10 @@ async def run_round_loop(
             if budget_stop is not None:
                 return budget_stop, None
 
-            if sweep and clean_rounds >= 1:
-                await run_generation_only_round(
-                    cycle, session, cb, round_num, label="sweep_gen_only"
-                )
-                return StopReason.SWEEP_COMPLETE, None
-
             if diag and clean_rounds >= 1:
                 # Force L2 (bypass stall counter) on R1 evidence; peek R2 with L2 overrides.
                 await escalate_or_stop(cycle, config, session, round_num - 1, cb)
-                await run_generation_only_round(
-                    cycle, session, cb, round_num, label="diag_gen_only"
-                )
+                await run_generation_only_round(cycle, session, cb, round_num)
                 return StopReason.DIAG_COMPLETE, None
 
         return (StopReason.HARD_CAP if round_num >= HARD_CAP else StopReason.MAX_ROUNDS), None

@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import logging
 
-from promptpotter.application.seed_screen import SeedScreenError, screen_inner_seeds
+from promptpotter.application.diagnostics.seed_screen import SeedScreenError, screen_inner_seeds
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.infrastructure.store.stores import build_stores

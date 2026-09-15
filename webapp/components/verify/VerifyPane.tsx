@@ -1,6 +1,6 @@
 "use client";
 // Workspace-scope diagnostic-run records — one row per `verify` CLI invocation.
-// Categorically NOT a cycle, fork, or sweep: pure on-demand re-evaluation of
+// Categorically NOT a cycle or a fork: pure on-demand re-evaluation of
 // an existing candidate against more samples. Reads GET /api/v1/workspace/
 // diagnostic-runs and renders a sortable table with a per-row trend bar
 // (grey = source-campaign composite, red overlay = workspace composite).
@@ -123,7 +123,11 @@ function VerifyRow({ run }: { run: DiagnosticRunRecord }) {
       <td className="verify-num">{fmtFitness(run.source_campaign_composite)}</td>
       <td className="verify-num">{fmtFitness(run.workspace_composite)}</td>
       <td className="verify-bar-cell">
-        <TrendBar source={run.source_campaign_accuracy} workspace={run.workspace_accuracy} />
+        {run.source_campaign_accuracy === null ? (
+          "—"
+        ) : (
+          <TrendBar source={run.source_campaign_accuracy} workspace={run.workspace_accuracy} />
+        )}
       </td>
       <td className="verify-when">{ageText(run.ts)}</td>
     </tr>

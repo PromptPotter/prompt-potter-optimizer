@@ -2,8 +2,8 @@
 store, put them back, or delete the store.
 
 A thin shell, like every verb here: it picks a mode and renders counts. The passes themselves are
-``application/archive_maintenance.py``, which is what lets the same three modes reach the REST API,
-the webapp and an embedded host rather than the terminal alone.
+``application/maintenance/archive_maintenance.py``, which is what lets the same three modes reach
+the REST API, the webapp and an embedded host rather than the terminal alone.
 
 Dry-run by default. ``--apply`` writes, and ``purge-cold --apply`` is the one step that destroys —
 the rows it drops are paid LLM spend and nothing puts them back."""
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 
-from promptpotter.application.archive_maintenance import (
+from promptpotter.application.maintenance.archive_maintenance import (
     ArchiveReport,
     compact_measurement_archive,
     purge_cold_store,

@@ -62,7 +62,7 @@ invariants:
                       one — the worker has exited — so a parked campaign kept the jobs dock lit and
                       destroyed its all-quiet signal; a paused cycle stays reachable as a sidebar row
                       wearing its phase. detached means a dead producer (the heartbeat invariant,
-                      architecture.md §0 State + persistence) and never renders as running.
+                      architecture.md § Display) and never renders as running.
                       Client-side connection loss (failed poll, offline, hidden tab) is presented as
                       connection state (offline / stale affordance) and MUST NOT impersonate a run
                       phase or unmount run controls while the last-known server phase is running.
@@ -115,8 +115,9 @@ invariants:
                       own floor — the origin at round 0, the prior winner after: every
                       `matched_parent_*` field, wherever it surfaces (the searchpoint drill-in,
                       OuterSignalPanel, RoundFileView, run_card''s percent pair). The engine
-                      elects on the parent (architecture.md §0), so a pane labelling a
-                      `matched_parent_*` value "origin" states a comparison the run never made.
+                      elects on the parent (architecture.md § Origin, parent, and check-in), so
+                      a pane labelling a `matched_parent_*` value "origin" states a comparison
+                      the run never made.
                       Two references may share a box only when BOTH are labelled — run_card is
                       the sanctioned case and says so at its own seam.'
   I9_pipeline_resolution_server_owned: 'What config a node RUNS in a campaign has ONE

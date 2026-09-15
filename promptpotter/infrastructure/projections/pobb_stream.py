@@ -9,25 +9,25 @@ from typing import Any
 
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import SnapshotRecord
-from promptpotter.infrastructure.projections.base import DerivedView
+from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.io import append_jsonl
 from promptpotter.infrastructure.store.layout import CycleLayout
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["PoBBStreamView"]
+__all__ = ["PoBBStreamProjection"]
 
 _STREAMS_SUBPATH = (".runtime", "streams")
 
 
-class PoBBStreamView(DerivedView):
+class PoBBStreamProjection(Projection):
     """Per-sample P(best) snapshots, one JSONL per round. **One line describes ONE candidate** — a cid-keyed map gave every
     prior a trajectory built out of numbers about somebody else."""
 
     def __init__(self, streams_dir: Path) -> None:
         if streams_dir.parts[-len(_STREAMS_SUBPATH) :] != _STREAMS_SUBPATH:
             raise ValueError(
-                f"PoBBStreamView streams_dir must end in /{'/'.join(_STREAMS_SUBPATH)}; "
+                f"PoBBStreamProjection streams_dir must end in /{'/'.join(_STREAMS_SUBPATH)}; "
                 f"got {streams_dir}"
             )
         self.streams_dir = streams_dir
@@ -36,7 +36,7 @@ class PoBBStreamView(DerivedView):
         self._last_round: int | None = None
 
     @classmethod
-    def from_cycle_dir(cls, cycle_dir: CycleDir) -> PoBBStreamView:
+    def from_cycle_dir(cls, cycle_dir: CycleDir) -> PoBBStreamProjection:
         return cls(CycleLayout(Path(cycle_dir)).streams)
 
     def _handle_snapshot(self, record: SnapshotRecord) -> None:
@@ -83,4 +83,4 @@ class PoBBStreamView(DerivedView):
         try:
             append_jsonl(self.streams_dir / f"round_{round_num:04d}_p_best.jsonl", line)
         except OSError as exc:
-            logger.warning("PoBBStreamView: append failed for round %d: %s", round_num, exc)
+            logger.warning("PoBBStreamProjection: append failed for round %d: %s", round_num, exc)

@@ -52,7 +52,6 @@
 .family-cladogram-dot{fill:var(--color-text-secondary);stroke:var(--color-background-primary);stroke-width:1}
 .family-cladogram-dot.kind-root{fill:var(--color-text-primary)}
 .family-cladogram-dot.kind-fork{fill:var(--color-accent)}
-.family-cladogram-dot.kind-sweep{fill:var(--color-text-secondary)}
 .family-cladogram-dot.kind-diag{fill:var(--color-success)}
 .family-cladogram-lane-selected{fill:var(--color-background-tint-active);opacity:0.45}
 /* COMPARISON CHANNELS — a searchpoint some card on the Compare tab is anchored on, marked in

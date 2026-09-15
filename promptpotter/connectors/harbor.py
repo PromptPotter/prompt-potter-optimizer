@@ -12,6 +12,7 @@ comparison is against their object rather than against something merely analogou
 from __future__ import annotations
 
 import codecs
+import functools
 import json
 import locale
 import logging
@@ -19,18 +20,18 @@ import re
 import sys
 import tempfile
 import time
-from contextvars import ContextVar
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.connectors.protocol import BackendUnreachableError, Connector
+from promptpotter.connectors.protocol import Connector, InProcessWorkload
+from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.spend import StepTokenUsage
-from promptpotter.infrastructure.store.io import read_yaml_optional
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from types import ModuleType
 
     import httpx
@@ -54,6 +55,13 @@ DEFAULT_TASK_REWARD_KEY = "reward"
 # than asking a ranking that does not exist.
 ANSWER_KEY = "agent_answer"
 ANSWER_FILENAME = "answer.txt"
+
+# Whether the episode opened the artifact the candidate prompt WAS (see `_skill_opened`). A
+# measured observation like the reward beside it, not a diagnostic: on this backend the prompt
+# reaches the model only if the model opens the file, so this is the term that separates "the skill
+# was wrong" from "the skill was never read" — and an arm scoring as no-skill is a round whose arms
+# were all the same episode.
+SKILL_KEY = "skill_opened"
 
 # NO `final_ranking`, and its absence is the declaration: the `agent` node declares no
 # `node_role`, so nothing would read one. Do not restore it, and do not reach the same place by
@@ -95,6 +103,9 @@ _TRIALS_ROOT = Path(tempfile.gettempdir()) / "promptpotter-harbor"
 # file to read the body, so a candidate free to write its own could win by making itself
 # uninviting — the skill goes unread, the arm scores as no-skill, and hiding reads as discovery.
 _SKILL_NAME = "task-approach"
+# The Agent Skills spec's filename, and the needle `_skill_opened` looks for. One owner: it is both
+# what we WRITE and what we detect a read of, and two spellings could disagree silently.
+SKILL_FILENAME = "SKILL.md"
 _SKILL_DESCRIPTION = (
     "Read this before acting. Required approach, conventions and completion criteria for "
     "this task. Always consult it first."
@@ -115,19 +126,7 @@ class HarborSession:
         return True
 
 
-# The declared panel. A ContextVar because ``in_process_run`` is a module-level hook called with
-# ``(query, payload)`` and no call-site state. NOT a module global: campaigns run as sibling
-# `asyncio.create_task`s, each copying the context at spawn, so two concurrent Harbor campaigns
-# cannot clobber each other's panel. That both in-process connectors invented this independently is
-# the tell that `InProcessRun` lacks an arming argument (`docs/specs/code-debt-cleanup.md`).
-_PANEL: ContextVar[dict[str, Any] | None] = ContextVar("harbor_panel", default=None)
-
-
-# Resolved rosters, keyed by ``(dataset, version)``. Init asks twice — once for the samples, once
-# for the fingerprint — so caching is the difference between one network fetch and one per task.
-_ROSTER_CACHE: dict[tuple[str, str], list[dict[str, Any]]] = {}
-
-
+@functools.cache
 def _registry_tasks(dataset: str, version: str) -> list[dict[str, Any]]:
     """The roster of a PUBLISHED Harbor dataset, resolved from Harbor's own registry.
 
@@ -135,11 +134,9 @@ def _registry_tasks(dataset: str, version: str) -> list[dict[str, Any]]:
     second owner of upstream's list would drift the moment it repinned. Safe only because the
     resolved pins fold into the instrument fingerprint (:func:`_identity_config`), so a moved
     commit lands as a new measurement identity. The version is required for the same reason."""
-    if (cached := _ROSTER_CACHE.get((dataset, version))) is not None:
-        return cached
-
     from harbor.registry.client.json import JsonRegistryClient
 
+    # Memoized: a run carries its own resolved document, and identity hashes the pins it used.
     specs = JsonRegistryClient().dataset_specs.get(dataset)
     if not specs:
         raise ValueError(
@@ -152,7 +149,7 @@ def _registry_tasks(dataset: str, version: str) -> list[dict[str, Any]]:
             f"harbor connector: dataset {dataset!r} has no version {version!r} "
             f"(published: {sorted(specs)})."
         )
-    tasks = [
+    return [
         {
             "id": t.name,
             "git_url": t.git_url,
@@ -161,19 +158,17 @@ def _registry_tasks(dataset: str, version: str) -> list[dict[str, Any]]:
         }
         for t in spec.tasks
     ]
-    _ROSTER_CACHE[(dataset, version)] = tasks
-    return tasks
 
 
-def _panel_tasks(panel: dict[str, Any]) -> list[dict[str, Any]]:
-    """The episodes this dataset measures, from whichever of Harbor's two task sources it names.
+def _resolve_experiment(panel: Mapping[str, Any]) -> dict[str, Any]:
+    """The panel with its ``tasks`` pinned, from whichever of Harbor's two task sources it names.
 
     Mirrors ``TaskConfig``'s own split rather than inventing one: a published dataset resolved by
     ``harbor_dataset`` + ``harbor_dataset_version``, or tasks declared inline for a locally
     authored panel. A committed dataset uses the first — see :func:`_registry_tasks`.
     """
     if inline := panel.get("tasks"):
-        return list(inline)
+        return {**panel, "tasks": list(inline)}
     dataset = panel.get("harbor_dataset")
     if not dataset:
         raise ValueError(
@@ -193,7 +188,7 @@ def _panel_tasks(panel: dict[str, Any]) -> list[dict[str, Any]]:
     # belongs in measurement identity — `_identity_config` hashes the pins AFTER this filter.
     include = panel.get("tasks_include")
     if not include:
-        return tasks
+        return {**panel, "tasks": tasks}
     wanted = list(dict.fromkeys(str(i) for i in include))
     by_id = {t["id"]: t for t in tasks}
     if missing := [i for i in wanted if i not in by_id]:
@@ -201,11 +196,11 @@ def _panel_tasks(panel: dict[str, Any]) -> list[dict[str, Any]]:
             f"harbor connector: {TASKS_FILE} includes {missing}, which {dataset}@{version} "
             f"does not publish (it has {sorted(by_id)})."
         )
-    return [by_id[i] for i in wanted]
+    return {**panel, "tasks": [by_id[i] for i in wanted]}
 
 
 def _extract_experiment(
-    experiment_data: dict[str, Any],
+    experiment_data: Mapping[str, Any],
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Harbor tasks → ``(queries, index_terms)``, and **the one place this backend's answer shape
     is declared** (``connectors/CLAUDE.md`` § The answer shape).
@@ -216,15 +211,8 @@ def _extract_experiment(
 
     Checked as a SET: ``all_verifier_graded`` is whole-bank, so a half-labelled panel has no answer
     shape and raises here. Downstream it would be silent — rank statistics and the recall
-    evaluators would report the unlabelled rows as misses.
-
-    Also PUBLISHES the panel, RESOLVED, so an episode reads the pins its samples were built from.
-    Done here because init already hands this function the parsed ``harbor_tasks.yaml``. Never
-    reset: the binding lives as long as its context (:data:`_PANEL`)."""
-    resolved = dict(experiment_data)
-    resolved["tasks"] = _panel_tasks(experiment_data)
-    _PANEL.set(resolved)
-    tasks = [t for t in resolved["tasks"] if t.get("id")]
+    evaluators would report the unlabelled rows as misses."""
+    tasks = [t for t in experiment_data["tasks"] if t.get("id")]
     labelled = [t for t in tasks if str(t.get("answer") or "").strip()]
     if labelled and len(labelled) != len(tasks):
         unlabelled = [t["id"] for t in tasks if not str(t.get("answer") or "").strip()]
@@ -248,16 +236,16 @@ def _extract_experiment(
     return out, []
 
 
-def _current_task(query: str) -> tuple[dict[str, Any], str, dict[str, Any]]:
+def _current_task(
+    panel: Mapping[str, Any] | None, query: str
+) -> tuple[dict[str, Any], str, dict[str, Any]]:
     """The declared task for one query, plus the reward key and agent block it is graded under."""
-    panel = _PANEL.get()
     if panel is None:
         raise RuntimeError(
-            "harbor connector: no panel published — init reads the dataset's "
-            f"{TASKS_FILE} through `extract_experiment` before anything is scored, so this "
-            "ran outside an armed session."
+            f"harbor connector: this run's workload carries no {TASKS_FILE}, so no task can be "
+            "resolved for it."
         )
-    for task in panel.get("tasks") or []:
+    for task in panel["tasks"]:
         if (task or {}).get("id") == query:
             return (
                 task,
@@ -302,12 +290,9 @@ def harbor_wire_adapter(
 # environment Harbor runs in — where litellm already looks — and stays separately revocable.
 
 
-def _read_tasks(dataset_dir: Path) -> dict[str, Any]:
-
-    return read_yaml_optional(dataset_dir / TASKS_FILE) or {}
-
-
-def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
+def _identity_config(
+    _dataset_dir: Path, experiment: Mapping[str, Any] | None
+) -> dict[str, dict[str, Any]]:
     """What the cell was measured ON, folded into measurement identity.
 
     A task is pinned bytes and the agent driving it is the rest of the instrument; repoint either
@@ -316,8 +301,8 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
 
     Hashes the RESOLVED pins, never the declaration, which is what lets a dataset commit only a
     name and a version (:func:`_registry_tasks`)."""
-
-    tasks = _read_tasks(dataset_dir)
+    if experiment is None:
+        raise ValueError(f"harbor connector: no {TASKS_FILE} on this machine to fingerprint.")
     pins = [
         {
             "id": (t or {}).get("id"),
@@ -331,13 +316,13 @@ def _identity_config(dataset_dir: Path) -> dict[str, dict[str, Any]]:
             "question": (t or {}).get("question"),
             "answer": (t or {}).get("answer"),
         }
-        for t in _panel_tasks(tasks)
+        for t in experiment["tasks"]
     ]
     fingerprint = stable_hash(
         [
             sorted(pins, key=lambda p: str(p["id"])),
-            tasks.get("agent") or {},
-            tasks.get("reward_key") or DEFAULT_TASK_REWARD_KEY,
+            experiment.get("agent") or {},
+            experiment.get("reward_key") or DEFAULT_TASK_REWARD_KEY,
         ]
     )[:12]
     return {AGENT_NODE: {INSTRUMENT_KEY: fingerprint}}
@@ -432,21 +417,25 @@ async def _preflight(backend_url: str) -> None:
 def _write_skill(root: Path, prompt: str) -> Path:
     """The candidate's prompt as an Agent Skill. The layout is not ours to choose: Harbor uploads
     ``<skills_dir>/<name>/SKILL.md`` and the agent finds it with a depth-2 ``find``, so the extra
-    directory level is load-bearing. The frontmatter must parse as YAML and carry both ``name``
-    and ``description`` — an agent that fails to parse it SKIPS the skill in silence, which would
-    make every candidate score as no-skill and read as 'the prompt does not matter'."""
+    directory level is load-bearing.
+
+    Two things the agent SILENTLY skips the skill for, which scores every candidate as no-skill:
+    frontmatter that is not YAML carrying both ``name`` and ``description``, and a line ending that
+    is not LF — ``terminus_2.py::_parse_skill_frontmatter`` matches ``r"^---\\n(.*?)\\n---"``, so
+    ``newline`` may never fall back to the platform default."""
     skill_dir = root / _SKILL_NAME
     skill_dir.mkdir(parents=True, exist_ok=True)
     body = prompt.strip()
-    (skill_dir / "SKILL.md").write_text(
+    (skill_dir / SKILL_FILENAME).write_text(
         f"---\nname: {_SKILL_NAME}\ndescription: {_SKILL_DESCRIPTION}\n---\n\n{body}\n",
         encoding="utf-8",
+        newline="\n",
     )
     return root
 
 
 # Every escape a terminal recording carries and a prompt must not: SGR colour, cursor and mode
-# sequences, charset selectors, bare control bytes. Local rather than `views/display.py::_ANSI_RE`,
+# sequences, charset selectors, bare control bytes. Local rather than `terminal/primitives.py::_ANSI_RE`,
 # which matches colour alone and sits in a layer this one may not import.
 _TERMINAL_ESC = re.compile(
     r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b[]()#][0-9A-Za-z]|\x1b.|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]"
@@ -559,8 +548,8 @@ def _read_trajectory(path: Path) -> list[dict[str, Any]]:
     return [s for s in steps or [] if isinstance(s, dict)]
 
 
-def _turns(result: TrialResult) -> list[dict[str, Any]]:
-    """The cell's conversation, in order, each turn stamped with the STEP it served.
+def _trajectory_sources(result: TrialResult) -> list[tuple[Path, str | None]]:
+    """Every ATIF trajectory this trial wrote, with the STEP each one served.
 
     Two layouts: ``<trial>/agent/trajectory.json`` single-step, ``<trial>/steps/<name>/agent/`` per
     step. Walking ``step_results`` rather than globbing is what makes the STEP NAME available — the
@@ -568,21 +557,50 @@ def _turns(result: TrialResult) -> list[dict[str, Any]]:
     (``domain/scoring.py::TurnRecord``)."""
     root = _TRIALS_ROOT / str(getattr(result, "trial_name", "") or "")
     steps = getattr(result, "step_results", None) or []
-    sources: list[tuple[Path, str | None]] = (
-        [
+    if steps:
+        return [
             (root / "steps" / str(sr.step_name) / "agent" / "trajectory.json", str(sr.step_name))
             for sr in steps
         ]
-        if steps
-        else [(root / "agent" / "trajectory.json", None)]
-    )
+    return [(root / "agent" / "trajectory.json", None)]
+
+
+def _turns(result: TrialResult) -> list[dict[str, Any]]:
+    """The cell's conversation, in order, each turn stamped with the STEP it served."""
     turns: list[dict[str, Any]] = []
-    for path, step in sources:
+    for path, step in _trajectory_sources(result):
         for raw in _read_trajectory(path):
             turns.append(_turn(raw, len(turns) + 1, step))
     if not turns:
+        root = _TRIALS_ROOT / str(getattr(result, "trial_name", "") or "")
         _warn_layout_drift(f"no agent trajectory under {root}")
     return turns
+
+
+def _skill_opened(result: TrialResult) -> float | None:
+    """Whether the episode OPENED the skill: ``1.0``, ``0.0``, or ``None`` for no evidence.
+
+    The candidate's prompt is the skill's BODY, and the agent is shown only the frontmatter, so an
+    unopened skill is an episode that ran with no candidate prompt in it — every arm of such a
+    round is the same no-skill episode and the δ ruler is flat by construction.
+
+    Read off ``tool_calls[].arguments``, never a turn's message: the ``<available_skills>`` block
+    carries the skill's own path and is appended to the INSTRUCTION, so a text scan there matches
+    every episode whether or not it acted.
+
+    ``None`` rather than ``0.0`` where no trajectory exists — an episode that produced no record has
+    not declined to open the skill. Same rule as ``_phase_timings``."""
+    saw_trajectory = False
+    for path, _step in _trajectory_sources(result):
+        for raw in _read_trajectory(path):
+            saw_trajectory = True
+            for call in raw.get("tool_calls") or []:
+                if not isinstance(call, dict):
+                    continue
+                args = call.get("arguments")
+                if SKILL_FILENAME in (json.dumps(args) if args else ""):
+                    return 1.0
+    return 0.0 if saw_trajectory else None
 
 
 # An answer is read, graded and displayed, never scanned — so the HEAD, and generous enough for a
@@ -837,13 +855,15 @@ def _task_config(task: dict[str, Any], harbor_config: ModuleType) -> Any:
     )
 
 
-async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]:
+async def _in_process_run(
+    workload: InProcessWorkload, query: str, payload: dict[str, Any]
+) -> dict[str, Any]:
     """Run one episode and project its verdict onto the ``{"data": {…}}`` shape ``measure_sample``
     parses from an HTTP body — so the scorer reads a Harbor result identically to a remote one."""
     from harbor.models.trial import config as harbor_config
     from harbor.trial.trial import Trial
 
-    task, reward_key, agent_cfg = _current_task(query)
+    task, reward_key, agent_cfg = _current_task(workload.experiment, query)
 
     agent_kwargs = dict(agent_cfg.get("kwargs") or {})
     agent_kwargs.update(payload.get("agent_kwargs") or {})
@@ -915,6 +935,22 @@ async def _in_process_run(query: str, payload: dict[str, Any]) -> dict[str, Any]
         data["turns"] = turns
     if phases := _phase_timings(result, elapsed):
         data["step_phases"] = phases
+    # Only where a skill was actually injected. With no prompt there is no artifact to open, so
+    # `0.0` would report the arm declining to read a file that was never written.
+    if skills and (opened := _skill_opened(result)) is not None:
+        data[SKILL_KEY] = opened
+        if not opened:
+            # A line per cell rather than a scoring discount: the term is constant on a healthy
+            # channel, so charging it moves nothing when things work and discounts every arm
+            # UNIFORMLY when they break — invisible arithmetically, and identical to a finding.
+            logger.warning(
+                "harbor connector: %r never opened the injected skill, so this cell measured a "
+                "NO-SKILL episode — the candidate's prompt reached the model not at all. A round "
+                "of these cannot separate arms on the prompt. Check the frontmatter parses "
+                "(`_write_skill`) and that %s is present in the container.",
+                query,
+                SKILL_FILENAME,
+            )
     data.update(_step_rewards(result))
     return {"data": data}
 
@@ -932,16 +968,27 @@ CONNECTOR = Connector(
     expected_revision=EXPECTED_HARBOR_SERIES,
     version_check=_version_check,
     identity_config=_identity_config,
+    resolve_experiment=_resolve_experiment,
     # An episode is a whole agent run — minutes, with its own container build and its own spend —
     # so it is a cell.
     measured_unit="cell",
+    # The prompt is the SKILL's body, not a message. `terminus-2` shows the model only the
+    # frontmatter, so it arrives only if the model opens the file — which is why `SKILL_KEY` is a
+    # required observation beside it, and why this is the one connector where a value can be
+    # optimized every round and reach nothing.
+    prompt_delivery="artifact_body",
     # Each cell holds a container. Two is the shipped default elsewhere and is the right floor
     # here too: the ceiling is the operator's machine, not the provider.
     max_cells_in_flight=2,
-    # The one key always emitted that a formula reads, verified against the dataset's declared
+    # The keys always emitted that a formula reads, verified against the dataset's declared
     # mappings at init. Per-step rewards are NOT here — a single-step task emits none, so
     # declaring them would fail init for every task that is not multi-step.
-    required_observation_keys=(REWARD_KEY,),
+    #
+    # `SKILL_KEY` earns its place where those cannot: EVERY harbor cell handed a prompt can answer
+    # it, single-step or not. Declared here so a harbor dataset that forgets the mapping raises at
+    # init rather than dropping the observation in silence — which on this key would mean a whole
+    # campaign of arms scored as no-skill with nothing saying so.
+    required_observation_keys=(REWARD_KEY, SKILL_KEY),
     # An episode answers even though a verifier grades it, and until this existed nothing carried
     # the answer: no ranking means `predicted` was the `NO_RESULT` sentinel on every cell here.
     answer_key=ANSWER_KEY,

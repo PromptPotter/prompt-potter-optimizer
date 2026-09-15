@@ -78,7 +78,7 @@ def stage_datasets() -> int:
     """Copy the *tracked* dataset files into the package. Returns the file count.
 
     Tracked-only is the whole point: it ships the definitions (``campaign.yaml``,
-    ``pipeline.yaml``, ``prompts/``, ``task_description.md``, the sweep payloads)
+    ``pipeline.yaml``, ``prompts/``, ``task_description.md``)
     and leaves the regenerable HuggingFace caches behind. A benchmark whose cache
     is absent is already a handled case — ``application/datasets/loaders.py::
     resolve_dataset_items`` fetches and re-persists it on first use, the same path

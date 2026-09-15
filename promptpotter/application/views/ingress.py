@@ -7,6 +7,9 @@ from typing import Any
 
 from promptpotter.application.optimization.dispatch.llm_call.prompts import optimizer_model
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
+from promptpotter.application.views.render.optimizer_prompt_text import (
+    format_l1_critique_for_prompt,
+)
 from promptpotter.application.views.view_models import (
     AnyView,
     CandidatesGeneratedView,
@@ -27,7 +30,6 @@ from promptpotter.application.views.view_models import (
 )
 from promptpotter.domain.candidate_diff import build_candidate_flat, flatten_sp_summary
 from promptpotter.domain.phases import PhaseEvent
-from promptpotter.domain.rendering import format_l1_critique_for_prompt
 from promptpotter.domain.results import ScoredCandidate
 from promptpotter.domain.ruler import is_flat_ruler_id
 from promptpotter.shared import truncate
@@ -200,8 +202,11 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
     winner_label = str(d.get("winner_label") or "?")
     winner_total = int(d.get("winner_total", 0))
 
-    w_acc = float(d["winner_accuracy"])
-    improved = bool(d["improved"])
+    # Read exactly as ``winner_matched_parent_accuracy`` is read four lines down — the file
+    # already knew an accuracy can be absent and applied it to the parent's but not the winner's.
+    raw_winner = d.get("winner_accuracy")
+    w_acc = None if raw_winner is None else float(raw_winner)
+    improved = bool(d.get("improved"))
     parent_acc = ctx.parent_accuracy
     # Matched-pair parent (winner-measured samples). Δ uses this so operator-visible Δ
     # matches the ``improved`` gate, not the full-set comparison that punishes PoBB-locked
@@ -210,7 +215,8 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
     raw_matched = d.get("winner_matched_parent_accuracy")
     matched_parent_acc = None if raw_matched is None else float(raw_matched)
     matched_parent_composite = d.get("winner_matched_parent_composite")
-    delta = None if matched_parent_acc is None else w_acc - matched_parent_acc
+    # No Δ without BOTH ends of it. The winner's own rate is the new half of that condition.
+    delta = None if matched_parent_acc is None or w_acc is None else w_acc - matched_parent_acc
     p_value: float | None = d.get("p_value")  # computed by l1_score; not recomputed here.
     # The WHOLE reading is emitted, so a cold scale is legible here rather than arriving as a
     # bare float indistinguishable from a warm one — headline `ability` declines the cold case.
@@ -222,7 +228,10 @@ def _l1_score_exit(d: dict[str, Any], ctx: ViewContext) -> RoundCompleteView:
         and isinstance(t := raw_ability.get("theta"), int | float)
         else None
     )
-    if improved:
+    # An ungraded winner re-anchors NEITHER, which is the same "BOTH move" rule read through its
+    # own condition: there is no accuracy to anchor to, so moving the composite alone would put
+    # an accuracy Δ against the old parent above a composite Δ against the new one.
+    if improved and w_acc is not None:
         # BOTH move, or the candidate box renders an accuracy Δ against the new parent
         # above a composite Δ against C0, under one word and with nothing to tell them apart.
         ctx.parent_accuracy = w_acc
@@ -342,7 +351,7 @@ def from_phase_event(event: PhaseEvent, ctx: ViewContext) -> AnyView | None:
     return builder(event.data, ctx) if builder is not None else None
 
 
-# --- score-entry helpers (shared with application/output disk render) ---
+# --- score-entry helpers ---
 
 
 def score_entry_from_dict(s: dict[str, Any]) -> ScoreEntry:

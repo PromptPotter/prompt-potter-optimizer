@@ -40,7 +40,7 @@
                 "additionalProperties": {
                   "type": "string"
                 },
-                "description": "Top-level prompt-template fields; keys must be one of {persona, task_intent, problem_description, instruction, thinking_style, answer_format}.",
+                "description": "Top-level prompt-template fields; the open ones are grafted from the active PipelineSchema at runtime.",
                 "title": "Prompt Fields Updates",
                 "type": "object"
               },

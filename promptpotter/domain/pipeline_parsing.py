@@ -10,7 +10,6 @@ from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_JSON,
     ANSWER_AS_TEXT,
     OUTPUT_CONTRACT_KEYS,
-    SCHEMA_DESCRIPTIONS_PARAM,
     SCHEMA_TOGGLE_PARAM,
     THINKING_KINDS,
     NodeKind,
@@ -23,9 +22,13 @@ from promptpotter.domain.pipeline_schema import (
     PipelineView,
     PipelineViewEdge,
     PipelineViewNode,
-    declares_llm_run,
+    description_key,
+    description_paths,
 )
 from promptpotter.shared.errors import PayloadInvalidError
+from promptpotter.shared.hashing import shapes_optimizer_prompt
+
+shapes_optimizer_prompt(__name__)
 
 logger = logging.getLogger(__name__)
 
@@ -115,8 +118,7 @@ def _node_kind(name: str, raw: object) -> NodeKind | None:
 
 def _derive_node_kind(node: PipelineNode | None) -> str:
     """The DECLARED kind (:class:`NodeKind`) mapped to the coarser vocabulary the CLIENT styles
-    (``PipelineViewNode.kind``). Cache role wins — a hit short-circuits the pipeline — then the
-    model-axis signal, so a node carrying it can never read as anything else.
+    (``PipelineViewNode.kind``). Cache role wins — a hit short-circuits the pipeline.
 
     TOTAL over ``NodeKind`` rather than matched by prefix. ``startswith("llm")`` could not tell a
     declared type from a view kind spelled into a manifest, and every unlisted string fell through
@@ -126,16 +128,12 @@ def _derive_node_kind(node: PipelineNode | None) -> str:
         return "tool"
     if node.node_type is NodeType.CACHE:
         return "cache"
-    if node.runs_llm:
-        return "llm"
     kind = node.wire_type
     # An undeclared node is plumbing until its producer says otherwise — the one place the old
     # catch-all survives, now naming the single input it actually covers.
     if kind is None:
         return "tool"
     if kind in THINKING_KINDS:
-        # `llm/optimizer` and `agent` bear an LLM without carrying the MODEL AXIS, which is all
-        # `runs_llm` asks about — an in-process optimizer node resolves no carrier.
         return "llm"
     match kind:
         case NodeKind.GATEWAY:
@@ -378,8 +376,8 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             "param_descriptions": opt.get("param_descriptions", {}),
             "param_allowed_values": opt.get("param_allowed_values", {}),
             "param_types": _infer_param_types(opt, nc),
-            "langfuse_type": opt.get("langfuse_type", "span"),
             "current_config": dict(nc),
+            "tunes_llm": kind in THINKING_KINDS and bool(pk),
         }
 
         # Observation mappings
@@ -423,32 +421,29 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
                     f"output_schema (have: {sorted(props)})"
                 )
 
-        # Synthesize the always-on `description` lever onto any node that ships an
-        # `output_schema` with fields — schema-driven, never a per-dataset `param_keys`
-        # opt-in. The field NAME stays locked (`SCHEMA_OWNED_FIELDS`); only the free
-        # prose becomes tunable. Declared as an `object` param so the one nesting
-        # contract (`apply_node_overlay` merges one level, `build_l1_response_schema`
-        # emits the sub-schema, `validate_overrides` type-checks it) applies with no
-        # special case downstream — the same shape a hand-declared nested param has.
+        # Synthesize the `description` lever onto any node that ships an `output_schema` —
+        # schema-driven, never a per-dataset `param_keys` opt-in. The field NAME stays locked
+        # (`SCHEMA_OWNED_FIELDS`); only the free prose becomes tunable, one `string` param per
+        # field, so a campaign's `param_keys` holds or opens each like any scalar.
         out_schema = step_kwargs.get("output_schema")
-        if out_schema is not None and out_schema.fields:
-            step_kwargs["param_keys"] = pk | {SCHEMA_DESCRIPTIONS_PARAM}
+        described = (
+            [description_key(p) for p in description_paths(out_schema.json_schema)]
+            if out_schema is not None
+            else []
+        )
+        if described:
+            step_kwargs["param_keys"] = pk | set(described)
             step_kwargs["param_types"] = {
                 **step_kwargs["param_types"],
-                SCHEMA_DESCRIPTIONS_PARAM: "object",
+                **dict.fromkeys(described, "string"),
             }
 
-        # Synthesize the schema TOGGLE onto every node that runs an LLM — the sibling of the
+        # Synthesize the schema TOGGLE onto every node that tunes an LLM — the sibling of the
         # lever above, and neither is a per-dataset opt-in: whether the request carries a schema
         # is PromptPotter's own decision, so a connector re-declaring it would be a second
         # declaration of one axis (`docs/developer/node-standard.md`). One bound rides the value
         # space below; the model's own refusal is the other and belongs to `_refused`.
-        if declares_llm_run(
-            name=name,
-            mappings=mappings,
-            wire_type=kind,
-            langfuse_type=step_kwargs["langfuse_type"],
-        ):
+        if step_kwargs["tunes_llm"]:
             step_kwargs["param_keys"] = step_kwargs["param_keys"] | {SCHEMA_TOGGLE_PARAM}
             # Typed even where the node declares no schema — that is the row an operator creates
             # one from, and inference has nothing to read. Types only: they stay out of

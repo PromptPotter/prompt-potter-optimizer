@@ -218,7 +218,7 @@ export function WorkspaceProvider({
 
   // Tracks the active pointer from the last successful poll. When the
   // server-side pointer transitions to a *different* cycle (CLI ran
-  // `new`, fork, or sweep — all three mint a fresh cycle id and
+  // `new` or a fork — both mint a fresh cycle id and
   // re-write active_session.json), we auto-snap follow=true so the
   // viewed unit yanks to the new session. Resume does not move the
   // pointer, so a pinned operator studying a finished cycle stays put.

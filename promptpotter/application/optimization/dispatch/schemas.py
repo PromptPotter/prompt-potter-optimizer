@@ -20,6 +20,9 @@ from pydantic import (
 from promptpotter.application.optimization.dispatch.bundle import LAYOUT_SCHEMA_INSTRUCTION
 from promptpotter.domain.l1_layout import NODE_LAYOUTS, layout_json_schema
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.shared.hashing import shapes_optimizer_prompt
+
+shapes_optimizer_prompt(__name__)
 
 
 def _truncate(max_len: int) -> Callable[[Any], Any]:
@@ -160,9 +163,8 @@ class L1Variant(OptimizerResponseModel):
     prompt_fields_updates: dict[str, str] = Field(
         default_factory=dict,
         description=(
-            "Top-level prompt-template fields; keys must be one of "
-            "{persona, task_intent, problem_description, instruction, "
-            "thinking_style, answer_format}."
+            "Top-level prompt-template fields; the open ones are grafted from the "
+            "active PipelineSchema at runtime."
         ),
     )
     task_context_updates: dict[str, str] = Field(

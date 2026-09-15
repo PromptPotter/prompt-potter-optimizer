@@ -43,8 +43,8 @@ class LLMResponse(StrictModel):
             "round-trips are billed). Its own field rather than a ``usage`` key because "
             "``usage`` counts tokens and this is money. ``None`` means the provider "
             "reported nothing — the honest answer, which routes the reader back to the "
-            "rate table (``shared/pricing.py::compute_usd`` takes it as ``override_usd``) "
-            "instead of quoting a zero nobody measured."
+            "rate table (``infrastructure/llm/pricing.py::compute_usd`` takes it as "
+            "``override_usd``) instead of quoting a zero nobody measured."
         ),
     )
     served_by: str | None = Field(

@@ -64,7 +64,7 @@ if _declared != _record_types:
 
 # Whether a kind can EVER become an item in the activity feed — the ONE declaration of the
 # feed's vocabulary, which is why the ray needs none of its own. ``False`` is the licence not to
-# serve the record at all (``store/family_ray_views.py``); ``True`` still renders conditionally
+# serve the record at all (``store/family_ray_queries.py``); ``True`` still renders conditionally
 # on the payload — a ``snapshot`` that is a ``p_best_update`` yields nothing — and THAT decision
 # belongs to the renderer. Total over the RECORD kinds: ``stream_snapshot`` is synthesized by
 # the tail, reaches its own translator, and is on no ledger for the ray to filter.
