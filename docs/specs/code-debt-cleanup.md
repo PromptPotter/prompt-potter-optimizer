@@ -331,6 +331,12 @@ Closed items are not tracked here — `git log` is the history layer.
 - **Holistic reframes** (tooltip consolidation half) — VALID. `grep -rn "title={TERMS\[" webapp --include=*.tsx | wc -l` = 0, confirmed. No `lib/terms.ts::TERMS` string has migrated to HoverCard.
 - **InProcessRun has no arming context** — VALID. `_PROGRAM: ContextVar[DspyProgram | None]` still at `connectors/dspy_module.py:58`; `_PANEL: ContextVar[dict[str, Any] | None]` still at `connectors/harbor.py:123`. Both in-process connectors still reach independently for a ContextVar to carry per-run state, as described.
 
+## verified 2026-09-14
+
+- **NEXT — L4 re-reads `inner_tasks.yaml`** — VALID. Re-test run: `grep -rn "load_inner_tasks(" promptpotter/application/runner/inner/` returns three call sites — `ruler.py:50`, `spawn_context.py:75`, and `tasks.py:248` (inside `resolve_inner_task`). The two the entry names (`ruler.py` and `spawn_context.py`) are confirmed independent reads from disk; `resolve_inner_task` in `tasks.py` is a third. Action (resolve the panel once and hand it down through the spawn context) has not occurred.
+- **CLI's verb table defers every handler import** — VALID. `importlib.import_module` confirmed at `presentation/cli/campaign_runner.py:194`: `handler = getattr(importlib.import_module(module_path), attr)` — each command handler is resolved at call time from a string stored in `COMMANDS`. Re-test hits; operator decision on startup cost pending.
+- **Harbor run's roster never lands on disk** — VALID. `connectors/harbor.py::_registry_tasks` still decorated `@functools.cache` at line 129. Sole write site for `pipeline.resolved.yaml` is `application/initialization/loop_start.py:75`; no harbor roster file is written alongside it. No harbor campaign cycles exist on disk (re-test not runnable), but code confirms the action has not been taken.
+
 ## verified 2026-09-15
 
 - **Nine account-pane page loads put** — VALID. Both whole-workspace reads in `presentation/api/routers/campaigns/storage.py` are synchronous `def` functions performing `rglob("*")` walks: `get_storage_by_dataset:141` and `get_workspace_storage:194`. FastAPI runs them in its threadpool, holding a thread for each full walk's duration. No bounding or caching has been added. Note: `webapp/e2e/walk/account.spec.ts` and `dashboard.spec.ts` now exist after main merge — the re-test command is now runnable.
