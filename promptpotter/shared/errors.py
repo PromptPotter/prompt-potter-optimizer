@@ -3,11 +3,15 @@ from __future__ import annotations
 import asyncio
 import enum
 import logging
+import re
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.shared.hashing import shapes_optimizer_prompt
+
+if TYPE_CHECKING:
+    from promptpotter.domain.spend import StepTokenUsage
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +20,8 @@ class ErrorCategory(enum.StrEnum):
     CLIENT = "CLIENT"
     SERVER = "SERVER"
     CONNECTION = "CONNECTION"
+    # The model provider refused the cell's calls for lack of credit. A hole, like CONNECTION.
+    PROVIDER_CREDIT = "PROVIDER_CREDIT"
     PIPELINE = "PIPELINE"
     # A bound WE declared ended the cell. Re-measuring under the same declaration ends it at the
     # same place for the same price, so a repair leaves one alone (:func:`is_repairable_hole`).
@@ -28,9 +34,23 @@ class ErrorCategory(enum.StrEnum):
 
 class CellUnscoreableError(RuntimeError):
     """Raised where a cell answers with no verdict; ``measure_sample`` is the one catcher and banks
-    :attr:`category`, so the configuration under test is never charged."""
+    :attr:`category`, so the configuration under test is never charged.
+
+    ``spent`` (``step_tokens`` shape) and ``step_timings`` are what the cell paid before it had no
+    verdict, and the catcher bills them. ``{}`` where a ledger holds it already (an L4 inner cycle)."""
 
     category: ErrorCategory = ErrorCategory.UNSCOREABLE
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        spent: Mapping[str, StepTokenUsage],
+        step_timings: Mapping[str, float],
+    ) -> None:
+        super().__init__(message)
+        self.spent = spent
+        self.step_timings = step_timings
 
 
 class CellHaltedError(CellUnscoreableError):
@@ -38,6 +58,36 @@ class CellHaltedError(CellUnscoreableError):
     declaration cuts the next attempt at the same place, after paying for it again."""
 
     category = ErrorCategory.HALTED
+
+
+class CellInfrastructureError(CellUnscoreableError):
+    """The machine could not run the cell — a registry, a package mirror, the network — after the
+    backend's own bounded retries. Banked as ``CONNECTION``, which stops the walk (``query_loop``)."""
+
+    category = ErrorCategory.CONNECTION
+
+
+class CellCreditExhaustedError(CellInfrastructureError):
+    """The provider account behind the cell is out of credit. No backoff can top it up, so the
+    backend raises it on the first attempt."""
+
+    category = ErrorCategory.PROVIDER_CREDIT
+
+
+# The refusals once an account's credit or a key's limit is spent: OpenRouter's two (HTTP 402 /
+# 403) and Anthropic's, which arrives as an HTTP 400 `invalid_request_error`.
+_PROVIDER_CREDIT_REFUSAL = re.compile(
+    r"requires more credits|Key limit exceeded|credit balance is too low"
+)
+
+
+def is_provider_credit_refusal(detail: str) -> bool:
+    return _PROVIDER_CREDIT_REFUSAL.search(detail) is not None
+
+
+class ProviderCreditExhaustedError(RuntimeError):
+    """One of our own LLM calls was refused for lack of provider credit. Terminal until the key is
+    topped up; a run ends on ``StopReason.PROVIDER_CREDIT`` rather than crashing."""
 
 
 class PotterError(Exception):
@@ -307,11 +357,11 @@ def has_pipeline_warnings(result: Mapping[str, Any]) -> bool:
 
 @contextmanager
 def graceful(msg: str) -> Iterator[None]:
-    """Suppress non-interrupt exceptions with a log message. ``KeyboardInterrupt`` and
-    ``asyncio.CancelledError`` re-raise, so graceful shutdown is never swallowed."""
+    """Suppress non-interrupt exceptions with a log message. ``KeyboardInterrupt``,
+    ``asyncio.CancelledError`` and a spent provider account re-raise: each ends the run."""
     try:
         yield
-    except (KeyboardInterrupt, asyncio.CancelledError):
+    except (KeyboardInterrupt, asyncio.CancelledError, ProviderCreditExhaustedError):
         raise
     except Exception:
         logger.warning(msg, exc_info=True)
@@ -340,7 +390,9 @@ def is_repairable_hole(result: Mapping[str, Any]) -> bool:
 
 __all__ = [
     "BadRequestError",
+    "CellCreditExhaustedError",
     "CellHaltedError",
+    "CellInfrastructureError",
     "CellUnscoreableError",
     "ConflictError",
     "ContentTooLargeError",
@@ -350,6 +402,7 @@ __all__ = [
     "NotFoundError",
     "PayloadInvalidError",
     "PotterError",
+    "ProviderCreditExhaustedError",
     "RequestTooLargeError",
     "ResumeDivergenceError",
     "RulerCoverageError",
@@ -361,5 +414,6 @@ __all__ = [
     "graceful",
     "has_pipeline_warnings",
     "is_error_result",
+    "is_provider_credit_refusal",
     "is_repairable_hole",
 ]

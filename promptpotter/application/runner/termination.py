@@ -3,20 +3,33 @@ backend reports $0 while tokens count the work it misses. Caps re-read every tic
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from promptpotter.domain.phases import StopReason
-from promptpotter.shared.errors import is_repairable_hole
+from promptpotter.domain.phases import StopLoop, StopReason
+from promptpotter.shared.errors import ProviderCreditExhaustedError, is_repairable_hole
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from promptpotter.domain.results import DegradationHealth
 
+logger = logging.getLogger(__name__)
+
 OriginGateMode = Literal["strict", "critical_only", "off"]
 PanelGateMode = Literal["strict", "off"]
+
+# What ends a run on a named reason wherever it is raised — prep, init or the round loop.
+RUN_STOPS = (StopLoop, ProviderCreditExhaustedError)
+
+
+def run_stop_reason(stop: StopLoop | ProviderCreditExhaustedError) -> StopReason:
+    if isinstance(stop, ProviderCreditExhaustedError):
+        logger.warning("Run halted: %s", stop)
+        return StopReason.PROVIDER_CREDIT
+    return stop.reason
 
 
 @dataclass(frozen=True)
@@ -54,16 +67,6 @@ def origin_gate_tripped(
     return None
 
 
-def backend_unreachable_tripped(health: DegradationHealth | None) -> StopReason | None:
-    """``BACKEND_UNREACHABLE`` on a closed round whose verdict says the backend is down. Unconditional:
-    there is nothing to decide, only a corpse to grind, and halting turns six silent rounds into one."""
-    if health is None:
-        return None
-    if health.grade == "critical" and health.cause == "backend_unreachable":
-        return StopReason.BACKEND_UNREACHABLE
-    return None
-
-
 def panel_gate_tripped(
     holed_rows: Sequence[Mapping[str, Any]], mode: PanelGateMode
 ) -> StopReason | None:
@@ -81,9 +84,10 @@ def panel_gate_tripped(
 
 
 __all__ = [
+    "RUN_STOPS",
     "BudgetGate",
     "OriginGateMode",
-    "backend_unreachable_tripped",
     "origin_gate_tripped",
     "panel_gate_tripped",
+    "run_stop_reason",
 ]

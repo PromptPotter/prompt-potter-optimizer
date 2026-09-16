@@ -33,8 +33,8 @@ class CampaignPhase(enum.StrEnum):
 
 
 class StopReason(enum.StrEnum):
-    """``BACKEND_UNREACHABLE`` halts on a round that was ≥ ``BACKEND_UNREACHABLE_RATE``
-    backend-down samples, rather than grinding zero-accuracy rounds against a dead backend."""
+    """``BACKEND_UNREACHABLE`` halts at the first cell the backend could not reach once its own
+    retries were spent (``query_loop.py::_absorb``)."""
 
     PERFECT = "perfect_score"
     MAX_ROUNDS = "max_rounds"
@@ -52,6 +52,7 @@ class StopReason(enum.StrEnum):
     TOKEN_BUDGET = "token_budget"
     ORIGIN_GATE = "origin_gate"
     BACKEND_UNREACHABLE = "backend_unreachable"
+    PROVIDER_CREDIT = "provider_credit_exhausted"
     RENDER_ERROR = "render_error"
     OPTIMIZER_TIMEOUT = "optimizer_timeout"
     REBASED = "rebased_to_fork"
@@ -152,13 +153,15 @@ class StopReasonInfo(NamedTuple):
 # import time below — adding a StopReason without a row here raises before the module loads.
 #
 # Mid-round is decided by WHERE the stop is raised, not by how bad it sounds:
-#   - `scoring/query_loop.py` raises inside the per-sample loop -> SPEND_BUDGET, TOKEN_BUDGET.
+#   - `scoring/query_loop.py` raises inside the per-sample loop -> SPEND_BUDGET, TOKEN_BUDGET,
+#     BACKEND_UNREACHABLE, PROVIDER_CREDIT.
 #   - a pause returns from that same loop between samples -> PAUSED.
-#   - CRASHED / RENDER_ERROR / OPTIMIZER_TIMEOUT are exceptions from anywhere, round included.
+#   - CRASHED / RENDER_ERROR / OPTIMIZER_TIMEOUT are exceptions from anywhere, round included, and
+#     so is PROVIDER_CREDIT when an optimizer call is the one refused.
 #   - everything else fires at a round BOUNDARY: `runner/round.py` raises only after
 #     `close_round`, escalation's ABORT/REBASED ride the post-round transition seam,
-#     ORIGIN_GATE runs once round 0 is scored, BACKEND_UNREACHABLE reads a CLOSED round's
-#     verdict, and DIVERGED is decided at resume before any round starts.
+#     ORIGIN_GATE runs once round 0 is scored, and DIVERGED is decided at resume before any
+#     round starts.
 #
 # `next_step` is filled ONLY where the verb cannot be read off the label. "Fix the backend, then
 # resume" is the reason restated, not advice; the ones below each name a flag, a threshold or a
@@ -227,7 +230,21 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         "Origin gate (unhealthy origin)", StopOutcome.HALTED, False, False, ""
     ),
     StopReason.BACKEND_UNREACHABLE: StopReasonInfo(
-        "Backend unreachable", StopOutcome.HALTED, False, False, ""
+        "Backend unreachable",
+        StopOutcome.HALTED,
+        True,
+        False,
+        "The unreached cell is a hole, not a score: restore the backend or the network it "
+        "needs, then `resume` re-measures it.",
+    ),
+    # Not SPEND_BUDGET: that ceiling is ours and `set-budget` moves it. This one is the provider's.
+    StopReason.PROVIDER_CREDIT: StopReasonInfo(
+        "Provider out of credit",
+        StopOutcome.HALTED,
+        True,
+        False,
+        "Raise the provider key's limit or top up its credit, then `resume`; a refused cell is a "
+        "hole it re-measures.",
     ),
     StopReason.CRASHED: StopReasonInfo("Crashed", StopOutcome.FAILED, True, True, ""),
     # Written by the REAPER straight onto index.json — the producer is already gone, so
@@ -264,8 +281,10 @@ def stop_reason_outcome(reason: StopReason | str) -> StopOutcome:
 class StopLoop(Exception):  # noqa: N818 — control-flow signal, not an error
     """Control-flow signal caught once at the top of the round loop."""
 
-    def __init__(self, reason: StopReason) -> None:
+    def __init__(self, reason: StopReason, *, unmeasured: int | None = None) -> None:
         self.reason = reason
+        # Cells of the walk this stop left unmeasured, where the raiser is a walk.
+        self.unmeasured = unmeasured
         super().__init__(reason.value)
 
 

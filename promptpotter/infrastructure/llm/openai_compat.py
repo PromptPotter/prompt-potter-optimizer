@@ -29,6 +29,7 @@ from promptpotter.infrastructure.llm.rate_limit import (
 )
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.shared import truncate
+from promptpotter.shared.errors import ProviderCreditExhaustedError, is_provider_credit_refusal
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -496,9 +497,15 @@ class OpenAICompatibleClient(LLMClientBase):
         request_params: dict[str, Any],
         response_model: type[BaseModel] | None,
     ) -> LLMResponse | None:
-        """Known-error translation: too-large + 404 raise clearer, Groq json_validate_failed salvages, else ``None`` ⇒ re-raise."""
+        """Known-error translation: too-large, 404 and a spent account raise clearer, Groq
+        json_validate_failed salvages, else ``None`` ⇒ re-raise."""
         raise_if_request_too_large(exc, self._provider_name)
-        if getattr(exc, "status_code", None) == 404:
+        status = getattr(exc, "status_code", None)
+        if status in (402, 403) and is_provider_credit_refusal(str(exc)):
+            raise ProviderCreditExhaustedError(
+                f"{self._provider_name} refused the call for lack of credit: {str(exc)[:300]}"
+            ) from exc
+        if status == 404:
             model_name = request_params.get("model", "unknown")
             raise ValueError(
                 f"Model '{model_name}' not found on {self._provider_name}. "

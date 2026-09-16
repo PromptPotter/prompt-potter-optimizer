@@ -125,6 +125,14 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   fires only on `verified` aliases. Workaround: clear `measurements/`. **Re-test:** grep the package
   for `--fresh` and for any revision term on the measurement-cache key; while both miss, this stands.
 
+**A second containerized connector:**
+- **`package_cache` is honoured by harbor alone, and nothing refuses a dataset whose connector
+  ignores it.** The dataset key is already backend-neutral; what is harbor-only is the reader
+  (`harbor.py::PACKAGE_CACHE_SCOPES`). Action: a `Connector.package_cache_scopes` declaration,
+  empty by default, that run init checks the declared scope against — with one connector it would
+  have one reader and guard nothing. **Re-test:** a second `connectors/*.py` that runs cells in a
+  container; while harbor is the only one, this waits.
+
 **Coupon + BYO build (Lane A2 — blocked on the build itself; ADR-0003 § Host coupon + BYO keys):**
 - **Re-test for all three below: grep the package for `grant.json`.** It is prose-only today, so
   while that grep reaches no code the build has not started and every premise here stands.

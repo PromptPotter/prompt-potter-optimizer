@@ -114,6 +114,10 @@ class CellEnvelope:
             raise CellHaltedError(
                 f"cell {self.label} ran past its {self.budget_s:.0f}s wall-clock envelope and was "
                 f"cancelled ({self.unworked:.0f}s of it already given back as time the cell was "
-                "not allowed to spend)"
+                "not allowed to spend)",
+                # A cancelled call hands back no bill: our own LLM calls are on the ledger already,
+                # but an agent that spends outside our client is lost with it.
+                spent={},
+                step_timings={},
             )
         return False

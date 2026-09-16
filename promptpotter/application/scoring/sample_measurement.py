@@ -138,6 +138,8 @@ _INFRA_KEYS: frozenset[str] = frozenset(
         # it: a dataset does not declare an `observation_mapping` for how its backend talks, and
         # a formula must never read a turn — see `domain/scoring.py::TurnRecord`.
         "turns",
+        # Where an episode's wall clock went, by harness phase (`PipelineData.step_phases`).
+        "step_phases",
         # L4: the arm's own half of a paired cell difference (`domain/l4/proxies.py`). It rides
         # here rather than as a declared observation because the panel reads it and the scoring
         # formula must not — see the emit site in `runner/inner/spawn.py`.
@@ -558,6 +560,8 @@ async def measure_sample(
     except CellUnscoreableError as exc:
         # The cell RAN and there is nothing to grade. The exception's own category says WHICH of the
         # two — a cut we made, or a reward the backend never produced — and a repair reads them apart.
+        # What it paid is billed here all the same: an ungraded cell is not a free one.
+        emit_step_token_usage(exc.spent, exc.step_timings, cached=False)
         logger.warning("measure_sample %s for %s: %s", exc.category.value, query[:60], exc)
         return _error_result(sample, str(exc), category=exc.category)
     except Exception as exc:

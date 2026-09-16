@@ -138,7 +138,7 @@ export interface RoundSummaryCandidate {
 /** Context-aware degradation verdict for a round (origin included), computed */
 export interface DegradationHealth {
   grade: 'healthy' | 'degraded' | 'critical';
-  cause: 'origin_unmeasured' | 'origin_incomplete' | 'backend_unreachable' | 'structural' | 'unscoreable' | 'holed' | 'evidence_starved' | 'structural_untested' | 'persistent' | 'degraded' | null;
+  cause: 'origin_unmeasured' | 'origin_incomplete' | 'structural' | 'unscoreable' | 'holed' | 'evidence_starved' | 'structural_untested' | 'persistent' | 'degraded' | null;
   samples: number;
   structural_count: number;
   transient_count: number;
@@ -1972,6 +1972,7 @@ export const STOP_REASON_LABELS: Record<string, string> = {
   'token_budget': 'Token budget reached',
   'origin_gate': 'Origin gate (unhealthy origin)',
   'backend_unreachable': 'Backend unreachable',
+  'provider_credit_exhausted': 'Provider out of credit',
   'crashed': 'Crashed',
   'producer_vanished': 'Producer vanished',
   'render_error': 'Render error',
@@ -1989,6 +1990,8 @@ export const STOP_REASON_NEXT_STEPS: Record<string, string> = {
   'panel_cut': 'Give the cut cells room (`Connector.cell_envelope_s`) before `resume`, or `optimization.panel_gate: off` to elect on the holed panel.',
   'spend_budget': '`set-budget --max-usd <above what is already spent>` then `resume`.',
   'token_budget': '`set-budget --max-tokens <above what is already spent>` then `resume`.',
+  'backend_unreachable': 'The unreached cell is a hole, not a score: restore the backend or the network it needs, then `resume` re-measures it.',
+  'provider_credit_exhausted': "Raise the provider key's limit or top up its credit, then `resume`; a refused cell is a hole it re-measures.",
   'diverged': '`resume --fork-on-divergence` to branch here, or revert the config edit to continue.',
 };
 
@@ -2012,6 +2015,7 @@ export const STOP_REASON_OUTCOMES: Record<string, string> = {
   'token_budget': 'halted',
   'origin_gate': 'halted',
   'backend_unreachable': 'halted',
+  'provider_credit_exhausted': 'halted',
   'crashed': 'failed',
   'producer_vanished': 'failed',
   'render_error': 'failed',

@@ -46,7 +46,7 @@ from promptpotter.domain.l4.proxies import (
     parent_level_series,
 )
 from promptpotter.domain.launch_limits import LaunchLimits
-from promptpotter.domain.phases import RunPhase
+from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.results import candidate_label
 from promptpotter.infrastructure.llm.telemetry import (
@@ -71,7 +71,7 @@ from promptpotter.infrastructure.store.layout import (
 )
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import build_stores
-from promptpotter.shared.errors import CellUnscoreableError, graceful
+from promptpotter.shared.errors import CellCreditExhaustedError, CellUnscoreableError, graceful
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.instrument import (
     MAX_INSTRUMENT_DEPTH,
@@ -380,13 +380,17 @@ def _open_inner_campaign(
     if phase in (RunPhase.RUNNING, RunPhase.GATE, RunPhase.CHECKIN):
         raise CellUnscoreableError(
             f"its campaign {campaign_id}/{plan.cycle_id} reads {phase} — another producer "
-            "owns it, and two runs writing one cycle is not a measurement"
+            "owns it, and two runs writing one cycle is not a measurement",
+            spent={},
+            step_timings={},
         )
     session_id = str(existing.get("parent_session_id") or "")
     if not session_id:
         raise CellUnscoreableError(
             f"its campaign {campaign_id}/{plan.cycle_id} names no parent session, so there "
-            "is no session record to continue under"
+            "is no session record to continue under",
+            spent={},
+            step_timings={},
         )
 
     session.session_id = session_id
@@ -673,8 +677,16 @@ async def _measure_inner_cell(
         with contextlib.suppress(asyncio.CancelledError):
             await heartbeat_task
     elapsed = time.monotonic() - start
-    # No exclusion decision here: `compute_outer_proxies` raises `CellUnscoreableError`,
-    # which `measure_sample` resolves to this cell's UNSCOREABLE row.
+    if result.stop_reason is StopReason.PROVIDER_CREDIT:
+        # The inner run spends the outer run's provider key, so the refusal is every later cell's:
+        # a hole that halts the walk, never an excluded cell the walk steps past.
+        raise CellCreditExhaustedError(
+            f"its inner campaign {campaign_id} ran out of provider credit",
+            spent={},
+            step_timings={},
+        )
+    # Every other no-evidence shape is the law's: `compute_outer_proxies` raises
+    # `CellUnscoreableError`, which `measure_sample` resolves to this cell's UNSCOREABLE row.
     proxies = compute_outer_proxies(result)
     facts = inner_cell_facts(result, campaign_id)
 

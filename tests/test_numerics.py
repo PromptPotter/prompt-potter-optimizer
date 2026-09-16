@@ -1303,17 +1303,15 @@ def test_leader_eligibility_bars_invalid_measurement_not_stops():
 
 
 def test_a_round_that_measured_nothing_usable_names_which_way_it_broke():
-    """Three ways a round produces no usable measurement. Each must NAME itself, because the
-    next move differs completely between them — and every one of the three used to grade
-    ``healthy`` or abstain.
+    """Two ways a round produces no usable measurement. Each must NAME itself, because the
+    next move differs completely between them — and both used to grade ``healthy`` or abstain.
 
     ``unscoreable`` (JustLogic): the pipeline RUNS — every ``step_status`` success, no warning —
     and emits no extractable label. The backend calls that a success, so the structural/transient
     channel is blind, and the loop spent rounds optimizing a prompt whose every output was
     unreadable. ``origin_unmeasured`` (L4): round-0 scoring produced ZERO rows, and graded
     healthy or abstained, candidates are then elected against NO baseline — the irreversible
-    one. ``backend_unreachable``: every row errored, and since ``total`` counts only evidence
-    rows, a round that ATTEMPTED work must not slip out as "nothing measured".
+    one.
 
     Only the ORIGIN halts, and only on a real break: a non-origin round that measured nothing
     abstains rather than fabricating a verdict, and a wrong-but-extractable round IS a
@@ -1351,20 +1349,9 @@ def test_a_round_that_measured_nothing_usable_names_which_way_it_broke():
     assert unmeasured is not None
     assert (unmeasured.grade, unmeasured.cause) == ("critical", "origin_unmeasured")
 
-    dead = compute_round_health(
-        results=[
-            {"error": "connect timeout", "error_category": "CONNECTION", "pipeline_data": None}
-            for _ in range(10)
-        ],
-        prior_healths=[],
-    )
-    assert dead is not None
-    assert (dead.grade, dead.cause) == ("critical", "backend_unreachable")
-    assert dead.samples == 10 and dead.suggested_action is not None
-
-    # Every one halts even in the LEAST-strict armed mode — that is the guarantee that a broken
+    # Both halt even in the LEAST-strict armed mode — that is the guarantee that a broken
     # origin never silently enters L1.
-    for broken in (unscoreable, unmeasured, dead):
+    for broken in (unscoreable, unmeasured):
         assert origin_gate_tripped(broken, "critical_only") == StopReason.ORIGIN_GATE
 
     # A hard task emitting REAL labels is a measurement, not a broken floor.

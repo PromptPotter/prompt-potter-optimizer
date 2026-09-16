@@ -184,7 +184,8 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
         # Loud, never silent: this drops a panel cell, and a dropped cell that reads as "covered"
         # is worse than no cell at all.
         logger.warning("inner cycle EXCLUDED (no evidence about the optimizer prompt): %s", reason)
-        raise CellUnscoreableError(reason)
+        # The inner cycle forwarded its own spend onto the outer ledger as it ran.
+        raise CellUnscoreableError(reason, spent={}, step_timings={})
 
     assert result.origin_level is not None  # guaranteed by no_evidence_reason
     # Every level is an ability in LOGITS on the fixed ruler, so a delta is a difference of two

@@ -1,0 +1,12 @@
+# Layered over Harbor's docker compose files on every harbor cell (`harbor.py::_DOCKER_OVERLAY`).
+services:
+  main:
+    # Harbor's build file names no image, so compose tags one per TRIAL and `down --rmi local`
+    # deletes it; a content-addressed tag is kept by that `down` and shared by every cell.
+    image: ${PREBUILT_IMAGE_NAME:-${MAIN_IMAGE_NAME}}
+    # PID 1 is `sleep`, which ignores SIGTERM, so a graceful stop idles out the full grace period.
+    stop_signal: SIGKILL
+    # Where a verifier reaches the machine's package cache (`harbor.py::PACKAGE_CACHE`). Docker
+    # Desktop resolves the name already; Linux needs the mapping.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

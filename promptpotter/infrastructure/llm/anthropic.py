@@ -18,6 +18,7 @@ from promptpotter.infrastructure.llm.rate_limit import (
     apply_discovered_caps,
 )
 from promptpotter.infrastructure.llm.response import LLMResponse
+from promptpotter.shared.errors import ProviderCreditExhaustedError, is_provider_credit_refusal
 
 if TYPE_CHECKING:
     from anthropic import AsyncAnthropic
@@ -122,7 +123,14 @@ class AnthropicClient(LLMClientBase):
             self._rate_limiter, messages, anthropic_max_tokens, "Anthropic"
         )
 
-        raw = await client.messages.with_raw_response.create(**request_params)
+        try:
+            raw = await client.messages.with_raw_response.create(**request_params)
+        except Exception as exc:
+            if getattr(exc, "status_code", None) == 400 and is_provider_credit_refusal(str(exc)):
+                raise ProviderCreditExhaustedError(
+                    f"Anthropic refused the call for lack of credit: {str(exc)[:300]}"
+                ) from exc
+            raise
         response = raw.parse()
 
         # Anthropic reports its cache counts BESIDE its input count; the OpenAI-compat wire

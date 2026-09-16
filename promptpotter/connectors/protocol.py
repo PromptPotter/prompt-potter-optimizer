@@ -59,6 +59,14 @@ PreflightFn = Callable[[str], Awaitable[None]]
 # so an env change lands without a reimport). ``None`` return = send no auth header.
 AuthTokenFn = Callable[[], str | None]
 
+# ``pipeline_params → Delivery``: where a backend offers more than one channel, which one carries
+# the prompt is the campaign's instrument choice, so it is resolved from the params a run hashes.
+PromptDelivery = Callable[[dict[str, Any] | None], Delivery]
+
+
+def _in_the_request(pipeline_params: dict[str, Any] | None) -> Delivery:
+    return "request"
+
 
 @dataclass(frozen=True)
 class Connector:
@@ -122,9 +130,9 @@ class Connector:
     """What one measured row of this backend is CALLED: ``cell`` where it is a whole inner campaign
     or agent episode, else ``sample``. Declared, never sniffed off a row."""
 
-    prompt_delivery: Delivery = "request"
-    """The CHANNEL the candidate's rendered prompt reaches the model by, read by
-    ``PipelineSchema.value_tree``.
+    prompt_delivery: PromptDelivery = _in_the_request
+    """The CHANNEL the candidate's rendered prompt reaches the model by, resolved per run from the
+    params it hashes and read by ``PipelineSchema.value_tree``.
 
     ``request`` — in the message that carries the task, so it always arrives. Three of the four
     connectors, and the reason this is the default.
@@ -134,7 +142,8 @@ class Connector:
     this channel **may never arrive**, which no param name says and no roster of keys could; the
     connector owes an arrival observation beside it (``harbor.py::SKILL_KEY``). Declared here and
     not inferred from ``execution`` or ``measured_unit``: an in-process agent backend could just as
-    well put the prompt in the request, and a guess would be silently wrong exactly once."""
+    well put the prompt in the request, and ``harbor`` does exactly that under
+    ``skill_delivery: system_prompt``."""
 
     required_observation_keys: tuple[str, ...] = ()
     """Observation keys this backend ALWAYS emits; ``wiring.py::_verify_required_observation_keys``
@@ -254,5 +263,6 @@ __all__ = [
     "InProcessRun",
     "InProcessWorkload",
     "PreflightFn",
+    "PromptDelivery",
     "VersionCheck",
 ]

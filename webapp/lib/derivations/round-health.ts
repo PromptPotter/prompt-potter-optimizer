@@ -28,7 +28,6 @@ export function roundHealthAt(
 export const HEALTH_CAUSE_LABEL: Record<NonNullable<DegradationHealth["cause"]>, string> = {
   origin_unmeasured: "the origin was not measured",
   origin_incomplete: "the origin is missing cells",
-  backend_unreachable: "the backend was unreachable",
   structural: "a node failed structurally",
   unscoreable: "no extractable answer",
   holed: "cells returned no measurement",

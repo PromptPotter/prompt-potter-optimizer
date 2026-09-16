@@ -175,8 +175,8 @@ async def execute_round(
     # cannot see it.
     #
     # The `is_leader_eligible` conjunct matters. A degradation / scoring-error abort also
-    # produces error rows, and it already owns a channel (`backend_unreachable_tripped`);
-    # halting on it here would be a second mechanism doing one job.
+    # produces error rows, and it already owns a channel (the candidate-scoped scoring-error
+    # escalation); halting on it here would be a second mechanism doing one job.
     holed = sorted(
         c.candidate_id
         for c in round_result.candidate_scores

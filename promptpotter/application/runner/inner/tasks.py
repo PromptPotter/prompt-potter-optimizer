@@ -236,12 +236,16 @@ def load_inner_tasks(path: Path) -> InnerTasks:
     if raw is None:
         raise CellUnscoreableError(
             f"{path} is missing — the inner benchmark, its sample count and its round cap are "
-            "all declared there. There is no default to run."
+            "all declared there. There is no default to run.",
+            spent={},
+            step_timings={},
         )
     try:
         return InnerTasks.model_validate(raw)
     except ValidationError as exc:
-        raise CellUnscoreableError(f"{path} does not declare a runnable panel: {exc}") from exc
+        raise CellUnscoreableError(
+            f"{path} does not declare a runnable panel: {exc}", spent={}, step_timings={}
+        ) from exc
 
 
 def resolve_inner_task(ctx: InnerSpawnContext, query: str) -> InnerTaskSpec:
@@ -253,7 +257,9 @@ def resolve_inner_task(ctx: InnerSpawnContext, query: str) -> InnerTaskSpec:
     if (panel := ctx.panel) is None:
         raise CellUnscoreableError(
             f"{inner_tasks_path(ctx.dataset_config_dir)} is missing — the inner benchmark, its "
-            "sample count and its round cap are all declared there. There is no default to run."
+            "sample count and its round cap are all declared there. There is no default to run.",
+            spent={},
+            step_timings={},
         )
     cfg = panel.inner_benchmark_config
     cell = next((t for t in panel.tasks if t.id == query), None)

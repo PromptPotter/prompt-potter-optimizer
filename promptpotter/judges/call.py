@@ -54,6 +54,7 @@ from promptpotter.infrastructure.llm.telemetry import (
 )
 from promptpotter.infrastructure.store.stores import LLMReuseCache, hash_call
 from promptpotter.judges.protocol import JudgeStage, JudgeVerdict
+from promptpotter.shared.errors import CellCreditExhaustedError, ProviderCreditExhaustedError
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,8 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
     """Run one judge stage. Returns ``(reply, error)`` — exactly one is non-empty.
 
     **Never raises**, which every caller relies on: a grading failure must stay a failed grading,
-    not kill the measurement of a cell the backend already paid for."""
+    not kill the measurement of a cell the backend already paid for. The one exception is a spent
+    provider account, which is no grading at all: it raises ``CellCreditExhaustedError``."""
     started = time.monotonic()
     cache = _CACHE.get()
     key: str | None = None
@@ -99,6 +101,10 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
     else:
         try:
             response = await _sample(stage, prompt, judge=judge, started=started)
+        except ProviderCreditExhaustedError as exc:
+            # `spent` is empty because `measure_sample` bills the cell's backend spend before any
+            # judge runs; its catch banks the hole and the walk halts on it.
+            raise CellCreditExhaustedError(str(exc), spent={}, step_timings={}) from exc
         except Exception as exc:
             logger.warning("judge %s stage %s failed: %s", judge, stage.role, exc)
             return "", f"{type(exc).__name__}: {exc}"

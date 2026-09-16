@@ -55,7 +55,11 @@ from promptpotter.presentation.cli.commands.resume_command import cmd_resume
 from promptpotter.presentation.cli.commands.seed_screen import cmd_seed_screen
 from promptpotter.presentation.cli.commands.verify import cmd_verify
 from promptpotter.presentation.cli.parsers import build_parser, parser_verbs
-from promptpotter.shared.errors import PotterError, RequestTooLargeError
+from promptpotter.shared.errors import (
+    PotterError,
+    ProviderCreditExhaustedError,
+    RequestTooLargeError,
+)
 
 __all__ = ["main"]
 
@@ -215,7 +219,7 @@ def main() -> None:
 
     try:
         result = asyncio.run(handler(args))
-    except (RequestTooLargeError, PotterError) as exc:
+    except (RequestTooLargeError, ProviderCreditExhaustedError, PotterError) as exc:
         # Operator-facing input errors (e.g. `resume --from N` past the last
         # completed round → BadRequestError) surface as a clean message, not a
         # traceback. PotterError is the one typed-error family the seams raise.

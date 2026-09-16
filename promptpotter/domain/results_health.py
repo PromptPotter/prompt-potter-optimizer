@@ -22,7 +22,6 @@ shapes_optimizer_prompt(__name__)
 STRUCTURAL_FLAG_RATE: float = 0.30
 DEGRADED_RATE_FLAG: float = 0.20
 CONSECUTIVE_DEGRADED_CRITICAL: int = 3
-BACKEND_UNREACHABLE_RATE: float = 0.50
 UNSCOREABLE_RATE: float = 0.50
 EVIDENCE_STARVED_RATE: float = 0.40
 # The share of its panel a round must actually have SENT before any rate below is allowed to grade
@@ -243,7 +242,6 @@ def compute_degradation_health(
     prior_clean_rounds: int,
     consecutive_degraded_rounds: int,
     dominant_node: str | None = None,
-    unreachable_count: int = 0,
     no_result_count: int = 0,
     hole_count: int = 0,
     not_attempted: int = 0,
@@ -321,11 +319,8 @@ def compute_degradation_health(
     # Holes are in the denominator and can never be in the numerator — a hole `continue`s before
     # ``classify_sample_failure`` ever sees it — so a round graded CLOSER TO 0% the more completely
     # it failed, which is exactly what "Degraded rate 0%" read beside "98% of cells returned no
-    # measurement". The rate is over the cells that came back with something to classify, and
-    # UNREACHABLE is the other kind that never gets there: it `continue`s one arm earlier off the
-    # typed transport error. Subtracting one and not the other leaves the same bug for the failure
-    # mode that produces it most — a backend going down mid-round.
-    classifiable = attempted - hole_count - unreachable_count
+    # measurement". The rate is over the cells that came back with something to classify.
+    classifiable = attempted - hole_count
     degraded_rate = (structural_count + transient_count) / classifiable if classifiable else 0.0
     untested = prior_clean_rounds == 0
 
@@ -338,11 +333,7 @@ def compute_degradation_health(
 
     grade: HealthGrade
     cause: HealthCause | None = None
-    # Backend-down outranks every other verdict: an unreachable backend isn't a
-    # pipeline problem the optimizer can move, it's a halt-and-restart condition.
-    if unreachable_count / attempted >= BACKEND_UNREACHABLE_RATE:
-        grade, cause = "critical", "backend_unreachable"
-    elif structural_rate >= STRUCTURAL_FLAG_RATE:
+    if structural_rate >= STRUCTURAL_FLAG_RATE:
         grade, cause = "critical", "structural"
     elif no_result_rate >= UNSCOREABLE_RATE:
         # Pipeline succeeded but emitted no extractable label on a majority of
@@ -384,13 +375,7 @@ def compute_degradation_health(
     suggested_action: str | None = None
     where = f"{dominant_node} " if dominant_node else ""
     if grade == "critical":
-        if cause == "backend_unreachable":
-            pct = round(unreachable_count / attempted * 100)
-            suggested_action = (
-                f"backend unreachable on {pct}% of samples — it is down or overloaded, "
-                "not a pipeline fault; restart the backend and `resume`."
-            )
-        elif cause == "evidence_starved":
+        if cause == "evidence_starved":
             pct = round(rates.get(dominant_node or "", 0.0) * 100)
             suggested_action = (
                 f"{where}produced no evidence on {pct}% of samples — the enricher is "
@@ -550,7 +535,7 @@ def compute_round_health(
     """The SINGLE computation site: every surface reads ``RoundResult.health`` and none
     recomputes it."""
 
-    structural = transient = unreachable = no_result = holes = 0
+    structural = transient = no_result = holes = 0
     structural_nodes: dict[str, int] = {}
     # Read from the END of the walk, which is what makes it the TRIGGER: `_absorb` appends a row,
     # then classifies it, then returns on an abort — so the last errored row IS the cell that
@@ -567,15 +552,9 @@ def compute_round_health(
         None,
     )
     for r in results:
-        # Backend-down samples carry NO diagnostics (empty pipeline_data), so they're
-        # invisible to classify_sample_failure — count them off the typed error channel
-        # instead. CONNECTION = the transport failed. This used to also match a row whose
-        # ``error`` read ``skipped_after_consecutive_errors``; that string only ever appeared on
-        # the abort's fabricated tail, so with the padding gone the arm matched nothing. A short
-        # walk is now reported as coverage (``not_attempted``), which is what it is.
-        if error_category(r) == ErrorCategory.CONNECTION:
-            unreachable += 1
-            continue
+        # No arm for a CONNECTION or PROVIDER_CREDIT row: one halts the walk
+        # (`query_loop.py::_WALK_STOPS`), so a round carrying one never closes. A short walk is
+        # reported as coverage (``not_attempted``).
         # The pipeline ran (no transport/error) but the terminal ranker emitted no
         # candidate → ``predicted == NO_RESULT``. The backend calls this a success and
         # stamps no warning, so it's invisible to ``classify_sample_failure`` below —
@@ -627,7 +606,7 @@ def compute_round_health(
     # verdict counts clean; a ``None`` in the consecutive walk is skipped, not a stop.
     prior_clean = sum(1 for h in prior_healths if h is not None and h.grade == "healthy")
     consecutive = 0
-    if structural + transient + unreachable + holes > 0:
+    if structural + transient + holes > 0:
         consecutive = 1
         for h in reversed(list(prior_healths)):
             if h is None:
@@ -644,7 +623,6 @@ def compute_round_health(
         prior_clean_rounds=prior_clean,
         consecutive_degraded_rounds=consecutive,
         dominant_node=dominant,
-        unreachable_count=unreachable,
         no_result_count=no_result,
         hole_count=holes,
         not_attempted=not_attempted,

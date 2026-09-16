@@ -395,7 +395,14 @@ LEDGER_BASELINE = {
     # declaration cuts the re-measure, so the repair branched the cycle and re-bought the cell
     # (test_resume), and the panel gate halted the live round advising the resume that re-buys it
     # (test_numerics § 10) — unbounded forks and unbounded spend, every number rendering.
-    "test_functions": 190,
+    # +1: a cell that RAN and had no grade dropped its spend at `measure_sample`'s one catch, so
+    # the ceiling under-counted a paid episode and the sidebar read $0.00 (test_integrity § 7).
+    # +1: a harbor episode a provider throttle ran out of clock banked its verifier's 0.0 as the
+    # model's grade, and the archive replays it under that identity; the same test holds an
+    # account out of credit to a halt rather than a panel of holes (test_integrity § 1).
+    # +1: a harbor campaign declaring `skill_delivery: system_prompt` whose skill never reached
+    # the first request runs every arm prompt-less under that mode's key (test_integrity § 1).
+    "test_functions": 193,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

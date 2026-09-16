@@ -20,7 +20,12 @@ from promptpotter.infrastructure.llm.rate_limit import (
 QUERY_TIMEOUT: float = 120.0  # HTTP timeout for /matches endpoint
 
 if TYPE_CHECKING:
-    from promptpotter.connectors.protocol import Connector, InProcessRun, InProcessWorkload
+    from promptpotter.connectors.protocol import (
+        Connector,
+        InProcessRun,
+        InProcessWorkload,
+        PromptDelivery,
+    )
     from promptpotter.domain.connector import (
         CellEnvelopeSeconds,
         ConnectorExecution,
@@ -92,7 +97,7 @@ class BackendClient:
         cell_envelope: CellEnvelopeSeconds | None = None,
         measured_unit: MeasuredUnit = "sample",
         answer_key: str | None = None,
-        prompt_delivery: Delivery = "request",
+        prompt_delivery: PromptDelivery,
         timeout: float = 30.0,
         auth_token: str | None = None,
     ):
@@ -113,10 +118,7 @@ class BackendClient:
         self._max_cells_in_flight = max_cells_in_flight
         self._cell_envelope: CellEnvelopeSeconds | None = cell_envelope
         self._measured_unit: MeasuredUnit = measured_unit
-        # Which channel the candidate's prompt travels, so `PipelineSchema.value_tree` can say
-        # whether a value being optimized can even arrive. A wire fact like the three above it,
-        # and the one that distinguishes a prompt the model always sees from one it must open.
-        self.prompt_delivery: Delivery = prompt_delivery
+        self._prompt_delivery: PromptDelivery = prompt_delivery
         # Where this backend's answer TEXT lives, when it emits one outside a ranking.
         self._answer_key: str | None = answer_key
         self._auth_token = auth_token or ""
@@ -148,6 +150,11 @@ class BackendClient:
         """Seconds this cell may spend, or ``None`` where the backend declares no bound — see
         :attr:`Connector.cell_envelope_s`. A method, not a property: it is resolved per cell."""
         return None if self._cell_envelope is None else self._cell_envelope(query, pipeline_params)
+
+    def prompt_delivery(self, pipeline_params: dict[str, Any] | None) -> Delivery:
+        """The channel the candidate's prompt travels under these params, so
+        ``PipelineSchema.value_tree`` can say whether a value being optimized can even arrive."""
+        return self._prompt_delivery(pipeline_params)
 
     @property
     def measured_unit(self) -> MeasuredUnit:

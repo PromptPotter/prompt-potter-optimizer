@@ -15,7 +15,10 @@ from typing import TYPE_CHECKING, Any, cast
 from promptpotter.application.campaign_config import (
     load_campaign_config as validate_campaign_config,
 )
-from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring
+from promptpotter.application.initialization.loop_start import (
+    arm_diagnostic_scoring,
+    diagnostic_stop_as,
+)
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.optimization.l1.population import merge_pipeline_params
 from promptpotter.application.optimization.task_context import committed_task_context
@@ -287,7 +290,7 @@ async def verify_candidate(
         n_to_pick,
         len(measured_ids),
     )
-    with _diagnostic_trace(stores, hop):
+    with _diagnostic_trace(stores, hop), diagnostic_stop_as(VerifyError):
         await score_search_point(
             jsp,
             picked,

@@ -10,6 +10,8 @@ Single canonical view of the model + reasoning_effort + max_tokens defaults ship
 | `justlogic-d234` | `openai/gpt-oss-20b:nitro` | `low` | absent | JustLogic (Chen 2025), 3-class deductive reasoning. iid random mix of depths 2, 3, 4 (200/depth from HF `train`, seed=42, interleaved). Each depth cut is a separate dataset name sharing no cache key with another — never compare across cuts (`datasets/CLAUDE.md` § L4). |
 | `lca-termnorm` | `openai/gpt-oss-120b` | n/a | absent (`null`) | Multi-node TermNorm pipeline; not a single-call reasoning dataset. |
 | `lca-bom-termnorm` | `entity_profiling` → `openai/gpt-oss-20b` | `low` (entity_profiling) | absent (`null`) | Tenant material-matching pipeline (`web_search → entity_profiling → token_matching`, no `llm_ranking`). `entity_profiling` emits **native** `json_schema` and pins `reasoning_effort: low` — the cap is load-bearing, see § The Groq output ceiling. Multi-node, so the single-call columns describe the profiling node only. Tenant config on disk, gitignored. |
+| `spreadsheetbench-s10` | `qwen/qwen3.7-flash:nitro` (agent) | unset | absent | Harbor agent episode: the prompt is an injected `SKILL.md`. The agent model is chosen under § The agent model on a Harbor dataset. |
+| `sealqa-longseal-12` | `qwen/qwen3.7-flash:nitro` (agent) | unset | absent | Harbor agent episode, `max_turns: 4`, graded by a `gpt-oss-120b` judge. Same selection section. |
 
 `max_tokens` is **never** set as a numeric default in any dataset's `pipeline.yaml` node config — the provider ceiling applies. Held by convention, not by a test, so check the overlay rather than assuming.
 
@@ -63,6 +65,102 @@ Three findings from the JustLogic-d234 A/B that no catalogue would have given:
 - **The optimizer, not the worker, owns the clock.** Every inner cell spends 88-108s and 4500-4800 output tokens per optimizer call, identical across all six worker arms — 35-45% of each cell's wall-clock. Swapping workers cannot reach it; the dispatch package can.
 
 Two arms are dead rather than slow, and both fail on the same surface: `z-ai/glm-4.7-flash` returns `content_empty` with `finish_reason=stop` and 5352 reasoning chars, triggering a schema-repair re-prompt before timing out; `inclusionai/ling-3.0-flash` answers HTTP 405 — `json_schema response format is not supported`, and every node here is schema-bearing. `GLM-5.2` is excluded by operator decision; do not add it to an arm list.
+
+## The agent model on a Harbor dataset
+
+On a Harbor dataset the model runs inside an agent episode (`terminus-2`), and the candidate prompt reaches it only as an injected `SKILL.md` that the agent must choose to open. Choosing that model follows its own rules, which are operator decisions from 2026-09-16:
+
+- **Two delivery modes, and a result names its mode.**
+  - **Advanced, the default and today's working mode:** the agent must open the skill file itself. If a model never opens `SKILL.md`, its score says nothing about what the optimizer changed, however high the score is, so read the `skill_opened` observation before the score.
+  - **Primitive:** the literature's setting, kept for the one-to-one comparison. WikiSkill injects the whole skill into the agent's system prompt; SkillOpt prepends it to the context. Under this mode, not opening the skill does not disqualify a model.
+  - Every row below was measured in the advanced mode.
+- **Rank by speed, then headroom, then cost.**
+  - **Speed:** rank on the agent phase (`step_phases.agent_execution`), never on a cell's total wall clock, which the verifier dominates.
+  - **Headroom:** a model that solves 9–10 of 10 at the origin leaves the optimizer nothing to find.
+  - **Cost:** paying 1.5–2.7× the prompt-optimization default is acceptable if it buys speed. The ceiling is 3× `gpt-oss-20b` ($0.225/$0.90 per M tokens).
+- **Two models are banned from every agent and LLM pipeline on cost:** `google/gemini-3.5-flash` and `qwen/qwen3.6-27b`. A model that costs an order of magnitude more per cell than the current candidates is not screened at all.
+- **Pin one host per model, and probe hosts first.** The same weights ran at 11.5 tok/s on one host and 120 tok/s on another (`qwen/qwen3.5-9b` on DeepInfra vs. Venice). A screen pins each model to one host through `route_order`, so every result names who served it.
+
+### Pilot: `spreadsheetbench-s10`, all ten cells
+
+Measured 2026-09-16, origin only, one pinned host per model. Column meanings:
+- **Agent s:** median agent-phase seconds.
+- **$/cell:** median of the `cost_usd` the provider returned, not the list price.
+- **Opened:** cells where the agent opened `SKILL.md`.
+- **Solved:** cells solved, out of the cells that got a grade.
+
+The WikiSkill paper's models are marked †. Qwen-3.5-4B is not served on OpenRouter. Gemma-4-31B's screen was cut off by the key's daily spend limit before any cell was graded; its fastest host measured 34 tok/s.
+
+| Model | Host | Effort | Agent s | $/cell | Opened | Solved | Verdict |
+|---|---|---|---|---|---|---|---|
+| `inception/mercury-2.5` | inception | default | 41 | 0.0020 | 8/10 | 4/9 | **Pick.** The fastest model that passes every bar. One cell lost its grade to a provider APIError. |
+| `qwen/qwen3.7-flash` | alibaba | `none` | 66 | 0.0013 | 10/10 | 6/10 | Headroom and price are fine; too slow. |
+| `z-ai/glm-5.3-flash` | baseten/fp8 | `low` | 62 | 0.0045 | 10/10 | 8/10 | The host throttled it (HTTP 429), and one cell hit the 600 s agent timeout. |
+| `deepseek/deepseek-v4-flash-0731` | wafer/fast | `none` | 55 | 0.0042 | 6/10 | 9/10 | Saturated, and often skips the skill. |
+| † `google/gemini-3.5-flash` | google-ai-studio | `low` | 37 | 0.053 | 1/10 | 9/10 | **Banned.** Costs 26× the pick. Also saturated, and solves without opening the skill. |
+| † `qwen/qwen3.6-27b` | alibaba | `low` | 83 | 0.024 | 10/10 | 8/10 | **Banned.** Costs 12× the pick. Also slow, because the model writes a lot rather than because of the host. |
+| † `qwen/qwen3.5-9b` | venice/fp8 | `low` | 157 | 0.0090 | 8/10 | 4/8 | Too slow, at 4.5× the pick's cost. The daily spend limit cost two cells their grades. |
+| `qwen/qwen3.6-35b-a3b` | venice/fp8 | `low` | 29 | 0.0096 | 2/2 | 1/2 | Fast and opens the skill, but costs 5× the pick. The daily spend limit ended it after two graded cells, too few to rank it. |
+
+**Dropped after two cells** (`10452`, `105-24`):
+
+| Model | Host | Why dropped |
+|---|---|---|
+| `openai/gpt-oss-120b` | groq | Gave up after 2 turns; solved 0 of 2. |
+| `google/gemini-2.5-flash-lite` | — | Never opened the skill. |
+| `mistralai/mistral-small-2603` | — | Never opened the skill. |
+| `poolside/laguna-s-2.1` | — | Hit the 20-turn cap. |
+| `qwen/qwen3.8-flash` (`low`) | — | 129 s. |
+| `deepseek/deepseek-v4.1-flash` | fireworks | 70 s and 579 s. |
+
+**Dropped in the first screen, which ran before the harness fixes:**
+- **Never opened the skill:**
+  - `gpt-oss-20b:nitro`, the only model near 30 s (13 s);
+  - `gpt-oss-120b:nitro` (19 s);
+  - `mistral-nemo`.
+- **Too slow:**
+  - `gpt-5-nano` (219–330 s);
+  - `nemotron-3.5-lightning` (166 s);
+  - `nemotron-3-nano` (104 s).
+- **Hit the 20-turn cap at about 5× the cost:**
+  - `ministral-3b`;
+  - `nova-micro`.
+
+### Pilot: `sealqa-longseal-12`, all twelve cells
+
+Measured 2026-09-16, origin only, with the same hosts as above. **Correct** comes from the campaign's judges. The trial's own reward only says whether the episode left an answer, so it reads 1.0 on almost every cell.
+
+| Model | Effort | Agent s | $/cell | Opened | Correct |
+|---|---|---|---|---|---|
+| `inception/mercury-2.5` | default | 16 | 0.0011 | 0/12 | 1/12 |
+| `qwen/qwen3.7-flash` | `none` | 42 | 0.0004 | 3/12 | 1/9 (the host's rate limit left three cells without a grade) |
+
+The other arms produced no graded cell. Gemini-3.5-Flash's calls each reserved 65k output tokens, and OpenRouter refused them for lack of credit (HTTP 402). The rest hit the key's daily spend limit.
+
+With `max_turns: 4`, both models answer from the documents in two to four turns, mostly without reading the skill. In the advanced mode an optimized skill therefore barely reaches the model on this dataset, and both models sit at the floor. SealQA is a dataset for the primitive mode.
+
+What the pilot established:
+
+- **Cheap, fast models do not open a skill they have to go and read.** Only models that open it can be optimized in skill mode, so a model's speed in this table matters only once it opens the skill.
+- **litellm silently drops `reasoning_effort` for every `:nitro` name and for any model it does not know.** Until `harbor_wire_adapter` moved the effort to `extra_body.reasoning` (`_REASONING_CHANNEL`), a screen's `low` and `none` arms sent the same request.
+- **Screen results are summaries; the campaigns behind them are disposable.** This table is the record kept after the campaigns and traces are deleted. Re-measure before relying on any row: hosts change their throughput and prices from week to week.
+
+### Optimization: `inception/mercury-2.5` on `spreadsheetbench-s10`, advanced mode
+
+Measured 2026-09-16: six rounds, two variants per round, `deepseek/deepseek-v4-flash:nitro` as the optimizer model. The run stopped at `max_rounds`.
+
+| Round | Winner | Solved | θ | Lift over parent (95% CI) |
+|---|---|---|---|---|
+| 0 | C0, the origin | 4/10 | −1.04 | — |
+| 1 | C1.1 | 6/10 | −0.19 | +0.2 (−0.10 to +0.50) |
+| 2 | C2.1 | 8/10 | +0.91 | +0.2 (−0.10 to +0.50) |
+| 3–6 | no winner | — | +0.91 | — |
+
+- **What the claim rests on.** The overlap line compares the winners on the same ten cells: C0 solves 4, C1.1 solves 6, C2.1 solves 8. Neither promotion is separable on its own, because both intervals include zero, so `rounds_to_separable` stays unset while `rounds_to_improved` is 1.
+- **What changed.** The winning prompt adds two checks to the origin's instruction. Before writing a transformation, the agent traces the first row against the expected result. After each formula, it reopens the saved workbook, reads the evaluated value, and confirms that every referenced column exists.
+- **Cost:** $0.39 billed, of which $0.37 was the agent and $0.03 the optimizer. Priced with cache hits included, it comes to $0.64.
+- **Time:** 2 h 41 min wall clock, of which 2 h 34 min was cell scoring; each round took 26–38 min.
+- **What comes next.** The ten-cell cut is nearly used up: the winner solves eight cells and leaves two to win, so a further campaign needs a larger cut.
 
 ## Per-sample timings understate wall-clock
 

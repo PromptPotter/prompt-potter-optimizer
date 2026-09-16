@@ -777,6 +777,9 @@ def configure_and_apply_pipeline(
     _validate_model_ownership(
         pipeline_params, filtered=filtered, active=active, dataset_name=dataset_name
     )
+    # The connector refuses a channel it cannot run (harbor's `skill_delivery`); asked here, that
+    # refusal stops init instead of erroring every cell of the origin.
+    session.backend_client.prompt_delivery(pipeline_params)
 
     session.pipeline_schema = filtered
     session.pipeline_params = pipeline_params

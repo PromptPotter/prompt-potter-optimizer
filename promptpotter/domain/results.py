@@ -1143,7 +1143,6 @@ HealthCause = Literal[
     # The origin measured SOME of its cells — distinct from `origin_unmeasured` (none) and `holed`
     # (a rate, any round): the baseline every later round reads against is permanently short.
     "origin_incomplete",
-    "backend_unreachable",
     "structural",
     "unscoreable",
     "holed",

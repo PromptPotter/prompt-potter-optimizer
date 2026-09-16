@@ -591,6 +591,157 @@ def test_whether_the_episode_opened_the_injected_skill_is_measured(
     )
 
 
+def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """terminus-2 retries a 429 inside the turn, so the throttle spends the agent's clock and the
+    verifier then grades whatever was left — a 0.0 banked as the model's, and replayed as one. An
+    account out of credit ends every episode at turn 0: banked as holes, the walk spends the panel,
+    and on the optimizer's own call a swallowed refusal runs the round on without its critique. A
+    judge's refused grading banked as absent is a cell that replays ungraded forever.
+
+    Namespaces stand in for ``TrialResult`` and ``ExceptionInfo`` on the argument
+    ``test_whether_the_episode_opened_the_injected_skill_is_measured`` makes: declared fields only.
+    The provider clients are wiring seams, so a namespace stands in for each too."""
+    import asyncio
+    from types import SimpleNamespace
+
+    import httpx
+    import openai
+    from factories import measurement
+
+    from promptpotter.connectors import harbor
+    from promptpotter.infrastructure.llm.anthropic import AnthropicClient
+    from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
+    from promptpotter.judges import _compute
+    from promptpotter.judges import call as judge_call
+    from promptpotter.judges.grounding import ANSWER_GROUNDING
+    from promptpotter.judges.protocol import JudgeSpec, JudgeStage
+    from promptpotter.shared.errors import (
+        CellCreditExhaustedError,
+        ErrorCategory,
+        ProviderCreditExhaustedError,
+        graceful,
+    )
+
+    monkeypatch.setattr(harbor, "_TRIALS_ROOT", tmp_path)
+    throttled = "Unknown Error in LLM interaction: litellm.RateLimitError: RateLimitError: 429\n"
+
+    def trial(name: str, log: str, exc_type: str | None, message: str = "") -> SimpleNamespace:
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "trial.log").write_text(log, encoding="utf-8")
+        exc = SimpleNamespace(exception_type=exc_type, exception_message=message)
+        return SimpleNamespace(
+            trial_name=name, step_results=None, exception_info=exc if exc_type else None
+        )
+
+    def banked_as(t: SimpleNamespace) -> ErrorCategory | None:
+        failure = harbor._infrastructure_failure(t)
+        return None if failure is None else failure[1].category
+
+    timeout = "Agent execution timed out after 600.0 seconds"
+    for throttle in (
+        trial("clock", throttled, "AgentTimeoutError", timeout),
+        trial("ended", "", "RateLimitError", "litellm.RateLimitError: 429"),
+    ):
+        assert banked_as(throttle) is ErrorCategory.CONNECTION
+    # Out of credit halts on the first attempt: no backoff can top the key up.
+    bodies = (
+        '{"error":{"message":"This request requires more credits","code":402}}',
+        '{"error":{"message":"Key limit exceeded (daily limit).","code":403}}',
+    )
+    client = OpenAICompatibleClient(api_key="k", provider_name="openrouter")
+    for code, body in zip((402, 403), bodies, strict=True):
+        failed = trial(str(code), "", "APIError", f"litellm.APIError: {body}")
+        assert banked_as(failed) is ErrorCategory.PROVIDER_CREDIT
+        # The same refusal on our own client is the same fact, and no best-effort block eats it.
+        refused = openai.APIStatusError(
+            f"Error code: {code} - {body}",
+            response=httpx.Response(code, request=httpx.Request("POST", "https://x")),
+            body=None,
+        )
+        with pytest.raises(ProviderCreditExhaustedError), graceful("best-effort step"):
+            client._try_recover_from_chat_error(refused, {}, None)
+
+    class _StatusError(Exception):
+        def __init__(self, status_code: int, message: str) -> None:
+            super().__init__(message)
+            self.status_code = status_code
+
+    anthropic_body = "invalid_request_error: Your credit balance is too low to access the API."
+
+    async def _anthropic_refuses(**_: Any) -> None:
+        raise _StatusError(400, anthropic_body)
+
+    claude = AnthropicClient(api_key="k")
+    claude._client = SimpleNamespace(  # type: ignore[assignment]
+        messages=SimpleNamespace(with_raw_response=SimpleNamespace(create=_anthropic_refuses))
+    )
+    with pytest.raises(ProviderCreditExhaustedError), graceful("best-effort step"):
+        asyncio.run(claude.chat([{"role": "user", "content": "q"}], model="m"))
+
+    # A judge: a spent account is a hole that halts, any other grader failure stays absent.
+    row = measurement(
+        sample_id=0, fitness=0.0, predicted="1999", pipeline_data={"reasoning_trace": "read it"}
+    )
+    spec = JudgeSpec(name="answer_grounding", stages=[JudgeStage(model="m", provider="p")])
+
+    def grade_under(failure: Exception) -> float | None:
+        async def _chat(**_: Any) -> None:
+            raise failure
+
+        monkeypatch.setattr(judge_call, "get_llm_client", lambda _p: SimpleNamespace(chat=_chat))
+        return asyncio.run(_compute(result=row, judge=ANSWER_GROUNDING, spec=spec, term="ground"))
+
+    with pytest.raises(CellCreditExhaustedError) as hole:
+        grade_under(ProviderCreditExhaustedError("openrouter refused the call"))
+    assert hole.value.category is ErrorCategory.PROVIDER_CREDIT
+    assert grade_under(_StatusError(500, "upstream exploded")) is None
+    # The agent's own slowness is its score, and a throttle it outlived is only latency.
+    assert harbor._infrastructure_failure(trial("slow", "", "AgentTimeoutError", timeout)) is None
+    assert harbor._infrastructure_failure(trial("outlived", throttled, None)) is None
+
+
+def test_a_skill_in_the_system_prompt_reaches_the_first_request_and_is_measured_there(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``skill_delivery: system_prompt`` silently not applied runs every arm as the same
+    prompt-less episode, banked under the key of a mode it never ran, and reads as "the prompt
+    does not matter". Namespaces stand in for ``TrialResult`` as in the skill-opened test."""
+    import json
+    from types import SimpleNamespace
+
+    from promptpotter.connectors import harbor
+
+    cfg = {"provider": "openrouter", "model": "m", "prompt": "Keep {braces} as written."}
+    in_prompt = {"agent": {**cfg, "skill_delivery": "system_prompt"}}
+    assert harbor.harbor_wire_adapter("t", in_prompt)["skill_delivery"] == "system_prompt"
+    assert harbor.harbor_wire_adapter("t", {"agent": cfg})["skill_delivery"] == "agent_skill"
+    assert harbor.CONNECTOR.prompt_delivery(in_prompt) == "request"
+    assert harbor.CONNECTOR.prompt_delivery({"agent": cfg}) == "artifact_body"
+
+    # terminus-2 fills its template with `str.format`, which must leave the skill verbatim.
+    template = (
+        "Rules.\n\nTask Description:\n{instruction}\n\nCurrent terminal state:\n{terminal_state}"
+    )
+    sent = harbor._system_skill_template(template, cfg["prompt"]).format(
+        instruction="solve it", terminal_state="$"
+    )
+    assert cfg["prompt"] in sent and "solve it" in sent
+
+    monkeypatch.setattr(harbor, "_TRIALS_ROOT", tmp_path)
+
+    def trial(name: str, first_message: str) -> SimpleNamespace:
+        agent_dir = tmp_path / name / "agent"
+        agent_dir.mkdir(parents=True)
+        steps = [{"source": "user", "message": first_message}]
+        (agent_dir / "trajectory.json").write_text(json.dumps({"steps": steps}), encoding="utf-8")
+        return SimpleNamespace(trial_name=name, step_results=None)
+
+    assert harbor._skill_in_first_request(trial("carried", sent), cfg["prompt"]) == 1.0
+    assert harbor._skill_in_first_request(trial("dropped", template), cfg["prompt"]) == 0.0
+
+
 def test_a_judge_never_grades_a_cell_that_has_no_answer() -> None:
     """A cell with no answer must cost nothing and bank nothing.
 
@@ -2560,6 +2711,55 @@ async def _walk(
         "depths": depths,
         "max_depth": max(depths) if depths else 0,
     }
+
+
+async def test_a_cell_that_ran_without_a_grade_still_bills_what_it_spent() -> None:
+    """A connector that runs a paid episode and gets no verdict raises ``CellUnscoreableError``,
+    and ``measure_sample`` is its one catcher. The success path bills ``step_tokens``; the raise
+    had nothing to bill with, so a verifier timeout banked the hole and dropped the agent's spend —
+    the campaign ceiling under-counted and the sidebar read $0.00 for a cell that cost money."""
+    from promptpotter.application.scoring.sample_measurement import measure_sample
+    from promptpotter.domain.run_records import TokenUsageRecord
+    from promptpotter.infrastructure.llm import telemetry
+    from promptpotter.shared.errors import CellUnscoreableError, ErrorCategory
+
+    spent = {"agent": {"input": 1200, "output": 300, "estimated": False, "cost_usd": 0.0076}}
+
+    class _RanUngraded:
+        def cell_envelope_s(self, query: str, params: dict[str, Any]) -> None:
+            return None
+
+        async def run_query(self, query: str, **_kw: Any) -> dict[str, Any]:
+            raise CellUnscoreableError(
+                "verifier timed out", spent=spent, step_timings={"agent": 138.0}
+            )
+
+    class _Ledger:
+        def __init__(self) -> None:
+            self.records: list[Any] = []
+
+        def append(self, record: Any) -> int:
+            self.records.append(record)
+            return len(self.records)
+
+    ledger = _Ledger()
+    session = types.SimpleNamespace(
+        pipeline_schema=None,
+        state=types.SimpleNamespace(ledger=None),
+        backend_client=_RanUngraded(),
+    )
+    token = telemetry.set_cycle_ledger(ledger)  # type: ignore[arg-type]
+    try:
+        row = await measure_sample(
+            Sample(id=0, query="10452", ground_truth=None),
+            session,  # type: ignore[arg-type]
+        )
+    finally:
+        telemetry.reset_cycle_ledger(token)
+
+    assert row["error_category"] == ErrorCategory.UNSCOREABLE
+    billed = [r for r in ledger.records if isinstance(r, TokenUsageRecord)]
+    assert [(r.cost_usd, r.input_tokens, r.cached) for r in billed] == [(0.0076, 1200, False)]
 
 
 def test_a_rate_belongs_to_the_provider_model_pair_not_the_model_alone(
