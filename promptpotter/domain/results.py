@@ -53,6 +53,7 @@ __all__ = [
     "WarningDict",
     "best_round_on_shared_cells",
     "candidate_label",
+    "diagnostic_held",
     "is_electable",
     "is_floor_pinned",
     "is_leader_eligible",
@@ -1094,12 +1095,31 @@ class DiagnosticRunRecord(StrictModel):
     source_campaign_accuracy: float | None
     source_campaign_composite: float
     source_campaign_n: int
+    held: bool | None = Field(
+        description="Did the verdict HOLD on the wider set — `workspace_accuracy` at or above "
+        "`source_campaign_accuracy`, under this layer's float tolerance. `None` where the source "
+        "carries no rate to compare against. Stored rather than left to each reader: the "
+        "tolerance is a decision about when two measured rates count as equal, and a surface "
+        "picking its own epsilon is a surface that can disagree with this one about whether a "
+        "candidate survived."
+    )
     # ``noise-floor`` only: the backend's own run-to-run noise, not a comparison to history.
     noise_floor_k: int | None = None
     noise_floor_mean: float | None = None
     noise_floor_ci_lo: float | None = None
     noise_floor_ci_hi: float | None = None
     noise_floor_raw: list[float] | None = None
+
+
+def diagnostic_held(
+    workspace_accuracy: float, source_campaign_accuracy: float | None
+) -> bool | None:
+    """:attr:`DiagnosticRunRecord.held`, from the two rates it compares — ``None`` where the source
+    carries no rate. The tolerance absorbs the float error of two means taken over different row
+    counts; a strict ``>=`` calls an unchanged candidate dropped once in a while."""
+    if source_campaign_accuracy is None:
+        return None
+    return workspace_accuracy + 1e-9 >= source_campaign_accuracy
 
 
 class WarningDict(TypedDict):

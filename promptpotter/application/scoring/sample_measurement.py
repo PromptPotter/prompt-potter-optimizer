@@ -556,10 +556,10 @@ async def measure_sample(
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise
     except CellUnscoreableError as exc:
-        # The cell RAN and there is nothing to grade. Its own category, so no reader takes a cut
-        # we made, or a reward the backend never produced, for the configuration under test.
-        logger.warning("measure_sample unscoreable for %s: %s", query[:60], exc)
-        return _error_result(sample, str(exc), category=ErrorCategory.UNSCOREABLE)
+        # The cell RAN and there is nothing to grade. The exception's own category says WHICH of the
+        # two — a cut we made, or a reward the backend never produced — and a repair reads them apart.
+        logger.warning("measure_sample %s for %s: %s", exc.category.value, query[:60], exc)
+        return _error_result(sample, str(exc), category=exc.category)
     except Exception as exc:
         logger.warning("measure_sample failed for %s: %s", query[:60], exc)
         return _error_result(sample, str(exc), category=ErrorCategory.UNKNOWN)

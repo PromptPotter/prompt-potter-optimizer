@@ -189,6 +189,7 @@ export interface RoundSummary {
   improved: boolean | null;
   electable_count: number | null;
   verdict_reason: string | null;
+  separable: boolean | null;
   candidates: RoundSummaryCandidate[];
   selection: number[];
   health: DegradationHealth | null;
@@ -213,6 +214,13 @@ export interface DiagnosticRunRecord {
   source_campaign_accuracy: number | null;
   source_campaign_composite: number;
   source_campaign_n: number;
+  /** Did the verdict HOLD on the wider set — `workspace_accuracy` at or above
+   * `source_campaign_accuracy`, under this layer's float tolerance. `None`
+   * where the source carries no rate to compare against. Stored rather than
+   * left to each reader: the tolerance is a decision about when two measured
+   * rates count as equal, and a surface picking its own epsilon is a surface
+   * that can disagree with this one about whether a candidate survived. */
+  held: boolean | null;
   noise_floor_k: number | null;
   noise_floor_mean: number | null;
   noise_floor_ci_lo: number | null;
@@ -1958,6 +1966,7 @@ export const STOP_REASON_LABELS: Record<string, string> = {
   'l3_patience_exhausted': 'Converged (L3 patience)',
   'rebased_to_fork': 'Rebased to fork',
   'paused': 'Paused',
+  'panel_cut': 'Panel cut by a declared bound',
   'escalation_abort': 'Escalation abort',
   'spend_budget': 'Spend budget reached',
   'token_budget': 'Token budget reached',
@@ -1977,6 +1986,7 @@ export const STOP_REASON_NEXT_STEPS: Record<string, string> = {
   'perfect_score': "`verify` the winner on more cells — this is one round's panel, not the dataset.",
   'max_rounds': 'Raise `max_rounds` and `resume` if the curve was still moving; else read `review.md`.',
   'paused': '`resume` picks it up at the next checkpoint.',
+  'panel_cut': 'Give the cut cells room (`Connector.cell_envelope_s`) before `resume`, or `optimization.panel_gate: off` to elect on the holed panel.',
   'spend_budget': '`set-budget --max-usd <above what is already spent>` then `resume`.',
   'token_budget': '`set-budget --max-tokens <above what is already spent>` then `resume`.',
   'diverged': '`resume --fork-on-divergence` to branch here, or revert the config edit to continue.',
@@ -1996,6 +2006,7 @@ export const STOP_REASON_OUTCOMES: Record<string, string> = {
   'l3_patience_exhausted': 'success',
   'rebased_to_fork': 'success',
   'paused': 'paused',
+  'panel_cut': 'paused',
   'escalation_abort': 'halted',
   'spend_budget': 'halted',
   'token_budget': 'halted',
@@ -2038,6 +2049,11 @@ export const EVALUATOR_META: EvaluatorMeta[] = [
   { name: 'retrieval_shortfall', scope: 'per_sample', direction: 'high', node_type: null, from_rows: false, description: 'Per-sample min(observed/target, 1.0) across nodes with max_*/num_* limits on list-valued outputs. 1.0 = target met or exceeded.' },
   { name: 'mean_retrieval_shortfall', scope: 'per_round', direction: 'high', node_type: null, from_rows: false, description: "Mean of retrieval_shortfall across the round's results." },
 ];
+
+// Seconds of silence after which a cycle's producer is treated as vanished. Mirror of
+// infrastructure/runtime_flags.py::RUN_FRESH_S, which owns it and derives `run_phase`
+// from it. Don't hand-copy this threshold.
+export const RUN_FRESH_S = 30.0;
 
 // The cycle-address grammar. Mirror of domain/cycle_paths.py, which owns it and
 // asserts at import that no separator matches the id charset — the precondition that

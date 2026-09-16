@@ -181,7 +181,12 @@ LEDGER_BASELINE = {
     # nested surface was blind at exactly the sites that have it — deleting one of the four buckets
     # lowered it by nothing, and adding a fifth would have raised it by nothing. The guard is the
     # walk PATH now, so a genuine cycle still returns 0 and a second declaration costs what it is.
-    "cycle_result_fields": 213,
+    # +17: `DegradationHealth`, reached through `RoundResult.health`. It was priced as ONE leaf
+    # because its annotation was still a forward reference at count time — so the row read 213 or
+    # 230 depending only on whether anything in the process had validated a `RoundResult` first,
+    # and the gate saw 213 because `test_complexity_ledger` sorts ahead of every file that builds
+    # one. The walk rebuilds each model now; nothing was added.
+    "cycle_result_fields": 230,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -386,7 +391,11 @@ LEDGER_BASELINE = {
     # paired test the human-in-the-loop claim is published from compares an arm against itself and
     # reports the real difference as this instrument's noise. Every number still renders.
     # (test_numerics § 7)
-    "test_functions": 188,
+    # +2: a cell a declared bound CUT read as a hole in the measurement at BOTH readers. The same
+    # declaration cuts the re-measure, so the repair branched the cycle and re-bought the cell
+    # (test_resume), and the panel gate halted the live round advising the resume that re-buys it
+    # (test_numerics § 10) — unbounded forks and unbounded spend, every number rendering.
+    "test_functions": 190,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -446,7 +455,13 @@ LEDGER_BASELINE = {
     # collides them on every table that keys a row. `provenance[]` carries the same id per
     # occurrence and cannot replace it: a list expresses no guarantee that the row HAS one.
     # (`RankedEdit.state_hash` → `sp_hash` is a rename in the same commit and moves nothing.)
-    "served_fields": 584,
+    # +1: `DiagnosticRunRecord.held` — did the verdict hold on the wider set. The pane drew the
+    # answer already; what it did not have was the TOLERANCE, so the browser picked its own
+    # epsilon for when two measured rates count as equal. It folds into neither rate beside it:
+    # those are measurements, this is the comparison's own decision, and the one reader it buys
+    # is the bar that was authoring it. (`RoundSummary.separable` lands in the same arc and costs
+    # nothing here — `dashboard.json` is served verbatim and reaches no OpenAPI schema.)
+    "served_fields": 585,
 }
 
 

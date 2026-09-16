@@ -5,11 +5,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.domain.phases import StopReason
+from promptpotter.shared.errors import is_repairable_hole
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
     from promptpotter.domain.results import DegradationHealth
 
 OriginGateMode = Literal["strict", "critical_only", "off"]
@@ -61,11 +64,19 @@ def backend_unreachable_tripped(health: DegradationHealth | None) -> StopReason 
     return None
 
 
-def panel_gate_tripped(holed_candidate_ids: list[str], mode: PanelGateMode) -> StopReason | None:
+def panel_gate_tripped(
+    holed_rows: Sequence[Mapping[str, Any]], mode: PanelGateMode
+) -> StopReason | None:
     """``PAUSED`` when an electable candidate's panel has holes, so candidates were ranked on different
-    cell sets. **Not a second under-probing guard** — ``coverage_floor`` excludes; this halts, resumably."""
-    if mode == "off" or not holed_candidate_ids:
+    cell sets. **Not a second under-probing guard** — ``coverage_floor`` excludes; this halts, resumably.
+
+    ONE hole a declared bound CUT makes it ``PANEL_CUT`` instead. Both halt and both are resumable,
+    but only one is plugged by resuming: the declaration that cut the cell cuts the re-run at the
+    same place, so the standing advice would re-buy the round at full price on every attempt."""
+    if mode == "off" or not holed_rows:
         return None
+    if any(not is_repairable_hole(row) for row in holed_rows):
+        return StopReason.PANEL_CUT
     return StopReason.PAUSED
 
 

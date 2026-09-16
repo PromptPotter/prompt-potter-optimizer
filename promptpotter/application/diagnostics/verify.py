@@ -28,6 +28,7 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import (
     DiagnosticRunRecord,
+    diagnostic_held,
     parse_candidate_label,
     resolved_fitness,
 )
@@ -354,6 +355,7 @@ async def verify_candidate(
         source_campaign_accuracy=source_campaign_accuracy,
         source_campaign_composite=source_campaign_composite,
         source_campaign_n=source_campaign_n,
+        held=diagnostic_held(workspace_accuracy, source_campaign_accuracy),
     )
     sidecar_path = stores.diagnostic_runs.save(record)
     logger.info("verify: wrote diagnostic-run record → %s", sidecar_path)

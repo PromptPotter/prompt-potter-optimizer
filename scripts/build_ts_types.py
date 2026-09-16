@@ -603,6 +603,23 @@ def _emit_prompt_string_fields() -> str:
     )
 
 
+def _emit_run_freshness() -> str:
+    """Emit ``RUN_FRESH_S`` (``infrastructure/runtime_flags.py``) — the staleness window that splits
+    a live producer from a vanished one.
+
+    The browser's status banner hand-copied the ``30``, so the two answered the same question in two
+    languages: a change to the server's window would have left the banner calling a reaped cycle
+    live, with nothing anywhere to say the numbers had parted."""
+    from promptpotter.infrastructure.runtime_flags import RUN_FRESH_S
+
+    return (
+        "// Seconds of silence after which a cycle's producer is treated as vanished. Mirror of\n"
+        "// infrastructure/runtime_flags.py::RUN_FRESH_S, which owns it and derives `run_phase`\n"
+        "// from it. Don't hand-copy this threshold.\n"
+        f"export const RUN_FRESH_S = {RUN_FRESH_S};"
+    )
+
+
 def _emit_cycle_path_grammar() -> str:
     """Emit the cycle-address grammar (``domain/cycle_paths.py``) — two separators and two
     charset patterns.
@@ -700,6 +717,7 @@ def main() -> int:
     blocks.append(_emit_stop_reason_tables())
     blocks.append(_emit_abort_lens_labels())
     blocks.append(_emit_evaluator_meta())
+    blocks.append(_emit_run_freshness())
     blocks.append(_emit_cycle_path_grammar())
     blocks.append(_emit_prompt_string_fields())
     content = _HEADER + "\n\n".join(blocks) + "\n"

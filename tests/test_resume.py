@@ -1199,3 +1199,31 @@ def test_a_resumed_cycle_clocks_only_its_own_launch(tmp_path: Path) -> None:
     assert clock.elapsed_s is not None and sum(clock.phase_s.values()) <= clock.elapsed_s
     assert "1" not in clock.round_ended_s, "a round an earlier launch closed read as instant"
     assert clock.round_ended_s["2"] == pytest.approx(21 * 60 + 1)
+
+
+def test_a_halted_cell_is_not_a_hole_a_resume_can_plug() -> None:
+    """A cell a declared bound CUT is settled, not incomplete — the same declaration cuts the next
+    attempt at the same place. Counted as a hole, every resume branches the cycle, re-buys the cell
+    at full price and lands the identical row, so the fork and the spend repeat without bound.
+    """
+    from promptpotter.application.optimization.resume_and_fork.repair import repair_cut
+    from promptpotter.shared.errors import ErrorCategory
+    from tests.factories import measurement, round_result
+
+    def _rows(category: ErrorCategory) -> list[dict[str, Any]]:
+        return [
+            measurement(0, 1.0),
+            measurement(1, None, error="no verdict", error_category=category),
+        ]
+
+    halted = round_result(
+        1, candidates_scored=1, all_candidate_results={"c0": _rows(ErrorCategory.HALTED)}
+    )
+    assert repair_cut([halted]).rounds == []
+
+    # The other unscoreable arm is unchanged: the cell ran to its own end, so a re-measure can
+    # answer differently and the round genuinely does not re-derive until it does.
+    holed = round_result(
+        1, candidates_scored=1, all_candidate_results={"c0": _rows(ErrorCategory.UNSCOREABLE)}
+    )
+    assert repair_cut([holed]).rounds == [1]

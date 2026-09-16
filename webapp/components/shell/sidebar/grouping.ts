@@ -54,6 +54,10 @@ export interface OriginGroup {
 // values, or null when none has scored a round yet (renders as "—"). A fresh
 // sibling carries 0.0 (a real value); a no-rounds-yet cycle carries null, so
 // the `!= null` guard keeps "—" distinct from a genuine 0%.
+//
+// A SELECTION, not a computation — what renders is byte-identical to one served `best_accuracy`.
+// Both tiers it selects over are this file's groupings, and an ORIGIN (campaigns sharing a
+// `root_cycle_id`) is no server entity, so a `CampaignSummary.best_accuracy` would leave it max'ing.
 function bestAccuracyOf(entries: CycleListEntry[]): number | null {
   let best: number | null = null;
   for (const e of entries) {

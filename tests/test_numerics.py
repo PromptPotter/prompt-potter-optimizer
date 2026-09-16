@@ -3431,3 +3431,38 @@ def test_the_l1_only_arm_can_reach_no_layer_above_it() -> None:
     # Not vacuous: the same states fire L2 on the full ladder, so this passes because the rule
     # preempts and not because the grid missed every firing shape.
     assert NextAction.FIRE_L2 in actions(EscalationLadder.FULL)
+
+
+def test_a_panel_holed_by_a_declared_bound_is_not_advised_to_resume() -> None:
+    """Both halts are resumable; only one is PLUGGED by resuming. A cell a declared bound cut
+    comes back cut on the re-run, so the round is re-bought at full price and holed again — and
+    the operator is told to resume by every surface that reads the stop, on every attempt.
+
+    Silent: the round is discarded rather than persisted partial, the run reads `paused`, and each
+    resume renders a clean round-in-progress. The tell is the same fork-and-re-buy loop
+    `repair_cut` refuses one layer down — this is the live path into it."""
+    from promptpotter.application.runner.termination import panel_gate_tripped
+    from promptpotter.domain.phases import STOP_REASON_INFO, StopOutcome, StopReason
+    from promptpotter.shared.errors import ErrorCategory
+    from tests.factories import measurement
+
+    def _hole(category: ErrorCategory) -> dict[str, Any]:
+        return measurement(1, None, error="no verdict", error_category=category)
+
+    backend = [_hole(ErrorCategory.UNSCOREABLE)]
+    cut = [_hole(ErrorCategory.HALTED)]
+
+    assert panel_gate_tripped([], "strict") is None
+    assert panel_gate_tripped(cut, "off") is None
+    # The backend answered with nothing: a re-measure can answer differently, so resume IS the verb.
+    assert panel_gate_tripped(backend, "strict") is StopReason.PAUSED
+    # ONE cut cell decides it — the panel cannot complete while the declaration stands, however
+    # many of its siblings a resume would plug.
+    assert panel_gate_tripped(cut, "strict") is StopReason.PANEL_CUT
+    assert panel_gate_tripped([*backend, *cut], "strict") is StopReason.PANEL_CUT
+
+    # And it stays NON-TERMINAL: what changes is the advice, not whether the cycle is over. Read as
+    # a terminal outcome, the cycle banks `finished_at` and resume has nothing to pick up.
+    info = STOP_REASON_INFO[StopReason.PANEL_CUT]
+    assert info.outcome is StopOutcome.PAUSED
+    assert info.next_step != STOP_REASON_INFO[StopReason.PAUSED].next_step

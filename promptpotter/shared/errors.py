@@ -17,15 +17,27 @@ class ErrorCategory(enum.StrEnum):
     SERVER = "SERVER"
     CONNECTION = "CONNECTION"
     PIPELINE = "PIPELINE"
-    # The cell ran and produced nothing gradeable: its envelope expired, or the backend answered
-    # with no verdict. Not the configuration under test failing, so never a fatal code.
+    # A bound WE declared ended the cell. Re-measuring under the same declaration ends it at the
+    # same place for the same price, so a repair leaves one alone (:func:`is_repairable_hole`).
+    HALTED = "HALTED"
+    # The cell ran to its own end and produced nothing gradeable. Not the configuration under
+    # test failing, so never a fatal code.
     UNSCOREABLE = "UNSCOREABLE"
     UNKNOWN = "UNKNOWN"
 
 
 class CellUnscoreableError(RuntimeError):
-    """Raised where a cell is CUT or answers with no verdict; ``measure_sample`` is the one catcher
-    and banks :attr:`ErrorCategory.UNSCOREABLE`, so the configuration under test is never charged."""
+    """Raised where a cell answers with no verdict; ``measure_sample`` is the one catcher and banks
+    :attr:`category`, so the configuration under test is never charged."""
+
+    category: ErrorCategory = ErrorCategory.UNSCOREABLE
+
+
+class CellHaltedError(CellUnscoreableError):
+    """A bound we DECLARED cut the cell, so there is no verdict AND no point re-measuring: the same
+    declaration cuts the next attempt at the same place, after paying for it again."""
+
+    category = ErrorCategory.HALTED
 
 
 class PotterError(Exception):
@@ -320,8 +332,15 @@ def error_category(result: Mapping[str, Any]) -> ErrorCategory | None:
         return None
 
 
+def is_repairable_hole(result: Mapping[str, Any]) -> bool:
+    """A hole a re-measure could plug. ``HALTED`` is not one: the bound that cut the cell is
+    declared, so the next attempt is cut at the same place and the measurement is paid for twice."""
+    return is_error_result(result) and error_category(result) is not ErrorCategory.HALTED
+
+
 __all__ = [
     "BadRequestError",
+    "CellHaltedError",
     "CellUnscoreableError",
     "ConflictError",
     "ContentTooLargeError",
@@ -342,4 +361,5 @@ __all__ = [
     "graceful",
     "has_pipeline_warnings",
     "is_error_result",
+    "is_repairable_hole",
 ]

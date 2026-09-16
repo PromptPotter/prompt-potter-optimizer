@@ -17,7 +17,12 @@ from promptpotter.application.runner.inner.spawn_context import publish_inner_sp
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.results import DiagnosticRunRecord, candidate_label, resolved_fitness
+from promptpotter.domain.results import (
+    DiagnosticRunRecord,
+    candidate_label,
+    diagnostic_held,
+    resolved_fitness,
+)
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.statistics import mean_ci
 
@@ -139,6 +144,7 @@ async def measure_noise_floor(
     mean_composite, ci_lo, ci_hi = mean_ci(composites)
 
     source_accuracy = round_file.accuracy
+    workspace_accuracy = sum(accuracies) / len(accuracies)
 
     record = DiagnosticRunRecord(
         ts=utcnow_iso(),
@@ -151,11 +157,12 @@ async def measure_noise_floor(
         samples_requested=len(scoring_set),
         samples_added=0,
         workspace_n=len(scoring_set),
-        workspace_accuracy=sum(accuracies) / len(accuracies),
+        workspace_accuracy=workspace_accuracy,
         workspace_composite=mean_composite,
         source_campaign_accuracy=source_accuracy,
         source_campaign_composite=round_file.composite_fitness,
         source_campaign_n=round_file.total,
+        held=diagnostic_held(workspace_accuracy, source_accuracy),
         noise_floor_k=k,
         noise_floor_mean=mean_composite,
         noise_floor_ci_lo=ci_lo,

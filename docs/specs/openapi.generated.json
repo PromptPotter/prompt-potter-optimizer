@@ -1811,6 +1811,18 @@
             "title": "Dataset",
             "type": "string"
           },
+          "held": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Did the verdict HOLD on the wider set — `workspace_accuracy` at or above `source_campaign_accuracy`, under this layer's float tolerance. `None` where the source carries no rate to compare against. Stored rather than left to each reader: the tolerance is a decision about when two measured rates count as equal, and a surface picking its own epsilon is a surface that can disagree with this one about whether a candidate survived.",
+            "title": "Held"
+          },
           "noise_floor_ci_hi": {
             "anyOf": [
               {
@@ -1944,7 +1956,8 @@
           "workspace_composite",
           "source_campaign_accuracy",
           "source_campaign_composite",
-          "source_campaign_n"
+          "source_campaign_n",
+          "held"
         ],
         "title": "DiagnosticRunRecord",
         "type": "object"

@@ -40,6 +40,7 @@ class StopReason(enum.StrEnum):
     MAX_ROUNDS = "max_rounds"
     LIVES_EXHAUSTED = "lives_exhausted"
     PAUSED = "paused"
+    PANEL_CUT = "panel_cut"
     CRASHED = "crashed"
     DIVERGED = "diverged"
     ABORT = "escalation_abort"
@@ -160,7 +161,7 @@ class StopReasonInfo(NamedTuple):
 #     verdict, and DIVERGED is decided at resume before any round starts.
 #
 # `next_step` is filled ONLY where the verb cannot be read off the label. "Fix the backend, then
-# resume" is the reason restated, not advice; the four below each name a flag, a threshold or a
+# resume" is the reason restated, not advice; the ones below each name a flag, a threshold or a
 # reading the label does not carry.
 STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
     StopReason.PERFECT: StopReasonInfo(
@@ -191,6 +192,18 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
     StopReason.REBASED: StopReasonInfo("Rebased to fork", StopOutcome.SUCCESS, False, False, ""),
     StopReason.PAUSED: StopReasonInfo(
         "Paused", StopOutcome.PAUSED, True, False, "`resume` picks it up at the next checkpoint."
+    ),
+    # Non-terminal like its neighbour and advised the OPPOSITE way: the panel is holed by cells a
+    # declared bound CUT (`ErrorCategory.HALTED`), so the same declaration cuts the re-run at the
+    # same place and `resume` alone only re-buys the round. The round is discarded, not persisted
+    # partial, which is the one fact separating this row from `PAUSED`'s.
+    StopReason.PANEL_CUT: StopReasonInfo(
+        "Panel cut by a declared bound",
+        StopOutcome.PAUSED,
+        False,
+        False,
+        "Give the cut cells room (`Connector.cell_envelope_s`) before `resume`, or "
+        "`optimization.panel_gate: off` to elect on the holed panel.",
     ),
     StopReason.ABORT: StopReasonInfo("Escalation abort", StopOutcome.HALTED, False, False, ""),
     # The two the private or-chain missed: the budget gate stops INSIDE the sample loop. The

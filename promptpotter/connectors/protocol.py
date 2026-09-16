@@ -114,8 +114,9 @@ class Connector:
     so. Time the cell was not ALLOWED to spend is handed back at the seam that enforces this
     (``application/scoring/cell_envelope.py``), leaving the cell's OWN work.
 
-    **Reaching it is UNSCOREABLE, never a zero** — a cut we made is not an answer, so the row
-    carries :attr:`~promptpotter.shared.errors.ErrorCategory.UNSCOREABLE` and no verdict."""
+    **Reaching it is HALTED, never a zero** — a cut we made is not an answer, so the row carries
+    :attr:`~promptpotter.shared.errors.ErrorCategory.HALTED`, no verdict, and no claim on a repair:
+    this declaration cuts the next attempt at the same place."""
 
     measured_unit: MeasuredUnit = "sample"
     """What one measured row of this backend is CALLED: ``cell`` where it is a whole inner campaign

@@ -7,7 +7,12 @@ import html
 import json
 from typing import TYPE_CHECKING, cast
 
-from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
+from promptpotter.domain.phases import (
+    STOP_REASON_INFO,
+    StopOutcome,
+    StopReason,
+    stop_reason_outcome,
+)
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 from promptpotter.presentation.terminal.primitives import (
     BOLD,
@@ -33,7 +38,9 @@ def render_completion(
     dataset_name: str | None = None,
     campaign_id: str | None = None,
 ) -> str:
-    paused = result.stop_reason == StopReason.PAUSED
+    # The OUTCOME, never the member: `StopOutcome.PAUSED` is the one non-terminal class, and a
+    # second reason in it (a panel the bounds cut) read as COMPLETE against a name comparison.
+    paused = stop_reason_outcome(result.stop_reason) is StopOutcome.PAUSED
     title = (
         f"{YELLOW}{BOLD}PAUSED{RESET} — resumable"
         if paused

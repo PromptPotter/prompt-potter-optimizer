@@ -310,6 +310,7 @@ export function summaryRound(over: Partial<RoundSummary> = {}): RoundSummary {
     improved: null,
     electable_count: null,
     verdict_reason: null,
+    separable: null,
     candidates: [],
     selection: [],
     health: null,

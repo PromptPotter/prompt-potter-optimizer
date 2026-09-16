@@ -9,7 +9,7 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from promptpotter.infrastructure.llm.rate_limit import set_throttle_stall_sink
-from promptpotter.shared.errors import CellUnscoreableError
+from promptpotter.shared.errors import CellHaltedError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -28,8 +28,8 @@ class CellEnvelope:
     """Async context manager bounding one cell's total wall clock. ``budget_s=None`` enters and
     exits doing nothing, so an undeclared backend costs the seam a branch rather than a code path.
 
-    Expiry raises :class:`CellUnscoreableError` — the measurement was CUT, so there is no
-    trajectory to grade and a truncated one must never reach the formula."""
+    Expiry raises :class:`CellHaltedError` — the measurement was CUT, so there is no trajectory to
+    grade, a truncated one must never reach the formula, and no repair may re-buy the cell."""
 
     def __init__(self, budget_s: float | None, *, label: str) -> None:
         self.budget_s = budget_s
@@ -111,7 +111,7 @@ class CellEnvelope:
         if timed_out or self._deadline.expired():
             # `asyncio.timeout` raises only when a CancelledError comes back up, so a chain that
             # answers cancellation with a normal return would make the guard vanish silently.
-            raise CellUnscoreableError(
+            raise CellHaltedError(
                 f"cell {self.label} ran past its {self.budget_s:.0f}s wall-clock envelope and was "
                 f"cancelled ({self.unworked:.0f}s of it already given back as time the cell was "
                 "not allowed to spend)"

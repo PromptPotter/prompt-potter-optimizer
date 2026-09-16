@@ -123,10 +123,14 @@ function VerifyRow({ run }: { run: DiagnosticRunRecord }) {
       <td className="verify-num">{fmtFitness(run.source_campaign_composite)}</td>
       <td className="verify-num">{fmtFitness(run.workspace_composite)}</td>
       <td className="verify-bar-cell">
-        {run.source_campaign_accuracy === null ? (
+        {run.source_campaign_accuracy === null || run.held === null ? (
           "—"
         ) : (
-          <TrendBar source={run.source_campaign_accuracy} workspace={run.workspace_accuracy} />
+          <TrendBar
+            source={run.source_campaign_accuracy}
+            workspace={run.workspace_accuracy}
+            held={run.held}
+          />
         )}
       </td>
       <td className="verify-when">{ageText(run.ts)}</td>
@@ -138,13 +142,20 @@ function VerifyRow({ run }: { run: DiagnosticRunRecord }) {
 // = workspace accuracy. Accuracy is the primary metric matched against the
 // dashboard's per-candidate fitness bars (blue = accuracy). Both clamped to
 // [0,1].
-function TrendBar({ source, workspace }: { source: number; workspace: number }) {
+// `held` is SERVED (`DiagnosticRunRecord.held`) — the producer owns when two measured rates count
+// as equal, so no surface picks its own epsilon. The two widths are geometry, clamped here.
+function TrendBar({
+  source,
+  workspace,
+  held,
+}: {
+  source: number;
+  workspace: number;
+  held: boolean;
+}) {
   const clamp = (v: number) => Math.max(0, Math.min(1, v));
   const s = clamp(source);
   const w = clamp(workspace);
-  // The one verdict on this pane the browser authors: `DiagnosticRunRecord` serves both rates and
-  // no held/dropped answer, so the float tolerance is ours until it does.
-  const held = workspace + 1e-9 >= source;
   return (
     <div className="verify-bar" role="img" aria-label={`workspace ${held ? "≥" : "<"} campaign accuracy`}>
       <div className="verify-bar-source" style={{ width: `${s * 100}%` }} />

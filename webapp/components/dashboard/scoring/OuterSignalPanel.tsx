@@ -14,7 +14,7 @@ import { memo, useMemo } from "react";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import type { RoundSummary, RoundSummaryCandidate } from "@/lib/api/types";
 import { CardFrame, Badge } from "@/components/ui";
-import { NOT_SEPARABLE, liftSeparates } from "@/lib/fitness";
+import { NOT_SEPARABLE } from "@/lib/fitness";
 
 const AXIS_W = 220;
 const ROW_H = 18;
@@ -31,7 +31,17 @@ function leadingArm(r: RoundSummary): RoundSummaryCandidate | null {
   return r.candidates.find((c) => c.is_leading) ?? null;
 }
 
-type Lift = { round: number; lift: number; lo: number; hi: number; label: string };
+type Lift = {
+  round: number;
+  lift: number;
+  lo: number;
+  hi: number;
+  label: string;
+  // The ROUND's own verdict, SERVED three-state (`RoundResult.separable`), decided over its WHOLE
+  // electable field. The arm below is what a row DRAWS; whether the round resolved anything is not
+  // that arm's bracket to answer, and `null` — no arm carried an interval — is not `false`.
+  separable: boolean | null;
+};
 
 function liftsOf(rounds: RoundSummary[]): Lift[] {
   const out: Lift[] = [];
@@ -51,14 +61,25 @@ function liftsOf(rounds: RoundSummary[]): Lift[] {
       lo: c.matched_parent_lift_ci_lo,
       hi: c.matched_parent_lift_ci_hi,
       label: c.label,
+      separable: r.separable,
     });
   }
   return out;
 }
 
+// What the round ANSWERED, in one word. `null` keeps its own word: a round no arm bracketed asked
+// nothing, and printing "inconclusive" there reports an unasked question as a negative answer. A
+// separated round takes its tone from the arm drawn, so one that separated DOWNWARD reads as worse.
+function verdictWord(d: Lift): { tone: "success" | "danger" | "accent"; word: string } {
+  if (d.separable === true) {
+    if (d.hi < 0) return { tone: "danger", word: "worse" };
+    return { tone: d.lo > 0 ? "success" : "accent", word: "separated" };
+  }
+  return { tone: "accent", word: d.separable === false ? "inconclusive" : "unbracketed" };
+}
+
 function LiftRow({ d, x }: { d: Lift; x: (v: number) => number }) {
   // Sign-coloured, but the number and the verdict wording always carry the meaning on their own.
-  const clears = liftSeparates(d.lo, d.hi);
   const stroke = d.lo > 0
     ? "var(--color-success)"
     : d.hi < 0
@@ -76,7 +97,7 @@ function LiftRow({ d, x }: { d: Lift; x: (v: number) => number }) {
         height={ROW_H}
         viewBox={`0 0 ${AXIS_W} ${ROW_H}`}
         role="img"
-        aria-label={`Round ${d.round}: ${value}${clears ? "" : `, ${NOT_SEPARABLE}`}`}
+        aria-label={`Round ${d.round}: ${value}${d.separable === false ? `, ${NOT_SEPARABLE}` : ""}`}
       >
         <line x1={x(0)} y1={2} x2={x(0)} y2={ROW_H - 2} stroke="var(--color-border)" strokeWidth={1} />
         <line
@@ -125,8 +146,8 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
       ) : (
         <>
           <p className="l4-lede">
-            <Badge tone={latest.lo > 0 ? "success" : latest.hi < 0 ? "danger" : "accent"}>
-              {latest.lo > 0 ? "separated" : latest.hi < 0 ? "worse" : "inconclusive"}
+            <Badge tone={verdictWord(latest).tone}>
+              {verdictWord(latest).word}
             </Badge>{" "}
             Round {latest.round}&rsquo;s leading arm lifts <strong>{fmt(latest.lift)}</strong> [
             {fmt(latest.lo)}, {fmt(latest.hi)}] over its parent, on the cells both measured.

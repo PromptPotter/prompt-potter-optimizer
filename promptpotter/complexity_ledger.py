@@ -78,9 +78,16 @@ def _unwrap_optional(annotation: object) -> object:
 
 def _count_leaves(model: type[BaseModel], _path: tuple[type[BaseModel], ...] = ()) -> int:
     """A ``list[Model]`` or ``dict[str, Model]`` field is a whole nested surface, not one leaf.
-    The guard is the PATH, never a seen-set: one model at two sibling fields is two surfaces."""
+    The guard is the PATH, never a seen-set: one model at two sibling fields is two surfaces.
+
+    REBUILD FIRST, or the count is a reading of what happened to be imported. Pydantic resolves a
+    forward reference lazily, on first validation — so an unresolved annotation is no ``BaseModel``
+    yet and prices as ONE leaf, and the same model prices its whole subtree once anything in the
+    process has built one. ``RoundResult.health`` hid ``DegradationHealth``'s 17 leaves that way,
+    visible or not depending on which test file ran first. A resolved model rebuilds to a no-op."""
     if model in _path:
         return 0
+    model.model_rebuild()
     path = (*_path, model)
     total = 0
     for field in model.model_fields.values():
