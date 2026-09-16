@@ -468,7 +468,11 @@ LEDGER_BASELINE = {
     # those are measurements, this is the comparison's own decision, and the one reader it buys
     # is the bar that was authoring it. (`RoundSummary.separable` lands in the same arc and costs
     # nothing here — `dashboard.json` is served verbatim and reaches no OpenAPI schema.)
-    "served_fields": 585,
+    # +3: `MachineStatusResponse.ceiling`, `QuotaStatus.concurrent_queued` and
+    # `.max_concurrent_cycles_writable` — the Account panel's run-concurrency section. The machine
+    # ceiling was served nowhere, the queued half of the account limit only inside a refusal, and
+    # who may move the limit is a server decision the browser would otherwise re-derive.
+    "served_fields": 588,
 }
 
 

@@ -25,6 +25,7 @@ from promptpotter.application.commands.payloads import (
     PauseCyclePayload,
     ReplaceDatasetPayload,
     SetCampaignLabelPayload,
+    SetConcurrentCyclesPayload,
     SkipSearchpointPayload,
     StepCyclePayload,
     UnarchiveCampaignPayload,
@@ -53,6 +54,7 @@ __all__ = [
     "cmd_rename",
     "cmd_replace_dataset",
     "cmd_set_budget",
+    "cmd_set_concurrent_cycles",
     "cmd_skip_searchpoint",
     "cmd_step_cycle",
     "cmd_unarchive",
@@ -389,6 +391,19 @@ async def cmd_cancel_queued(args: argparse.Namespace) -> CommandResult:
     return CommandResult(
         data={"job_id": job_id, "status": "cancelled"},
         human=f"{job_id} -> left the queue; nothing ran and nothing was spent.",
+    )
+
+
+async def cmd_set_concurrent_cycles(args: argparse.Namespace) -> CommandResult:
+    limit: int = args.limit
+    stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
+    await CommandDispatcher(stores).dispatch_workspace_command(
+        CommandCall(SetConcurrentCyclesPayload(max_concurrent_cycles=limit), uuid.uuid4().hex)
+    )
+    logger.info("account %s -> max_concurrent_cycles %d", stores.identity.user_id, limit)
+    return CommandResult(
+        data={"max_concurrent_cycles": limit, "status": "limit_set"},
+        human=f"This account now holds at most {limit} campaign(s) at once, queued included.",
     )
 
 

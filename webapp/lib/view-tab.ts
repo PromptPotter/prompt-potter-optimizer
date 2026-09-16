@@ -59,7 +59,7 @@ export function isTab(s: string): s is Tab {
 // that renders it cannot be the thing an address is parsed into.
 export type AccountPane =
   | "profile"
-  | "security"
+  | "usage"
   | "activity"
   | "storage"
   | "preferences"
@@ -67,7 +67,7 @@ export type AccountPane =
 
 export const ACCOUNT_PANES: readonly AccountPane[] = [
   "profile",
-  "security",
+  "usage",
   "activity",
   "storage",
   "preferences",

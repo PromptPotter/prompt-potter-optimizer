@@ -266,7 +266,7 @@ Four gates, each with a different owner, and only the first two adapt on their o
 |---|---|---|
 | Campaigns admitted at once | `Settings.MACHINE_RUN_CAPACITY` | Yes — lowered under provider back-pressure, never raised above the ceiling |
 | Share of the provider's 60 s window | nothing — derived per call | Yes — least-served tenant next (`infrastructure/llm/rate_limit.py`) |
-| Campaigns ONE person may hold | `user.json::max_concurrent_cycles` | No |
+| Campaigns ONE person may hold | `user.json::max_concurrent_cycles` — the host, or `set-concurrent-cycles` by an account on its own key | No |
 | What an account may ever spend | the free-tier ceilings above, in both units | No |
 
 **The first gate WAITS; the third refuses.** A full machine is temporary and nobody's fault, so a

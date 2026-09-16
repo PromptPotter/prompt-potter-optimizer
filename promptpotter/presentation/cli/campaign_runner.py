@@ -40,6 +40,7 @@ from promptpotter.presentation.cli.commands.lifecycle import (
     cmd_rename,
     cmd_replace_dataset,
     cmd_set_budget,
+    cmd_set_concurrent_cycles,
     cmd_skip_searchpoint,
     cmd_step_cycle,
     cmd_unarchive,
@@ -90,6 +91,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], Coroutine[Any, Any, CommandRe
     "cleanup-empty-cycles": cmd_cleanup_empty_cycles,
     "replace-dataset": cmd_replace_dataset,
     "cancel-queued": cmd_cancel_queued,
+    "set-concurrent-cycles": cmd_set_concurrent_cycles,
 }
 
 # A verb is one row here plus one `sub.add_parser` in `parsers.py`, and nothing made the two
@@ -128,6 +130,7 @@ CLI_VERB_FOR_KIND: dict[str, str | None] = {
     "resolve-origin": "new",
     "start-checkin": "new",
     "cancel-queued-run": "cancel-queued",
+    "set-concurrent-cycles": "set-concurrent-cycles",
     # Reached by the verb named, but through an IN-PROCESS path rather than the command — the
     # terminal changes the same state and writes no `CommandRecord` naming who asked. Each is its
     # own standing finding; they are named here so the next reader inherits them instead of

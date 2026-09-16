@@ -745,6 +745,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_cancel_q.add_argument("job_id", help="The queued job id, as served by /machine-status.")
 
+    p_concurrency = sub.add_parser(
+        "set-concurrent-cycles",
+        help="How many campaigns this account may hold at once, queued launches included. At most "
+        "the machine's MACHINE_RUN_CAPACITY; an account on the host's key cannot move its own.",
+    )
+    p_concurrency.add_argument("limit", type=int, help="The new limit (1 or more).")
+
     return parser
 
 

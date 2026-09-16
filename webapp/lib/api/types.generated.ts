@@ -1550,7 +1550,13 @@ export interface QuotaStatus {
   tokens_used_total: number;
   token_budget_total: number | null;
   concurrent_running: number;
+  /** This account's launches waiting for a machine slot. They count against
+   * `max_concurrent_cycles` exactly as running ones do. */
+  concurrent_queued: number;
   max_concurrent_cycles: number;
+  /** Whether this caller may move `max_concurrent_cycles` through `set-concurrent-
+   * cycles`. False on the host's key, where the host sets it. */
+  max_concurrent_cycles_writable: boolean;
   campaigns_today: number;
   max_campaigns_per_day: number;
 }
@@ -1634,6 +1640,10 @@ export interface MachineStatusResponse {
    * rule a launch is admitted on, and lowered from the operator's ceiling
    * while the shared provider throttle is saturated. */
   capacity: number;
+  /** The operator's `MACHINE_RUN_CAPACITY` — set in the server environment and
+   * writable nowhere else. `capacity` never exceeds it, and neither may an
+   * account's limit. */
+  ceiling: number;
   /** Campaigns currently live on the machine. */
   running: number;
   /** Launches waiting for a slot, machine-wide — an occupancy figure like
@@ -1948,7 +1958,7 @@ export type RunPhase = 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 
 export type DashboardState = 'init' | 'origin' | 'scoring' | 'between_samples' | 'between_candidates' | 'l1_generate' | 'l2_refining' | 'l3_replanning' | 'escalation' | 'stopped';
 
 // Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).
-export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-spend-budget' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-campaign-label' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign' | 'verify-candidate';
+export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-spend-budget' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-campaign-label' | 'set-concurrent-cycles' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign' | 'verify-candidate';
 
 // Kinds no activity item is ever made of — the ray drops them and the translator
 // returns null. Complement of domain/projection_envelope.py::RENDERS_AS_ACTIVITY.

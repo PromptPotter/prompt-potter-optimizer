@@ -35,6 +35,7 @@ from promptpotter.application.commands.payloads import (
     RegisterBackendPayload,
     ReplaceDatasetPayload,
     SetCampaignLabelPayload,
+    SetConcurrentCyclesPayload,
     SetSampleLookaheadPayload,
     SkipSearchpointPayload,
     StartRunPayload,
@@ -52,7 +53,11 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     mint_campaign_command,
     start_run_command,
 )
-from promptpotter.application.jobs.quota import clamp_budget_change, hold_ceiling
+from promptpotter.application.jobs.quota import (
+    clamp_budget_change,
+    hold_ceiling,
+    set_concurrent_cycles,
+)
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import (
     ArchiveReport,
@@ -200,6 +205,9 @@ CAP_FOR_KIND: dict[str, str] = {
     # still, enforced in `JobRegistry.cancel_queued`, so a delegate holding `campaign.run`
     # cannot withdraw somebody else's launch.
     "cancel-queued-run": CAMPAIGN_RUN_CAP,
+    # How many runs this account may hold is a spend-RATE decision, so it sits with the ceilings.
+    # Holding the rung is not enough on the host's key: `quota.py::set_concurrent_cycles`.
+    "set-concurrent-cycles": CAMPAIGN_BUDGET_CAP,
     "register-backend": CAMPAIGN_CREATE_CAP,
     "edit-draft-campaign": CAMPAIGN_CREATE_CAP,
     "resolve-origin": CAMPAIGN_CREATE_CAP,
@@ -401,6 +409,9 @@ class CommandDispatcher:
         elif isinstance(payload, CancelQueuedRunPayload):
             job_id = payload.job_id
             applier = Applier(lambda: self._apply_cancel_queued_run(job_id))
+        elif isinstance(payload, SetConcurrentCyclesPayload):
+            limit = payload.max_concurrent_cycles
+            applier = Applier(lambda: set_concurrent_cycles(stores=self._stores, limit=limit))
         elif isinstance(payload, MintCampaignPayload):
             mint = payload
 

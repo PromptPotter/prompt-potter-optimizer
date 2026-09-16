@@ -209,6 +209,48 @@ paths:
         '403': { $ref: '#/components/responses/CapabilityDenied' }
         '422': { $ref: '#/components/responses/PayloadInvalid' }
 
+  /commands/set-concurrent-cycles:
+    post:
+      operationId: setConcurrentCycles
+      summary: Set how many campaigns the caller's own account may hold at once.
+      description: |
+        Rewrites `user.json::max_concurrent_cycles` for the CALLER's account and
+        records who asked on the workspace ledger. The limit counts running and
+        queued launches alike (`check_launch_quotas`); lowering it below what is
+        already in flight stops nothing, it refuses the next launch.
+
+        Requires `campaign.budget`, the rung that moves spend ceilings: more runs
+        at once is a faster draw on the same wallet. Holding the rung is not
+        enough on the host's provider key. There the limit is the host's bound on
+        that person, written in `user.json` alone, so the command answers 422
+        `concurrency_set_by_host`; only an account spending its own key moves
+        its own. `GET /auth/quota-status` serves which case the caller is in as
+        `max_concurrent_cycles_writable`.
+
+        Refused with 422 `concurrency_above_machine` above the machine's
+        `MACHINE_RUN_CAPACITY` (`GET /machine-status`'s `ceiling`), which stays
+        environment-configured and has no command.
+      tags: [budget]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: set-concurrent-cycles }
+                    payload: { $ref: '#/components/schemas/SetConcurrentCyclesPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
   /commands/set-sample-lookahead:
     post:
       operationId: setSampleLookahead
@@ -3114,6 +3156,19 @@ components:
             `CycleRef`: the queue holds launch INTENT, and a queued mint names no
             cycle until the drainer runs it.
 
+    SetConcurrentCyclesPayload:
+      type: object
+      additionalProperties: false
+      required: [max_concurrent_cycles]
+      properties:
+        max_concurrent_cycles:
+          type: integer
+          minimum: 1
+          description: |
+            The caller's own account limit, queued launches included. At most
+            `GET /machine-status`'s `ceiling`; a larger value is refused, never
+            clamped.
+
     StepCyclePayload:
       allOf:
         - $ref: '#/components/schemas/CycleRef'
@@ -4398,7 +4453,7 @@ components:
     MachineStatusResponse:
       type: object
       additionalProperties: false
-      required: [capacity, running, queued, busy, queue]
+      required: [capacity, ceiling, running, queued, busy, queue]
       properties:
         capacity:
           type: integer
@@ -4406,6 +4461,12 @@ components:
             Campaigns the machine admits right now. Resolved per read against the
             same rule a launch is admitted on, and lowered from the operator's
             ceiling while the shared provider throttle is saturated.
+        ceiling:
+          type: integer
+          description: |
+            The operator's `MACHINE_RUN_CAPACITY`, set in the server environment and
+            writable nowhere else. `capacity` never exceeds it, and
+            `set-concurrent-cycles` refuses an account limit above it.
         running:
           type: integer
           description: Campaigns currently live on the machine.

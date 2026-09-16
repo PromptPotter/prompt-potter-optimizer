@@ -227,6 +227,10 @@ class CancelQueuedRunPayload(CommandPayload):
     job_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
+class SetConcurrentCyclesPayload(CommandPayload):
+    max_concurrent_cycles: WireInt = Field(ge=1)
+
+
 class MintCampaignPayload(CommandPayload, LaunchLimits):
     dataset_name: str = Field(min_length=1, max_length=64)
 
@@ -261,6 +265,7 @@ PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {
     "register-backend": RegisterBackendPayload,
     "mint-campaign": MintCampaignPayload,
     "cancel-queued-run": CancelQueuedRunPayload,
+    "set-concurrent-cycles": SetConcurrentCyclesPayload,
     "replace-dataset": ReplaceDatasetPayload,
     "compact-archive": CompactArchivePayload,
     "edit-draft-campaign": EditDraftCampaignPayload,

@@ -256,6 +256,11 @@ export async function postChangeSpendBudget(
   if (typeof caps.maxTokens === "number") payload.max_tokens = caps.maxTokens;
   return postCommand("change-spend-budget", payload);
 }
+// The caller's OWN account limit — workspace-scoped, so no cycle. Refused (422) above the
+// machine ceiling and on the host's key; read the result back off `/auth/quota-status`.
+export async function postSetConcurrentCycles(limit: number): Promise<CommandAcceptedBody> {
+  return postCommand("set-concurrent-cycles", { max_concurrent_cycles: limit });
+}
 // No cap args. A cap is declared where there is a surface to declare it on — the check-in's own
 // Start (`start-checkin`) for a fresh launch, `change-spend-budget` for a run already going — and
 // a resume inherits what the cycle already carries. The two optional ones that stood here reached
