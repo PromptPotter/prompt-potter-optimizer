@@ -22,9 +22,10 @@ import s from "./ValueList.module.css";
 //     is how a list comes to contradict itself.
 //   - WHAT IS PERMITTED is the tick. One tick pins the axis; more than one opens it.
 //
-// **Each fact is present exactly when its channel is** — `onPick` absent drops the start (values
-// become text, not buttons), `checked` absent drops the tick column. A host that owns only one of
-// the two says so by passing only one, and gets no control it cannot honour.
+// **Each fact is present exactly when its channel is** — `onPick` absent makes the values text,
+// not buttons, and `checked` absent drops the tick column. A host that owns only one of the two
+// says so by passing only one, and gets no control it cannot honour. A host passing neither is a
+// READING: position 1 is still the value the point runs, it just cannot be moved from here.
 //
 // State here is one scalar: a remount counter for the free-text input. `values`, `checked` and the
 // order are props end to end, so the caller's store is the single source of truth and every
@@ -46,8 +47,8 @@ export function ValueList({
 }: {
   /** The axis, as the operator reads it — a `snake_case` param key, usually. */
   name: string;
-  /** The full menu, ALREADY ordered current-first by the caller. `values[0]` is the origin —
-   *  where the axis starts — but only where `onPick` makes that a fact this list owns. */
+  /** The full menu, ALREADY ordered current-first by the caller. `values[0]` is where the axis
+   *  starts — except on a permissions-only host, whose sibling surface owns that value. */
   values: readonly string[];
   /** The permitted subset. `undefined` = no tick column at all, rather than a column of empty
    *  boxes that would read as "nothing permitted". */
@@ -66,9 +67,9 @@ export function ValueList({
   readOnly?: boolean;
   /** Omit to drop the free-text row — an axis whose values a caller cannot widen. */
   addPlaceholder?: string;
-  /** Omit where the START VALUE is not this list's to set — a permissions-only host, whose
-   *  sibling surface owns the value. The rows then render as text: an enabled control that
-   *  discards the click is the shape this absence exists to make unspellable. */
+  /** Omit where the START VALUE is not this list's to set — a reading, or a permissions-only
+   *  host. The rows then render as text: an enabled control that discards the click is the shape
+   *  this absence exists to make unspellable. */
   onPick?: (value: string) => void;
   onToggle?: (value: string) => void;
   onAdd?: (value: string) => void;
@@ -80,10 +81,10 @@ export function ValueList({
   const start = values[0] ?? "";
   const permitted = checked === undefined ? null : values.filter((v) => checked.includes(v));
   const count = permitted === null ? null : `${permitted.length}/${values.length}`;
-  // Closed, the line states the fact this list OWNS. Printing `values[0]` on a permissions-only
-  // host would read as a start value on a surface that cannot set one, so there the line is the
-  // permitted set itself — which for a pinned axis is the same single value, correctly.
-  const summary = onPick ? start || "(unset)" : (permitted ?? []).join(", ") || "(none)";
+  // Closed, the line states the value the point runs, except on a PERMISSIONS-ONLY host (ticks, no
+  // pick): its value belongs to a sibling surface, so there the line is the permitted set.
+  const summary =
+    permitted !== null && !onPick ? permitted.join(", ") || "(none)" : start || "(unset)";
 
   return (
     <Popover

@@ -468,11 +468,16 @@ LEDGER_BASELINE = {
     # those are measurements, this is the comparison's own decision, and the one reader it buys
     # is the bar that was authoring it. (`RoundSummary.separable` lands in the same arc and costs
     # nothing here — `dashboard.json` is served verbatim and reaches no OpenAPI schema.)
+    # +4: `CampaignSummary.spend_used_usd` + `.spend_unpriced_tokens`, counted twice because
+    # `CampaignDetailResponse` inherits them. The sidebar row prints a campaign's dollars, and the
+    # only other money carriers are per-cycle (`dashboard.json`, cumulative from the seed, so a
+    # fork double-counts) or per-account (`QuotaStatus`); adding up cycles in the browser is the
+    # arithmetic `webapp/CLAUDE.md` forbids. The pair mirrors `QuotaStatus`'s spend + unpriced.
     # +3: `MachineStatusResponse.ceiling`, `QuotaStatus.concurrent_queued` and
     # `.max_concurrent_cycles_writable` — the Account panel's run-concurrency section. The machine
     # ceiling was served nowhere, the queued half of the account limit only inside a refusal, and
     # who may move the limit is a server decision the browser would otherwise re-derive.
-    "served_fields": 588,
+    "served_fields": 592,
 }
 
 

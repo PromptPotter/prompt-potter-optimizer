@@ -492,8 +492,9 @@ def _emit_stop_reason_tables() -> str:
     walk's spend tier was carrying one. Emitted TOTAL over the table, so a new `StopReason`
     arrives classified rather than silently absent.
     """
-    from promptpotter.domain.phases import STOP_REASON_INFO
+    from promptpotter.domain.phases import STOP_REASON_INFO, StopOutcome
 
+    outcome_union = " | ".join(repr(o.value) for o in StopOutcome)
     rows = "\n".join(
         f"  {reason.value!r}: {info.label!r}," for reason, info in STOP_REASON_INFO.items()
     )
@@ -521,7 +522,8 @@ def _emit_stop_reason_tables() -> str:
         "// `StopOutcome`, where `paused` is the one non-terminal member. TOTAL over the reasons,\n"
         "// so ask it rather than matching names: a hand-listed set of crash names rots in both\n"
         "// directions, missing the reason added yesterday and keeping one that was renamed.\n"
-        "export const STOP_REASON_OUTCOMES: Record<string, string> = {\n"
+        f"export type StopOutcome = {outcome_union};\n"
+        "export const STOP_REASON_OUTCOMES: Record<string, StopOutcome> = {\n"
         f"{outcomes}\n"
         "};"
     )

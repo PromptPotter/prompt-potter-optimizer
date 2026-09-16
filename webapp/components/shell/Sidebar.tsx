@@ -12,9 +12,9 @@ import { Term } from "@/components/ui";
 import { encodeCyclePath, rootCycleId, type CyclePath } from "@/lib/ids";
 import { useNodeToggle } from "@/lib/view-memory";
 import { applyTheme, readStoredTheme } from "@/lib/theme";
-import { AccountModal } from "@/components/account/AccountModal";
 import { buildForest, nodeKey } from "./sidebar/grouping";
 import type { TreeCtx } from "./sidebar/ForestRows";
+import { AccountSpend } from "./sidebar/AccountSpend";
 import { SidebarContent } from "./SidebarContent";
 
 interface Props {
@@ -75,11 +75,7 @@ export function Sidebar({
     activeCampaignId,
     lifecycleFilter,
     setLifecycleFilter,
-    // The account modal's open-ness is on the ADDRESS (`#/account/<pane>`), not local
-    // state — the modal is a view like any other, so it is linkable and survives a reload.
-    accountPane,
     openAccount,
-    closeAccount,
   } = useWorkspace();
   // Expand/collapse, remembered PER CAMPAIGN (`lib/view-memory.tsx`) — the campaign a node
   // belongs to is read off its own address, so nothing here has to carry one.
@@ -219,6 +215,7 @@ export function Sidebar({
         origins={origins}
         ctx={ctx}
       />
+      <AccountSpend />
       <div className="sidebar-footer">
         <div className="sidebar-footer-chrome">
           {/* Search — the disabled placeholder this file's header refuses to sweep.
@@ -301,7 +298,6 @@ export function Sidebar({
           </button>
         )}
       </div>
-      <AccountModal open={accountPane != null} onClose={closeAccount} />
     </nav>
   );
 }

@@ -1334,9 +1334,13 @@ paths:
         is the caller's own tenant tree; a hop chain re-roots the list into an
         L4 `.inner/<key>` sandbox, so one route lists the top level and
         any depth. Response shape is owned by the server model
-        (`registry.py::CampaignListResponse`, generated into
+        (`routers/campaigns/manifests.py::CampaignListResponse`, generated into
         `webapp/lib/api/types.generated.ts::CampaignSummary`) — not duplicated
-        here.
+        here. Each summary carries the campaign's lifetime billed spend
+        (`spend_used_usd`, a floor while `spend_unpriced_tokens > 0`), summed
+        server-side over its cycle ledgers and banked tombstones — the
+        per-campaign split of `GET /auth/quota-status`'s account total, so the
+        sidebar prints dollars it never adds up itself.
       tags: [cycles]
       parameters:
         - name: dataset

@@ -614,6 +614,16 @@
             "description": "The campaign's root cycle id — `cycle_<root_content_hash>`, so it IS the campaign's ORIGIN identity. Campaigns on one declaration share it and differ only in the random `campaign_id` suffix, which is what makes them separate RUNS of that origin; the sidebar groups the forest by this key.",
             "title": "Root Cycle Id",
             "type": "string"
+          },
+          "spend_unpriced_tokens": {
+            "description": "Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them. Zero means the dollar figure is complete.",
+            "title": "Spend Unpriced Tokens",
+            "type": "integer"
+          },
+          "spend_used_usd": {
+            "description": "What this campaign has billed over its whole life — every cycle's ledger, forks and forwarded L4 inner spend included, plus spend banked when one of its cycles was deleted. Its share of `QuotaStatus.spend_used_total_usd`. A FLOOR while `spend_unpriced_tokens` is non-zero.",
+            "title": "Spend Used Usd",
+            "type": "number"
           }
         },
         "required": [
@@ -621,6 +631,8 @@
           "dataset_name",
           "created_at",
           "root_cycle_id",
+          "spend_used_usd",
+          "spend_unpriced_tokens",
           "config"
         ],
         "title": "CampaignDetailResponse",
@@ -883,13 +895,25 @@
             "description": "The campaign's root cycle id — `cycle_<root_content_hash>`, so it IS the campaign's ORIGIN identity. Campaigns on one declaration share it and differ only in the random `campaign_id` suffix, which is what makes them separate RUNS of that origin; the sidebar groups the forest by this key.",
             "title": "Root Cycle Id",
             "type": "string"
+          },
+          "spend_unpriced_tokens": {
+            "description": "Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them. Zero means the dollar figure is complete.",
+            "title": "Spend Unpriced Tokens",
+            "type": "integer"
+          },
+          "spend_used_usd": {
+            "description": "What this campaign has billed over its whole life — every cycle's ledger, forks and forwarded L4 inner spend included, plus spend banked when one of its cycles was deleted. Its share of `QuotaStatus.spend_used_total_usd`. A FLOOR while `spend_unpriced_tokens` is non-zero.",
+            "title": "Spend Used Usd",
+            "type": "number"
           }
         },
         "required": [
           "campaign_id",
           "dataset_name",
           "created_at",
-          "root_cycle_id"
+          "root_cycle_id",
+          "spend_used_usd",
+          "spend_unpriced_tokens"
         ],
         "title": "CampaignSummary",
         "type": "object"

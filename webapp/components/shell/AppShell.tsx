@@ -14,6 +14,7 @@ import { decodeCyclePath, encodeCyclePath, type CyclePath } from "@/lib/ids";
 import { applyChartDefaults } from "@/lib/theme";
 import { cx } from "@/lib/cx";
 import type { Tab } from "@/lib/view-tab";
+import { AccountModal } from "@/components/account/AccountModal";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { SidebarResizer } from "@/components/shell/SidebarResizer";
 import { JobsDock } from "@/components/shell/JobsDock";
@@ -105,6 +106,9 @@ function AppShellInner() {
     dismissGoneNotice,
     tab,
     setTab,
+    // Open-ness is on the ADDRESS (`#/account/<pane>`), so the modal is linkable.
+    accountPane,
+    closeAccount,
   } = useWorkspace();
 
   // ── Per-campaign view memory: remember where the operator was, put them back.
@@ -481,6 +485,9 @@ function AppShellInner() {
           first paint — IngestPane already hard-returns null when closed, so
           gating the mount is behaviour-identical. */}
       {newCampaignOpen && <IngestPane open onClose={() => setNewCampaignOpen(false)} />}
+      {/* A `.shell` child, not a sidebar one: the phone hides the sidebar off its list
+          screen, and a deep link to `#/account/<pane>` must open wherever it lands. */}
+      <AccountModal open={accountPane != null} onClose={closeAccount} />
     </div>
     </HardSamplesProvider>
     </ConnectorProvider>

@@ -1,62 +1,62 @@
 "use client";
-import { Fragment } from "react";
+import { Fragment, type ReactNode } from "react";
 import { CopyButton, HoverCard } from "@/components/ui";
 import { useFetch } from "@/lib/hooks/useFetch";
 import { fetchCampaignStorage } from "@/lib/api";
-import { fmtAgo, fmtBytes, fmtDateTime } from "@/lib/format";
+import { cx } from "@/lib/cx";
+import { fmtBytes } from "@/lib/format";
 
-// The ONE hover surface for every sidebar row — the card that replaced the
-// clashing pair (the bespoke storage card + a native `title=` tooltip that
-// floated over it). Meta is shown for every row; the on-disk breakdown only
-// where a per-campaign storage endpoint exists (top-level campaign rows).
+// The ONE hover surface for every sidebar row. Three tiers, read top-down: WHAT the row is
+// (name, state, one line), the few NUMBERS an operator scans for, then the IDs and dates they
+// copy out. Rows hand in served values already formatted; the card lays them out and nothing else.
 //
-// The card is reachable (see `HoverCard`), so what is in it selects by drag, and
-// the copy button hands the same rows over as JSON. Both read the SAME two
-// lists, so the payload cannot claim anything the card does not show.
-export function RowHoverCard({
-  cycleId,
-  description,
-  datasetName,
-  createdAt,
-  campaignId,
-  children,
-}: {
-  cycleId: string;
-  // The one-line "what is this row" copy that used to live in `title=`.
-  description: string;
-  datasetName?: string | null;
-  // ISO timestamp — only campaign rows carry one; the served tree has no date.
-  createdAt?: string | null;
-  // Present ⇒ the storage section is fetched and shown.
+// The card is reachable (see `HoverCard`), so what is in it selects by drag, and the copy button
+// hands the same values over as JSON — both read the SAME lists, so the payload cannot claim
+// anything the card does not show.
+
+export interface RowStat {
+  label: string;
+  value: string;
+  // A second line under the value — which floor a Δ is against, what a figure leaves out.
+  sub?: string;
+  className?: string;
+}
+
+export interface RowCardFacts {
+  title: string;
+  // The row's run-state or verdict word — always a word, never colour alone.
+  state?: string | null;
+  tags?: string[];
+  lede: string;
+  stats: RowStat[];
+  // A served caveat that makes a number above unreadable as it stands.
+  caveat?: ReactNode;
+  facts: [string, string][];
+  // Present ⇒ the on-disk breakdown is fetched (lazily — the card mounts only while open).
   campaignId?: string;
-  children: React.ReactNode;
-}) {
-  // Lazy either way — the card mounts `content` only while open — but owned here
-  // so the copy payload carries the same numbers the grid draws.
+}
+
+const snake = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+
+export function RowHoverCard({ card, children }: { card: RowCardFacts; children: ReactNode }) {
+  return (
+    <HoverCard className="rowhover-shell" content={<RowCardBody card={card} />}>
+      {children}
+    </HoverCard>
+  );
+}
+
+function RowCardBody({ card }: { card: RowCardFacts }) {
+  const { campaignId } = card;
   const { data, error } = useFetch(
     campaignId != null ? (signal) => fetchCampaignStorage(campaignId, signal) : null,
     [campaignId ?? null],
   );
 
-  // The campaign id is what identifies this run to another person; the cycle id
-  // names the run inside it. Only top-level rows have the first.
-  const meta: [string, string][] = [];
-  if (datasetName) meta.push(["Dataset", datasetName]);
-  if (createdAt) {
-    const ago = fmtAgo(createdAt);
-    meta.push(["Created", ago ? `${fmtDateTime(createdAt)} · ${ago}` : fmtDateTime(createdAt)]);
-  }
-  if (campaignId) meta.push(["Campaign", campaignId]);
-  meta.push(["Cycle", cycleId]);
-
-  // One MECE hierarchy: "On disk" is the whole; the operator axis is Dataset /
-  // Connector / Loop, and Loop = State + Trace + History + Reports. The trailing
-  // flag indents a Loop leaf. Needs no campaign guard — without one there is no
-  // `data`, and both consumers below gate on that.
-  const loop =
-    data && data.state_bytes + data.trace_bytes + data.history_bytes + data.reports_bytes;
+  // "On disk" is the whole; the operator axis is Dataset / Connector / Loop, and Loop =
+  // State + Trace + History + Reports. The flag indents a Loop leaf.
+  const loop = data && data.state_bytes + data.trace_bytes + data.history_bytes + data.reports_bytes;
   const sizes: [string, number | undefined, boolean?][] = [
-    ["On disk", data?.on_disk_bytes],
     ["Dataset", data?.dataset_bytes],
     ["Connector", data?.connector_bytes],
     ["Loop", loop ?? undefined],
@@ -66,48 +66,77 @@ export function RowHoverCard({
     ["Reports", data?.reports_bytes, true],
   ];
   const size = (n: number | undefined) => (error ? "—" : data ? fmtBytes(n ?? 0) : "…");
-  const key = (label: string) => label.toLowerCase().replace(" ", "_");
 
-  const content = (
+  const payload = {
+    name: card.title,
+    ...(card.state ? { state: card.state } : {}),
+    ...Object.fromEntries(card.stats.map((s) => [snake(s.label), s.value])),
+    ...Object.fromEntries(card.facts.map(([k, v]) => [snake(k), v])),
+    ...(data
+      ? {
+          on_disk: {
+            total: size(data.on_disk_bytes),
+            ...Object.fromEntries(sizes.map(([k, n]) => [snake(k), size(n)])),
+          },
+        }
+      : {}),
+  };
+
+  return (
     <div className="rowhover">
-      <div className="rowhover-head">
-        <span className="rowhover-desc">{description}</span>
-        <CopyButton
-          title="Copy these details as JSON"
-          data={{
-            description,
-            ...Object.fromEntries(meta.map(([k, v]) => [key(k), v])),
-            ...(data
-              ? { on_disk: Object.fromEntries(sizes.map(([k, n]) => [key(k), size(n)])) }
-              : {}),
-          }}
-        />
-      </div>
-      <div className="rowhover-meta">
-        {meta.map(([label, value]) => (
+      <header className="rowhover-head">
+        <div className="rowhover-titleline">
+          <span className="rowhover-title">{card.title}</span>
+          {card.tags?.map((t) => (
+            <span key={t} className="rowhover-tag">
+              {t}
+            </span>
+          ))}
+          {card.state && <span className="rowhover-state">{card.state}</span>}
+        </div>
+        <CopyButton title="Copy these details as JSON" data={payload} />
+      </header>
+      <p className="rowhover-lede">{card.lede}</p>
+
+      {card.stats.length > 0 && (
+        <dl className="rowhover-stats">
+          {card.stats.map((s) => (
+            <div key={s.label} className="rowhover-stat">
+              <dt>{s.label}</dt>
+              <dd className={cx("rowhover-stat-value", s.className)}>{s.value}</dd>
+              {s.sub && <dd className="rowhover-stat-sub">{s.sub}</dd>}
+            </div>
+          ))}
+        </dl>
+      )}
+      {card.caveat && <div className="rowhover-caveat">{card.caveat}</div>}
+
+      <dl className="rowhover-facts">
+        {card.facts.map(([label, value]) => (
           <Fragment key={label}>
-            <span className="rowhover-key">{label}</span>
-            {/* Operator IDs stay selectable (a11y). */}
-            <span className="rowhover-val">{value}</span>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
           </Fragment>
         ))}
-      </div>
+      </dl>
+
       {campaignId && (
-        <div className="csize-grid">
-          {sizes.map(([label, n, indent]) => (
-            <Fragment key={label}>
-              <span className="csize-label" data-indent={indent || undefined}>
-                {label}
-              </span>
-              <span className="csize-val">{size(n)}</span>
-            </Fragment>
-          ))}
-          {/* Flags what the keepsake `delete --keep-results` spares. */}
-          <span className="csize-note">delete --keep-results spares Reports + loop trace</span>
-        </div>
+        <details className="rowhover-disk">
+          <summary>
+            <span>On disk</span>
+            <span className="rowhover-disk-total">{size(data?.on_disk_bytes)}</span>
+          </summary>
+          <dl className="rowhover-facts">
+            {sizes.map(([label, n, indent]) => (
+              <Fragment key={label}>
+                <dt data-indent={indent || undefined}>{label}</dt>
+                <dd>{size(n)}</dd>
+              </Fragment>
+            ))}
+          </dl>
+          <p className="rowhover-note">delete --keep-results spares Reports + loop trace</p>
+        </details>
       )}
     </div>
   );
-
-  return <HoverCard content={content}>{children}</HoverCard>;
 }

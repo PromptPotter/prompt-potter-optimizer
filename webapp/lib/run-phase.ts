@@ -1,5 +1,9 @@
-import type { DashboardState, RunPhase } from "@/lib/api/types.generated";
-import { STOP_REASON_LABELS, STOP_REASON_NEXT_STEPS } from "@/lib/api/types.generated";
+import type { DashboardState, RunPhase, StopOutcome } from "@/lib/api/types.generated";
+import {
+  STOP_REASON_LABELS,
+  STOP_REASON_NEXT_STEPS,
+  STOP_REASON_OUTCOMES,
+} from "@/lib/api/types.generated";
 
 // One display mapping for the run-state vocabulary (RunPhase), read off the
 // single `run_phase` field the backend computes. Replaces the old
@@ -127,6 +131,44 @@ export function runPhaseLabel(
   }
   if (isRunPhase(runPhase) && runPhase !== "terminal") return RUN_PHASE_LABEL[runPhase];
   return runPhase || "—";
+}
+
+// The glyph form of `runPhaseLabel`, for a slot too narrow for the word: a truncated word reads
+// as nothing. The word still rides the mark's `aria-label`. A terminal phase is marked by its
+// served OUTCOME, so every reason sharing one shares a mark.
+export type RunPhaseTone = "live" | "attention" | "quiet" | "success" | "warn" | "danger";
+export interface RunPhaseMark {
+  glyph: string;
+  tone: RunPhaseTone;
+}
+
+const PHASE_MARK: Record<Exclude<RunPhase, "terminal">, RunPhaseMark> = {
+  running: { glyph: "●", tone: "live" },
+  gate: { glyph: "◆", tone: "attention" },
+  paused: { glyph: "‖", tone: "quiet" },
+  checkin: { glyph: "✎", tone: "quiet" },
+  detached: { glyph: "⊘", tone: "warn" },
+};
+
+const OUTCOME_MARK: Record<StopOutcome, RunPhaseMark> = {
+  success: { glyph: "✓", tone: "success" },
+  paused: { glyph: "‖", tone: "quiet" },
+  halted: { glyph: "■", tone: "warn" },
+  failed: { glyph: "✕", tone: "danger" },
+};
+
+// A reason the generated table does not classify renders as "?", never as one of the four above.
+const UNKNOWN_MARK: RunPhaseMark = { glyph: "?", tone: "quiet" };
+
+export function runPhaseMark(
+  runPhase: string | null | undefined,
+  reason: string | null | undefined,
+): RunPhaseMark {
+  if (runPhase === "terminal") {
+    const outcome = reason ? STOP_REASON_OUTCOMES[reason] : undefined;
+    return outcome ? OUTCOME_MARK[outcome] : UNKNOWN_MARK;
+  }
+  return isRunPhase(runPhase) && runPhase !== "terminal" ? PHASE_MARK[runPhase] : UNKNOWN_MARK;
 }
 
 // What the operator does now, for a cycle that ENDED — the generated mirror of the same table's

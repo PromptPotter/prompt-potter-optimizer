@@ -157,6 +157,23 @@
    campaign from the live one (CLI↔webapp parity). The reason word carries the
    meaning; a terminal run's status reads as stale, not done. */
 .unit-library-status{text-transform:uppercase;letter-spacing:.04em;color:var(--color-text-tertiary)}
+/* A row's run-state as a glyph (lib/run-phase.ts::runPhaseMark); the word is its aria-label and
+   the hover card's headline, because a word cut to "PAU…" reads as nothing. Glyph AND tone, so
+   the state never rides colour alone. */
+.unit-library-meta-marked{display:inline-flex;align-items:baseline;gap:var(--space-6)}
+.unit-library-mark{display:inline-block;min-inline-size:1em;text-align:center;font-size:var(--text-xs);line-height:1}
+.unit-library-mark.tone-live{color:var(--color-success)}
+.unit-library-mark.tone-attention{color:var(--color-accent)}
+.unit-library-mark.tone-quiet{color:var(--color-text-tertiary)}
+.unit-library-mark.tone-success{color:var(--color-success)}
+.unit-library-mark.tone-warn{color:var(--color-warn)}
+.unit-library-mark.tone-danger{color:var(--color-danger)}
+/* A campaign's served dollars, never truncated. */
+.unit-library-spend{flex:0 0 auto;font-family:var(--font-mono);font-variant-numeric:tabular-nums;color:var(--color-text-secondary)}
+/* The name gives way, the id's `__suffix` does not: it is what separates runs of one dataset. */
+.unit-library-name-split{display:flex;align-items:baseline}
+.unit-library-name-head{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.unit-library-name-tail{flex:0 0 auto;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-tertiary)}
 /* Unit-kind badge on a non-root unit row (fork / diag). Small,
    uppercase, low-contrast — a qualifier, not a focal point. The root unit
    gets no badge. */
@@ -206,20 +223,59 @@
 .unit-library-children>li::before{content:"";position:absolute;left:-9px;top:0;bottom:0;border-left:1px solid var(--color-accent)}
 .unit-library-children>li:last-child::before{bottom:auto;height:20px}
 .unit-library-children>li::after{content:"";position:absolute;left:-9px;top:20px;width:9px;border-top:1px solid var(--color-accent)}
-/* The ONE sidebar-row hover card body (the shell — fixed-position, escaping
-   overflow — is the `HoverCard` primitive). Meta on every row; the on-disk
-   storage grid only where a campaign endpoint exists. */
-.rowhover{display:flex;flex-direction:column;gap:var(--space-8);max-width:320px}
+/* The ONE sidebar-row hover card body (the shell — fixed-position, escaping overflow — is the
+   `HoverCard` primitive). Three tiers: identity, the scanned numbers between two hairlines,
+   then the copyable ids in mono. The disk breakdown folds, because it is rarely the question. */
+.rowhover{display:flex;flex-direction:column;gap:var(--space-10);inline-size:min(300px,calc(100vw - var(--space-40)))}
 .rowhover-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-8)}
-.rowhover-desc{flex:1 1 auto;font-size:var(--text-xs);line-height:1.4;color:var(--color-text-secondary)}
-.rowhover-meta{display:grid;grid-template-columns:auto 1fr;column-gap:var(--space-12);row-gap:3px;align-items:baseline}
-.rowhover-key{font-size:var(--text-xs);letter-spacing:0.04em;text-transform:uppercase;color:var(--color-text-tertiary)}
-.rowhover-val{font-size:var(--text-xs);color:var(--color-text-primary);font-variant-numeric:tabular-nums;word-break:break-all}
-.csize-grid{display:grid;grid-template-columns:auto auto;align-items:baseline;column-gap:var(--space-14);row-gap:var(--space-4)}
-.csize-label{justify-self:start;font-size:var(--text-xs);letter-spacing:0.04em;text-transform:uppercase;color:var(--color-text-tertiary)}
-.csize-val{justify-self:end;font-size:var(--text-base);font-weight:700;color:var(--color-text-primary);font-variant-numeric:tabular-nums}
-.csize-label[data-indent]{padding-left:12px;text-transform:none;letter-spacing:0.02em}
-.csize-note{grid-column:1 / -1;margin-top:2px;font-size:var(--text-xs);letter-spacing:0.02em;color:var(--color-text-tertiary);opacity:0.8}
+.rowhover-titleline{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--space-4) var(--space-8);min-width:0}
+.rowhover-title{font-size:var(--text-md);font-weight:600;color:var(--color-text-primary);overflow-wrap:anywhere}
+.rowhover-state{font-size:var(--text-xs);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--color-accent)}
+.rowhover-tag{font-size:var(--text-xs);padding:0 var(--space-4);border:0.5px solid var(--color-border);border-radius:var(--border-radius-sm);color:var(--color-text-secondary)}
+.rowhover-lede{margin:0;font-size:var(--text-xs);line-height:1.45;color:var(--color-text-secondary)}
+.rowhover-stats{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:var(--space-10) var(--space-12);padding-block:var(--space-10);border-block:0.5px solid var(--color-border)}
+.rowhover-stat{display:flex;flex-direction:column;gap:2px;min-width:0}
+.rowhover-stat dt{font-size:var(--text-xs);letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-tertiary)}
+.rowhover-stat dd{margin:0}
+.rowhover-stat-value{font-size:var(--text-lg);font-weight:600;line-height:1.2;font-variant-numeric:tabular-nums;color:var(--color-text-primary);white-space:nowrap}
+.rowhover-stat .rowhover-stat-sub{font-size:var(--text-xs);line-height:1.35;color:var(--color-text-tertiary)}
+.rowhover-tone-warn{color:var(--color-warn)}
+.rowhover-caveat{font-size:var(--text-xs);line-height:1.45;color:var(--color-text-secondary);padding:var(--space-6) var(--space-8);border-left:2px solid var(--color-warn);background:var(--color-warn-bg);border-radius:var(--border-radius-sm)}
+.rowhover-caveat strong{color:var(--color-warn)}
+.rowhover-facts{margin:0;display:grid;grid-template-columns:auto 1fr;column-gap:var(--space-12);row-gap:var(--space-4);align-items:baseline}
+.rowhover-facts dt{font-size:var(--text-xs);color:var(--color-text-tertiary);white-space:nowrap}
+.rowhover-facts dt[data-indent]{padding-left:var(--space-12)}
+.rowhover-facts dd{margin:0;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-primary);overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.rowhover-disk summary{display:flex;justify-content:space-between;gap:var(--space-8);list-style:none;cursor:pointer;font-size:var(--text-xs);color:var(--color-text-secondary)}
+.rowhover-disk summary::-webkit-details-marker{display:none}
+.rowhover-disk summary > :first-child::before{content:"▸";display:inline-block;inline-size:1.2em;color:var(--color-text-tertiary)}
+.rowhover-disk[open] summary > :first-child::before{content:"▾"}
+.rowhover-disk[open] summary{margin-bottom:var(--space-6)}
+.rowhover-disk-total{font-family:var(--font-mono);color:var(--color-text-primary)}
+.rowhover-note{margin:var(--space-6) 0 0;font-size:var(--text-xs);color:var(--color-text-tertiary)}
+/* The account's spend against its allowance (components/shell/sidebar/AccountSpend). Pinned
+   above the footer in every sidebar state; the 36px rail keeps only the figure, set vertical. */
+.account-spend{flex:0 0 auto;display:grid;grid-template-columns:1fr auto;grid-template-areas:"label cap" "value value" "bar bar";align-items:baseline;gap:2px var(--space-8);margin:var(--space-8) var(--space-8) 0;padding:var(--space-8) var(--space-10);background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-md)}
+.account-spend-label{grid-area:label;font-size:var(--text-xs);font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--color-text-tertiary)}
+.account-spend-cap{grid-area:cap;font-size:var(--text-xs);color:var(--color-text-tertiary);white-space:nowrap}
+.account-spend-reading{grid-area:value;justify-self:start}
+.account-spend-value{font-family:var(--font-mono);font-size:var(--text-xl);font-weight:600;font-variant-numeric:tabular-nums;color:var(--color-text-primary)}
+.account-spend-muted{grid-area:value;font-size:var(--text-sm);font-weight:400;color:var(--color-text-tertiary)}
+.account-spend-bar{grid-area:bar;display:block;block-size:3px;margin-top:var(--space-4);border-radius:2px;background:var(--color-background-tertiary);overflow:hidden}
+.account-spend-bar > span{display:block;block-size:100%;background:var(--color-accent)}
+.account-spend-exhausted .account-spend-value,.account-spend-exhausted .account-spend-label{color:var(--color-warn)}
+.account-spend-exhausted .account-spend-bar > span{background:var(--color-warn)}
+.account-spend-explain{max-inline-size:260px;font-size:var(--text-xs);line-height:1.45;color:var(--color-text-secondary)}
+.account-spend-explain p{margin:0}
+.account-spend-explain p + p{margin-top:var(--space-6)}
+@media not all and (max-width:880px){
+  .shell.sidebar-collapsed .account-spend{grid-template-columns:1fr;grid-template-areas:"value";justify-items:center;margin:var(--space-8) 2px 0;padding:var(--space-8) 0;background:transparent;border:0}
+  .shell.sidebar-collapsed .account-spend-label,
+  .shell.sidebar-collapsed .account-spend-cap,
+  .shell.sidebar-collapsed .account-spend-bar{display:none}
+  .shell.sidebar-collapsed .account-spend-reading{justify-self:center}
+  .shell.sidebar-collapsed .account-spend-value{writing-mode:vertical-rl;transform:rotate(180deg);font-size:var(--text-sm)}
+}
 /* Active-jobs dock (components/shell/JobsDock) — floats on the sidebar's OUTER
    edge, straddling the hairline, tracking --sidebar-width so it rides a drag and
    the 36px rail alike. A `.shell` child, so the multi-run popover escapes

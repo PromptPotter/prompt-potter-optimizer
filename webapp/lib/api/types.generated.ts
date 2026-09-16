@@ -975,6 +975,15 @@ export interface CampaignSummary {
   lifecycle_changed_at: string;
   /** Optional operator-supplied reason for the last lifecycle transition */
   lifecycle_reason: string;
+  /** What this campaign has billed over its whole life — every cycle's ledger,
+   * forks and forwarded L4 inner spend included, plus spend banked when one
+   * of its cycles was deleted. Its share of
+   * `QuotaStatus.spend_used_total_usd`. A FLOOR while `spend_unpriced_tokens`
+   * is non-zero. */
+  spend_used_usd: number;
+  /** Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them.
+   * Zero means the dollar figure is complete. */
+  spend_unpriced_tokens: number;
 }
 
 export interface CampaignListResponse {
@@ -1829,6 +1838,15 @@ export interface CampaignDetailResponse {
   lifecycle_changed_at: string;
   /** Optional operator-supplied reason for the last lifecycle transition */
   lifecycle_reason: string;
+  /** What this campaign has billed over its whole life — every cycle's ledger,
+   * forks and forwarded L4 inner spend included, plus spend banked when one
+   * of its cycles was deleted. Its share of
+   * `QuotaStatus.spend_used_total_usd`. A FLOOR while `spend_unpriced_tokens`
+   * is non-zero. */
+  spend_used_usd: number;
+  /** Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them.
+   * Zero means the dollar figure is complete. */
+  spend_unpriced_tokens: number;
   /** Content hash of the origin search point — the campaign identity */
   root_content_hash: string;
   /** Frozen CampaignConfig snapshot for this campaign */
@@ -2009,7 +2027,8 @@ export const STOP_REASON_NEXT_STEPS: Record<string, string> = {
 // `StopOutcome`, where `paused` is the one non-terminal member. TOTAL over the reasons,
 // so ask it rather than matching names: a hand-listed set of crash names rots in both
 // directions, missing the reason added yesterday and keeping one that was renamed.
-export const STOP_REASON_OUTCOMES: Record<string, string> = {
+export type StopOutcome = 'success' | 'halted' | 'failed' | 'paused';
+export const STOP_REASON_OUTCOMES: Record<string, StopOutcome> = {
   'perfect_score': 'success',
   'max_rounds': 'success',
   'target_hit': 'success',

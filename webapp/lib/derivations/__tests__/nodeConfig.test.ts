@@ -24,7 +24,8 @@ function row(over: Partial<ConfigRow> & { key: string; kind: string }): ConfigRo
     locked: false,
     allowed: [],
     stated: false,
-    fromCandidate: false,
+    inSeed: false,
+    source: "unset",
     neverAxis: "",
     movableBy: [],
     held: false,
@@ -288,8 +289,10 @@ describe("configRows (values mode)", () => {
     const rows = configRows(schema, { llm_only: { reasoning_effort: "high" } }, "values");
     const re = rows.find((r) => r.key === "reasoning_effort")!;
     expect(re.value).toBe("high");
-    expect(re.fromCandidate).toBe(true);
-    expect(rows.find((r) => r.key === "temperature")!.fromCandidate).toBe(false);
+    expect(re.inSeed).toBe(true);
+    expect(rows.find((r) => r.key === "temperature")!.inSeed).toBe(false);
+    // Carried by the seed is not provenance: the badge reads what the server stamped.
+    expect(re.source).toBe("dataset");
   });
 
   it("returns no rows without a schema", () => {

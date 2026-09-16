@@ -32,6 +32,8 @@ from promptpotter.domain.pipeline_overlay import (
     steers_disallowed_model,
 )
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.store.account_spend import campaign_spend
+from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.stores import descend_store
 from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
@@ -83,6 +85,20 @@ class CampaignSummary(StrictModel):
         default="",
         description="Optional operator-supplied reason for the last lifecycle transition",
     )
+    spend_used_usd: float = Field(
+        description=(
+            "What this campaign has billed over its whole life — every cycle's ledger, forks and "
+            "forwarded L4 inner spend included, plus spend banked when one of its cycles was "
+            "deleted. Its share of `QuotaStatus.spend_used_total_usd`. A FLOOR while "
+            "`spend_unpriced_tokens` is non-zero."
+        )
+    )
+    spend_unpriced_tokens: int = Field(
+        description=(
+            "Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them. Zero "
+            "means the dollar figure is complete."
+        )
+    )
 
 
 class CampaignListResponse(StrictModel):
@@ -97,7 +113,8 @@ class CampaignDetailResponse(CampaignSummary):
     config: dict[str, Any] = Field(description="Frozen CampaignConfig snapshot for this campaign")
 
 
-def _campaign_summary(campaign: Campaign) -> CampaignSummary:
+def _campaign_summary(campaign: Campaign, store: CampaignStore) -> CampaignSummary:
+    spent = campaign_spend(store, campaign.campaign_id)
     return CampaignSummary(
         campaign_id=campaign.campaign_id,
         dataset_name=campaign.dataset_name,
@@ -110,6 +127,8 @@ def _campaign_summary(campaign: Campaign) -> CampaignSummary:
         lifecycle_status=campaign.lifecycle_status,
         lifecycle_changed_at=campaign.lifecycle_changed_at,
         lifecycle_reason=campaign.lifecycle_reason,
+        spend_used_usd=round(spent.used_usd, 6),
+        spend_unpriced_tokens=spent.unpriced_tokens,
     )
 
 
@@ -216,7 +235,7 @@ def list_campaigns(
     campaigns = leaf.campaigns.list_campaigns(dataset, lifecycle=lifecycle, owner_user_id=owner)
     campaigns.sort(key=lambda c: c.created_at, reverse=True)
     return CampaignListResponse(
-        campaigns=[_campaign_summary(c) for c in campaigns],
+        campaigns=[_campaign_summary(c, leaf.campaigns) for c in campaigns],
         total=len(campaigns),
     )
 
@@ -259,17 +278,7 @@ def get_campaign(stores: StoresDep, campaign_id: str) -> CampaignDetailResponse:
     if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
     return CampaignDetailResponse(
-        campaign_id=campaign.campaign_id,
-        dataset_name=campaign.dataset_name,
-        label=campaign.label,
-        created_at=campaign.created_at,
-        root_cycle_id=campaign.root_cycle_id,
-        backend_id=campaign.backend_id,
-        backend_type=campaign.backend_type,
-        owner_user_id=campaign.owner_user_id,
-        lifecycle_status=campaign.lifecycle_status,
-        lifecycle_changed_at=campaign.lifecycle_changed_at,
-        lifecycle_reason=campaign.lifecycle_reason,
+        **_campaign_summary(campaign, stores.campaigns).model_dump(),
         root_content_hash=campaign.root_content_hash,
         config=campaign.config,
     )
