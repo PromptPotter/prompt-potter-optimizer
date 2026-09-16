@@ -519,7 +519,6 @@ async def cmd_resume(args: argparse.Namespace) -> CommandResult:
             token_budget=getattr(args, "token_budget", None),
             tenant=getattr(args, "tenant", None),
             verbose=getattr(args, "verbose", False),
-            session=getattr(args, "session", None),
             json_output=getattr(args, "json_output", False),
         )
         return await cmd_new(new_args)

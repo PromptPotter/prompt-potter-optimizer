@@ -42,7 +42,7 @@ from promptpotter.application.runner.inner.ruler import refresh_inner_rulers
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.runner.loop import run_round_loop
 from promptpotter.application.runner.round import flush_pending_decisions
-from promptpotter.application.runner.termination import BudgetGate
+from promptpotter.application.runner.termination import RUN_STOPS, BudgetGate, run_stop_reason
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.config.settings import APP_VERSION
@@ -323,7 +323,6 @@ async def _prepare_run(
     *,
     session: Session,
     observers: RunObservers,
-    origin: CampaignOrigin | None,
     limits: LaunchLimits,
 ) -> _PreparedRun:
     cb = observers.callbacks
@@ -395,21 +394,20 @@ async def _prepare_run(
     # and before the origin pass, which spends without one otherwise.
     _arm_run_controls(session, observers, campaign_config)
 
-    if origin is None:
-        # Round 0 IS a round, so it is declared like any other: `_CURRENT_ROUND` must be bound
-        # for everything the origin pass spawns, or every origin measurement stamps `None`.
-        cb.set_round(0)
-        # The single origin seam. A no-edit operator fork inherits its branch-point candidate's
-        # recorded accuracy rather than re-rolling it under a nondeterministic backend.
-        origin = await establish_campaign_origin(
-            session,
-            dataset,
-            campaign_config,
-            seed=seed,
-            listener=cb,
-        )
-        if observers.display is not None and hasattr(observers.display, "set_origin"):
-            observers.display.set_origin(origin.report.accuracy)
+    # Round 0 IS a round, so it is declared like any other: `_CURRENT_ROUND` must be bound
+    # for everything the origin pass spawns, or every origin measurement stamps `None`.
+    cb.set_round(0)
+    # The single origin seam. A no-edit operator fork inherits its branch-point candidate's
+    # recorded accuracy rather than re-rolling it under a nondeterministic backend.
+    origin = await establish_campaign_origin(
+        session,
+        dataset,
+        campaign_config,
+        seed=seed,
+        listener=cb,
+    )
+    if observers.display is not None and hasattr(observers.display, "set_origin"):
+        observers.display.set_origin(origin.report.accuracy)
 
     return _PreparedRun(
         origin=origin,
@@ -429,7 +427,7 @@ def _level_of(rr: RoundResult) -> AbilityReading | None:
 
 def _build_cycle_result(
     cycle: Cycle | None,
-    origin: CampaignOrigin,
+    origin: CampaignOrigin | None,
     session: Session,
     *,
     stop_reason: StopReason,
@@ -438,8 +436,9 @@ def _build_cycle_result(
     finished_at: str,
     spend: SpendRollup | None,
 ) -> CycleResult:
-    """Assemble the terminal :class:`CycleResult`; ``cycle is None`` is the init-crash fallback. Both
-    ``winner_*`` read ``best_sp``, since ``cycle.opt_sp`` is overwritten every round."""
+    """Assemble the terminal :class:`CycleResult`; ``cycle is None`` is the init-crash fallback, and
+    ``origin is None`` a stop inside origin scoring. Both ``winner_*`` read ``best_sp``, since
+    ``cycle.opt_sp`` is overwritten every round."""
     best_sp = cycle.tracking.best_sp if cycle is not None else None
     # Round 0 is the reference the whole result is differenced against, carried beside it as
     # ``origin_accuracy`` / ``origin_level``. Counting it as a search result would credit the
@@ -459,7 +458,7 @@ def _build_cycle_result(
         n_l1_rounds=len(cycle_rounds),
         best_accuracy=cycle.tracking.best_accuracy if cycle is not None else None,
         best_round=cycle.tracking.best_round if cycle is not None else 0,
-        origin_accuracy=origin.report.accuracy,
+        origin_accuracy=origin.report.accuracy if origin is not None else None,
         origin_composite_fitness=(
             cycle.origin_round.composite_fitness if cycle is not None else None
         ),
@@ -525,6 +524,49 @@ def _export_artifact(
         origin_accuracy=cycle_result.origin_accuracy,
         origin_composite_fitness=cycle_result.origin_composite_fitness,
     )
+
+
+def _close_cycle(
+    cycle: Cycle | None,
+    origin: CampaignOrigin | None,
+    session: Session,
+    observers: RunObservers,
+    *,
+    stop_reason: StopReason,
+    cycle_error: ErrorRecord | None,
+    started_at: str,
+    accuracy_ceiling: float | None,
+    diag: bool,
+) -> CycleResult:
+    """The one terminal path, for a stop raised in the round loop and one raised in run init."""
+    finished_at = utcnow_iso()
+    # Before the result is built: a decision made after the last round closed has no next
+    # `persist_round` to carry it, and every stop reason lands here.
+    if cycle is not None:
+        flush_pending_decisions(cycle, session)
+    cycle_result = _build_cycle_result(
+        cycle,
+        origin,
+        session,
+        stop_reason=stop_reason,
+        cycle_error=cycle_error,
+        started_at=started_at,
+        finished_at=finished_at,
+        # In-memory, not the debounced ``dashboard.json``: at finalize the live rollup is
+        # already complete.
+        spend=observers.dashboard.state.spend,
+    )
+    langfuse_trace_id = _finalize_run(
+        session,
+        observers,
+        cycle_result,
+        accuracy_ceiling=accuracy_ceiling,
+        winner=_winning_round(cycle, cycle_result),
+        diag=diag,
+    )
+    if langfuse_trace_id is not None:
+        cycle_result = cycle_result.model_copy(update={"langfuse_trace_id": langfuse_trace_id})
+    return cycle_result
 
 
 @dataclass
@@ -611,6 +653,9 @@ async def _run_single_cycle(
             stop_after_rounds=mode.stop_after_rounds,
             budget_gate=budget_gate,
         )
+    except RUN_STOPS as stop:
+        stop_reason = run_stop_reason(stop)
+        cycle_error = None
     except KeyboardInterrupt:
         logger.warning("Optimization paused before round loop entered (user-initiated).")
         stop_reason = StopReason.PAUSED
@@ -646,33 +691,17 @@ async def _run_single_cycle(
             kind=kind, message=message, stop_reason="CRASHED", traceback=tb
         )
 
-    finished_at = utcnow_iso()
-    # Before the result is built: a decision made after the last round closed has no next
-    # `persist_round` to carry it, and every stop reason lands here.
-    if cycle is not None:
-        flush_pending_decisions(cycle, session)
-    cycle_result = _build_cycle_result(
+    cycle_result = _close_cycle(
         cycle,
         origin,
         session,
+        observers,
         stop_reason=stop_reason,
         cycle_error=cycle_error,
         started_at=started_at,
-        finished_at=finished_at,
-        # In-memory, not the debounced ``dashboard.json``: at finalize the live rollup is
-        # already complete.
-        spend=observers.dashboard.state.spend,
-    )
-    langfuse_trace_id = _finalize_run(
-        session,
-        observers,
-        cycle_result,
         accuracy_ceiling=campaign_config.accuracy_ceiling,
-        winner=_winning_round(cycle, cycle_result),
         diag=mode.diag,
     )
-    if langfuse_trace_id is not None:
-        cycle_result = cycle_result.model_copy(update={"langfuse_trace_id": langfuse_trace_id})
     # A fork that never completed a round leaves an empty dir. Ahead of the re-raise below,
     # because a cancellation is one of the interrupts that produces one.
     forked_in_this_run = (
@@ -755,13 +784,12 @@ async def run_optimization(
     *,
     session: Session,
     observers: RunObservers,
-    origin: CampaignOrigin | None = None,
     langfuse_session_id: str | None = None,
     mode: RunMode,
     limits: LaunchLimits,
 ) -> CycleResult:
-    """End-to-end optimization. *observers* MUST be pre-built (ledger bound before origin).
-    *origin* omitted ⇒ scored as phase 0 (CLI); supplied ⇒ reused (notebook path)."""
+    """End-to-end optimization, origin scoring included. *observers* MUST be pre-built (ledger bound
+    before origin)."""
     started_at = utcnow_iso()
     # Every launch path reaches here; bolted onto one entry point instead, it leaves the others
     # pricing off whatever table shipped. No-op on a fresh cache.
@@ -790,11 +818,24 @@ async def run_optimization(
             campaign_config,
             session=session,
             observers=observers,
-            origin=origin,
             limits=limits,
         )
+    except RUN_STOPS as stop:
+        # Origin scoring stops on the round loop's channel — the budget gate, an unreachable
+        # backend, a spent provider account — so it ends on the round loop's path, never a crash.
+        return _close_cycle(
+            None,
+            None,
+            session,
+            observers,
+            stop_reason=run_stop_reason(stop),
+            cycle_error=None,
+            started_at=started_at,
+            accuracy_ceiling=campaign_config.accuracy_ceiling,
+            diag=mode.diag,
+        )
     except (KeyboardInterrupt, asyncio.CancelledError):
-        # Prep is the only phase outside `_run_single_cycle`'s finalize, and the longest. An
+        # Prep is the only phase outside `_run_single_cycle`'s try, and the longest. An
         # interrupt escaping here declares no phase and drains nothing, so `dashboard.json`
         # keeps `declared_phase: "running"` and every reader that trusts the declaration —
         # `paused` is the one thing derivation cannot re-derive — reports a dead run as healthy.

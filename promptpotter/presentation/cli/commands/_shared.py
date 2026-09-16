@@ -36,6 +36,7 @@ from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir
+from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.presentation.terminal.live.display import LiveDisplay
 from promptpotter.presentation.terminal.primitives import set_display_tags
 from promptpotter.shared.identity import IdentityContext
@@ -419,6 +420,20 @@ def resolve_cycle(stores: Stores, campaign_id: str, hint: str | None) -> str:
     return ids[0]
 
 
+def resolve_target(args: argparse.Namespace, store: Stores) -> tuple[str, str]:
+    """The ``--campaign``/``--cycle`` pair, else the active pointer's — never half of each: the
+    pointer's cycle belongs to the pointer's campaign, so a named one resolves its own."""
+    campaign_id: str = getattr(args, "campaign", None) or ""
+    cycle_id: str = getattr(args, "cycle", None) or ""
+    if not campaign_id:
+        _sid, pointer_cid, pointer_cyid = read_active_pointer(store.base_dir)
+        return pointer_cid, cycle_id or pointer_cyid
+    # A hand-typed `--campaign` gets the same reach here as it does for `verify`, through the one
+    # matcher rather than a second rule.
+    campaign_id = resolve_campaign_hint(store, campaign_id)
+    return campaign_id, cycle_id or resolve_cycle(store, campaign_id, None)
+
+
 def confirm_tty(prompt: str, *, default_no: bool = True) -> bool | None:
     """Ask y/N at the terminal; ``None`` when stdin is not a TTY, so callers fall back to a
     non-interactive default. One shared site keeps that detection consistent across the CLI."""
@@ -450,5 +465,6 @@ __all__ = [
     "pipeline_summary",
     "resolve_campaign",
     "resolve_cycle",
+    "resolve_target",
     "set_verbose",
 ]

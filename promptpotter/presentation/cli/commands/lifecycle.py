@@ -32,13 +32,12 @@ from promptpotter.application.commands.payloads import (
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.registry import JobRegistry, default_jobs_dir
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
-from promptpotter.infrastructure.store.session_pointer import read_active_pointer
-from promptpotter.infrastructure.store.stores import Stores, build_stores
+from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
     identity_from_args,
     resolve_campaign_hint,
-    resolve_cycle,
+    resolve_target,
 )
 from promptpotter.shared.errors import ConflictError, NotFoundError
 
@@ -58,20 +57,6 @@ __all__ = [
     "cmd_step_cycle",
     "cmd_unarchive",
 ]
-
-
-def _resolve_target(args: argparse.Namespace, store: Stores) -> tuple[str, str]:
-    """The ``--campaign``/``--cycle`` pair, else the active pointer's — never half of each: the
-    pointer's cycle belongs to the pointer's campaign, so a named one resolves its own."""
-    campaign_id: str = getattr(args, "campaign", None) or ""
-    cycle_id: str = getattr(args, "cycle", None) or ""
-    if not campaign_id:
-        _sid, pointer_cid, pointer_cyid = read_active_pointer(store.base_dir)
-        return pointer_cid, cycle_id or pointer_cyid
-    # A hand-typed `--campaign` gets the same reach here as it does for `verify`, through the one
-    # matcher rather than a second rule.
-    campaign_id = resolve_campaign_hint(store, campaign_id)
-    return campaign_id, cycle_id or resolve_cycle(store, campaign_id, None)
 
 
 async def _refused(awaitable: Awaitable[object], ids: dict[str, str]) -> CommandResult | None:
@@ -152,7 +137,7 @@ async def _cycle_scoped(
     cannot come to differ between two verbs that answer to the same dispatcher.
     """
     store = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
-    campaign_id, cycle_id = _resolve_target(args, store)
+    campaign_id, cycle_id = resolve_target(args, store)
     if not (campaign_id and cycle_id):
         return (
             CommandResult(
@@ -209,7 +194,7 @@ async def cmd_set_budget(args: argparse.Namespace) -> CommandResult:
     """
     identity = identity_from_args(args)
     store = build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
-    campaign_id, cycle_id = _resolve_target(args, store)
+    campaign_id, cycle_id = resolve_target(args, store)
     if not (campaign_id and cycle_id):
         return CommandResult(
             data={"status": "no_target"},

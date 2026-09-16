@@ -82,7 +82,7 @@ class DspySession:
 def _extract_experiment(
     experiment_data: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """Always empty: a DSPy caller hands its rows to ``mint_and_score_origin`` directly, so there
+    """Always empty: a DSPy caller hands its rows to ``run_campaign`` directly, so there
     is no experiment doc for this connector to read one out of."""
     return [], []
 

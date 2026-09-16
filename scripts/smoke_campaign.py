@@ -35,11 +35,7 @@ from promptpotter.application.datasets.loaders import (  # noqa: E402
     dataset_loader,
     loadable_dataset_names,
 )
-from promptpotter.application.embedded_run import (  # noqa: E402
-    mint_and_score_origin,
-    open_session,
-    run_campaign,
-)
+from promptpotter.application.embedded_run import open_session, run_campaign  # noqa: E402
 from promptpotter.application.pipeline_resolve import (  # noqa: E402
     configure_and_apply_pipeline,
 )
@@ -136,7 +132,7 @@ async def _run(args: argparse.Namespace) -> int:
             patience=args.patience,
         )
     )
-    pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=print)
+    configure_and_apply_pipeline(session, campaign_config, log=print)
     set_display_tags(session.pipeline_schema)
 
     train_slice = (session.samples or [])[: args.samples]
@@ -144,33 +140,22 @@ async def _run(args: argparse.Namespace) -> int:
         print("[smoke] ERROR: dataset loader returned no items", file=sys.stderr)
         return 3
 
-    observers, dataset_obj, origin = await mint_and_score_origin(
+    result = await run_campaign(
         session,
         train_slice,
         campaign_config,
-        pipeline_params=pipeline_params,
         display=LiveDisplay.for_campaign(session, campaign_config),
-        on_status=print,
-    )
-    report = origin.report
-    origin_acc = report.accuracy
-    print(
-        f"[smoke] origin: {origin_acc:.3f} ({round(origin_acc * report.total)}/{report.total})"
-        if origin_acc is not None
-        else "[smoke] origin: not measured (no scoreable row)",
-        flush=True,
-    )
-
-    result = await run_campaign(
-        observers,
-        dataset_obj,
-        origin,
-        campaign_config,
-        session=session,
         limits=LaunchLimits(),
         mode=RunMode(),
     )
     report_completion(result, session=session)
+    origin_acc = result.origin_accuracy
+    print(
+        f"[smoke] origin: {origin_acc:.3f}"
+        if origin_acc is not None
+        else "[smoke] origin: not measured (no scoreable row)",
+        flush=True,
+    )
 
     cycle_id = result.cycle_id or ""
     cycle_dir = (

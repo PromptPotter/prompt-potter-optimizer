@@ -25,7 +25,6 @@ from promptpotter.application.pipeline_resolve import (
 from promptpotter.application.runner.campaign_ids import build_origin_cycle_id
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.application.scoring.search_point_scorer import score_search_point
-from promptpotter.config.settings import DATASET_NAME
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, emit_phase
@@ -38,7 +37,7 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
 from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import StoredConfigInvalidError, graceful
+from promptpotter.shared.errors import StoredConfigInvalidError
 from promptpotter.shared.instrument import (
     NO_ROUND_SLOT,
     MeasuredCandidate,
@@ -48,8 +47,6 @@ from promptpotter.shared.instrument import (
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.run_observers import RunCallbacks
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 
 
 logger = logging.getLogger(__name__)
@@ -57,7 +54,6 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "CampaignOrigin",
     "establish_campaign_origin",
-    "prepare_scoring_context",
     "rescore_parent",
     "resolve_origin_opt_search_point",
     "try_inherit_fork_origin",
@@ -272,10 +268,10 @@ async def establish_campaign_origin(
     campaign_config: CampaignConfig,
     *,
     seed: CycleSeed | None,
-    listener: RunCallbacks | None,
+    listener: RunCallbacks,
 ) -> CampaignOrigin:
-    """The single origin-establishment seam — the OSP is resolved exactly once and shared by both
-    branches, which return the same :class:`CampaignOrigin` shape."""
+    """The single origin-establishment seam — the OSP is resolved exactly once and shared by the
+    inherited, the unmeasured and the scored branch, which return the same shape."""
 
     resolved_origin = resolve_origin_opt_search_point(
         prompt_node_names=session.pipeline_schema.prompt_node_names(),
@@ -289,83 +285,31 @@ async def establish_campaign_origin(
     if inherited is not None:
         return inherited
 
-    origin, _ = await prepare_scoring_context(
-        dataset,
-        campaign_config,
-        pipeline_params=session.pipeline_params,
-        pipeline_schema=session.pipeline_schema,
-        svc=session,
-        listener=listener,
-        seed=seed,
-        resolved_origin=resolved_origin,
-    )
-    return origin
-
-
-async def prepare_scoring_context(
-    train_data: list[Sample] | None,
-    campaign_config: CampaignConfig | None = None,
-    *,
-    pipeline_params: dict[str, Any] | None = None,
-    pipeline_schema: PipelineSchema,
-    svc: Session | None = None,
-    listener: RunCallbacks | None = None,
-    obs: ObservabilityBridge | None = None,
-    seed: CycleSeed | None = None,
-    resolved_origin: OptSearchPoint | None = None,
-) -> tuple[CampaignOrigin, list[Sample]]:
-    """*resolved_origin* lets the caller pass an already-resolved origin OSP (so it isn't
-    resolved twice on the runner path); when ``None`` it's resolved here (the notebook path)."""
-
-    if resolved_origin is None:
-        prompt_nodes = pipeline_schema.prompt_node_names()
-        # Resolving one HERE means reading the committed framing off the store, so this branch
-        # requires the session — a requirement it previously stated only by ``getattr``-ing the
-        # object defensively on one line and dereferencing it bare on the next.
-        if svc is None:
-            raise ValueError(
-                "prepare_scoring_context needs `svc` (the Session) to resolve an origin; "
-                "pass an already-resolved `resolved_origin=` when there is no session."
-            )
-        resolved_origin = resolve_origin_opt_search_point(
-            prompt_node_names=prompt_nodes,
-            dataset_dir=svc.dataset_config_dir,
-            task_context=committed_task_context(svc.store, svc.dataset_name),
-            seed=seed,
-        )
-    dataset = train_data or []
-
-    # Score the origin whenever there is a live run to score it in (session + config +
-    # dataset). Never sniff the searchpoint shape to guess "is there a program here?" — the
-    # L4 outer origin's prose and node configs are both empty because its program IS the inner
-    # recursion, and the skip that guess produced is indistinguishable downstream from a crash.
-    # An unscoreable origin is caught LOUD by the round-0 origin gate, never hidden here; the
-    # remaining guard is the no-session notebook/test path, which has nothing to score.
-
-    if not (campaign_config is not None and svc is not None and dataset):
+    # Never sniff the searchpoint shape to guess "is there a program here?" — the L4 outer
+    # origin's prose and node configs are both empty because its program IS the inner recursion,
+    # and the skip that guess produced is indistinguishable downstream from a crash. An
+    # unscoreable origin is caught LOUD by the round-0 origin gate, never hidden here.
+    if not dataset:
         # The resolved origin still travels — dropping it hands back a blank
         # OptSearchPoint(instruction="").
-        return (
-            CampaignOrigin(
-                resolved_origin=resolved_origin,
-                # Unmeasured reports as unmeasured in the shape a measured one uses: `total=0`
-                # is the no-evidence marker, where a bare 0.0 reads as a real floor of zero.
-                report=build_score_report(
-                    resolved_origin,
-                    None,
-                    INVALID_SCORES,
-                    [],
-                    [],
-                    label=candidate_label(0, 0),
-                    # No session ⇒ no schema to hash under, and no rows for an id to address.
-                    sp_hash="",
-                ),
-                origin_results=None,
+        return CampaignOrigin(
+            resolved_origin=resolved_origin,
+            # Unmeasured reports as unmeasured in the shape a measured one uses: `total=0`
+            # is the no-evidence marker, where a bare 0.0 reads as a real floor of zero.
+            report=build_score_report(
+                resolved_origin,
+                None,
+                INVALID_SCORES,
+                [],
+                [],
+                label=candidate_label(0, 0),
+                # No rows for an id to address.
+                sp_hash="",
             ),
-            dataset,
+            origin_results=None,
         )
 
-    session: Session = svc
+    pipeline_schema = session.pipeline_schema
     scoring_set = sample_dataset(dataset, campaign_config.origin_budget())
     spec = split_scoring_block(campaign_config.scoring)
 
@@ -376,20 +320,14 @@ async def prepare_scoring_context(
         # `/matches` to fail.
         logger.warning("No session terms available — /matches calls will fail.")
 
-    if obs:
-        with graceful("Dataset registration in origin scoring failed"):
-            obs.register_dataset(DATASET_NAME, scoring_set)
-
     sp = resolved_origin.to_job_search_point(
-        base_pipeline_params=pipeline_params,
+        base_pipeline_params=session.pipeline_params,
         schema=pipeline_schema,
     )
     # populate_session_scoring overwrites scoring/source; loop repopulates before round 1.
-    prior_schema = session.pipeline_schema
-    session.pipeline_schema = pipeline_schema
     populate_session_scoring(
         session,
-        obs=obs,
+        obs=None,
         scoring_formula=spec.per_sample,
         scoring_cell_formula=spec.per_cell,
         scorer_id=spec.scorer_id,
@@ -399,8 +337,7 @@ async def prepare_scoring_context(
     )
 
     # ci=0/ct=1 ⇒ dashboard ticks per-sample during origin like L1.
-    if listener is not None:
-        emit_phase(listener.on_phase, CampaignPhase.ORIGIN, "enter", round=0)
+    emit_phase(listener.on_phase, CampaignPhase.ORIGIN, "enter", round=0)
 
     # C0 is a minted candidate like any other — named on the ledger before it is measured.
     if (ledger := session.state.ledger) is not None:
@@ -420,15 +357,14 @@ async def prepare_scoring_context(
     # round 0 carries a walk axis and a readable searchpoint like any other round. `n_priors=0`
     # is a fact rather than a default: C0 is the first arm, so nothing has been measured for
     # PoBB to catch up on, and there is no `pipeline_overlay` because nothing proposed a delta.
-    if listener is not None:
-        listener.announce_candidate(
-            0,
-            0,
-            1,
-            opt_sp=resolved_origin,
-            resolved_pipeline_params=sp.config_params,
-            sample_order=[s.id for s in scoring_set],
-        )
+    listener.announce_candidate(
+        0,
+        0,
+        1,
+        opt_sp=resolved_origin,
+        resolved_pipeline_params=sp.config_params,
+        sample_order=[s.id for s in scoring_set],
+    )
 
     try:
         # The origin is the campaign's whole reference, so a transient-transport abort must not
@@ -446,12 +382,8 @@ async def prepare_scoring_context(
                 opt_sp=None,
                 measured=None,
                 force_fresh=attempt > 0,
-                on_sample_starting=(
-                    partial(listener.on_sample_started, 0, 1) if listener is not None else None
-                ),
-                on_sample_scored=(
-                    partial(listener.on_sample_scored, 0, 1) if listener is not None else None
-                ),
+                on_sample_starting=partial(listener.on_sample_started, 0, 1),
+                on_sample_scored=partial(listener.on_sample_scored, 0, 1),
             )
             if not is_transient_scoring_abort(signal):
                 break
@@ -470,20 +402,14 @@ async def prepare_scoring_context(
             sp_hash=sp.sp_hash(pipeline_schema),
             resolved_pipeline_params=sp.config_params,
         )
-        if listener is not None:
-            listener.on_candidate_scored(0, 1, report.model_dump())
+        listener.on_candidate_scored(0, 1, report.model_dump())
     finally:
-        if listener is not None:
-            emit_phase(listener.on_phase, CampaignPhase.ORIGIN, "exit", round=0)
-        session.pipeline_schema = prior_schema
+        emit_phase(listener.on_phase, CampaignPhase.ORIGIN, "exit", round=0)
 
-    return (
-        CampaignOrigin(
-            resolved_origin=resolved_origin,
-            report=report,
-            origin_results=origin_results,
-        ),
-        dataset,
+    return CampaignOrigin(
+        resolved_origin=resolved_origin,
+        report=report,
+        origin_results=origin_results,
     )
 
 

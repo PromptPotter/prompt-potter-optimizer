@@ -7,12 +7,8 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.infrastructure.store.session_pointer import (
-    active_pointer_exists,
-    read_active_pointer,
-)
 from promptpotter.infrastructure.store.stores import Stores, build_stores
-from promptpotter.presentation.cli.commands._shared import identity_from_args
+from promptpotter.presentation.cli.commands._shared import identity_from_args, resolve_target
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -66,30 +62,25 @@ def no_dataset_hint() -> str:
 
 
 def load_session(args: argparse.Namespace) -> SessionCtx:
-
-    # THE resolver, not a copy of it — a comment asserting "same resolver as
-    # `identity_from_args`" sat here instead, and a copy that must match is a copy that
-    # can stop matching: resume would then read one tenant's pointer and look for the
-    # session in another's tree. Imported here, not at module scope, because `_shared`
-    # imports `SessionCtx` from this module.
-    identity = identity_from_args(args)
-    store = build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
-    if not active_pointer_exists(store.base_dir):
+    """The session is the one the targeted cycle was minted under
+    (``index.json::parent_session_id``), the same read the web launch makes — never the pointer's,
+    which names another campaign's."""
+    store = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
+    campaign_id, cycle_id = resolve_target(args, store)
+    if not campaign_id:
         raise SystemExit(
             "ERROR: No active session.\n\n"
             "To start a campaign, run `new` against a dataset:\n\n" + no_dataset_hint()
         )
-    pointer_sid, pointer_cid, pointer_cyid = read_active_pointer(store.base_dir)
-    session_id = getattr(args, "session", None) or pointer_sid
+    hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
+    session_id = str((store.campaigns.load(hop) or {}).get("parent_session_id") or "")
     if not session_id:
-        raise SystemExit("ERROR: No active session_id in pointer.")
+        raise SystemExit(f"ERROR: cycle {cycle_id!r} in {campaign_id!r} names no session.")
 
     state = store.sessions.read(session_id)
     if not state:
         raise SystemExit(f"ERROR: Session '{session_id}' not found.")
 
-    campaign_id = pointer_cid or ""
-    cycle_id = getattr(args, "cycle", None) or pointer_cyid or ""
     backend_id = state.get("init_params", {}).get("backend_id", "") or ""
     return SessionCtx(store, state, backend_id, session_id, campaign_id, cycle_id)
 

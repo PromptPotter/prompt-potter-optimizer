@@ -196,9 +196,7 @@ one campaign inside its own event loop:
 ```python
 session = await open_session(dataset_name, *, backend_url=…, backend_id=…, on_status=None,
                              identity=None, stores=None, program=None)
-observers, dataset, origin = await mint_and_score_origin(
-    session, train_data, campaign_config, *, pipeline_params=None, display=None, on_status=None)
-result = await run_campaign(observers, dataset, origin, campaign_config, *, session,
+result = await run_campaign(session, train_data, campaign_config, *, display=None,
                             langfuse_session_id=None, limits, mode)
 ```
 
@@ -207,11 +205,13 @@ spend_budget_usd=…, token_budget=…)`, the model the CLI flags and the `start
 budget it declares may only lower the campaign's own, and `LaunchLimits()` declares none. `mode`
 is `runner/entry.py::RunMode`, and `RunMode()` is a plain run.
 
-Three steps rather than one because every caller does its own work between them. It mints through
-the same `prepare_fresh_cycle` prologue `new` and the web mint run, so the cycle it produces is
-resumable, forkable and diagnosable by the §5 verbs — that is what this seam buys over a private
-loop. `identity` / `stores` pass through to `init_services`; without them a host writes into the
-anonymous `projects/default/` tenant. `program` rides the backend client as
+Two steps rather than one because every caller does its own work between them. It mints through
+the same `prepare_fresh_cycle` prologue `new` and the web mint run, and scores the origin inside
+`run_optimization` like every other entry point, so the cycle it produces is resumable, forkable
+and diagnosable by the §5 verbs and a stop during origin scoring closes it — that is what this seam
+buys over a private loop. The origin's accuracy is `result.origin_accuracy`. `identity` /
+`stores` pass through to `init_services`; without them a host writes into the anonymous
+`projects/default/` tenant. `program` rides the backend client as
 `InProcessWorkload.program` (§1) — the host's own code, for an in-process backend with no service.
 **`origin_gate` defaults to `strict` and a host has no TTY**, so `run_campaign` blocks at round 0
 until something answers — call

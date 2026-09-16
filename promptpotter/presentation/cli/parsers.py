@@ -14,7 +14,6 @@ from promptpotter.infrastructure.store.layout import SHARED_CACHE_DIRS
 
 
 def _add_global_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--session", default=None, help="Session ID (default: active)")
     parser.add_argument(
         "--tenant",
         default=None,
@@ -140,6 +139,17 @@ def _add_new_args(p_new: argparse.ArgumentParser) -> None:
 
 
 def _add_resume_args(p_resume: argparse.ArgumentParser) -> None:
+    p_resume.add_argument(
+        "--campaign",
+        default="",
+        help="Campaign id, 6-hex suffix, or unambiguous prefix (default: the active one). Its "
+        "cycle's own session is resumed; the active pointer is not consulted.",
+    )
+    p_resume.add_argument(
+        "--cycle",
+        default="",
+        help="Cycle id (default: the active one, or the named campaign's only cycle).",
+    )
     p_resume.add_argument(
         "--from",
         dest="resume_from_round",

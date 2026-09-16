@@ -1,9 +1,9 @@
 """The embedded launch entry — a host Python program driving one campaign inside its own event loop.
 
 Peer of ``jobs/launcher/mint_and_start.py``, which detaches the run onto a background task and takes
-a machine slot or queues for one; this one blocks in the caller's loop and takes no slot. Three steps
+a machine slot or queues for one; this one blocks in the caller's loop and takes no slot. Two steps
 rather than one because every caller does its own work between them — build the config, resolve the
-pipeline, slice the trainset, read the origin before deciding to spend.
+pipeline, slice the trainset.
 
 Not to be confused with ``Connector.execution = "in_process"``, which is the BACKEND running inside
 our process; this is us running inside someone else's program.
@@ -12,7 +12,7 @@ our process; this is us running inside someone else's program.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
@@ -23,11 +23,9 @@ from promptpotter.application.maintenance.archive_maintenance import (
     reindex_measurement_archive,
     restore_measurement_archive,
 )
-from promptpotter.application.origin import CampaignOrigin, prepare_scoring_context
-from promptpotter.application.run_observers import RunObservers, build_run_observers
+from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.application.runner.origin_gate import submit_gate_decision
-from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.settings import DEFAULT_BACKEND_ID, DEFAULT_BACKEND_URL
 from promptpotter.domain.results import CycleResult
@@ -50,7 +48,6 @@ if TYPE_CHECKING:
 # leaving the process that has the `Stores` already built.
 __all__ = [
     "compact_measurement_archive",
-    "mint_and_score_origin",
     "open_session",
     "purge_cold_store",
     "reindex_measurement_archive",
@@ -92,17 +89,19 @@ async def open_session(
     return session
 
 
-async def mint_and_score_origin(
+async def run_campaign(
     session: Session,
     train_data: list[Sample],
     campaign_config: CampaignConfig,
     *,
-    pipeline_params: dict[str, Any] | None = None,
     display: LiveDisplay | None = None,
-    on_status: StatusFn | None = None,
-) -> tuple[RunObservers, list[Sample], CampaignOrigin]:
-    """Mint the campaign, bind observers, score the origin — through ``prepare_fresh_cycle``, the same
-    prologue ``new`` and the web mint run, never a second path for this caller alone."""
+    langfuse_session_id: str | None = None,
+    limits: LaunchLimits,
+    mode: RunMode,
+) -> CycleResult:
+    """Mint through ``prepare_fresh_cycle``, the prologue ``new`` and the web mint run, then run the
+    loop from its origin. With no slot there is no admission: a declared budget may only LOWER the
+    campaign's own, and ``LaunchLimits()`` declares none."""
     if not session.campaign_id:
         prepare_fresh_cycle(
             session,
@@ -110,50 +109,16 @@ async def mint_and_score_origin(
             train_data,
             campaign_id=fresh_campaign_id(session, campaign_config),
         )
-
-    observers = build_run_observers(
-        session=session,
-        campaign_config=campaign_config,
-        dataset=train_data,
-        display=display,
-    )
-
-    origin, dataset = await prepare_scoring_context(
+    return await run_optimization(
         train_data,
         campaign_config,
-        pipeline_params=pipeline_params,
-        pipeline_schema=session.pipeline_schema,
-        svc=session,
-        listener=observers.callbacks,
-    )
-    if display is not None:
-        display.set_origin(origin.report.accuracy)
-    if on_status is not None:
-        on_status(
-            f"Evaluation data: {len(dataset)} queries  |  Origin: {fmt_pct(origin.report.accuracy)}"
-        )
-    return observers, dataset, origin
-
-
-async def run_campaign(
-    observers: RunObservers,
-    dataset: list[Sample],
-    origin: CampaignOrigin,
-    campaign_config: CampaignConfig,
-    *,
-    session: Session,
-    langfuse_session_id: str | None = None,
-    limits: LaunchLimits,
-    mode: RunMode,
-) -> CycleResult:
-    """Run the loop over an origin this caller already scored. With no slot there is no admission:
-    a declared budget may only LOWER the campaign's own, and ``LaunchLimits()`` declares none."""
-    return await run_optimization(
-        dataset,
-        campaign_config,
         session=session,
-        observers=observers,
-        origin=origin,
+        observers=build_run_observers(
+            session=session,
+            campaign_config=campaign_config,
+            dataset=train_data,
+            display=display,
+        ),
         langfuse_session_id=langfuse_session_id,
         limits=limits,
         mode=mode,

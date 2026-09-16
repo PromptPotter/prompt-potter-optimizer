@@ -13,11 +13,7 @@ from shared_config import Record, export_results
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
 from promptpotter.application.datasets.loaders import samples_from_dicts
-from promptpotter.application.embedded_run import (
-    mint_and_score_origin,
-    open_session,
-    run_campaign,
-)
+from promptpotter.application.embedded_run import open_session, run_campaign
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.runner.entry import RunMode
 from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
@@ -109,26 +105,16 @@ async def run_bbeh_campaign(
                 f"node {llm_node!r} resolved no model — datasets/bbeh/pipeline.yaml must pin one."
             )
 
-        observers, dataset_obj, origin = await mint_and_score_origin(
+        cycle_result = await run_campaign(
             session,
             train_norm,
             campaign_config,
-            pipeline_params=pipeline_params,
             display=LiveDisplay.for_campaign(session, campaign_config),
-            on_status=print,
-        )
-        origin_train_acc = origin.report.accuracy
-
-        cycle_result = await run_campaign(
-            observers,
-            dataset_obj,
-            origin,
-            campaign_config,
-            session=session,
             limits=LaunchLimits(),
             mode=RunMode(),
         )
         report_completion(cycle_result, session=session)
+        origin_train_acc = cycle_result.origin_accuracy
         # Ask the outcome table, never a hand-authored string: the export below is only
         # meaningful for a run that finished, and every halted/failed/paused reason must skip it.
         if stop_reason_outcome(cycle_result.stop_reason) is not StopOutcome.SUCCESS:
