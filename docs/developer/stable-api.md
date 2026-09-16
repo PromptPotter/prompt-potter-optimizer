@@ -183,7 +183,7 @@ which is both where `pip` deletes on upgrade and where the HuggingFace `datasets
 
 Two behaviours a fork may rely on, neither of them readable off `--help`:
 
-- Every `new` mints a fresh root cycle; on content-hash collision with an existing root the `cycle_id` gains a `_r2` / `_r3` discriminator so the new run lands in its own directory tree. The prior campaign is preserved.
+- Every `new` mints a fresh `campaign_id`, but two `new` calls on an unchanged declaration SHARE their content-addressed root `cycle_id` and its origin score, then diverge from round 1 (`runner/campaign_ids.py::mint_campaign_id`). The prior campaign is preserved.
 - A launch flag may only lower a budget. `set-budget` is the verb that raises one.
 
 The maintenance and diagnostic verbs are not part of v1.

@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Badge, CardFrame } from "@/components/ui";
+import { Badge, CardFrame, HoverCard } from "@/components/ui";
 import type { RoundResult } from "@/lib/api/types";
 import { fmtNum, fmtPct1 } from "@/lib/format";
 import { isHit } from "@/lib/fitness";
@@ -88,8 +88,16 @@ export function RoundFileView({ doc, raw }: Props) {
                   <th>Candidate</th>
                   <th>Accuracy</th>
                   <th>Composite</th>
-                  <th title="Difficulty-adjusted Rasch ability on the cycle's fixed δ ruler — the metric the round winner is elected on, which is what explains a lower-accuracy winner. Empty outside the election fit, and for every row while the ruler is cold.">θ</th>
-                  <th title="The candidate's blocked lift over the parent on the cells both measured, with its 95% interval. An interval spanning 0 means the round could not separate them.">Lift vs parent</th>
+                  <th>
+                    <HoverCard content="Difficulty-adjusted Rasch ability on the cycle's fixed δ ruler — the metric the round winner is elected on, which is what explains a lower-accuracy winner. Empty outside the election fit, and for every row while the ruler is cold.">
+                      <span className="term-hint" tabIndex={0}>θ</span>
+                    </HoverCard>
+                  </th>
+                  <th>
+                    <HoverCard content="The candidate's blocked lift over the parent on the cells both measured, with its 95% interval. An interval spanning 0 means the round could not separate them.">
+                      <span className="term-hint" tabIndex={0}>Lift vs parent</span>
+                    </HoverCard>
+                  </th>
                   <th>Win</th>
                 </tr>
               </thead>
@@ -123,11 +131,31 @@ export function RoundFileView({ doc, raw }: Props) {
             <table>
               <thead>
                 <tr>
-                  <th title="Sample ID — stable identifier from the project.">ID</th>
-                  <th title="Hit / miss for this sample.">Status</th>
-                  <th title="Input given to the pipeline for this sample.">Query</th>
-                  <th title="Top-1 prediction returned by the pipeline.">Predicted</th>
-                  <th title="Ground-truth answer from the project.">Ground</th>
+                  <th>
+                    <HoverCard content="Sample ID — stable identifier from the project.">
+                      <span className="term-hint" tabIndex={0}>ID</span>
+                    </HoverCard>
+                  </th>
+                  <th>
+                    <HoverCard content="Hit / miss for this sample.">
+                      <span className="term-hint" tabIndex={0}>Status</span>
+                    </HoverCard>
+                  </th>
+                  <th>
+                    <HoverCard content="Input given to the pipeline for this sample.">
+                      <span className="term-hint" tabIndex={0}>Query</span>
+                    </HoverCard>
+                  </th>
+                  <th>
+                    <HoverCard content="Top-1 prediction returned by the pipeline.">
+                      <span className="term-hint" tabIndex={0}>Predicted</span>
+                    </HoverCard>
+                  </th>
+                  <th>
+                    <HoverCard content="Ground-truth answer from the project.">
+                      <span className="term-hint" tabIndex={0}>Ground</span>
+                    </HoverCard>
+                  </th>
                 </tr>
               </thead>
               <tbody>

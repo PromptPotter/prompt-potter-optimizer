@@ -9,7 +9,7 @@ import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { ageText, fmtFitness, fmtPct0 } from "@/lib/format";
 import { useFetch } from "@/lib/hooks/useFetch";
-import { ErrorNote, Loading, SignInPrompt } from "@/components/ui";
+import { ErrorNote, HoverCard, Loading, SignInPrompt } from "@/components/ui";
 
 export function VerifyPane() {
   const { status } = useAuth();
@@ -83,13 +83,41 @@ export function VerifyPane() {
           <thead>
             <tr>
               <th>Source</th>
-              <th title="Samples requested at the CLI; how many were newly measured (the rest were already in the cross-cycle archive).">Samples</th>
-              <th title="Total samples this candidate has measurements for across the dataset's archive.">Workspace n</th>
-              <th title="Source campaign's accuracy for this candidate, as persisted on the round file.">Campaign acc</th>
-              <th title="Workspace accuracy = mean hit rate over the workspace measurement set.">Workspace acc</th>
-              <th title="Source campaign's composite for this candidate, as persisted on the round file.">Campaign cf</th>
-              <th title="Composite recomputed under the campaign's scorer over every workspace measurement for this candidate's config.">Workspace cf</th>
-              <th title="Grey = source-campaign accuracy. Red overlay = workspace accuracy. A red bar shorter than the grey one means the verdict didn't hold.">Trend</th>
+              <th>
+                <HoverCard content="Samples requested at the CLI; how many were newly measured (the rest were already in the cross-cycle archive).">
+                  <span className="term-hint" tabIndex={0}>Samples</span>
+                </HoverCard>
+              </th>
+              <th>
+                <HoverCard content="Total samples this candidate has measurements for across the dataset's archive.">
+                  <span className="term-hint" tabIndex={0}>Workspace n</span>
+                </HoverCard>
+              </th>
+              <th>
+                <HoverCard content="Source campaign's accuracy for this candidate, as persisted on the round file.">
+                  <span className="term-hint" tabIndex={0}>Campaign acc</span>
+                </HoverCard>
+              </th>
+              <th>
+                <HoverCard content="Workspace accuracy = mean hit rate over the workspace measurement set.">
+                  <span className="term-hint" tabIndex={0}>Workspace acc</span>
+                </HoverCard>
+              </th>
+              <th>
+                <HoverCard content="Source campaign's composite for this candidate, as persisted on the round file.">
+                  <span className="term-hint" tabIndex={0}>Campaign cf</span>
+                </HoverCard>
+              </th>
+              <th>
+                <HoverCard content="Composite recomputed under the campaign's scorer over every workspace measurement for this candidate's config.">
+                  <span className="term-hint" tabIndex={0}>Workspace cf</span>
+                </HoverCard>
+              </th>
+              <th>
+                <HoverCard content="Grey = source-campaign accuracy. Red overlay = workspace accuracy. A red bar shorter than the grey one means the verdict didn't hold.">
+                  <span className="term-hint" tabIndex={0}>Trend</span>
+                </HoverCard>
+              </th>
               <th>When</th>
             </tr>
           </thead>

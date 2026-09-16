@@ -12,7 +12,7 @@ Three levers, in increasing order of neglect.
 
 The second correction was costlier, and it was in the **required set**, not the order alone: `changes_description` was required and generated *above* the three override slots, which were optional. A model could therefore name a change, cite a panel for it, and mutate nothing — and roughly one live variant in ten did exactly that, arriving narrated-but-empty. The schema was asking for the story and treating the substance as garnish. The payload now generates before the prose that reports it, at least one override is enforced at parse (`_reject_empty_mutation`), and `variant_name` — an unbounded free-text identifier that led the object, that no engine reader consumed, and that the decoder repeatedly derailed into repetition loops — is deleted outright. The prompt's `answer_format` lists the fields in the same order; a schema that disagrees with its own prose teaches twice, contradictorily.
 
-**3. The description.** The only natural language placed *inside* the field-filling loop. Root [`CLAUDE.md`](../../CLAUDE.md) says *never trim `Field(description=)` — LLM-facing copy*; that rule is a scar from trimming them as documentation. They are prompt.
+**3. The description.** The only natural language placed *inside* the field-filling loop. [`../developer/conventions.md`](../developer/conventions.md) § Prose in the source keeps `Field(description=)` out of the docstring rules for exactly this reason — the rule is a scar from trimming them as documentation. They are prompt.
 
 ## A place to think is part of the ask
 

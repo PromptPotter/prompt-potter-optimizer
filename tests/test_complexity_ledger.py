@@ -182,7 +182,9 @@ LEDGER_BASELINE = {
     # answered with pre-copy nodes. Derived on read now. A real subtraction, not a re-annotation.
     # -1: `candidate_diff.py::parent_param_value(…, proposed: Any)` — it read the proposal only to
     # know which fields a nested description dict named; one key per path names its own.
-    "any_params": 49,
+    # -1: `evidence/read.py::_coerce_state(raw: Any)` is GONE with the overlay-keyed edit identity
+    # it existed to canonicalise. `sp_hash` is a stamped string, so nothing coerces a nested dict.
+    "any_params": 48,
     # +1: `results.py::is_floor_pinned(rows: Sequence[Mapping[str, Any]])`, the same signature as
     # `measured_cells` and `is_answer_collapsed` beside it — a round row read off disk is a plain
     # mapping, so a narrower annotation here would be a claim the callers cannot honour.
@@ -209,7 +211,10 @@ LEDGER_BASELINE = {
     # answered off a different permitted list than `fork-cycle` dispatch did. Taking `Campaign`
     # instead would buy one of these back and couple a pipeline-SHAPE module to the manifest
     # entity, which is the worse structure of the two.
-    "domain_any_maps": 91,
+    # +1: `permitted_models_for_campaign` — the campaign->permitted hop named apart from the
+    # verdict, so a surface can SERVE the comparison set instead of deriving a second one beside
+    # it. Its return is typed; only the `Campaign.config` snapshot param counts.
+    "domain_any_maps": 92,
     "models_lax": 3,
     "prompt_string_fields": 6,
     "injections": 32,
@@ -362,7 +367,17 @@ LEDGER_BASELINE = {
     # name, and nothing on any surface tells the two apart. (test_numerics § 10)
     # +1: a resumed cycle's wall clock folded every earlier launch against this launch's endpoints,
     # so each round closed before the resume read as instant in the published clock. (test_resume)
-    "test_functions": 186,
+    # +1: the ADR-0005 babysit trigger's own decision boundaries. The 13 vitest cases deleted with
+    # the browser's copy of the rule were the ONLY automated assertion of that truth table
+    # anywhere, and a false negative is silent twice over: the fork is admitted without
+    # `campaign.babysit` AND the branch is never stamped grade C, so it enters clean comparison,
+    # origin reuse and the L4 rollup as untainted with every number rendering. (test_security)
+    # +1: a human-authored arm pooled with the L1 arm that shares its `arm_id`. The read groups
+    # replicates by optimizer-prompt hash, which two forks of one campaign hold identically, so the
+    # paired test the human-in-the-loop claim is published from compares an arm against itself and
+    # reports the real difference as this instrument's noise. Every number still renders.
+    # (test_numerics § 7)
+    "test_functions": 188,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -398,7 +413,31 @@ LEDGER_BASELINE = {
     # off a different permitted list than the gate did. It folds into no neighbour: every other
     # campaign read is addressed by id, and this one's subject is an overlay that exists nowhere
     # on disk until the fork is confirmed.
-    "served_fields": 579,
+    # +1: `ForkPreviewResponse.permitted_models` — the set the gate compared against, served
+    # beside its verdict. Without it the panel named models off the served pipeline rows while the
+    # verdict came off the frozen campaign narrowing, so the sentence and its answer could disagree
+    # on a cycle seed that moved the set. Per node, never flattened: the panel flattens for one
+    # sentence, which is display, not derivation.
+    # +1: `SubjectReading.authorship` — WHO proposed the configuration a subject reads at. The read
+    # could already compute the human-against-loop contrast and had no key to LABEL or group it by:
+    # `arm_id` hashes round 0's optimizer prompts, which every fork of one campaign shares whoever
+    # wrote the edit. It folds into `arm_id` only by destroying that distinction, and into `label`
+    # not at all — a label names the branch, not its author.
+    # +1: `SubjectReading.human_intervened` — whether an operator touched the subject's CYCLE
+    # mid-run. Apart from `authorship` because it is about the run rather than the point: a
+    # loop-authored arm carries it too, and a babysat cycle is not comparable to an untouched one
+    # however it was authored. Already on `index.json`; nothing served it to a comparison.
+    # +1: `SubjectReading.cached_samples` — how many of the point's cells REPLAYED. The effort half
+    # of the same pairing: a rewind fork inherits its parent's rows, so `n_cells` beside it reads
+    # that evidence as independently bought. `int | None`, because 0 is the measurement "it earned
+    # every cell" and absent is no report — collapsing them is what credits the inherited arm.
+    # +1: `RankedEdit.campaign_id` — the other half of that row's identity, once the ranking keys
+    # on `sp_hash` and pools within one campaign. Two campaigns that ran the same searchpoint hold
+    # one hash and are two rows, each measured against its own origin, so serving the hash alone
+    # collides them on every table that keys a row. `provenance[]` carries the same id per
+    # occurrence and cannot replace it: a list expresses no guarantee that the row HAS one.
+    # (`RankedEdit.state_hash` → `sp_hash` is a rename in the same commit and moves nothing.)
+    "served_fields": 584,
 }
 
 

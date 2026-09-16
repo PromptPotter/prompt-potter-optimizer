@@ -27,7 +27,10 @@ from promptpotter.application.pipeline_resolve import (
     resolve_pipeline_for_campaign,
 )
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.pipeline_overlay import steers_disallowed_model
+from promptpotter.domain.pipeline_overlay import (
+    permitted_models_for_campaign,
+    steers_disallowed_model,
+)
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import descend_store
 from promptpotter.presentation.api.deps import StoresDep, decode_descend
@@ -311,6 +314,15 @@ class ForkPreviewResponse(StrictModel):
             "and stamps the branch grade C."
         )
     )
+    permitted_models: dict[str, list[str]] = Field(
+        description=(
+            "What the verdict above was compared AGAINST, per node — this campaign's frozen "
+            "`optimizer_narrowing[node].param_allowed_values.model`. Served beside the verdict so "
+            "a surface naming the permitted models cannot name a different set than the one that "
+            "decided. A node absent from it sanctions nothing, which is why any model steer there "
+            "counts."
+        )
+    )
 
 
 @campaigns_router.post("/campaigns/{campaign_id}/fork-preview", response_model=ForkPreviewResponse)
@@ -328,7 +340,8 @@ def preview_fork_steer(
     if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
     return ForkPreviewResponse(
-        steers_disallowed_model=steers_disallowed_model(campaign.config, body.pipeline_overlay)
+        steers_disallowed_model=steers_disallowed_model(campaign.config, body.pipeline_overlay),
+        permitted_models=permitted_models_for_campaign(campaign.config),
     )
 
 

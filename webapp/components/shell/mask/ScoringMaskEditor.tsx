@@ -15,7 +15,7 @@
 // grid commits per click, which is the same rule — a toggle is not a half-value.
 
 import type { ReactNode } from "react";
-import { CommitInput, SegmentedControl } from "@/components/ui";
+import { CommitInput, HoverCard, SegmentedControl } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { TERMS } from "@/lib/terms";
 import { maskIconFor } from "@/components/candidates/icons";
@@ -186,10 +186,11 @@ function WeightGrid({
                   !r.applicable && "disabled",
                 )}
               >
-                <button
-                  type="button"
-                  className="mask-sq-toggle"
-                  disabled={!r.applicable}
+                {/* A div, not a `<button>`: the direction glyph below carries its own HoverCard
+                    trigger, and a button forbids a focusable descendant. `role="checkbox"` +
+                    the key handler restore the native activation this trades away. */}
+                <div
+                  className={cx("mask-sq-toggle", !r.applicable && "mask-sq-toggle-disabled")}
                   role="checkbox"
                   aria-checked={enabled}
                   aria-disabled={!r.applicable}
@@ -197,6 +198,13 @@ function WeightGrid({
                   tabIndex={r.applicable ? 0 : -1}
                   title={r.description || r.displayName}
                   onClick={() => r.applicable && toggle(r.displayName)}
+                  onKeyDown={(e) => {
+                    if (!r.applicable) return;
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      toggle(r.displayName);
+                    }
+                  }}
                 >
                   <span className="mask-tick" aria-hidden="true">
                     <svg
@@ -210,16 +218,14 @@ function WeightGrid({
                       <path d="M2.5 8.5 L6.5 12.5 L13.5 3.5" />
                     </svg>
                   </span>
-                  <span
-                    className={cx("mask-dir", down ? "down" : "up")}
-                    title={down ? TERMS.mask_down : TERMS.mask_up}
-                    aria-hidden="true"
-                  >
-                    {down ? "↓" : "↑"}
-                  </span>
+                  <HoverCard content={down ? TERMS.mask_down : TERMS.mask_up}>
+                    <span className={cx("mask-dir term-hint", down ? "down" : "up")} tabIndex={0}>
+                      {down ? "↓" : "↑"}
+                    </span>
+                  </HoverCard>
                   <span className="mask-ico">{maskIconFor(r.displayName, r.registryName)}</span>
                   <span className="mask-name">{r.displayName}</span>
-                </button>
+                </div>
                 {/* Weight thermometer — only where this evaluator counts. Seeded from the realized
                     composite coefficient, served. */}
                 <div className="mask-weight" aria-hidden={!enabled || undefined}>

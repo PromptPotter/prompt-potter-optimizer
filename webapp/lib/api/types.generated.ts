@@ -1003,6 +1003,12 @@ export interface ForkPreviewResponse {
    * sanction. True means the fork is the ADR-0005 babysit act: it needs
    * `campaign.babysit` (404 without it) and stamps the branch grade C. */
   steers_disallowed_model: boolean;
+  /** What the verdict above was compared AGAINST, per node — this campaign's frozen
+   * `optimizer_narrowing[node].param_allowed_values.model`. Served beside the
+   * verdict so a surface naming the permitted models cannot name a different
+   * set than the one that decided. A node absent from it sanctions nothing,
+   * which is why any model steer there counts. */
+  permitted_models: Record<string, string[]>;
 }
 
 /** Where one occurrence of an edit was measured on disk. */
@@ -1019,9 +1025,10 @@ export interface EditSpread {
   n_edits: number;
 }
 
-/** One unique candidate state — a ``pipeline_overlay`` — aggregated across every */
+/** One SEARCHPOINT measured against its own campaign's origin — a prompt edit, a node-config */
 export interface RankedEdit {
-  state_hash: string;
+  sp_hash: string;
+  campaign_id: string;
   label: string;
   provenance: EffectProvenance[];
   anchor_effect: number;
@@ -1180,6 +1187,9 @@ export interface SubjectReading {
   winner_chain: WinnerChainPoint[] | null;
   config: Record<string, string> | null;
   arm_id: string | null;
+  authorship: string;
+  human_intervened: boolean;
+  cached_samples: number | null;
   instrument_id: string | null;
   ability: AbilityReading | null;
   round: number;

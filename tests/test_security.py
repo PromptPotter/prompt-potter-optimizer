@@ -521,6 +521,51 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
     )
 
 
+def test_a_steer_the_campaign_never_sanctioned_cannot_pass_as_a_clean_fork() -> None:
+    """The ADR-0005 babysit trigger, which decides both whether `fork-cycle` demands
+    `campaign.babysit` and whether the branch is stamped grade C. A false NEGATIVE is silent and
+    unrecoverable in one step: the fork is admitted without the cap AND enters clean comparison,
+    origin reuse and the L4 rollup as untainted, so every number still renders and the pollution is
+    banked. The restrictive boundaries are the point — a node the campaign never narrowed sanctions
+    NOTHING, and a cost lever has no permitted set that could sanction it at all.
+
+    The set SERVED beside the verdict is asserted to be the set the verdict compares against: two
+    sources for one sentence is what let a browser name models that decided nothing.
+    """
+    from promptpotter.domain.pipeline_overlay import (
+        permitted_models_for_campaign,
+        steers_disallowed_model,
+    )
+
+    config = {
+        "optimizer_narrowing": {
+            "l1_generate": {"param_allowed_values": {"model": ["openai/gpt-oss-120b"]}}
+        }
+    }
+    assert permitted_models_for_campaign(config) == {"l1_generate": ["openai/gpt-oss-120b"]}, (
+        "the set served beside the verdict is not the set the verdict compares against"
+    )
+
+    permitted_steer = {"model": "openai/gpt-oss-120b"}
+    assert not steers_disallowed_model(config, {"l1_generate": permitted_steer}), (
+        "a sanctioned responder was graded a babysit act, which taints a clean branch"
+    )
+    assert not steers_disallowed_model(config, {"l1_generate": {"temperature": 0.9}}), (
+        "an ordinary axis edit was read as a steer of WHO ANSWERS"
+    )
+    assert not steers_disallowed_model(None, {}), "an empty steer is not a babysit act"
+
+    assert steers_disallowed_model(config, {"l1_generate": {"model": "deepseek/deepseek-v4"}}), (
+        "an unsanctioned responder passed as a clean fork"
+    )
+    assert steers_disallowed_model(config, {"l2_context": permitted_steer}), (
+        "a node the campaign never narrowed sanctioned a model — the default must be restrictive"
+    )
+    assert steers_disallowed_model(config, {"l1_generate": {"route_order": ["a", "b"]}}), (
+        "a cost lever passed as clean; no permitted set can sanction one"
+    )
+
+
 def test_deleting_a_campaign_does_not_un_spend_what_it_spent(built_stores: Any) -> None:
     """The per-cycle ledgers ARE the account's lifetime spend record, and `delete_campaign` takes
     them under BOTH `keep_results` arms — `.runtime/ledger.jsonl` is not a keepsake. Unbanked, the

@@ -2362,6 +2362,34 @@ def test_a_scenario_chain_stops_where_the_record_parts() -> None:
     ]
 
 
+def test_a_human_authored_arm_never_pools_with_the_loop_that_proposed_one() -> None:
+    """The human-in-the-loop comparison rests on grouping by AUTHOR, and the only key that looked
+    like one cannot do it: `arm_id` hashes round 0's optimizer prompts, so an operator-steered fork
+    and an L1 mutation of the same campaign share it exactly. Pooled on that, the two arms read as
+    replicates of one — `ArmReplicate.level_spread` reports their real difference as this
+    instrument's noise, and the paired test the claim is published from compares the arm against
+    itself. Nothing raises: every number renders, and the spread is plausible.
+
+    Two operators steering one campaign is the same failure one level down, which is why the fork's
+    `issued_by` is in the key and an unattributed cut does not silently join a named one.
+    """
+    from promptpotter.application.evidence.subjects import authorship_of
+
+    human = authorship_of("fork_seed", "nieena")
+    loop = authorship_of("l1_generate", "nieena")
+    assert human != loop
+    # The layer passes through as ITSELF, so a source added later is its own arm rather than one
+    # that quietly joins the operator's.
+    assert loop == "l1_generate"
+    assert authorship_of("l2_context", "") != loop
+    # Two humans on one campaign are two authors; the fork record is the only thing that says so.
+    assert human != authorship_of("fork_seed", "someone-else")
+    # An unattributed cut is not the named operator's, and two unattributed ones ARE each other's:
+    # nothing on disk distinguishes them, and inventing a per-cut identity would claim it does.
+    assert human != authorship_of("fork_seed", "")
+    assert authorship_of("fork_seed", "") == authorship_of("campaign_origin", "")
+
+
 # 8. The L4 outer proxy — what one finished inner cycle says
 
 

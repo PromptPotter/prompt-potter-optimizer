@@ -88,12 +88,12 @@ export function effortLadder(row: ConfigRow, caps: ModelCapability | undefined):
  *  whole distinction: `[]` says nothing may be picked, while `null` says `options` IS the permitted
  *  set (`domain/pipeline_schema.py::NodeConfigParam.permitted`).
  *
- *  DISPLAY of a served set, never a verdict over it: whether a steer is the babysit act is
- *  answered by `POST /campaigns/{id}/fork-preview` and nothing here.
- *
- *  Off THESE rows and never off the campaign's frozen `config.optimizer_narrowing`: that one
- *  answers for the mint, so a fork or a cycle seed that moved the set steers against the wrong
- *  list. */
+ *  **It answers what the editor may OFFER, and that is the only question it answers.** The two are
+ *  not one: these rows move with a cycle seed, while the babysit gate reads the campaign's frozen
+ *  `config.optimizer_narrowing` — so both the VERDICT and the list a warning NAMES come from
+ *  `POST /campaigns/{id}/fork-preview` (`steers_disallowed_model` + `permitted_models`). Wiring
+ *  this back into either is the drift that endpoint exists to end, and it fails silently: the
+ *  sentence renders, naming models that decided nothing. */
 export function permittedModels(
   schema: Record<string, NodeConfigParam[]> | null | undefined,
 ): Record<string, readonly string[]> {

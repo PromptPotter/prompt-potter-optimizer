@@ -2598,6 +2598,17 @@
         "additionalProperties": false,
         "description": "What `POST /commands/fork-cycle` would decide about this steer, asked without forking.",
         "properties": {
+          "permitted_models": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "description": "What the verdict above was compared AGAINST, per node — this campaign's frozen `optimizer_narrowing[node].param_allowed_values.model`. Served beside the verdict so a surface naming the permitted models cannot name a different set than the one that decided. A node absent from it sanctions nothing, which is why any model steer there counts.",
+            "title": "Permitted Models",
+            "type": "object"
+          },
           "steers_disallowed_model": {
             "description": "The overlay picks a responder the campaign's frozen `optimizer_narrowing` never sanctioned, or touches a cost lever, which no permitted set can sanction. True means the fork is the ADR-0005 babysit act: it needs `campaign.babysit` (404 without it) and stamps the branch grade C.",
             "title": "Steers Disallowed Model",
@@ -2605,7 +2616,8 @@
           }
         },
         "required": [
-          "steers_disallowed_model"
+          "steers_disallowed_model",
+          "permitted_models"
         ],
         "title": "ForkPreviewResponse",
         "type": "object"
@@ -4408,11 +4420,15 @@
       },
       "RankedEdit": {
         "additionalProperties": false,
-        "description": "One unique candidate state — a ``pipeline_overlay`` — aggregated across every\noccurrence in the selection. An L1 target-prompt edit on an ordinary campaign, an\noptimizer-prompt edit on the recursion; the arithmetic does not care which.\n\nIt pools by EDIT IDENTITY, so it earns its keep where the same edit recurs across campaigns.\nThat is routine on the recursion and rarer elsewhere, where most rows will carry one campaign's\ncells and an interval to match.",
+        "description": "One SEARCHPOINT measured against its own campaign's origin — a prompt edit, a node-config\nedit, an optimizer-prompt edit on the recursion; the arithmetic does not care which.\n\n**The identity is ``sp_hash``**, the archive join already stamped on every candidate row, so a\nprose-only edit ranks like any other. Keying the sparse ``pipeline_overlay`` instead cannot see\none at all: that overlay is empty for a prompt-only candidate, which is the whole of what L1\nproposes on a campaign optimizing prompts.\n\n**Rows POOL WITHIN ONE CAMPAIGN and never across two.** ``_config_of`` states why: a\nsearchpoint is read through a delta against its parent, and two campaigns share no parent to\ntake one against — so a cross-campaign pool is a number lined up on nothing, and that is a\nclaim withdrawn rather than a capability lost. Do not re-add it as an improvement. Within one\ncampaign the pool is real: a repair re-measures a searchpoint without re-minting it.",
         "properties": {
           "anchor_effect": {
             "title": "Anchor Effect",
             "type": "number"
+          },
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "string"
           },
           "ci_hi": {
             "anyOf": [
@@ -4455,13 +4471,14 @@
             "title": "Provenance",
             "type": "array"
           },
-          "state_hash": {
-            "title": "State Hash",
+          "sp_hash": {
+            "title": "Sp Hash",
             "type": "string"
           }
         },
         "required": [
-          "state_hash",
+          "sp_hash",
+          "campaign_id",
           "label",
           "provenance",
           "anchor_effect",
@@ -4827,6 +4844,21 @@
             ],
             "title": "Arm Id"
           },
+          "authorship": {
+            "title": "Authorship",
+            "type": "string"
+          },
+          "cached_samples": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cached Samples"
+          },
           "campaign_id": {
             "title": "Campaign Id",
             "type": "string"
@@ -4912,6 +4944,10 @@
           "dataset_name": {
             "title": "Dataset Name",
             "type": "string"
+          },
+          "human_intervened": {
+            "title": "Human Intervened",
+            "type": "boolean"
           },
           "inside": {
             "items": {
@@ -5047,6 +5083,9 @@
           "winner_chain",
           "config",
           "arm_id",
+          "authorship",
+          "human_intervened",
+          "cached_samples",
           "instrument_id",
           "ability",
           "round",
@@ -7772,13 +7811,13 @@
             }
           },
           {
-            "description": "Also rank the candidate edits measured across the selection's CAMPAIGN subjects. OFF by default because it is the widest walk here: the roster half reads one document per subject, while this opens EVERY round of every campaign selected. Edits are scored on the SELECTED metric, in its units.",
+            "description": "Also rank every SEARCHPOINT measured in the selection's CAMPAIGN subjects against its own campaign's origin, keyed on `sp_hash` so a prompt-only edit ranks like a config one. Rows pool within ONE campaign and never across two — they share no anchor to be compared through. OFF by default because it is the widest walk here: the roster half reads one document per subject, while this opens EVERY round of every campaign selected. Scored on the SELECTED metric, in its units.",
             "in": "query",
             "name": "ranking",
             "required": false,
             "schema": {
               "default": false,
-              "description": "Also rank the candidate edits measured across the selection's CAMPAIGN subjects. OFF by default because it is the widest walk here: the roster half reads one document per subject, while this opens EVERY round of every campaign selected. Edits are scored on the SELECTED metric, in its units.",
+              "description": "Also rank every SEARCHPOINT measured in the selection's CAMPAIGN subjects against its own campaign's origin, keyed on `sp_hash` so a prompt-only edit ranks like a config one. Rows pool within ONE campaign and never across two — they share no anchor to be compared through. OFF by default because it is the widest walk here: the roster half reads one document per subject, while this opens EVERY round of every campaign selected. Scored on the SELECTED metric, in its units.",
               "title": "Ranking",
               "type": "boolean"
             }

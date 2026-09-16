@@ -478,12 +478,35 @@ function ChannelCard({
               <dt>rounds on branch</dt>
               <dd>{reading.cycle_rounds_scored}</dd>
             </div>
+            {/* WHO proposed this configuration, served (`authorship`). The arm beside it groups by
+                optimizer CONFIG, which two forks of one campaign share whoever wrote the edit — so
+                this is the only row on the card that separates a human's prompt from L1's. */}
+            <div>
+              <dt>authored by</dt>
+              <dd title={reading.authorship}>{reading.authorship || "—"}</dd>
+            </div>
+            {/* Of the cells behind the number above, how many REPLAYED instead of being measured
+                here. Absent and zero are different facts: `—` is no report for this point, `0` is
+                every cell earned, and a rewind fork's inherited rows are neither. */}
+            <div>
+              <dt>replayed cells</dt>
+              <dd>{reading.cached_samples ?? "—"}</dd>
+            </div>
           </dl>
           {/* The SENTENCE is served (`comparable_note`). A different ruler and a different
               dataset are not one fact worded twice, and the copy that lived here said "its cells
               still pair where they overlap" over a pair that shared no question at all. */}
           {reading.comparable === false && (
             <p className="l4-warn">{reading.comparable_note}</p>
+          )}
+          {/* A fact about the RUN, not about who authored the point — a loop-authored arm carries
+              it too. Served, because a babysat cycle is no longer purely reproducible and pairing
+              it against one nobody touched is a comparison of two different things. */}
+          {reading.human_intervened && (
+            <p className="l4-warn">
+              An operator intervened mid-run on this cycle, so it is no longer purely
+              reproducible.
+            </p>
           )}
 
           {/* The MAP first, then what the point it highlights IS. Walking the cladogram is what

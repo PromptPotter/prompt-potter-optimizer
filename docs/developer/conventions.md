@@ -101,7 +101,7 @@ collects everything else.
   § Conventions.
 - **Schema field order IS generation order.** A response model's fields are
   emitted left-to-right, each becoming context for the next; a `description=`
-  is prompt, not documentation (root `CLAUDE.md` forbids trimming them).
+  is prompt, not documentation, so it is never trimmed as prose.
   Put reasoning/evidence fields *above* the fields they justify — below, they
   are structurally post-hoc. Which levers are free and which are wire contract:
   `docs/concepts/structured-output.md`.

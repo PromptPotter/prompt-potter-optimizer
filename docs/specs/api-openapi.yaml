@@ -3901,9 +3901,14 @@ components:
 
     ForkPreviewResponse:
       type: object
-      required: [steers_disallowed_model]
+      required: [steers_disallowed_model, permitted_models]
       additionalProperties: false
-      description: One verdict, the same one `fork-cycle` dispatch reaches.
+      description: |
+        One verdict, the same one `fork-cycle` dispatch reaches, plus the set it
+        was reached against. Both, because an operator reads them as one sentence:
+        a verdict and the models it is a verdict about. Served apart, the sentence
+        can name models that had nothing to do with the answer, and it fails
+        silently — the same defect one field to the left.
       properties:
         steers_disallowed_model:
           type: boolean
@@ -3914,6 +3919,20 @@ components:
             babysit act: it needs `campaign.babysit` (404 without it) and stamps
             the branch grade C — excluded from clean comparison, origin reuse and
             the L4 rollup.
+        permitted_models:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          description: |
+            What the verdict was compared AGAINST, keyed by node — this campaign's
+            `optimizer_narrowing[node].param_allowed_values.model`, off the same
+            walk the verdict takes. A node absent from it sanctions nothing, which
+            is why any model steer there counts. Distinct from the served row's
+            `permitted` (`CampaignPipelineResponse.node_config_schema`), which is
+            what the editor may OFFER — that one answers for the rows and moves
+            with a cycle seed, so naming it beside this verdict is the drift.
 
     CampaignPipelineResponse:
       type: object

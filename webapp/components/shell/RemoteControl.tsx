@@ -1,7 +1,7 @@
 "use client";
 import { useMemo, useState, type ReactNode } from "react";
 import { postSkipSearchpoint, postSetSampleLookahead, IngestApiError } from "@/lib/api";
-import { SegmentedControl } from "@/components/ui";
+import { HoverCard, SegmentedControl } from "@/components/ui";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { cx } from "@/lib/cx";
@@ -295,13 +295,17 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
             ) : null}
             <div className="section-title">Outcome</div>
             {!terminal && (
-              <div className="row" title={TERMS.remote_eta}>
-                <span className="lbl">ETA</span><span className="val">{etaChip}</span>
-              </div>
+              <HoverCard content={TERMS.remote_eta}>
+                <div className="row term-hint" tabIndex={0}>
+                  <span className="lbl">ETA</span><span className="val">{etaChip}</span>
+                </div>
+              </HoverCard>
             )}
-            <div className="row" title={TERMS.remote_eff}>
-              <span className="lbl">Δ/$</span><span className="val">{effChip}</span>
-            </div>
+            <HoverCard content={TERMS.remote_eff}>
+              <div className="row term-hint" tabIndex={0}>
+                <span className="lbl">Δ/$</span><span className="val">{effChip}</span>
+              </div>
+            </HoverCard>
             {babysat ? (
               <div className="row">
                 <span className="lbl">Provenance</span>
@@ -433,21 +437,33 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
           paragraph. It reads as decoration mid-run and as the answer once the run stops,
           which is why the strip survives `terminal` rather than unmounting exactly when
           these numbers start mattering. */}
-      <button
-        type="button"
+      {/* A div, not a `<button>`: the chip inside carries its own HoverCard trigger, and a
+          button forbids a focusable descendant. `role="button"` + the key handler below
+          restore the native activation this trades away. */}
+      <div
+        role="button"
+        tabIndex={0}
         className="remote-readout"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setOpen((v) => !v);
+          }
+        }}
         aria-label="Job status and configuration"
       >
-        <span className="chip" title={TERMS.remote_best}>
-          <span className="chip-lbl">Lift</span> <strong>{deltaTheta}</strong>
-          {best != null && <span className="chip-origin"> · best {fmtPct0(best)}</span>}
-        </span>
+        <HoverCard content={TERMS.remote_best}>
+          <span className="chip term-hint" tabIndex={0}>
+            <span className="chip-lbl">Lift</span> <strong>{deltaTheta}</strong>
+            {best != null && <span className="chip-origin"> · best {fmtPct0(best)}</span>}
+          </span>
+        </HoverCard>
         <svg className="chev" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="m3 4.5 3 3 3-3" />
         </svg>
-      </button>
+      </div>
       {err ? (
         <span className="remote-err" role="alert">
           {err}

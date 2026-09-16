@@ -37,11 +37,11 @@ Sequenced into lanes by dependency, not milestone number. **Front priority = Lan
 | C1 | **Chat-first front door** — one thread: ingest/check-in → curated activity stream → inline decision buttons (existing verbs). | Arc 2 (conversation endpoint) deferred — [`chat-foundation.md`](chat-foundation.md) |
 | C2 | Composite fitness P2–P4 (P1 = spend, done) — data rollup anytime; **scatter panel after P3** | pending (see § Connectors + L4) |
 | C2b | **Judged + turn-structured scoring** — an LLM-as-judge as a measured observation, and the per-step ruler it opens | judges, the grading call path and the `retrieve → ground → answer` schema all SHIPPED (`promptpotter/judges/`); open: the per-step ruler (see § Judged and turn-structured scoring) |
-| C3 | L4 closure — the recursion + the L4 campaign + `proxy_lift_corr ≥ 0.6` re-validation | Open: the bounded cheap default config, and the `proxy_lift_corr` gate — itself gated on the panel being able to resolve one optimizer prompt from another — [`l4-outer-loop.md`](l4-outer-loop.md) § Open |
+| C3 | L4 closure — the recursion + the L4 campaign + `proxy_lift_corr ≥ 0.6` re-validation | Open — the roster is [`l4-outer-loop.md`](l4-outer-loop.md) § Open, read there and never subsetted here |
 | C4 | Cross-user measurement panel (after P3) | pending (see § Ingest + chat-first web) |
-| C5 | MCP server mode (= **agent-tool parity**, see § Agent-tool parity) · user-editable `pipeline.yaml` in UI | pending — the editable half is gated on the served campaign pipeline resolution (`architecture.md` § Two resolution seams): editing a value the surface cannot correctly READ is how the wrong scope gets written back |
+| C5 | MCP server mode (= **agent-tool parity**, see § Agent-tool parity) · user-editable `pipeline.yaml` in UI | pending — the editable half's gate is LIFTED: the served campaign pipeline resolution shipped (`architecture.md` § Two resolution seams), so the surface can now READ the value it would write back, and what remains is the write side alone |
 | C6 | Public-service hardening (Docker, metrics, rate-limit, billing) — `/health` shipped; **pull rate-limit/metrics forward if the beta opens past the allowlist** | pending |
-| C7 | Non-prompt targets + evolutionary operators · **agent harnesses** (§ Evolving agent harnesses) · multimodal · research extensions | pending — after v1 |
+| C7 | Non-prompt targets + evolutionary operators · **agent harnesses** (§ Evolving agent harnesses) · multimodal · research extensions | pending — after v1, except the agent-harness half, pulled forward and part-shipped (§ Evolving agent harnesses) |
 | C8 | **Mask abstraction** — backend organizing structure (alternative-criterion + transferability); M1 = scoring-function-swap divergence + minimal visual clues, then migrate every divergence trigger onto it | M1 + abort + the scoring write side shipped (see § Lineage mask) |
 
 **Parallel lane — publication = M13, and it is now the project's closing focus** (the distributable-`promptpotter-self` milestone it followed is done). Dependency sequence, no dates, running record in `.scratch/m13-preprint.md`; manuscript in `paper/`. A **fourth** publication blocker joins the three below: the peers and PromptPotter do not grade with the same function — `matchers.py::_exact_match` runs `extract_last_bold` on both sides, the notebooks' inlined `exact_match` compares whole strings, and on a chain-of-thought benchmark that difference favours us.
@@ -52,9 +52,8 @@ Sequenced into lanes by dependency, not milestone number. **Front priority = Lan
 
 ## Permanent contracts (constitutions, not steps)
 
-- **Identity foundation** — OIDC wire + PostgreSQL RLS; three-stage staging. → [`ADR-0002`](../adr/0002-identity-foundation.md)
-- **Spend + tenancy** — `TokenUsageRecord` on the canonical ledger via `emit_token_usage`. → [`ADR-0003`](../adr/0003-spend-and-tenancy.md)
-- **Control plane** — Control-remote I/O kind; closed in/out sets ([`api-openapi.yaml`](api-openapi.yaml) + [`events-asyncapi.yaml`](events-asyncapi.yaml)). → [`ADR-0001`](../adr/0001-m12-control-plane.md)
+**The ADR roster is the [`../adr/`](../adr/) directory listing, never an enumeration** — a subset here is what leaves one unindexed ([`../CLAUDE.md`](../CLAUDE.md) § What may live in `specs/`). Two live contracts are not ADRs, so they are named here:
+
 - **Frontend surface** — per-control behavior per auth/data state. → [`frontend-surface-contract`](frontend-surface-contract.md)
 - **Verdict resolution** — the statistical model behind the live adaptive queue + `hard_samples.json`. → [`verdict-resolution`](../methods/verdict-resolution.md)
 
@@ -84,7 +83,7 @@ Four nouns map to OIDC: Install=`iss`, User=`sub` (`user_id=f"{iss}:{sub}"`, SCI
 
 **The committed artifact is a Dataset, not a campaign:** 4 content-hashed files at `projects/{tenant}/datasets/{slug}/` (`cache.json` rows, `pipeline.yaml` overlay, `task_description.md`, `prompts/default.yaml`) compose into `JobSearchPoint.content_hash`; the sibling `campaign.json` is NOT in the hash. Identical datasets → identical `cycle_{target_hash[:12]}` + a shared `measurements/`, so cross-tenant pooling is free.
 
-**That hash is dataset-scoped BY DESIGN; pipeline resolution is campaign-scoped. Do not collapse them.** The hash exists so two tenants running the same target pool their paid cells — it answers *are these the same measurement*. What a node runs answers *what is this campaign doing*, and five campaigns sharing one `pipeline.yaml` each run a different model. The split is achieved by the LAYER, not by emptying the file: `nodes.*.config` stays as the dataset's SEED and every campaign carries its own values above it, so the hash covers the dataset's shape and the campaign covers its values. Moving those keys out was considered and rejected on a census of all 13 shipped datasets — [`../architecture.md`](../architecture.md) § Two resolution seams carries the evidence and is where that decision lives.
+**The hash is dataset-scoped and pipeline resolution is campaign-scoped — owned by [`../architecture.md`](../architecture.md) § Two resolution seams**, which carries the census the decision was taken on. What this lane must not do is collapse them: the hash answers *are these the same measurement*, the resolution answers *what is this campaign doing*.
 
 ### Connectors + L4 inner-cycle execution
 - **Connector contract** — owned by [`../../promptpotter/connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md); a third party registers one through the `promptpotter.connectors` entry-point group, and no plugin may shadow a built-in.
@@ -98,7 +97,7 @@ Two halves of one question, and they are siblings: parity widens how PromptPotte
 
 Today PromptPotter is driven by a human or by Claude via `/potter-run`. The next invocation surface is **parity as a first-class agent-callable tool**: an *operating agent* — the user's own, an agent harness like dsh, or an ML-research agent like NVIDIA's AutoResearch or verl — calls PromptPotter as one move in its toolbox. Those callers stack rather than compete: a harness is where an operator sits, verl and NeMo RL only start above the weights line, and a gateway sits below both. Parity means the MCP tool exposes the CLI/skill lifecycle — mint, run, supervise, read results — so an agent can operate a campaign end-to-end. Mechanism already on the board: **C5**.
 
-**Deliberately held, not just unscheduled.** The REST API is the integration surface for now — protocol-agnostic, and callable by anything that can hold a browser session, which is the live constraint rather than a detail: there is no inbound bearer token or API key ([`code-debt-cleanup.md`](code-debt-cleanup.md) § Blocked — named blocker). MCP would need the same credential and would add a protocol on top of the gap, and the MCP spec itself is still moving. Revisit once the spec stabilizes and a concrete caller asks.
+**Deliberately held, not just unscheduled.** The REST API is the integration surface for now — protocol-agnostic, and callable by anything that can hold a browser session, which is the live constraint rather than a detail — **the inbound-credential gap is owned by [`../developer/stable-api.md`](../developer/stable-api.md) § 8. What is NOT stable**. MCP would need the same credential and would add a protocol on top of the gap, and the MCP spec itself is still moving. Revisit once the spec stabilizes and a concrete caller asks.
 
 ### Application radius — what PromptPotter EMITS, and the standing DSPy rule
 
@@ -137,7 +136,7 @@ It unblocks datasets no matcher can grade, and the first is wired and running: `
 - **Its trigger is a FORK, not a stall.** The signal is L2 reaching a two-way split it cannot choose between: two strategies, no evidence favouring either, and a whole-pipeline arm that would confound them. A plain stall belongs to the existing escalation ladder.
 - **It is a human-in-the-loop design cycle, not an implementation ticket.** What a partial proposal may touch, how a partial arm compares against a whole one, and what a δ ruler does with arms of different shapes are all open and none is answerable from code.
 
-**SHIPPED, and the residual it asked for is measured.** A grading that failed past its retry left `rescore_results` raising inside `measure_sample`, and the catch-all banked the cell as an ERROR — discarding a backend answer already paid for, and tripping `_classify_abort` on `PIPELINE` so the candidate's whole remaining walk went with it. The residual, asked for here before acting: **0 of 4,799 banked cells**, because no dataset's formula named a judge term yet. `formula/rescore.py` now resolves such a row to UNSCORED — measurement kept, both verdict keys absent, out of every denominator — and a formula that RAISES still halts loud, since that one is a contract bug every cell fails.
+**SHIPPED, and the residual it asked for is measured.** A grading that failed past its retry left `rescore_results` raising inside `measure_sample`, and the catch-all banked the cell as an ERROR — discarding a backend answer already paid for, and tripping `_classify_abort` on `PIPELINE` so the candidate's whole remaining walk went with it. The residual, asked for here before acting: **zero banked cells**, because no dataset's formula names a judge term yet — recount with `compact-archive inventory` before quoting a denominator. `formula/rescore.py` now resolves such a row to UNSCORED — measurement kept, both verdict keys absent, out of every denominator — and a formula that RAISES still halts loud, since that one is a contract bug every cell fails.
 
 ### Selection-clean reporting
 **Why, and the statistical statement, are owned by [`../research/benchmarks.md`](../research/benchmarks.md) § The winner's own number is biased upward.** What this lane owes: a reserved per-dataset partition the loop never scores on, and two readers pointed at it — `verify` (which already re-scores a frozen candidate, C0 included, without touching the cycle, so it is the closest existing shape) and the reported fitness in `export.json`, whose provenance block advertises a deployment estimate it cannot currently claim. Sequenced with the publication lane, not before it: an in-sample headline is wrong in a direction that flatters us, so it costs credibility at publication rather than correctness in the loop. The published BBEH comparison is not what this fixes — its split already satisfies the requirement.
@@ -152,7 +151,7 @@ Two things in the remaining gap are real rather than cosmetic, and both shipped:
 SkillOpt, DarwinX and AutoDesign already evolve harnesses for a frozen model, and DarwinX states our own one-armed-search argument back at us. What that comparison leaves standing is what a PromptPotter version must keep rather than re-derive — sequential elimination, cost-per-fitness, subset-invariant ability. Their benchmarks are agent environments `harbor` can now measure but PoBB's cost model still cannot bound, so adopting the target does **not** mean adopting their evaluation suite.
 
 ### Schema axes — the one open step
-Why the schema steers at all is [`../concepts/structured-output.md`](../concepts/structured-output.md). Two axes now ride the same gate: the `description` prose, and whether the node uses its schema at all (`response_format`). **Open: contrast them on `justlogic-d234`** — promote at `proxy_lift_corr ≥ 0.6`, and a negative result closes an axis by reverting it. No panel verb expresses that contrast yet: `axes:` grids a cell's dataset, seed, model and provider, so neither these two axes nor an `l1_layout` contrast has a verb until `axes:` grows one.
+Why the schema steers at all is [`../concepts/structured-output.md`](../concepts/structured-output.md). Two axes now ride the same gate: the `description` prose, and whether the node uses its schema at all (`response_format`). **Open: contrast them on `justlogic-d234`** — promote at `proxy_lift_corr ≥ 0.6`, and a negative result closes an axis by reverting it. The verb is already there: `evidence --grid ROW,COL` DISCOVERS its factors off each subject's own config (`evidence/grid.py::levels_by_subject`), so a varying `response_format` lands as a config factor and a varying schema `description` as a prompt-field one. What is missing is the paired run, not a surface to read it on.
 
 ### Fitness comparability — the slice-4 remainder
 Open: the **cross-round headline surfaces** + the lineage `/N` badge, and **feeding graduated discrimination `aₛ` into `select_round_subset`**, which is still 1PL ([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md)).
@@ -213,9 +212,12 @@ Identity is **Stage 0.5** — the OIDC wire is live but RLS / SCIM tenant isolat
 
 | Requirement | Target |
 |---|---|
-| Single evaluation (500 items) | < 10 min |
-| Full run (5 iters × 500 items) | < 60 min |
-| Project store per campaign | < 10 MB |
 | LLM providers | OpenAI-compatible (OpenRouter default) |
 | Python | 3.13 |
 | Crash recovery | incremental `.partial.jsonl`; resume cache-hits prior |
+
+**No wall-clock or per-campaign storage target is declared, and neither should be re-added.** Both
+were, at per-item rates set before an agent episode was a cell. What a cell costs is measured in
+[`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md)
+§ What a cell costs, and what a workspace holds on disk is `compact-archive inventory`'s — the
+archive is not scoped by campaign, so a per-campaign figure is not a question it answers.

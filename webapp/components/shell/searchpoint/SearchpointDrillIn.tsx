@@ -19,6 +19,7 @@ import type { ElectedRow, PipelineStatus, SampleRow } from "@/lib/types";
 import type { DraftPatch, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
 import { cacheShare, prefixReading, type ObserveConfig } from "@/lib/derivations";
 import { TERMS } from "@/lib/terms";
+import { HoverCard } from "@/components/ui";
 import { fmtPct1, fmtSigned, fmtTokens } from "@/lib/format";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 import { SampleRowItem, SAMPLE_RENDER_CAP } from "@/components/shell/samples/SampleRowItem";
@@ -163,7 +164,7 @@ export function SearchpointDrillIn({
                 v={`${fmtTokens(row.input_tokens)} in · ${fmtTokens(row.output_tokens ?? 0)} out${
                   row.cached_samples ? ` · ${row.cached_samples} replayed` : ""
                 }`}
-                title={TERMS.cache_replayed}
+                hint={TERMS.cache_replayed}
               />
             )}
             {typeof row.input_tokens === "number" && (
@@ -173,7 +174,7 @@ export function SearchpointDrillIn({
                   cacheShare(row.cache_read_tokens, row.input_tokens, false),
                   false,
                 ).label}
-                title={TERMS.cache_prefix}
+                hint={TERMS.cache_prefix}
               />
             )}
           </>
@@ -215,17 +216,28 @@ function Fact({
   k,
   v,
   title,
+  hint,
 }: {
   k: string;
   v: React.ReactNode;
   title?: string;
+  // Operator-vocabulary explainer (from `lib/terms.ts`) — reachable, unlike `title`.
+  hint?: string;
 }) {
   return (
     <div className="inspector-row">
       <span className="inspector-key">{k}</span>
-      <span className="inspector-val" title={title}>
-        {v}
-      </span>
+      {hint ? (
+        <HoverCard content={hint}>
+          <span className="inspector-val term-hint" tabIndex={0}>
+            {v}
+          </span>
+        </HoverCard>
+      ) : (
+        <span className="inspector-val" title={title}>
+          {v}
+        </span>
+      )}
     </div>
   );
 }

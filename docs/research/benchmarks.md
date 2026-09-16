@@ -33,9 +33,9 @@ Two ways to misread the bar:
 - **A low score is not admission either.** A dataset the model scores near-zero on has no reachable
   headroom and ties just as hard — the floor and the ceiling produce the same symptom from opposite
   directions.
-- **The constant-answer floor is invisible to the bar.** On a 3-class set whose majority label holds
-  40% of the bank, a pipeline that has stopped reading the input scores 40% and reads as a healthy
-  in-band origin. Screen it *before* the score.
+- **The constant-answer floor is invisible to the bar** — owned by
+  [`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md)
+  § Selection criteria, criterion 1b. Screen it before reading any origin in the roster below.
 
 ## Order of use
 
@@ -61,7 +61,7 @@ upward before trusting it.
 | Dataset | Origin | Verdict |
 |---|---|---|
 | BBEH mini | **28%** | ✅ headline |
-| `justlogic-d234` | **0.500–0.625** (floor 0.350) | ✅ focus instrument |
+| `justlogic-d234` | **0.500–0.625** (floor 0.350) — the recon slice, not the current wiring; re-read off `noise-floor --k 3` on a cold workspace before quoting it | ✅ focus instrument |
 | AIME 2025 | **30%** | ✅ wired; too small to split |
 | PlanBench `task_1` | **36%** | 🟡 next-priority; needs a PDDL plan validator |
 | NaturalPlan | **36%** macro | 🟡 next-priority; `meeting_planning`-only (43%) is the clean cut |

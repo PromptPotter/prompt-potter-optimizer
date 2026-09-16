@@ -40,47 +40,21 @@ it.
 
 A leading `NEXT` marks the one to take up cold when nothing else is in hand.
 
-- **`AccessGate` and `AllowanceSpent` render only for a NON-HOST account, and the browser walk has
-  no way to be one.** Two of the four onboarding surfaces are now covered — `ConsentGate` because a
-  throwaway `PROMPTPOTTER_HOME` is unaccepted by construction, `WelcomeLockoutModal` through the
-  `?auth_error=` bounce-back, which is its only trigger that does not require `unauthed`. The other
-  two are blocked by one shared fact rather than by a missing fixture, which is what the entry used
-  to say: `PROMPTPOTTER_AUTH=off` resolves `registered_or_default_identity()`, whose `issuer` is
-  `None`, so `quota.py::_is_host` answers YES and `lifetime_ceilings` exempts it from metering
-  (`AllowanceSpent` can never see a ceiling), while `shared/identity.py::claim_access_state` stamps
-  nothing and defaults to active (`AccessGate` can never see a block). Both are correct — metering
-  bounds a stranger spending the host's key, and `_is_host`'s own docstring says merging its two
-  detectors is the trap — so writing a `user.json` or a `blocklist.json` changes neither answer.
-  What it would take is an OIDC session in the harness, which is the real cost and the reason this
-  is filed. **Rides with:** any work that gives the walk a signed-in identity — a fake issuer for
-  the cold tier, or the first spec that needs to be somebody other than the box's operator. One
-  assertion per surface behind it then, never a suite. **Re-test:** `grep -rn "auth_error\|issuer"
-  webapp/e2e/` — while nothing there mints a session, both surfaces are unreachable by
-  construction rather than merely unwritten.
-
-- **The responsive walk proves only that no page scrolls sideways.** Six widths (375/393/412/768,
-  landscape, 1440) run every pass against the shell, all five tabs, the account modal and login
-  (`e2e/walk/responsive.spec.ts`). That catches content DELETED by an `overflow:hidden` wrapper,
-  or a `viewBox`'d SVG that scaled instead of overflowing; it says nothing about whether a phone
-  layout is USABLE, which stays a human pass. Two gaps sit behind it: the L4 panel, the candidates
-  card and the lineage forest are swept at NO width, each needing a campaign of a shape the walk
-  cannot count on finding; and the original mobile pass recorded no Lighthouse score, so a later
-  one has no before to beat. Action: one Lighthouse run on the dashboard at 375, written down here.
-  **Rides with:** any stylesheet or layout change that already has a browser open — the
-  Lighthouse number is one run once you are there, and the three panels get their widths the
-  next time a spec has a campaign of the right shape to hand (the spend tier mints one).
-  **Re-test:** `grep -n "l4\|lineage" webapp/e2e/walk/responsive.spec.ts` — empty means those
-  three are still unswept at every width.
+- **The responsive walk records no Lighthouse score, and sizes the candidates card at no width.**
+  The six-width sweep (`e2e/walk/responsive.spec.ts`) catches content DELETED by an
+  `overflow:hidden` wrapper or a `viewBox`'d SVG that scaled instead of overflowing — the
+  outer-signal panel and the lineage forest are now swept there too, at every width. The
+  candidates card is not: it needs a campaign of a shape the walk cannot count on finding. The
+  sweep still says nothing about whether a phone layout is USABLE, which stays a human pass, and
+  the original mobile pass took no Lighthouse number. Action: one Lighthouse run on the dashboard
+  at 375, written down here. **Rides with:** any stylesheet or layout change that already has a
+  browser open — the number is one run once you are there — and, for the card, the next spec with
+  a campaign of the right shape to hand (the spend tier mints one). **Re-test:** `grep -n candidate
+  webapp/e2e/walk/responsive.spec.ts` — empty means the card is still unswept; the Lighthouse half
+  has nothing on disk to grep for a number that was never taken.
 
 - **Holistic reframes — larger chunks, noted so they aren't mistaken for done; don't slip one into a
-  release.** (1) **Tooltip/overlay consolidation:** most of the webapp's DOM `title=` attributes are
-  teaching prose the browser renders as an unstyled, unselectable blob that dies on touch. Migrate
-  **by string source, not by file** — `lib/terms.ts::TERMS` first, then the `VerifyPane` /
-  `RoundFileView` header glossaries; leave the `title={same truncated string}` sites, where
-  HoverCard is strictly worse. **Rides with:** any edit to `lib/terms.ts` or to a header glossary —
-  migrate the strings that file already made you read. **Re-test:**
-  `grep -rn "title={TERMS\[" webapp --include=*.tsx | wc -l` — while it reads 0, nothing has
-  migrated. (2) **Whether L4 should reach the escalation machinery.**
+  release.** **Whether L4 should reach the escalation machinery.**
   Not "each is built from scratch" — L2 and L3 already share `dispatch/`, `escalation/`, `cycle.py`
   and `OPTIMIZER_RESPONSE_MODELS`, and `application/optimization/CLAUDE.md` already splits the
   conceptual family from the structural one, which leaves only L4 outside, at the connector seam.
@@ -95,7 +69,9 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   measurement: a live cycle reaching L3, read under the model
   `promptpotter/assets/optimizer/pipeline.yaml` currently pins — read it off that file, never off
   this entry. **Rides with:** the next supervised campaign that escalates. The run is the expensive
-  part and someone is already paying for it; this is a read of what it wrote.
+  part and someone is already paying for it; this is a read of what it wrote. **Re-test:** whoever
+  supervises that run, asked what share of its L2/L3 optimizer calls needed a parse repair — a
+  number closes this; no number leaves it standing.
 
 - **The `prompt_info` trap has no GUARD, and the obvious one is wrong.** A node that omits it scores
   every variant identically as no-skill and raises nothing — stated at the decision point,
@@ -140,14 +116,18 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   blocker: `_compute_step_tokens` stamps every step-token entry with the node's model — the backend's
   per-node `model` when it reports one, else the model the dataset overlay pinned
   (`pipeline.yaml::nodes.{n}.config.model`, mandatory for an LLM node) — so per-node cost is
-  derivable today, including for chars/4-estimated nodes.
+  derivable today, including for chars/4-estimated nodes. **Re-test:** `termnorm.py::_EXPECTED_REVISION`
+  is `None`; the moment it holds a string the endpoint landed and this entry goes.
 - **A backend fix isn't observable without clearing a cache** — PP's measurement cache and
   TermNorm's `match_database` both key on query/searchpoint, never on backend code/revision, so a
   co-owned backend fix replays stale results. Fold the connector revision-pin into the
   measurement-cache key (or add a `--fresh` flag); confirm the TermNorm `/matches` short-circuit
-  fires only on `verified` aliases. Workaround: clear `measurements/`.
+  fires only on `verified` aliases. Workaround: clear `measurements/`. **Re-test:** grep the package
+  for `--fresh` and for any revision term on the measurement-cache key; while both miss, this stands.
 
-**Coupon + BYO build (Lane A2 — blocked on the build itself; ADR-0003 § Host coupon):**
+**Coupon + BYO build (Lane A2 — blocked on the build itself; ADR-0003 § Host coupon + BYO keys):**
+- **Re-test for all three below: grep the package for `grant.json`.** It is prose-only today, so
+  while that grep reaches no code the build has not started and every premise here stands.
 - **Adopt-in-new-code:** the new `grant.json` / `api_keys.json` stores MUST ride
   `read_json_optional` / `write_json` (the `UserStore` template, `store/io.py`) from day one — no
   hand-rolled readers.
@@ -167,46 +147,43 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
 
 **Needs a capability M13 does not open** — the no-new-features clause is retired, so the bar is no
 longer "is a feature allowed" but "does the preprint need it", and these do not:
-- **The REST API has no inbound credential, so it cannot yet be the external integration surface the
-  roadmap calls it.** `presentation/api/deps.py::resolve_identity` 401s unless
-  `request.state.identity_ctx` is set, and `middleware/oidc.py` sets that from a browser **session
-  cookie** and nothing else — no bearer token, no API key anywhere on the inbound path. A
-  third-party caller reaches it only by running the server with `PROMPTPOTTER_AUTH=off`, i.e. with no
-  auth at all. (The one bearer token the repo has,
-  [`backend-integration.md`](../operations/backend-integration.md) § Connection security, runs
-  PP→TermNorm — outbound, the other direction — so this gap is unowned.) What is TRUE is now said out
-  loud — [`developer/stable-api.md`](../developer/stable-api.md) § 8 names the surface rather than
-  leaving it implicitly internal. What remains is the credential itself, and the worked
-  `submit → poll → fetch` examples and per-endpoint guarantees that wait on it. Blocker: that
-  capability.
+- **The REST API has no inbound credential** — owned by
+  [`../developer/stable-api.md`](../developer/stable-api.md) § 8. What is NOT stable. Owed HERE: the
+  credential itself, plus the worked `submit → poll → fetch` examples and per-endpoint guarantees
+  that wait on it. Blocker: that capability. **Re-test:** grep `promptpotter/presentation/api/` for
+  a bearer or API-key reader on the inbound path; while the session cookie is the only one, this
+  stands.
 - **Swapping a model means hand-editing two `pipeline.yaml` lines and remembering to revert both**,
   and a leaked pin mislabels the next run. The half of this that was about `response_format` is
   closed: the OpenRouter catalogue's `supported_parameters` already answers whether a route takes
   the key, and `PipelineSchema._refused` spends that answer on the search space rather than on a
   badge — so an unsupporting model no longer has to be discovered by paying for it. Blocker: the
-  swap-verb, which is a new capability.
-- **`infrastructure/llm/json_parse.py::try_groq_json_validate_repair` meters a fabricated ZERO** — it
-  rebuilds `LLMResponse` with `usage` hardcoded to zeros after a `json_validate_failed` 400 that was
-  already billed. The 400 body carries no `usage`, so the count is unrecoverable, and
-  `unpriced_tokens` is the wrong home: it means price unknown, not count unknown. Never estimate from
-  content length. Dormant — Groq-only, every configured provider is `openrouter`. Blocker:
-  `TokenUsageRecord` has no unknown-count dimension, and the account gate leans on a count always
-  being knowable.
+  swap-verb, which is a new capability. **Re-test:** a swap verb in the `presentation/cli/commands/`
+  listing; while it has none, this stands.
+- **`infrastructure/llm/json_parse.py::try_groq_json_validate_repair` banks a MISSING count as an
+  empty account** — it rebuilds `LLMResponse` without `usage` after a `json_validate_failed` 400 that
+  was already billed, so the model's own default is what every reader downstream sees. The 400 body
+  carries no `usage`, so the count is unrecoverable, and `unpriced_tokens` is the wrong home: it
+  means price unknown, not count unknown. Never estimate from content length. Dormant — Groq-only,
+  every configured provider is `openrouter`. Blocker: `TokenUsageRecord` has no unknown-count
+  dimension, and the account gate leans on a count always being knowable. **Re-test:** a
+  `provider: groq` in any `datasets/*/pipeline.yaml`; while none pins one the path cannot fire.
 
 **Needs a live run, not a decision:**
 - **`_rebank_on_branch`'s re-bank has never been observed** — fixed to take each corrected round
   through the whole ingress, but the cycle it was measured on went with a store wipe, so the fix is
-  reasoned, not seen. Repair a fork; confirm each corrected round carries its own `round:complete` on
-  the branch.
+  reasoned, not seen. **Re-test:** repair a fork, then confirm each corrected round carries its own
+  `round:complete` on the branch; nothing under `tests/` asserts it.
 - **The `evolved` and `seed` provenance layers have never been stamped by real data.**
   `pipeline_resolve.py::_evolved_overlay` reads the CANDIDATE's `pipeline_overlay` and the seed
   layer the CYCLE SEED's — one field name, three carriers, distinguished by the `source` each
   layer stamps (`campaign` / `seed` / `evolved`); every candidate on this workspace
   is prompt-only, so both feeds are dead here and only the merge primitive beneath them is
-  covered (`tests/test_pipeline_resolve.py`). A campaign that actually MOVES a node param
+  covered (`tests/test_integrity.py`). A campaign that actually MOVES a node param
   exercises both, and the trap they guard is documented at `_evolved_overlay`: reading
   `resolved_pipeline_params` instead would stamp every param `evolved` at once.
-  **Re-test:** `grep -rho '"pipeline_overlay": [^,}]*'
+  **Re-test**, from the checkout root where `.promptpotter/` lives and never from a worktree:
+  `grep -rho '"pipeline_overlay": [^,}]*'
   .promptpotter/projects/*/campaigns/*/cycles/*/rounds/*.json | sort -u` — while the only
   distinct value is `null`, no live row has reached either layer.
 
