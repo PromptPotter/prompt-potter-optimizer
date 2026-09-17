@@ -633,7 +633,13 @@ export interface LiveDashboardState {
   open_sample_ids: number[];
   declared_sample_order: number[];
   sample_lookahead: number;
+  sample_lookahead_auto: boolean;
   sample_lookahead_discards: number;
+  in_flight: number;
+  lookahead_allowed: number;
+  lookahead_most: number;
+  waiting_on: string | null;
+  waiting_since: number | null;
   max_cells_in_flight: number;
   measured_unit: 'sample' | 'cell';
   last_query_elapsed_s: number | null;

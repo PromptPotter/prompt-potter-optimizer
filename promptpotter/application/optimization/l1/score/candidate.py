@@ -1,5 +1,6 @@
-"""Per-candidate three-path lifecycle: validation-skip (synthetic 0, no eval), cache-replay (no backend calls), and
-full eval classified into SCORED / LEADER_LOCKED / ESCALATED."""
+"""Per-candidate lifecycle, opened before its round's scoring phase and concluded when the phase
+decides it: validation-skip (synthetic 0, no eval), cache-replay (no backend calls), and full eval
+classified into SCORED / LEADER_LOCKED / ESCALATED."""
 
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
     ResumeCheckpointRecord,
     record_decision,
 )
-from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.application.scoring.search_point_scorer import close_walk, open_walk
 from promptpotter.domain.escalation_signals import EscalationSignal, RuntimeFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import ScoredCandidate, candidate_label
@@ -33,6 +34,7 @@ from promptpotter.shared.instrument import MeasuredCandidate, MeasurementRole
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.run_observers import RunCallbacks
+    from promptpotter.application.scoring.query_loop import Walk
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
 
@@ -49,48 +51,80 @@ class CandidateRunResult:
     escalation_signal: EscalationSignal | None = None
 
 
-async def score_one_candidate(
+def open_candidate(
     *,
     idx: int,
     opt_sp_c: OptSearchPoint,
     candidate_sp: JobSearchPoint,
-    pipeline_overlay: dict[str, Any] | None,
     cycle: Cycle,
     dataset: list[Sample],
     n_total: int,
+    round_num: int,
+    callbacks: RunCallbacks,
+    checks: list[StopRule],
+    l1_diversity: float,
+) -> Walk | None:
+    """The candidate's walk, or ``None`` when it fails validation and is never measured.
+
+    A ``hallucinated_node`` wound is the one NON-fatal validation failure: L1 named a node that
+    doesn't exist, but that phantom edit is simply stripped from the wire — the candidate's real
+    edits still ran, so its score stands and the wound rides along as routed signal (``l1_wounds``),
+    not a synthetic-0. Every other failure (forbidden axis, type mismatch, out-of-enum value) is a
+    genuinely invalid program and still nukes it."""
+    if fatal_validation_failures(opt_sp_c):
+        return None
+    return open_walk(
+        candidate_sp,
+        dataset,
+        cycle.session,
+        label=f"candidate_{idx}",
+        on_sample_scored=partial(callbacks.on_sample_scored, idx, n_total),
+        on_sample_starting=partial(callbacks.on_sample_started, idx, n_total),
+        checks=checks,
+        axes=cycle.axes,
+        l1_diversity=l1_diversity,
+        opt_sp=opt_sp_c,
+        # Who this pass measures, handed to the gateway rather than bound here — every re-entrant
+        # asker declares its own, so none can inherit this one. The L4 recursion reads it to stamp
+        # an inner campaign's provenance; the connector seam carries only the RUN's workload and
+        # `(query, payload)`, so identity cannot reach it any other way.
+        measured=MeasuredCandidate(
+            idx=idx,
+            candidate_id=opt_sp_c.lineage.id,
+            label=candidate_label(round_num, idx),
+            role=MeasurementRole.PANEL,
+        ),
+    )
+
+
+def conclude_candidate(
+    *,
+    idx: int,
+    opt_sp_c: OptSearchPoint,
+    candidate_sp: JobSearchPoint,
+    walk: Walk | None,
+    pipeline_overlay: dict[str, Any] | None,
+    cycle: Cycle,
+    dataset: list[Sample],
     effective_pipeline_params: dict[str, Any] | None,
     elim_check: PoBBCheck,
-    callbacks: RunCallbacks,
-    degradation_checks: list[StopRule] | None,
     decisions: list[ResumeCheckpointRecord] | None,
     candidate_scores: list[ScoredCandidate],
     round_num: int,
     l1_diversity: float,
-    force_fresh: bool = False,
 ) -> CandidateRunResult:
-    """One candidate through the three-exit-path lifecycle. ``candidate_sp`` is built ONCE by the caller and shared with the in-flight
-    dashboard seed, so the origin⊕delta merge happens at a single site."""
+    """A decided candidate through the three-exit-path lifecycle, before the next candidate takes a
+    cell — its registration as a prior is what that candidate's checks read. ``candidate_sp`` is
+    built ONCE by the caller and shared with the in-flight dashboard seed, so the origin⊕delta
+    merge happens at a single site."""
     label = candidate_label(round_num, idx)
     resolved_pipeline_params = candidate_sp.config_params
     # Off `candidate_sp` — the SAME object the gateway hands `build_dataset_run_data`, so the id
     # the report carries and the `prompt_fields_id` the rows are keyed on are one computation.
     sp_hash = candidate_sp.sp_hash(cycle.session.pipeline_schema)
 
-    # Who this pass measures, handed to the gateway rather than bound here — every
-    # re-entrant asker declares its own, so none can inherit this one. The L4 recursion
-    # reads it to stamp an inner campaign's provenance; the connector seam carries only the
-    # RUN's workload and `(query, payload)`, so identity cannot reach it any other way.
-    measured = MeasuredCandidate(
-        idx=idx, candidate_id=opt_sp_c.lineage.id, label=label, role=MeasurementRole.PANEL
-    )
-
-    # Path 1 — validation-skip synthetic-0. A ``hallucinated_node`` wound is the one
-    # NON-fatal validation failure: L1 named a node that doesn't exist, but that phantom
-    # edit is simply stripped from the wire — the candidate's real edits still ran, so its
-    # score stands and the wound rides along as routed signal (``l1_wounds``), not a
-    # synthetic-0. Every other failure (forbidden axis,
-    # type mismatch, out-of-enum value) is a genuinely invalid program and still nukes it.
-    if fatal_validation_failures(opt_sp_c):
+    # Path 1 — validation-skip synthetic-0.
+    if walk is None:
         return CandidateRunResult(
             outcome=CandidateOutcome.SKIPPED_VALIDATION,
             results=[],
@@ -108,28 +142,8 @@ async def score_one_candidate(
             ),
         )
 
-    async def _catch_priors_up(sample: Sample) -> None:
-        fresh = await elim_check.backfill_for_sample(sample)
-        if fresh:
-            callbacks.on_pobb_backfill(round_num, idx, n_total, sample.id, fresh)
-
-    results, scores, signal = await score_search_point(
-        candidate_sp,
-        dataset,
-        cycle.session,
-        label=f"candidate_{idx}",
-        on_sample_scored=partial(callbacks.on_sample_scored, idx, n_total),
-        on_sample_starting=partial(callbacks.on_sample_started, idx, n_total),
-        degradation_checks=[*(degradation_checks or []), elim_check],
-        candidate_idx=idx,
-        n_total_candidates=n_total,
-        axes=cycle.axes,
-        l1_diversity=l1_diversity,
-        opt_sp=opt_sp_c,
-        measured=measured,
-        on_sample_pre_check=_catch_priors_up,
-        force_fresh=force_fresh,
-    )
+    scored = close_walk(walk)
+    results, signal = scored.results, scored.signal
 
     # Path 2 — scored. Snapshot priors BEFORE eval registers this candidate.
     priors_at_test = list(elim_check.prior_ids)
@@ -137,6 +151,7 @@ async def score_one_candidate(
         signal,
         results=results,
         dataset=dataset,
+        stopped_early=scored.stopped is not None,
         effective_pipeline_params=effective_pipeline_params,
         round_num=round_num,
         elim_check=elim_check,
@@ -145,13 +160,13 @@ async def score_one_candidate(
         priors_at_test=priors_at_test,
     )
     # Aborted candidates must NOT seed priors — their scores are synthetic 0s.
-    if len(results) == len(dataset) and not effect.aborted:
+    if scored.stopped is None and not effect.aborted:
         elim_check.register_completed(results, candidate_id=opt_sp_c.lineage.id, sp=candidate_sp)
 
     report = build_score_report(
         opt_sp_c,
         pipeline_overlay,
-        scores,
+        scored.scores,
         results,
         dataset,
         label=label,
@@ -225,4 +240,4 @@ async def score_one_candidate(
     )
 
 
-__all__ = ["score_one_candidate"]
+__all__ = ["conclude_candidate", "open_candidate"]

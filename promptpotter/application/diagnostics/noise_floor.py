@@ -13,7 +13,7 @@ from promptpotter.application.campaign_config import (
 )
 from promptpotter.application.initialization.loop_start import (
     arm_diagnostic_scoring,
-    diagnostic_stop_as,
+    diagnostic_pass,
 )
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
@@ -122,8 +122,9 @@ async def measure_noise_floor(
     composites: list[float] = []
     accuracies: list[float] = []
     for i in range(k):
-        with diagnostic_stop_as(NoiseFloorError):
-            _results, scores, _signal = await score_search_point(
+        scored = await diagnostic_pass(
+            NoiseFloorError,
+            score_search_point(
                 jsp,
                 scoring_set,
                 session,
@@ -137,7 +138,9 @@ async def measure_noise_floor(
                 on_sample_starting=lambda *_a, **_k: None,
                 source=f"noise_floor:{hop.campaign_id}:C0:{i}",
                 force_fresh=True,
-            )
+            ),
+        )
+        scores = scored.scores
         if (measured := scores.get("accuracy")) is None:
             raise NoiseFloorError(
                 f"noise-floor rescore {i + 1}/{k} of {hop.campaign_id}/{hop.cycle_id} measured no "

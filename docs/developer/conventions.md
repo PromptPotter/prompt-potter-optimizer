@@ -111,7 +111,7 @@ collects everything else.
   typecheck, so there is no standing test to keep). The bug class: the decision then
   lives in an *absent* argument, and reading the call site tells you nothing — you must
   notice the absence, jump to a distant default, and find a docstring clause naming the
-  intended callers. `score_search_point` / `compute_composite_fitness` take `opt_sp` this
+  intended callers. `open_walk` / `compute_composite_fitness` take `opt_sp` this
   way, having spent time on exactly that three-hop trail; the same function's per-sample
   callbacks were already required for the weaker reason of display honesty.
   A default is fine when it is a *derivation* every caller would repeat identically

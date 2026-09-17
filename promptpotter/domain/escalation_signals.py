@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import enum
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import ConfigDict, Field
@@ -50,12 +50,6 @@ class EscalationSignal:
     check_name: str
     target: EscalationTarget
     check_result: dict[str, Any]
-    candidate_idx: int
-    candidates_scored: int
-    candidates_skipped: int
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
 
     @property
     def is_elimination(self) -> bool:

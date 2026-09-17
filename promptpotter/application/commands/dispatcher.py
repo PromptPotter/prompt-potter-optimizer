@@ -619,8 +619,8 @@ class CommandDispatcher:
         if isinstance(payload, PauseCyclePayload):
             return Applier(lambda: self._apply_pause_cycle(hop))
         if isinstance(payload, SetSampleLookaheadPayload):
-            cells = payload.cells
-            return Applier(lambda: self._apply_set_sample_lookahead(hop, cells=cells))
+            cells, auto = payload.cells, payload.auto
+            return Applier(lambda: self._apply_set_sample_lookahead(hop, cells=cells, auto=auto))
         if isinstance(payload, OriginGateDecisionPayload):
             decision = payload.decision
             return Applier(lambda: self._apply_origin_gate_decision(hop, decision))
@@ -720,12 +720,12 @@ class CommandDispatcher:
         flag.parent.mkdir(parents=True, exist_ok=True)
         flag.write_text(f"requested_at={utcnow_iso()}\n", encoding="utf-8")
 
-    def _apply_set_sample_lookahead(self, hop: CycleHop, *, cells: int) -> None:
-        """Arm the walk to hold ``cells`` samples in flight; ``1`` disarms. Recorded UNCLAMPED —
+    def _apply_set_sample_lookahead(self, hop: CycleHop, *, cells: int, auto: bool) -> None:
+        """Arm the round to hold ``cells`` calls in flight; ``1`` disarms. Recorded UNCLAMPED —
         the walk clamps to the connector's ceiling, and clamping twice lets the two disagree.
         Pointedly does NOT ``mark_human_intervened`` as its neighbour above does — skip changes what
         was measured, this cannot, and a babysat stamp would assert a steer that did not happen."""
-        write_sample_lookahead(self._stores.campaigns.cycle_dir(hop), cells)
+        write_sample_lookahead(self._stores.campaigns.cycle_dir(hop), cells, auto=auto)
 
     def _apply_origin_gate_decision(self, hop: CycleHop, decision: GateDecision) -> None:
         """The browser's half of the gate. The write itself is

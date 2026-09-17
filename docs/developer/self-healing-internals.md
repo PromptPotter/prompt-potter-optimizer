@@ -30,7 +30,7 @@ Storage stays four typed lists (+ `l3_note`); **rendering collapses to two owner
 | **Nurse prompt slot** | `{{l1_wounds}}` | `{{l1_wounds}}` | (whole `l3_plan` template) | `{{guard_breaches}}` |
 | **Renderer** | `_r_l1_wounds` | `_r_l1_wounds` | `_r_l1_wounds` | `_r_guard_breaches` |
 | **Nurse's writeback** | L1 re-proposes a valid override | L1 retunes the node config · or operator trims schema/model | `cycle.opt_sp.plan` | `cycle.opt_sp.plan` |
-| **Score effect** | synthetic 0 (Path 1 in `score_one_candidate`) | real score, candidate eliminated mid-eval | none | none — fires after L2 ran |
+| **Score effect** | synthetic 0 (Path 1 in `conclude_candidate`) | real score, candidate eliminated mid-eval | none | none — fires after L2 ran |
 
 ## Wound 1 — what trips the validator
 
@@ -94,7 +94,7 @@ Every `content_empty` row is gated on **the result not having answered** — the
 
 A fatal code is deterministic for the whole config — one sighting proves the candidate is broken for every remaining query, which is why a rule allowed to fire on a row that answered *correctly* eliminates a good candidate. Grow the rule table (don't expose it as a tunable) when a new pattern proves equally conclusive.
 
-Three load-boundary effects, consumed via `is_deprecated()`: `DegradationCheck` eliminates the candidate on first sighting; `score_search_point` runs `_filter_deprecated_priors` over `archive.load_reusable_results` so fatal entries are evicted from cache and re-measured with `retry_of_deprecated_cache=True`; and `_compute_accuracy` partitions deprecated rows into their own count, out of `hits`, `total`, `errors` and the accuracy denominator.
+Three load-boundary effects, consumed via `is_deprecated()`: `DegradationCheck` eliminates the candidate on first sighting; `open_walk` splits deprecated entries off `archive_queries.reusable_results` (`_split_off_deprecated_samples`) so fatal entries are evicted from cache and re-measured with `retry_of_deprecated_cache=True`; and `_compute_accuracy` partitions deprecated rows into their own count, out of `hits`, `total`, `errors` and the accuracy denominator.
 
 This is a load-boundary filter, not a score-time fallback: trace records are still archived for forensic value, and only cache reuse and primary-stat aggregation are blocked. Sanctioned alongside the `score_population()` validation-failure synthetic-0 — see [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#deprecated-samples).
 

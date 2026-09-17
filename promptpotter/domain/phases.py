@@ -34,7 +34,7 @@ class CampaignPhase(enum.StrEnum):
 
 class StopReason(enum.StrEnum):
     """``BACKEND_UNREACHABLE`` halts at the first cell the backend could not reach once its own
-    retries were spent (``query_loop.py::_absorb``)."""
+    retries were spent (``query_loop.py::Walk.take``)."""
 
     PERFECT = "perfect_score"
     MAX_ROUNDS = "max_rounds"
@@ -153,9 +153,9 @@ class StopReasonInfo(NamedTuple):
 # import time below — adding a StopReason without a row here raises before the module loads.
 #
 # Mid-round is decided by WHERE the stop is raised, not by how bad it sounds:
-#   - `scoring/query_loop.py` raises inside the per-sample loop -> SPEND_BUDGET, TOKEN_BUDGET,
-#     BACKEND_UNREACHABLE, PROVIDER_CREDIT.
-#   - a pause returns from that same loop between samples -> PAUSED.
+#   - `scoring/query_loop.py::run_walks` raises inside the scoring phase -> SPEND_BUDGET,
+#     TOKEN_BUDGET, BACKEND_UNREACHABLE, PROVIDER_CREDIT.
+#   - a pause is raised from that same loop between samples -> PAUSED.
 #   - CRASHED / RENDER_ERROR / OPTIMIZER_TIMEOUT are exceptions from anywhere, round included, and
 #     so is PROVIDER_CREDIT when an optimizer call is the one refused.
 #   - everything else fires at a round BOUNDARY: `runner/round.py` raises only after

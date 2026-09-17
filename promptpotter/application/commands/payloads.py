@@ -77,6 +77,10 @@ class PauseCyclePayload(CyclePayload):
 
 class SetSampleLookaheadPayload(DescendableCyclePayload):
     cells: WireInt = Field(ge=1, description="1 disarms.")
+    auto: bool = Field(
+        default=False,
+        description="As deep as the stop rules allow, every round, until pressed off.",
+    )
 
 
 class OriginGateDecisionPayload(CyclePayload):

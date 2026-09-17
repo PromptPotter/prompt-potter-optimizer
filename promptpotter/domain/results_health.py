@@ -537,7 +537,7 @@ def compute_round_health(
 
     structural = transient = no_result = holes = 0
     structural_nodes: dict[str, int] = {}
-    # Read from the END of the walk, which is what makes it the TRIGGER: `_absorb` appends a row,
+    # Read from the END of the walk, which is what makes it the TRIGGER: `Walk.take` appends a row,
     # then classifies it, then returns on an abort — so the last errored row IS the cell that
     # stopped the round, and it is the one message that explains the whole thing. Taken from the
     # front it was whichever cell errored first, so a transient blip dozens of cells earlier stood

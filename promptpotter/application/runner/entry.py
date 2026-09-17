@@ -45,6 +45,7 @@ from promptpotter.application.runner.round import flush_pending_decisions
 from promptpotter.application.runner.termination import RUN_STOPS, BudgetGate, run_stop_reason
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.scoring.formula import split_scoring_block
+from promptpotter.application.scoring.query_loop import FlightGauge
 from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import PromptExport, build_prompt_export
@@ -73,6 +74,7 @@ from promptpotter.infrastructure.runtime_flags import (
     clear_run_control_flags,
     read_sample_lookahead,
     read_spend_caps,
+    spend_sample_lookahead,
     write_spend_caps,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_wall_clock
@@ -146,6 +148,7 @@ def _arm_run_controls(
     # `Path()` where no cycle exists yet keeps the pollers total rather than optional.
     cycle_dir = session.store.campaigns.cycle_dir(session.hop) if session.state.cycle_id else Path()
     _bind_run_controls(session, cycle_dir)
+    session.flight = FlightGauge(observers.callbacks.on_flight)
     gate = _build_budget_gate(
         observers,
         cycle_dir,
@@ -258,7 +261,7 @@ def _bind_run_controls(session: Session, cycle_dir: Path) -> None:
     # must reach the instrument, but inheriting a THROUGHPUT setting would let one arming
     # multiply concurrency at every nested level at once.
     session.sample_lookahead_check = partial(read_sample_lookahead, cycle_dir)
-    session.sample_lookahead_consume = partial(layout.sample_lookahead.unlink, missing_ok=True)
+    session.sample_lookahead_consume = partial(spend_sample_lookahead, cycle_dir)
 
 
 def _tighten_budgets(config: CampaignConfig, wallet: SpendCeilings) -> CampaignConfig:
@@ -898,7 +901,7 @@ def _finalize_run(
     stop_reason = cycle_result.stop_reason
     # Read off the canonical table, never re-derived here: a private or-chain has no
     # exhaustiveness check, and silently missed the two reasons the budget gate raises from
-    # INSIDE the per-sample loop, writing a partial round with no `interrupted` marker.
+    # INSIDE the scoring phase, writing a partial round with no `interrupted` marker.
     info = STOP_REASON_INFO[StopReason(stop_reason)]
     is_paused = info.outcome is StopOutcome.PAUSED
     halted_mid_round = info.halts_mid_round

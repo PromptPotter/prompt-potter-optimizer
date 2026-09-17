@@ -228,7 +228,9 @@ LEDGER_BASELINE = {
     # +1: `permitted_models_for_campaign` — the campaign->permitted hop named apart from the
     # verdict, so a surface can SERVE the comparison set instead of deriving a second one beside
     # it. Its return is typed; only the `Campaign.config` snapshot param counts.
-    "domain_any_maps": 92,
+    # −2: `EscalationSignal.to_dict` and `ValidatorOutcome.to_dict` — neither had a caller, and the
+    # signal's candidate position they would have serialized was read by nothing either.
+    "domain_any_maps": 90,
     "models_lax": 3,
     "prompt_string_fields": 6,
     "injections": 32,
@@ -402,7 +404,9 @@ LEDGER_BASELINE = {
     # account out of credit to a halt rather than a panel of holes (test_integrity § 1).
     # +1: a harbor campaign declaring `skill_delivery: system_prompt` whose skill never reached
     # the first request runs every arm prompt-less under that mode's key (test_integrity § 1).
-    "test_functions": 193,
+    # +1: a look-ahead walk launches one cell past its stop rule's horizon, so a horizon that
+    # answers after the real cut discards paid calls unrecorded (test_numerics § 5).
+    "test_functions": 194,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.initialization.session import Session, open_cycle_ledger
@@ -38,6 +37,7 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.origin import CampaignOrigin
     from promptpotter.application.run_observers import RunCallbacks
+    from promptpotter.application.scoring.search_point_scorer import ScoredWalk
     from promptpotter.domain.results import HeadlineMetric
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
@@ -185,16 +185,25 @@ def arm_diagnostic_scoring(
     return pipeline_params
 
 
-@contextmanager
-def diagnostic_stop_as(error: Callable[[str], Exception]) -> Iterator[None]:
-    """Score for a verb armed by :func:`arm_diagnostic_scoring`. Nothing above it catches the round
-    loop's ``StopLoop``, so a stop ends as the verb's own resolved-state error instead."""
+async def diagnostic_pass(
+    error: Callable[[str], Exception], scoring: Awaitable[ScoredWalk]
+) -> ScoredWalk:
+    """Score for a verb armed by :func:`arm_diagnostic_scoring`, whole or not at all. Nothing
+    above it catches the round loop's ``StopLoop``, so a stop ends as the verb's own
+    resolved-state error instead; and a pass decided before its last cell is refused the same
+    way, because a reading over part of it describes whatever stopped it."""
     try:
-        yield
+        scored = await scoring
     except StopLoop as stop:
         info = STOP_REASON_INFO[stop.reason]
         unmeasured = "" if stop.unmeasured is None else f", {stop.unmeasured} cell(s) unmeasured"
         raise error(f"{info.label}{unmeasured}. {info.next_step}".strip()) from None
+    if scored.stopped is not None:
+        raise error(
+            f"Scoring stopped after {len(scored.results)} cell(s): {scored.stopped}. A reading "
+            "over part of the pass would describe the stop, not the configuration."
+        )
+    return scored
 
 
 async def _emit_preflight_and_init_session(
@@ -492,7 +501,7 @@ async def init_optimization_loop(
 
 
 __all__ = [
-    "diagnostic_stop_as",
+    "diagnostic_pass",
     "init_cycle",
     "init_optimization_loop",
     "populate_session_scoring",

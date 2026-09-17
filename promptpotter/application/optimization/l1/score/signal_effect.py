@@ -44,8 +44,8 @@ def _abort_is_config_break(cr: dict[str, Any]) -> bool:
 
 
 class CandidateOutcome(StrEnum):
-    """How ``score_one_candidate`` exited. The caller fires the report UNCONDITIONALLY and uses the tag only to decide
-    whether to break — ``SKIPPED_VALIDATION`` is an early return that still produces one."""
+    """How ``conclude_candidate`` decided a candidate. The caller fires the report UNCONDITIONALLY and uses the tag only
+    to decide whether to break — ``SKIPPED_VALIDATION`` is a candidate never walked that still produces one."""
 
     SKIPPED_VALIDATION = "skipped_validation"
     SCORED = "scored"
@@ -75,6 +75,7 @@ def decode_signal_effect(
     *,
     results: list[Any],
     dataset: list[Any],
+    stopped_early: bool,
     effective_pipeline_params: dict[str, Any] | None,
     round_num: int,
     elim_check: PoBBCheck,
@@ -89,7 +90,7 @@ def decode_signal_effect(
     leader_locked_loose = signal.is_leader_lock
     scoring_error_abort = signal.check_name == "scoring_error_abort"
     leader_locked = signal.is_leader_lock and signal.check_name == elim_check.name
-    aborted = not leader_locked_loose and (scoring_error_abort or len(results) < len(dataset))
+    aborted = not leader_locked_loose and (scoring_error_abort or stopped_early)
 
     cr = signal.check_result
 

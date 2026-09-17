@@ -267,8 +267,8 @@ backend ([`../../docs/methods/verdict-resolution.md`](../../docs/methods/verdict
 **And `cell` implies NOTHING about the run's CONTROL LOOP — a flag reasoning "a cell is expensive,
 therefore…" is the one to refuse.** A connector declares what a row costs (`max_cells_in_flight`,
 the ceiling it may be run at; `cell_envelope_s`, the wall clock ONE of them may spend); how long an
-operator's look-ahead arming lasts is the round's to spend, and no connector can see the round it
-is inside. The shape to watch for is a second flag that ships beside `measured_unit` and is set by
+operator's look-ahead arming lasts is the round's and the operator's to decide, and no connector
+can see the round it is inside. The shape to watch for is a second flag that ships beside `measured_unit` and is set by
 RESEMBLING the recursion rather than by any fact about the run — which is how a declaration reaches
 every backend whose cells merely look alike.
 

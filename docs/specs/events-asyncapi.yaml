@@ -357,7 +357,8 @@ components:
           minimum: 0
         candidate_idx:
           type: [integer, 'null']
-          minimum: 0
+          minimum: -1
+          description: "`-1` (`NO_ROUND_SLOT`) names no candidate: the parent's re-measure, and the round-wide `flight` gauge."
         candidate_total:
           type: [integer, 'null']
           minimum: 0

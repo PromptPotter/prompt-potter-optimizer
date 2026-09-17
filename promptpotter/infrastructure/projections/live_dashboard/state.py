@@ -252,8 +252,21 @@ class LiveDashboardState(StrictModel):
     # `.runtime/sample_lookahead.json`. ONE number: a second field for "what the loop last held"
     # is a log with no round-boundary writer, and no surface may reconcile the two.
     sample_lookahead: int = 1
+    # Whether that depth outlives its round — the operator's auto-arm, read off the same file.
+    sample_lookahead_auto: bool = False
     # Samples launched then discarded unabsorbed — the depth's whole running cost, cumulative.
     sample_lookahead_discards: int = 0
+    # The scoring phase's calls in flight; how many its stop rules allow right now; and the most it
+    # could ever hold — all counted over every candidate walking and the PoBB catch-ups
+    # (`scoring/query_loop.py::FlightGauge`). Between phases `lookahead_most` is the next round's
+    # (`n_variants` x `sp_budget_round`), so the operator can size a press before it starts.
+    in_flight: int = 0
+    lookahead_allowed: int = 0
+    lookahead_most: int = 0
+    # The call the round's next decision waits on — calls are taken in walk order, so one slow cell
+    # at a candidate's head holds every call behind it — and when it was launched (epoch seconds).
+    waiting_on: str | None = None
+    waiting_since: float | None = None
     # The connector's own declarations, stamped at INIT:exit. SERVED rather than inferred: the
     # browser's only available guess — "is this self-optimization?" — is not the question. `1`
     # says the control does not apply, and went unserved before, so the button took dead presses.

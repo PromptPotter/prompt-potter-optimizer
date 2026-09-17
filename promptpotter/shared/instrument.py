@@ -3,10 +3,8 @@ binding the two subtractions; re-split it and forgetting one still looks like a 
 
 from __future__ import annotations
 
-import contextlib
 import contextvars
 import enum
-from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated
 
@@ -24,7 +22,7 @@ __all__ = [
     "instrument_depth",
     "instrument_mode",
     "measured_candidate",
-    "measured_candidate_scope",
+    "measured_candidate_context",
 ]
 
 # How deep the recursion may nest. L4 (an outer campaign scoring inner campaigns) is depth 1;
@@ -126,16 +124,13 @@ _MEASURED: contextvars.ContextVar[MeasuredCandidate | None] = contextvars.Contex
 )
 
 
-@contextlib.contextmanager
-def measured_candidate_scope(candidate: MeasuredCandidate | None) -> Iterator[None]:
-    """The candidate the outer loop is scoring, for anything it spawns; ``None`` is an origin pass.
-    Scoped, never a bare set: scoring re-enters itself in the SAME task (a prior catch-up), and
-    without the restore that callee's stamp mis-keys the rest of this walk's ``inner_campaign_id``."""
-    token = _MEASURED.set(candidate)
-    try:
-        yield
-    finally:
-        _MEASURED.reset(token)
+def measured_candidate_context(candidate: MeasuredCandidate | None) -> contextvars.Context:
+    """A context naming the candidate a walk measures, for everything its cells spawn; ``None`` is
+    an origin pass. A context rather than a set in the caller's task: one loop launches every
+    walk's cells, so each walk carries its own and each cell runs in a copy of it."""
+    context = contextvars.copy_context()
+    context.run(_MEASURED.set, candidate)
+    return context
 
 
 def measured_candidate() -> MeasuredCandidate | None:

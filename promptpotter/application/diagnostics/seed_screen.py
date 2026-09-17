@@ -24,7 +24,7 @@ from promptpotter.application.datasets.authored import (
 )
 from promptpotter.application.initialization.loop_start import (
     arm_diagnostic_scoring,
-    diagnostic_stop_as,
+    diagnostic_pass,
 )
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.optimization.task_context import committed_task_context
@@ -248,7 +248,7 @@ async def screen_inner_seeds(
         session, campaign_config, source=f"seed_screen:{dataset_name}", log=log_fn
     )
     # The screen's whole concurrency story, and it reuses the shipped window rather than adding a
-    # second way to run things at once: `run_query_loop` re-reads this at every launch boundary and
+    # second way to run things at once: `run_walks` re-reads this at every launch boundary and
     # clamps it to the backend's ceiling, so a constant holds the depth for the entire screen.
     # `sample_lookahead_consume` stays `None` DELIBERATELY — a depth is spent by the round that
     # scored under it, and a screen has no round.
@@ -289,8 +289,9 @@ async def screen_inner_seeds(
         cost_usd: float | None = None
         n_scored = 0
         for i in range(max(1, repeat)):
-            with diagnostic_stop_as(SeedScreenError):
-                rows, _scores, _signal = await score_search_point(
+            passed = await diagnostic_pass(
+                SeedScreenError,
+                score_search_point(
                     origin_sp,
                     bank,
                     session,
@@ -299,8 +300,8 @@ async def screen_inner_seeds(
                     label=f"seed{seed}_origin_{i}",
                     # A screen measures the BANK, not an individual's own report, so every seed
                     # sits on the same vacuous fallback — otherwise the readings would partly
-                    # carry prompt length rather than the bank (`score_search_point`'s contract
-                    # for `opt_sp`).
+                    # carry prompt length rather than the bank (the gateway's contract for
+                    # `opt_sp`).
                     opt_sp=None,
                     measured=None,
                     # No per-sample callbacks, declared rather than defaulted: a screen has no
@@ -309,7 +310,9 @@ async def screen_inner_seeds(
                     on_sample_starting=None,
                     source=f"seed_screen:{dataset_name}:seed{seed}:{i}",
                     force_fresh=repeat > 1,
-                )
+                ),
+            )
+            rows = passed.results
             # `is_hit` is the ONE definition of "this configuration solved the row" — re-deriving
             # it from predicted-vs-ground_truth would be a second answer to a question the scorer
             # owns, and the two would disagree the moment a dataset grades non-binary.

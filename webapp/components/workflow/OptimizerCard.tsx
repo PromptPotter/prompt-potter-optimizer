@@ -88,7 +88,17 @@ export function OptimizerCard({ pipeline }: Props) {
         >
           ● {status}
         </span>
-        <CopyButton data={roundNodes} title="Copy the viewed round's nodes as JSON" />
+        {/* Off while the round has no node yet — an empty `{}` on the clipboard reads as a
+            broken copy, not as "nothing has run". */}
+        <CopyButton
+          data={roundNodes}
+          disabled={Object.keys(roundNodes).length === 0}
+          title={
+            Object.keys(roundNodes).length === 0
+              ? "No node of this round has finished yet"
+              : "Copy the viewed round's nodes as JSON"
+          }
+        />
       </div>
       <div className="workflow-graph">
         <PipelineFlow

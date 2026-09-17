@@ -37,11 +37,13 @@ from promptpotter.infrastructure.projections.live_dashboard.state import RunLimi
 from promptpotter.infrastructure.projections.pobb_stream import PoBBStreamProjection
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 from promptpotter.shared.errors import graceful
+from promptpotter.shared.instrument import NO_ROUND_SLOT
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimization.pobb.checks import PoBBSnapshot
+    from promptpotter.application.scoring.query_loop import Flight
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.phases import PhaseEvent
     from promptpotter.domain.sample import Sample
@@ -384,11 +386,14 @@ class RunCallbacks:
         qt: int,
         sample_id: int,
         sample_lookahead: int = 1,
+        stop_horizon: int | None = None,
     ) -> None:
         """``sample_lookahead`` is what the walk held in flight as it launched this one — what the loop
-        did, not what the operator's flag asked for. ``query_preview`` is capped HERE: its sole reader
-        showed the first 120 chars, so the rest was never a record of anything — the whole query is a
-        dataset fact, on disk at ``datasets/{slug}/`` and in every measurement row."""
+        did, not what the operator's flag asked for. ``stop_horizon`` is the fewest rows at which a
+        stop rule could still cut as it launched, ``None`` where none could inside the window.
+        ``query_preview`` is capped HERE: its sole reader showed the first 120 chars, so the rest was
+        never a record of anything — the whole query is a dataset fact, on disk at
+        ``datasets/{slug}/`` and in every measurement row."""
         self._snapshot(
             "sample_started",
             ci,
@@ -397,9 +402,31 @@ class RunCallbacks:
                 "query_preview": query_text[:QUERY_PREVIEW_CHARS],
                 "sample_id": int(sample_id),
                 "sample_lookahead": int(sample_lookahead),
+                "stop_horizon": stop_horizon,
             },
             sample_idx=qi,
             sample_total=qt,
+        )
+
+    def on_flight(self, flight: Flight) -> None:
+        """The scoring phase's calls in flight, what its stop rules allow, the most it could hold, and
+        the call a decision waits on — the whole round's, so it names no candidate
+        (``scoring/query_loop.py::FlightGauge``)."""
+        waiting = (
+            None
+            if flight.waiting is None
+            else {"sample_id": int(flight.waiting[0]), "since": float(flight.waiting[1])}
+        )
+        self._snapshot(
+            "flight",
+            NO_ROUND_SLOT,
+            0,
+            {
+                "out": int(flight.out),
+                "allowed": int(flight.allowed),
+                "most": int(flight.most),
+                "waiting": waiting,
+            },
         )
 
     def on_sample_scored(self, ci: int, ct: int, result: dict[str, Any], qi: int, qt: int) -> None:

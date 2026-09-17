@@ -50,6 +50,16 @@
   cursor: default;
 }
 
+/* Gauge levels — before `.on`, so the chosen segment keeps its own fill. */
+.full {
+  background: rgba(var(--color-accent-rgb), 0.55);
+  color: var(--color-text-primary);
+}
+
+.part {
+  background: rgba(var(--color-accent-rgb), 0.18);
+}
+
 .on {
   background: var(--color-accent);
   color: var(--color-text-on-accent);

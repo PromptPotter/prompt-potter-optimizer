@@ -42,10 +42,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # All three jobs sync the same lock into the same cache key, so only `check` saves it;
+      # a second save loses the reservation race and warns on every push.
       - name: Install uv
         uses: astral-sh/setup-uv@v8.2.0
         with:
           enable-cache: true
+          save-cache: false
 
       - name: Install dependencies
         run: uv sync --extra stats --extra dev --extra api --frozen
@@ -96,7 +99,7 @@ jobs:
       # collects the read never, so the flag would be a regression here. Keyed
       # per commit with a prefix restore: each run reads the newest cache and
       # saves its own, and eslint re-lints whatever content actually moved.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: webapp/.eslintcache
           key: eslint-${{ github.sha }}
@@ -111,6 +114,7 @@ jobs:
         uses: astral-sh/setup-uv@v8.2.0
         with:
           enable-cache: true
+          save-cache: false
 
       - name: Install the engine the walk serves
         run: uv sync --extra stats --extra dev --extra api --frozen

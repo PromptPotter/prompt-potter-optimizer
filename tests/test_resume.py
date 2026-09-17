@@ -903,7 +903,7 @@ def test_a_measured_cell_the_formula_cannot_grade_is_kept_not_failed() -> None:
     The harm is silent and costs paid measurement twice over. A judge term is absent per CELL — one
     grading fails past its retry while the cell beside it grades fine. Marked ERRORED, that row is
     stamped ``fitness = 0.0``, which reads as an arm answering wrong rather than as a formula saying
-    nothing, and it trips ``query_loop.py::_classify_abort`` on ``ErrorCategory.PIPELINE``, which
+    nothing, and it trips ``query_loop.py::Walk._abort_reason`` on ``ErrorCategory.PIPELINE``, which
     abandons the candidate's ENTIRE remaining walk. Nothing raises either way.
 
     The replay half is the unrecoverable one: the cached path rescores every archived row on its way

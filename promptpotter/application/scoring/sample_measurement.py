@@ -350,7 +350,7 @@ def _classify_http_error(exc: httpx.HTTPStatusError) -> tuple[ErrorCategory, str
     if code == 429:
         # A throttle is only the CALLER's fault when it is a quota no retry can outlast. A
         # per-minute window that just closed is transient, and CLIENT is read by two consumers that
-        # both punish the candidate for the provider's load: ``query_loop._classify_abort`` voided
+        # both punish the candidate for the provider's load: ``query_loop.Walk._abort_reason`` voided
         # the whole panel on the first occurrence, and ``results_health.py::classify_result`` adds
         # ``backend:client_error`` to ``fatal_codes``, which PoBB fast-eliminates on one sighting.
         # A quota still reaches both — that one IS the operator's to act on.

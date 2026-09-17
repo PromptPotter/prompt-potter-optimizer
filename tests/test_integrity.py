@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import functools
 import logging
 import subprocess
 import sys
@@ -89,11 +90,15 @@ class _OrderedFakeBackend:
 
     async def measure(self, sample: Sample, session: Any, *, pipeline_params: Any = None) -> Any:
         self.calls.append(sample.id)
+        return await self.hold(sample)
+
+    async def hold(self, sample: Sample, pace: float = 0.01) -> Any:
+        """One call's worth of backend capacity — a PoBB backfill spends it as a cell does."""
         self._inflight += 1
         self.entries.append(self._inflight)
         rank = sample.id if self.slowest_last else (self.n - sample.id + 1)
         try:
-            await asyncio.sleep(rank * 0.01)
+            await asyncio.sleep(rank * pace)
         finally:
             self._inflight -= 1
         return {
@@ -118,16 +123,15 @@ class _CutAfter:
     def __init__(self, n: int) -> None:
         self.n = n
 
-    def check(self, results: list[Any], ci: int, ct: int) -> Any:
+    def earliest_stop(self, results: list[Any], upcoming: list[Any]) -> int | None:
+        m = max(self.n, len(results) + 1)
+        return m if m <= len(results) + len(upcoming) else None
+
+    def check(self, results: list[Any]) -> Any:
         if len(results) < self.n:
             return None
         return EscalationSignal(
-            check_name=self.name,
-            target=EscalationTarget.ELIMINATE_CANDIDATE,
-            check_result={"queries_scored": len(results)},
-            candidate_idx=ci,
-            candidates_scored=len(results),
-            candidates_skipped=0,
+            self.name, EscalationTarget.ELIMINATE_CANDIDATE, {"queries_scored": len(results)}
         )
 
 
@@ -2656,60 +2660,170 @@ def test_the_l4_dataset_is_recognized_as_one() -> None:
 # 7. Money — what a call is billed, and against which price
 
 
+def _walk_over(
+    dataset: list[Sample],
+    session: Any,
+    *,
+    checks: list[Any],
+    measured: Any = None,
+    on_sample_starting: Any = None,
+    on_taken: Any = None,
+) -> Any:
+    """A walk as the gateway opens one, over stubbed persistence."""
+    from promptpotter.shared.instrument import measured_candidate_context
+
+    ctx = query_loop.QueryLoopState(
+        search_point=JobSearchPoint(),
+        session=session,
+        cached_sample_results={},
+        on_sample_scored=None,
+        axes=None,
+        scorer=lambda r: 1.0,
+        deprecated_samples={},
+        persist_fresh=on_taken or (lambda rows: {"accuracy": 1.0}),
+        running_scores=lambda rows: {"accuracy": 1.0},
+        record_run=lambda rows, scores: None,
+    )
+    return query_loop.Walk(
+        dataset, ctx, checks, on_sample_starting, measured_candidate_context(measured)
+    )
+
+
+async def _stopped_by_operator(phase: Any) -> str | None:
+    """Run a scoring phase; the reason if the operator's pause ended it."""
+    try:
+        await phase
+    except KeyboardInterrupt as stop:
+        return str(stop)
+    return None
+
+
 async def _walk(
     dataset: list[Sample],
     *,
     armed: int,
     cut_at: int | None,
     max_cells: int = 2,
-    rearm_after: int | None = None,
-    slowest_last: bool = False,
+    parent_lacks_cells: bool = False,
+    backfill_pace: float = 0.01,
+    pause_after_call: int | None = None,
 ) -> dict[str, Any]:
-    backend = _OrderedFakeBackend(len(dataset), slowest_last=slowest_last)
-    request = {"cells": armed}
+    from promptpotter.application.optimization.pobb.checks import PoBBCheck, PoBBConfig
+
+    backend = _OrderedFakeBackend(len(dataset))
     depths: list[int] = []
+    committed: list[int] = []
+    returned: list[int] = []
+
+    async def _measure(sample: Sample, session: Any, *, pipeline_params: Any = None) -> Any:
+        row = await backend.measure(sample, session, pipeline_params=pipeline_params)
+        returned.append(sample.id)
+        return row
+
+    def _backfill(sp: Any, sample: Sample, prior_id: str) -> Any:
+        call = asyncio.ensure_future(backend.hold(sample, backfill_pace))
+
+        def _commit() -> list[Any]:
+            committed.append(sample.id)
+            return [call.result()]
+
+        return call, _commit
+
+    # A parent measured on none of the round's cells, so every cell owes it one catch-up call.
+    priors = PoBBCheck(PoBBConfig(), n_samples=len(dataset), ruler=None, backfill_fn=_backfill)
+    priors.register_completed([], candidate_id="parent", sp=JobSearchPoint())
     # The one seam stubbed; the window, cursors, checkpoints and discard are shipping code.
-    with mock.patch.object(query_loop, "measure_sample", backend.measure):
+    with mock.patch.object(query_loop, "measure_sample", _measure):
         session = types.SimpleNamespace(
             scoring=types.SimpleNamespace(scorer=lambda r: 1.0, round_scorer=None),
-            pause_check=None,
+            state=types.SimpleNamespace(ledger=None),
+            pause_check=lambda: pause_after_call is not None and len(returned) >= pause_after_call,
             skip_check=None,
             skip_consume=None,
             budget_tripped=None,
-            # The flag's real behaviour: the round that scored under the arming consumes it, so
-            # nothing inside one walk ever spends it. `rearm_after` is the OPERATOR pressing
-            # mid-walk — the flag reads 1 until that many samples have been launched, then the
-            # armed depth, which is the only way to observe a press binding at the next launch
-            # rather than waiting for the window to drain.
-            sample_lookahead_check=(
-                lambda: request["cells"] if rearm_after is None or len(depths) >= rearm_after else 1
-            ),
-            sample_lookahead_consume=(lambda: request.update(cells=1)),
+            sample_lookahead_check=lambda: armed,
             backend_client=types.SimpleNamespace(max_cells_in_flight=max_cells),
+            flight=None,
         )
-        result = await query_loop.run_query_loop(
-            JobSearchPoint(),
+        walk = _walk_over(
             dataset,
             session,
-            cached_sample_results={},
-            deprecated_samples={},
-            on_sample_scored=None,
-            on_sample_starting=lambda q, i, t, sid, depth: depths.append(depth),
-            degradation_checks=[_CutAfter(cut_at)] if cut_at else [],
-            candidate_idx=0,
-            n_total_candidates=1,
-            axes=None,
-            persist_fresh=lambda rows: {"accuracy": 1.0},
-            running_scores=lambda rows: {"accuracy": 1.0},
-            on_sample_pre_check=None,
+            checks=[_CutAfter(cut_at)] if cut_at else [],
+            on_sample_starting=lambda q, i, t, sid, depth, horizon: depths.append(depth),
+        )
+        stopped = await _stopped_by_operator(
+            query_loop.run_walks([walk], session, backfills=priors if parent_lacks_cells else None)
         )
     return {
-        "rows": result.results,
-        "stop_reason": result.stop_reason,
+        "rows": walk.results,
+        "stop_reason": stopped or walk.outcome.stop_reason,
         "calls": list(backend.calls),
         "entries": list(backend.entries),
+        "committed": committed,
         "depths": depths,
         "max_depth": max(depths) if depths else 0,
+    }
+
+
+async def _round(
+    dataset: list[Sample],
+    *,
+    armed: int,
+    cuts: list[int | None],
+    slowest_last: bool = False,
+    pause_after_call: int | None = None,
+) -> dict[str, Any]:
+    """Several candidates' walks driven as one round, as `score_population` drives them. Each
+    backend call is logged under the walk whose context it ran in. ``pause_after_call`` presses
+    pause as that call returns."""
+    from promptpotter.shared.instrument import MeasuredCandidate, measured_candidate
+
+    backend = _OrderedFakeBackend(len(dataset), slowest_last=slowest_last)
+    events: list[tuple[str, int, int]] = []
+    flag = {"pause": False}
+
+    async def _measure(sample: Sample, session: Any, *, pipeline_params: Any = None) -> Any:
+        call = len(backend.calls) + 1
+        events.append(("call", cast("MeasuredCandidate", measured_candidate()).idx, sample.id))
+        row = await backend.measure(sample, session, pipeline_params=pipeline_params)
+        if call == pause_after_call:
+            flag["pause"] = True
+        return row
+
+    def _taken(walk: int, rows: list[Any]) -> dict[str, float]:
+        events.append(("absorb", walk, rows[-1]["sample_id"]))
+        return {"accuracy": 1.0}
+
+    session = types.SimpleNamespace(
+        scoring=types.SimpleNamespace(scorer=lambda r: 1.0, round_scorer=None),
+        state=types.SimpleNamespace(ledger=None),
+        pause_check=lambda: flag["pause"],
+        skip_check=None,
+        skip_consume=None,
+        budget_tripped=None,
+        sample_lookahead_check=lambda: armed,
+        backend_client=types.SimpleNamespace(max_cells_in_flight=armed),
+        flight=None,
+    )
+    walks = [
+        _walk_over(
+            dataset,
+            session,
+            checks=[_CutAfter(cut)] if cut else [],
+            measured=MeasuredCandidate(idx=w, candidate_id=f"c{w}", label=f"C1.{w + 1}"),
+            on_taken=functools.partial(_taken, w),
+        )
+        for w, cut in enumerate(cuts)
+    ]
+    with mock.patch.object(query_loop, "measure_sample", _measure):
+        stopped = await _stopped_by_operator(query_loop.run_walks(walks, session))
+    return {
+        "rows": [walk.results for walk in walks],
+        "stops": [stopped or walk.outcome.stop_reason for walk in walks],
+        "absorbed": [(w, sid) for kind, w, sid in events if kind == "absorb"],
+        "events": events,
+        "calls": list(backend.calls),
+        "peak": max(backend.entries),
     }
 
 
@@ -2951,26 +3065,76 @@ async def test_sample_lookahead_changes_the_bill_and_never_the_record() -> None:
     assert (await _walk(dataset, armed=4, cut_at=None, max_cells=1))["max_depth"] == 1
     assert (await _walk(dataset, armed=4, cut_at=None, max_cells=2))["max_depth"] == 2
 
-    # 6. An arming is NOT spent inside the walk — the round that scored under it spends it
-    #    (`l1/score/winner.py`), the one control loop every armable walk sits inside. So the
-    #    depth holds to the walk's own end. There is no second arming shape to test: a
-    #    connector declares the CEILING and nothing about how long a press lasts, because it
-    #    cannot know whether the walk in front of it is inside a round.
-    r = await _walk(dataset, armed=2, cut_at=None, max_cells=4)
-    assert r["depths"] == [2] * len(dataset)
-    assert r["rows"] == d1["rows"]
+    # 6. What a cut discards is bounded by the stop rule's HORIZON, not by the depth: armed far
+    #    past the cut, the walk launches one cell beyond the earliest row the rule could fire at.
+    deep = await _walk(dataset, armed=8, cut_at=4, max_cells=8)
+    assert deep["stop_reason"] == "escalation"
+    assert deep["rows"] == c1["rows"]
+    assert 0 <= len(deep["calls"]) - len(c1["calls"]) <= 1
+    assert len(c1["calls"]) == 4, "an unarmed walk launched before the cell ahead was decided"
 
-    # 7. A press landing while a sample is in flight TOPS THE WINDOW UP at the next launch
-    #    rather than waiting for the window to drain — the press exists to shorten the wait, so
-    #    a running sample is JOINED. Asserted on `depths` (the window the walk OPENED) rather
-    #    than on backend-observed overlap, which is a wall-clock race: an in-flight peer that
-    #    retires early lowers the reading without the window having closed, so a loaded box
-    #    reported a press that never landed. `entries` carries the launch burst exactly.
-    late = await _walk(dataset, armed=3, cut_at=None, max_cells=4, rearm_after=2, slowest_last=True)
-    assert late["depths"][:2] == [1, 1], "the walk ran sequentially before the press"
-    assert late["depths"][2:] == [3] * (len(dataset) - 2), "the press bound at the next launch"
-    assert max(late["entries"]) == 3, "the window never physically overlapped"
-    assert late["rows"] == d1["rows"]
+    # 7. A PoBB catch-up call is a whole inner campaign on L4, so it holds a slot like a cell —
+    #    the depth bounds everything the walk has out, which is what keeps the connector's
+    #    ceiling a memory bound. It may START early, but it lands in the archive only for a cell
+    #    the walk absorbed, in walk order: one written for a cell past the cut would be a row
+    #    the unarmed walk never measured, replayed later as if it had been.
+    lone = await _walk(dataset, armed=1, cut_at=4, parent_lacks_cells=True)
+    wide = await _walk(dataset, armed=3, cut_at=4, max_cells=3, parent_lacks_cells=True)
+    # Catch-up far faster than a cell, so the one started past the cut is back before the cut.
+    quick = await _walk(
+        dataset, armed=8, cut_at=4, max_cells=8, parent_lacks_cells=True, backfill_pace=0.0001
+    )
+    assert max(lone["entries"]) == 1
+    assert max(wide["entries"]) <= 3
+    absorbed = [s.id for s in dataset[:4]]
+    assert lone["committed"] == wide["committed"] == quick["committed"] == absorbed
+    assert lone["rows"] == wide["rows"] == quick["rows"] == c1["rows"]
+
+    # 8. A round's candidates walk AT ONCE and decide IN TURN: a later walk may measure ahead
+    #    of the ones before it, but is taken, cut and persisted only in its turn — so the rows,
+    #    the cuts and their order are the serial round's. The depth bounds the ROUND, not each
+    #    walk, or three walks would hold three times the declared ceiling.
+    serial = await _round(dataset, armed=1, cuts=[4, None, 6])
+    fanned = await _round(dataset, armed=4, cuts=[4, None, 6])
+    assert serial["peak"] == 1
+    assert fanned["peak"] <= 4
+    assert fanned["rows"] == serial["rows"]
+    assert fanned["stops"] == serial["stops"] == ["escalation", None, "escalation"]
+    assert fanned["absorbed"] == serial["absorbed"]
+    # A cell the one loop launched runs as the candidate it measures, or an L4 inner campaign is
+    # filed under the candidate on turn. First cells fastest, so the second walk's calls go out
+    # while the first still has cells to take.
+    ahead = await _round(dataset, armed=4, cuts=[None, None], slowest_last=True)
+    assert ahead["absorbed"] == [(w, s.id) for w in (0, 1) for s in dataset]
+    last_of_first = max(i for i, e in enumerate(ahead["events"]) if e[:2] == ("absorb", 0))
+    assert any(e[:2] == ("call", 1) for e in ahead["events"][:last_of_first]), (
+        "no later candidate measured ahead — the identity check below proves nothing"
+    )
+    for w in (0, 1):
+        calls = sorted(sid for kind, who, sid in ahead["events"] if kind == "call" and who == w)
+        assert calls == [s.id for s in dataset], f"walk {w}'s calls ran under another identity"
+    # A stop keeps what is already back and owes nothing: the call that returned as the pause was
+    # pressed is absorbed, not discarded and paid again on resume.
+    paused = await _round(dataset, armed=1, cuts=[None], pause_after_call=3)
+    assert paused["stops"] == ["graceful"]
+    assert len(paused["rows"][0]) == len(paused["calls"]) == 3
+    # …and starts nothing while it does: a pause is a promise to spend nothing more. A catch-up
+    # no one started stays unstarted, and waiting on one already out launches no cell.
+    owing = await _walk(dataset, armed=1, cut_at=None, parent_lacks_cells=True, pause_after_call=2)
+    assert owing["stop_reason"] == "graceful"
+    assert owing["committed"] == [dataset[0].id]
+    assert len(owing["rows"]) == len(owing["calls"]) == 2
+    landing = await _walk(
+        dataset,
+        armed=2,
+        cut_at=None,
+        parent_lacks_cells=True,
+        backfill_pace=0.02,
+        pause_after_call=1,
+    )
+    assert landing["stop_reason"] == "graceful"
+    assert landing["committed"] == [dataset[0].id]
+    assert len(landing["rows"]) == len(landing["calls"]) == 1
 
 
 class _CountingClient:

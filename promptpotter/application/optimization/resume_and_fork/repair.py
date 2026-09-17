@@ -266,8 +266,6 @@ async def repair_incomplete_rounds(
                     session,
                     label="round_repair",
                     opt_sp=None,
-                    degradation_checks=None,
-                    n_total_candidates=0,
                     axes=cycle.axes,
                     on_sample_scored=None,
                     on_sample_starting=None,
@@ -277,24 +275,34 @@ async def repair_incomplete_rounds(
             # PHASE 2 — re-score the whole attempted set (all cache hits by now), so the
             # composite comes from the scoring GATEWAY over the complete panel rather than a
             # local computation stitched onto phase 1's partial return.
-            results, scores, _signal = await score_search_point(
+            scored = await score_search_point(
                 sp,
                 attempted,
                 session,
                 label="round_repair",
                 opt_sp=None,
-                degradation_checks=None,
-                n_total_candidates=0,
                 axes=cycle.axes,
                 on_sample_scored=None,
                 on_sample_starting=None,
                 measured=stamp,
             )
+            if scored.stopped is not None:
+                logger.warning(
+                    "Round %d candidate %s: re-scoring its cells stopped after %d/%d (%s) — "
+                    "leaving it holed rather than reporting part of its panel as the whole.",
+                    t.round,
+                    cs.label,
+                    len(scored.results),
+                    len(attempted),
+                    scored.stopped,
+                )
+                continue
+            results = scored.results
             t.all_candidate_results[cs.candidate_id] = results
             t.candidate_scores[i] = build_score_report(
                 cand_osp,
                 cs.pipeline_overlay,
-                scores,
+                scored.scores,
                 results,
                 attempted,
                 label=cs.label,

@@ -71,12 +71,12 @@ Self-healing fires through a different door: failures route directly to the laye
 
 ## 3. Scoring node
 
-`score_search_point()` (`application/scoring/search_point_scorer.py`) is the only optimizer node that's **not LLM-driven**. It:
+The scoring gateway (`application/scoring/search_point_scorer.py`: `open_walk` → `run_walks` → `close_walk`, or `score_search_point()` for one walk) is the only optimizer node that's **not LLM-driven**. It:
 
-- Runs a frozen `JobSearchPoint` (rendered prompt + `pipeline_params`) against the **backend**, not the optimizer LLM.
-- Loops over the scoring dataset, calls the backend per sample, applies the scorer formula.
-- Handles two-tier caching, deprecated-prior eviction, and PoBB elimination stops mid-loop.
-- Returns `(list[QueryMeasurement], stats, escalation_signal)`.
+- Runs frozen `JobSearchPoint`s (rendered prompt + `pipeline_params`) against the **backend**, not the optimizer LLM.
+- Walks the scoring dataset — one loop drives every walk of a phase — calling the backend per sample and applying the scorer formula.
+- Handles two-tier caching, deprecated-prior eviction, and PoBB elimination stops mid-walk.
+- Returns a `ScoredWalk` per walk — rows, scores, escalation signal, and `stopped`: why it ended before its last cell, which each caller answers for itself.
 
 It's the **bridge between optimizer and target system**. Everything above it generates prompts and pipeline params; the scoring node is the only place those land in the real backend and produce a fitness number. The measurement archive is its output stream.
 
@@ -103,7 +103,7 @@ measurements/                       MeasurementArchive
 
 Both files are append-only logs folded last-wins (`store/read_model.py`). The index keys on `content_hash`; a run's log keys on `k` — one `"run"` header row (rewritten whole per save; it is the commit marker) and one `"m:{sample_id}"` row per measurement.
 
-**Write path:** `score_search_point()` → `build_dataset_run_data()` (`application/datasets/loaders.py`) → `archive.append_run(run_id, data, new_measurements)` — the rows already on disk are never rewritten, so a walk of S samples costs O(S) bytes, not O(S²) — → `AxisIndex.refresh()` (`application/intelligence/indexes/axis.py`) pulls via `archive.load_since()`. `compact_run` drops superseded rows at the walk boundary; `reset_run` truncates (a `force_fresh` pass REPLACES its rows, and append-only does not overwrite); `reindex` rebuilds `index.jsonl` from `runs/`.
+**Write path:** a taken cell (`Walk.take`) → `build_dataset_run_data()` (`application/datasets/loaders.py`) → `archive.append_run(run_id, data, new_measurements)` — the rows already on disk are never rewritten, so a walk of S samples costs O(S) bytes, not O(S²) — → `AxisIndex.refresh()` (`application/intelligence/indexes/axis.py`) pulls via `archive.load_since()`. `compact_run` drops superseded rows at the walk boundary; `reset_run` truncates (a `force_fresh` pass REPLACES its rows, and append-only does not overwrite); `reindex` rebuilds `index.jsonl` from `runs/`.
 
 **Read paths** (both return `list[Measurement]`):
 

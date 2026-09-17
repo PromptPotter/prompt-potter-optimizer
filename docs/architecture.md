@@ -47,9 +47,9 @@ target backend's `pipeline.yaml` — so accumulated `OptSearchPoint` data is the
 One round = generate → score → critique.
 
 - `l1_generate` produces N candidate searchpoints from the parent.
-- `l1_score` runs each candidate against the dataset via the **sole
-  scoring entry point** `score_search_point()`
-  (`application/scoring/search_point_scorer.py::score_search_point`).
+- `l1_score` walks the candidates against the dataset through the **sole
+  scoring gateway** (`application/scoring/search_point_scorer.py`):
+  `open_walk` → `run_walks` → `close_walk`.
 - `l1_critique` reads the round's outcomes and writes a structured
   critique. The critique flows into next round's `l1_generate`.
 
@@ -75,7 +75,7 @@ Both are first-class:
 
 #### Three single-place-to-extend mechanisms
 
-Exactly one entry for each shape: **scoring** goes through `score_search_point()`,
+Exactly one entry for each shape: **scoring** goes through the scoring gateway,
 **persistence** through `CycleEventLog.append`, **prompt-fill** through the `injection_table()`
 registry.
 
@@ -799,10 +799,11 @@ the PR description.
   test harness). Audit during cleanup §1 for accumulated cruft, but
   don't delete the underlying scripts without operator confirmation.
 
-- **`score_search_point()` gateway**
-  (`application/scoring/search_point_scorer.py::score_search_point`) — sole scoring
-  ingress. Sibling to `CycleEventLog.append` and `injection_table()`. Don't
-  add a second scoring entry path "for convenience."
+- **The scoring gateway** (`application/scoring/search_point_scorer.py`) — sole
+  scoring ingress: `open_walk` → `run_walks` → `close_walk`, with
+  `score_search_point()` the form for a search point scored alone. Sibling to
+  `CycleEventLog.append` and `injection_table()`. Don't add a second scoring
+  entry path "for convenience."
 
 - **Composite-fitness resolution chain** — **fitness is never one fixed number;
   always ask "under which formula?"** Formula-relative (the **active** formula

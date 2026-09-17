@@ -9,6 +9,7 @@ validators that score a proposal's conformance. Every assertion is wrong-reveal
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -1447,11 +1448,7 @@ def test_pobb_epsilon_is_graded_by_depth_not_scalar():
         check = PoBBCheck(cfg, n_samples=28, ruler=None)
         check.register_completed(measurements([1.0] * 28), candidate_id="winner", sp=_DUMMY_SP)
         check.set_current("arm")
-        return check.check(
-            measurements([0.0] * misses + [1.0] * (n - misses)),
-            candidate_idx=1,
-            n_total_candidates=2,
-        )
+        return check.check(measurements([0.0] * misses + [1.0] * (n - misses)))
 
     # One discordant loss is uncuttable at EVERY depth, not merely reprieved at the floor: a single
     # adverse cell caps p_best at 0.25, above every bar this ramp reaches.
@@ -1476,15 +1473,13 @@ def test_pobb_locks_in_dominant_leader():
     )
     check.register_completed(measurements([0.0] * 20), candidate_id="weak_prior", sp=_DUMMY_SP)
     check.set_current("strong_current")
-    sig = check.check(measurements([1.0] * 8), candidate_idx=1, n_total_candidates=3)
+    sig = check.check(measurements([1.0] * 8))
     assert sig is not None
     assert sig.target == EscalationTarget.LEADER_LOCKED
     cr = sig.check_result
     assert cr["leader_id"] == "weak_prior"
     assert cr["p_best"] >= 0.95
     assert cr["queries_scored"] == 8
-    # Two candidates remain unscored (idx=1 of 3).
-    assert sig.candidates_skipped == 1
 
 
 async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
@@ -1508,11 +1503,7 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
         sp=_DUMMY_SP,
     )
     check_no_backfill.set_current("R2_challenger")
-    sig = check_no_backfill.check(
-        measurements([0.0] * 5, sample_ids=candidate_samples),
-        candidate_idx=0,
-        n_total_candidates=6,
-    )
+    sig = check_no_backfill.check(measurements([0.0] * 5, sample_ids=candidate_samples))
     assert sig is None, (
         "lucky-prefix leader incomplete on candidate's hard samples must NOT cause "
         "elimination — old unpaired code would have unfairly fired here"
@@ -1521,10 +1512,10 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
     # --- Branch (b): backfill_fn returns honest leader scores on the hard set ⇒ paired
     # comparison shows the leader is not actually 100% (it misses 4/5), and the
     # candidate (0/5) is no longer overwhelmingly dominated — no elimination.
-    backfill_calls: list[tuple[int, ...]] = []
+    backfill_calls: list[int] = []
 
-    async def _stub_backfill(_sp, samples, prior_id):
-        backfill_calls.append(tuple(s.id for s in samples))
+    def _stub_backfill(_sp, sample, prior_id):
+        backfill_calls.append(sample.id)
         assert prior_id == "R1_lucky_winner", (
             "the backfill must be told WHOSE catch-up it is running; inheriting the "
             "foreground candidate's identity is what mis-filed C1.1's rows as C1.2's"
@@ -1532,10 +1523,10 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
         # Leader misses 4/5 hard samples; only #13 is hit. Mirrors origin's
         # behavior on the same samples in the real cycle.
         truth = {9: False, 12: False, 13: True, 14: False, 8: False}
-        return [
-            {"sample_id": s.id, "fitness": (f := 1.0 if truth[s.id] else 0.0), "objective": f}
-            for s in samples
-        ]
+        f = 1.0 if truth[sample.id] else 0.0
+        call = asyncio.get_running_loop().create_future()
+        call.set_result(None)
+        return call, lambda: [{"sample_id": sample.id, "fitness": f, "objective": f}]
 
     check_paired = PoBBCheck(
         PoBBConfig(n_min=4, epsilon=0.05), n_samples=20, ruler=None, backfill_fn=_stub_backfill
@@ -1546,18 +1537,16 @@ async def test_paired_pobb_breaks_lucky_prefix_leader_trap():
         sp=_DUMMY_SP,
     )
     for sid in candidate_samples:
-        await check_paired.backfill_for_sample(Sample(id=sid, query="q", ground_truth="t"))
+        sample = Sample(id=sid, query="q", ground_truth="t")
+        check_paired.start_backfill(sample, 1)
+        check_paired.commit_backfills(sample)
 
-    assert backfill_calls == [(9,), (12,), (13,), (14,), (8,)]
+    assert backfill_calls == candidate_samples
     leader_paired = check_paired.priors_by_sample["R1_lucky_winner"]
     assert all(str(sid) in leader_paired for sid in candidate_samples)
 
     check_paired.set_current("R2_challenger")
-    sig = check_paired.check(
-        measurements([0.0] * 5, sample_ids=candidate_samples),
-        candidate_idx=0,
-        n_total_candidates=6,
-    )
+    sig = check_paired.check(measurements([0.0] * 5, sample_ids=candidate_samples))
     # Leader honest mean 1/5; candidate 0/5 — gap small ⇒ p_best must stay ≥ ε=0.05.
     if sig is not None:
         assert sig.check_result["p_best"] >= 0.05
@@ -1580,7 +1569,7 @@ def test_an_arm_in_the_last_n_min_cells_is_finished_not_discarded() -> None:
         check = PoBBCheck(cfg, n_samples=28, ruler=None)
         check.register_completed(measurements([1.0] * 28), candidate_id="winner", sp=_DUMMY_SP)
         check.set_current("arm")
-        return check.check(measurements([0.0] * n), candidate_idx=1, n_total_candidates=2)
+        return check.check(measurements([0.0] * n))
 
     # Hopeless arms in the BODY of the panel still die — the guard is a tail rule, not a reprieve.
     assert cut_at(9) is not None
@@ -1613,7 +1602,7 @@ def test_a_collapse_cut_is_never_reported_as_an_epsilon_cut() -> None:
         }
         for i in range(6)
     ]
-    signal = PoBBCheck(PoBBConfig(), n_samples=28, ruler=None).check(rows, 0, 1)
+    signal = PoBBCheck(PoBBConfig(), n_samples=28, ruler=None).check(rows)
     assert signal is not None, "a constant answerer must be cut at n_min"
     cr = signal.check_result
     assert cr["gate"] == EliminationGate.COLLAPSED
@@ -1666,7 +1655,7 @@ def test_the_collapse_gate_reads_the_answer_not_the_labels() -> None:
         ]
 
     def cut(rs: list[Any]) -> Any:
-        return PoBBCheck(PoBBConfig(), n_samples=28, ruler=None).check(rs, 0, 1)
+        return PoBBCheck(PoBBConfig(), n_samples=28, ruler=None).check(rs)
 
     signal = cut(rows([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]))
     assert signal is not None, "a constant answerer must be cut at n_min with no labels to read"
@@ -1807,26 +1796,148 @@ def test_a_fatal_row_ends_a_candidate_on_one_sighting_and_an_advisory_never_does
     check = DegradationCheck(threshold=0.4, min_samples=3)
 
     # ONE fatal sighting ends it, before `min_samples` is even reached.
-    sig = check.check([measurement(0, 1.0), {**measurement(1, 1.0), **warn("structural")}], 0, 3)
+    sig = check.check([measurement(0, 1.0), {**measurement(1, 1.0), **warn("structural")}])
     assert sig is not None
     assert sig.check_result["fatal"] is True
     assert sig.check_result["dominant_warning"] == "entity_profiling:json_validate_failed"
-    assert sig.candidates_skipped == 2
 
     # An advisory sighting is not an elimination at ANY depth.
     advisory = [{**measurement(i, 1.0), **warn("transient")} for i in range(6)]
-    assert check.check(advisory, 0, 3) is None
+    assert check.check(advisory) is None
 
     # Below `min_samples` a non-fatal round decides nothing rather than deciding on two rows.
-    assert check.check([measurement(0, 1.0), measurement(1, 0.0)], 0, 3) is None
+    assert check.check([measurement(0, 1.0), measurement(1, 0.0)]) is None
 
     # The rate arm, with the fast path off so the threshold is what is under test.
     rated = DegradationCheck(threshold=0.4, min_samples=3, fatal_fastpath=False)
     fatal_row = {**measurement(0, 0.0), **warn("structural")}
     clean = [measurement(i, 1.0) for i in range(1, 6)]
-    assert rated.check([fatal_row, *clean[:4]], 0, 3) is None  # 1/5 = 0.2, under the bar
-    cut = rated.check([fatal_row, {**fatal_row, "sample_id": 9}, *clean[:2]], 0, 3)
+    assert rated.check([fatal_row, *clean[:4]]) is None  # 1/5 = 0.2, under the bar
+    cut = rated.check([fatal_row, {**fatal_row, "sample_id": 9}, *clean[:2]])
     assert cut is not None and cut.check_result["degraded_rate"] == pytest.approx(0.5)
+
+
+def test_no_walk_is_cut_before_the_horizon_it_launched_under() -> None:
+    """A look-ahead walk launches one cell past ``earliest_stop`` and no further, so a horizon that
+    answers LATE is paid for silently: every cut it misses discards calls that were bought and
+    never recorded. The walks below are random, with graded, errored and constant-answer rows, a
+    2PL ruler, a prior that must be backfilled (and sometimes cannot be), a candidate ahead that
+    may never become one, and cells finishing out of order, and every gate gets to fire: collapse, lock-in, the ramped ε and the degradation
+    rate. No horizon may come after the cut that actually happened.
+
+    The other direction is only cost, so it is pinned loosely: a horizon that always answered
+    "the next cell" would be sound and would buy no look-ahead at all."""
+    import random
+
+    from promptpotter.application.optimization.pobb.checks import DegradationCheck
+    from promptpotter.domain.sample import Sample
+
+    n = 10
+    delta = [-1.2, 0.4, 2.1, -0.3, 1.0, 2.8, -2.0, 0.7, 1.6, 0.1]
+    ruler = DeltaRuler(
+        delta=dict(enumerate(delta)),
+        delta_se=dict.fromkeys(range(n), 0.4),
+        discrimination={0: 0.6, 3: 1.8, 5: 1.3, 8: 0.9},
+        mu_delta=0.5,
+        sigma_delta=1.4,
+        sigma_theta=1.5,
+        calibration_model="2PL",
+        anchor_id="horizon",
+    )
+    samples = [Sample(id=i, query=f"q{i}", ground_truth="AB"[i % 2]) for i in range(n)]
+    config = PoBBConfig(
+        n_min=3, epsilon=0.35, epsilon_floor=0.2, lock_in=0.7, lock_in_n_min=4, leader_lock_in=True
+    )
+    rng = random.Random(1)
+    gates: set[str] = set()
+    ahead = states = sharper = 0
+    for _ in range(120):
+        tilt = rng.choice((0.2, 0.5, 0.8))
+        constant = rng.random() < 0.25
+        sick = rng.choice((0.0, 0.1, 0.5))
+
+        def grade(p: float) -> float:
+            return rng.choice((0.0, 0.5, 1.0)) if rng.random() < 0.3 else float(rng.random() < p)
+
+        rows = [
+            measurement(i, None, error="boom", error_category="transient")
+            if rng.random() < 0.1
+            else {
+                **measurement(i, g, objective=g),
+                "predicted": "A" if constant else rng.choice("AB"),
+                "ground_truth": s.ground_truth,
+            }
+            for i, s in enumerate(samples)
+            for g in [grade(tilt)]
+        ]
+        fatal = {"step": "llm_only", "code": "json_validate_failed", "kind": "structural"}
+        for r in rows:
+            if rng.random() < sick:
+                r["pipeline_data"] = {"diagnostics": {"warnings": [fatal]}}
+        check = PoBBCheck(config, n_samples=n, ruler=ruler)
+        check.register_completed(
+            measurements([grade(0.5) for _ in range(n)]), candidate_id="full", sp=_DUMMY_SP
+        )
+        check.register_completed(
+            [
+                measurement(i, g, objective=g)
+                for i in range(n)
+                if rng.random() < 0.4
+                for g in [grade(0.6)]
+            ],
+            candidate_id="partial",
+            sp=_DUMMY_SP,
+        )
+        # A candidate ahead, still walking while this one looks ahead: it registers with every row
+        # or is cut and never does, and the horizon sees only some of the rows it has back.
+        walking = rng.random() < 0.5
+        strength, returned = rng.choice((0.3, 0.9)), rng.choice((0.6, 1.0))
+        ahead_rows = [
+            measurement(i, None, error="boom", error_category="transient")
+            if rng.random() < 0.1
+            else measurement(i, g, objective=g)
+            for i in range(n)
+            for g in [grade(strength)]
+        ]
+        seer = PoBBCheck(config, n_samples=n, ruler=ruler)
+        seer.priors_by_sample = dict(check.priors_by_sample)  # the partial's backfills reach both
+        seer.prior_ids = list(check.prior_ids)
+        if walking and rng.random() < 0.5:
+            check.register_completed(ahead_rows, candidate_id="ahead", sp=_DUMMY_SP)
+        rate = DegradationCheck(threshold=0.34, min_samples=3, fatal_fastpath=False)
+        results: list[dict] = []
+        horizons: list[int | None] = []
+        cut = None
+        for a in range(n):
+            upcoming = [(samples[j], rows[j] if rng.random() < 0.3 else None) for j in range(a, n)]
+            back = [r for r in ahead_rows if rng.random() < returned]
+            unresolved = {"ahead": back} if walking else None
+            stops = [seer.earliest_stop(results, upcoming, unresolved=unresolved)]
+            stops.append(rate.earliest_stop(results, upcoming))
+            if walking:
+                read = stops[0]
+                blind = seer.earliest_stop(results, upcoming, unresolved={"ahead": []})
+                sharper += blind is not None and (read is None or read > blind)
+            horizon = min((m for m in stops if m is not None), default=None)
+            assert horizon is None or horizon > a
+            horizons.append(horizon)
+            results.append(rows[a])
+            if rng.random() < 0.8:  # the backfill that covers the partial prior, when it succeeds
+                check.priors_by_sample["partial"].setdefault(str(a), grade(0.6))
+            signal = check.check(results) or rate.check(results)
+            if signal is not None:
+                cut = a + 1
+                gates.add(str(signal.check_result.get("gate", signal.check_name)))
+                break
+        for a, horizon in enumerate(horizons):
+            states += 1
+            ahead += horizon is None or horizon > a + 1
+            assert cut is None or (horizon is not None and horizon <= cut), (
+                f"launched past a cut: horizon {horizon} at {a} rows, cut at {cut}"
+            )
+    assert gates >= {"collapsed", "lock_in", "epsilon", "degradation"}, gates
+    assert ahead / states > 0.4, f"the horizon bought look-ahead in {ahead}/{states} states"
+    assert sharper > 0, "a candidate ahead's returned cells never moved the horizon"
 
 
 # 6. Which cells a round buys

@@ -73,7 +73,7 @@ async def rescore_parent(
     session = cycle.session
     tr = cycle.tracking
     assert tr.current_sp is not None
-    results, scores, _signal = await score_search_point(
+    scored = await score_search_point(
         tr.current_sp,
         scoring_set,
         session,
@@ -82,8 +82,6 @@ async def rescore_parent(
         # delta reads a prompt-length difference as a behaviour difference. `l1_diversity` is
         # withheld for the same reason — it keeps its 1.0 vacuous default.
         opt_sp=None,
-        degradation_checks=None,
-        n_total_candidates=0,
         axes=cycle.axes,
         # Ticked, not silenced. This is the LONGEST phase of a held round — the parent walks the
         # whole panel while the candidates stopped wherever PoBB cut them — so a silenced one
@@ -99,16 +97,27 @@ async def rescore_parent(
         ),
         force_fresh=force_fresh,
     )
+    # Kept: `matched_parent_stats` pairs each candidate on the cells both reached, and the report
+    # carries the shortfall as `scored_samples < expected_samples`. A held round's headline is
+    # this pass, though, so the shortfall is said aloud rather than left for a reader to count.
+    if scored.stopped is not None:
+        logger.warning(
+            "Round parent %s stopped after %d/%d cells (%s); its floor covers only those.",
+            cycle.rounds[-1].label,
+            len(scored.results),
+            len(scoring_set),
+            scored.stopped,
+        )
     return RoundParent(
         opt_sp=cycle.opt_sp,
-        results=cast("list[dict[str, Any]]", results),
+        results=cast("list[dict[str, Any]]", scored.results),
         # The gateway's OWN answer — never re-run `compute_composite_fitness` over the same
         # rows, which drops the evaluator namespace on the way.
         report=build_score_report(
             cycle.opt_sp,
             None,
-            scores,
-            results,
+            scored.scores,
+            scored.results,
             scoring_set,
             # The parent INDIVIDUAL's label (``C0``, ``C3.1``, …), off the round it won — it
             # reaches disk, so a synthesized round name here would name no candidate.
@@ -369,9 +378,10 @@ async def establish_campaign_origin(
     try:
         # The origin is the campaign's whole reference, so a transient-transport abort must not
         # bank a corrupted floor — re-score once fresh. A config-deterministic abort is NOT
-        # retried; it is a real fault the operator must fix.
+        # retried; it is a real fault the operator must fix. A pass that stays partial is graded
+        # by coverage (`origin_gate`), which is why nothing here reads `stopped`.
         for attempt in range(2):
-            origin_results, scores, signal = await score_search_point(
+            scored = await score_search_point(
                 sp,
                 scoring_set,
                 session,
@@ -385,7 +395,7 @@ async def establish_campaign_origin(
                 on_sample_starting=partial(listener.on_sample_started, 0, 1),
                 on_sample_scored=partial(listener.on_sample_scored, 0, 1),
             )
-            if not is_transient_scoring_abort(signal):
+            if not is_transient_scoring_abort(scored.signal):
                 break
             logger.warning(
                 "Origin scoring hit a transient transport abort — re-scoring once fresh."
@@ -395,8 +405,8 @@ async def establish_campaign_origin(
         report = build_score_report(
             resolved_origin,
             None,
-            scores,
-            origin_results,
+            scored.scores,
+            scored.results,
             scoring_set,
             label=candidate_label(0, 0),
             sp_hash=sp.sp_hash(pipeline_schema),
@@ -409,7 +419,7 @@ async def establish_campaign_origin(
     return CampaignOrigin(
         resolved_origin=resolved_origin,
         report=report,
-        origin_results=origin_results,
+        origin_results=scored.results,
     )
 
 

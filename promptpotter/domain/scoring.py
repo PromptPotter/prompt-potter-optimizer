@@ -177,7 +177,7 @@ class QueryMeasurement(TypedDict):
     # and errored, carrying the missing term's own message. Presence IS the state; ``fitness`` and
     # ``objective`` are then absent, which is what keeps a stale archived verdict from reading as
     # this formula's. Never an error: the backend answered and the row is worth keeping, so it must
-    # not reach the walk's abort classifier (`query_loop.py::_classify_abort`).
+    # not reach the walk's abort classifier (`query_loop.py::Walk._abort_reason`).
     unscored: NotRequired[str]
     pipeline_data: PipelineData | None
     # ---- Stamped after measurement, by the scorer and the walk -------------------

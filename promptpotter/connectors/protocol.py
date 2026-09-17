@@ -103,9 +103,10 @@ class Connector:
     ``in_process_run`` (no HTTP). ``BackendClient.run_query`` dispatches on this."""
 
     max_cells_in_flight: int = 2
-    """Most samples of one candidate the scoring walk may hold in flight once armed. Declared
-    here rather than read off ``execution``, a transport fact: ``dspy`` and ``promptpotter`` are
-    both ``in_process`` and want opposite answers. ``1`` opts out.
+    """Most calls a scoring round may hold in flight once armed — every candidate's cells and the
+    catch-up calls that pair them, together. Declared here rather than read off ``execution``, a
+    transport fact: ``dspy`` and ``promptpotter`` are both ``in_process`` and want opposite
+    answers. ``1`` opts out.
 
     **This is the whole of what a connector may say about concurrency — never how long an operator
     arming lasts.** A connector cannot see whether the walk in front of it sits inside a round;

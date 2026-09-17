@@ -17,7 +17,7 @@ from promptpotter.application.campaign_config import (
 )
 from promptpotter.application.initialization.loop_start import (
     arm_diagnostic_scoring,
-    diagnostic_stop_as,
+    diagnostic_pass,
 )
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.optimization.l1.population import merge_pipeline_params
@@ -290,20 +290,23 @@ async def verify_candidate(
         n_to_pick,
         len(measured_ids),
     )
-    with _diagnostic_trace(stores, hop), diagnostic_stop_as(VerifyError):
-        await score_search_point(
-            jsp,
-            picked,
-            session,
-            label="verify",
-            # `verify` replays a RECORDED config against fresh samples; the optimizer state that
-            # produced it is not in scope here, and the workspace side it is compared against
-            # (`compute_composite_fitness` below) has none either.
-            opt_sp=None,
-            measured=None,
-            on_sample_scored=lambda *_a, **_k: None,
-            on_sample_starting=lambda *_a, **_k: None,
-            source=f"verify:{hop.campaign_id}:{label}",
+    with _diagnostic_trace(stores, hop):
+        await diagnostic_pass(
+            VerifyError,
+            score_search_point(
+                jsp,
+                picked,
+                session,
+                label="verify",
+                # `verify` replays a RECORDED config against fresh samples; the optimizer state
+                # that produced it is not in scope here, and the workspace side it is compared
+                # against (`compute_composite_fitness` below) has none either.
+                opt_sp=None,
+                measured=None,
+                on_sample_scored=lambda *_a, **_k: None,
+                on_sample_starting=lambda *_a, **_k: None,
+                source=f"verify:{hop.campaign_id}:{label}",
+            ),
         )
 
     # Workspace aggregate: archive rows matching this candidate's node-configs, deduped per sample (latest wins).

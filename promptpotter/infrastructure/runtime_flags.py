@@ -3,6 +3,7 @@ place run-state is computed — for every reader, live surfaces included."""
 
 from __future__ import annotations
 
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -25,24 +26,39 @@ def is_checkin(cycle_dir: Path) -> bool:
     return CycleLayout(cycle_dir).checkin_flag.is_file()
 
 
-def write_sample_lookahead(cycle_dir: Path, cells: int) -> None:
-    """How many samples the walk holds in flight, from now until the round that scores under it
-    ends. ``cells <= 1`` removes the file, so "back to sequential" and "never set" are one on-disk
-    state rather than two that read alike."""
+def write_sample_lookahead(cycle_dir: Path, cells: int, *, auto: bool = False) -> None:
+    """How many calls the round holds in flight, until the round that scores under it ends — or,
+    with ``auto``, as many as its stop rules allow, every round until the operator says otherwise.
+    ``cells <= 1`` without ``auto`` removes the file, so "back to sequential" and "never set" are
+    one on-disk state rather than two that read alike."""
     path = CycleLayout(cycle_dir).sample_lookahead
-    if cells <= 1:
+    if cells <= 1 and not auto:
         path.unlink(missing_ok=True)
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    write_json(path, {"cells": int(cells), "requested_at": time.time()})
+    write_json(path, {"cells": int(cells), "auto": auto, "requested_at": time.time()})
+
+
+def sample_lookahead_auto(cycle_dir: Path) -> bool:
+    """Whether the arming outlives its round. A mode, where the plain press is a gesture."""
+    data = read_json_tolerant(CycleLayout(cycle_dir).sample_lookahead)
+    return isinstance(data, dict) and data.get("auto") is True
+
+
+def spend_sample_lookahead(cycle_dir: Path) -> None:
+    """The round that scored under the arming spends it — a press, never an ``auto`` one. The walk
+    wastes at most one call per cut at any depth (``StopRule.earliest_stop``), which is what makes
+    an arming that never ends safe to leave on."""
+    if not sample_lookahead_auto(cycle_dir):
+        CycleLayout(cycle_dir).sample_lookahead.unlink(missing_ok=True)
 
 
 def effective_lookahead(requested: int, ceiling: int) -> int:
-    """What the walk will ACTUALLY hold in flight — the request bounded by the connector's
+    """What the round will ACTUALLY hold in flight — the request bounded by the connector's
     declared ``max_cells_in_flight``.
 
-    **The one clamp**, and every reader meaning "the depth in force" ends here: the walk
-    (`query_loop._lookahead`), the served overlay (`overlay_armed_controls`), and the dashboard
+    **The one clamp**, and every reader meaning "the depth in force" ends here: the scoring phase
+    (`query_loop._armed_cells`), the served overlay (`overlay_armed_controls`), and the dashboard
     file (`live_dashboard/projection.py::_persist`) — which was the one that did not, and wrote a depth
     nothing was running beside the ceiling refusing it. The write side stores the request UNCLAMPED
     on purpose: a ceiling is a property of the backend a cycle runs against, not of the press."""
@@ -56,13 +72,16 @@ def read_sample_lookahead(cycle_dir: Path) -> int:
     round clears the file.
 
     Not the depth in force on its own: `POST /commands/set-sample-lookahead` takes any int ≥ 1,
-    and the connector's ceiling is what decides how much of it the walk honours.
+    and the connector's ceiling is what decides how much of it the walk honours. ``auto`` asks for
+    no bound at all, so the ceiling alone decides and the stop rules limit the rest.
 
     ``1`` when absent, unreadable or malformed: the failure direction is "run as normal", never
     "stall"."""
     data = read_json_tolerant(CycleLayout(cycle_dir).sample_lookahead)
     if not isinstance(data, dict):
         return 1
+    if data.get("auto") is True:
+        return sys.maxsize
     cells = data.get("cells")
     if not isinstance(cells, int) or isinstance(cells, bool):
         return 1
@@ -71,7 +90,8 @@ def read_sample_lookahead(cycle_dir: Path) -> int:
 
 def clear_run_control_flags(cycle_dir: Path) -> BudgetChange:
     """Drop every POLLED run-control flag — a fresh launch IS the operator's intent to run at the
-    engine's own cadence, and a flag surviving the gesture it answered re-answers the next one.
+    engine's own cadence, and a flag surviving the gesture it answered re-answers the next one. An
+    ``auto`` look-ahead answered no gesture, so it stays until toggled off.
 
     **Returns the spend ceiling it dropped, and the caller must compose it.** Alone among these
     flags, ``spend_cap.json`` can carry a decision the run has not acted on yet:
@@ -83,7 +103,7 @@ def clear_run_control_flags(cycle_dir: Path) -> BudgetChange:
     dropped = read_spend_caps(cycle_dir)
     layout.pause_flag.unlink(missing_ok=True)
     layout.skip_flag.unlink(missing_ok=True)
-    layout.sample_lookahead.unlink(missing_ok=True)
+    spend_sample_lookahead(cycle_dir)
     # `entry.py::_usd_cap` prefers this file over the cap the launch just composed, so a ceiling
     # clamped against a richer account governs every later resume unless it goes with the run.
     layout.spend_cap.unlink(missing_ok=True)
@@ -130,7 +150,7 @@ def overlay_armed_controls(body: dict[str, Any], cycle_dir: Path) -> None:
     conditional-GET validator, so a press expires the cached answer on its own.
 
     **A REPLAY must not call this.** These are the values in force now, and restating one as a past
-    moment's is a fabrication."""
+    moment's is a fabrication. Call it after ``run_phase`` is set on the body."""
     limits = body.get("run_limits")
     if isinstance(limits, dict):
         armed_usd, armed_tokens = read_spend_caps(cycle_dir)
@@ -140,14 +160,19 @@ def overlay_armed_controls(body: dict[str, Any], cycle_dir: Path) -> None:
             limits["token_budget"] = armed_tokens
     # Clamped against the SERVED ceiling, so this is the depth the walk will hold rather than the
     # depth someone asked for. `max_cells_in_flight` is a WIRING_FIELD stamped at INIT:exit, so it
-    # is already in the body being corrected. Unclamped, an out-of-range request rendered as fact:
-    # the browser's segmented control offers 1..maxCells, so a served 8 against a ceiling of 2 lit
-    # no segment at all, and the panel claimed a depth nothing was running.
+    # is already in the body being corrected. Unclamped, an out-of-range request rendered as fact —
+    # a served 8 against a ceiling of 2 claimed a depth nothing was running — and an `auto` arming,
+    # which asks for no bound at all, would serve a number no backend holds.
     ceiling = body.get("max_cells_in_flight")
     body["sample_lookahead"] = effective_lookahead(
         read_sample_lookahead(cycle_dir),
         ceiling if isinstance(ceiling, int) and not isinstance(ceiling, bool) else 1,
     )
+    body["sample_lookahead_auto"] = sample_lookahead_auto(cycle_dir)
+    # The flight gauge is the one FOLDED value that goes stale the same way: a killed or crashed
+    # run never publishes its closing zero, so a dead producer would go on reporting calls out.
+    if body.get("run_phase") != RunPhase.RUNNING:
+        body.update(in_flight=0, lookahead_allowed=0, waiting_on=None, waiting_since=None)
 
 
 # dashboard.json untouched for longer than this ⇒ an active cycle's producer is
@@ -266,6 +291,8 @@ __all__ = [
     "read_sample_lookahead",
     "read_spend_caps",
     "run_phase_validator_epoch",
+    "sample_lookahead_auto",
+    "spend_sample_lookahead",
     "write_sample_lookahead",
     "write_spend_caps",
 ]

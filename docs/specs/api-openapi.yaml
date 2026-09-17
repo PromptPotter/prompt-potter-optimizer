@@ -254,29 +254,34 @@ paths:
   /commands/set-sample-lookahead:
     post:
       operationId: setSampleLookahead
-      summary: Set how many samples the scoring walk holds in flight — host-admin only.
+      summary: Set how many calls the scoring round holds in flight — host-admin only.
       description: |
-        Writes `.runtime/sample_lookahead.json` (`cells: 1` removes it). While set, the walk
-        holds that many of one candidate's samples at once instead of one, cutting the wall
-        clock of its sample walk roughly in proportion.
+        Writes `.runtime/sample_lookahead.json` (`cells: 1` without `auto` removes it). While set,
+        the round holds that many calls at once instead of one — its candidates walk together
+        and decide in turn — cutting the wall clock of its scoring roughly in proportion.
 
         **The request is recorded unclamped; the walk clamps it** to the backend's declared
         `Connector.max_cells_in_flight`, which is where the connector being walked is known.
-        Two fields are served on `dashboard.json`: `max_cells_in_flight` (the ceiling, `1`
-        meaning the control does not apply to this backend) and `sample_lookahead` — **the
-        depth in force, and the only reading of it there is.** It is the flag re-read on the
-        way out of the dashboard route and the SSE snapshot, never served as the runner last
-        flushed it, so a press is visible on the next poll rather than at the next launch.
-        There is deliberately no second field for "what the loop last held": that is a log
-        with no round-boundary writer, and a control reconciling the two reported a spent
-        depth as the depth still in force.
+        `dashboard.json` serves `max_cells_in_flight` (the ceiling, `1` meaning the control does
+        not apply to this backend) and `sample_lookahead` — **the depth in force, and the only
+        reading of it there is**, re-read from the flag on the way out of the dashboard route and
+        the SSE snapshot, so a press is visible on the next poll rather than at the next launch.
+        Beside them, the round's own gauge: `in_flight`, `lookahead_allowed` (what the stop rules
+        let the round hold right now) and `lookahead_most` (the most it could hold were nothing
+        cut) — each summed over every candidate walking and the PoBB catch-ups, and between
+        rounds `lookahead_most` is the next round's, so a press can be sized before it applies.
 
         **The depth lasts ONE ROUND of scoring** and is cleared when that round's scoring
         completes, so one set outside a scoring phase waits for the next round rather than
-        expiring unused. This is the same on every backend: a connector declares the ceiling
-        and cannot declare how long a depth lasts, because it cannot see whether the walk in
-        front of it is inside a round. The walk re-reads the flag at every launch boundary, so
-        a press mid-walk tops the window up rather than waiting for it to drain.
+        expiring unused. **`auto: true` asks for no depth at all**: every round holds as many
+        calls as its stop rules allow, up to the ceiling, until an `auto: false` press replaces
+        it; `cells` is ignored while it stands, and it is served as
+        `dashboard.json::sample_lookahead_auto`. Leaving it on is safe because the walk launches
+        no further than one cell past the earliest row a stop rule could cut at. This is the same
+        on every backend: a connector declares the ceiling and cannot declare how long a depth
+        lasts, because it cannot see whether the walk in front of it is inside a round. The walk
+        re-reads the flag at every launch boundary, so a press mid-walk tops the window up rather
+        than waiting for it to drain.
 
         **The measurement is unchanged, at any depth.** Samples are
         acquired in parallel but absorbed in walk order, and an acquisition still in flight when
@@ -3126,12 +3131,19 @@ components:
               type: integer
               minimum: 1
               description: >
-                How many of one candidate's samples the walk may hold in flight. `1` clears it —
+                How many calls the scoring round may hold in flight. `1` clears it —
                 one on-disk state for "never set" and "cancelled", so the two cannot read
                 alike. Recorded as sent and clamped by the walk to the backend's declared
                 ceiling (`dashboard.json::max_cells_in_flight`), so a value above it runs at the
                 ceiling rather than being rejected. The depth also ends on its own — after the
                 round that scores under it — so `1` is a cancel, not the normal way it ends.
+            auto:
+              type: boolean
+              default: false
+              description: >
+                Hold as many calls as the stop rules allow, up to the ceiling, every round and
+                past a fresh launch, until an `auto: false` press replaces it; `cells` is ignored
+                while it stands. `false` is the one-round press.
             descend:
               type: string
               maxLength: 512

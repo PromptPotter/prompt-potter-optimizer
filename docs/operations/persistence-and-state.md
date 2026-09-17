@@ -164,11 +164,11 @@ Polled per checkpoint and consumed at the next **sample** boundary — transient
 |---|---|
 | `pause.flag` | The single operator-interrupt flag. **There is no `stop.flag`.** The loop exits at the next checkpoint; the cycle stays resumable. |
 | `checkin.flag` | The campaign is still authoring its origin. Dropped at skeleton creation, cleared when Start flips `checkin` → `active`. |
-| `sample_lookahead.json` | The operator's *request* that the walk hold a second sample in flight. What the loop actually ran at is `dashboard.json::sample_lookahead` — never serve the flag as that. |
+| `sample_lookahead.json` | The operator's *request* that the round hold several calls in flight, for one round — or, with `auto`, until a later press replaces it. What the loop actually ran at is `dashboard.json::sample_lookahead` — never serve the flag as that. |
 | `skip.flag` | Skip the current unit at the next checkpoint. |
 | `spend_cap` | Live `(usd, tokens)` ceilings. |
 
-A fresh launch clears every polled run-control flag: a flag surviving the gesture it answered would re-answer the next one.
+A fresh launch clears every polled run-control flag: a flag surviving the gesture it answered would re-answer the next one. An `auto` look-ahead answered no gesture — it is a mode — so it stays.
 
 ### Where the error text is
 
@@ -240,7 +240,7 @@ A hole is plugged with a **real measurement, never an archive row** — a cached
 
 **An inner cycle stops when its owner does.** An L4 inner campaign runs in a child task under its own sandbox, whose pause flag nobody writes; it inherits the outer's pause predicate at the run-control binding seam (`runner/entry.py::_bind_run_controls`) rather than overwriting it. Without that a pause on the outer waited out the whole inner campaign, because one outer *sample* is an entire inner run.
 
-**Make a slow round finish sooner — the look-ahead control.** The remote's **⇉** control runs the walk with several of a candidate's samples in flight instead of one, cutting that walk's wall clock roughly in proportion. Suggest it whenever someone asks why a round is taking so long; it is the only speed lever needing no config change and no restart. **Every clause of it** — who may press, what one press buys, why the overshot sample is discarded — is owned by [`access-model.md`](access-model.md) § host-admin ↔ user. What this layer must hold is the on-disk half: the operator's *request* is `.runtime/sample_lookahead.json` and what the loop actually ran at is `dashboard.json::sample_lookahead`, never the flag served as that.
+**Make a slow round finish sooner — the look-ahead control.** The remote's **⇉** control runs the round with several calls in flight instead of one — its candidates walk together and decide in turn — cutting its scoring wall clock roughly in proportion. Suggest it whenever someone asks why a round is taking so long; it is the only speed lever needing no config change and no restart. **Every clause of it** — who may press, what one press buys, why the overshot sample is discarded — is owned by [`access-model.md`](access-model.md) § host-admin ↔ user. What this layer must hold is the on-disk half: the operator's *request* is `.runtime/sample_lookahead.json` and what the loop actually ran at is `dashboard.json::sample_lookahead`, never the flag served as that.
 
 ## CLI flags — `new` and `resume`
 

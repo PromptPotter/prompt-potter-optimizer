@@ -195,7 +195,7 @@ export async function postVerifyCandidate(
     label,
   });
 }
-// Set how many of a candidate's samples the scoring walk holds in flight; `cells: 1` disarms,
+// Set how many calls the scoring round holds in flight; `cells: 1` disarms,
 // so it is a cancel rather than a second verb. The request is sent unclamped and the walk
 // clamps it to the backend's ceiling (`dashboard.json::max_cells_in_flight`). It also ends on
 // its own — spent by the round that scored under it, the same on every backend. Unlike skip it
@@ -204,11 +204,13 @@ export async function postVerifyCandidate(
 //
 // The one command addressed by PATH rather than by the root hop: throughput is what an inner
 // run answers for itself, so an L4 inner cycle is armed by descending to it — the same
-// `descend` grammar the dashboard poll uses, empty at depth 1.
+// `descend` grammar the dashboard poll uses, empty at depth 1. `auto` keeps the arming past its
+// round and past a relaunch, until a later press replaces it.
 // Per `api-openapi.yaml::setSampleLookahead`.
 export async function postSetSampleLookahead(
   path: CyclePath,
   cells: number,
+  auto: boolean,
 ): Promise<CommandAcceptedBody> {
   const root = pathRoot(path);
   const descend = encodeDescend(path);
@@ -216,6 +218,7 @@ export async function postSetSampleLookahead(
     campaign_id: root.campaignId,
     cycle_id: root.cycleId,
     cells,
+    auto,
     ...(descend ? { descend } : {}),
   });
 }

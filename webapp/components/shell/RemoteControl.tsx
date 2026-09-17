@@ -1,7 +1,7 @@
 "use client";
 import { useMemo, useState, type ReactNode } from "react";
 import { postSkipSearchpoint, postSetSampleLookahead, IngestApiError } from "@/lib/api";
-import { SegmentedControl, Term } from "@/components/ui";
+import { SegmentedControl, Switch, Term } from "@/components/ui";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { cx } from "@/lib/cx";
@@ -62,6 +62,15 @@ function etaToBudget(
   const burn = usedUsd / ageSec; // $/sec
   const remainingSec = (budgetUsd - usedUsd) / burn;
   return fmtDuration(remainingSec);
+}
+
+// The call a round's next decision waits on, once it has outlasted an ordinary call — module-level
+// for the same wallclock reason as `etaToBudget`. Calls are taken in walk order, so one slow call
+// at a candidate's head holds every call behind it, and a stall should say which.
+function heldBy(waitingOn: string | null, waitingSince: number | null): string | null {
+  if (waitingOn === null || waitingSince === null) return null;
+  const waited = Date.now() / 1000 - waitingSince;
+  return waited >= 10 ? `waiting on ${waitingOn} · ${fmtDuration(waited)}` : null;
 }
 
 // One bucket's prefix-cache discount, appended to that bucket's own spend figure. A bucket holds
@@ -210,11 +219,22 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
   // in force — because the walk re-reads it at every launch: a press applies to a walk already
   // running, and waits harmlessly for the next one if none is.
   const lookahead = dash?.sample_lookahead ?? 1;
+  const autoArmed = dash?.sample_lookahead_auto ?? false;
   const discards = dash?.sample_lookahead_discards ?? 0;
   // SERVED, because the browser cannot answer either: what one sample costs is the connector's
   // declaration, not "is this self-optimization?". `1` disables the control WITH ITS REASON —
   // unserved, it takes presses the engine then silently pins to depth 1.
   const maxCells = dash?.max_cells_in_flight ?? 1;
+  // SERVED and summed over every candidate the round is walking plus the PoBB catch-ups — never a
+  // count of `open_sample_ids`, which sees only the candidate whose turn it is. Between rounds
+  // `most` is the next round's, so a press can be sized before it applies.
+  const inFlight = dash?.in_flight ?? 0;
+  const allowed = dash?.lookahead_allowed ?? 0;
+  const most = dash?.lookahead_most ?? 0;
+  const scoringNow = inFlight > 0 || allowed > 0;
+  const waitNote = heldBy(dash?.waiting_on ?? null, dash?.waiting_since ?? null);
+  // The deepest press worth making: what the backend takes, and no more than the round can hold.
+  const pickMax = most > 0 ? Math.max(1, Math.min(maxCells, most)) : maxCells;
   // Unlike Skip, this one follows the VIEWED path: the ceiling on screen and the cycle the press
   // arms are the same run at either depth. The outer's arming is deliberately not inherited
   // (`runner/entry.py`), so each layer is armed by looking at it.
@@ -223,22 +243,43 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
       ? "This backend runs one sample at a time — a single call has no latency to overlap."
       : undefined;
   const armDisabled = Boolean(concurrencyReason) || runPhase !== "running" || pending !== null;
+  // A mode, not a press, so it is offered on a paused run too: it survives the relaunch.
+  const autoDisabled = Boolean(concurrencyReason) || terminal || pending !== null;
   const concurrencyTitle =
     concurrencyReason ??
-    `Runs scoring with this many samples in flight, and resets to 1 when the round finishes scoring. Ceiling ${maxCells}. The measurement is unchanged and the cycle is NOT marked babysat${
+    `${
+      autoArmed
+        ? `Every round, scoring holds as many calls as the stop rules allow, up to ${maxCells}`
+        : `Runs this round's scoring with this many calls in flight, up to ${pickMax}, then resets to 1`
+    }. A cut discards at most one call. The measurement is unchanged and the cycle is NOT marked babysat${
       discards > 0 ? ` (${discards} discarded)` : ""
     }.`;
+  const arm = (cells: number, auto: boolean) =>
+    void act("sample-lookahead", () =>
+      postSetSampleLookahead(viewedPath ?? [{ campaignId, cycleId }], cells, auto),
+    );
   // Clamped here as well as in the walk: the server records the request UNCLAMPED, so a value
   // past the ceiling would read back as an arming the run never held.
-  const armCells = (raw: number | string) => {
-    const n = Number(raw);
-    if (!Number.isInteger(n) || n < 1) return;
-    const cells = Math.min(n, maxCells);
-    if (cells === lookahead) return;
-    void act("sample-lookahead", () =>
-      postSetSampleLookahead(viewedPath ?? [{ campaignId, cycleId }], cells),
-    );
+  // A press is for this round, so picking a depth while "Every round" stands switches it off.
+  const armCells = (raw: string) => {
+    const cells = Number(raw);
+    if (cells === lookahead && !autoArmed) return;
+    arm(cells, false);
   };
+  // One segment per depth the backend takes, doubling as the round's gauge: lit as far as calls
+  // are out, tinted as far as the stop rules allow, and off past the most the round could hold.
+  const depthSegments = Array.from({ length: maxCells }, (_, i) => {
+    const n = i + 1;
+    const fill: "full" | "part" | undefined =
+      n <= inFlight ? "full" : n <= allowed ? "part" : undefined;
+    return {
+      value: String(n),
+      label: String(n),
+      fill,
+      disabled: armDisabled || n > pickMax,
+      title: n === 1 ? "One at a time" : `Hold ${n} in flight`,
+    };
+  });
 
   const act = async (which: "skip" | "sample-lookahead", fn: () => Promise<unknown>) => {
     setPending(which);
@@ -311,30 +352,51 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
               </div>
             ) : null}
           </div>
-          {/* An ARM control, not a switch: it spends itself at the round's scoring boundary.
-              ONE form at every ceiling — an exclusive choice over 1..maxCells, so the shared
-              segmented control, one click per press. No second form selected by the backend:
-              a connector declares the ceiling and never how long an arming lasts, and an
-              off/max toggle could only say two things where this says any depth under it. */}
+          {/* Two forms of one arming, and the depth is never the browser's guess. Every round: no
+              number at all — the round holds what its stop rules allow, up to the backend's
+              ceiling, so the top segment is on and the fill is the round's live amplitude.
+              Otherwise a PRESS for this round's scoring, spent at its boundary. The fill and the
+              readout are both the served gauge. */}
           <div className="remote-panel-section">
             <div className="section-title">Samples in flight</div>
+            <Term className="row" content={TERMS.remote_flight}>
+              <span className="lbl">{scoringNow ? "Now" : "Next round"}</span>
+              <span className="val">
+                {scoringNow
+                  ? `${inFlight} out · ${allowed} allowed · ${most} at most`
+                  : `${most} at most`}
+              </span>
+            </Term>
+            {waitNote ? (
+              <div className="row">
+                <span className="lbl">Held by</span>
+                <span className="val remote-spend-warn">{waitNote}</span>
+              </div>
+            ) : null}
             <span className="remote-cells-group" title={concurrencyTitle}>
               <span aria-hidden="true" className="remote-cells-icon">
                 ⇉
               </span>
               <SegmentedControl
-                ariaLabel={`Samples to hold in flight, up to ${maxCells}`}
+                ariaLabel={`Calls to hold in flight, up to ${pickMax}`}
                 className="remote-cells"
                 value={String(lookahead)}
-                onChange={(v) => armCells(v)}
-                options={Array.from({ length: maxCells }, (_, i) => ({
-                  value: String(i + 1),
-                  label: String(i + 1),
-                  disabled: armDisabled,
-                  title: i === 0 ? "One at a time" : `Hold ${i + 1} in flight`,
-                }))}
+                onChange={armCells}
+                options={depthSegments}
               />
             </span>
+            <div className="row">
+              <span className="lbl">Every round</span>
+              <span className="val">
+                <Switch
+                  checked={autoArmed}
+                  label="Hold as many as the stop rules allow, every round"
+                  locked={autoDisabled}
+                  lockedNote={concurrencyReason ?? "not available now"}
+                  onChange={() => arm(lookahead, !autoArmed)}
+                />
+              </span>
+            </div>
           </div>
           <div className="remote-panel-section">
             <div className="section-title">Finishing criteria</div>

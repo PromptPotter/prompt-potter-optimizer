@@ -99,9 +99,12 @@
 /* Inner/outer drill — navigation, not a run command: hop into the live inner
    run from the outer view, or back out while an inner is viewed. */
 .remote-drill{color:var(--color-accent)}
-/* The look-ahead arm: the ⇉ mark beside the shared segmented control, never a button wrapper —
-   the segments ARE the buttons, so `.remote-btn` here would nest one control inside another. */
-.remote-cells-group{display:inline-flex;align-items:center;gap:var(--space-4)}
+/* The look-ahead arm and gauge: the ⇉ mark, then one segment per depth the backend takes, sharing
+   the panel's width so a ceiling of 16 fits without scrolling. The segments ARE the buttons, so
+   `.remote-btn` here would nest one control inside another. */
+.remote-cells-group{display:flex;align-items:center;gap:var(--space-4);width:100%}
+.remote-cells-group .remote-cells{display:flex;flex:1 1 auto;min-width:0}
+.remote-cells-group .remote-cells > button{flex:1 1 0;min-width:0;padding-inline:0;font-variant-numeric:tabular-nums}
 .remote-cells-icon{color:var(--color-text-tertiary)}
 .remote-btn-label{font-weight:600}
 

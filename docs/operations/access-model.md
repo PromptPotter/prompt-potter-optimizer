@@ -41,8 +41,7 @@ explicitly **not** an inbound API route. **No `/commands/{kind}` verb is admin-o
 person running the box presses exactly the buttons its users press.
 
 That is a decision, not an absence. The one verb that used to sit here —
-`set-sample-lookahead`, arming the scoring walk to hold several of a candidate's samples in
-flight — spends the **box's** shared provider key and rate bucket rather than the campaign's
+`set-sample-lookahead`, arming the scoring round to hold several calls in flight — spends the **box's** shared provider key and rate bucket rather than the campaign's
 budget, so a user holding it can throttle every other user to finish sooner. It was
 host-admin for exactly that reason, and moved to `campaign.lookahead` (the authorization
 boundary) when the
@@ -51,8 +50,11 @@ the abuse now is the per-account spend ceiling plus the delegate carve: it is it
 `CAMPAIGN_CAP_BY_NAME`, so a host can withhold it from a delegate without withholding the
 run. It is still deliberately **not** `campaign.babysit` — babysit marks a cycle whose
 measurement an operator steered, and this verb cannot steer one (the overshoot sample is
-discarded precisely so the recorded rows stay identical at either depth). The ceiling and what
-one press buys are the CONNECTOR's declarations; the boundary answers only who may press.
+discarded precisely so the recorded rows stay identical at either depth). The ceiling is the
+CONNECTOR's declaration; how far past a possible cut the walk may reach — and so how deep an
+`auto` arming, which names no number, actually runs — is the stop rules'
+([`candidate-elimination.md`](../methods/candidate-elimination.md)); the boundary answers only
+who may press.
 
 **It is reachable from the browser only** — no CLI verb, no config key, no dataset knob. It is
 also the one command whose address may DESCEND (`payload.descend`), because the arming is not
