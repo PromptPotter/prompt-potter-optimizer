@@ -907,7 +907,8 @@ export interface CycleListEntry {
   /** Round 0's accuracy — the origin's measurement, derived from rounds[] (no
    * stored copy). Null until round 0 lands. */
   origin_accuracy: number | null;
-  n_rounds: number;
+  /** Rounds this cycle has closed AFTER the origin — the unit a rounds cap counts. */
+  rounds_closed: number;
   created_at: string;
   updated_at: string;
   /** True once an operator manually intervened (e.g. skip-searchpoint); the cycle
@@ -946,6 +947,23 @@ export interface StartCheckinPayload {
   spend_budget_usd: number | null;
   token_budget: number | null;
   campaign_id: string;
+}
+
+/** One setting a campaign's root course runs with, and the layer that chose it. */
+export interface RunsWithParam {
+  node: string;
+  /** The config grid's own param key (`NodeConfigParam.key`) */
+  key: string;
+  value: unknown;
+  source: 'backend' | 'dataset' | 'campaign' | 'seed' | 'evolved' | 'identity' | 'unset';
+}
+
+/** What a campaign's root course runs with — the root's pipeline resolution, cut to settings. */
+export interface CampaignRunsWith {
+  /** Scalar settings in active-step order, `model` included; no prompt text */
+  params: RunsWithParam[];
+  /** The DECLARED rounds cap, not the armed one: 0 = origin only, null = unlimited */
+  max_rounds: number | null;
 }
 
 export interface CampaignSummary {
@@ -990,6 +1008,11 @@ export interface CampaignSummary {
   /** Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them.
    * Zero means the dollar figure is complete. */
   spend_unpriced_tokens: number;
+  /** What the ROOT course runs with — a second transport of the answer `GET
+   * /campaigns/{id}/pipeline` gives at the root, never a second source. Null
+   * when the root pipeline did not resolve. `max_rounds` is the DECLARED
+   * rounds cap; 0 means origin only. */
+  runs_with: CampaignRunsWith | null;
 }
 
 export interface CampaignListResponse {
@@ -1853,6 +1876,11 @@ export interface CampaignDetailResponse {
   /** Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them.
    * Zero means the dollar figure is complete. */
   spend_unpriced_tokens: number;
+  /** What the ROOT course runs with — a second transport of the answer `GET
+   * /campaigns/{id}/pipeline` gives at the root, never a second source. Null
+   * when the root pipeline did not resolve. `max_rounds` is the DECLARED
+   * rounds cap; 0 means origin only. */
+  runs_with: CampaignRunsWith | null;
   /** Content hash of the origin search point — the campaign identity */
   root_content_hash: string;
   /** Frozen CampaignConfig snapshot for this campaign */

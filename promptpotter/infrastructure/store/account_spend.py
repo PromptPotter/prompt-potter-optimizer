@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.run_records import SpendTombstoneRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.store.io import stat_key
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import iter_jsonl
 from promptpotter.shared.clock import epoch_seconds
@@ -127,18 +128,10 @@ _BILLED_BY_LEDGER: dict[Path, tuple[tuple[int, int], UserSpend]] = {}
 _BANKED_BY_LEDGER: dict[Path, tuple[tuple[int, int], dict[str, UserSpend]]] = {}
 
 
-def _stat_key(path: Path) -> tuple[int, int] | None:
-    try:
-        st = path.stat()
-    except FileNotFoundError:
-        return None
-    return st.st_size, st.st_mtime_ns
-
-
 def _ledger_billed(ledger: Path) -> UserSpend:
     """One ledger's whole-life billed spend, re-read only when the file's size or mtime moved — the
     campaign list is polled, and a ledger is append-only between the rewinds that restat it."""
-    key = _stat_key(ledger)
+    key = stat_key(ledger)
     if key is None:
         return ZERO_SPEND
     hit = _BILLED_BY_LEDGER.get(ledger)
@@ -164,7 +157,7 @@ def billed_spend(ledgers: Iterable[Path]) -> UserSpend:
 
 
 def _banked_by_campaign(workspace_ledger: Path) -> dict[str, UserSpend]:
-    key = _stat_key(workspace_ledger)
+    key = stat_key(workspace_ledger)
     if key is None:
         return {}
     hit = _BANKED_BY_LEDGER.get(workspace_ledger)

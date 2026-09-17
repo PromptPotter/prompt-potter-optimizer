@@ -126,7 +126,10 @@ invariants:
                       still authoring its origin takes that function''s check-in arm
                       (resolve_pipeline_for_draft), which the draft response also carries — so
                       StaticConnectorProvider is a second TRANSPORT of one answer, not a second
-                      source, and overlaying anything else into it re-opens this. I6 is its
+                      source, and overlaying anything else into it re-opens this. The campaign
+                      list''s `CampaignSummary.runs_with` is a second TRANSPORT of the same
+                      kind (campaign_runs_with: the root''s two merges, cut to settings), never a
+                      second source a row may re-merge or diff. I6 is its
                       sibling — same shape, different question — and neither is a second
                       mechanism for the other. The browser never joins a VALUE from one store
                       onto a SCHEMA from another. Every param carries a served `source` naming

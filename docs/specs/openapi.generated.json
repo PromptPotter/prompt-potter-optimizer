@@ -615,6 +615,17 @@
             "title": "Root Cycle Id",
             "type": "string"
           },
+          "runs_with": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CampaignRunsWith"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the ROOT course runs with — a second transport of the answer `GET /campaigns/{id}/pipeline` gives at the root, never a second source. Null when the root pipeline did not resolve. `max_rounds` is the DECLARED rounds cap; 0 means origin only."
+          },
           "spend_unpriced_tokens": {
             "description": "Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them. Zero means the dollar figure is complete.",
             "title": "Spend Unpriced Tokens",
@@ -633,6 +644,7 @@
           "root_cycle_id",
           "spend_used_usd",
           "spend_unpriced_tokens",
+          "runs_with",
           "config"
         ],
         "title": "CampaignDetailResponse",
@@ -774,6 +786,38 @@
         "title": "CampaignPipelineResponse",
         "type": "object"
       },
+      "CampaignRunsWith": {
+        "additionalProperties": false,
+        "description": "What a campaign's root course runs with — the root's pipeline resolution, cut to settings.",
+        "properties": {
+          "max_rounds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The DECLARED rounds cap, not the armed one: 0 = origin only, null = unlimited",
+            "title": "Max Rounds"
+          },
+          "params": {
+            "description": "Scalar settings in active-step order, `model` included; no prompt text",
+            "items": {
+              "$ref": "#/components/schemas/RunsWithParam"
+            },
+            "title": "Params",
+            "type": "array"
+          }
+        },
+        "required": [
+          "params",
+          "max_rounds"
+        ],
+        "title": "CampaignRunsWith",
+        "type": "object"
+      },
       "CampaignStorageResponse": {
         "additionalProperties": false,
         "properties": {
@@ -896,6 +940,17 @@
             "title": "Root Cycle Id",
             "type": "string"
           },
+          "runs_with": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CampaignRunsWith"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the ROOT course runs with — a second transport of the answer `GET /campaigns/{id}/pipeline` gives at the root, never a second source. Null when the root pipeline did not resolve. `max_rounds` is the DECLARED rounds cap; 0 means origin only."
+          },
           "spend_unpriced_tokens": {
             "description": "Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them. Zero means the dollar figure is complete.",
             "title": "Spend Unpriced Tokens",
@@ -913,7 +968,8 @@
           "created_at",
           "root_cycle_id",
           "spend_used_usd",
-          "spend_unpriced_tokens"
+          "spend_unpriced_tokens",
+          "runs_with"
         ],
         "title": "CampaignSummary",
         "type": "object"
@@ -1270,11 +1326,6 @@
             "title": "Mint Kind",
             "type": "string"
           },
-          "n_rounds": {
-            "default": 0,
-            "title": "N Rounds",
-            "type": "integer"
-          },
           "origin_accuracy": {
             "anyOf": [
               {
@@ -1303,6 +1354,12 @@
             "default": "",
             "title": "Parent Session Id",
             "type": "string"
+          },
+          "rounds_closed": {
+            "default": 0,
+            "description": "Rounds this cycle has closed AFTER the origin — the unit a rounds cap counts.",
+            "title": "Rounds Closed",
+            "type": "integer"
           },
           "run_phase": {
             "$ref": "#/components/schemas/RunPhase",
@@ -4650,6 +4707,45 @@
         "title": "RunPhase",
         "type": "string"
       },
+      "RunsWithParam": {
+        "additionalProperties": false,
+        "description": "One setting a campaign's root course runs with, and the layer that chose it.",
+        "properties": {
+          "key": {
+            "description": "The config grid's own param key (`NodeConfigParam.key`)",
+            "title": "Key",
+            "type": "string"
+          },
+          "node": {
+            "title": "Node",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "backend",
+              "dataset",
+              "campaign",
+              "seed",
+              "evolved",
+              "identity",
+              "unset"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "node",
+          "key",
+          "value",
+          "source"
+        ],
+        "title": "RunsWithParam",
+        "type": "object"
+      },
       "SampleSeries": {
         "additionalProperties": false,
         "properties": {
@@ -6028,7 +6124,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/config-map": {
       "get": {
-        "description": "The knob coupling/provenance map for one campaign — what moves which\nstatistical estimand, what overwrites what, and which knobs currently collide.\n\nRead-only: resolves the frozen ``CampaignConfig`` snapshot against the declared\n``knobs`` registry. 404 on cross-user reads.",
+        "description": "The knob coupling/provenance map for one campaign — what moves which\nstatistical estimand, what overwrites what, and which knobs currently collide.\n\nRead-only: resolves the config the campaign's root runs under — its draft while it is\nstill authoring — against the declared ``knobs`` registry. 404 on cross-user reads.",
         "operationId": "get_campaign_config_map_api_v1_campaigns__campaign_id__config_map_get",
         "parameters": [
           {

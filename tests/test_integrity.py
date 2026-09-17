@@ -2078,6 +2078,59 @@ def test_answering_in_TEXT_sends_no_contract_to_answer_INTO() -> None:
     assert resolved_output_schemas(schema, text_point)["llm_only"] is None
 
 
+def test_the_campaign_list_names_the_model_its_root_course_runs(built_stores: Any) -> None:
+    """Sibling campaigns on one slug differ only in what their roots run, so the list row is where
+    an operator tells them apart. Three layers name a model here; the root's seed is the one that
+    runs, and a list reading the shared file or the frozen delta names the wrong model with every
+    row rendering. The campaign read without `at` skipped that same seed."""
+    from promptpotter.application.evidence.subjects import SubjectSpec
+    from promptpotter.application.pipeline_resolve import resolve_pipeline_for_campaign
+    from promptpotter.connectors import DEFAULT_CONNECTOR, get
+    from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.run_records import CycleSeed
+    from promptpotter.presentation.api.routers.campaigns.manifests import list_campaigns
+
+    stores = built_stores
+    dataset = stores.tenant_datasets.dataset_dir("ds")
+    write_yaml(
+        dataset / "pipeline.yaml",
+        {
+            "nodes": {"llm_only": {"type": "llm", "config": {"model": "A"}}},
+            "pipelines": {"default": ["llm_only"]},
+        },
+    )
+    write_yaml(
+        dataset / "campaign.yaml",
+        {"campaign_config": {"optimization": dict(get(DEFAULT_CONNECTOR).default_optimization)}},
+    )
+    campaign = Campaign(
+        campaign_id="ds__000001",
+        dataset_name="ds",
+        created_at="2026-09-17T00:00:00Z",
+        root_cycle_id="cycle_root",
+        owner_user_id=str(stores.identity.user_id),
+        config={"pipeline_overlay": {"llm_only": {"model": "B"}}},
+    )
+    stores.campaigns.create_campaign(campaign)
+    stores.campaigns.create(campaign.root_hop, {})
+    seed = CycleSeed(pipeline_overlay={"llm_only": {"model": "C"}}, origin_source="campaign_origin")
+    stores.campaigns.write_cycle_seed(campaign.root_hop, seed)
+
+    listed = list_campaigns(stores, dataset=None, lifecycle="active", descend=None)
+    runs_with = listed.campaigns[0].runs_with
+    assert runs_with is not None
+    models = [(p.value, p.source) for p in runs_with.params if p.key == "model"]
+    assert models == [("C", "seed")]
+
+    for at in (
+        SubjectSpec("campaign", campaign.campaign_id),
+        SubjectSpec("course", campaign.campaign_id, campaign.root_cycle_id),
+    ):
+        served = resolve_pipeline_for_campaign(stores, campaign, at=at)
+        row = next(p for p in served.node_config_schema["llm_only"] if p.key == "model")
+        assert [(row.value, row.source)] == models, at.kind
+
+
 # 5. The dispatch frame — what a node is shown, within what budget
 
 

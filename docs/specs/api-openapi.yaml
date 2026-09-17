@@ -1345,7 +1345,12 @@ paths:
         (`spend_used_usd`, a floor while `spend_unpriced_tokens > 0`), summed
         server-side over its cycle ledgers and banked tombstones — the
         per-campaign split of `GET /auth/quota-status`'s account total, so the
-        sidebar prints dollars it never adds up itself.
+        sidebar prints dollars it never adds up itself. Each also carries
+        `runs_with` — what the ROOT course runs with (models and every scalar
+        setting, each with the layer that won it, plus the DECLARED rounds cap)
+        — a second transport of the `GET /campaigns/{id}/pipeline` answer at the
+        root, never a second source; null when the root pipeline did not
+        resolve, so one broken dataset drops its own row's answer only.
       tags: [cycles]
       parameters:
         - name: dataset
@@ -3035,7 +3040,7 @@ components:
           enum: [checkin, running, paused, detached, terminal]
           default: detached
         best_accuracy: { type: [number, 'null'] }
-        n_rounds: { type: integer, default: 0 }
+        rounds_closed: { type: integer, default: 0 }
         created_at: { type: string, default: '' }
         updated_at: { type: string, default: '' }
         human_intervened: { type: boolean, default: false }

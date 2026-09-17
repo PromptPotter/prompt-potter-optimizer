@@ -11,7 +11,9 @@ export type {
   ArchiveReport,
   ActiveSessionResponse,
   CampaignListResponse,
+  CampaignRunsWith,
   CampaignSummary,
+  RunsWithParam,
   RankedEdit,
   EffectProvenance,
   EditSpread,
@@ -113,7 +115,7 @@ export type {
   WorkspaceStorageResponse,
 } from "./types.generated";
 
-import type { CycleListEntry, DegradationHealth, LiveDashboardState } from "./types.generated";
+import type { CycleListEntry, LiveDashboardState } from "./types.generated";
 
 // Three named data scopes — hand-maintained because `HeatmapScope` reaches the wire only as a
 // query param, so there is no response model to generate it from. Same vocabulary as the heatmap
@@ -130,11 +132,6 @@ export type HardSamplesScope = "cycle" | "campaign" | "dataset";
 // operator-initiated branch (HITL fork, diagnostic); `auto_rebase` = an automatic
 // layer-driven rebase branch (an L2/L3 `fork_proposal`, fork trigger `l2_rebase`/`l3_rebase`).
 export type MintKind = CycleListEntry["mint_kind"];
-
-// WHY a round graded below healthy — one cause, closed server-side
-// (`domain/results.py::HealthCause`). READ BACK off the generated interface, never re-typed, so a
-// cause no producer emits cannot be branched on here. `null` is the `healthy` grade.
-export type HealthCause = NonNullable<DegradationHealth["cause"]>;
 
 // What ONE measured row is called (`Connector.measured_unit`) — `cell` on the recursion, where a
 // row is a whole inner campaign. READ BACK off the generated interface: the engine declares it.

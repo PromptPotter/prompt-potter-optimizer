@@ -139,7 +139,10 @@ class CycleListEntry(StrictModel):
         default=None,
         description="Round 0's accuracy — the origin's measurement, derived from rounds[] (no stored copy). Null until round 0 lands.",
     )
-    n_rounds: int = 0
+    rounds_closed: int = Field(
+        default=0,
+        description="Rounds this cycle has closed AFTER the origin — the unit a rounds cap counts.",
+    )
     created_at: str = ""
     updated_at: str = ""
     human_intervened: bool = Field(

@@ -235,7 +235,10 @@ class DraftCampaign:
             origin_prompt_fields=dict(data.get("origin_prompt_fields", {})),
             decomposed_task_context=dict(data.get("decomposed_task_context", {})),
             pipeline_steps=list(data.get("pipeline_steps", [])),
-            optimization_overrides=dict(data.get("optimization_overrides", {})),
+            optimization_overrides={
+                **_default_optimization_overrides(),
+                **data.get("optimization_overrides", {}),
+            },
             candidate_library=tuple(data.get("candidate_library", ())),
             backend_nodes=dict(data.get("backend_nodes", {})),
             reused_origin_id=data.get("reused_origin_id", ""),

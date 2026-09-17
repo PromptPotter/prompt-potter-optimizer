@@ -413,7 +413,10 @@ LEDGER_BASELINE = {
     # answers after the real cut discards paid calls unrecorded (test_numerics § 5).
     # +1: a burst of concurrent sends — answered, cancelled, timed out — records spend past its
     # ceiling, or a send that never reported is billed with no record (test_security).
-    "test_functions": 195,
+    # +1: a campaign list row naming a model its root does not run — the shared file's or the
+    # frozen delta's instead of the root seed's — and the campaign read without `at` skipping that
+    # seed; every row renders, and siblings are told apart by the wrong model (test_integrity § 4).
+    "test_functions": 196,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -488,7 +491,13 @@ LEDGER_BASELINE = {
     # `.max_concurrent_cycles_writable` — the Account panel's run-concurrency section. The machine
     # ceiling was served nowhere, the queued half of the account limit only inside a refusal, and
     # who may move the limit is a server decision the browser would otherwise re-derive.
-    "served_fields": 592,
+    # +8: `CampaignSummary.runs_with` (counted twice through `CampaignDetailResponse`), its
+    # `CampaignRunsWith.params` + `.max_rounds`, and `RunsWithParam`'s node/key/value/source — what
+    # a root runs with, on the list. Sibling campaigns differ only there, and the per-campaign
+    # `/pipeline` read is too heavy per row while the frozen `config` is a delta the browser may not
+    # merge (I9). A second transport of that resolver's answer, so it folds into no neighbour.
+    # (`CycleListEntry.n_rounds` → `rounds_closed` is a rename in the same change and moves nothing.)
+    "served_fields": 600,
 }
 
 

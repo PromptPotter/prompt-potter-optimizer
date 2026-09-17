@@ -296,6 +296,14 @@ def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
     )
 
 
+def stat_key(path: Path) -> tuple[int, int] | None:
+    try:
+        st = path.stat()
+    except FileNotFoundError:
+        return None
+    return st.st_size, st.st_mtime_ns
+
+
 def newest_mtime_ns(*paths: Path) -> int | None:
     """Newest ``st_mtime_ns`` across *paths*; missing skipped, all missing → ``None``. Nanoseconds,
     not float seconds: the float collides on a same-tick append and serves a spurious 304."""
@@ -322,6 +330,7 @@ __all__ = [
     "read_yaml",
     "read_yaml_optional",
     "rmtree_robust",
+    "stat_key",
     "unlink_robust",
     "validate_path_component",
     "write_bytes",

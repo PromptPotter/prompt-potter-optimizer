@@ -52,7 +52,11 @@ from promptpotter.application.evidence.subjects import (
     WinnerChainPoint,
 )
 from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
-from promptpotter.application.pipeline_resolve import CampaignPipelineResponse
+from promptpotter.application.pipeline_resolve import (
+    CampaignPipelineResponse,
+    CampaignRunsWith,
+    RunsWithParam,
+)
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import (
     DashboardCandidate,
@@ -237,6 +241,8 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     # rather than a hand-kept list that a fourth `LaunchLimits` field would not reach.
     StartCheckinPayload,
     # --- campaigns/manifests router ---
+    RunsWithParam,  # nested in CampaignRunsWith — the emitter does not recurse
+    CampaignRunsWith,  # nested in CampaignSummary
     CampaignSummary,
     CampaignListResponse,
     # What ONE campaign runs at one searchpoint (`frontend-surface-contract.md::I9`).

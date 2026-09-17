@@ -437,6 +437,20 @@ class PipelineNode(StrictModel):
             return []
         return [description_key(p) for p in description_paths(self.output_schema.json_schema)]
 
+    def param_kind(self, key: str) -> str:
+        if description_path(key) is not None:
+            return "description"
+        if key in _PROMPT_OWNED_FIELDS:
+            return "prompt"
+        if self.param_types.get(key) in NESTED_PARAM_TYPES:
+            return "nested"
+        if key == "model":
+            return "model"
+        if key in self.param_allowed_values:
+            return "enum"
+        t = self.param_types.get(key, "string")
+        return "number" if t in ("number", "integer") else "bool" if t == "boolean" else "string"
+
 
 ParamSource = Literal["backend", "dataset", "campaign", "seed", "evolved", "identity", "unset"]
 """WHICH LAYER set a resolved param's value, stamped BY the merge (last writer wins), never diffed
@@ -892,27 +906,23 @@ class PipelineSchema(StrictModel):
                 # UNSET is a value the node RUNS, not one nobody chose — the fold writes nothing,
                 # so an empty row would report a JSON-answering node as answering in prose.
                 unset = schema_toggle_default(n) if key == SCHEMA_TOGGLE_PARAM else None
-                if (path := description_path(key)) is not None:
+                kind = n.param_kind(key)
+                if kind == "description":
                     # Unset, a field says what its schema says: the inline one the config holds,
                     # else the declaration.
-                    kind = "description"
                     field = described_field(
                         resolved.get(OUTPUT_SCHEMA_KEY)
                         or (n.output_schema.json_schema if n.output_schema else None),
-                        path,
+                        key.removeprefix(SCHEMA_DESCRIPTION_PREFIX),
                     )
                     unset = str((field or {}).get("description") or "")
-                elif key in _PROMPT_OWNED_FIELDS:
-                    kind = "prompt"
-                elif n.param_types.get(key) in NESTED_PARAM_TYPES:
-                    kind = "nested"
-                elif key == "model":
+                elif kind == "model":
                     # The CATALOGUE, and only the catalogue — never the permitted set. Two things
                     # rest on that. Narrowing must not shrink `options`, or unticking a model
                     # would be a one-way ratchet the operator could not undo. And a value the
                     # operator TYPED is exactly one this list does not carry, which is the only
                     # thing that lets a surface mark it as theirs rather than the admin's.
-                    kind, options = "model", list(model_menu or self.available_models)
+                    options = list(model_menu or self.available_models)
                     allowed = self.model_options(n)
                     permitted = _stated_permitted(
                         allowed,
@@ -921,13 +931,12 @@ class PipelineSchema(StrictModel):
                         if declared and declared_node
                         else allowed,
                     )
-                elif key in n.param_allowed_values:
+                elif kind == "enum":
                     # `permitted` is what THIS CAMPAIGN declared, and never the model-resolved
                     # space, because it is also what the editor emits back as the narrowing
                     # (`nodeConfig.ts::nodeNarrowing`). Resolving it here would let a repaint
                     # bake one model's refusals into the operator's own declaration — and an
                     # axis resolving to nothing would come back as a closed one.
-                    kind = "enum"
                     narrowed = list(n.param_allowed_values[key])
                     absent = (
                         list(declared_node.param_allowed_values.get(key, ()))
@@ -942,15 +951,6 @@ class PipelineSchema(StrictModel):
                     )
                     options = list(dict.fromkeys([*menu, *narrowed]))
                     permitted = _stated_permitted(narrowed, options, absent)
-                else:
-                    t = n.param_types.get(key, "string")
-                    kind = (
-                        "number"
-                        if t in ("number", "integer")
-                        else "bool"
-                        if t == "boolean"
-                        else "string"
-                    )
                 # Who may move this axis, in ``MOVABLE_AGENTS`` order — one source per agent,
                 # so a member added to that tuple has to be given one here. The two constructions
                 # that can never be axes short-circuit to the empty list and SAY WHICH; `model`

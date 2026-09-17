@@ -8,7 +8,6 @@ from fastapi import Query
 from pydantic import Field
 
 from promptpotter.application.campaign_config import (
-    CampaignConfig,
     Estimand,
     MechanismConfig,
     estimand_doc,
@@ -24,7 +23,10 @@ from promptpotter.application.knobs import (
 )
 from promptpotter.application.pipeline_resolve import (
     CampaignPipelineResponse,
+    CampaignRunsWith,
+    campaign_runs_with,
     resolve_pipeline_for_campaign,
+    resolve_root_config,
 )
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.pipeline_overlay import (
@@ -33,8 +35,7 @@ from promptpotter.domain.pipeline_overlay import (
 )
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.account_spend import campaign_spend
-from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-from promptpotter.infrastructure.store.stores import descend_store
+from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import BadRequestError, NotFoundError, PayloadInvalidError
@@ -99,6 +100,14 @@ class CampaignSummary(StrictModel):
             "means the dollar figure is complete."
         )
     )
+    runs_with: CampaignRunsWith | None = Field(
+        description=(
+            "What the ROOT course runs with — a second transport of the answer "
+            "`GET /campaigns/{id}/pipeline` gives at the root, never a second source. Null when "
+            "the root pipeline did not resolve. `max_rounds` is the DECLARED rounds cap; 0 means "
+            "origin only."
+        )
+    )
 
 
 class CampaignListResponse(StrictModel):
@@ -113,8 +122,8 @@ class CampaignDetailResponse(CampaignSummary):
     config: dict[str, Any] = Field(description="Frozen CampaignConfig snapshot for this campaign")
 
 
-def _campaign_summary(campaign: Campaign, store: CampaignStore) -> CampaignSummary:
-    spent = campaign_spend(store, campaign.campaign_id)
+def _campaign_summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
+    spent = campaign_spend(stores.campaigns, campaign.campaign_id)
     return CampaignSummary(
         campaign_id=campaign.campaign_id,
         dataset_name=campaign.dataset_name,
@@ -129,6 +138,7 @@ def _campaign_summary(campaign: Campaign, store: CampaignStore) -> CampaignSumma
         lifecycle_reason=campaign.lifecycle_reason,
         spend_used_usd=round(spent.used_usd, 6),
         spend_unpriced_tokens=spent.unpriced_tokens,
+        runs_with=campaign_runs_with(stores, campaign),
     )
 
 
@@ -235,7 +245,7 @@ def list_campaigns(
     campaigns = leaf.campaigns.list_campaigns(dataset, lifecycle=lifecycle, owner_user_id=owner)
     campaigns.sort(key=lambda c: c.created_at, reverse=True)
     return CampaignListResponse(
-        campaigns=[_campaign_summary(c, leaf.campaigns) for c in campaigns],
+        campaigns=[_campaign_summary(c, leaf) for c in campaigns],
         total=len(campaigns),
     )
 
@@ -278,7 +288,7 @@ def get_campaign(stores: StoresDep, campaign_id: str) -> CampaignDetailResponse:
     if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
     return CampaignDetailResponse(
-        **_campaign_summary(campaign, stores.campaigns).model_dump(),
+        **_campaign_summary(campaign, stores).model_dump(),
         root_content_hash=campaign.root_content_hash,
         config=campaign.config,
     )
@@ -426,13 +436,13 @@ def get_campaign_config_map(stores: StoresDep, campaign_id: str) -> ConfigMapRes
     """The knob coupling/provenance map for one campaign — what moves which
     statistical estimand, what overwrites what, and which knobs currently collide.
 
-    Read-only: resolves the frozen ``CampaignConfig`` snapshot against the declared
-    ``knobs`` registry. 404 on cross-user reads.
+    Read-only: resolves the config the campaign's root runs under — its draft while it is
+    still authoring — against the declared ``knobs`` registry. 404 on cross-user reads.
     """
     campaign = stores.campaigns.load_owned(campaign_id, str(stores.identity.user_id))
     if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
-    config = CampaignConfig.model_validate(campaign.config)
+    config = resolve_root_config(stores, campaign)
 
     states = resolve_knob_states(config)
     knob_models = {

@@ -797,7 +797,7 @@ class CampaignStore:
             "run_phase": run_phase,
             "best_accuracy": data.get("best_accuracy"),
             "origin_accuracy": origin_accuracy_of(data),
-            "n_rounds": data.get("n_rounds", 0),
+            "rounds_closed": sum(1 for r in data.get("rounds") or [] if r.get("round", 0) > 0),
             "created_at": data.get("created_at", ""),
             "updated_at": data.get("updated_at", ""),
             "human_intervened": bool(data.get("human_intervened", False)),
