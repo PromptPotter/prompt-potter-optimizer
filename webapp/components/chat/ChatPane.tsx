@@ -28,6 +28,7 @@ interface Props {
   // null. The thread reopens its draft in place — no separate pane, so the hero
   // and the samples stay where they are.
   checkinCampaignId: string | null;
+  onOpenDashboard: () => void;
 }
 
 // The Chat surface. The pipeline hero is display-only; the live interactive path is
@@ -36,7 +37,7 @@ interface Props {
 // Run status lives on the shell's RemoteControl, and what this chat can DO is the
 // composer's Tools popover. Everything above the thread is deliberately MINIATURE —
 // the Dashboard is where these same surfaces are read at size.
-export function ChatPane({ checkinCampaignId }: Props) {
+export function ChatPane({ checkinCampaignId, onOpenDashboard }: Props) {
   // Only the name is read here (the pipeline hero labels itself with it); the roster
   // and its controls go straight to the two panels that draw them.
   const { datasetName } = useHardSamples();
@@ -198,7 +199,7 @@ export function ChatPane({ checkinCampaignId }: Props) {
             liveSegment={composing ? undefined : liveSegment}
             runCard={
               composing || !cycleId ? undefined : (
-                <RunCard sampleOrder={live.sampleOrder} />
+                <RunCard sampleOrder={live.sampleOrder} onOpenDashboard={onOpenDashboard} />
               )
             }
           />

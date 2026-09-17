@@ -1,6 +1,8 @@
 // The `@/lib/derivations` surface — pure data→data shaping helpers.
 // One module per file; barrel re-exports them all (names are collision-free).
 
+export * from "./campaign-forest";
+export * from "./campaign-summary";
 export * from "./candidate-views";
 export * from "./candidateSearchPoint";
 export * from "./connector-state";

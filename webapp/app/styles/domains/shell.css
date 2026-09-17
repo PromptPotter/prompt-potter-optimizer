@@ -47,7 +47,8 @@
 .shell.sidebar-collapsed .sidebar > .sidebar-footer{display:none}
 .brand{padding:var(--space-8) var(--space-16) var(--space-18);border-bottom:0.5px solid var(--color-border);margin-bottom:8px}
 .brand-lockup{display:flex;align-items:center;gap:var(--space-8);margin-bottom:2px}
-.brand-mark{width:22px;height:22px;background:var(--color-accent);border-radius:4px;display:flex;align-items:center;justify-content:center}
+/* The mark inside tints with `currentColor`, so the tile sets the ink it sits on. */
+.brand-mark{width:22px;height:22px;background:var(--color-accent);color:var(--color-text-on-accent);border-radius:4px;display:flex;align-items:center;justify-content:center}
 .brand-name{font-size:var(--text-xl);font-weight:500}
 .brand-sub{font-size:var(--text-xs);letter-spacing:.1em;color:var(--color-text-tertiary)}
 .sidebar-footer{margin-top:auto;padding:var(--space-12) var(--space-16);border-top:0.5px solid var(--color-border)}
@@ -114,13 +115,10 @@
 .unit-library-empty{padding:var(--space-12) var(--space-10);display:flex;flex-direction:column;gap:var(--space-6)}
 .unit-library-empty .empty-headline{font-size:var(--text-base);font-weight:500;color:var(--color-text-secondary)}
 .unit-library-empty .empty-body{font-size:var(--text-sm);color:var(--color-text-tertiary)}
-/* Lifecycle tabs — Active / Archived. Deleted is hidden from the UI;
-   reach for the file tree by campaign id to recover one. */
-.unit-library-tabs{display:flex;gap:var(--space-4);padding:var(--space-4) var(--space-8) var(--space-6);border-bottom:0.5px solid var(--color-border)}
-.sidebar-filter-panel .unit-library-tabs{padding:0 0 var(--space-4)}
-.unit-library-tab{flex:1;padding:var(--space-4) var(--space-8);background:transparent;border:0;border-bottom:1.5px solid transparent;cursor:pointer;font-family:inherit;font-size:var(--text-xs);color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.04em}
-.unit-library-tab:hover{color:var(--color-text-primary)}
-.unit-library-tab.active{color:var(--color-accent);border-bottom-color:var(--color-accent);font-weight:500}
+/* Lifecycle — Active / Archived, a `SegmentedControl`; this only spans it across the panel.
+   Deleted is hidden from the UI; reach for the file tree by campaign id to recover one. */
+.sidebar-filter-lifecycle{display:flex;margin-bottom:var(--space-6)}
+.sidebar-filter-lifecycle > *{flex:1}
 /* Per-campaign three-dots menu. The wrapper + floating panel come from the
    Popover primitive (components/ui/Popover.module.css); these style the
    trigger and the menu items inside that panel. */
@@ -128,10 +126,8 @@
 .campaign-menu-trigger:hover{color:var(--color-text-primary);background:var(--color-background-hover)}
 .campaign-menu-trigger[aria-expanded="true"]{color:var(--color-accent);background:var(--color-background-tint-active)}
 .campaign-menu-trigger:disabled{cursor:default;opacity:.5}
-.campaign-menu-item{padding:var(--space-6) var(--space-12);background:transparent;border:0;text-align:left;cursor:pointer;font-family:inherit;font-size:var(--text-sm);color:var(--color-text-secondary);width:100%}
-.campaign-menu-item:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
-.campaign-menu-item-danger{color:var(--color-danger)}
-.campaign-menu-item-danger:hover{color:var(--color-danger);background:var(--color-background-hover)}
+/* The destructive row's ink. On the LABEL, so the menu row's own hover still lights the row. */
+.campaign-menu-danger{color:var(--color-danger)}
 .campaign-menu-err{margin-left:4px;color:var(--color-danger);font-weight:700;font-size:var(--text-xs)}
 .campaign-rename-id{margin:var(--space-8) 0 0;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-tertiary);word-break:break-all}
 /* Dataset filter chips — inside the header filter popover; narrow the flat
@@ -152,7 +148,6 @@
 .unit-library-name{flex:1 1 60%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .unit-library-meta{flex:0 1 auto;font-size:var(--text-xs);color:var(--color-text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .unit-library-live{color:var(--color-success);margin-left:4px;font-size:var(--text-xs);vertical-align:middle}
-.unit-library-live.active{color:var(--color-accent)}
 /* Terminal run-state on a non-running unit row — distinguishes a stopped/aborted
    campaign from the live one (CLI↔webapp parity). The reason word carries the
    meaning; a terminal run's status reads as stale, not done. */
@@ -171,6 +166,12 @@
 /* A campaign's served dollars, never truncated. */
 .unit-library-spend{flex:0 0 auto;font-family:var(--font-mono);font-variant-numeric:tabular-nums;color:var(--color-text-secondary)}
 /* The name gives way, the id's `__suffix` does not: it is what separates runs of one dataset. */
+/* The row's second line — what a campaign runs with. `flex:1 1 100%` makes the wrapping row
+   break before it, so it takes a line of its own under the name and the reading. */
+/* Two lines, not one: at the resting 200px sidebar a single line ends after the model, and
+   the settings after it are what tell one run of a dataset from the next. The title carries
+   the whole line for the third. */
+.unit-library-sub{flex:1 1 100%;min-width:0;font-size:var(--text-xs);color:var(--color-text-tertiary);font-family:var(--font-mono);overflow:hidden;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
 .unit-library-name-split{display:flex;align-items:baseline}
 .unit-library-name-head{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .unit-library-name-tail{flex:0 0 auto;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-tertiary)}
@@ -235,7 +236,9 @@
 .rowhover-lede{margin:0;font-size:var(--text-xs);line-height:1.45;color:var(--color-text-secondary)}
 .rowhover-stats{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:var(--space-10) var(--space-12);padding-block:var(--space-10);border-block:0.5px solid var(--color-border)}
 .rowhover-stat{display:flex;flex-direction:column;gap:2px;min-width:0}
-.rowhover-stat dt{font-size:var(--text-xs);letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-tertiary)}
+.rowhover-stat dt,.rowhover-heading{margin:0;font-size:var(--text-xs);letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-tertiary)}
+.rowhover-heading{margin-bottom:var(--space-4)}
+.rowhover-source{margin-left:var(--space-6);color:var(--color-text-tertiary)}
 .rowhover-stat dd{margin:0}
 .rowhover-stat-value{font-size:var(--text-lg);font-weight:600;line-height:1.2;font-variant-numeric:tabular-nums;color:var(--color-text-primary);white-space:nowrap}
 .rowhover-stat .rowhover-stat-sub{font-size:var(--text-xs);line-height:1.35;color:var(--color-text-tertiary)}
@@ -246,12 +249,12 @@
 .rowhover-facts dt{font-size:var(--text-xs);color:var(--color-text-tertiary);white-space:nowrap}
 .rowhover-facts dt[data-indent]{padding-left:var(--space-12)}
 .rowhover-facts dd{margin:0;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-primary);overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
-.rowhover-disk summary{display:flex;justify-content:space-between;gap:var(--space-8);list-style:none;cursor:pointer;font-size:var(--text-xs);color:var(--color-text-secondary)}
-.rowhover-disk summary::-webkit-details-marker{display:none}
-.rowhover-disk summary > :first-child::before{content:"▸";display:inline-block;inline-size:1.2em;color:var(--color-text-tertiary)}
-.rowhover-disk[open] summary > :first-child::before{content:"▾"}
-.rowhover-disk[open] summary{margin-bottom:var(--space-6)}
-.rowhover-disk-total{font-family:var(--font-mono);color:var(--color-text-primary)}
+.rowhover-fold summary{display:flex;justify-content:space-between;gap:var(--space-8);list-style:none;cursor:pointer;font-size:var(--text-xs);color:var(--color-text-secondary)}
+.rowhover-fold summary::-webkit-details-marker{display:none}
+.rowhover-fold summary > :first-child::before{content:"▸";display:inline-block;inline-size:1.2em;color:var(--color-text-tertiary)}
+.rowhover-fold[open] summary > :first-child::before{content:"▾"}
+.rowhover-fold[open] summary{margin-bottom:var(--space-6)}
+.rowhover-fold-total{font-family:var(--font-mono);color:var(--color-text-primary)}
 .rowhover-note{margin:var(--space-6) 0 0;font-size:var(--text-xs);color:var(--color-text-tertiary)}
 /* The account's spend against its allowance (components/shell/sidebar/AccountSpend). Pinned
    above the footer in every sidebar state; the 36px rail keeps only the figure, set vertical. */
@@ -278,9 +281,9 @@
 }
 /* Active-jobs dock (components/shell/JobsDock) — floats on the sidebar's OUTER
    edge, straddling the hairline, tracking --sidebar-width so it rides a drag and
-   the 36px rail alike. A `.shell` child, so the multi-run popover escapes
+   the 36px rail alike. A `.shell` child, so its outer half escapes
    `.sidebar{overflow:hidden}`.
-   z-index 45: the panel opens rightward over `.main`, and `.critical-alert` is a
+   z-index 45: that half sits over `.main`, and `.critical-alert` is a
    sticky z-40 in this same stacking context — anything lower slides under the
    alert banner. Above the resizer's 6 too, so the ~30px it covers of that
    full-height drag strip belongs to the dock; the rest still drags, and the dock
@@ -294,27 +297,21 @@
 .jobs-dock-btn.phase-gate{border-color:var(--color-accent);box-shadow:0 0 0 1px var(--color-accent),0 2px 8px rgba(0,0,0,.28)}
 .jobs-dock-btn:hover{background:var(--color-background-hover);border-color:var(--color-accent)}
 .jobs-dock-count{position:absolute;top:-5px;right:-5px;min-width:15px;height:15px;padding:0 3px;display:inline-flex;align-items:center;justify-content:center;font-size:var(--text-xs);font-weight:600;line-height:1;border-radius:8px;background:var(--color-accent-strong);color:#fff;border:1.5px solid var(--color-background-primary)}
-.jobs-dock-list{list-style:none;margin:0;padding:var(--space-4);min-width:180px}
-.jobs-dock-item{display:flex;align-items:center;gap:var(--space-8);width:100%;padding:var(--space-6) var(--space-8);background:none;border:0;border-radius:var(--border-radius-md);color:var(--color-text-secondary);font-size:var(--text-base);font-family:inherit;text-align:left;cursor:pointer}
-.jobs-dock-item:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
-.jobs-dock-item .phase-chip{flex-shrink:0;font-size:var(--text-xs)}
+/* One job inside a `MenuItem` — the row is the primitive's; this is what rides in its label. */
+.jobs-dock-row{display:flex;align-items:center;gap:var(--space-8);min-width:0}
+.jobs-dock-row .phase-chip{flex-shrink:0;font-size:var(--text-xs)}
 .jobs-dock-item-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* Separator inside the campaign ⋯ menu, between the mobile bar's leading view
    items and the lifecycle verbs. */
 /* Run-phase chip — a status dot paired with the phase word (never colour
    alone), shared by the RemoteControl and the jobs dock's list so a run's
    phase reads identically wherever it surfaces. */
-.phase-chip{display:inline-flex;align-items:center;gap:var(--space-6);font-weight:600;font-size:var(--text-sm);color:var(--color-text-primary)}
+.phase-chip{display:inline-flex;align-items:center;gap:var(--space-6);font-weight:600;font-size:var(--text-sm);color:var(--color-text-primary);white-space:nowrap}
 .phase-dot{width:8px;height:8px;border-radius:50%;background:var(--color-text-tertiary)}
 .phase-running .phase-dot{background:var(--color-success)}
 .phase-paused .phase-dot{background:var(--color-warn)}
 .phase-gate .phase-dot{background:var(--color-accent)}
 .phase-detached .phase-dot{background:var(--color-text-tertiary)}
-/* Breadcrumb affordance shown only while the view is pinned to a campaign
-   (workspace `following` is false) — one click resumes following the
-   CLI's active campaign. */
-.follow-active-btn{display:inline-flex;align-items:center;gap:var(--space-4);margin-left:8px;padding:2px var(--space-8);border-radius:10px;background:var(--color-background-secondary);border:0.5px solid var(--color-border);color:var(--color-text-secondary);font-family:inherit;font-size:var(--text-xs);cursor:pointer;white-space:nowrap;transition:color .15s,border-color .15s}
-.follow-active-btn:hover{color:var(--color-accent);border-color:var(--color-accent)}
 /* The ORIGIN tier — renders only when one origin holds 2+ runs (a lone run wears
    its own row). It groups, it doesn't navigate: no cycle is addressed by it, so
    the label is a plain span, not a button. Muted against the run rows beneath so

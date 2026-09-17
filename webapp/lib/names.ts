@@ -10,8 +10,8 @@
 import type { CampaignSummary, CycleListEntry, MintKind } from "./api";
 import { shortFamilyTail } from "./ids";
 
-// How the operator reads what minted a cycle. A campaign has exactly one root,
-// which reads as "Session"; the others tag a fork / diag branch.
+// How the operator reads what minted a cycle. Total over the served union, so a new mint kind
+// is a compile error here rather than a blank tag.
 const MINT_KIND_LABEL: Record<MintKind, string> = {
   session: "Session",
   divergent_resume: "divergent resume",
@@ -25,9 +25,8 @@ export function campaignDisplayName(c: CampaignSummary): string {
   return c.label || c.dataset_name || c.campaign_id;
 }
 
-// Human name for one unit — "Session" for the campaign's root, "{kind} {tail}"
-// for a fork / diag branch.
+// Human name for one BRANCH cut off a campaign's root — "{kind} {tail}". The root itself is
+// named by its campaign row, so nothing asks this for one.
 export function unitDisplayName(c: CycleListEntry): string {
-  if (c.is_root) return MINT_KIND_LABEL.session;
   return `${MINT_KIND_LABEL[c.mint_kind]} ${shortFamilyTail(c.cycle_id)}`;
 }

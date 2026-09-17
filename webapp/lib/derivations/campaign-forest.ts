@@ -1,5 +1,5 @@
-// Sidebar data model — the FOREST, and the collapsed-node codec. Pure: no
-// React; the tree-row components own the rendering.
+// The campaign FOREST, and the collapsed-node codec. Pure: no React; the sidebar
+// rows and the masthead switcher render the same groups.
 //
 // One store is one forest, and the structure is self-similar:
 //
@@ -34,6 +34,8 @@ export interface RunGroup {
   // Display-data sources, "a cut that moved the line means the BRANCH answers").
   // Usually the root; never assumed to be.
   answering: CycleListEntry;
+  // The root's siblings, most-recently-updated first — every fork and diag cut from it.
+  branches: CycleListEntry[];
   // Most-recent updated_at across every cycle — sorts so the run being actively
   // worked on stays at the top.
   updatedAt: string;
@@ -121,6 +123,7 @@ function groupRuns(
       campaign,
       root,
       answering: answeringCycle(root, branches),
+      branches,
       updatedAt: all.reduce(
         (m, c) => (c.updated_at > m ? c.updated_at : m),
         campaign.created_at,

@@ -15,19 +15,15 @@ import type { ReactNode } from "react";
 import { cx } from "@/lib/cx";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
 import { campaignDisplayName } from "@/lib/names";
-import {
-  effectTone,
-  fmtAgo,
-  fmtDateTime,
-  fmtPct0,
-  fmtSigned,
-  fmtTokens,
-  fmtUsd,
-  shortId,
-} from "@/lib/format";
-import { runPhaseLabel, runPhaseMark, type RunPhaseMark } from "@/lib/run-phase";
+import { effectTone, fmtPct0, fmtSigned } from "@/lib/format";
+import { runPhaseLabel, runPhaseMark } from "@/lib/run-phase";
 import { CAVEAT_COPY } from "@/components/candidates/AbilityInfo";
 import {
+  accuracyStat,
+  campaignCard,
+  campaignLineParts,
+  campaignStatus,
+  campaignTitle,
   candidatesOf,
   childCourses,
   cutFromLabel,
@@ -35,67 +31,24 @@ import {
   panelCellLabel,
   pathOf,
   roundSizes,
+  spendLabel,
   splitRetired,
   wasElected,
+  type NodeKind,
+  type OriginGroup,
   type RetiredGroup,
+  type RowCardFacts,
+  type RowStat,
+  type RowStatus,
+  type RunGroup,
 } from "@/lib/derivations";
 import { encodeCyclePath, nodeAddress, shortFamilyTail, type CyclePath } from "@/lib/ids";
-import type { CampaignSummary, LineageNode } from "@/lib/api";
+import type { LineageNode } from "@/lib/api";
 import { useLineageTree, type CampaignTree } from "@/lib/lineage";
-import type { NodeKind } from "./grouping";
-import type { OriginGroup, RunGroup } from "./grouping";
 import { CampaignMenu } from "./CampaignMenu";
+import { CampaignRowLabel, PhaseMark } from "./CampaignRowLabel";
 import { CompareToggle } from "./CompareToggle";
-import { RowHoverCard, type RowStat } from "./RowHoverCard";
-
-// A campaign's served lifetime spend. A price-less model makes it a FLOOR, and the `≥` says so
-// on the row itself rather than only inside the card.
-function spendLabel(c: CampaignSummary): string {
-  return `${c.spend_unpriced_tokens > 0 ? "≥" : ""}${fmtUsd(c.spend_used_usd)}`;
-}
-
-interface RowStatus {
-  mark: RunPhaseMark;
-  word: string;
-}
-
-const ARCHIVED_MARK: RunPhaseMark = { glyph: "▫", tone: "quiet" };
-
-// The glyph stands in for a word the column cannot fit whole; the word is its accessible name.
-function PhaseMark({ status }: { status: RowStatus }) {
-  return (
-    <span
-      className={`unit-library-mark tone-${status.mark.tone}`}
-      role="img"
-      aria-label={status.word}
-    >
-      {status.mark.glyph}
-    </span>
-  );
-}
-
-// Ten runs of one dataset share a display name, so a campaign row keeps its id's `__suffix`
-// whole and lets the name before it truncate — the tail is what tells the rows apart.
-function RowName({ label, campaign }: { label: string; campaign?: CampaignSummary }) {
-  const tail = campaign ? shortId(campaign.campaign_id) : null;
-  return (
-    <>
-      <span className="unit-library-name-head">{label}</span>
-      {campaign && tail !== campaign.campaign_id && (
-        <span className="unit-library-name-tail">__{tail}</span>
-      )}
-    </>
-  );
-}
-
-function accuracyStat(origin: number | null, best: number | null): RowStat {
-  const lifted = origin != null && best != null && best !== origin;
-  return {
-    label: "Accuracy",
-    value: lifted ? `${fmtPct0(origin)} → ${fmtPct0(best)}` : fmtPct0(origin ?? best),
-    sub: `${lifted ? "origin → best" : origin != null ? "origin" : "best"} · rounds are won on θ`,
-  };
-}
+import { RowHoverCard } from "./RowHoverCard";
 
 // What every row needs to render itself and answer clicks. Threaded down rather than
 // context'd so the tree stays a pure function of its props.
@@ -112,10 +65,6 @@ export interface TreeCtx {
   viewedPath: CyclePath | null;
   viewedCandidateId: string | null;
   selectCyclePath: (path: CyclePath, candidateId?: string | null) => void;
-  // The store's own active pointer — the workspace's session up top. An inner run's
-  // liveness is `run_phase` on its own node (server-owned, I6), not a second pointer read.
-  activeCampaignId: string | null;
-  activeCycleId: string | null;
 }
 
 function courseOpen(ctx: TreeCtx, path: CyclePath): boolean {
@@ -296,12 +245,11 @@ function CourseRow({
   // read as a round of six.
   const { live: liveRows, retired: retiredGroups } = splitRetired(rows);
 
-  const campaign = run?.campaign;
   const originAccuracy = node?.origin_accuracy ?? null;
   const best = run?.bestAccuracy ?? node?.best_accuracy ?? null;
   const lifted = originAccuracy != null && best != null && best !== originAccuracy;
 
-  const archived = campaign?.lifecycle_status === "archived";
+  const archived = run?.campaign.lifecycle_status === "archived";
   // Compare the WHOLE (campaign, cycle) path, not just the leaf cycleId: `cycle_id` is a
   // deterministic origin hash, so two campaigns of one origin (a re-`new`) share it. A
   // cycleId-only match lit BOTH runs when one was selected — the exact "select one, another
@@ -314,80 +262,26 @@ function CourseRow({
   // `run_phase` is the ONE server-owned run-state (I6), handed in above. Every phase reaches
   // the row as a MARK from the total `runPhaseMark` map, its word in `aria-label` and the card:
   // a marker that tested `=== "running"` left a run held at the origin gate looking idle.
-  const active =
-    campaign?.campaign_id === ctx.activeCampaignId &&
-    path[path.length - 1]?.cycleId === ctx.activeCycleId &&
-    phase !== "checkin";
-  const status: RowStatus | null = archived
-    ? { mark: ARCHIVED_MARK, word: "Archived" }
+  const status: RowStatus | null = run
+    ? campaignStatus(run)
     : phase
       ? { mark: runPhaseMark(phase, phaseReason), word: runPhaseLabel(phase, phaseReason) }
       : null;
 
   const cycleId = path[path.length - 1]!.cycleId;
-  const answering = run?.answering;
-  const facts: [string, string][] = [];
-  const dataset = campaign?.dataset_name ?? node?.dataset_name;
-  if (dataset) facts.push(["Dataset", dataset]);
-  if (node?.task) facts.push(["Task", node.task]);
-  if (run) facts.push(["Last activity", fmtAgo(run.updatedAt) || fmtDateTime(run.updatedAt)]);
-  if (campaign) {
-    const ago = fmtAgo(campaign.created_at);
-    facts.push(["Created", `${fmtDateTime(campaign.created_at)}${ago ? ` · ${ago}` : ""}`]);
-    facts.push(["Campaign", campaign.campaign_id]);
-  }
-  facts.push(["Cycle", cycleId]);
-  if (answering && answering.cycle_id !== cycleId) facts.push(["Answering", answering.cycle_id]);
-
-  const stats: RowStat[] = [];
-  if (campaign) {
-    stats.push({
-      label: "Spend",
-      value: spendLabel(campaign),
-      sub:
-        campaign.spend_unpriced_tokens > 0
-          ? `floor — ${fmtTokens(campaign.spend_unpriced_tokens)} unpriced`
-          : "lifetime, every cycle",
-      className: campaign.spend_unpriced_tokens > 0 ? "rowhover-tone-warn" : undefined,
-    });
-  }
-  if (answering) stats.push({ label: "Rounds", value: String(answering.n_rounds) });
-  stats.push(accuracyStat(originAccuracy, best));
-  if (node?.hearts != null && node.lives_cap != null) {
-    stats.push({ label: "Lives", value: `${node.hearts} / ${node.lives_cap}` });
-  }
-
-  const card = {
-    title: label,
-    state: status?.word,
-    tags: answering?.human_intervened ? ["babysat"] : undefined,
-    lede: archived
-      ? "Archived — restore it from the ⋯ menu to open it."
-      : node?.task
-        ? "An inner run: it measured one candidate of the course above on one panel cell."
-        : "The campaign and the course it ran. Its origin is the C0 row inside it.",
-    stats,
-    facts,
-    campaignId: campaign?.campaign_id,
-  };
-
-  // A campaign reads in dollars, archived or not; its accuracy sits in the card beside the θ
-  // that decides. An inner run keeps its accuracy.
-  const reading = campaign ? (
-    <span className="unit-library-spend">{spendLabel(campaign)}</span>
-  ) : archived ? null : (
-    <span>
-      {fmtPct0(originAccuracy ?? best ?? null)}
-      {lifted && (
-        <>
-          <span className="unit-library-arrow" aria-label="improved to">
-            →
-          </span>
-          {fmtPct0(best)}
-        </>
-      )}
-    </span>
-  );
+  // A campaign's whole card is one derivation, shared with the masthead; an inner run has no
+  // campaign, no spend and no answering cycle, so it says the three things it does know.
+  const card: RowCardFacts = run
+    ? campaignCard(run, node, status?.word)
+    : {
+        title: label,
+        state: status?.word,
+        lede: node?.task
+          ? "An inner run: it measured one candidate of the course above on one panel cell."
+          : "The course and what it ran. Its origin is the C0 row inside it.",
+        stats: innerStats(node, originAccuracy, best),
+        facts: innerFacts(node, cycleId),
+      };
 
   const row = (
     <div className={cx("unit-library-family", selected && "selected", archived && "archived")}>
@@ -408,20 +302,33 @@ function CourseRow({
         aria-current={selected ? "true" : undefined}
         disabled={archived}
       >
-        <span className="unit-library-row">
-          <span className="unit-library-name unit-library-name-split">
-            <RowName label={label} campaign={campaign} />
-            {active && (
-              <span className="unit-library-live active" aria-label="Dashboard follows this run">
-                ●
+        {run ? (
+          <CampaignRowLabel
+            name={label}
+            suffix={campaignTitle(run.campaign).suffix}
+            status={status}
+            spend={spendLabel(run.campaign)}
+            parts={campaignLineParts(run)}
+          />
+        ) : (
+          <span className="unit-library-row">
+            <span className="unit-library-name">{label}</span>
+            <span className="unit-library-meta unit-library-meta-marked">
+              {status && <PhaseMark status={status} />}
+              <span>
+                {fmtPct0(originAccuracy ?? best ?? null)}
+                {lifted && (
+                  <>
+                    <span className="unit-library-arrow" aria-label="improved to">
+                      →
+                    </span>
+                    {fmtPct0(best)}
+                  </>
+                )}
               </span>
-            )}
+            </span>
           </span>
-          <span className="unit-library-meta unit-library-meta-marked">
-            {status && <PhaseMark status={status} />}
-            {reading}
-          </span>
-        </span>
+        )}
       </button>
       {chrome}
     </div>
@@ -462,6 +369,24 @@ function CourseRow({
       )}
     </>
   );
+}
+
+// An inner run's card. It is machine-minted into a sandbox, so it has no campaign manifest to
+// read spend, a rounds cap or a creation date off — its numbers are the ones on its own node.
+function innerFacts(node: LineageNode | null, cycleId: string): [string, string][] {
+  const facts: [string, string][] = [];
+  if (node?.dataset_name) facts.push(["Dataset", node.dataset_name]);
+  if (node?.task) facts.push(["Task", node.task]);
+  facts.push(["Cycle", cycleId]);
+  return facts;
+}
+
+function innerStats(node: LineageNode | null, origin: number | null, best: number | null) {
+  const stats: RowStat[] = [accuracyStat(origin, best)];
+  if (node?.hearts != null && node.lives_cap != null) {
+    stats.push({ label: "Lives", value: `${node.hearts} / ${node.lives_cap}` });
+  }
+  return stats;
 }
 
 // What ONE supersede cut left behind — the record of what ran, collapsed under the live line.

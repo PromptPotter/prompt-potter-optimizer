@@ -6,8 +6,7 @@
 
    foundation/ = the portable, whitelabel-safe skeleton (tokens, both theme
    palettes, reset/base, reduced-motion, responsive floors).
-   domains/    = per-feature component rules + their co-located @media.
-   Glassmorphism (domains/glass.css) is operator-vetoed — preserved verbatim. */
+   domains/    = per-feature component rules + their co-located @media. */
 
 /* ── Foundation ─────────────────────────────────────────────── */
 @import "./foundation/tokens.css";
@@ -17,11 +16,10 @@
 /* ── Domains (authored cascade order) ───────────────────────── */
 @import "./domains/shell.css";
 @import "./domains/dashboard.css";
-@import "./domains/cycle-picker.css";
+@import "./domains/masthead.css";
 @import "./domains/lineage.css";
 @import "./domains/panels.css";
 @import "./domains/candidates.css";
-@import "./domains/glass.css";
 @import "./domains/workflow.css";
 @import "./domains/files.css";
 @import "./domains/chat.css";
