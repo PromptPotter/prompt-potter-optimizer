@@ -114,6 +114,21 @@ class Connector:
     every press, and a screen declares its depth at launch instead
     (``application/diagnostics/seed_screen.py``)."""
 
+    holds_own_sends: bool = False
+    """Whether every paid call this backend makes passes through this process's own LLM clients,
+    which admit each send against the run's spend book (``infrastructure/llm/spend_book.py``) — so
+    a cell holds nothing itself. ``False`` (default): the cell is held whole, at the bound the
+    backend serves per node (``PipelineNode.spend_bound``), and a backend serving none cannot run
+    under a spend ceiling. Only the recursion is ``True``; ``dspy`` runs in this process but pays
+    through litellm, which no admission sees."""
+
+    cancel_stops_billing: bool = False
+    """Whether cancelling a cell that is already sent stops what it bills. ``False`` (default): a
+    sent cell is left to land, because the backend finishes it and the provider bills it whether or
+    not anyone waits — cancelling would lose the result and learn nothing of the cost. Declared,
+    never read off ``execution``: an in-process call that is one provider request bills all the
+    same."""
+
     cell_envelope_s: CellEnvelopeSeconds | None = None
     """Seconds ONE cell of this backend may SPEND, resolved per cell. ``None`` (default) = this
     backend's cells carry no wall-clock bound.

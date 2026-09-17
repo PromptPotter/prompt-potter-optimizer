@@ -25,6 +25,11 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopLoop, emit_phase
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.scoring import all_verifier_graded
+from promptpotter.infrastructure.llm.spend_book import (
+    bind_spend_book,
+    bound_spend_book,
+    unbounded_spend_book,
+)
 from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 from promptpotter.judges import build_evaluators
 from promptpotter.shared.errors import graceful
@@ -166,8 +171,13 @@ def arm_diagnostic_scoring(
 
     ``source`` is required here though :func:`populate_session_scoring` defaults it. ``ab`` was the
     one caller that omitted it, so its replays stamped the session ``optimization_loop`` — the
-    provenance of the run being replayed rather than of the replay."""
+    provenance of the run being replayed rather than of the replay.
 
+    A verb run inside a campaign — the saturation ``verify`` — spends under that run's book; one
+    run on its own gets a book for its task, which no ceiling binds yet."""
+
+    if bound_spend_book() is None:
+        bind_spend_book(unbounded_spend_book())
     pipeline_params = configure_and_apply_pipeline(
         session, campaign_config, log=log or (lambda *_a, **_k: None)
     )

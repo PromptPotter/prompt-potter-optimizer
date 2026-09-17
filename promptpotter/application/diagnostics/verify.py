@@ -36,6 +36,7 @@ from promptpotter.domain.results import (
     resolved_fitness,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.spend_book import bound_spend_book
 from promptpotter.infrastructure.llm.telemetry import (
     active_cycle_ledger,
     diagnostic_spend,
@@ -109,7 +110,12 @@ def _diagnostic_trace(stores: Stores, hop: CycleHop) -> Iterator[None]:
         with diagnostic_spend():
             yield
         return
-    token = set_cycle_ledger(CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop))))
+    ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
+    # The verb's own book files here too, so what an L4 cell spends beneath it lands on this
+    # ledger rather than only on the sandbox's.
+    if (book := bound_spend_book()) is not None and book.ledger is None:
+        book.ledger = ledger
+    token = set_cycle_ledger(ledger)
     try:
         with diagnostic_spend():
             yield

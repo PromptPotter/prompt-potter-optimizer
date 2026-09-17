@@ -138,7 +138,7 @@ and moves every round.
   task image**, tagged `hb__<content hash>` by `resources/harbor-docker-compose.yaml` — one per
   distinct task environment, never one per cell. **A trial that measured the machine is never a
   cell**: `_infrastructure_failure` retries it and then raises `CellInfrastructureError`, which
-  halts the walk — at once and as `CellCreditExhaustedError` when the provider account is out of
+  halts the walk — at once and as `CellWalletExhaustedError` when the provider account is out of
   credit. The rule, and the package cache that keeps downloads out of a cell, are
   [`../../docs/operations/package-cache.md`](../../docs/operations/package-cache.md).
 

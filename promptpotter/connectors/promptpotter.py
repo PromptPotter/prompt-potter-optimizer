@@ -252,6 +252,10 @@ CONNECTOR = Connector(
     # One sample is a whole inner campaign — tens of minutes, almost all of it waiting on the
     # provider — so the ceiling here is what bounds a press, and it is the only thing that does.
     max_cells_in_flight=MAX_CELLS_IN_FLIGHT,
+    # The inner campaign's calls go through this process's clients, each admitted on its own; and
+    # cancelling one stops the calls it has not made yet.
+    holds_own_sends=True,
+    cancel_stops_billing=True,
     # A whole campaign runs per cell, so the awaits inside one are unbounded in sum: without this
     # a throttle storm stretches one cell across the round that was measuring it.
     cell_envelope_s=_cell_envelope_s,

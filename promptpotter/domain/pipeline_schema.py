@@ -349,6 +349,34 @@ class PipelineView(StrictModel):
     edges: list[PipelineViewEdge] = Field(default_factory=list)
 
 
+class LLMSpendBound(StrictModel):
+    """The most one run of an LLM node can bill, in the counts its BACKEND enforces — never a
+    price, which is the client's to read (``infrastructure/llm/pricing.py::rate_ceiling``)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["llm"]
+    # Provider requests one run may send, every retry and repair included.
+    attempts: int = Field(ge=1)
+    # The most one request reads, in UTF-8 bytes — refused by the backend beyond it.
+    input_bytes: int = Field(ge=0)
+    # The reply cap no retry lifts; a node config's own `max_tokens` replaces it.
+    max_tokens: int = Field(ge=1)
+
+
+class WebSpendBound(StrictModel):
+    """The most one run of a web-search node can bill."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["web"]
+    queries: int = Field(ge=0)
+    usd_per_query: float = Field(ge=0)
+
+
+NodeSpendBound = Annotated[LLMSpendBound | WebSpendBound, Field(discriminator="kind")]
+
+
 class PipelineNode(StrictModel):
     model_config = ConfigDict(frozen=True)
 
@@ -380,6 +408,9 @@ class PipelineNode(StrictModel):
     # A THINKING node whose declaration opens a search axis — decided at parse, before `narrow`,
     # so no campaign's closing moves which node carries the `response_format` and model rows.
     tunes_llm: bool
+    # What one run of this node may bill, as the backend serves it; `None` is a node its backend
+    # bounds nothing on. Rides the schema, never the identity — it prices no measurement.
+    spend_bound: NodeSpendBound | None = None
 
     @property
     def output_keys(self) -> list[str]:
@@ -1192,11 +1223,13 @@ __all__ = [
     "CANDIDATE_LIBRARY_FILE",
     "MOVABLE_AGENTS",
     "THINKING_KINDS",
+    "LLMSpendBound",
     "NestedPipelineRef",
     "NodeConfigParam",
     "NodeKind",
     "NodeOutputSchema",
     "NodePromptInfo",
+    "NodeSpendBound",
     "NodeType",
     "ObservationMapping",
     "ParamSource",
@@ -1206,6 +1239,7 @@ __all__ = [
     "PipelineView",
     "PipelineViewEdge",
     "PipelineViewNode",
+    "WebSpendBound",
     "dependencies_from_node_types",
     "stable_hash",
 ]

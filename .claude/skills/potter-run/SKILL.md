@@ -215,9 +215,9 @@ leaderboard picks.
   active pointer naming a different dataset than requested; recent
   `measurements/runs/{run_id}.jsonl` showing empty `predicted` strings. Documented config is
   expected state, not a warning.
-- **Bounded retries are already handled.** `BackendClient.run_query()` retries 429 (Retry-After)
-  and 5xx/transport with backoff, 5 attempts. If 5xx still propagates, halt and say so — don't loop
-  on top of the client's loop.
+- **Bounded retries are already handled.** `BackendClient.run_query()` retries 429 (Retry-After),
+  5xx and a connection never made, 5 attempts, each admitted against the spend book; a read timeout
+  is never re-sent. If 5xx still propagates, halt and say so — don't loop on top of the client's loop.
 - Error prefixes (`[CLIENT]` / `[SERVER]` / `[CONNECTION]` / `[PIPELINE]`) → `logs/latest.log` + the
   latest `rounds/round_NNNN.json`.
 - Surface the kill command (`tasklist | findstr python` → `taskkill //F //PID <pid>`) only when

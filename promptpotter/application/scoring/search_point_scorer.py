@@ -361,7 +361,11 @@ def open_walk(
         ci_lo, ci_hi = mean_fitness_ci(rows)
         return {**scores, "mean_fitness_ci_lo": ci_lo, "mean_fitness_ci_hi": ci_hi}
 
-    def _save_run(results: list[QueryMeasurement], scores: dict[str, Any]) -> None:
+    def _save_run(
+        results: list[QueryMeasurement],
+        scores: dict[str, Any],
+        banked: Sequence[QueryMeasurement] = (),
+    ) -> None:
         nonlocal opened, appended, priors_appended
         if not (store and backend_id):
             return
@@ -393,10 +397,14 @@ def open_walk(
         # last one. The priors go down once — ``merged[len(results):]`` is exactly the ones
         # the walk has not reached; a sample walked later supersedes its own prior by
         # ``sample_id``, which is what makes an append-only log safe to re-walk.
+        # A banked row is a prior this walk made itself, so it rides the tail: with it when the tail
+        # has yet to go down, on its own once it has.
         new_rows: list[QueryMeasurement] = []
         if not priors_appended:
             new_rows.extend(merged[len(results) :])
             priors_appended = True
+        else:
+            new_rows.extend(banked)
         new_rows.extend(results[appended:])
         appended = len(results)
         archive_queries.record_measurement_run(
@@ -412,6 +420,15 @@ def open_walk(
         merged = merge_with_unprocessed_priors(results, prior_tail)
         _save_run(results, running if merged is results else _composite(merged))
         return running
+
+    def _bank(results: list[QueryMeasurement], rows: list[QueryMeasurement]) -> None:
+        """Rows back and not yet taken, kept as priors of this run: the walk resumed from a stop
+        replays each when it reaches it, as it replays any archived row for its configuration."""
+        if not (store and backend_id):
+            return
+        for row in rows:
+            prior_tail[row["sample_id"]] = row
+        _save_run(results, _composite(merge_with_unprocessed_priors(results, prior_tail)), rows)
 
     def _record_run(results: list[QueryMeasurement], scores: dict[str, Any]) -> None:
         _save_run(results, scores)
@@ -437,6 +454,7 @@ def open_walk(
         persist_fresh=_persist_fresh,
         running_scores=_composite,
         record_run=_record_run,
+        bank=_bank,
     )
     return Walk(
         dataset=dataset,

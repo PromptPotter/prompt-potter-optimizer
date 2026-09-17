@@ -35,6 +35,7 @@ from promptpotter.domain.run_records import (
     RoundWarningRecord,
     RulerRecord,
     SnapshotRecord,
+    SpendHoldRecord,
     SpendTombstoneRecord,
     TokenUsageRecord,
 )
@@ -72,6 +73,9 @@ _ROUTES: dict[type, str | None] = {
     # Banked by `store/account_spend.py` before a delete takes the rows it stands for — a fact
     # about a cycle that no longer exists, so no live view of one can hold it.
     SpendTombstoneRecord: None,
+    # A call's admission, paired with the usage record that settles it; money moves on the usage
+    # record, and a hold left open is charged as one (`spend_book.py::charge_open_holds`).
+    SpendHoldRecord: None,
 }
 
 _arms = frozenset(get_args(get_args(CycleRecord)[0]))

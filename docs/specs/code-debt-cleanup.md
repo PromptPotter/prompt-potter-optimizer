@@ -82,7 +82,34 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   a node's `param_keys` are validated. **Re-test:** grep `promptpotter/` for a raise naming
   `prompt_info`; while none exists, the no-skill shape still passes silently.
 
+- **Harbor and DSPy cells cannot run under a spend ceiling.** Neither serves a `spend_bound`
+  (`backend-integration.md` § What a backend owes a campaign under a spend ceiling), so
+  `scoring/sample_measurement.py::cell_bound` leaves every cell unbounded and the spend book refuses
+  it — loudly, before it is sent. Action: harbor caps an episode's cost inside its agent harness and
+  serves that cap; dspy serves its student node's bound from its own declaration and checks the
+  input against it before the call. **Rides with:** the next change to `connectors/harbor.py` or
+  `connectors/dspy_module.py`. **Re-test:** launch a harbor dataset with a USD ceiling — every cell
+  refused with "no rate bounds what it may cost" means this is still open.
+
+- **`noise-floor` and `seed-screen` spend with no record.** Both admit every call against a book
+  (`initialization/loop_start.py::arm_diagnostic_scoring`) but bind no ledger, so what they pay is
+  on no ledger any account sum reads; on a `promptpotter-self` cycle the inner spend is banked only
+  when the sandbox is reaped. Action: file both on a ledger the account walk reaches — `noise-floor`
+  has its cycle, as `verify` does (`diagnostics/verify.py::_diagnostic_trace`); `seed-screen` has
+  none and needs one named. **Rides with:** the next change to either verb. **Re-test:** run
+  `noise-floor -k 1` on a cycle and grep its `.runtime/ledger.jsonl` for a `token_usage` line
+  stamped `diagnostic`; none means this is open.
+
 ## Blocked — named blocker
+
+- **Concurrent sibling cycles of one campaign each spend up to the whole ceiling.**
+  `spend_budget_usd` binds a CYCLE (`runner/entry.py::_build_budget_gate` seeds its book off that
+  cycle's folded history), so two forks launched side by side are each admitted the full ceiling
+  and the campaign can spend twice it. **Blocker:** a decision only the operator can make — whether
+  the ceiling is the campaign's or the cycle's. The campaign's answer is one book per campaign,
+  shared by its live cycles through the job registry the account wallet already reads.
+  **Re-test:** ask the operator which the ceiling is; while unanswered, this stands.
+
 
 **Archive hygiene — the reclaim, its attribution, and the map over both:**
 - **Re-test: `compact-archive inventory`**, which is what sizes the three below: runs, cells, bytes
@@ -143,7 +170,7 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   `User.spend_budget_usd_total` / `token_budget_total` lifetime ceilings, vs the new coupon
   (`grant.json`, ledger-derived, live). Two guards on one concern = the no-redundant-mechanism rule.
   Action: **delete the free-tier path**; coupon-remaining becomes the single host ceiling, read by
-  the per-cycle `BudgetGate` every tick (D1/D2 in ADR-0003). Blocker: lands *with* the coupon —
+  the run's spend book at every admission (D1/D2 in ADR-0003). Blocker: lands *with* the coupon —
   deleting first leaves the wallet unguarded. ⚠️ Two things the replacement must carry or it is a
   regression: BOTH units (an all-USD coupon re-opens the unpriced-model blindness D1's token arm
   covers), and the per-run **reservation** (`Job.cap_usd` / `cap_tokens`) — without it two concurrent

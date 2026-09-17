@@ -6,7 +6,7 @@ import asyncio
 import logging
 import re
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
@@ -25,16 +25,20 @@ from promptpotter.domain.l4.proxies import (
     PARENT_LEVEL_SE_KEY,
 )
 from promptpotter.domain.phases import RunPhase
+from promptpotter.domain.pipeline_schema import WebSpendBound
 from promptpotter.domain.results_health import classify_result, terminal_node
 from promptpotter.domain.run_records import PhaseRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import QueryMeasurement, extract_item_label, is_hit, turn_scalars
 from promptpotter.domain.spend import StepTokenUsage, TokenAccount
+from promptpotter.infrastructure.llm.pricing import rate_ceiling
 from promptpotter.infrastructure.llm.rate_limit import is_quota_rate_limit
+from promptpotter.infrastructure.llm.spend_book import FRAMING_TOKENS, Billed, SendBound
 from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, emit_token_usage
 from promptpotter.shared.errors import (
     CellUnscoreableError,
     ErrorCategory,
+    WalletExhaustedError,
     has_pipeline_warnings,
 )
 
@@ -180,34 +184,122 @@ assert _SEAM_OWNED.isdisjoint(_WIRE_SEEDED), (
 )
 
 
-def emit_step_token_usage(
-    step_tokens: Mapping[str, StepTokenUsage],
-    step_timings: Mapping[str, Any],
-    *,
-    cached: bool,
-) -> None:
-    """Fan one sample's per-node backend token usage onto the ledger, on BOTH paths. A cache hit
-    spent no money but the search still made the call, so metering only misses prices our cache."""
+def _step_parts(
+    step_tokens: Mapping[str, StepTokenUsage], step_timings: Mapping[str, Any]
+) -> list[Billed]:
+    """One sample's per-node backend usage, one billed part per node that used anything. A step
+    with no tokens still counts when it carries a fixed cost — spend is the headline."""
+    parts: list[Billed] = []
     for node_name, entry in step_tokens.items():
-        in_tok = entry["input"]
-        out_tok = entry["output"]
         cost_usd = entry.get("cost_usd")
-        # Skip a wholly-empty step, but never one that still carries a fixed/per-call
-        # cost (spend is the headline) — that would silently drop cost from the ledger.
-        if in_tok == 0 and out_tok == 0 and not cost_usd:
+        if entry["input"] == 0 and entry["output"] == 0 and not cost_usd:
             continue
         raw_dur = step_timings.get(node_name)
-        emit_token_usage(
-            node=str(node_name),
-            kind="backend",
-            usage=TokenAccount.from_step_entry(entry),
-            duration_s=float(raw_dur) if isinstance(raw_dur, (int, float)) else 0.0,
-            model=entry.get("model"),
-            provider=entry.get("provider"),
-            served_by=entry.get("served_by"),
-            cost_usd=cost_usd,
-            cached=cached,
+        parts.append(
+            Billed(
+                TokenAccount.from_step_entry(entry),
+                cost_usd,
+                served_by=entry.get("served_by"),
+                model=entry.get("model"),
+                node=str(node_name),
+                provider=entry.get("provider"),
+                duration_s=float(raw_dur) if isinstance(raw_dur, (int, float)) else 0.0,
+            )
         )
+    return parts
+
+
+def emit_replayed_step_tokens(
+    step_tokens: Mapping[str, StepTokenUsage], step_timings: Mapping[str, Any]
+) -> None:
+    """Meter a replayed row's per-node backend usage, flagged ``cached``: it spent no money, but the
+    search still made the call, so leaving it unmetered prices our cache history. A fresh cell is
+    metered where it was admitted (:func:`cell_billing`)."""
+    for part in _step_parts(step_tokens, step_timings):
+        emit_token_usage(
+            node=part.node or "backend",
+            kind="backend",
+            usage=part.usage,
+            duration_s=part.duration_s or 0.0,
+            model=part.model,
+            provider=part.provider,
+            served_by=part.served_by,
+            cost_usd=part.cost_usd,
+            cached=True,
+        )
+
+
+def cell_billing(
+    pipeline_schema: PipelineSchema, wire_params: dict[str, Any]
+) -> Callable[[dict[str, Any]], list[Billed] | None]:
+    """What a cell's reply ``data`` says each node billed — ``None`` where it reports no usage at
+    all, which is charged the cell's whole bound. A node's guessed usage is no report, so it bills
+    nothing here: a backend reports every node it ran (``backend-integration.md``)."""
+
+    def billed(data: dict[str, Any]) -> list[Billed] | None:
+        if not isinstance(data.get("step_tokens"), dict):
+            return None
+        reported = {
+            name: entry
+            for name, entry in _compute_step_tokens(data, pipeline_schema, wire_params).items()
+            if not entry["estimated"]
+        }
+        parts = _step_parts(reported, data.get("step_timings") or {})
+        web = data.get("web_cost")
+        usd = web.get("usd") if isinstance(web, dict) else None
+        if isinstance(usd, int | float) and not isinstance(usd, bool) and usd:
+            searched = next(
+                (n.name for n in pipeline_schema.nodes if isinstance(n.spend_bound, WebSpendBound)),
+                "web_search",
+            )
+            parts.append(Billed(TokenAccount(), float(usd), node=searched))
+        return parts
+
+    return billed
+
+
+async def cell_bound(session: Session, wire_params: Mapping[str, Any]) -> SendBound | None:
+    """The most one cell can bill: the bound each node's backend serves, priced at the dearest the
+    model this configuration runs it on can charge. ``None`` for a backend whose own sends are
+    each admitted. A backend bounding nothing, or an LLM node it serves no bound for, leaves the
+    cell unbounded — and an unbounded cell cannot run under a ceiling."""
+    if session.backend_client.holds_own_sends:
+        return None
+    usd = 0.0
+    input_tokens = output_tokens = 0
+    bounded = priced = True
+    served = False
+    for node in session.pipeline_schema.nodes:
+        spend = node.spend_bound
+        if spend is None:
+            bounded = bounded and not node.is_llm
+            continue
+        served = True
+        if isinstance(spend, WebSpendBound):
+            usd += spend.queries * spend.usd_per_query
+            continue
+        raw_cfg = wire_params.get(node.name)
+        cfg = raw_cfg if isinstance(raw_cfg, Mapping) else {}
+        reply = int(cfg.get("max_tokens") or spend.max_tokens)
+        reads = spend.input_bytes + FRAMING_TOKENS
+        input_tokens += spend.attempts * reads
+        output_tokens += spend.attempts * reply
+        model, provider = cfg.get("model"), cfg.get("provider")
+        ceiling = (
+            await rate_ceiling(model, provider)
+            if isinstance(model, str) and isinstance(provider, str)
+            else None
+        )
+        if ceiling is None:
+            priced = False
+        else:
+            tier = ceiling.at(reads)
+            usd += spend.attempts * (ceiling.per_request + reads * tier.input + reply * tier.output)
+    if not (served and bounded):
+        return SendBound(input_tokens=input_tokens, output_tokens=None, usd=None)
+    return SendBound(
+        input_tokens=input_tokens, output_tokens=output_tokens, usd=usd if priced else None
+    )
 
 
 def _compute_step_tokens(
@@ -407,6 +499,7 @@ async def measure_sample(
                 logger.exception("backend warning ledger emit failed; continuing")
 
         client = session.backend_client
+        bound = await cell_bound(session, wire_params)
         envelope = CellEnvelope(
             client.cell_envelope_s(query, wire_params), label=f"{sample.id}:{query[:40]}"
         )
@@ -425,7 +518,11 @@ async def measure_sample(
         try:
             async with envelope:
                 resp = await client.run_query(
-                    query, pipeline_params=wire_params, on_warning=_emit_backend_warning
+                    query,
+                    pipeline_params=wire_params,
+                    bound=bound,
+                    billed=cell_billing(pipeline_schema, wire_params),
+                    on_warning=_emit_backend_warning,
                 )
         finally:
             # Cancel whether the query succeeded or raised — an in-flight task survives and
@@ -495,12 +592,11 @@ async def measure_sample(
         if sample.question:
             pd["question"] = sample.question
 
+        # Metered where the cell was admitted (`BackendClient.run_query`); a replay of this row
+        # meters itself off what is banked here.
         step_tokens = _compute_step_tokens(data, pipeline_schema, wire_params)
         if step_tokens:
             pd["step_tokens"] = step_tokens
-            # Only fresh backend calls reach here — a cache hit returns early and meters
-            # itself off the archived row — so this never double-counts.
-            emit_step_token_usage(step_tokens, data.get("step_timings") or {}, cached=False)
 
         result: dict[str, Any] = {
             "sample_id": sample.id,
@@ -555,13 +651,13 @@ async def measure_sample(
         error_msg = f"{exc} — Backend may be down or unreachable."
         logger.warning("measure_sample CONNECTION for %s: %s", query[:60], error_msg)
         return _error_result(sample, error_msg, category=ErrorCategory.CONNECTION)
-    except (KeyboardInterrupt, asyncio.CancelledError):
+    except (KeyboardInterrupt, asyncio.CancelledError, WalletExhaustedError):
+        # A wallet that refused the cell refused it before it was sent: a stop, never a row.
         raise
     except CellUnscoreableError as exc:
         # The cell RAN and there is nothing to grade. The exception's own category says WHICH of the
         # two — a cut we made, or a reward the backend never produced — and a repair reads them apart.
-        # What it paid is billed here all the same: an ungraded cell is not a free one.
-        emit_step_token_usage(exc.spent, exc.step_timings, cached=False)
+        # What it paid was billed where it was admitted: an ungraded cell is not a free one.
         logger.warning("measure_sample %s for %s: %s", exc.category.value, query[:60], exc)
         return _error_result(sample, str(exc), category=exc.category)
     except Exception as exc:

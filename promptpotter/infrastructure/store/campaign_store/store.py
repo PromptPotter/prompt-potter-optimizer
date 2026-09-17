@@ -25,12 +25,7 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.value_tree import ValueLeaf
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.runtime_flags import derive_run_phase, is_checkin
-from promptpotter.infrastructure.store.account_spend import (
-    FORWARDED_SPEND_KEY,
-    BilledSpend,
-    bank_spend,
-    sandbox_cycle_dirs,
-)
+from promptpotter.infrastructure.store.account_spend import bank_spend, sandbox_cycle_dirs
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_cycle_seed,
     scan_ledger_round_closes,
@@ -485,9 +480,9 @@ class CampaignStore:
 
     def delete_inner_sandbox(self, sandbox: Path, *, campaign_id: str) -> None:
         """The third destroyer. An inner sandbox is off the account walk — it is a SIBLING of the
-        tenant tree — so nothing else banks what its ledgers still hold, and every cycle inside it
-        has already forwarded part of that onto its outer cycle. Banking the residue is what makes
-        the delete safe in both directions.
+        tenant tree — so nothing else banks what its ledgers still hold, and every call its run
+        settled was already carried onto its outer cycle's ledger (a ``mirrored`` row). Banking
+        only what was not is what makes the delete safe in both directions.
 
         The tombstone is keyed on the sandbox DIRECTORY, whose name hashes the full owner triple;
         keying it on the inner cycle would collide, because inner cycle ids are content-addressed
@@ -501,12 +496,6 @@ class CampaignStore:
             cycle_id=sandbox.name,
         )
         rmtree_robust(sandbox)
-
-    def mark_spend_forwarded(self, hop: CycleHop, spent: BilledSpend) -> None:
-        """Raise this cycle's forwarded high-water mark. Sole writer of the key `bank_spend` reads
-        — written AFTER the spend reached the other ledger, so a crash between the two re-forwards
-        rather than losing the money."""
-        self.update(hop, {FORWARDED_SPEND_KEY: dict(spent._asdict())})
 
     # ------------------------------------------------------------------
     # Per-cycle ``index.json`` CRUD — create, update, rewind, enumerate

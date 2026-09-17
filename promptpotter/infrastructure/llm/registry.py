@@ -19,12 +19,12 @@ class ProviderSpec:
     display_name: str  # e.g. "Groq" — used in error messages + logs
     api_key_attr: str  # settings field holding the API key
     base_url: str | None = None  # None ⇒ SDK default (OpenAI)
-    max_retries: int = 5
     timeout: float | None = None
-    # Whether this provider answers OpenRouter's `usage: {include: true}` body field, which
-    # itemizes what the call cost and how much of the prompt its cache served. False by
-    # default: an unknown body key is a 400 on the providers that lack the extension.
-    usage_accounting: bool = False
+    # Whether this provider is OpenRouter's gateway, answering its body extensions: `usage:
+    # {include: true}`, which itemizes what the call cost and how much of the prompt its cache
+    # served, and `provider.max_price`, which caps what any host may charge. False by default: an
+    # unknown body key is a 400 on the providers that lack the extensions.
+    gateway: bool = False
 
 
 @dataclass(frozen=True)
@@ -83,7 +83,6 @@ _OPENAI_COMPAT_SPECS: dict[str, ProviderSpec] = {
         "Groq",
         "GROQ_API_KEY",
         base_url="https://api.groq.com/openai/v1",
-        max_retries=3,
         timeout=60.0,
     ),
     "openai": ProviderSpec(
@@ -100,7 +99,7 @@ _OPENAI_COMPAT_SPECS: dict[str, ProviderSpec] = {
         "OpenRouter",
         "OPENROUTER_API_KEY",
         base_url="https://openrouter.ai/api/v1",
-        usage_accounting=True,
+        gateway=True,
     ),
 }
 
@@ -114,12 +113,12 @@ def _make_openai_compat(provider: str, spec: ProviderSpec) -> OpenAICompatibleCl
     rpm, tpm = _rate_caps(provider)
     return OpenAICompatibleClient(
         api_key=getattr(settings, spec.api_key_attr),
+        provider=provider,
+        display_name=spec.display_name,
         base_url=spec.base_url,
-        max_retries=spec.max_retries,
         timeout=spec.timeout,
-        provider_name=spec.display_name,
         rate_limiter=build_rate_limiter(rpm, tpm),
-        usage_accounting=spec.usage_accounting,
+        gateway=spec.gateway,
     )
 
 
@@ -128,22 +127,12 @@ def _make_anthropic_client() -> AnthropicClient:
     return AnthropicClient(rate_limiter=build_rate_limiter(rpm, tpm))
 
 
-def _make_mock_client() -> LLMClientBase:
-    try:
-        from tests.mock_llm_client import MockLLMClient
-    except ImportError as err:
-        raise ValueError("Test mock unavailable outside the test environment.") from err
-    client: LLMClientBase = MockLLMClient()
-    return client
-
-
 _PROVIDER_FACTORIES: dict[str, Callable[[], LLMClientBase]] = {
     **{
         name: functools.partial(_make_openai_compat, name, spec)
         for name, spec in _OPENAI_COMPAT_SPECS.items()
     },
     "anthropic": _make_anthropic_client,
-    "mock": _make_mock_client,
 }
 
 

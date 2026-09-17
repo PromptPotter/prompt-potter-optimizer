@@ -20,8 +20,11 @@ class ErrorCategory(enum.StrEnum):
     CLIENT = "CLIENT"
     SERVER = "SERVER"
     CONNECTION = "CONNECTION"
-    # The model provider refused the cell's calls for lack of credit. A hole, like CONNECTION.
+    # A wallet refused the cell's calls — the provider account's credit, or the run's spend or token
+    # ceiling. A hole, like CONNECTION: every later cell meets the same refusal.
     PROVIDER_CREDIT = "PROVIDER_CREDIT"
+    SPEND_CEILING = "SPEND_CEILING"
+    TOKEN_CEILING = "TOKEN_CEILING"
     PIPELINE = "PIPELINE"
     # A bound WE declared ended the cell. Re-measuring under the same declaration ends it at the
     # same place for the same price, so a repair leaves one alone (:func:`is_repairable_hole`).
@@ -67,11 +70,21 @@ class CellInfrastructureError(CellUnscoreableError):
     category = ErrorCategory.CONNECTION
 
 
-class CellCreditExhaustedError(CellInfrastructureError):
-    """The provider account behind the cell is out of credit. No backoff can top it up, so the
-    backend raises it on the first attempt."""
+class CellWalletExhaustedError(CellInfrastructureError):
+    """A wallet behind the cell refused it — the provider account's credit, or a ceiling the run
+    holds; ``category`` names which. No backoff refills either, so it is raised on the first
+    refusal and the walk halts on the hole."""
 
-    category = ErrorCategory.PROVIDER_CREDIT
+    def __init__(
+        self,
+        message: str,
+        *,
+        category: ErrorCategory,
+        spent: Mapping[str, StepTokenUsage],
+        step_timings: Mapping[str, float],
+    ) -> None:
+        super().__init__(message, spent=spent, step_timings=step_timings)
+        self.category = category
 
 
 # The refusals once an account's credit or a key's limit is spent: OpenRouter's two (HTTP 402 /
@@ -85,9 +98,15 @@ def is_provider_credit_refusal(detail: str) -> bool:
     return _PROVIDER_CREDIT_REFUSAL.search(detail) is not None
 
 
-class ProviderCreditExhaustedError(RuntimeError):
-    """One of our own LLM calls was refused for lack of provider credit. Terminal until the key is
-    topped up; a run ends on ``StopReason.PROVIDER_CREDIT`` rather than crashing."""
+class WalletExhaustedError(RuntimeError):
+    """A wallet refused one of our paid calls — the provider account's credit, or a ceiling the run
+    holds (``infrastructure/llm/spend_book.py``), which refuses BEFORE sending. Nothing but the
+    operator refills either, so a run ends on the stop ``category`` maps to
+    (``domain/phases.py::WALLET_STOPS``) rather than crashing."""
+
+    def __init__(self, message: str, *, category: ErrorCategory) -> None:
+        super().__init__(message)
+        self.category = category
 
 
 class PotterError(Exception):
@@ -361,7 +380,7 @@ def graceful(msg: str) -> Iterator[None]:
     ``asyncio.CancelledError`` and a spent provider account re-raise: each ends the run."""
     try:
         yield
-    except (KeyboardInterrupt, asyncio.CancelledError, ProviderCreditExhaustedError):
+    except (KeyboardInterrupt, asyncio.CancelledError, WalletExhaustedError):
         raise
     except Exception:
         logger.warning(msg, exc_info=True)
@@ -390,10 +409,10 @@ def is_repairable_hole(result: Mapping[str, Any]) -> bool:
 
 __all__ = [
     "BadRequestError",
-    "CellCreditExhaustedError",
     "CellHaltedError",
     "CellInfrastructureError",
     "CellUnscoreableError",
+    "CellWalletExhaustedError",
     "ConflictError",
     "ContentTooLargeError",
     "DatasetIdentityError",
@@ -402,7 +421,6 @@ __all__ = [
     "NotFoundError",
     "PayloadInvalidError",
     "PotterError",
-    "ProviderCreditExhaustedError",
     "RequestTooLargeError",
     "ResumeDivergenceError",
     "RulerCoverageError",
@@ -410,6 +428,7 @@ __all__ = [
     "ServiceUnavailableError",
     "StoredConfigInvalidError",
     "UnauthorizedError",
+    "WalletExhaustedError",
     "error_category",
     "graceful",
     "has_pipeline_warnings",

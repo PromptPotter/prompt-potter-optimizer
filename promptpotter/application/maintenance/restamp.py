@@ -48,6 +48,7 @@ from promptpotter.domain.phases import CampaignPhase, RunPhase
 from promptpotter.domain.results import DiagnosticRunRecord, RoundResult
 from promptpotter.domain.run_records import CycleRecord
 from promptpotter.domain.scoring import ledger_sample_view
+from promptpotter.infrastructure.llm.pricing import compute_usd
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.campaign_store.store import reproject_round_index
 from promptpotter.infrastructure.store.io import (
@@ -371,8 +372,26 @@ def _prune_record(rec: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     return (pruned, [dotted for dotted, _ in dropped]) if dropped else (rec, [])
 
 
+def _stamp_price(rec: dict[str, Any]) -> dict[str, Any] | None:
+    """A usage record carrying no price, stamped as the writer stamps one today — every reader sums
+    the stamp and none re-prices. ``None`` ⇒ already stamped, or no rate to stamp it with."""
+    if rec.get("cost_usd") is not None:
+        return None
+    usd = compute_usd(
+        rec.get("model"),
+        int(rec.get("input_tokens", 0)),
+        int(rec.get("output_tokens", 0)),
+        provider=rec.get("provider"),
+        cache_read_tokens=int(rec.get("cache_read_tokens", 0)),
+        cache_write_tokens=int(rec.get("cache_write_tokens", 0)),
+    )
+    return None if usd is None else rec | {"cost_usd": usd}
+
+
 def _compact_record(rec: dict[str, Any]) -> dict[str, Any] | None:
     """One stored record → what the writer would emit for it today. ``None`` ⇒ already current."""
+    if rec.get("record_type") == "token_usage":
+        return _stamp_price(rec)
     payload = rec.get("payload")
     if not isinstance(payload, dict):
         return None

@@ -265,9 +265,19 @@ class PoBBCheck:
         if fresh and self._on_backfill is not None:
             self._on_backfill(sample.id, fresh)
 
+    def bank_backfills(self, samples: Sequence[Sample]) -> None:
+        """Write, ungraded, the catch-ups back for *samples* — cells a stopped round's walks were
+        sure to take, so the resumed round replays these rather than paying for them again."""
+        wanted = {s.id for s in samples}
+        for key, (call, commit) in list(self._pending.items()):
+            landed = call.done() and not call.cancelled() and call.exception() is None
+            if key[1] in wanted and landed:
+                del self._pending[key]
+                commit()
+
     def discard_backfills(self) -> None:
         """Drop every measurement no walk took — paid, and never written, as a serial round would
-        never have made it."""
+        never have made it — save what :meth:`bank_backfills` kept."""
         for call, _ in self._pending.values():
             call.cancel()
             # Retrieved, so a discarded call's own failure is not reported as unhandled.

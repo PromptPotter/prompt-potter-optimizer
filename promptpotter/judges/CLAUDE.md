@@ -185,9 +185,9 @@ author who edits a rubric and forgets to bump `version` still moves the fingerpr
 `cell_namespace` leaves the term unbound, and the formula raises `ScoringTermMissingError`. That
 is the difference between *this answer was wrong* and *we did not find out*, and it is why
 `call.py::ask` never raises — a provider hiccup must not be bankable as a wrong answer, nor kill
-the measurement of a cell the backend already paid for. **A spent provider account is the one
-exception**: it is no grading at all, so `ask` raises `CellCreditExhaustedError`, the cell is a
-`PROVIDER_CREDIT` hole, and the walk halts.
+the measurement of a cell the backend already paid for. **A wallet that refused the call is the one
+exception** — a spent provider account or the run's ceiling: it is no grading at all, so `ask`
+raises `CellWalletExhaustedError`, the cell is a hole of that wallet's category, and the walk halts.
 
 **`ask` not raising is only half of it, and the other half is one frame up.** Anything else that
 throws inside `grade` — a rubric placeholder the caller does not fill, a label outside `to_score`,

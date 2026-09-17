@@ -69,6 +69,7 @@ from promptpotter.domain.scoring import ScoringSpec
 from promptpotter.domain.spend import BudgetChange, SpendCeilings, SpendRollup
 from promptpotter.infrastructure.llm.pricing import refresh_rates_in_background
 from promptpotter.infrastructure.llm.rate_limit import get_abort_check, set_abort_check
+from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.llm.telemetry import emit_error_record
 from promptpotter.infrastructure.runtime_flags import (
     clear_run_control_flags,
@@ -116,7 +117,8 @@ def _build_budget_gate(
     ``.runtime/spend_cap.json`` each tick, so ``change-spend-budget`` can bind a run that declared
     nothing. Returning no gate for a launch with no starting caps is what let that command ack
     ``applied`` against a ceiling that could never trip — set by the operator, served to the
-    webapp, enforced by nothing. An unset arm still costs nothing: `tripped` skips a ``None`` cap."""
+    webapp, enforced by nothing. An unset arm still costs nothing: the book skips a ``None`` cap.
+    The book it arms is what admits every call the run sends."""
     dashboard = observers.dashboard
 
     def _usd_cap() -> float | None:
@@ -127,12 +129,15 @@ def _build_budget_gate(
         saved = read_spend_caps(cycle_dir).tokens
         return saved if saved is not None else token_cap
 
-    return BudgetGate(
-        usd_spent=lambda: dashboard.spend_total_used_usd,
+    # Seeded from the rollup the resume folded, then fed by the ledger itself.
+    book = SpendBook(
         usd_cap=_usd_cap,
-        tokens_spent=lambda: dashboard.spend_total_tokens,
         tokens_cap=_token_cap,
+        usd_spent=dashboard.spend_total_used_usd,
+        tokens_spent=dashboard.spend_total_tokens,
     )
+    observers.arm_spend_book(book)
+    return BudgetGate(book=book)
 
 
 def _arm_run_controls(
@@ -156,7 +161,7 @@ def _arm_run_controls(
         token_cap=campaign_config.optimization.token_budget,
     )
     session.budget_tripped = gate.tripped
-    session.spend_used = gate.usd_spent
+    session.spend_used = lambda: gate.book.usd_spent
     return gate
 
 

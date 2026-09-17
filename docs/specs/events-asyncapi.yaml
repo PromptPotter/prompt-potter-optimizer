@@ -456,7 +456,6 @@ components:
             - l1_zero_candidates
             - injection_budget_overrun
             - layer_parse_failure
-            - optimizer_deadline_retry
             # The round measured cleanly and still resolved nothing: no arm's
             # blocked lift over the parent excluded 0
             # (`ScoredCandidate.matched_parent_lift_ci_*`). The round's numbers

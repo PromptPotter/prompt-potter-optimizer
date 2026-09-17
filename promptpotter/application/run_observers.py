@@ -3,6 +3,7 @@ wires audit + dashboard + PoBB stream + optional ``LiveDisplay`` to one ledger, 
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from contextvars import Token
 from dataclasses import dataclass, field
@@ -23,6 +24,12 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.scoring import QueryMeasurement, ledger_sample_view
 from promptpotter.infrastructure.ledger import CycleEventLog, branch_offset
 from promptpotter.infrastructure.llm.rate_limit import set_rate_tenant
+from promptpotter.infrastructure.llm.spend_book import (
+    SpendBook,
+    bind_spend_book,
+    charge_open_holds,
+    reset_spend_book,
+)
 from promptpotter.infrastructure.llm.telemetry import (
     reset_current_round,
     reset_cycle_ledger,
@@ -37,7 +44,7 @@ from promptpotter.infrastructure.projections.live_dashboard.state import RunLimi
 from promptpotter.infrastructure.projections.pobb_stream import PoBBStreamProjection
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 from promptpotter.shared.errors import graceful
-from promptpotter.shared.instrument import NO_ROUND_SLOT
+from promptpotter.shared.instrument import NO_ROUND_SLOT, instrument_depth
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -48,6 +55,8 @@ if TYPE_CHECKING:
     from promptpotter.domain.phases import PhaseEvent
     from promptpotter.domain.sample import Sample
     from promptpotter.presentation.terminal.live.display import LiveDisplay
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "QUERY_PREVIEW_CHARS",
@@ -517,6 +526,31 @@ class RunObservers:
     pobb: PoBBStreamProjection
     display: LiveDisplay | None
     _ledger_token: Token[CycleEventLog | None] | None = None
+    # The armed spend book's binding, one at a time — see `arm_spend_book`.
+    _book_tokens: list[Token[SpendBook | None]] = field(default_factory=list)
+
+    def arm_spend_book(self, book: SpendBook) -> None:
+        """Count this run's ledger into ``book`` and admit every send the run makes against it,
+        replacing a book armed before — the ceilings are re-armed once the origin is scored. A
+        call a killed run left out is charged here, before this run sends anything.
+
+        A run nested inside another (an L4 inner cell) admits nothing against its own book: its
+        sends stay on the ROOT's, the one ceiling every level of the recursion spends under, and
+        its book only reads its own ledger for its own surfaces."""
+        ledger = self.callbacks.ledger
+        ledger.bind(book)
+        if instrument_depth() == 0:
+            book.ledger = ledger
+            book.round_now = lambda: self.callbacks._current_round
+            if self._book_tokens:
+                reset_spend_book(self._book_tokens.pop())
+            self._book_tokens.append(bind_spend_book(book))
+        if charged := charge_open_holds(ledger):
+            logger.warning(
+                "A stopped run left %d paid call(s) unreported; each is charged the most it "
+                "could have cost.",
+                charged,
+            )
 
     def drain_all(self) -> None:
         """``drain()`` every projection + reset both emission ContextVars. Called on EVERY stop reason, so
@@ -529,6 +563,8 @@ class RunObservers:
         # open HTTP tails idle on heartbeats once the run stops appending.
         if self._ledger_token is not None:
             reset_cycle_ledger(self._ledger_token)
+        if self._book_tokens:
+            reset_spend_book(self._book_tokens.pop())
         if self.callbacks._round_token is not None:
             reset_current_round(self.callbacks._round_token)
             self.callbacks._round_token = None

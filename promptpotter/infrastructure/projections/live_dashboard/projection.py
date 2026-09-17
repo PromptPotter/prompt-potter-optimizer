@@ -36,7 +36,6 @@ from promptpotter.domain.scoring import (
 )
 from promptpotter.domain.spend import TOKEN_KIND_BUCKET, SpendBucket, SpendRollup
 from promptpotter.infrastructure.ledger import open_with_history
-from promptpotter.infrastructure.llm.pricing import compute_usd
 from promptpotter.infrastructure.projections.audit_trail import (
     audit_rounds_dir,
     build_node_block,
@@ -782,17 +781,9 @@ class LiveDashboardProjection(Projection):
         """EVERY call lands in ``incurred``; only one that reached the wire lands in the bill. A
         cached call spent nothing, so billing it would halt a run over money it never cost.
 
-        Banked TWICE from ONE pricing — into the cycle's running total and into the round the call
-        stamped itself with — so the two sides stay reconcilable."""
-        usd = compute_usd(
-            record.model,
-            int(record.input_tokens),
-            int(record.output_tokens),
-            override_usd=record.cost_usd,
-            provider=record.provider,
-            cache_read_tokens=int(record.cache_read_tokens),
-            cache_write_tokens=int(record.cache_write_tokens),
-        )
+        Banked TWICE from ONE price, the one the record carries — into the cycle's running total and
+        into the round the call stamped itself with — so the two sides stay reconcilable."""
+        usd = record.cost_usd
         _bank_call(self.state.spend, record, usd)
         # A call carrying no round ran before any round closed (init, the origin score); banking it
         # at 0 rather than dropping it is what keeps the two sides reconcilable.

@@ -29,7 +29,7 @@ archive's own bytes — 102.6 MB of ledger, 56.6% of it duplication.
 
 | Projection | Scope | Writes | Role |
 |---|---|---|---|
-| `LiveDashboardProjection` (`projections/live_dashboard/projection.py`) | per cycle | `dashboard.json` | **Display surface** — completed-round summaries (`dash.rounds[]`; **round 0 = the origin's round-0 score**, a one-candidate round (the origin scored) emitted via the standard `close_round` path, no separate origin block) + in-flight `current_round` block + `spend` rollup (sole writer for every bucket via `_handle_token_usage`, which picks one through `domain/spend.py::TOKEN_KIND_BUCKET` and folds the totals over `SpendRollup.buckets` — never a hand-named pair, or a new spend kind is money the cap cannot see; halt probe reads `spend_total_used_usd` accessor). Sole webapp source for the chart, lineage tree, trend sparkline. |
+| `LiveDashboardProjection` (`projections/live_dashboard/projection.py`) | per cycle | `dashboard.json` | **Display surface** — completed-round summaries (`dash.rounds[]`; **round 0 = the origin's round-0 score**, a one-candidate round (the origin scored) emitted via the standard `close_round` path, no separate origin block) + in-flight `current_round` block + `spend` rollup (sole writer for every bucket via `_handle_token_usage`, which picks one through `domain/spend.py::TOKEN_KIND_BUCKET` and folds the totals over `SpendRollup.buckets` — never a hand-named pair, or a new spend kind is money the cap cannot see; a run's spend book is seeded off the `spend_total_used_usd` accessor when it is armed). Sole webapp source for the chart, lineage tree, trend sparkline. |
 | `AuditTrailProjection` (`projections/audit_trail.py`) | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundAudit`) only when an operator drills into a specific round; `useRoundFile` is the peer hook for the PUBLIC `rounds/` tree. |
 | `PoBBStreamProjection` (`projections/pobb_stream.py`) | per cycle | `.runtime/streams/round_NNNN_p_best.jsonl` | Per-sample P(best) trajectory for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
 
@@ -151,7 +151,7 @@ Path helpers live in `store/layout.py`, the per-tenant active-session pointer in
 
 The `CycleDir` / `WorkspaceDir` write-target newtypes live in `domain/cycle_paths.py` — projections and stores accept these, not raw `str`/`Path` — as does `CycleHop`, which every per-cycle `CampaignStore` method takes in place of a `(campaign_id, cycle_id)` pair (both `str`, so a swapped call read as "no data" rather than raising). Build it from the carrier that owns both, never by re-pairing.
 
-**`store/account_spend.py` banks what a subject still HOLDS, not what its rows say.** It sums an account's lifetime spend and banks it as a `SpendTombstoneRecord` before a delete takes the rows carrying it. It sits in `infrastructure/` rather than `application/` for exactly that reason: the three destroyers (`delete_campaign`, `try_delete_stub_cycle`, `delete_inner_sandbox`) call it themselves, so no caller can destroy a ledger and skip the bank. An L4 inner cycle forwards onto its outer ledger as it runs and records how far it got in `index.json::forwarded_spend`, so banking the rows whole would bill that money twice; absent mark ⇒ nothing forwarded, which is every cycle outside a sandbox.
+**`store/account_spend.py` banks what a subject still HOLDS, not what its rows say.** It sums an account's lifetime spend and banks it as a `SpendTombstoneRecord` before a delete takes the rows carrying it. It sits in `infrastructure/` rather than `application/` for exactly that reason: the three destroyers (`delete_campaign`, `try_delete_stub_cycle`, `delete_inner_sandbox`) call it themselves, so no caller can destroy a ledger and skip the bank. An L4 inner cycle's calls are carried onto its outer ledger as they settle, and its own copies are flagged `mirrored`, which the sum skips — banking them would bill that money twice.
 
 **Two read-once ledger records ride `CampaignStore`.** `write_cycle_seed`/`read_cycle_seed` append and scan the cycle seed as a `CycleSeedRecord` (a steered fork's or campaign-origin's typed `CycleSeed`, written by `_mint_fork` or the mint seam, read once at the runner seam; the pure scan is in `ledger_scan.py`, no subscribers fire). A fork inherits the parent's seed record virtually then appends its own, so a scan of the cycle's own ledger returns that cycle's seed.
 
@@ -208,8 +208,13 @@ on purpose is not.
 
 `llm/openai_compat.py`: `OpenAICompatibleClient` serves Groq/OpenAI/OpenRouter
 as instances (no subclasses) parameterized by a `ProviderSpec` registry.
-`llm/anthropic.py::AnthropicClient` is its peer. SDK `max_retries` handles 503/429 +
-Retry-After.
+`llm/anthropic.py::AnthropicClient` is its peer.
+
+**No paid request is sent unadmitted.** `LLMClientBase._admitted_send` holds each attempt's worst
+case against the run's spend book (`llm/spend_book.py`), sends, and settles it with the usage record
+it writes itself; `BackendClient.run_query` does the same for a whole cell. SDK retries are off —
+only a 429, a 5xx and a connection never made are sent again, each admitted anew — and a send that
+ends unreported is charged its whole bound. A caller meters only a cache replay.
 
 **Provider selection is always EXPLICIT** — the caller passes it to
 `registry.get_llm_client`, sourced from the optimizer node's `config.provider`. No

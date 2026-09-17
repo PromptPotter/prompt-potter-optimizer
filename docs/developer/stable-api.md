@@ -17,6 +17,8 @@ class Connector:
     extract_experiment: Callable[[dict], tuple[list[dict], list[str]]]  # → (queries, index_terms)
     execution: ConnectorExecution = "remote_http"                   # "remote_http" | "in_process" (no HTTP; TRANSPORT only)
     in_process_run: InProcessRun | None = None                      # async (workload, query, payload) -> {"data": …}; required iff in_process
+    holds_own_sends: bool = False                                   # True: every paid call goes through PP's own clients, so a cell holds nothing
+    cancel_stops_billing: bool = False                              # True: cancelling a sent cell stops what it bills; else it is left to land
     required_observation_keys: tuple[str, ...] = ()                 # keys the payload ALWAYS carries; init RAISES if the dataset declares no mapping
     experiment_file: str = ""                                       # on-disk experiment doc read from the dataset dir in place of a sample table
     resolve_experiment: ExperimentResolver | None = None            # parsed experiment_file -> the document every read sees (a named roster pinned)

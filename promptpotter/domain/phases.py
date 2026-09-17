@@ -8,8 +8,10 @@ from pydantic import ConfigDict, Field
 
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import ErrorCategory
 
 __all__ = [
+    "WALLET_STOPS",
     "CampaignPhase",
     "DashboardState",
     "PhaseEvent",
@@ -276,6 +278,15 @@ if _missing_stop_info:
 
 def stop_reason_outcome(reason: StopReason | str) -> StopOutcome:
     return STOP_REASON_INFO[StopReason(reason)].outcome
+
+
+# Which stop each wallet's refusal ends a run on — raised before a call (`WalletExhaustedError`) or
+# banked on the hole a refused cell leaves (`CellWalletExhaustedError`), one table for both.
+WALLET_STOPS: dict[ErrorCategory, StopReason] = {
+    ErrorCategory.PROVIDER_CREDIT: StopReason.PROVIDER_CREDIT,
+    ErrorCategory.SPEND_CEILING: StopReason.SPEND_BUDGET,
+    ErrorCategory.TOKEN_CEILING: StopReason.TOKEN_BUDGET,
+}
 
 
 class StopLoop(Exception):  # noqa: N818 — control-flow signal, not an error

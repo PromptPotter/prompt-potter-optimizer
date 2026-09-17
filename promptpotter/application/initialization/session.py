@@ -178,13 +178,12 @@ class Session:
     # `budget_tripped` returns the `StopReason` once a spend/token ceiling is met, else None.
     # Bound at the runner seam to the SAME `BudgetGate.tripped` the round loop consults — one
     # object, so the two cadences can't disagree and a mid-flight ceiling change moves both.
-    # The round-boundary check alone let a whole round of scoring run past the ceiling; for an
-    # L4 outer round that is `n_candidates x n_samples` inner CAMPAIGNS of overshoot.
+    # Whether a call may be SENT is the spend book's to answer, at the send; this is the stop a
+    # phase reads between samples once a ceiling is reached.
     budget_tripped: Callable[[], StopReason | None] | None = None
-    # What has been spent so far, for the panel that tells an optimizer how much run is left.
-    # A callable off the same rollup `budget_tripped` reads, bound at the same seam, because the
-    # amount lives only on the dashboard projection and `application/optimization/` must not
-    # import one. A FLOOR while unpriced tokens are outstanding.
+    # What has been spent so far, for the panel that tells an optimizer how much run is left —
+    # the spend book's own total, bound at the same seam. A FLOOR while unpriced tokens are
+    # outstanding.
     spend_used: Callable[[], float] | None = None
 
 

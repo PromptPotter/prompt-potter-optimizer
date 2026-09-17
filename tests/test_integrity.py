@@ -617,14 +617,19 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
     from promptpotter.connectors import harbor
     from promptpotter.infrastructure.llm.anthropic import AnthropicClient
     from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
+    from promptpotter.infrastructure.llm.spend_book import (
+        CallLabel,
+        bind_spend_book,
+        unbounded_spend_book,
+    )
     from promptpotter.judges import _compute
     from promptpotter.judges import call as judge_call
     from promptpotter.judges.grounding import ANSWER_GROUNDING
     from promptpotter.judges.protocol import JudgeSpec, JudgeStage
     from promptpotter.shared.errors import (
-        CellCreditExhaustedError,
+        CellWalletExhaustedError,
         ErrorCategory,
-        ProviderCreditExhaustedError,
+        WalletExhaustedError,
         graceful,
     )
 
@@ -641,7 +646,7 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
 
     def banked_as(t: SimpleNamespace) -> ErrorCategory | None:
         failure = harbor._infrastructure_failure(t)
-        return None if failure is None else failure[1].category
+        return None if failure is None else failure[1]
 
     timeout = "Agent execution timed out after 600.0 seconds"
     for throttle in (
@@ -654,7 +659,7 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
         '{"error":{"message":"This request requires more credits","code":402}}',
         '{"error":{"message":"Key limit exceeded (daily limit).","code":403}}',
     )
-    client = OpenAICompatibleClient(api_key="k", provider_name="openrouter")
+    client = OpenAICompatibleClient(api_key="k", provider="openrouter", display_name="OpenRouter")
     for code, body in zip((402, 403), bodies, strict=True):
         failed = trial(str(code), "", "APIError", f"litellm.APIError: {body}")
         assert banked_as(failed) is ErrorCategory.PROVIDER_CREDIT
@@ -664,7 +669,7 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
             response=httpx.Response(code, request=httpx.Request("POST", "https://x")),
             body=None,
         )
-        with pytest.raises(ProviderCreditExhaustedError), graceful("best-effort step"):
+        with pytest.raises(WalletExhaustedError), graceful("best-effort step"):
             client._try_recover_from_chat_error(refused, {}, None)
 
     class _StatusError(Exception):
@@ -681,8 +686,15 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
     claude._client = SimpleNamespace(  # type: ignore[assignment]
         messages=SimpleNamespace(with_raw_response=SimpleNamespace(create=_anthropic_refuses))
     )
-    with pytest.raises(ProviderCreditExhaustedError), graceful("best-effort step"):
-        asyncio.run(claude.chat([{"role": "user", "content": "q"}], model="m"))
+
+    async def _refused() -> None:
+        bind_spend_book(unbounded_spend_book())
+        await claude.chat(
+            [{"role": "user", "content": "q"}], model="m", label=CallLabel("probe", "optimizer")
+        )
+
+    with pytest.raises(WalletExhaustedError), graceful("best-effort step"):
+        asyncio.run(_refused())
 
     # A judge: a spent account is a hole that halts, any other grader failure stays absent.
     row = measurement(
@@ -697,9 +709,9 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
         monkeypatch.setattr(judge_call, "get_llm_client", lambda _p: SimpleNamespace(chat=_chat))
         return asyncio.run(_compute(result=row, judge=ANSWER_GROUNDING, spec=spec, term="ground"))
 
-    with pytest.raises(CellCreditExhaustedError) as hole:
-        grade_under(ProviderCreditExhaustedError("openrouter refused the call"))
-    assert hole.value.category is ErrorCategory.PROVIDER_CREDIT
+    with pytest.raises(CellWalletExhaustedError) as hole:
+        grade_under(WalletExhaustedError("the spend ceiling", category=ErrorCategory.SPEND_CEILING))
+    assert hole.value.category is ErrorCategory.SPEND_CEILING
     assert grade_under(_StatusError(500, "upstream exploded")) is None
     # The agent's own slowness is its score, and a throttle it outlived is only latency.
     assert harbor._infrastructure_failure(trial("slow", "", "AgentTimeoutError", timeout)) is None
@@ -2668,21 +2680,29 @@ def _walk_over(
     measured: Any = None,
     on_sample_starting: Any = None,
     on_taken: Any = None,
+    cached: dict[int, Any] | None = None,
+    banked: dict[int, Any] | None = None,
 ) -> Any:
-    """A walk as the gateway opens one, over stubbed persistence."""
+    """A walk as the gateway opens one, over stubbed persistence: ``cached`` is the archive it
+    replays from, ``banked`` collects what a stop keeps for its resumption."""
     from promptpotter.shared.instrument import measured_candidate_context
 
     ctx = query_loop.QueryLoopState(
         search_point=JobSearchPoint(),
         session=session,
-        cached_sample_results={},
+        cached_sample_results=dict(cached or {}),
         on_sample_scored=None,
         axes=None,
-        scorer=lambda r: 1.0,
+        scorer=types.SimpleNamespace(
+            fitness=lambda r: r["fitness"], objective=lambda r: r["objective"]
+        ),
         deprecated_samples={},
         persist_fresh=on_taken or (lambda rows: {"accuracy": 1.0}),
         running_scores=lambda rows: {"accuracy": 1.0},
         record_run=lambda rows, scores: None,
+        bank=lambda rows, kept: (banked if banked is not None else {}).update(
+            {r["sample_id"]: r for r in kept}
+        ),
     )
     return query_loop.Walk(
         dataset, ctx, checks, on_sample_starting, measured_candidate_context(measured)
@@ -2690,11 +2710,18 @@ def _walk_over(
 
 
 async def _stopped_by_operator(phase: Any) -> str | None:
-    """Run a scoring phase; the reason if the operator's pause ended it."""
+    """Run a scoring phase; the reason if a pause or a spend ceiling ended it."""
+    from promptpotter.domain.phases import WALLET_STOPS, StopLoop
+    from promptpotter.shared.errors import WalletExhaustedError
+
     try:
         await phase
     except KeyboardInterrupt as stop:
         return str(stop)
+    except StopLoop as stop:
+        return stop.reason.value
+    except WalletExhaustedError as refused:
+        return WALLET_STOPS[refused.category].value
     return None
 
 
@@ -2707,18 +2734,44 @@ async def _walk(
     parent_lacks_cells: bool = False,
     backfill_pace: float = 0.01,
     pause_after_call: int | None = None,
+    cached: dict[int, Any] | None = None,
+    stall: int | None = None,
+    skip_at: int | None = None,
+    cap_usd: float | None = None,
 ) -> dict[str, Any]:
+    """``stall`` names a sample whose call lands well after every other; ``skip_at`` is a skip on
+    record from before a stop. Every cell is admitted at, and bills, $1, against ``cap_usd``."""
     from promptpotter.application.optimization.pobb.checks import PoBBCheck, PoBBConfig
+    from promptpotter.application.runner.termination import BudgetGate
+    from promptpotter.domain.pipeline_schema import WebSpendBound
+    from promptpotter.domain.spend import TokenAccount
+    from promptpotter.infrastructure.llm.spend_book import (
+        Billed,
+        CallLabel,
+        SendBound,
+        SpendBook,
+        admitted,
+        spending_under,
+    )
 
     backend = _OrderedFakeBackend(len(dataset))
+    banked: dict[int, Any] = {}
     depths: list[int] = []
     committed: list[int] = []
     returned: list[int] = []
+    book = SpendBook(usd_cap=lambda: cap_usd, tokens_cap=lambda: None)
+    dollar = SendBound(input_tokens=0, output_tokens=0, usd=1.0)
 
     async def _measure(sample: Sample, session: Any, *, pipeline_params: Any = None) -> Any:
-        row = await backend.measure(sample, session, pipeline_params=pipeline_params)
-        returned.append(sample.id)
+        with admitted(CallLabel("cell", "backend"), dollar, model=None, provider=None) as bill:
+            if sample.id == stall:
+                await asyncio.sleep(0.3)
+            row = await backend.measure(sample, session, pipeline_params=pipeline_params)
+            returned.append(sample.id)
+            bill.settle(Billed(TokenAccount(), 1.0))
         return row
+
+    gate = BudgetGate(book=book)
 
     def _backfill(sp: Any, sample: Sample, prior_id: str) -> Any:
         call = asyncio.ensure_future(backend.hold(sample, backfill_pace))
@@ -2733,16 +2786,29 @@ async def _walk(
     priors = PoBBCheck(PoBBConfig(), n_samples=len(dataset), ruler=None, backfill_fn=_backfill)
     priors.register_completed([], candidate_id="parent", sp=JobSearchPoint())
     # The one seam stubbed; the window, cursors, checkpoints and discard are shipping code.
-    with mock.patch.object(query_loop, "measure_sample", _measure):
+    with mock.patch.object(query_loop, "measure_sample", _measure), spending_under(book):
         session = types.SimpleNamespace(
             scoring=types.SimpleNamespace(scorer=lambda r: 1.0, round_scorer=None),
             state=types.SimpleNamespace(ledger=None),
             pause_check=lambda: pause_after_call is not None and len(returned) >= pause_after_call,
             skip_check=None,
             skip_consume=None,
-            budget_tripped=None,
+            budget_tripped=gate.tripped,
+            spend_used=lambda: book.usd_spent,
             sample_lookahead_check=lambda: armed,
-            backend_client=types.SimpleNamespace(max_cells_in_flight=max_cells),
+            backend_client=types.SimpleNamespace(
+                max_cells_in_flight=max_cells, cancel_stops_billing=False, holds_own_sends=False
+            ),
+            # One node the backend bounds at the cell's dollar, so the scheduler counts in them.
+            pipeline_schema=types.SimpleNamespace(
+                nodes=[
+                    types.SimpleNamespace(
+                        name="search",
+                        is_llm=False,
+                        spend_bound=WebSpendBound(kind="web", queries=1, usd_per_query=1.0),
+                    )
+                ]
+            ),
             flight=None,
         )
         walk = _walk_over(
@@ -2750,7 +2816,10 @@ async def _walk(
             session,
             checks=[_CutAfter(cut_at)] if cut_at else [],
             on_sample_starting=lambda q, i, t, sid, depth, horizon: depths.append(depth),
+            cached=cached,
+            banked=banked,
         )
+        walk.skip_at = skip_at
         stopped = await _stopped_by_operator(
             query_loop.run_walks([walk], session, backfills=priors if parent_lacks_cells else None)
         )
@@ -2760,6 +2829,9 @@ async def _walk(
         "calls": list(backend.calls),
         "entries": list(backend.entries),
         "committed": committed,
+        "banked": banked,
+        "returned": returned,
+        "billed": book.usd_spent,
         "depths": depths,
         "max_depth": max(depths) if depths else 0,
     }
@@ -2801,8 +2873,11 @@ async def _round(
         skip_check=None,
         skip_consume=None,
         budget_tripped=None,
+        spend_used=None,
         sample_lookahead_check=lambda: armed,
-        backend_client=types.SimpleNamespace(max_cells_in_flight=armed),
+        backend_client=types.SimpleNamespace(
+            max_cells_in_flight=armed, cancel_stops_billing=False, holds_own_sends=True
+        ),
         flight=None,
     )
     walks = [
@@ -2834,19 +2909,25 @@ async def test_a_cell_that_ran_without_a_grade_still_bills_what_it_spent() -> No
     the campaign ceiling under-counted and the sidebar read $0.00 for a cell that cost money."""
     from promptpotter.application.scoring.sample_measurement import measure_sample
     from promptpotter.domain.run_records import TokenUsageRecord
+    from promptpotter.infrastructure.backend import BackendClient
     from promptpotter.infrastructure.llm import telemetry
+    from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
     from promptpotter.shared.errors import CellUnscoreableError, ErrorCategory
 
     spent = {"agent": {"input": 1200, "output": 300, "estimated": False, "cost_usd": 0.0076}}
 
-    class _RanUngraded:
-        def cell_envelope_s(self, query: str, params: dict[str, Any]) -> None:
-            return None
+    async def _ran_ungraded(*_args: Any) -> dict[str, Any]:
+        raise CellUnscoreableError("verifier timed out", spent=spent, step_timings={"agent": 138.0})
 
-        async def run_query(self, query: str, **_kw: Any) -> dict[str, Any]:
-            raise CellUnscoreableError(
-                "verifier timed out", spent=spent, step_timings={"agent": 138.0}
-            )
+    client = BackendClient(
+        "http://unused",
+        wire_adapter=lambda query, params: {"query": query},
+        session=types.SimpleNamespace(),  # type: ignore[arg-type]
+        execution="in_process",
+        in_process_run=_ran_ungraded,
+        workload=types.SimpleNamespace(),  # type: ignore[arg-type]
+        prompt_delivery=types.SimpleNamespace(),  # type: ignore[arg-type]
+    )
 
     class _Ledger:
         def __init__(self) -> None:
@@ -2858,16 +2939,17 @@ async def test_a_cell_that_ran_without_a_grade_still_bills_what_it_spent() -> No
 
     ledger = _Ledger()
     session = types.SimpleNamespace(
-        pipeline_schema=None,
+        pipeline_schema=types.SimpleNamespace(nodes=[]),
         state=types.SimpleNamespace(ledger=None),
-        backend_client=_RanUngraded(),
+        backend_client=client,
     )
     token = telemetry.set_cycle_ledger(ledger)  # type: ignore[arg-type]
     try:
-        row = await measure_sample(
-            Sample(id=0, query="10452", ground_truth=None),
-            session,  # type: ignore[arg-type]
-        )
+        with spending_under(unbounded_spend_book()):
+            row = await measure_sample(
+                Sample(id=0, query="10452", ground_truth=None),
+                session,  # type: ignore[arg-type]
+            )
     finally:
         telemetry.reset_cycle_ledger(token)
 
@@ -3025,7 +3107,7 @@ def test_wire_cost_reaches_the_response_or_nothing_prices_the_optimizer() -> Non
     assert _billed_cost(None, None) is None
 
 
-async def test_sample_lookahead_changes_the_bill_and_never_the_record() -> None:
+async def test_sample_lookahead_changes_the_bill_and_never_the_record(tmp_path: Path) -> None:
     """Look-ahead must move the wall clock and NOTHING a measurement is read from.
 
     Silent by construction: if the second in-flight sample could reach the archive, or shift where a
@@ -3072,6 +3154,10 @@ async def test_sample_lookahead_changes_the_bill_and_never_the_record() -> None:
     assert deep["rows"] == c1["rows"]
     assert 0 <= len(deep["calls"]) - len(c1["calls"]) <= 1
     assert len(c1["calls"]) == 4, "an unarmed walk launched before the cell ahead was decided"
+    # …and a remote call it discards still lands on the bill: the backend finishes it and the
+    # provider charges for it whether or not anyone waits, so cancelling only lost the record.
+    assert sorted(deep["returned"]) == sorted(deep["calls"])
+    assert deep["billed"] == len(deep["calls"])
 
     # 7. A PoBB catch-up call is a whole inner campaign on L4, so it holds a slot like a cell —
     #    the depth bounds everything the walk has out, which is what keeps the connector's
@@ -3135,57 +3221,117 @@ async def test_sample_lookahead_changes_the_bill_and_never_the_record() -> None:
     assert landing["stop_reason"] == "graceful"
     assert landing["committed"] == [dataset[0].id]
     assert len(landing["rows"]) == len(landing["calls"]) == 1
+    # What came back behind a head still out is banked, not dropped: the resumed walk replays it
+    # rather than paying again, and still takes the uninterrupted walk's rows in its order.
+    head = dataset[0].id
+    stopped = await _walk(
+        dataset, armed=4, max_cells=4, cut_at=None, pause_after_call=3, stall=head
+    )
+    assert stopped["rows"] == [] and set(stopped["banked"]) == set(stopped["returned"])
+    resumed = await _walk(dataset, armed=4, max_cells=4, cut_at=None, cached=stopped["banked"])
+    assert not set(resumed["calls"]) & set(stopped["banked"]), "a banked cell was paid again"
+    assert [r["sample_id"] for r in resumed["rows"]] == [s.id for s in dataset]
+    # …but never one past where a rule could cut: the serial walk would not have measured it.
+    capped = await _walk(dataset, armed=4, max_cells=4, cut_at=2, pause_after_call=2, stall=head)
+    assert set(capped["banked"]) == {head, dataset[1].id}
+    # A spend ceiling binds BEFORE a call rather than after it: every cell out is counted at its
+    # bound, so a window of four never carries the run past the ceiling it was checked against.
+    ceiling = await _walk(dataset, armed=4, max_cells=4, cut_at=None, cap_usd=5.0)
+    assert ceiling["stop_reason"] == "spend_budget"
+    assert ceiling["billed"] == 5.0
+    # A skip made before a stop outlives it: the resumed round reads the last decision the ledger
+    # holds for each candidate, replays it at the same row, and launches nothing the skip spared.
+    from promptpotter.application.optimization.l1.score.loop import _skips_on_record
+    from promptpotter.infrastructure.ledger import CycleEventLog
+
+    ledger = CycleEventLog(tmp_path / "ledger.jsonl")
+    for cid, n, reason in (("a", 3, "skip"), ("b", 2, "skip"), ("b", 8, ""), ("c", 4, "skip")):
+        scores = {"candidate_id": cid, "scored_samples": n, "partial_reason": reason}
+        ledger.append(SnapshotRecord(event="candidate_scored", round=2, payload={"scores": scores}))
+    assert _skips_on_record(ledger, 2) == {"a": 3, "c": 4}
+    replayed = await _walk(dataset, armed=4, max_cells=4, cut_at=None, skip_at=3)
+    assert replayed["stop_reason"] == "skip" and len(replayed["rows"]) == 3
+    assert sorted(replayed["calls"]) == [s.id for s in dataset[:3]]
 
 
-class _CountingClient:
-    """One provider, counting round-trips. ``chat`` is the seam a judge actually reaches."""
+def _counting_client(reply: str) -> tuple[Any, list[int]]:
+    """One provider reached through the real client's send seam — only its SDK is stubbed — and
+    the round-trips it took."""
+    from openai.types.chat import ChatCompletion
 
-    def __init__(self, reply: str = "A") -> None:
-        self.reply = reply
-        self.calls = 0
+    from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
 
-    async def chat(self, **_kw: Any) -> Any:
-        from promptpotter.domain.spend import TokenAccount
-        from promptpotter.infrastructure.llm.response import LLMResponse
+    calls: list[int] = []
 
-        self.calls += 1
-        return LLMResponse(
-            content=self.reply,
-            model="grader-1",
-            # The provider's own prefix-cache discount rides `cache_read`. A judge prompt is the
-            # most cacheable shape we send — the rubric is a module constant, so most of it is
-            # byte-identical on every cell — so a stub reporting none cannot catch the metering
-            # dropping it.
-            usage=TokenAccount(input=11, output=1, cache_read=8),
+    async def create(**_kw: Any) -> Any:
+        calls.append(1)
+        # The provider's own prefix-cache discount rides `cached_tokens`. A judge prompt is the most
+        # cacheable shape we send — the rubric is a module constant, so most of it is byte-identical
+        # on every cell — so a stub reporting none cannot catch the metering dropping it.
+        completion = ChatCompletion.model_validate(
+            {
+                "id": "c",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "grader-1",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": reply},
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 11,
+                    "completion_tokens": 1,
+                    "total_tokens": 12,
+                    "prompt_tokens_details": {"cached_tokens": 8},
+                },
+            }
         )
+        return types.SimpleNamespace(headers={}, parse=lambda: completion)
+
+    client = OpenAICompatibleClient(api_key="k", provider="p", display_name="P")
+    client._client = types.SimpleNamespace(  # type: ignore[assignment]
+        chat=types.SimpleNamespace(
+            completions=types.SimpleNamespace(
+                with_raw_response=types.SimpleNamespace(create=create)
+            )
+        )
+    )
+    return client, calls
 
 
 async def _grade_twice(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, reply: str
-) -> tuple[_CountingClient, list[Any], Any]:
-    """Grade one identical cell twice through the real evaluator, and report what it cost."""
+) -> tuple[list[int], list[Any], Any]:
+    """Grade one identical cell twice through the real evaluator, and report the round-trips and
+    what they metered."""
     from factories import measurement
 
+    from promptpotter.infrastructure.llm import spend_book
     from promptpotter.infrastructure.store.stores import LLMReuseCache
     from promptpotter.judges import build_evaluators
     from promptpotter.judges import call as judge_call
     from promptpotter.judges.protocol import JudgeSpec, JudgeStage
 
-    client = _CountingClient(reply)
+    client, calls = _counting_client(reply)
     monkeypatch.setattr(judge_call, "get_llm_client", lambda _p: client)
     metered: list[Any] = []
     monkeypatch.setattr(judge_call, "emit_token_usage", lambda **kw: metered.append(kw))
+    monkeypatch.setattr(spend_book, "emit_token_usage", lambda **kw: metered.append(kw))
 
     cache = LLMReuseCache(tmp_path, "judge_reuse")
     (ev,) = build_evaluators(
         {"answer": JudgeSpec(name="sealqa", stages=[JudgeStage(model="grader-1", provider="p")])},
         cache=cache,
     )
-    for _ in range(2):
-        row = measurement(sample_id=0, fitness=0.0)
-        row["query"], row["predicted"], row["ground_truth"] = "who?", "Ada", "Ada"
-        last = await ev.compute(result=row, schema=None)
-    return client, metered, last
+    with spend_book.spending_under(spend_book.unbounded_spend_book()):
+        for _ in range(2):
+            row = measurement(sample_id=0, fitness=0.0)
+            row["query"], row["predicted"], row["ground_truth"] = "who?", "Ada", "Ada"
+            last = await ev.compute(result=row, schema=None)
+    return calls, metered, last
 
 
 async def test_a_second_grading_of_one_comparison_is_not_re_billed(
@@ -3197,13 +3343,15 @@ async def test_a_second_grading_of_one_comparison_is_not_re_billed(
 
     Both halves are asserted, because each fails on its own. The provider is reached ONCE, and the
     replay is still METERED — flagged ``cached`` — since the cell was still graded and grading cost
-    must stay invariant to our cache history, exactly as ``llm_call`` and ``emit_step_token_usage``
+    must stay invariant to our cache history, exactly as ``llm_call`` and ``emit_replayed_step_tokens``
     keep it."""
-    client, metered, score = await _grade_twice(tmp_path, monkeypatch, reply="A")
+    calls, metered, score = await _grade_twice(tmp_path, monkeypatch, reply="A")
 
     assert score == 1.0, "the replayed reply must grade identically, not merely cheaply"
-    assert client.calls == 1, f"an identical comparison re-billed the provider: {client.calls}x"
-    assert [m["cached"] for m in metered] == [False, True], "a served grading went unmetered"
+    assert len(calls) == 1, f"an identical comparison re-billed the provider: {len(calls)}x"
+    assert [m.get("cached", False) for m in metered] == [False, True], (
+        "a served grading went unmetered"
+    )
     assert {m["kind"] for m in metered} == {"judge"}, "grading spend landed outside its own bucket"
 
 
@@ -3367,10 +3515,10 @@ async def test_an_empty_grading_reply_is_never_made_permanent(
     points at the cache: the operator sees a cell that cannot be graded, forever.
 
     Same scar as ``llm_call``'s, at the judge's own chokepoint."""
-    client, _metered, score = await _grade_twice(tmp_path, monkeypatch, reply="   ")
+    calls, _metered, score = await _grade_twice(tmp_path, monkeypatch, reply="   ")
 
     assert score is None, "an unreadable grading is an absent verdict, never a zero"
-    assert client.calls == 2, "an empty reply was cached and replayed as if it were a verdict"
+    assert len(calls) == 2, "an empty reply was cached and replayed as if it were a verdict"
 
 
 async def test_an_unusable_cache_entry_costs_a_re_sample_and_never_the_cell(
@@ -3385,14 +3533,14 @@ async def test_an_unusable_cache_entry_costs_a_re_sample_and_never_the_cell(
     answer — sample it again."""
     from factories import measurement
 
+    from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
     from promptpotter.infrastructure.store.stores import LLMReuseCache
     from promptpotter.judges import build_evaluators
     from promptpotter.judges import call as judge_call
     from promptpotter.judges.protocol import JudgeSpec, JudgeStage
 
-    client = _CountingClient("A")
+    client, calls = _counting_client("A")
     monkeypatch.setattr(judge_call, "get_llm_client", lambda _p: client)
-    monkeypatch.setattr(judge_call, "emit_token_usage", lambda **_kw: None)
 
     cache = LLMReuseCache(tmp_path, "judge_reuse")
     (ev,) = build_evaluators(
@@ -3401,16 +3549,19 @@ async def test_an_unusable_cache_entry_costs_a_re_sample_and_never_the_cell(
     )
     row = measurement(sample_id=0, fitness=0.0)
     row["query"], row["predicted"], row["ground_truth"] = "who?", "Ada", "Ada"
-    assert await ev.compute(result=row, schema=None) == 1.0
+    with spending_under(unbounded_spend_book()):
+        assert await ev.compute(result=row, schema=None) == 1.0
 
-    # Poison every entry the first grading wrote — a half-written file is the realistic shape.
-    poisoned = list(tmp_path.glob("judge_reuse/*.json"))
-    assert poisoned, "the first grading banked nothing, so this proves nothing"
-    for path in poisoned:
-        path.write_text('{"content": ', encoding="utf-8")
+        # Poison every entry the first grading wrote — a half-written file is the realistic shape.
+        poisoned = list(tmp_path.glob("judge_reuse/*.json"))
+        assert poisoned, "the first grading banked nothing, so this proves nothing"
+        for path in poisoned:
+            path.write_text('{"content": ', encoding="utf-8")
 
-    assert await ev.compute(result=row, schema=None) == 1.0, "a bad entry cost the cell its grade"
-    assert client.calls == 2, "an unusable entry must fall through to a fresh sample"
+        assert await ev.compute(result=row, schema=None) == 1.0, (
+            "a bad entry cost the cell its grade"
+        )
+    assert len(calls) == 2, "an unusable entry must fall through to a fresh sample"
 
 
 def test_a_judge_term_cannot_take_a_name_that_already_measures_something() -> None:

@@ -14,6 +14,7 @@ from promptpotter.application.optimization.dispatch.schemas import CheckinOutput
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store.dataset_access import (
     readable_task_context,
@@ -79,19 +80,21 @@ async def decompose_prompt_fields(
 
     token = set_cycle_ledger(context.ledger)
     try:
-        async with observed_node(
-            "checkin",
-            "llm",
-            obs=None,
-            campaign_id=campaign_id,
-            round_num=0,
-        ):
-            result, _, _ = await run_optimizer_node(
-                template_name="checkin",
-                prompt_vars={"consultation_instruction": consultation_instruction},
-                user_content=user_content,
-                context=context,
-            )
+        # A decomposition runs from the host's own CLI (`new <file>`), which no account meters.
+        with spending_under(unbounded_spend_book()):
+            async with observed_node(
+                "checkin",
+                "llm",
+                obs=None,
+                campaign_id=campaign_id,
+                round_num=0,
+            ):
+                result, _, _ = await run_optimizer_node(
+                    template_name="checkin",
+                    prompt_vars={"consultation_instruction": consultation_instruction},
+                    user_content=user_content,
+                    context=context,
+                )
     finally:
         reset_cycle_ledger(token)
 

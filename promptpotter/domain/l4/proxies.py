@@ -65,9 +65,9 @@ class InnerCellFacts(StrictModel):
     inner_rounds_ran: int
     inner_round_budget: int
     inner_stop_reason: str
-    # REPORTING figures, and they enter no ledger. Billing is `_forward_inner_spend`'s DELTA onto
-    # the outer ledger; these are the cell's cumulative total across attempts, so a reader that
-    # treated them as a charge would bill a continued cell's history twice.
+    # REPORTING figures, and they enter no ledger. Billing is each call's own, carried onto the
+    # outer ledger as it settles; these are the cell's cumulative total across attempts, so a
+    # reader that treated them as a charge would bill a continued cell's history twice.
     inner_spend_usd: float | None
     inner_tokens: int | None
     # The seed's own campaign. The outer row could not name it at all, so a cell was traceable

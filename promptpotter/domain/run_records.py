@@ -35,6 +35,7 @@ __all__ = [
     "RoundWarningKind",
     "RoundWarningRecord",
     "SnapshotRecord",
+    "SpendHoldRecord",
     "TokenUsageRecord",
     "WallClock",
     "view_fields",
@@ -166,7 +167,40 @@ class TokenUsageRecord(StrictModel):
     makes the next read cheap, so all writes and no reads is paying for a prefix nothing collects."""
     duration_s: float = 0.0
     cost_usd: float | None = None
+    """The call's price, stamped once when it is recorded (``telemetry.py::emit_token_usage``) and
+    only ever summed after — ``None`` is unpriced. A cached call carries what it WOULD have cost."""
+    unsettled: bool = False
+    """The call never reported what it used — cancelled, timed out, failed after it was sent — so
+    the counts and the price are the bound it was ADMITTED on (``infrastructure/llm/spend_book.py``),
+    the most the provider may have billed, never a measurement."""
+    hold_id: str | None = None
+    """The :class:`SpendHoldRecord` this call settles; ``None`` for a call nothing held (a replay)."""
+    mirrored: bool = False
+    """A nested run's call, carried as it settled onto the ledger of the run it measured for
+    (``spend_book.py::SpendBook.mirror``) — that copy is the one money is summed off; this one is
+    the nested run's own view of what it spent."""
     cached: bool = False
+    round: int | None = None
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+class SpendHoldRecord(StrictModel):
+    """A paid call ADMITTED, written before it is sent at the most it may cost. The usage record
+    carrying its ``hold_id`` settles it; a hold nothing settled belongs to a run killed with the
+    call out, and is charged in full (``spend_book.py::charge_open_holds``) — so a hard exit never
+    leaves a billed call off the ledger."""
+
+    model_config = ConfigDict(frozen=True)
+
+    record_type: Literal["spend_hold"] = "spend_hold"
+    hold_id: str
+    kind: TokenUsageKind
+    node: str
+    model: str | None = None
+    provider: str | None = None
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float | None = None
     round: int | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
@@ -316,7 +350,6 @@ RoundWarningKind = Literal[
     "l1_zero_candidates",
     "injection_budget_overrun",
     "layer_parse_failure",
-    "optimizer_deadline_retry",
     # The cycle STOPPED and a human has to act. Its reason is the layer's own sentence, and it
     # rides a warning rather than a log line so the why reaches disk with the halt.
     "layer_terminated_cycle",
@@ -703,6 +736,7 @@ CycleRecord = Annotated[
     | RoundWarningRecord
     | RulerRecord
     | SnapshotRecord
+    | SpendHoldRecord
     | SpendTombstoneRecord
     | TokenUsageRecord,
     Field(discriminator="record_type"),

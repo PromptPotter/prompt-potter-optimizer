@@ -5,6 +5,7 @@ per-connector adapters in `promptpotter.connectors`. API responses stored verbat
 from __future__ import annotations
 
 import asyncio
+import itertools
 import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
@@ -16,8 +17,26 @@ from promptpotter.infrastructure.llm.rate_limit import (
     decide_429_wait,
     wait_with_countdown,
 )
+from promptpotter.infrastructure.llm.spend_book import (
+    Admission,
+    Billed,
+    CallLabel,
+    SendBound,
+    admitted,
+    may_have_billed,
+    never_sent,
+)
+from promptpotter.shared.errors import CellUnscoreableError
 
-QUERY_TIMEOUT: float = 120.0  # HTTP timeout for /matches endpoint
+# HTTP timeout for /matches. Longer than the backend's own retries can run — a few provider
+# attempts per LLM node, each on its own timeout — because a read timeout is terminal: the backend
+# is still working and billing, so the cell is charged its whole bound and never sent again.
+QUERY_TIMEOUT: float = 600.0
+
+# The hold a whole cell is admitted on, and the settle that reads what it billed off the reply —
+# ``None`` where the reply reports nothing, which is charged in full.
+CellBilling = Callable[[dict[str, Any]], "list[Billed] | None"]
+_CELL = CallLabel("backend_cell", "backend")
 
 if TYPE_CHECKING:
     from promptpotter.connectors.protocol import (
@@ -56,6 +75,8 @@ def build_backend_client(
         in_process_run=connector.in_process_run,
         workload=workload,
         max_cells_in_flight=connector.max_cells_in_flight,
+        holds_own_sends=connector.holds_own_sends,
+        cancel_stops_billing=connector.cancel_stops_billing,
         cell_envelope=connector.cell_envelope_s,
         measured_unit=connector.measured_unit,
         answer_key=connector.answer_key,
@@ -81,6 +102,28 @@ def _is_session_error(resp: httpx.Response) -> bool:
     return "session" in text.lower()
 
 
+def _reply_data(resp: httpx.Response) -> dict[str, Any]:
+    """The ``data`` a reply carries — on success, and on an error envelope reporting what the
+    failed request billed before it failed."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return {}
+    data = body.get("data") if isinstance(body, dict) else None
+    return data if isinstance(data, dict) else {}
+
+
+def _spent_data(exc: CellUnscoreableError) -> dict[str, Any]:
+    return {"step_tokens": dict(exc.spent), "step_timings": dict(exc.step_timings)}
+
+
+def _settle(admission: Admission, reported: list[Billed] | None) -> None:
+    if reported is None:
+        admission.charge_in_full()
+    else:
+        admission.settle(*reported)
+
+
 class BackendClient:
     """Async HTTP client. `wire_adapter` + `session` are connector-specific and required at construction."""
 
@@ -94,6 +137,8 @@ class BackendClient:
         in_process_run: InProcessRun | None = None,
         workload: InProcessWorkload,
         max_cells_in_flight: int = 2,
+        holds_own_sends: bool = False,
+        cancel_stops_billing: bool = False,
         cell_envelope: CellEnvelopeSeconds | None = None,
         measured_unit: MeasuredUnit = "sample",
         answer_key: str | None = None,
@@ -116,6 +161,8 @@ class BackendClient:
         # What one sample COSTS, which the transport above does not answer — two `in_process`
         # connectors want opposite depths.
         self._max_cells_in_flight = max_cells_in_flight
+        self.holds_own_sends = holds_own_sends
+        self.cancel_stops_billing = cancel_stops_billing
         self._cell_envelope: CellEnvelopeSeconds | None = cell_envelope
         self._measured_unit: MeasuredUnit = measured_unit
         self._prompt_delivery: PromptDelivery = prompt_delivery
@@ -224,11 +271,16 @@ class BackendClient:
         query: str,
         pipeline_params: dict[str, Any] | None = None,
         *,
+        bound: SendBound | None,
+        billed: CellBilling,
         on_warning: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
-        """POST /matches. 400+session-in-detail → one-shot session recover + retry. *on_warning*
-        fires on each retry (transport/429/5xx) for ledger telemetry — retry behaviour itself unchanged.
-        """
+        """One cell — POST /matches, or the in-process arm — held whole at ``bound`` against the
+        run's spend book and settled off what the reply says it billed (``billed`` reads a reply's
+        ``data``). ``bound`` is ``None`` only for a backend whose own sends are each admitted
+        (``Connector.holds_own_sends``). A request that may have reached the backend is never sent
+        again: only a 429, a 5xx, a connection never made and a lost session are. *on_warning*
+        fires on each retry for ledger telemetry."""
         payload = self._wire_adapter(query, pipeline_params)
 
         if self._execution != "remote_http":
@@ -236,8 +288,20 @@ class BackendClient:
             # The registry guarantees the arm whenever the mode is ``in_process``.
             if self._in_process_run is None:
                 raise RuntimeError(f"execution={self._execution!r} but no in_process_run wired")
-            return await self._in_process_run(self.workload, query, payload)
+            if bound is None:
+                return await self._in_process_run(self.workload, query, payload)
+            with admitted(_CELL, bound, model=None, provider=None) as admission:
+                try:
+                    result = await self._in_process_run(self.workload, query, payload)
+                except CellUnscoreableError as exc:
+                    # It ran to no verdict, and says what it paid for doing so.
+                    _settle(admission, billed(_spent_data(exc)))
+                    raise
+                _settle(admission, billed(result.get("data") or {}))
+                return result
 
+        if bound is None:
+            raise RuntimeError("a remote cell is held whole, so it needs the bound its nodes serve")
         client = self._get_http()
 
         def _warn(kind: str, *, attempt: int, wait_s: float, **extra: Any) -> None:
@@ -258,90 +322,90 @@ class BackendClient:
             except Exception:
                 logger.exception("on_warning callback failed; continuing retry loop")
 
-        # 429 → Retry-After (RFC 7231); 5xx + transport → exp backoff (1, 2, 4, 8s); others exit.
-        resp: httpx.Response | None = None
-        for attempt in range(MAX_429_ATTEMPTS):
-            try:
-                resp = await client.post(
-                    f"{self.base_url}/matches",
-                    json=payload,
-                    timeout=QUERY_TIMEOUT,
-                )
-            except httpx.TransportError as exc:
-                if attempt == MAX_429_ATTEMPTS - 1:
-                    _warn(
-                        "transport_error",
-                        attempt=attempt,
-                        wait_s=0.0,
-                        error_class=exc.__class__.__name__,
-                        final=True,
+        # 429 → Retry-After (RFC 7231); 5xx + a connection never made → exp backoff (1, 2, 4, 8s);
+        # a lost session → one recovery; everything else, a read timeout included, exits.
+        recovered = False
+        for attempt in itertools.count():
+            wait: float | None = None
+            with admitted(_CELL, bound, model=None, provider=None) as admission:
+                try:
+                    resp = await client.post(
+                        f"{self.base_url}/matches",
+                        json=payload,
+                        timeout=QUERY_TIMEOUT,
                     )
-                    raise
-                wait_t = float(2**attempt)
-                logger.warning(
-                    "Backend transport error (attempt %d/%d): %s; waiting %.1fs",
-                    attempt + 1,
-                    MAX_429_ATTEMPTS,
-                    exc.__class__.__name__,
-                    wait_t,
-                )
-                _warn(
-                    "transport_error",
-                    attempt=attempt,
-                    wait_s=wait_t,
-                    error_class=exc.__class__.__name__,
-                )
-                await wait_with_countdown(wait_t, "backend connection")
-                continue
-
-            code = resp.status_code
-            if code == 429:
-                decision = decide_429_wait(resp.headers, resp.text, attempt)
-                if decision is None:
-                    break
-                logger.warning(
-                    "Backend 429 [%s] (attempt %d/%d); waiting %.1fs",
-                    decision.scope,
-                    attempt + 1,
-                    MAX_429_ATTEMPTS,
-                    decision.seconds,
-                )
-                _warn(
-                    "rate_limit",
-                    attempt=attempt,
-                    wait_s=decision.seconds,
-                    status_code=429,
-                    scope=decision.scope,
-                )
-                await wait_with_countdown(decision.seconds, f"backend {decision.scope}")
-                continue
-
-            if 500 <= code < 600 and attempt < MAX_429_ATTEMPTS - 1:
-                wait_5 = float(2**attempt)
-                logger.warning(
-                    "Backend %d (attempt %d/%d); waiting %.1fs",
-                    code,
-                    attempt + 1,
-                    MAX_429_ATTEMPTS,
-                    wait_5,
-                )
-                _warn("server_error", attempt=attempt, wait_s=wait_5, status_code=code)
-                await wait_with_countdown(wait_5, f"backend {code}")
-                continue
-
-            break
-        assert resp is not None  # loop invariant: set resp or raised TransportError
-
-        if (
-            resp.status_code == 400
-            and _is_session_error(resp)
-            and await self._guard.recover(client, self.base_url)
-        ):
-            resp = await client.post(
-                f"{self.base_url}/matches",
-                json=payload,
-                timeout=QUERY_TIMEOUT,
-            )
+                except httpx.TransportError as exc:
+                    error_class = exc.__class__.__name__
+                    if never_sent(exc):
+                        admission.release()
+                        if attempt + 1 < MAX_429_ATTEMPTS:
+                            wait = float(2**attempt)
+                    if wait is None:
+                        _warn(
+                            "transport_error",
+                            attempt=attempt,
+                            wait_s=0.0,
+                            error_class=error_class,
+                            final=True,
+                        )
+                        raise
+                    logger.warning(
+                        "Backend unreachable (attempt %d/%d): %s; waiting %.1fs",
+                        attempt + 1,
+                        MAX_429_ATTEMPTS,
+                        error_class,
+                        wait,
+                    )
+                    _warn("transport_error", attempt=attempt, wait_s=wait, error_class=error_class)
+                else:
+                    code = resp.status_code
+                    reported = billed(_reply_data(resp))
+                    if reported is not None:
+                        admission.settle(*reported)
+                    elif resp.is_success or may_have_billed(code):
+                        admission.charge_in_full()
+                    else:
+                        admission.release()
+                    if code == 429:
+                        decision = decide_429_wait(resp.headers, resp.text, attempt)
+                        if decision is not None:
+                            wait = decision.seconds
+                            logger.warning(
+                                "Backend 429 [%s] (attempt %d/%d); waiting %.1fs",
+                                decision.scope,
+                                attempt + 1,
+                                MAX_429_ATTEMPTS,
+                                wait,
+                            )
+                            _warn(
+                                "rate_limit",
+                                attempt=attempt,
+                                wait_s=wait,
+                                status_code=429,
+                                scope=decision.scope,
+                            )
+                    elif 500 <= code < 600 and attempt + 1 < MAX_429_ATTEMPTS:
+                        wait = float(2**attempt)
+                        logger.warning(
+                            "Backend %d (attempt %d/%d); waiting %.1fs",
+                            code,
+                            attempt + 1,
+                            MAX_429_ATTEMPTS,
+                            wait,
+                        )
+                        _warn("server_error", attempt=attempt, wait_s=wait, status_code=code)
+                    elif (
+                        code == 400
+                        and not recovered
+                        and _is_session_error(resp)
+                        and await self._guard.recover(client, self.base_url)
+                    ):
+                        recovered = True
+                        wait = 0.0
+            if wait is None:
+                break
+            if wait:
+                await wait_with_countdown(wait, "backend")
 
         resp.raise_for_status()
         match_result: dict[str, Any] = resp.json()

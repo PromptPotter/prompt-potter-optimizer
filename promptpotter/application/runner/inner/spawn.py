@@ -46,32 +46,21 @@ from promptpotter.domain.l4.proxies import (
     parent_level_series,
 )
 from promptpotter.domain.launch_limits import LaunchLimits
-from promptpotter.domain.phases import RunPhase, StopReason
+from promptpotter.domain.phases import WALLET_STOPS, RunPhase, StopReason
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.results import candidate_label
-from promptpotter.infrastructure.llm.telemetry import (
-    _CURRENT_ROUND,
-    _CYCLE_LEDGER,
-    emit_token_usage,
-)
+from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, _CYCLE_LEDGER
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
-from promptpotter.infrastructure.store.account_spend import (
-    ZERO_SPEND,
-    BilledSpend,
-    billed_spend,
-    forwarded_mark,
-)
 from promptpotter.infrastructure.store.archive_queries import capture_evidence_epoch
-from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import read_json_optional, write_json
-from promptpotter.infrastructure.store.layout import (
-    CycleLayout,
-    sandbox_owner_path,
-    tenant_workspace,
-)
+from promptpotter.infrastructure.store.layout import CycleLayout, sandbox_owner_path
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import build_stores
-from promptpotter.shared.errors import CellCreditExhaustedError, CellUnscoreableError, graceful
+from promptpotter.shared.errors import (
+    CellUnscoreableError,
+    CellWalletExhaustedError,
+    ErrorCategory,
+)
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.instrument import (
     MAX_INSTRUMENT_DEPTH,
@@ -94,6 +83,11 @@ logger = logging.getLogger(__name__)
 # token cap by design: those trip on MEASURED token counts, which jitter run to run, making a
 # truncated trajectory indistinguishable from "this optimizer prompt found nothing". The cost
 # ceiling is the OUTER campaign's spend budget, which every inner dollar rolls up onto.
+
+# The stop an inner run ends on when a wallet refused it, back to the hole category that says so.
+_WALLET_REFUSALS: dict[StopReason | None, ErrorCategory] = {
+    stop: category for category, stop in WALLET_STOPS.items()
+}
 
 # Per-round wall-clock allowance for ONE inner cell — the rate `inner_cell_envelope_s` multiplies
 # out, enforced at the measure seam (`application/scoring/cell_envelope.py`). Never make it
@@ -309,51 +303,6 @@ def inner_cell_envelope_s(query: str, payload: dict[str, Any]) -> float:
     campaign_id = inner_campaign_id(spec, payload.get("optimizer_prompt_overrides") or {}, role)
     banked = _banked_inner_rounds(ctx, campaign_id)
     return OUTER_SAMPLE_WALL_S_PER_ROUND * max(1, (spec.n_rounds + 1) - banked)
-
-
-def _forward_inner_spend(
-    ctx: InnerSpawnContext,
-    campaign_id: str,
-    spec: InnerTaskSpec,
-    start: float,
-    cycle_dir_box: dict[str, Path],
-) -> None:
-    """Roll what this cell has spent since the last forward onto the OUTER ledger, then raise its
-    high-water mark. Runs at teardown on EVERY terminal outcome, because a cell that dies has still
-    spent its money; carries a DELTA, because a continued cell's own rollup is cumulative across
-    attempts and billing that whole would charge its history again.
-
-    Emit-then-mark is the crash policy: interrupted between the two, the next attempt re-forwards
-    and the run halts early, which is recoverable. The other order loses the money silently."""
-    if "dir" not in cycle_dir_box:
-        # This caller never opened the campaign — it was refused because ANOTHER producer owns it,
-        # or it died before the mint. Forwarding here would bill that producer's in-flight spend to
-        # this sample and raise a mark it did not earn.
-        return
-    store = CampaignStore(tenant_workspace(ctx.inner_sandbox_root, str(ctx.identity.tenant_id)))
-    pending: list[tuple[CycleHop, BilledSpend]] = []
-    total = ZERO_SPEND
-    for cycle_dir in store.campaign_cycle_dirs(campaign_id):
-        held = billed_spend([CycleLayout(cycle_dir).ledger])
-        delta = held.since(forwarded_mark(cycle_dir))
-        if delta == ZERO_SPEND:
-            continue
-        pending.append((CycleHop(campaign_id=campaign_id, cycle_id=cycle_dir.name), held))
-        total = total.plus(delta)
-    if not pending:
-        return
-    # `l1_critique` names no call this made — a whole campaign ran here. It is the node the outer
-    # sample's `step_timings` already keys, so the two spend surfaces agree on one attribution.
-    emit_token_usage(
-        node="l1_critique",
-        kind="backend",
-        usage=total.as_account(),
-        duration_s=time.monotonic() - start,
-        model=f"inner:{spec.inner_dataset}",
-        cost_usd=total.used_usd,
-    )
-    for hop, held in pending:
-        store.mark_spend_forwarded(hop, held)
 
 
 def _open_inner_campaign(
@@ -576,18 +525,13 @@ async def run_inner_cycle(query: str, payload: dict[str, Any]) -> dict[str, Any]
     spawn_role = cand.role if (cand := measured_candidate()) else MeasurementRole.PANEL
     campaign_id = inner_campaign_id(spec, overrides, spawn_role)
     start = time.monotonic()
-    # Filled by the inner task once the campaign is open; the forwarder reads it as the proof that
-    # this caller — not a concurrent one — owns what the sandbox holds.
+    # Filled by the inner task once the campaign is open, for the progress line to read its
+    # dashboard. What the campaign spends reaches the outer ledger call by call, as each settles
+    # against the outer run's book (`spend_book.py::SpendBook.mirror`).
     cycle_dir_box: dict[str, Path] = {}
-    try:
-        return await _measure_inner_cell(
-            ctx, spec, query, campaign_id, overrides, spawn_role, start, cycle_dir_box
-        )
-    finally:
-        # Every exit — measured, unscoreable, cancelled — spent the money either way. `graceful`
-        # keeps a forwarding failure from replacing the outcome the caller is already carrying.
-        with graceful(f"could not forward inner spend for {campaign_id}"):
-            _forward_inner_spend(ctx, campaign_id, spec, start, cycle_dir_box)
+    return await _measure_inner_cell(
+        ctx, spec, query, campaign_id, overrides, spawn_role, start, cycle_dir_box
+    )
 
 
 async def _measure_inner_cell(
@@ -677,11 +621,13 @@ async def _measure_inner_cell(
         with contextlib.suppress(asyncio.CancelledError):
             await heartbeat_task
     elapsed = time.monotonic() - start
-    if result.stop_reason is StopReason.PROVIDER_CREDIT:
-        # The inner run spends the outer run's provider key, so the refusal is every later cell's:
-        # a hole that halts the walk, never an excluded cell the walk steps past.
-        raise CellCreditExhaustedError(
-            f"its inner campaign {campaign_id} ran out of provider credit",
+    if (refused := _WALLET_REFUSALS.get(result.stop_reason)) is not None:
+        # The inner run spends the outer run's wallets — its provider key and its ceiling — so the
+        # refusal is every later cell's: a hole that halts the walk, never an excluded cell the walk
+        # steps past.
+        raise CellWalletExhaustedError(
+            f"its inner campaign {campaign_id} stopped on {result.stop_reason}",
+            category=refused,
             spent={},
             step_timings={},
         )
@@ -714,9 +660,9 @@ async def _measure_inner_cell(
         "terminal_node": "l3_plan",
         "total_time": elapsed,
         "step_timings": {"l1_critique": elapsed},
-        # No `step_tokens`: spend rides `_forward_inner_spend` at teardown instead. Returning it
-        # HERE would bill only the cells that succeed, bill a continued cell's whole history
-        # again, and re-bill the lot whenever the archive replays this row.
+        # No `step_tokens`: every call the campaign made was billed as it settled
+        # (`spend_book.py::SpendBook.mirror`). Returning it HERE would bill the cell twice, a
+        # continued cell's whole history again, and the lot whenever the archive replays this row.
     }
     return {"data": data}
 

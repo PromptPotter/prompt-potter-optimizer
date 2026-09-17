@@ -849,17 +849,22 @@ the PR description.
     may raise as well as lower, which is the only way a budget-halted cycle is
     ever continued. Bounding that one downward too was one guard doing two jobs,
     and it silently destroyed every legitimate raise.
-  - **Only the cycle tier halts a run** (`termination.py::BudgetGate`, both units,
-    whichever trips first); the account tier admits or refuses and never
-    interrupts a campaign in flight.
-  - **An L4 inner cycle needs no fourth source** — it forwards its spend onto the
-    OUTER cycle's ledger as a `backend` `TokenUsageRecord`
-    (`inner/spawn.py::_forward_inner_spend`), so the account walk must not reach
-    `.inner/`: a sandbox is a SIBLING of the tenant tree, and summing it counts
-    the forwarded half twice. Spend is summed one way
-    (`store/account_spend.py::account_ledgers`) and priced one way
-    (`infrastructure/llm/pricing.py::compute_usd`, which returns `None` for a
-    call it cannot price rather than `0.0`).
+  - **Only the cycle tier halts a run, and it halts one BEFORE a call is sent**:
+    its spend book (`infrastructure/llm/spend_book.py`) admits every paid call
+    at the most it may cost, in both units, beside everything still out, and a
+    call that ends without reporting is charged that whole bound. A ceiling
+    read after the fact is a guess about the calls in flight.
+    `termination.py::BudgetGate` reads the same book at the round boundary; the
+    account tier admits or refuses and never interrupts a campaign in flight.
+  - **An L4 inner cycle needs no fourth source** — it spends under its ROOT's
+    book, and each call is carried onto the OUTER cycle's ledger as it settles
+    (`SpendBook.mirror`), its own row flagged `mirrored`. So the account walk
+    must not reach `.inner/`: a sandbox is a SIBLING of the tenant tree, and
+    summing it counts the carried half twice. Spend is summed one way
+    (`store/account_spend.py::account_ledgers`) and priced once, when it is
+    recorded (`infrastructure/llm/telemetry.py::emit_token_usage`, via
+    `pricing.py::compute_usd`, which returns `None` for a call it cannot price
+    rather than `0.0`).
 
 - **`observed_node()` context manager** — the trace-emission seam
   every optimizer LLM call wraps. Cutting it removes Langfuse-shape

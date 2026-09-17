@@ -101,8 +101,8 @@ async def run_round_loop(
         while clean_rounds < max_rounds and round_num < HARD_CAP:
             # Pause cooperation: exit cleanly at the round boundary when the
             # operator set the pause flag. The scoring phase (run_walks)
-            # checks the same predicate, so a mid-round pause lands within one
-            # sample; this boundary check covers the single-LLM-call phases
+            # checks the same predicate, so a mid-round pause lands once the
+            # calls already sent have; this boundary check covers the single-LLM-call phases
             # (generate / L2 / L3) that have no inner loop. The cycle stays
             # resumable — `_finalize_run` skips terminal marking on PAUSED.
             if pause_requested(session):

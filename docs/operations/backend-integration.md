@@ -31,6 +31,23 @@ Every key is ABSENT when the backend reported nothing, and PromptPotter reads ab
 | `reasoning` | the share of output spent thinking is unreadable, so a slow node reads as a slow provider |
 | `cache_read` | the prefix-cache reading is `unreported` — every surface renders `c?`, distinct from a reported `c0%` (`application/views/render/prefix_reading.py::prefix_reading`) |
 
+### What a backend owes a campaign under a spend ceiling — required, not optional
+
+A ceiling is enforced before a cell is SENT, at the most the cell may cost, so the backend has to
+say what that is and hold to it. Without these, a campaign with no ceiling runs as before, and one
+under a ceiling has every cell refused before it leaves.
+
+- **`/pipeline` serves `spend_bound` on every node that can bill** — for an LLM node
+  `{kind: "llm", attempts, input_bytes, max_tokens}`, for a web search
+  `{kind: "web", queries, usd_per_query}` (`domain/pipeline_schema.py::NodeSpendBound`). They are
+  COUNTS the backend enforces, never prices: PromptPotter prices them at the dearest host the
+  node's model routes to (`infrastructure/llm/pricing.py::rate_ceiling`).
+- **The backend enforces them.** No request reads more than `input_bytes`, no retry lifts
+  `max_tokens`, no run of a node sends more than `attempts` requests.
+- **Every billed attempt is reported**, in `step_tokens`, on a failed request too — an error
+  envelope carries `data.step_tokens`. A reply reporting none is charged the whole bound.
+- **Search spend is reported in dollars**, as `data.web_cost.usd`.
+
 **Deploying the pair.** The Linux box co-hosts both — `deploy.config::BACKEND_DIR` / `BACKEND_SERVICE` — and `deploy-linux/update.sh` already syncs the backend checkout, reinstalls its requirements and restarts its unit alongside the optimizer. A backend-side change therefore reaches production through the ordinary update, provided it is pushed first; there is no separate download step to add.
 
 ## Connection security
@@ -40,7 +57,7 @@ The client talks to each backend over HTTP(S) with optional bearer-token auth. F
 - **Transport** — `https://` verifies the server cert; `http://` is cleartext. Pick the scheme in the registered `base_url`.
 - **Auth** — set `TERMNORM_TOKEN` and every request carries `Authorization: Bearer …`; empty token → no header.
 - **Backend gate** — the backend decides whether to *require* a token (`TERMNORM_REQUIRE_AUTH=1`). Mismatch → 401.
-- **Resilience** — the session handshake auto-recovers; 429 honors `Retry-After`; 5xx/transport errors back off 1→2→4→8 s.
+- **Resilience** — the session handshake auto-recovers; 429 honors `Retry-After`; a 5xx and a connection never made back off 1→2→4→8 s; a read timeout is never sent again, because the backend is still working — and billing — the first request.
 
 **Remote:** set `TERMNORM_REQUIRE_AUTH=1` + matching `TERMNORM_TOKEN` on both hosts, register with the `https://` URL, verify `curl https://…/status` returns 200. **Local:** same machine → `http://127.0.0.1:8000`; token optional for bare dev. The Linux deploy (`deploy-linux/bootstrap.sh`) auto-provisions a shared `TERMNORM_TOKEN` and sets `TERMNORM_REQUIRE_AUTH=true` on both sides **even on loopback** — defense-in-depth against a co-located compromised process. Nothing leaves loopback either way.
 
@@ -60,9 +77,9 @@ fixed and varies only evidence depth, latency, and LLM token cost. Sweep it on t
 LCA ground-truth set and read the winner off accuracy vs the per-match cost block.
 
 Each `/matches` response (and a langfuse `web_search` observation) now carries `web_cost`:
-`{strategy, brave_queries, scrape_attempts, scrape_ok, scrape_failed, evidence_chars}`.
-`brave_queries` is the metered cost (==1 on a live search, 0 when skipped/precomputed) and
-is the free-tier ceiling; `evidence_chars` + `scrape_failed` are the efficiency/reliability
+`{strategy, brave_queries, usd, scrape_attempts, scrape_ok, scrape_failed, evidence_chars}`.
+`brave_queries` is the metered count (==1 on a live search, 0 when skipped/precomputed) and
+`usd` its price, which PromptPotter bills; `evidence_chars` + `scrape_failed` are the efficiency/reliability
 signal to weigh against accuracy. The status/sources/warning-`kind` contract is unchanged —
 existing display and self-healing keep working. Backend rationale:
 `TermNorm-excel/backend-api/docs/WEB_SEARCH_STRATEGY.md`.
@@ -92,7 +109,7 @@ A long debug session taught these; future-me: be systematic and code-first, not 
 - **Diagnose from the code path, not by restarting.** When the backend "goes down" — `/status` itself times out, scoring stalls — the cause is almost always a **blocking call in an `async def` request path**, not a crash / SQLite lock / double-start. Symptom→action: grep the handler for sync I/O (`requests`, `ThreadPoolExecutor.map`, `time.sleep`, blocking DB) FIRST. Killing/restarting the worker and theorizing about ports/timeouts is the slow path and hid the real bug for an hour. Root found: `web_generate_entity_profile` (async) ran `_brave_search` + `list(executor.map(scrape_url…))` synchronously, freezing the single uvicorn worker for the whole web step → every concurrent request (incl. `/status`) stalled. Fix = offload via `asyncio.to_thread` / `run_in_executor`. **Backend async hygiene is a standing check: no sync I/O on the event loop.**
 - **The highway IS a cross-repo contract — change one side, fix both.** PP consumes TermNorm response *shapes*, so a shape change on either side silently breaks the other. Known coupling points: the error envelope is TermNorm's `{status, message, code}` (a global handler in `main.py`), **not** FastAPI's `{detail}` — PP must read `message`. Session-loss self-heal keys on a stable machine-readable `code: "no_session"` (prefer codes over substring/shape guessing). The web_search warning `stats` dict keys are read by PP's display. When you touch a response field, grep the *other* repo for its consumer.
 - **`--reload` wipes the in-memory session every backend code edit.** TermNorm holds sessions in `user_sessions = {}` (process memory). Any backend edit → uvicorn reload → in-flight PP runs hit `400 no_session`. PP now self-heals (re-`POST /sessions` + retry); keep it that way — a developer editing the backend mid-run must not abort the campaign.
-- **openrouter latency is the recurring root.** The same provider slowness hit (a) the optimizer (`promptpotter/assets/optimizer/pipeline.yaml` loop nodes at `reasoning_effort=high` + `max_tokens=20000` on openrouter/gpt-oss-120b → blew the 360s `OPTIMIZER_CALL_DEADLINE_S`×2 deadline → `OPTIMIZER_TIMEOUT` before round 1) and (b) `entity_profiling` (openrouter/gpt-oss-20b, ~20 tok/s, 47s tails). Survival guards: bounded optimizer reasoning (`medium`) + request timeouts under PP's 120s `QUERY_TIMEOUT`. The durable fix is provider (groq is far faster) — but that's the operator's daily-volume knob; don't flip it unprompted.
+- **openrouter latency is the recurring root.** The same provider slowness hit (a) the optimizer (`promptpotter/assets/optimizer/pipeline.yaml` loop nodes at `reasoning_effort=high` + `max_tokens=20000` on openrouter/gpt-oss-120b → blew the 360s `OPTIMIZER_CALL_DEADLINE_S`×2 deadline → `OPTIMIZER_TIMEOUT` before round 1) and (b) `entity_profiling` (openrouter/gpt-oss-20b, ~20 tok/s, 47s tails). Survival guards: bounded optimizer reasoning (`medium`) + request timeouts under PP's `QUERY_TIMEOUT`. The durable fix is provider (groq is far faster) — but that's the operator's daily-volume knob; don't flip it unprompted.
 - **The `web_search` hang was fixed structurally, not with a bigger timeout (2026-06-17).** The old multi-minute scrape freeze is retired by making evidence depth a strategy axis: `scrape` runs under a hard `scrape_budget` deadline, `snippets` never hangs, `hybrid` (default) falls back per source. Contract, `web_cost` fields, and how to sweep it → § Web-search strategy above. PP-side overlay wiring in `datasets/lca-termnorm/pipeline.yaml` still pending.
 
 ## Troubleshooting

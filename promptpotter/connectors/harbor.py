@@ -32,9 +32,9 @@ from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.spend import StepTokenUsage
 from promptpotter.shared.errors import (
-    CellCreditExhaustedError,
     CellInfrastructureError,
     CellUnscoreableError,
+    CellWalletExhaustedError,
     ErrorCategory,
     is_provider_credit_refusal,
 )
@@ -961,11 +961,9 @@ def _phase_timings(result: TrialResult, elapsed: float) -> dict[str, float]:
     return out
 
 
-def _infrastructure_failure(
-    result: TrialResult,
-) -> tuple[str, type[CellInfrastructureError]] | None:
-    """Why this trial measured the machine rather than the agent, and the error that cell raises,
-    or ``None``. Only a ``CONNECTION`` one is worth a retry.
+def _infrastructure_failure(result: TrialResult) -> tuple[str, ErrorCategory] | None:
+    """Why this trial measured the machine rather than the agent, and the category that cell is
+    banked as, or ``None``. Only a ``CONNECTION`` one is worth a retry.
 
     Asked whether or not a reward exists: a verifier whose tool download failed still grades — a
     ``set -e`` script does not stop on a failed ``apt-get update && …`` — without the tools it was
@@ -982,26 +980,26 @@ def _infrastructure_failure(
         if is_provider_credit_refusal(detail):
             return (
                 f"the provider account is out of credit: {detail[:300]}",
-                CellCreditExhaustedError,
+                ErrorCategory.PROVIDER_CREDIT,
             )
         if (
             exc.exception_type in _HARNESS_TIMEOUTS
             or _HARNESS_NETWORK_FAILURE.search(detail)
             or _PROVIDER_THROTTLE.search(detail)
         ):
-            return detail[:300], CellInfrastructureError
+            return detail[:300], ErrorCategory.CONNECTION
         timed_out = timed_out or exc.exception_type == "AgentTimeoutError"
     root = _TRIALS_ROOT / result.trial_name
     if timed_out and (line := _first_line(root / "trial.log", _PROVIDER_THROTTLE)):
         return (
             f"the provider throttled the agent before it ran out of clock: {line}",
-            CellInfrastructureError,
+            ErrorCategory.CONNECTION,
         )
     for log in root.rglob("test-stdout.txt"):
         if log.parent.name == "verifier" and (line := _first_line(log, _FETCH_FAILURE)):
             return (
                 f"the verifier could not download what it installs: {line}",
-                CellInfrastructureError,
+                ErrorCategory.CONNECTION,
             )
     return None
 
@@ -1283,20 +1281,25 @@ async def _in_process_run(
         try:
             result, elapsed = await attempt()
         except CellInfrastructureError as exc:
-            cause, error = str(exc), type(exc)
+            cause, category = str(exc), exc.category
         else:
             attempts.append(_step_tokens(result, model_name))
             spent_s += elapsed
             if (failure := _infrastructure_failure(result)) is None:
                 break
-            cause, error = failure
+            cause, category = failure
         _PACKAGE_CACHE_RUNNING.discard(PACKAGE_CACHE)
-        if n == _INFRA_ATTEMPTS or error.category is not ErrorCategory.CONNECTION:
-            raise error(
+        if n == _INFRA_ATTEMPTS or category is not ErrorCategory.CONNECTION:
+            message = (
                 f"harbor task {query!r} measured the infrastructure, not the agent, "
-                f"on attempt {n}/{_INFRA_ATTEMPTS}: {cause}",
-                spent=_sum_spend(attempts),
-                step_timings={AGENT_NODE: spent_s},
+                f"on attempt {n}/{_INFRA_ATTEMPTS}: {cause}"
+            )
+            spent = _sum_spend(attempts)
+            timings = {AGENT_NODE: spent_s}
+            if category is ErrorCategory.CONNECTION:
+                raise CellInfrastructureError(message, spent=spent, step_timings=timings)
+            raise CellWalletExhaustedError(
+                message, category=category, spent=spent, step_timings=timings
             )
         logger.warning(
             "harbor task %r attempt %d/%d measured the infrastructure (%s); retrying in %.0fs",

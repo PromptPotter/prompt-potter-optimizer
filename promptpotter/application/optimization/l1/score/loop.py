@@ -22,6 +22,7 @@ from promptpotter.application.scoring.search_point_scorer import close_walk, ope
 from promptpotter.domain.escalation_signals import EscalationSignal
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import CandidateProposal, ScoredCandidate
+from promptpotter.domain.run_records import SnapshotRecord
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
 from promptpotter.shared.errors import is_error_result
@@ -37,6 +38,7 @@ if TYPE_CHECKING:
     from promptpotter.application.run_observers import RunCallbacks
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
+    from promptpotter.infrastructure.ledger import CycleEventLog
 
 
 async def score_population(
@@ -95,7 +97,7 @@ async def score_population(
 
         def commit() -> list[QueryMeasurement]:
             walk.collect()
-            walk.end(walk.take(cell) or walk.judge())
+            walk.end(walk.take(cell) or walk.judge(), cancel=True)
             return close_walk(walk).results
 
         return cell, commit
@@ -152,24 +154,26 @@ async def score_population(
         )
         for idx, opt_sp_c in enumerate(population)
     ]
+    skips = _skips_on_record(cycle.session.state.ledger, round_num)
     walks: list[Walk | None] = []
     for idx, opt_sp_c in enumerate(population):
         # The candidates before this one that are still being walked may yet become priors.
         ahead = _PriorsAhead(elim_check, list(zip(ids, walks, strict=False)))
-        walks.append(
-            open_candidate(
-                idx=idx,
-                opt_sp_c=opt_sp_c,
-                candidate_sp=sps[idx],
-                cycle=cycle,
-                dataset=dataset,
-                n_total=n,
-                round_num=round_num,
-                callbacks=callbacks,
-                checks=[*(degradation_checks or []), ahead],
-                l1_diversity=l1_diversity,
-            )
+        walk = open_candidate(
+            idx=idx,
+            opt_sp_c=opt_sp_c,
+            candidate_sp=sps[idx],
+            cycle=cycle,
+            dataset=dataset,
+            n_total=n,
+            round_num=round_num,
+            callbacks=callbacks,
+            checks=[*(degradation_checks or []), ahead],
+            l1_diversity=l1_diversity,
         )
+        if walk is not None:
+            walk.skip_at = skips.get(ids[idx])
+        walks.append(walk)
 
     def on_turn(idx: int) -> None:
         # Bind PoBBCheck so this candidate's per-sample snapshot rides the telemetry stream
@@ -231,6 +235,28 @@ async def score_population(
         walks, cycle.session, backfills=elim_check, on_turn=on_turn, on_decided=on_decided
     )
     return all_candidate_results, candidate_scores, escalation_signal
+
+
+def _skips_on_record(ledger: CycleEventLog | None, round_num: int) -> dict[str, int]:
+    """The candidates of this round an operator skipped, and after how many rows. A skip is an
+    input, not a measurement, so a round resumed after a stop cannot re-derive it — it reads the
+    decision the ledger already carries, the last one per candidate. Keyed by candidate id, which
+    only a resumed round restores: a rewound or regenerated round mints new ones, and drops the
+    skips with the candidates they named."""
+    skips: dict[str, int] = {}
+    if ledger is None:
+        return skips
+    for _offset, rec in ledger.iter():
+        if not isinstance(rec, SnapshotRecord) or rec.event != "candidate_scored":
+            continue
+        scores = rec.payload.get("scores") or {}
+        if rec.round != round_num or not (cid := scores.get("candidate_id")):
+            continue
+        if scores.get("partial_reason") == "skip":
+            skips[cid] = int(scores.get("scored_samples") or 0)
+        else:
+            skips.pop(cid, None)
+    return skips
 
 
 @dataclass

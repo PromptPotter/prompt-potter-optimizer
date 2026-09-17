@@ -793,7 +793,8 @@ async def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
     job = registry.request_slot(user_id="default", dataset_name="ds1", hop=hop)
     registry.set_caps(job.job_id, cap_usd=0.30, cap_tokens=5_000_000)
     observers = types.SimpleNamespace(
-        dashboard=types.SimpleNamespace(spend_total_used_usd=0.10, spend_total_tokens=210_000)
+        dashboard=types.SimpleNamespace(spend_total_used_usd=0.10, spend_total_tokens=210_000),
+        arm_spend_book=lambda _book: None,
     )
     gate = _build_budget_gate(
         observers, built_stores.campaigns.cycle_dir(hop), usd_cap=0.30, token_cap=210_000
@@ -923,7 +924,8 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
 
     cycle_dir = tmp_path / "cyc"
     observers = types.SimpleNamespace(
-        dashboard=types.SimpleNamespace(spend_total_used_usd=1.0, spend_total_tokens=9_000)
+        dashboard=types.SimpleNamespace(spend_total_used_usd=1.0, spend_total_tokens=9_000),
+        arm_spend_book=lambda _book: None,
     )
 
     # A run that declared NOTHING is still gated, and the gate stays silent until a ceiling exists.
@@ -939,6 +941,220 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
     # And the launch sweep returns what it dropped, so a paused-cycle change cannot be lost silently.
     assert clear_run_control_flags(cycle_dir) == (None, 5_000)
     assert gate.tripped() is None, "the swept file must stop governing the next run"
+
+
+def test_no_burst_of_sends_records_spend_past_its_ceiling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A $0.10 campaign ended at $0.1018: the ceiling was compared against spend already recorded,
+    so every call out when it tripped landed past it — and a call cancelled on the way out billed
+    the provider with no record at all. Nothing raised; the number was simply higher than the cap.
+
+    A burst of concurrent sends through the real client — some answered, some cancelled mid-call,
+    some timed out after the request left — must record no more than the ceiling, and a send that
+    never reported must be on the ledger at the whole bound it was admitted on — even when the
+    process died before it could say so."""
+    import contextlib
+    import random
+    import types
+
+    import httpx
+    import openai
+    from openai.types.chat import ChatCompletion
+
+    from promptpotter.domain.run_records import TokenUsageRecord
+    from promptpotter.infrastructure.ledger import CycleEventLog
+    from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
+    from promptpotter.infrastructure.llm.pricing import Rate
+    from promptpotter.infrastructure.llm.spend_book import (
+        Admission,
+        CallLabel,
+        SendBound,
+        SpendBook,
+        charge_open_holds,
+        spending_under,
+    )
+    from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
+    from promptpotter.infrastructure.store.account_spend import billed_spend
+    from promptpotter.shared.errors import WalletExhaustedError
+
+    monkeypatch.setattr(
+        "promptpotter.infrastructure.llm.pricing.load_rates",
+        lambda: {"gpt-x": Rate(1e-6, 2e-6)},
+    )
+    rng = random.Random(7)
+    request = httpx.Request("POST", "https://x")
+
+    async def create(**params: Any) -> Any:
+        await asyncio.sleep(rng.random() * 0.02)
+        if rng.random() < 0.2:
+            raise openai.APITimeoutError(request=request)
+        prompt = rng.randint(1, len(params["messages"][0]["content"]))
+        completion = rng.randint(0, params["max_tokens"])
+        reply = ChatCompletion.model_validate(
+            {
+                "id": "c",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "gpt-x",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": "ok"},
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": prompt,
+                    "completion_tokens": completion,
+                    "total_tokens": prompt + completion,
+                },
+            }
+        )
+        return types.SimpleNamespace(headers={}, parse=lambda: reply)
+
+    client = OpenAICompatibleClient(api_key="k", provider="openai", display_name="OpenAI")
+    client._client = types.SimpleNamespace(  # type: ignore[assignment]
+        chat=types.SimpleNamespace(
+            completions=types.SimpleNamespace(
+                with_raw_response=types.SimpleNamespace(create=create)
+            )
+        )
+    )
+    ledger = CycleEventLog(tmp_path / "ledger.jsonl")
+    book = SpendBook(usd_cap=lambda: 0.05, tokens_cap=lambda: None)
+    ledger.bind(book)
+
+    async def burst() -> list[Any]:
+        async def one(i: int) -> Any:
+            return await client.chat(
+                [{"role": "user", "content": "x" * rng.randint(10, 400)}],
+                model="gpt-x",
+                label=CallLabel(f"n{i}", "optimizer"),
+                max_tokens=1500,
+            )
+
+        tasks = [asyncio.ensure_future(one(i)) for i in range(40)]
+        await asyncio.sleep(0.005)
+        for task in tasks[::5]:
+            task.cancel()
+        return await asyncio.gather(*tasks, return_exceptions=True)
+
+    token = set_cycle_ledger(ledger)
+    try:
+        with spending_under(book):
+            outcomes = asyncio.run(burst())
+    finally:
+        reset_cycle_ledger(token)
+
+    records = [r for _, r in ledger.iter() if isinstance(r, TokenUsageRecord)]
+    recorded = sum(r.cost_usd or 0.0 for r in records)
+    assert recorded <= 0.05 + 1e-12, f"recorded ${recorded:.6f} past a $0.05 ceiling"
+    assert recorded == pytest.approx(book.usd_spent)
+    assert any(isinstance(o, WalletExhaustedError) for o in outcomes), "the ceiling never bound"
+    unreported = sum(
+        isinstance(o, asyncio.CancelledError | openai.APITimeoutError) for o in outcomes
+    )
+    unsettled = [r for r in records if r.unsettled]
+    assert unreported and len(unsettled) == unreported
+    # Charged at the bound it was admitted on: its input bytes plus framing, and its whole reply.
+    assert all(r.output_tokens == 1500 and r.input_tokens > 512 for r in unsettled)
+
+    # A hard exit runs no `finally`: the hold written ahead of the call is all that says it left.
+    # The account reads it at its bound before any resume, and the resume charges it once.
+    killed = SendBound(input_tokens=600, output_tokens=1500, usd=0.0036)
+    token = set_cycle_ledger(ledger)
+    try:
+        Admission(book, CallLabel("killed", "optimizer"), killed, model="gpt-x", provider="openai")
+    finally:
+        reset_cycle_ledger(token)
+    assert billed_spend([ledger.path]).used_usd == pytest.approx(recorded + 0.0036)
+    assert (charge_open_holds(ledger), charge_open_holds(ledger)) == (1, 0)
+    assert billed_spend([ledger.path]).used_usd == pytest.approx(recorded + 0.0036)
+
+    # A nested run (an L4 cell) spends under its ROOT's book: the call is held on the root ledger
+    # and carried there as it settles, while the inner ledger keeps its own view — which no sum of
+    # money counts a second time.
+    book.ledger = ledger
+    inner = CycleEventLog(tmp_path / "inner.jsonl")
+    token = set_cycle_ledger(inner)
+    try:
+        with spending_under(book), contextlib.suppress(openai.APITimeoutError):
+            asyncio.run(
+                client.chat(
+                    [{"role": "user", "content": "nested"}],
+                    model="gpt-x",
+                    label=CallLabel("inner", "optimizer"),
+                    max_tokens=10,
+                )
+            )
+    finally:
+        reset_cycle_ledger(token)
+    carried = [r for _, r in ledger.iter() if isinstance(r, TokenUsageRecord)]
+    own = [r for _, r in inner.iter() if isinstance(r, TokenUsageRecord)]
+    assert [(r.node, r.mirrored) for r in carried[-1:]] == [("inner:inner", False)]
+    assert [r.mirrored for r in own] == [True] and not charge_open_holds(ledger)
+    assert billed_spend([inner.path]).used_usd == 0.0
+    assert book.usd_spent == pytest.approx(billed_spend([ledger.path]).used_usd)
+    # …and a kill mid-call leaves its hold on the ROOT ledger, where the root's resume charges it.
+    token = set_cycle_ledger(inner)
+    try:
+        Admission(book, CallLabel("killed", "optimizer"), killed, model="gpt-x", provider="openai")
+    finally:
+        reset_cycle_ledger(token)
+    assert charge_open_holds(ledger) == 1
+
+    # A backend cell: a connection never made is retried free; a 5xx that billed is settled off
+    # its error envelope and retried; a read timeout is charged whole and NEVER sent again — the
+    # backend is still working it, and a second POST was a second bill nobody recorded.
+    from promptpotter.application.scoring.sample_measurement import cell_billing
+    from promptpotter.infrastructure.backend import BackendClient
+
+    posts: list[int] = []
+    billed_step = {"step_tokens": {"n": {"input": 10, "output": 5, "cost_usd": 0.001}}}
+
+    async def _no_wait(*_args: Any) -> None:
+        return None
+
+    def backend(request: httpx.Request) -> httpx.Response:
+        posts.append(1)
+        if len(posts) == 1:
+            raise httpx.ConnectError("refused", request=request)
+        if len(posts) == 2:
+            return httpx.Response(500, json={"detail": "upstream", "data": billed_step})
+        raise httpx.ReadTimeout("slow", request=request)
+
+    monkeypatch.setattr("promptpotter.infrastructure.backend.wait_with_countdown", _no_wait)
+    cells = BackendClient(
+        "http://termnorm",
+        wire_adapter=lambda query, params: {"query": query},
+        session=types.SimpleNamespace(),  # type: ignore[arg-type]
+        workload=types.SimpleNamespace(),  # type: ignore[arg-type]
+        prompt_delivery=types.SimpleNamespace(),  # type: ignore[arg-type]
+    )
+    cells._http = httpx.AsyncClient(transport=httpx.MockTransport(backend))
+    cell = SendBound(input_tokens=100, output_tokens=50, usd=0.01)
+    wallet = SpendBook(usd_cap=lambda: None, tokens_cap=lambda: None)
+    before = sum(isinstance(r, TokenUsageRecord) for _, r in ledger.iter())
+    token = set_cycle_ledger(ledger)
+    try:
+        with spending_under(wallet), pytest.raises(httpx.ReadTimeout):
+            asyncio.run(
+                cells.run_query(
+                    "q",
+                    bound=cell,
+                    billed=cell_billing(types.SimpleNamespace(nodes=[]), {}),  # type: ignore[arg-type]
+                )
+            )
+    finally:
+        reset_cycle_ledger(token)
+    assert len(posts) == 3, f"{len(posts)} POSTs — a read timeout was sent again"
+    after = [r for _, r in ledger.iter() if isinstance(r, TokenUsageRecord)][before:]
+    assert [(r.cost_usd, r.unsettled) for r in after] == [
+        (0.0, False),
+        (0.001, False),
+        (0.01, True),
+    ]
 
 
 def test_an_operator_raise_survives_relaunch_but_never_escapes_the_wallet() -> None:
@@ -1104,18 +1320,35 @@ def test_host_wallet_ceilings_hold_in_both_units(
     assert blind.usd == pytest.approx(settings.FREE_TIER_LAUNCH_STEP_USD)
     assert blind.tokens == settings.FREE_TIER_TOKEN_CAP - 500_000
 
-    # A rate belongs to the (provider, model) PAIR, so the record handed to the pricer must carry
-    # the provider. Dropped, every namespaced model reads UNPRICED: the USD total stays $0.00 for
-    # real spend and the grace renews on each launch, which is the ceiling silently not existing.
+    # A rate belongs to the (provider, model) PAIR, so a call is priced with its provider when it is
+    # recorded. Dropped, every namespaced model lands UNPRICED: the USD total stays $0.00 for real
+    # spend and the grace renews on each launch, which is the ceiling silently not existing.
+    from promptpotter.domain.spend import TokenAccount
+    from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.llm.pricing import Rate
+    from promptpotter.infrastructure.llm.telemetry import (
+        emit_token_usage,
+        reset_cycle_ledger,
+        set_cycle_ledger,
+    )
 
     monkeypatch.setattr(
         "promptpotter.infrastructure.llm.pricing.load_rates",
         lambda: {"openrouter/openai/gpt-4o": Rate(1e-6, 2e-6)},
     )
-    priced = sum_user_spend(
-        ledgers=_ledger("priced.jsonl", model="openai/gpt-4o"), since=0.0, until=2e9
-    )
+    bound = set_cycle_ledger(CycleEventLog(tmp_path / "priced.jsonl"))
+    try:
+        emit_token_usage(
+            node="l1_generate",
+            kind="optimizer",
+            usage=TokenAccount(input=400_000, output=100_000),
+            duration_s=0.0,
+            model="openai/gpt-4o",
+            provider="openrouter",
+        )
+    finally:
+        reset_cycle_ledger(bound)
+    priced = sum_user_spend(ledgers=[tmp_path / "priced.jsonl"], since=0.0, until=2e9)
     assert priced.unpriced_tokens == 0
     assert priced.used_usd == pytest.approx(400_000 * 1e-6 + 100_000 * 2e-6)
 
@@ -1129,7 +1362,9 @@ def test_host_wallet_ceilings_hold_in_both_units(
     ) == (None, None)
 
 
-def test_an_exhausted_account_cannot_spend_before_a_campaign_exists(tmp_path: Path) -> None:
+def test_an_exhausted_account_cannot_spend_before_a_campaign_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The origin resolver is the one optimizer call reachable BEFORE a campaign, so no launch
     admission has run and no ``BudgetGate`` is watching. Its spend is recorded — on the check-in
     cycle's ledger — so nothing is lost; it is simply never checked, and an account already at its
@@ -1141,10 +1376,11 @@ def test_an_exhausted_account_cannot_spend_before_a_campaign_exists(tmp_path: Pa
     import json
     import types
 
-    from promptpotter.application.jobs.quota import QuotaExceededError, admit_llm_turn
+    from promptpotter.application.jobs.quota import QuotaExceededError, admit_spend
     from promptpotter.config.settings import settings
     from promptpotter.infrastructure.store.user_store import User
 
+    monkeypatch.setattr("promptpotter.application.jobs.quota.default_jobs_dir", lambda: tmp_path)
     user = User(user_id="sub-turn", tenant_id="sub-turn", created_at="2026-01-01")
     ledger = tmp_path / "spent.jsonl"
     ledger.write_text(
@@ -1175,7 +1411,7 @@ def test_an_exhausted_account_cannot_spend_before_a_campaign_exists(tmp_path: Pa
         )
 
     with pytest.raises(QuotaExceededError):
-        admit_llm_turn(stores=_stores("https://accounts.google.com"))
+        admit_spend(stores=_stores("https://accounts.google.com"), bucket="turn")
 
     # The box operator spends their own money and is refused on neither arm.
-    admit_llm_turn(stores=_stores(None))
+    admit_spend(stores=_stores(None), bucket="turn")

@@ -9,13 +9,15 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
-from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.jobs.capacity import resolve_run_capacity
+from promptpotter.application.jobs.registry import JobRegistry, default_jobs_dir
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.spend import BudgetChange, SpendCeilings
 from promptpotter.infrastructure.identity.migration import registered_user_id
 from promptpotter.infrastructure.identity.paths import default_identity_paths
+from promptpotter.infrastructure.llm.spend_book import SpendBook, unbounded_spend_book
 from promptpotter.infrastructure.runtime_flags import read_spend_caps, write_spend_caps
 from promptpotter.infrastructure.store.account_spend import (
     UserSpend,
@@ -240,36 +242,45 @@ def admit_launch(
     return SpendCeilings(usd, tokens)
 
 
-def admit_llm_turn(*, stores: Stores) -> None:
-    """A one-shot optimizer call outside any run — today the origin resolver, which spends the host's
-    key before a campaign exists. It declares no budget, so there is nothing to reserve and nothing
-    to clamp; the only question is whether the account has anything left at all. Its rate bucket is
-    keyed apart from the launch one, or a conversation would starve the verb it leads to."""
+def admit_spend(*, stores: Stores, bucket: str) -> SpendBook:
+    """Paid calls OUTSIDE any run — the origin resolver's turn, a ``verify-candidate`` — on the
+    host's key, and the book they spend under: this account's headroom beside every run it holds.
+    Nothing is reserved, because the book itself refuses a call that would pass the headroom.
+    ``bucket`` keys the rate meter apart from the launch one, or a conversation would starve the
+    verb it leads to."""
     user = stores.users.get_or_create(
         user_id=str(stores.identity.user_id), tenant_id=str(stores.identity.tenant_id)
     )
     spends_own_key = spends_the_hosts_own_key(stores)
     # Exempt in the RATE arm too: the free-tier meter exists to bound a stranger on the host's
-    # key, and counting the host's own turns per minute meters them against their own money.
-    if not spends_own_key and not _consume_rate_token(f"turn:{user.user_id}"):
+    # key, and counting the host's own calls per minute meters them against their own money.
+    if not spends_own_key and not _consume_rate_token(f"{bucket}:{user.user_id}"):
         raise QuotaExceededError(
             code="rate_limited",
-            message="Too many resolver turns; slow down and retry shortly.",
+            message=f"Too many {bucket} requests; slow down and retry shortly.",
         )
     ceilings = lifetime_ceilings(user=user, spends_own_key=spends_own_key)
     if ceilings.usd is None and ceilings.tokens is None:
-        return
-    spent = sum_user_spend(ledgers=account_ledgers(stores.campaigns), since=0.0, until=time.time())
-    if (ceilings.usd is not None and spent.used_usd >= ceilings.usd) or (
-        ceilings.tokens is not None and spent.used_tokens >= ceilings.tokens
+        return unbounded_spend_book()
+    wallet = read_account_wallet(
+        user=user,
+        stores=stores,
+        job_registry=JobRegistry(default_jobs_dir(), capacity=resolve_run_capacity),
+    )
+    if wallet.contended:
+        raise _contended("what this account has left")
+    headroom = wallet.headroom
+    if (headroom.usd is not None and headroom.usd <= 0.0) or (
+        headroom.tokens is not None and headroom.tokens <= 0
     ):
         raise QuotaExceededError(
             code="spend_ceiling_reached",
             message=(
-                f"This account has spent its allowance (${spent.used_usd:.2f} / "
-                f"{spent.used_tokens:,} tokens), so nothing further runs on the host's key."
+                f"This account has spent its allowance (${wallet.spent.used_usd:.2f} / "
+                f"{wallet.spent.used_tokens:,} tokens), so nothing further runs on the host's key."
             ),
         )
+    return SpendBook(usd_cap=lambda: headroom.usd, tokens_cap=lambda: headroom.tokens)
 
 
 def clamp_budget_change(
@@ -505,7 +516,7 @@ __all__ = [
     "AccountWallet",
     "QuotaExceededError",
     "admit_launch",
-    "admit_llm_turn",
+    "admit_spend",
     "check_launch_quotas",
     "clamp_budget_change",
     "concurrent_cycles_writable",

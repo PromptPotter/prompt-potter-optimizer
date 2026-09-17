@@ -54,6 +54,7 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     start_run_command,
 )
 from promptpotter.application.jobs.quota import (
+    admit_spend,
     clamp_budget_change,
     hold_ceiling,
     set_concurrent_cycles,
@@ -81,6 +82,7 @@ from promptpotter.domain.run_records import CommandAckRecord, CommandRecord, Cyc
 from promptpotter.domain.spend import BudgetChange
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.spend_book import spending_under
 from promptpotter.infrastructure.llm.telemetry import (
     emit_command,
     emit_command_ack,
@@ -538,17 +540,20 @@ class CommandDispatcher:
 
             async def _apply_verify() -> None:
                 # The one application function the CLI also calls, so both raise the same record.
+                # It spends on the host's key outside any run, so the account's headroom is its book.
                 cand_round, cand_idx = parse_candidate_label(payload.label)
-                await verify_candidate(
-                    stores=self._stores,
-                    identity=self._stores.identity,
-                    hop=hop,
-                    round_num=cand_round,
-                    cand_idx=cand_idx,
-                    label=payload.label,
-                    samples=payload.samples,
-                    seed=None,
-                )
+                book = await asyncio.to_thread(admit_spend, stores=self._stores, bucket="verify")
+                with spending_under(book):
+                    await verify_candidate(
+                        stores=self._stores,
+                        identity=self._stores.identity,
+                        hop=hop,
+                        round_num=cand_round,
+                        cand_idx=cand_idx,
+                        label=payload.label,
+                        samples=payload.samples,
+                        seed=None,
+                    )
 
             return Applier(_apply_verify)
         if isinstance(payload, ForkCyclePayload):

@@ -6,6 +6,7 @@ import logging
 import sys
 from typing import TYPE_CHECKING, Any, cast
 
+import httpx
 from pydantic import BaseModel, ValidationError
 
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
@@ -19,17 +20,22 @@ from promptpotter.infrastructure.llm.json_parse import (
     parse_response_content,
     try_groq_json_validate_repair,
 )
+from promptpotter.infrastructure.llm.pricing import rate_ceiling
 from promptpotter.infrastructure.llm.rate_limit import (
     OPENAI_RPM_HEADER,
     OPENAI_TPM_HEADER,
     RateLimiter,
-    acquire_reservation,
     apply_discovered_caps,
     raise_if_request_too_large,
 )
 from promptpotter.infrastructure.llm.response import LLMResponse
+from promptpotter.infrastructure.llm.spend_book import Billed, CallLabel
 from promptpotter.shared import truncate
-from promptpotter.shared.errors import ProviderCreditExhaustedError, is_provider_credit_refusal
+from promptpotter.shared.errors import (
+    ErrorCategory,
+    WalletExhaustedError,
+    is_provider_credit_refusal,
+)
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -139,20 +145,19 @@ class OpenAICompatibleClient(LLMClientBase):
     def __init__(
         self,
         api_key: str,
+        *,
+        provider: str,
+        display_name: str,
         base_url: str | None = None,
-        max_retries: int = 5,
         timeout: float | None = None,
-        provider_name: str = "openai",
         rate_limiter: RateLimiter | None = None,
-        usage_accounting: bool = False,
+        gateway: bool = False,
     ):
+        super().__init__(provider=provider, display_name=display_name, rate_limiter=rate_limiter)
         self._api_key = api_key
         self._base_url = base_url
-        self._max_retries = max_retries
         self._timeout = timeout
-        self._provider_name = provider_name
-        self._rate_limiter = rate_limiter
-        self._usage_accounting = usage_accounting
+        self._gateway = gateway
         self._client: AsyncOpenAI | None = None
 
     def _ensure_client(self) -> AsyncOpenAI:
@@ -166,10 +171,9 @@ class OpenAICompatibleClient(LLMClientBase):
                     "installing openai here would hide the broken install, not fix it."
                 ) from err
 
-            kwargs: dict[str, Any] = {
-                "api_key": self._api_key,
-                "max_retries": self._max_retries,
-            }
+            # No SDK retries: a retried send is a second bill, so the one retry loop is the
+            # admitted one (`LLMClientBase._admitted_send`), which knows which failures billed.
+            kwargs: dict[str, Any] = {"api_key": self._api_key, "max_retries": 0}
             if self._base_url:
                 kwargs["base_url"] = self._base_url
             if self._timeout:
@@ -181,6 +185,8 @@ class OpenAICompatibleClient(LLMClientBase):
         self,
         messages: list[dict[str, str]],
         model: str,
+        *,
+        label: CallLabel,
         temperature: float = 0.0,
         max_tokens: int | None = None,
         response_model: type[BaseModel] | None = None,
@@ -216,8 +222,17 @@ class OpenAICompatibleClient(LLMClientBase):
         # because `create()` takes named params only: a bare `usage=` is a TypeError in the SDK,
         # never a request the provider gets to answer.
         extra_body: dict[str, Any] = {}
-        if self._usage_accounting:
+        route: dict[str, Any] = {}
+        if self._gateway:
             extra_body["usage"] = {"include": True}
+            # The price the call is admitted on (`pricing.py::rate_ceiling`), as the most any host
+            # may charge — so a host listed after the ceiling was read cannot bill past the hold.
+            if (ceiling := await rate_ceiling(model, self._provider)) is not None:
+                dearest = ceiling.dearest()
+                route["max_price"] = {
+                    "prompt": dearest.input * 1_000_000,
+                    "completion": dearest.output * 1_000_000,
+                }
         # A provider's implicit prefix cache is per-REPLICA, so it pays only where ONE route is hit
         # repeatedly. A throughput sort (`:nitro`) re-ranks per call, which on `deepseek-v4-flash`
         # put three of four live optimizer calls on Baidu — an endpoint that never caches, measured
@@ -230,7 +245,9 @@ class OpenAICompatibleClient(LLMClientBase):
         # `supports_implicit_caching`, which reads False on 14 of 15 deepseek endpoints including
         # the one measured at 96.7%.
         if route_order:
-            extra_body["provider"] = {"order": list(route_order), "allow_fallbacks": True}
+            route |= {"order": list(route_order), "allow_fallbacks": True}
+        if route:
+            extra_body["provider"] = route
         if extra_body:
             request_params["extra_body"] = extra_body
 
@@ -262,24 +279,17 @@ class OpenAICompatibleClient(LLMClientBase):
             request_params["extra_body"] = merged
         request_params.update(kwargs)
 
-        # Fail-fast on un-fittable TPM; otherwise block until inside the rolling window.
-        reservation = await acquire_reservation(
-            self._rate_limiter, messages, max_tokens, self._provider_name
+        result = await self._one_attempt(
+            client, request_params, response_model, response_schema, label
         )
-
-        result = await self._one_attempt(client, request_params, response_model, response_schema)
         if isinstance(result, LLMResponse):
-            # Groq json_validate_failed salvage — already typed. Reconcile the
-            # reservation with the salvage's real token count (mirrors the repair +
-            # normal exits) so the TPM window doesn't keep the cheap chars//4 estimate.
-            if reservation is not None:
-                reservation.close(result.usage.total)
+            # Groq json_validate_failed salvage — already typed.
             return result
         response, content, validation_err, parsed = result
         schema_repair_attempts = 0
         # The failed first attempt still burned tokens; carry them so the returned usage
-        # meters BOTH round-trips (emit_token_usage otherwise under-reports a repaired call
-        # by one full call). Zero unless a repair fires below.
+        # counts BOTH round-trips, as each one's own usage record already did. Zero unless a
+        # repair fires below.
         first = TokenAccount()
         first_cost: float | None = None
         if validation_err is not None:
@@ -376,7 +386,7 @@ class OpenAICompatibleClient(LLMClientBase):
                     len(ladder),
                 )
                 result = await self._one_attempt(
-                    client, retry_params, response_model, response_schema
+                    client, retry_params, response_model, response_schema, label
                 )
                 schema_repair_attempts = attempt_no
                 if isinstance(result, LLMResponse):
@@ -385,11 +395,6 @@ class OpenAICompatibleClient(LLMClientBase):
                     # owns the summing rule, so no field can be forgotten here.
                     result.usage = result.usage + first
                     result.cost_usd = _billed_cost(first_cost, result.cost_usd)
-                    # Reconcile the rolling-window reservation with the ACTUAL multi-round-trip
-                    # total, not the cheap chars//4 estimate — else the TPM self-throttle
-                    # under-counts on exactly the heaviest (repaired) calls. Mirrors line ~204.
-                    if reservation is not None:
-                        reservation.close(result.usage.total)
                     return result
                 response, content, validation_err, parsed = result
                 if validation_err is None:
@@ -427,9 +432,6 @@ class OpenAICompatibleClient(LLMClientBase):
                 first = first + _attempt_usage(response)
                 first_cost = _billed_cost(first_cost, _attempt_cost(response))
 
-        usage = response.usage
-        if reservation is not None and usage is not None:
-            reservation.close(usage.total_tokens)
         billed = _attempt_usage(response) + first
         # ``reasoning_tokens`` is a SUBSET of ``completion_tokens``, not a fourth total — the
         # provider bills the thinking as output. It rides the success path because that is the
@@ -460,21 +462,51 @@ class OpenAICompatibleClient(LLMClientBase):
         request_params: dict[str, Any],
         response_model: type[BaseModel] | None,
         response_schema: dict[str, Any] | None,
+        label: CallLabel,
     ) -> LLMResponse | tuple[Any, str, ValidationError | None, Any]:
-        """One provider round-trip + parse; ``parsed`` is consumed directly and never re-validated by the caller. SDK retries cover
-        408/409/429/5xx — this layer intercepts only request-too-large, 404 model-not-found, and Groq's 400 quirk."""
-        try:
-            raw = await client.chat.completions.with_raw_response.create(**request_params)
-            response = raw.parse()
-        except Exception as exc:
-            recovered = self._try_recover_from_chat_error(exc, request_params, response_model)
-            if recovered is not None:
-                return recovered
-            raise
+        """One admitted provider round-trip + parse; ``parsed`` is consumed directly and never
+        re-validated by the caller. Beyond the send seam's retries, this layer intercepts only
+        request-too-large, 404 model-not-found, a spent account and Groq's 400 quirk."""
 
+        async def send() -> LLMResponse | tuple[httpx.Headers, ChatCompletion]:
+            try:
+                raw = await client.chat.completions.with_raw_response.create(**request_params)
+            except Exception as exc:
+                recovered = self._try_recover_from_chat_error(exc, request_params, response_model)
+                if recovered is None:
+                    raise
+                return recovered
+            return raw.headers, raw.parse()
+
+        def billed(reply: LLMResponse | tuple[httpx.Headers, ChatCompletion]) -> Billed | None:
+            if isinstance(reply, LLMResponse):
+                # A salvaged 400 was generated, and billed, but its body reports no usage.
+                return None
+            response = reply[1]
+            return Billed(
+                _attempt_usage(response),
+                _attempt_cost(response),
+                _served_by(response),
+                response.model,
+            )
+
+        reply = await self._admitted_send(
+            label,
+            model=request_params["model"],
+            messages=request_params["messages"],
+            sent={
+                k: request_params[k] for k in ("messages", "response_format") if k in request_params
+            },
+            max_tokens=request_params.get("max_tokens"),
+            send=send,
+            billed=billed,
+        )
+        if isinstance(reply, LLMResponse):
+            return reply
+        headers, response = reply
         apply_discovered_caps(
             self._rate_limiter,
-            raw.headers,
+            headers,
             rpm_header=OPENAI_RPM_HEADER,
             tpm_header=OPENAI_TPM_HEADER,
         )
@@ -502,8 +534,9 @@ class OpenAICompatibleClient(LLMClientBase):
         raise_if_request_too_large(exc, self._provider_name)
         status = getattr(exc, "status_code", None)
         if status in (402, 403) and is_provider_credit_refusal(str(exc)):
-            raise ProviderCreditExhaustedError(
-                f"{self._provider_name} refused the call for lack of credit: {str(exc)[:300]}"
+            raise WalletExhaustedError(
+                f"{self._provider_name} refused the call for lack of credit: {str(exc)[:300]}",
+                category=ErrorCategory.PROVIDER_CREDIT,
             ) from exc
         if status == 404:
             model_name = request_params.get("model", "unknown")

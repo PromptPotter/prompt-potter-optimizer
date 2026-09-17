@@ -36,7 +36,6 @@ from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.run_records import TokenUsageRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
-from promptpotter.infrastructure.store.account_spend import BilledSpend, forwarded_mark
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import (
@@ -323,7 +322,14 @@ def test_reclaim_spares_a_sandbox_it_cannot_prove_is_an_orphan(built_stores: Sto
     assert sandbox.is_dir()
 
 
-def _spend_inner(sandbox: Path, *, input_tokens: int, output_tokens: int, cost_usd: float) -> Path:
+def _spend_inner(
+    sandbox: Path,
+    *,
+    input_tokens: int,
+    output_tokens: int,
+    cost_usd: float,
+    mirrored: bool = False,
+) -> Path:
     """Put real money on the sandbox's inner cycle ledger, through the real writer."""
     cycle_dir = sandbox / "tenant" / "campaigns" / "innerds__20260101-000000" / "cycles"
     cycle_dir = cycle_dir / "inner-cycle-0"
@@ -337,6 +343,7 @@ def _spend_inner(sandbox: Path, *, input_tokens: int, output_tokens: int, cost_u
             output_tokens=output_tokens,
             duration_s=1.0,
             cost_usd=cost_usd,
+            mirrored=mirrored,
         )
     )
     return cycle_dir
@@ -367,17 +374,13 @@ def test_reclaiming_a_sandbox_banks_the_spend_its_ledgers_hold(built_stores: Sto
 
 
 def test_a_forwarded_inner_cycle_is_not_banked_twice(built_stores: Stores) -> None:
-    """An inner cycle forwards onto its outer ledger as it runs, so its rows are already counted.
-    Banking them whole on the way out bills that money a second time — silently, because a
-    tombstone is indistinguishable from spend that never reached anywhere else."""
+    """An inner cycle's calls are carried onto its outer ledger as they settle, so those rows are
+    already counted. Banking them again on the way out bills that money a second time — silently,
+    because a tombstone is indistinguishable from spend that never reached anywhere else."""
     sandbox = _sandbox(built_stores, _CAMPAIGN, "orphaned-outer-cycle")
-    cycle_dir = _spend_inner(sandbox, input_tokens=1000, output_tokens=200, cost_usd=0.25)
-    inner = CampaignStore(WorkspaceDir(sandbox / "tenant"))
-    inner_hop = CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0")
-
-    # Half forwarded: only the remainder is still this sandbox's to bank.
-    inner.mark_spend_forwarded(inner_hop, BilledSpend(0.10, 400, 100, 0))
-    assert forwarded_mark(cycle_dir).used_usd == pytest.approx(0.10)
+    # One call carried out, one not: only the second is still this sandbox's to bank.
+    _spend_inner(sandbox, input_tokens=400, output_tokens=100, cost_usd=0.10, mirrored=True)
+    _spend_inner(sandbox, input_tokens=600, output_tokens=100, cost_usd=0.15)
 
     assert reclaim_orphan_sandboxes(built_stores.projects_root) == 1
     banked = _tombstones(built_stores)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+import httpx
 from pydantic import BaseModel
 
 from promptpotter.config.settings import settings
@@ -14,14 +15,19 @@ from promptpotter.infrastructure.llm.rate_limit import (
     ANTHROPIC_RPM_HEADER,
     ANTHROPIC_TPM_HEADER,
     RateLimiter,
-    acquire_reservation,
     apply_discovered_caps,
 )
 from promptpotter.infrastructure.llm.response import LLMResponse
-from promptpotter.shared.errors import ProviderCreditExhaustedError, is_provider_credit_refusal
+from promptpotter.infrastructure.llm.spend_book import Billed, CallLabel
+from promptpotter.shared.errors import (
+    ErrorCategory,
+    WalletExhaustedError,
+    is_provider_credit_refusal,
+)
 
 if TYPE_CHECKING:
     from anthropic import AsyncAnthropic
+    from anthropic.types import Message
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +39,20 @@ _UNSENDABLE_HERE: frozenset[str] = (
 ) | {"route_order"}
 
 
+def _usage(response: Message) -> TokenAccount:
+    """Anthropic reports its cache counts BESIDE its input count; the OpenAI-compat wire reports
+    its own INSIDE it. Normalized to the latter — the convention `TokenAccount` declares — so no
+    reader downstream has to know which provider answered."""
+    cache_read = int(getattr(response.usage, "cache_read_input_tokens", 0) or 0)
+    cache_write = int(getattr(response.usage, "cache_creation_input_tokens", 0) or 0)
+    return TokenAccount(
+        input=response.usage.input_tokens + cache_read + cache_write,
+        output=response.usage.output_tokens,
+        cache_read=cache_read,
+        cache_write=cache_write,
+    )
+
+
 class AnthropicClient(LLMClientBase):
     _schema_warned = False
 
@@ -41,8 +61,8 @@ class AnthropicClient(LLMClientBase):
         api_key: str | None = None,
         rate_limiter: RateLimiter | None = None,
     ):
+        super().__init__(provider="anthropic", display_name="Anthropic", rate_limiter=rate_limiter)
         self._api_key = api_key or settings.ANTHROPIC_API_KEY
-        self._rate_limiter = rate_limiter
         self._client: AsyncAnthropic | None = None
 
     def _ensure_client(self) -> AsyncAnthropic:
@@ -54,13 +74,16 @@ class AnthropicClient(LLMClientBase):
                     "anthropic package not installed. "
                     'Install the anthropic extras: pip install -e ".[anthropic]"'
                 ) from err
-            self._client = AsyncAnthropic(api_key=self._api_key)
+            # No SDK retries — see `OpenAICompatibleClient._ensure_client`.
+            self._client = AsyncAnthropic(api_key=self._api_key, max_retries=0)
         return self._client
 
     async def chat(
         self,
         messages: list[dict[str, str]],
         model: str,
+        *,
+        label: CallLabel,
         temperature: float = 0.0,
         max_tokens: int | None = None,
         response_model: type[BaseModel] | None = None,
@@ -115,40 +138,39 @@ class AnthropicClient(LLMClientBase):
         if top_p is not None:
             request_params["top_p"] = top_p
 
-        # Reserve against the number we are ABOUT TO SEND, not the caller's raw one. With
-        # `max_tokens=None` the request asks for 8192 while the reservation asked for
-        # nothing, so the limiter under-counted every default-sized call and let the
-        # window overshoot into a 429 it exists to prevent.
-        reservation = await acquire_reservation(
-            self._rate_limiter, messages, anthropic_max_tokens, "Anthropic"
-        )
+        async def send() -> tuple[httpx.Headers, Message]:
+            try:
+                raw = await client.messages.with_raw_response.create(**request_params)
+            except Exception as exc:
+                if getattr(exc, "status_code", None) == 400 and is_provider_credit_refusal(
+                    str(exc)
+                ):
+                    raise WalletExhaustedError(
+                        f"Anthropic refused the call for lack of credit: {str(exc)[:300]}",
+                        category=ErrorCategory.PROVIDER_CREDIT,
+                    ) from exc
+                raise
+            return raw.headers, raw.parse()
 
-        try:
-            raw = await client.messages.with_raw_response.create(**request_params)
-        except Exception as exc:
-            if getattr(exc, "status_code", None) == 400 and is_provider_credit_refusal(str(exc)):
-                raise ProviderCreditExhaustedError(
-                    f"Anthropic refused the call for lack of credit: {str(exc)[:300]}"
-                ) from exc
-            raise
-        response = raw.parse()
+        def billed(reply: tuple[httpx.Headers, Message]) -> Billed:
+            response = reply[1]
+            return Billed(_usage(response), None, None, response.model)
 
-        # Anthropic reports its cache counts BESIDE its input count; the OpenAI-compat wire
-        # reports its own INSIDE it. Normalize to the latter — the convention `TokenAccount`
-        # declares — so no reader downstream has to know which provider answered.
-        cache_read = int(getattr(response.usage, "cache_read_input_tokens", 0) or 0)
-        cache_write = int(getattr(response.usage, "cache_creation_input_tokens", 0) or 0)
-        usage = TokenAccount(
-            input=response.usage.input_tokens + cache_read + cache_write,
-            output=response.usage.output_tokens,
-            cache_read=cache_read,
-            cache_write=cache_write,
+        # Held and throttled against the number we are ABOUT TO SEND, not the caller's raw one:
+        # with `max_tokens=None` the request still asks for 8192.
+        headers, response = await self._admitted_send(
+            label,
+            model=model,
+            messages=messages,
+            sent={"system": system_message, "messages": anthropic_messages},
+            max_tokens=anthropic_max_tokens,
+            send=send,
+            billed=billed,
         )
-        if reservation is not None:
-            reservation.close(usage.total)
+        usage = _usage(response)
         apply_discovered_caps(
             self._rate_limiter,
-            raw.headers,
+            headers,
             rpm_header=ANTHROPIC_RPM_HEADER,
             tpm_header=ANTHROPIC_TPM_HEADER,
         )

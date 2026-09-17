@@ -43,6 +43,7 @@ ProjectionKind = Literal[
     "round_warning",
     "ruler",
     "snapshot",
+    "spend_hold",
     "spend_tombstone",
     "token_usage",
     # projection-only — synthesized by the ledger tail (``CycleLedgerTail``)
@@ -83,6 +84,7 @@ RENDERS_AS_ACTIVITY: dict[ProjectionKind, bool] = {
     "round_warning": True,
     "ruler": False,
     "snapshot": True,
+    "spend_hold": False,
     "spend_tombstone": False,
     "token_usage": False,
 }

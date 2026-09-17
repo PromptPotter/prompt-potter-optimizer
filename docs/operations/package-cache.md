@@ -23,7 +23,7 @@ Three mechanisms close this, and none of them changes measurement identity:
    (`shared/errors.py::CellInfrastructureError`), carrying what every attempt spent so the one catch
    in `measure_sample` bills it, and the walk halts with `StopReason.BACKEND_UNREACHABLE`. A
    provider account out of credit is not retried: it is banked as `ErrorCategory.PROVIDER_CREDIT`
-   (`CellCreditExhaustedError`) on the first attempt and halts with `StopReason.PROVIDER_CREDIT`.
+   (`CellWalletExhaustedError`) on the first attempt and halts with `StopReason.PROVIDER_CREDIT`.
    Either cell stays a hole that `resume` re-measures. There is no fallback to direct downloads: in
    an outage it fails the same way, one path later.
 3. **No registry call once a task image exists.** A kept `hb__<hash>` tag starts as a prebuilt

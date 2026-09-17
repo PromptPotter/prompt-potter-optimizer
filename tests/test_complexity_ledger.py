@@ -98,7 +98,12 @@ LEDGER_BASELINE = {
     # a truncated trajectory being graded. It PAID for itself: `runner/inner/spawn.py` held all
     # three for L4 alone, so harbor's container episodes and every remote cell were unbounded in
     # sum, and it is now a connector declaration any backend can make.
-    "modules": 356,
+    # +1: `infrastructure/llm/spend_book.py` — the ONE admission of a paid request, held at its
+    # worst case before it is sent. Every ceiling compared a cap against spend already recorded,
+    # so each call out when it tripped landed past it ($0.1018 on a $0.10 campaign) and a
+    # cancelled call billed with no record. It PAYS for itself: the SDK retries, the two caller
+    # 429 loops, the deadline re-send and the three caller emits fold into the one send seam.
+    "modules": 357,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     "init_files": 53,
@@ -406,7 +411,9 @@ LEDGER_BASELINE = {
     # the first request runs every arm prompt-less under that mode's key (test_integrity § 1).
     # +1: a look-ahead walk launches one cell past its stop rule's horizon, so a horizon that
     # answers after the real cut discards paid calls unrecorded (test_numerics § 5).
-    "test_functions": 194,
+    # +1: a burst of concurrent sends — answered, cancelled, timed out — records spend past its
+    # ceiling, or a send that never reported is billed with no record (test_security).
+    "test_functions": 195,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

@@ -1,20 +1,21 @@
 """Two budget ceilings, one gate, halting at the next clean round boundary — twins because a free
-backend reports $0 while tokens count the work it misses. Caps re-read every tick, never cached."""
+backend reports $0 while tokens count the work it misses. Caps re-read every tick, never cached;
+what enforces them is the admission of each call, ahead of any boundary."""
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from promptpotter.domain.phases import StopLoop, StopReason
-from promptpotter.shared.errors import ProviderCreditExhaustedError, is_repairable_hole
+from promptpotter.domain.phases import WALLET_STOPS, StopLoop, StopReason
+from promptpotter.shared.errors import WalletExhaustedError, is_repairable_hole
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from promptpotter.domain.results import DegradationHealth
+    from promptpotter.infrastructure.llm.spend_book import SpendBook
 
 logger = logging.getLogger(__name__)
 
@@ -22,33 +23,26 @@ OriginGateMode = Literal["strict", "critical_only", "off"]
 PanelGateMode = Literal["strict", "off"]
 
 # What ends a run on a named reason wherever it is raised — prep, init or the round loop.
-RUN_STOPS = (StopLoop, ProviderCreditExhaustedError)
+RUN_STOPS = (StopLoop, WalletExhaustedError)
 
 
-def run_stop_reason(stop: StopLoop | ProviderCreditExhaustedError) -> StopReason:
-    if isinstance(stop, ProviderCreditExhaustedError):
+def run_stop_reason(stop: StopLoop | WalletExhaustedError) -> StopReason:
+    if isinstance(stop, WalletExhaustedError):
         logger.warning("Run halted: %s", stop)
-        return StopReason.PROVIDER_CREDIT
+        return WALLET_STOPS[stop.category]
     return stop.reason
 
 
 @dataclass(frozen=True)
 class BudgetGate:
-    usd_spent: Callable[[], float] | None = None
-    usd_cap: Callable[[], float | None] | None = None
-    tokens_spent: Callable[[], int] | None = None
-    tokens_cap: Callable[[], int | None] | None = None
+    """The run's ceilings as the round loop asks them: whether one is already reached. Whether a
+    call may be SENT is the spend book's to answer (``infrastructure/llm/spend_book.py``)."""
+
+    book: SpendBook
 
     def tripped(self) -> StopReason | None:
-        if self.usd_spent is not None and self.usd_cap is not None:
-            cap = self.usd_cap()
-            if cap is not None and self.usd_spent() >= cap:
-                return StopReason.SPEND_BUDGET
-        if self.tokens_spent is not None and self.tokens_cap is not None:
-            cap_tok = self.tokens_cap()
-            if cap_tok is not None and self.tokens_spent() >= cap_tok:
-                return StopReason.TOKEN_BUDGET
-        return None
+        refused = self.book.exhausted()
+        return None if refused is None else WALLET_STOPS[refused]
 
 
 def origin_gate_tripped(
