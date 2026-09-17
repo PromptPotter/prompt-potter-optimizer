@@ -137,7 +137,7 @@ export function HardSamplesHeatmap() {
         ) : (
           <button
             type="button"
-            className="hs-heat-mini-btn"
+            className="hs-mini-btn resizable"
             onClick={() => setHeatExpanded((e) => !e)}
             aria-expanded={heatExpanded}
             aria-label={
@@ -145,7 +145,7 @@ export function HardSamplesHeatmap() {
             }
             title={`${summary} — click to ${heatExpanded ? "collapse" : "expand"} · drag to resize`}
           >
-            <span className="hs-heat-mini" aria-hidden="true">
+            <span className="hs-mini-tiles" aria-hidden="true">
               {/* The SERVED per-sample mean, shaded by the table's own `fitnessStyle` — one
                   colour rule for the strip and the row beneath it. It folded `perSample` down
                   and thresholded at 0.5 instead, which is neither `HIT_THRESHOLD` nor a
@@ -156,7 +156,7 @@ export function HardSamplesHeatmap() {
                 return (
                   <span
                     key={it.sample_id}
-                    className="hs-heat-mini-cell"
+                    className="hs-mini-cell"
                     style={mean == null ? undefined : fitnessStyle(mean)}
                   />
                 );
@@ -171,7 +171,7 @@ export function HardSamplesHeatmap() {
         />
       </div>
       {(bankExpanded || heatExpanded) && (
-        <RotatePrompt surfaceName="The sample heat-map" skipRender>
+        <RotatePrompt surfaceName="The sample heat-map">
           {bankExpanded && <SampleTrajectory rounds={dash?.rounds ?? []} />}
           {heatExpanded && !rosterNote && (
             <div className="hs-expand-wrap">

@@ -1,13 +1,12 @@
 "use client";
 import { useMemo, useState, type ReactNode } from "react";
-import { postSkipSearchpoint, postSetSampleLookahead, IngestApiError } from "@/lib/api";
+import { postSkipSearchpoint, postSetSampleLookahead } from "@/lib/api";
 import { SegmentedControl, Switch, Term } from "@/components/ui";
-import { bumpRevalidation } from "@/lib/revalidate";
-import { runPhaseLabel } from "@/lib/run-phase";
+import { useCommand } from "@/lib/hooks/useCommand";
 import { cx } from "@/lib/cx";
 import { TERMS } from "@/lib/terms";
 import { headlineStats, pathOf, prefixReading, readSpend, runningInnerRun } from "@/lib/derivations";
-import { fmtText, fmtDuration, fmtUsd, fmtTokens, fmtPct0 } from "@/lib/format";
+import { fmtText, fmtDuration, fmtTheta, fmtUsd, fmtTokens } from "@/lib/format";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useLineageTree } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
@@ -20,10 +19,11 @@ import { SpendBudgetControl } from "@/components/dashboard/control/SpendBudgetCo
 // this codebase means a border-radius and already belongs to four other things
 // (Badge, the round-axis LIVE marker, the provenance tag, the round strip).
 // It consolidates the run controls that were scattered (play/pause was buried in
-// the Chat-tab heat-map). The STRIP carries only what is read at a glance —
-// run-phase, play/pause (the reused RunControlButton), Skip, where the run is, and
-// the Lift readout that toggles the panel; every other number and control is a row
-// in that panel, because nine slots on one bar is a paragraph, not a remote.
+// the Chat-tab heat-map). The STRIP carries only what it ACTS on — play/pause (the
+// reused RunControlButton), Skip, the drill, and the Lift readout that toggles the
+// panel; every other number and control is a row in that panel, because nine slots on
+// one bar is a paragraph, not a remote. WHERE the run is — phase, round, best, spend —
+// is the masthead's chip row, one band per fact and this one not repeating it.
 // Pause is the single interrupt verb — there is no separate Stop;
 // pausing exits the worker cleanly and the play button resumes from the last
 // completed round.
@@ -32,10 +32,6 @@ import { SpendBudgetControl } from "@/components/dashboard/control/SpendBudgetCo
 // samples of the searchpoint scoring now, accepts the partial, and the cycle
 // continues — and marks the cycle human_intervened. Enabled only while running
 // (skipping only means something mid-scoring).
-//
-// The run-phase chip doubles as the follow-active control while the view is
-// PINNED. While following it stays a plain span — `followActive()` is a no-op
-// there, and a button that does nothing is a lie (surface-contract I3).
 
 const SKIP_ICON = (
   <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">
@@ -89,15 +85,12 @@ function cacheTag(share: number | null, write: number): ReactNode {
 }
 
 interface Props {
-  // Called after the operator follows the active run, so the shell can switch to
-  // the Dashboard view — same contract as the JobsDock's `onPicked`.
-  onFollowed?: () => void;
   // The viewed cycle's creation stamp, for the burn-rate ETA. Shell-owned because the
   // leaf hop's own stamp is what the strip describes.
   cycleStartedAt?: string | null;
 }
 
-export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
+export function RemoteControl({ cycleStartedAt = null }: Props) {
   // Identity from the workspace; live state from the per-cycle dashboard stream.
   const {
     campaignId,
@@ -107,14 +100,11 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
     leafIsL4,
     viewedPath,
     cycles,
-    following,
-    followActive,
     drillInto,
     backToOuter,
   } = useWorkspace();
-  const { dash, dashRound, status } = useDashboard();
-  const [pending, setPending] = useState<"skip" | "sample-lookahead" | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const { dash, status } = useDashboard();
+  const cmd = useCommand<"skip" | "sample-lookahead">("remote-control");
   const [open, setOpen] = useState(false);
   // The strip's one lineage read, only to offer the drill into a RUNNING inner
   // cycle while the OUTER of a self-optimizing campaign is viewed. Rides the
@@ -142,15 +132,6 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
   if (runPhase === null || runPhase === "checkin") return null;
   const terminal = runPhase === "terminal";
   const offline = status === "offline";
-
-  // Hoisted so the chip's two forms render byte-identical contents.
-  const phaseLabel = runPhaseLabel(runPhase, dash?.stop_reason);
-  const phase = (
-    <>
-      <span className="phase-dot" aria-hidden="true" />
-      {phaseLabel}
-    </>
-  );
 
   // The phase above is the LEAF's, and Skip/Pause address the ROOT hop, so firing them
   // from an inner view sent a command the inner run's `running` had enabled at the outer
@@ -198,22 +179,13 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
   } = readSpend(dash);
 
   // Headline KPIs. `abilityDelta` is SERVED and is in LOGITS, so it renders as θ and never as
-  // a percent — the two are different bases, not different renderings. Lift over origin leads
-  // because it is the meaningful number; absolute best rides as secondary context.
-  const { best, abilityDelta, abilityDeltaPerUsd } = headlineStats(dash);
-  const deltaTheta =
-    abilityDelta != null ? `θ ${abilityDelta >= 0 ? "+" : ""}${abilityDelta.toFixed(2)}` : "—";
+  // a percent — the two are different bases, not different renderings. The readout carries the
+  // LIFT alone; the absolute best is the masthead's BEST chip, and saying it twice let the two
+  // disagree on screen.
+  const { abilityDelta, abilityDeltaPerUsd } = headlineStats(dash);
+  const deltaTheta = fmtTheta(abilityDelta);
   const effChip = abilityDeltaPerUsd != null ? `${abilityDeltaPerUsd.toFixed(2)} θ/$` : "—";
   const etaChip = etaToBudget(usedUsd, budgetUsd, cycleStartedAt);
-  // The candidate currently being scored ("C3.2"). `dash.candidate` is "C3.2/4"
-  // and goes stale between rounds, so surface it only while the active node is
-  // the scorer — that's the window where it's the live position. This is the
-  // finer "where am I" the remote was missing: round AND candidate.
-  const scoringCand =
-    dash?.current_round.active_node === "l1_score"
-      ? String(dash?.candidate || "").split("/")[0]
-      : "";
-
   // SERVER state, never a local toggle (I6): the depth clears itself at the round boundary, so a
   // client-held value would stay lit after the round that spent it. ONE served number — the depth
   // in force — because the walk re-reads it at every launch: a press applies to a walk already
@@ -242,9 +214,10 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
     maxCells <= 1
       ? "This backend runs one sample at a time — a single call has no latency to overlap."
       : undefined;
-  const armDisabled = Boolean(concurrencyReason) || runPhase !== "running" || pending !== null;
+  const armDisabled =
+    Boolean(concurrencyReason) || runPhase !== "running" || cmd.pending !== null;
   // A mode, not a press, so it is offered on a paused run too: it survives the relaunch.
-  const autoDisabled = Boolean(concurrencyReason) || terminal || pending !== null;
+  const autoDisabled = Boolean(concurrencyReason) || terminal || cmd.pending !== null;
   const concurrencyTitle =
     concurrencyReason ??
     `${
@@ -255,7 +228,7 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
       discards > 0 ? ` (${discards} discarded)` : ""
     }.`;
   const arm = (cells: number, auto: boolean) =>
-    void act("sample-lookahead", () =>
+    void cmd.run("sample-lookahead", () =>
       postSetSampleLookahead(viewedPath ?? [{ campaignId, cycleId }], cells, auto),
     );
   // Clamped here as well as in the walk: the server records the request UNCLAMPED, so a value
@@ -280,19 +253,6 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
       title: n === 1 ? "One at a time" : `Hold ${n} in flight`,
     };
   });
-
-  const act = async (which: "skip" | "sample-lookahead", fn: () => Promise<unknown>) => {
-    setPending(which);
-    setErr(null);
-    try {
-      await fn();
-      bumpRevalidation(); // re-tick the workspace poll (run_phase + babysat flag)
-    } catch (e) {
-      setErr(IngestApiError.toOperatorMessage(e));
-    } finally {
-      setPending(null);
-    }
-  };
 
   return (
     <div
@@ -436,26 +396,6 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
           <span className="remote-btn-label">inner</span>
         </button>
       ) : null}
-      {following ? (
-        <span className={cx("phase-chip", `phase-${runPhase}`)}>{phase}</span>
-      ) : (
-        <button
-          type="button"
-          className={cx("phase-chip", "remote-follow", `phase-${runPhase}`)}
-          onClick={() => {
-            followActive();
-            onFollowed?.();
-          }}
-          aria-label={`${phaseLabel} — pinned to this campaign. Follow the campaign the CLI is currently running.`}
-        >
-          {phase}
-          {/* The breadcrumb's own button, floated above the pill. The tag IS the
-              tooltip, so no `title` on top of it. */}
-          <span className="follow-active-btn" aria-hidden="true">
-            ↪ Follow active
-          </span>
-        </button>
-      )}
       {offline ? (
         <Term
           className="remote-offline"
@@ -468,8 +408,8 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
       <button
         type="button"
         className="remote-btn remote-skip"
-        onClick={() => void act("skip", () => postSkipSearchpoint(campaignId, cycleId))}
-        disabled={inner || runPhase !== "running" || pending !== null}
+        onClick={() => void cmd.run("skip", () => postSkipSearchpoint(campaignId, cycleId))}
+        disabled={inner || runPhase !== "running" || cmd.pending !== null}
         aria-label="Skip the rest of this searchpoint"
         title={
           innerReason ??
@@ -479,50 +419,34 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
         {SKIP_ICON}
         <span className="remote-btn-label">Skip</span>
       </button>
-      <span className="remote-status" aria-live="off">
-        {/* The candidate label ("C2.3") already encodes the round (the 2), so
-            show it INSTEAD of "R{n}" while scoring — round only when there's no
-            candidate (between rounds / generating). */}
-        {scoringCand ? (
-          <span className="remote-cand">{scoringCand}</span>
-        ) : dashRound != null ? (
-          <span className="remote-round">R{dashRound}</span>
-        ) : null}
-      </span>
       {/* The one headline number, and the panel's own toggle. Everything the strip used to
           spell out — spend, ETA, Δ/$, look-ahead, the babysat and unpriced tags — is a row
           in that panel now: a control strip is read at a glance, and nine slots is a
           paragraph. It reads as decoration mid-run and as the answer once the run stops,
           which is why the strip survives `terminal` rather than unmounting exactly when
           these numbers start mattering. */}
-      {/* A div, not a `<button>`: the chip inside carries its own HoverCard trigger, and a
-          button forbids a focusable descendant. `role="button"` + the key handler below
-          restore the native activation this trades away. */}
-      <div
-        role="button"
-        tabIndex={0}
-        className="remote-readout"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            setOpen((v) => !v);
-          }
-        }}
-        aria-label="Job status and configuration"
-      >
+      {/* The chip TEACHES and the chevron ACTS — two things, so two elements. Folded into one
+          control, the chip's HoverCard trigger is a focusable descendant of it, and reading the
+          term presses the control. */}
+      <div className={cx("remote-readout", open && "remote-readout-on")}>
         <Term className="chip" content={TERMS.remote_best}>
           <span className="chip-lbl">Lift</span> <strong>{deltaTheta}</strong>
-          {best != null && <span className="chip-origin"> · best {fmtPct0(best)}</span>}
         </Term>
-        <svg className="chev" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="m3 4.5 3 3 3-3" />
-        </svg>
+        <button
+          type="button"
+          className="remote-readout-toggle"
+          aria-expanded={open}
+          aria-label="Job status and configuration"
+          onClick={() => setOpen((v) => !v)}
+        >
+          <svg className="chev" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="m3 4.5 3 3 3-3" />
+          </svg>
+        </button>
       </div>
-      {err ? (
+      {cmd.failure ? (
         <span className="remote-err" role="alert">
-          {err}
+          {cmd.failure.message}
         </span>
       ) : null}
     </div>

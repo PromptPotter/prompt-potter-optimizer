@@ -3,8 +3,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useSelection } from "@/lib/SelectionContext";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
-import { useRoundSource } from "@/lib/hooks/useRoundSource";
-import { useRoundCandidates } from "@/lib/hooks/useRoundCandidates";
+import { useRoundRows } from "@/lib/hooks/useRoundRows";
 import { useViewedLineage } from "@/lib/lineage";
 import {
   candidateSearchPoint,
@@ -13,7 +12,6 @@ import {
   liveCandidateSearchPoint,
   panelCellKey,
   pathOf,
-  samplesForRow,
 } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
 import type { LineageNode } from "@/lib/api";
@@ -114,25 +112,20 @@ export function MeasurementRun({
           }
         : null,
     );
+  // This round, one source: the live/historical pick, its document, and the candidate list
+  // shared with the candidates card. Round 0 is the origin (one candidate, "C0") and shows its
+  // per-sample stream from round_0000.json like any round.
   const {
-    isLive: isLiveView,
+    live: isLiveView,
     doc: roundDoc,
     loading: roundLoading,
-    error: roundError,
-  } = useRoundSource(viewedPath, round, dash);
+    failure: roundFailure,
+    rows: candidates,
+    samples: samplesFor,
+  } = useRoundRows(round);
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [candFilter, setCandFilter] = useState<string>("all");
-
-  // Candidate list for this round — single source of truth shared with
-  // the candidates card via the spine hook. Round 0 is the origin (one
-  // candidate, "C0") and shows its per-sample stream from round_0000.json like
-  // any round.
-  const { byRound } = useRoundCandidates();
-  const candidates: ElectedRow[] = useMemo(
-    () => byRound.get(round) ?? [],
-    [byRound, round],
-  );
 
   // Why a candidate produced what it produced. The FLAG that a candidate was rejected rides the
   // candidate row (no fetch, so the correctness fix lands instantly); the REASON rides this block,
@@ -150,11 +143,11 @@ export function MeasurementRun({
       spec: CandidateSearchPoint | null;
     }[] = [];
     for (const c of candidates) {
-      // `samplesForRow` selects live vs historical off the row's own `source`
-      // tag (the spine sets it) — same routing the candidates card's bars use, never a
-      // merge. `roundDoc` is null on the live round (the fetch is idled), and
-      // an in-flight row reads `dash`, so the source is unambiguous.
-      const raw = samplesForRow(c, dash, roundDoc);
+      // `samples` selects live vs historical off the row's own `source` tag (the spine sets
+      // it) — same routing the candidates card's bars use, never a merge. `roundDoc` is null
+      // on the live round (the fetch is idled), and an in-flight row reads `dash`, so the
+      // source is unambiguous.
+      const raw = samplesFor(c);
       // An L4 cell has no mark to filter on — it was optimized, not scored, so every
       // `status` is null. The control is hidden in that mode; skipping the filter here
       // keeps a stale `HIT` pick from blanking the panel.
@@ -175,7 +168,7 @@ export function MeasurementRun({
       return out.filter((g) => g.candidate.candidate_id === candFilter);
     }
     return out;
-  }, [candidates, candFilter, statusFilter, dash, roundDoc, isL4]);
+  }, [candidates, candFilter, statusFilter, dash, roundDoc, samplesFor, isL4]);
 
   const totalRows = useMemo(
     () => groups.reduce((n, g) => n + g.samples.length, 0),
@@ -194,12 +187,8 @@ export function MeasurementRun({
   if (!isLiveView && roundLoading) {
     return <Region>Loading round {round}…</Region>;
   }
-  if (!isLiveView && roundError) {
-    return (
-      <Region>
-        Could not load round {round}: {roundError}
-      </Region>
-    );
+  if (!isLiveView && roundFailure) {
+    return <Region>Could not load round {round}.</Region>;
   }
   if (candidates.length === 0) {
     // A live round still waiting on its first candidate is not a completed round that
@@ -332,32 +321,31 @@ export function MeasurementRun({
                   prompt shown here and the same prompt on the hero cannot drift. Folded: the
                   rows are the subject, the program is the thing you check against them. */}
               {oneCandidate && g.spec && (
-                <details className="rsv-spec">
-                  <summary>
-                    What {g.candidate.label} ran
-                    {/* An inner candidate's spec is reachable from nowhere else — the Scoring
-                        inspector reads the cycle the dashboard streams, and this is a run one
-                        hop down. */}
-                    <CopyButton
-                      data={{
-                        label: g.candidate.label,
-                        resolved_pipeline_params: g.spec.pipeline_overlay,
-                        prompt_fields: g.spec.origin_prompt_fields,
-                      }}
-                      title={`Copy what ${g.candidate.label} ran`}
+                <div className="rsv-spec-row">
+                  <details className="rsv-spec">
+                    <summary>What {g.candidate.label} ran</summary>
+                    <NodeSurface
+                      node={null}
+                      point={g.spec}
+                      overlay={g.spec.pipeline_overlay}
+                      schema={cv.nodeConfigSchema}
+                      schemaStatus={cv.pipelineStatus}
+                      outputSchema={cv.nodeOutputSchema}
+                      mode="values"
+                      compact
                     />
-                  </summary>
-                  <NodeSurface
-                    node={null}
-                    point={g.spec}
-                    overlay={g.spec.pipeline_overlay}
-                    schema={cv.nodeConfigSchema}
-                    schemaStatus={cv.pipelineStatus}
-                    outputSchema={cv.nodeOutputSchema}
-                    mode="values"
-                    compact
+                  </details>
+                  {/* Beside the disclosure, never in its `<summary>`: a label may hold neither a
+                      control nor that control's words in its accessible name. */}
+                  <CopyButton
+                    data={{
+                      label: g.candidate.label,
+                      resolved_pipeline_params: g.spec.pipeline_overlay,
+                      prompt_fields: g.spec.origin_prompt_fields,
+                    }}
+                    title={`Copy what ${g.candidate.label} ran`}
                   />
-                </details>
+                </div>
               )}
               {g.samples.length === 0 ? (
                 <div className="rsv-empty-row">

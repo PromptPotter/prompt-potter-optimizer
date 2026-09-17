@@ -5,11 +5,10 @@
 // CSS and a branded "rotate to landscape" card renders in their place.
 // On landscape or ≥768px the children render normally.
 //
-// Pure-CSS gating is preferred — the `.rotate-prompt-host` / `.rotate-
-// prompt-children` / `.rotate-prompt-card` classes in `app/styles/foundation/responsive.css` do
-// the work without involving React. The `useIsPortraitPhone()` branch
-// only matters when the children's effect tree should also be skipped
-// (heavy SVG layout calcs, etc.) — pass `skipRender` for that case.
+// The `.rotate-prompt-host` / `.rotate-prompt-children` / `.rotate-prompt-card`
+// classes in `app/styles/foundation/responsive.css` do the swap; the
+// `useIsPortraitPhone()` branch additionally UNMOUNTS the children, because every
+// surface this wraps carries an expensive layout pass (large SVG, virtualised table).
 
 import { type ReactNode } from "react";
 import { useIsPortraitPhone } from "@/lib/hooks/useMediaQuery";
@@ -19,10 +18,6 @@ interface Props {
   // Operator-readable label for the rotate card. Defaults to a generic
   // line; pass the specific surface name when it adds clarity.
   surfaceName?: string;
-  // When true, the children subtree is unmounted on portrait phone
-  // instead of merely hidden via CSS. Use for surfaces whose render is
-  // expensive (large SVG layouts, virtualised tables).
-  skipRender?: boolean;
 }
 
 function RotateIcon() {
@@ -45,12 +40,11 @@ function RotateIcon() {
   );
 }
 
-export function RotatePrompt({ children, surfaceName, skipRender }: Props) {
+export function RotatePrompt({ children, surfaceName }: Props) {
   const isPortraitPhone = useIsPortraitPhone();
-  const renderChildren = !(skipRender && isPortraitPhone);
   return (
     <div className="rotate-prompt-host">
-      {renderChildren && (
+      {!isPortraitPhone && (
         <div className="rotate-prompt-children">{children}</div>
       )}
       <div

@@ -2,9 +2,8 @@
 // Headless modal a11y — the behavior half of a dialog, with no visual chrome.
 // While `open`, it: moves focus into the card, traps Tab within it, closes on
 // ESC, and restores focus to the previously-focused element on close. The
-// `Dialog` primitive uses this under its 480px card; bespoke-layout modals
-// (account, auth, ingest) use it directly so they inherit the same a11y
-// contract without being forced into Dialog's chrome.
+// `Dialog` primitive uses this under its card; a surface that IS its own
+// backdrop (the full-screen hard-samples sheet) uses it directly.
 //
 // Attach the returned ref to the focus-trap container (the modal card). The
 // caller still renders its own backdrop + close button and wires those to
@@ -15,7 +14,8 @@ import { useEffect, useRef } from "react";
 const FOCUSABLE =
   'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
-export function useDialogA11y(open: boolean, onClose: () => void) {
+// `onClose` absent = an undismissable modal: Escape does nothing.
+export function useDialogA11y(open: boolean, onClose: (() => void) | undefined) {
   const cardRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
   // Hold the latest onClose in a ref so the effect depends only on `open`.
@@ -36,7 +36,7 @@ export function useDialogA11y(open: boolean, onClose: () => void) {
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        onCloseRef.current();
+        onCloseRef.current?.();
         return;
       }
       if (e.key !== "Tab" || !card) return;

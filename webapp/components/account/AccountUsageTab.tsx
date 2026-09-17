@@ -8,10 +8,10 @@ import { AccountFailure, AccountLoading, AccountSection } from "./AccountSection
 import { SegmentedControl, CommitInput, type Segment } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { fmtTokens, fmtUsd } from "@/lib/format";
-import { useFetch } from "@/lib/hooks/useFetch";
+import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
+import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import {
-  ApiError,
   fetchQuotaStatus,
   postSetConcurrentCycles,
   type MachineStatusResponse,
@@ -22,13 +22,15 @@ import {
 const SEGMENTED_MAX = 8;
 
 export function AccountUsageTab() {
-  const { data, error, kind } = useFetch(() => fetchQuotaStatus(), []);
+  const read = useRead({ key: "quota", fetch: fetchQuotaStatus }, { surface: "usage", auth: true });
   // A save re-reads in place, so the pane does not blank between the press and the answer.
   const [fresh, setFresh] = useState<QuotaStatus | null>(null);
-  const machine = useMachineStatus();
-  const quota = fresh ?? data;
+  const machine = readyData(useMachineStatus());
+  const quota = fresh ?? readyData(read);
 
-  if (error && quota === null) return <AccountFailure kind={kind} subject="your usage" />;
+  if (read.status === "failed" && quota === null) {
+    return <AccountFailure kind={read.failure.kind} subject="your usage" />;
+  }
   if (quota === null) return <AccountLoading subject="your usage" />;
   return (
     <>
@@ -221,19 +223,14 @@ function RunsSection({
   );
 }
 
-function refusal(err: unknown): string {
-  if (err instanceof ApiError) {
-    if (err.code === "concurrency_above_machine") {
-      return "That is more than this machine runs at once, so it could never bind.";
-    }
-    if (err.code === "concurrency_set_by_host") {
-      return "Whoever runs this server sets this account's limit.";
-    }
-    if (err.status === 404 || err.status === 403) {
-      return "This session may not change spend limits.";
-    }
-  }
-  return "The server did not take the change. Nothing was written; try again.";
+// The server words its own two refusals — `concurrency_set_by_host` and
+// `concurrency_above_machine`, the latter naming the ceiling this surface would have to
+// re-derive — so only a flat denial needs a sentence here. 403 and 404 are one answer: the
+// route is not this session's to reach.
+function refusal(f: CommandFailure): string | null {
+  return f.kind === "denied" || f.kind === "gone"
+    ? "This session may not change spend limits."
+    : null;
 }
 
 function LimitControl({
@@ -245,8 +242,10 @@ function LimitControl({
   machine: MachineStatusResponse | null;
   onSaved: () => Promise<void>;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const cmd = useCommand<"set-concurrent-cycles">("account-run-limit", { describe: refusal });
+  // The quota re-read is this pane's own: by then the limit is written, and only the meters
+  // on this screen are stale — which is a different thing to report than a refused write.
+  const [reread, setReread] = useState<"idle" | "busy" | "failed">("idle");
   const limit = quota.max_concurrent_cycles;
 
   if (!quota.max_concurrent_cycles_writable) {
@@ -262,23 +261,24 @@ function LimitControl({
 
   const save = async (next: number) => {
     if (next === limit || !Number.isInteger(next) || next < 1) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await postSetConcurrentCycles(next);
-    } catch (e) {
-      setError(refusal(e));
-      setBusy(false);
-      return;
-    }
+    setReread("idle");
+    const r = await cmd.run("set-concurrent-cycles", () => postSetConcurrentCycles(next));
+    if (!r.ok) return;
+    setReread("busy");
     try {
       await onSaved();
+      setReread("idle");
     } catch {
-      setError("Saved, but the new limit could not be read back. Reopen this pane to see it.");
+      setReread("failed");
     }
-    setBusy(false);
   };
 
+  const busy = cmd.pending !== null || reread === "busy";
+  const error =
+    cmd.failure?.message ??
+    (reread === "failed"
+      ? "Saved, but the new limit could not be read back. Reopen this pane to see it."
+      : null);
   const ceiling = machine?.ceiling ?? null;
   return (
     <div className="account-limit">

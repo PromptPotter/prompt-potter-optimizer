@@ -5,18 +5,14 @@ import { memo } from "react";
 // stays sharp at any scale; `currentColor` lets the caller/theme drive the fill
 // (DOOM-orange in dark, the accent in light). `filled=false` dims it to an
 // empty slot. Self-contained SVG — no external asset, CSP-safe.
-export const HeartIcon = memo(function HeartIcon({
-  filled = true,
-  size = 11,
-}: {
-  filled?: boolean;
-  size?: number;
-}) {
+const WIDTH = 11;
+
+export const HeartIcon = memo(function HeartIcon({ filled = true }: { filled?: boolean }) {
   return (
     <svg
       className="heart-icon"
-      width={size}
-      height={(size / 7) * 6}
+      width={WIDTH}
+      height={(WIDTH / 7) * 6}
       viewBox="0 0 7 6"
       shapeRendering="crispEdges"
       fill="currentColor"

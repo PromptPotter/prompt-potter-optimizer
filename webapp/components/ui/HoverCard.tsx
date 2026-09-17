@@ -1,11 +1,13 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { cx } from "@/lib/cx";
 import s from "./HoverCard.module.css";
 
 // Anchored hover/focus card. Wraps a trigger; while pointed at (or keyboard-
-// focused) it renders `content` in a `position:fixed` card off the trigger's
-// edge, so an ancestor's `overflow` can't clip it.
+// focused) it renders `content` in a `position:fixed` card portaled to <body>,
+// off the trigger's edge, so no ancestor's `overflow` can clip it.
 //
 // The card is REACHABLE — the pointer crosses into it and its text selects, so
 // it is `role="note"` (a tooltip may hold no control) and WCAG 1.4.13 applies:
@@ -28,17 +30,31 @@ const anchor = (r: DOMRect): CSSProperties => ({
 export function HoverCard({
   content,
   className,
+  block = false,
   children,
 }: {
   content: ReactNode;
   className?: string;
+  /** The trigger is block content (a whole row), so the wrapper is a full-width `<div>`
+   *  rather than the inline `<span>` a term inside running text needs. */
+  block?: boolean;
   children: ReactNode;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLElement | null>(null);
+  const setRef = useCallback((n: HTMLElement | null) => {
+    ref.current = n;
+  }, []);
+  const cardRef = useRef<HTMLDivElement>(null);
   const timer = useRef(0);
   // Where the card is — `null` IS closed, so this is one state, not two.
   const [at, setAt] = useState<CSSProperties | null>(null);
   const open = at !== null;
+
+  // The card is no DOM descendant of the wrapper, so "within" asks both halves.
+  const within = useCallback(
+    (n: Node | null) => !!n && !!(ref.current?.contains(n) || cardRef.current?.contains(n)),
+    [],
+  );
 
   const show = useCallback(() => {
     window.clearTimeout(timer.current);
@@ -68,7 +84,7 @@ export function HoverCard({
       if (e.key === "Escape") setAt(null);
     };
     const onUp = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) hide();
+      if (!within(e.target as Node)) hide();
     };
     document.addEventListener("keydown", onKey);
     document.addEventListener("mouseup", onUp);
@@ -76,35 +92,39 @@ export function HoverCard({
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [open, hide]);
+  }, [open, hide, within]);
 
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
-  // Both halves are their own hover target, and `contains` spans them, so focus
+  const Wrap = block ? "div" : "span";
+  // Both halves are their own hover target, and `within` spans them, so focus
   // moving into the card can't close the card under the focus that entered it.
   return (
-    <div
-      ref={ref}
-      className={s.wrap}
+    <Wrap
+      ref={setRef}
+      className={block ? s.block : s.wrap}
       onMouseEnter={show}
       onMouseLeave={leave}
       onFocus={show}
       onBlur={(e) => {
-        if (!ref.current?.contains(e.relatedTarget as Node | null)) hide();
+        if (!within(e.relatedTarget as Node | null)) hide();
       }}
     >
       {children}
-      {at && (
-        <div
-          className={className ? `${s.card} ${className}` : s.card}
-          role="note"
-          style={at}
-          onMouseEnter={show}
-          onMouseLeave={leave}
-        >
-          {content}
-        </div>
-      )}
-    </div>
+      {at &&
+        createPortal(
+          <div
+            ref={cardRef}
+            className={cx(s.card, className)}
+            role="note"
+            style={at}
+            onMouseEnter={show}
+            onMouseLeave={leave}
+          >
+            {content}
+          </div>,
+          document.body,
+        )}
+    </Wrap>
   );
 }

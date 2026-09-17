@@ -2,15 +2,9 @@ import type { ReactNode } from "react";
 import { cx } from "@/lib/cx";
 import s from "./SegmentedControl.module.css";
 
-// Exclusive choice across short options — one joined button group where
-// exactly one segment is always on. Three surfaces hand-rolled this shape before
-// it existed (the candidates view switch, the HIT/MISS sample filter, the
-// pipeline-mode picker), each with its own class names and its own `aria`
-// spelling; this is the one implementation they all read now.
-//
-// Exclusive by construction: `value` is the single source of truth, so the group
-// cannot land in an empty or multi-selected state. For a NON-exclusive set of
-// toggles (each independently on/off), reach for `Chip` instead.
+// Exclusive choice across short options — one joined button group where exactly
+// one segment is always on, `value` being the single source of truth. For a
+// NON-exclusive set of toggles (each independently on/off), reach for `Chip`.
 export interface Segment<T extends string> {
   value: T;
   // Text, or an icon. When it's an icon, `ariaLabel` is REQUIRED — a glyph has

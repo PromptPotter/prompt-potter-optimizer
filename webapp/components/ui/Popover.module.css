@@ -1,21 +1,19 @@
-/* Popover primitive. Anchored floating panel — wrap + panel ported from the
-   old global `.campaign-menu` / `.campaign-menu-list` rules so the sidebar
-   menu is pixel-stable. Behaviour (click-outside, ESC) lives in Popover.tsx. */
+/* Popover primitive. The panel is portaled to <body> and placed by Popover.tsx off the
+   trigger's rect, so these rules own only its look. Behaviour (click-outside, ESC) lives
+   in Popover.tsx too. */
 
+@layer ui {
 .wrap {
-  position: relative;
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
 }
 
+/* Above every overlay (the highest sits at 1000): a popover opened inside one portals out. */
 .panel {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 10;
+  position: fixed;
+  z-index: 1100;
   min-width: 140px;
-  margin-top: 2px;
   padding: var(--space-4) 0;
   background: var(--color-background-secondary);
   border: 0.5px solid var(--color-border);
@@ -24,24 +22,4 @@
   display: flex;
   flex-direction: column;
 }
-
-.alignRight {
-  left: auto;
-  right: 0;
-}
-
-.sideTop {
-  top: auto;
-  bottom: 100%;
-  margin-top: 0;
-  margin-bottom: 2px;
-}
-
-/* OVER the trigger, not below it — the Windows-95 dropdown LIST, where the popup covers the
-   closed box and the current value sits under the cursor rather than being repeated beside it.
-   `min-width: 100%` so the panel is never narrower than the line it replaces. */
-.sideOver {
-  top: 0;
-  margin-top: 0;
-  min-width: 100%;
 }

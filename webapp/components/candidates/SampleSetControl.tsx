@@ -11,9 +11,10 @@
 // It moves that one series and nothing else: the metric bars stay on each candidate's own
 // cells whatever is picked here.
 
-import { useState, type CSSProperties } from "react";
+import { useState } from "react";
 import type { MeasuredUnit, OverlapReading, RoundSummary } from "@/lib/api/types";
 import { unitCount } from "@/lib/format";
+import { cx } from "@/lib/cx";
 import { useSelection } from "@/lib/SelectionContext";
 import {
   measuredUniverse,
@@ -22,28 +23,18 @@ import {
   sameSampleSet,
   toggleInSet,
 } from "@/lib/sample-set";
+import { Button, Chip, ChipGroup, HoverCard, SegmentedControl, type Segment } from "@/components/ui";
 import { SampleTrajectorySeries } from "@/components/dashboard/samples/SampleTrajectory";
 import { subsetExactFor, useScoringMask } from "@/components/shell/mask/scoring-mask";
 
-const BTN: CSSProperties = {
-  fontFamily: "var(--font-mono)",
-  fontSize: "var(--text-xs)",
-  padding: "1px 8px",
-  border: "0.5px solid var(--color-border)",
-  borderRadius: 2,
-  cursor: "pointer",
-  background: "transparent",
-  color: "var(--color-text-secondary)",
-};
+// What a square in the trajectory grid below is allowed to stand for. Exclusive, so it is a
+// segmented control rather than two toggles that can both be off.
+type LoadMode = "measured" | "planned";
 
-function activeStyle(on: boolean): CSSProperties {
-  return {
-    ...BTN,
-    borderColor: on ? "var(--color-new-border)" : "var(--color-border)",
-    background: on ? "var(--color-new-bg)" : "transparent",
-    color: on ? "var(--color-new)" : "var(--color-text-secondary)",
-  };
-}
+const LOAD_MODES: readonly Segment<LoadMode>[] = [
+  { value: "measured", label: "measured only" },
+  { value: "planned", label: "+ planned" },
+];
 
 export function SampleSetControl({
   rounds,
@@ -57,7 +48,7 @@ export function SampleSetControl({
   const { sampleSet, setSelectionForSampleSet } = useSelection();
   const { open: maskOpen, mask } = useScoringMask();
   const [detailOpen, setDetailOpen] = useState(false);
-  const [includePlanned, setIncludePlanned] = useState(false);
+  const [load, setLoad] = useState<LoadMode>("measured");
   // The one bar a picked set still moves besides the overlap ones: the server composes `lens`
   // and `samples` in the same read, so a criterion that cannot re-derive whole from the masked
   // rows comes back on a basis the bars beside it are not on, and is dropped.
@@ -81,57 +72,34 @@ export function SampleSetControl({
   const shared = new Set(overlap?.sample_ids ?? []);
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 6,
-        padding: "6px 8px",
-        marginBottom: 6,
-        border: "0.5px solid var(--color-new-border)",
-        borderRadius: 3,
-      }}
-    >
+    <div className="ss-control">
       {/* MAIN INFO — every campaign sample; highlighted = in the set the bars
           are computed over. Click any to toggle. */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+      <div className="ss-strip">
         {universe.map((sid) => {
           const on = inSet.has(sid);
           const seen = coverage.get(sid) ?? 0;
           const everywhere = seen >= fullyCovered && fullyCovered > 0;
+          const note =
+            `Measured in ${seen}/${fullyCovered} rounds` +
+            (everywhere
+              ? " — every bar can be read on it."
+              : " — a bar for a round that never bought it is blank, not zero.") +
+            (shared.has(sid) ? " On the served set: C0 and every winner since answered it." : "");
           return (
+            // Three independent facts, three channels, so none hides another: SELECTED is the
+            // fill, COVERAGE the opacity, and a cell on the SERVED set is underlined in the
+            // overlap ink — more than a `Chip` can carry. `title` rather than a `HoverCard`
+            // because the strip is one control per sample, and the `aria-label` beside it is
+            // what says the state to a reader who cannot see the fill.
             <button
               key={sid}
               type="button"
+              className={cx("ss-cell", on && "on", everywhere && "everywhere", shared.has(sid) && "shared")}
               aria-pressed={on}
+              aria-label={`Sample ${sid} — ${on ? "in" : "not in"} the overlap set. ${note}`}
+              title={`Sample #${sid} — ${on ? "in" : "not in"} the overlap set. Click to toggle. ${note}`}
               onClick={() => setSelectionForSampleSet(toggleInSet(sampleSet, sid))}
-              title={
-                `Sample #${sid} — ${on ? "in" : "not in"} the overlap set. Click to toggle. ` +
-                `Measured in ${seen}/${fullyCovered} rounds` +
-                (everywhere ? " — every bar can be read on it." : " — a bar for a round that never bought it is blank, not zero.") +
-                (shared.has(sid) ? " On the served set: C0 and every winner since answered it." : "")
-              }
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: "var(--text-xs)",
-                minWidth: 22,
-                padding: "1px 4px",
-                borderRadius: 2,
-                cursor: "pointer",
-                border: "0.5px solid var(--color-border)",
-                // Three independent facts, three channels, so none hides another: SELECTED is
-                // the fill (what the bars use), COVERAGE is the opacity (whether they can be
-                // read on it), and a cell on the SERVED set is underlined in its own colour —
-                // the one basis on which C0 and every winner are all readable.
-                textDecoration: shared.has(sid) ? "underline" : "none",
-                textDecorationColor: "var(--color-overlap)",
-                textUnderlineOffset: 2,
-                borderColor: on ? "var(--color-new-border)" : "var(--color-border)",
-                background: on ? "var(--color-new-bg)" : "var(--color-background-secondary)",
-                color: on ? "var(--color-new)" : everywhere ? "var(--color-text-secondary)" : "var(--color-text-tertiary)",
-                fontWeight: on ? 600 : 400,
-                opacity: everywhere ? 1 : 0.55,
-              }}
             >
               {sid}
             </button>
@@ -140,52 +108,41 @@ export function SampleSetControl({
       </div>
 
       {/* Controls for the strip above. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-        <button type="button" onClick={() => setSelectionForSampleSet(universe)} style={BTN}>
+      <div className="ss-row">
+        <Button className="ss-action" onClick={() => setSelectionForSampleSet(universe)}>
           All measured
-        </button>
-        <button
-          type="button"
-          onClick={() => setSelectionForSampleSet([])}
-          title="Deselect every sample and build the set up one at a time. Press ∩ above to close the picker."
-          style={BTN}
-        >
-          Off
-        </button>
+        </Button>
+        <HoverCard content="Deselect every sample and build the set up one at a time. Press ∩ above to close the picker.">
+          <Button className="ss-action" onClick={() => setSelectionForSampleSet([])}>
+            Off
+          </Button>
+        </HoverCard>
         {overlap != null && (
-          <button
-            type="button"
-            aria-pressed={sameSampleSet(sampleSet, overlap.sample_ids)}
-            onClick={() => setSelectionForSampleSet(overlap.sample_ids)}
-            title={`The ${unitCount(overlap.sample_ids.length, unit)} C0 and every winner since have all answered — the one basis they can be differenced on, and what the overlap bars sit on until you replace it.`}
-            style={activeStyle(sameSampleSet(sampleSet, overlap.sample_ids))}
+          <HoverCard
+            content={`The ${unitCount(overlap.sample_ids.length, unit)} C0 and every winner since have all answered — the one basis they can be differenced on, and what the overlap bars sit on until you replace it.`}
           >
-            overlap · {overlap.sample_ids.length}
-          </button>
+            <Chip
+              on={sameSampleSet(sampleSet, overlap.sample_ids)}
+              onClick={() => setSelectionForSampleSet(overlap.sample_ids)}
+            >
+              overlap · {overlap.sample_ids.length}
+            </Chip>
+          </HoverCard>
         )}
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", color: "var(--color-text-tertiary)" }}>
-          round:
-        </span>
-        {roundSets.map((rs) => (
-          <button
-            key={rs.round}
-            type="button"
-            aria-pressed={sameSampleSet(sampleSet, rs.ids)}
-            onClick={() => setSelectionForSampleSet(rs.ids)}
-            title={`${unitCount(rs.ids.length, unit)} measured in round ${rs.round}`}
-            style={activeStyle(sameSampleSet(sampleSet, rs.ids))}
-          >
-            R{rs.round}
-          </button>
-        ))}
-        <span
-          style={{
-            marginLeft: "auto",
-            fontFamily: "var(--font-mono)",
-            fontSize: "var(--text-xs)",
-            color: "var(--color-text-tertiary)",
-          }}
-        >
+        <ChipGroup label="round" showLabel>
+          {roundSets.map((rs) => (
+            <Chip
+              key={rs.round}
+              on={sameSampleSet(sampleSet, rs.ids)}
+              ariaLabel={`Round ${rs.round} — ${unitCount(rs.ids.length, unit)}`}
+              title={`${unitCount(rs.ids.length, unit)} measured in round ${rs.round}`}
+              onClick={() => setSelectionForSampleSet(rs.ids)}
+            >
+              R{rs.round}
+            </Chip>
+          ))}
+        </ChipGroup>
+        <span className="ss-count">
           {sampleSet.length}/{universe.length}
           {maskDropped ? " · mask off" : ""}
         </span>
@@ -195,48 +152,26 @@ export function SampleSetControl({
           and out of the way until asked for. */}
       <button
         type="button"
+        className="ss-detail-toggle"
         aria-expanded={detailOpen}
         onClick={() => setDetailOpen((v) => !v)}
-        style={{
-          alignSelf: "flex-start",
-          padding: 0,
-          border: "none",
-          background: "transparent",
-          cursor: "pointer",
-          fontFamily: "var(--font-mono)",
-          fontSize: "var(--text-xs)",
-          color: "var(--color-text-tertiary)",
-          textDecoration: "underline",
-        }}
       >
         {detailOpen ? "hide detail" : "pick a state in detail…"}
       </button>
       {detailOpen && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-xs)", color: "var(--color-text-tertiary)" }}>
-              a square loads:
-            </span>
-            <button
-              type="button"
-              aria-pressed={!includePlanned}
-              onClick={() => setIncludePlanned(false)}
-              style={activeStyle(!includePlanned)}
-            >
-              measured only
-            </button>
-            <button
-              type="button"
-              aria-pressed={includePlanned}
-              onClick={() => setIncludePlanned(true)}
-              style={activeStyle(includePlanned)}
-            >
-              + planned
-            </button>
+        <div className="ss-detail">
+          <div className="ss-row">
+            <span className="ss-label">a square loads:</span>
+            <SegmentedControl
+              options={LOAD_MODES}
+              value={load}
+              onChange={setLoad}
+              ariaLabel="What a square in the grid below stands for"
+            />
           </div>
           <SampleTrajectorySeries
             rounds={rounds}
-            selectMode={includePlanned ? "all" : "measured"}
+            selectMode={load === "planned" ? "all" : "measured"}
             maxHeight={200}
           />
         </div>

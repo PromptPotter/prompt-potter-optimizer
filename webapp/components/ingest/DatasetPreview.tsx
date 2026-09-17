@@ -1,6 +1,7 @@
 "use client";
 
 import type { DraftCampaignWire } from "@/lib/api";
+import { Toolbar, ToolbarSpacer } from "@/components/ui";
 
 // The data being configured, shown where it is configured. A check-in has no
 // `datasets/{slug}/` yet — that is written at Start — so `/datasets/{name}/preview` cannot
@@ -23,13 +24,14 @@ export function DatasetPreview({ draft }: { draft: DraftCampaignWire }) {
 
   return (
     <section className="setup-preview">
-      <header className="setup-preview-head">
+      <Toolbar>
         <span className="setup-preview-title">Your data</span>
+        <ToolbarSpacer />
         <span className="setup-preview-sub">
           {draft.n_samples.toLocaleString()} row{draft.n_samples === 1 ? "" : "s"} ·{" "}
           {headers.length} column{headers.length === 1 ? "" : "s"} · first {rows.length} shown
         </span>
-      </header>
+      </Toolbar>
       <div className="ds-preview-scroll">
         <table className="ds-preview-table">
           <thead>

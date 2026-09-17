@@ -183,19 +183,20 @@
   color: var(--color-text-tertiary);
   font-family: var(--font-mono);
 }
-/* Right edge of the summary row, so the copy sits where every other panel's does rather than
-   packed against the restore link — but OUTSIDE `<summary>`, which is a label and may hold
-   neither a floating menu's markup nor its words in its accessible name. Absolute against the
-   row, so the disclosure keeps its own flex and nothing shifts when it opens. */
+/* The disclosure and its two controls are siblings on one row — the controls OUTSIDE `<summary>`,
+   which is a label and may hold neither a floating menu's markup nor its words in its accessible
+   name. A flex row, never an overlay: an absolute control sits on top of the open drill-in. */
 .cmp-channel-setup-row {
-  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-6);
 }
-.cmp-channel-setup-copy {
-  position: absolute;
-  top: 0;
-  right: 0;
-  display: inline-flex;
-  align-items: center;
+.cmp-channel-setup-row > .cmp-channel-setup {
+  flex: 1;
+  min-width: 0;
+}
+.cmp-channel-setup-row > :not(.cmp-channel-setup) {
+  flex: 0 0 auto;
 }
 /* An editable cell. The input is the value — no box, no chrome — until it holds something the
    record does not, which is the one state worth ink. */

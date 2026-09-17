@@ -1,17 +1,17 @@
 /* New campaign modal (Phase 4 Start surface) */
-.new-campaign-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:200;display:flex;align-items:center;justify-content:center;padding:var(--space-24)}
-/* Cap the modal to the viewport (overlay has 24px padding each side) so a
-   tall benchmark/demo list can't run off-screen; the body scrolls within. */
-.new-campaign-modal{background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:10px;width:100%;max-width:440px;max-height:calc(100vh - 48px);display:flex;flex-direction:column;box-shadow:0 18px 48px rgba(0,0,0,0.45);font-size:var(--text-base)}
+/* Cap the modal to the viewport so a tall benchmark/demo list can't run
+   off-screen; the body scrolls within. */
+.new-campaign-modal{background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:10px;width:100%;max-width:440px;max-height:calc(var(--vh-full) - 32px);display:flex;flex-direction:column;box-shadow:0 18px 48px rgba(0,0,0,0.45);font-size:var(--text-base)}
 .new-campaign-header{flex:none;display:flex;justify-content:space-between;align-items:center;padding:var(--space-16) var(--space-18);border-bottom:0.5px solid var(--color-border)}
 .new-campaign-header h2{margin:0;font-size:var(--text-lg);font-weight:600}
-.new-campaign-close{background:none;border:0;font-size:var(--text-3xl);line-height:1;color:var(--color-text-tertiary);cursor:pointer;padding:var(--space-4) var(--space-8);border-radius:4px}
-.new-campaign-close:hover{background:var(--color-background-hover)}
 /* The flow body is the scroll region — `min-height:0` lets it shrink inside
    the capped flex column so `overflow-y` actually engages. */
 .new-campaign-body{flex:1 1 auto;min-height:0;overflow-y:auto;padding:var(--space-18) var(--space-18);display:flex;flex-direction:column;gap:var(--space-14)}
 .new-campaign-field{display:flex;flex-direction:column;gap:var(--space-6)}
-.new-campaign-field span{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-tertiary)}
+/* The caption, whether the field's own box is the label (a lone select) or the label sits beside
+   an Apply button and names the input alone. */
+.new-campaign-field span,.new-campaign-field>label{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-tertiary)}
+.new-campaign-apply{display:flex;gap:var(--space-8)}
 .new-campaign-field select,.new-campaign-field input{padding:var(--space-8) var(--space-10);border:0.5px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:var(--text-base)}
 .new-campaign-loading{color:var(--color-text-tertiary);font-style:italic;font-size:var(--text-sm)}
 .new-campaign-error{color:var(--color-danger);font-size:var(--text-sm);margin:0}
@@ -175,14 +175,11 @@ textarea.config-input{resize:vertical;line-height:1.45;white-space:pre}
 .checkin-loading-slow{flex-basis:100%;color:var(--color-text-tertiary);font-style:italic}
 @keyframes checkin-bob{50%{transform:translateY(-3px)}}
 @media (prefers-reduced-motion:reduce){.checkin-loading-bot{animation:none}}
-/* Sweep-Group-B: lift IngestPane inputs to the iOS-safe size on
-   small phones, drop overlay padding, full-width modal. The Phase 0
-   pointer-coarse rule covers buttons + non-select inputs; select needs
-   the explicit font-size bump since the project-local selector is more
-   specific than the generic Phase 0 selector. */
+/* A phone gets the full width, and inputs at the iOS-safe size. The generic
+   pointer-coarse rule covers buttons + non-select inputs; select needs the
+   explicit font-size bump, its project-local selector being more specific. */
 @media (max-width:640px){
-  .new-campaign-overlay{padding:var(--space-8);align-items:flex-start;padding-top:24px}
-  .new-campaign-modal{max-width:none;max-height:calc(var(--vh-full) - 32px)}
+  .new-campaign-modal{max-width:none}
   .new-campaign-field select,.new-campaign-field input{font-size:var(--text-xl);min-height:44px}
   .origin-column-row{flex-direction:column;gap:var(--space-14)}
   /* A phone has no room for a name column: the name heads its box. */

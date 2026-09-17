@@ -10,7 +10,7 @@
 // reached the incident ring with no `error_id`, code or status to grep the log by. What this
 // class adds is the ingest DETAIL the read path has no use for.
 
-import { ApiError } from "./client";
+import { ApiError, type FailureKind } from "./client";
 import type { OriginGap } from "./draft-types";
 
 export function mintIdempotencyKey(): string {
@@ -31,6 +31,8 @@ export type IngestErrorDetail = {
   gaps?: OriginGap[];
 };
 export class IngestApiError extends ApiError {
+  // The envelope's own operator sentence; null when the server answered without one.
+  readonly serverMessage: string | null;
   readonly reason?: string;
   // `slug_collision` (409): the existing dataset name + a free suggestion.
   readonly existingSlug?: string;
@@ -45,16 +47,15 @@ export class IngestApiError extends ApiError {
   constructor(
     status: number,
     url: string,
-    message: string,
+    serverMessage: string | null,
     code?: string,
     errorId?: string,
     detail?: IngestErrorDetail,
   ) {
     super(status, url, code ?? null, errorId ?? null, detail ?? null);
     this.name = "IngestApiError";
-    // `ApiError`'s message is `${status} ${url}`, which serves a log line; a write surface
-    // renders the server's own sentence instead.
-    this.message = message;
+    this.serverMessage = serverMessage;
+    if (serverMessage !== null) this.message = serverMessage;
     this.reason = detail?.reason;
     this.existingSlug = detail?.slug;
     this.suggestedSlug = detail?.suggested_slug;
@@ -63,57 +64,50 @@ export class IngestApiError extends ApiError {
     this.draftId = detail?.draft_id;
     this.gaps = detail?.gaps;
   }
-
-  // Operator-facing error message. Every consumer that catches an
-  // IngestApiError renders via this method instead of reimplementing the
-  // per-error-code translation. Static `from` helper wraps unknown errors so
-  // call sites are one line:
-  //   setError(IngestApiError.toOperatorMessage(e))
-  toOperatorMessage(): string {
-    if (this.code === "backend_unreachable") {
-      const where = this.backendUrl ? ` at ${this.backendUrl}` : "";
-      const what = this.backendType ? ` ‘${this.backendType}’` : "";
-      return `Backend${what}${where} is not running. Start the backend and try again.`;
-    }
-    if (this.suggestedSlug) {
-      return `${this.message} Suggested slug: ${this.suggestedSlug}.`;
-    }
-    return this.message;
-  }
-
-  // One-liner for ``catch`` blocks. Renders unknown errors via their
-  // standard message; ``IngestApiError`` instances route through
-  // ``.toOperatorMessage()``.
-  static toOperatorMessage(e: unknown): string {
-    if (e instanceof IngestApiError) return e.toOperatorMessage();
-    return e instanceof Error ? e.message : String(e);
-  }
 }
+
+// What a write surface says when the server gave no sentence of its own. A transient write may
+// have landed before the connection dropped, so that sentence never claims nothing changed.
+const KIND_SENTENCE: Record<FailureKind, string> = {
+  transient: "Could not reach the server — the change may not have been applied.",
+  auth: "Your session has ended — sign in again.",
+  denied: "This account is not allowed to do that.",
+  gone: "What this acts on no longer exists.",
+  invalid: "The server refused the request as malformed.",
+};
+
+// The one operator sentence for a failed write: the server's own where the envelope carried one,
+// else the kind's. Never a raw status line or the browser's network text.
+export function operatorMessage(e: unknown, kind: FailureKind): string {
+  if (!(e instanceof IngestApiError) || e.serverMessage === null) return KIND_SENTENCE[kind];
+  if (e.code === "backend_unreachable") {
+    const where = e.backendUrl ? ` at ${e.backendUrl}` : "";
+    const what = e.backendType ? ` ‘${e.backendType}’` : "";
+    return `Backend${what}${where} is not running. Start the backend and try again.`;
+  }
+  if (e.suggestedSlug) return `${e.serverMessage} Suggested slug: ${e.suggestedSlug}.`;
+  return e.serverMessage;
+}
+
 export async function throwApiError(r: Response): Promise<never> {
-  let message = `${r.status} ${r.statusText}`;
+  let message: string | null = null;
   let code: string | undefined;
   let errorId: string | undefined;
   let detail: IngestErrorDetail | undefined;
   try {
     // The API serializes every error to the flat ErrorEnvelope declared in
-    // docs/specs/api-openapi.yaml — `{error, message, details?}` at the top
-    // level (no `detail` wrapper). The `detail` fallback only catches Starlette's
-    // built-in 404/422 for genuinely unmatched routes, which we never call.
+    // docs/specs/api-openapi.yaml — `{error, message, details?}` at the top level.
     const body = (await r.json()) as {
       error?: string;
       error_id?: unknown;
       message?: string;
       details?: IngestErrorDetail;
-      detail?: string;
     };
     if (body?.message) {
       message = body.message;
       code = body.error;
       detail = body.details;
-    } else if (typeof body?.detail === "string") {
-      message = body.detail;
     }
-    // The trace handle rides the envelope whichever arm above claimed the message.
     if (typeof body?.error_id === "string") errorId = body.error_id;
   } catch {
     /* status-only message */

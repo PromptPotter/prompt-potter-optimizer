@@ -20,11 +20,10 @@
 /* Value headline — popup-only (the showcase carries the pitch on /login). */
 .auth-headline{margin:0;font-size:var(--text-3xl);line-height:1.3;font-weight:500;color:var(--color-text-primary)}
 
-/* Post-auth consent gate (ConsentGate) — the blocking Terms-acceptance overlay.
-   Reuses .account-overlay/.account-modal chrome + .auth-note/.auth-link; the
-   modifier narrows the card to column + auto height (the default .account-modal
-   is the wide row), and these own the checkbox row + the accept action (button
-   reuses .login-button). */
+/* Post-auth consent gate (ConsentGate) — the blocking Terms-acceptance card.
+   Reuses .account-modal chrome + .auth-note/.auth-link; the modifier narrows it
+   to a column (the default .account-modal is the wide row), and these own the
+   checkbox row + the accept action (button reuses .login-button). */
 .consent-modal{flex-direction:column;max-width:440px;min-height:0}
 .consent-modal .account-pane-body{gap:var(--space-16)}
 .consent-check{display:flex;gap:var(--space-10);align-items:flex-start;font-size:var(--text-base);line-height:1.5;color:var(--color-text-secondary);cursor:pointer}

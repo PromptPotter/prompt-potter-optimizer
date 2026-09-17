@@ -146,7 +146,7 @@ export function ComparePane() {
   const readable = !!evidence?.subjects.some((c) => c.n_cells > 0);
   const names = useMemo(() => channelNames(evidence?.subjects ?? []), [evidence?.subjects]);
   // The channel the editor is open on, resolved against the LAST GOOD read: a rejected formula
-  // keeps the prior evidence (`useFetch` `survive:"invalid"`), and losing the form on a typo is
+  // keeps the prior evidence (`useRead` `survive:"invalid"`), and losing the form on a typo is
   // the failure that rule exists to prevent.
   const maskTarget =
     evidence?.subjects.find((s) => maskedSubject(s, {}) === masking) ?? null;

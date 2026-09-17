@@ -7,11 +7,10 @@ import {
   liveL1Candidates,
   type DashboardSnapshot,
 } from "@/lib/poll";
-import { useWorkspace } from "@/lib/workspace";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useEffectiveRound } from "@/lib/hooks/useEffectiveRound";
-import { useRoundSource } from "@/lib/hooks/useRoundSource";
-import { CardFrame, Term } from "@/components/ui";
+import { useRoundRows } from "@/lib/hooks/useRoundRows";
+import { Badge, CardFrame, Term } from "@/components/ui";
 import type { RawResultRow } from "@/lib/types";
 
 ensureChartRegistered();
@@ -51,21 +50,19 @@ export function FreqChart() {
   useThemeVersion();
   const chartRef = useRef(null);
   const { dash } = useDashboard();
-  // Round files follow the VIEWED leaf hop (inner loop → inner cycle's dir).
-  const { viewedPath } = useWorkspace();
   // The active round, from the single resolver every round-scoped surface shares.
   const { round: effectiveRound, isLiveView } = useEffectiveRound();
 
   // Source-of-truth split (no-stitch rule): live mode reads only
   // `dashboard.json`'s in-flight sample lines; historical mode reads only
-  // `round_NNNN.json`'s `results[]`. `useRoundSource` owns the guard —
+  // `round_NNNN.json`'s `results[]`. `useRoundRows` owns the guard —
   // it idles the fetch on the live round, so there's no fallback chain.
-  const { isLive, doc: roundDoc } = useRoundSource(viewedPath, effectiveRound, dash);
+  const { live, doc: roundDoc } = useRoundRows(effectiveRound);
 
   const results: ResultRow[] = useMemo(() => {
-    if (isLive) return liveResultsFrom(dash);
+    if (live) return liveResultsFrom(dash);
     return (roundDoc?.results as ResultRow[] | undefined) ?? [];
-  }, [isLive, dash, roundDoc]);
+  }, [live, dash, roundDoc]);
 
   const data = bucketScores(results);
   const accStrong = getCss("--color-accent-strong");
@@ -84,11 +81,7 @@ export function FreqChart() {
   return (
     <CardFrame
       title={<Term content={TERMS.stub_score_freq}>Score Frequency</Term>}
-      actions={
-        <span className="badge">
-          {isLiveView ? "live" : `R${effectiveRound}`}
-        </span>
-      }
+      actions={<Badge>{isLiveView ? "live" : `R${effectiveRound}`}</Badge>}
     >
       <div style={{ position: "relative", height: 140 }}>
         {/* A canvas has no text, so the name IS the whole reading for anyone not looking at it. */}

@@ -18,11 +18,7 @@
 // stays immutable. (`steps`, the top-level list `config_params` also carries, is
 // NOT a node config and is dropped so the per-node merge can't choke on it.)
 
-import {
-  liveInputCandidate,
-  roundOf,
-  type DashboardSnapshot,
-} from "@/lib/poll";
+import { liveInputCandidate, type DashboardSnapshot } from "@/lib/poll";
 import type { RoundResult } from "@/lib/types";
 
 // The seed-able half of a candidate's searchpoint. `config_overrides` is

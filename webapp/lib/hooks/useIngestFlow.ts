@@ -2,7 +2,9 @@
 
 import { useRef, useState } from "react";
 import {
+  failureKind,
   IngestApiError,
+  operatorMessage,
   postDraftFromDataset,
   postDraftFromOrigin,
   getCampaignCheckin,
@@ -167,7 +169,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   const pushError = (e: unknown) =>
     setMessages((m) => [
       ...m,
-      { id: uid(), kind: "error", text: IngestApiError.toOperatorMessage(e) },
+      { id: uid(), kind: "error", text: operatorMessage(e, failureKind(e)) },
     ]);
 
   // The origin check-in — the single LLM call that configures the draft from the

@@ -1,5 +1,5 @@
 "use client";
-import { useFetch } from "@/lib/hooks/useFetch";
+import { useRead } from "@/lib/hooks/useRead";
 import { fetchWorkspaceStorage } from "@/lib/api";
 import { fmtBytes } from "@/lib/format";
 import { cx } from "@/lib/cx";
@@ -10,10 +10,16 @@ import { ArchiveCompactionControl } from "./ArchiveCompactionControl";
 // the shared caches and a residual "Other" line so the parts sum to the real total.
 // Answers "where did the bucket sizes go?". Self-fetches `GET /workspace/storage`.
 export function WorkspaceStoragePanel() {
-  const { data, error, kind } = useFetch((signal) => fetchWorkspaceStorage(signal), []);
+  const read = useRead(
+    { key: "workspace-storage", fetch: fetchWorkspaceStorage },
+    { surface: "workspace-storage" },
+  );
 
-  if (error) return <AccountFailure kind={kind} subject="workspace storage" />;
-  if (!data) return <AccountLoading subject="workspace storage" />;
+  if (read.status === "failed") {
+    return <AccountFailure kind={read.failure.kind} subject="workspace storage" />;
+  }
+  if (read.status !== "ready") return <AccountLoading subject="workspace storage" />;
+  const data = read.data;
 
   const max = data.campaigns.reduce((m, c) => Math.max(m, c.on_disk_bytes), 0) || 1;
   const n = data.campaigns.length;

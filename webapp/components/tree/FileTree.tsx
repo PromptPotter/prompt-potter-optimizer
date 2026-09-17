@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import { fetchFiles, type FileEntry } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
-import { useFetch } from "@/lib/hooks/useFetch";
+import { readyData, useRead } from "@/lib/hooks/useRead";
 import { Empty, Loading, ErrorNote } from "@/components/ui";
 
 interface DirNode {
@@ -64,10 +64,13 @@ export function FileTree({ campaignId, cycleId, selected, onSelect }: Props) {
   // Workspace-level reachability — so the no-unit state can tell a network
   // failure apart from a genuinely empty workspace.
   const { activeError, cyclesError } = useWorkspace();
-  const { data: listing, error } = useFetch(
-    campaignId && cycleId ? (s) => fetchFiles(campaignId, cycleId, s) : null,
-    [campaignId, cycleId],
+  const read = useRead(
+    campaignId && cycleId
+      ? { key: `${campaignId}\x1f${cycleId}`, fetch: (s) => fetchFiles(campaignId, cycleId, s) }
+      : null,
+    { surface: "files" },
   );
+  const listing = readyData(read);
   const tree = useMemo(
     () => (listing ? buildTree(listing.entries) : null),
     [listing],
@@ -80,8 +83,8 @@ export function FileTree({ campaignId, cycleId, selected, onSelect }: Props) {
       <Empty>No active campaign — pick one from the sidebar, or start one in a terminal.</Empty>
     );
   }
-  if (error) {
-    return <ErrorNote>Failed to load files: {error}</ErrorNote>;
+  if (read.status === "failed") {
+    return <ErrorNote>Could not load this cycle&rsquo;s files.</ErrorNote>;
   }
   if (!tree) {
     return <Loading>Loading file tree…</Loading>;

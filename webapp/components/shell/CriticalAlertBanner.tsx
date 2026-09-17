@@ -4,6 +4,7 @@ import { connectorReachability, criticalAlert } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
+import { readyData } from "@/lib/hooks/useRead";
 import type { StatusKind } from "@/lib/poll";
 
 // The loud, can't-miss failure surface — a full-width sticky bar at the top of
@@ -44,7 +45,7 @@ export function CriticalAlertBanner({
   const { down: connectorDown } = connectorReachability(health);
   // Cross-user busy state — its own 5 s poll (useMachineStatus), surfaced in the
   // same bar so "someone else is running" reaches an alt-tabbed operator.
-  const machine = useMachineStatus();
+  const machine = readyData(useMachineStatus());
   const alert = criticalAlert({
     bannerStatus,
     bannerText,

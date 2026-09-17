@@ -8,16 +8,14 @@
 import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { ageText, fmtFitness, fmtPct0 } from "@/lib/format";
-import { useFetch } from "@/lib/hooks/useFetch";
+import { useRead } from "@/lib/hooks/useRead";
 import { ErrorNote, Loading, SignInPrompt, Term } from "@/components/ui";
 
 export function VerifyPane() {
   const { status } = useAuth();
-  // Gate on a confirmed session — `null` fetcher means useFetch fires nothing,
-  // so anon never 401s the protected read (frontend-surface-contract.md § I5).
-  const { data, error } = useFetch(
-    status === "authed" ? (s) => fetchDiagnosticRuns(undefined, s) : null,
-    [status],
+  const read = useRead(
+    { key: "diagnostic-runs", fetch: (s) => fetchDiagnosticRuns(undefined, s) },
+    { surface: "diagnostic-runs", auth: true },
   );
 
   if (status !== "authed") {
@@ -32,20 +30,21 @@ export function VerifyPane() {
     );
   }
 
-  if (error) {
+  if (read.status === "failed") {
     return (
       <div className="verify-pane">
         <ErrorNote>Couldn’t load diagnostic runs — retry shortly.</ErrorNote>
       </div>
     );
   }
-  if (data === null) {
+  if (read.status !== "ready") {
     return (
       <div className="verify-pane">
         <Loading>Loading diagnostic runs…</Loading>
       </div>
     );
   }
+  const data = read.data;
 
   if (data.n === 0) {
     return (

@@ -101,8 +101,8 @@
 
 /* Scoring inspector — its own full-width row below the Now row. The border reset
    matches the card framing above it. */
-.inspector-row{max-height:520px;overflow:auto;margin-bottom:14px}
-.inspector-row .scoring-inspector{border-top:0;margin-top:0;padding-top:0}
+.inspector-card{max-height:520px;overflow:auto;margin-bottom:14px}
+.inspector-card .scoring-inspector{border-top:0;margin-top:0;padding-top:0}
 /* Per-searchpoint sample stream — the round-wide Samples table sliced to the
    selected candidate. Reuses the `.rsv-*` row styling; scrolls on its own so a
    long round doesn't push the composite/hits summary out of view. */
@@ -120,6 +120,9 @@
    Same Trend + Score Frequency cards from the dropped Verdict lane. */
 .lsc-charts{display:flex;flex-direction:column;gap:var(--space-14);margin-top:14px}
 .lsc-charts > *{margin-bottom:0;min-width:0}
+/* Each chart is a SECTION of this card, not a card of its own: the frame is already drawn by
+   the host, so a second one around every chart draws a double border. Heading over a hairline. */
+.lsc-charts > .card{background:none;border:0;border-top:0.5px solid var(--color-border);border-radius:0;padding:var(--space-12) 0 0}
 
 /* Quiet per-round degraded notices under the trend — amber, never loud (the
    critical grade owns the cross-tab banner). Webapp twin of the CLI yellow line. */
@@ -142,8 +145,11 @@
 .rsv-cand-strip{min-width:0;max-width:100%;overflow-x:auto;padding-bottom:2px}
 /* The candidate's own specification, folded under its group head. Indented so it reads as
    belonging to the candidate rather than to the round, and bounded so a long prompt scrolls
-   inside the fold instead of pushing every sample row off the panel. */
-.rsv-spec{margin:var(--space-6) var(--space-8) var(--space-8);border-left:2px solid var(--color-border);padding-left:var(--space-10)}
+   inside the fold instead of pushing every sample row off the panel. The disclosure and its
+   copy control are siblings on one row, and the control keeps its width. */
+.rsv-spec-row{display:flex;align-items:flex-start;gap:var(--space-6);margin:var(--space-6) var(--space-8) var(--space-8)}
+.rsv-spec-row > :not(.rsv-spec){flex:0 0 auto}
+.rsv-spec{flex:1;min-width:0;border-left:2px solid var(--color-border);padding-left:var(--space-10)}
 .rsv-spec > summary{font-size:var(--text-sm);color:var(--color-text-tertiary);cursor:pointer;padding:var(--space-4) 0}
 .rsv-spec[open] > summary{color:var(--color-text-secondary)}
 .rsv-spec > :not(summary){max-height:420px;overflow-y:auto}
@@ -208,6 +214,9 @@
 .mech-empty{margin:0;padding:var(--space-8) var(--space-4);font-size:var(--text-sm);color:var(--color-text-tertiary)}
 .mech-groups{display:flex;flex-direction:column;gap:var(--space-12)}
 .mech-card-title{font-size:var(--text-base);font-weight:600}
+.mech-group{padding-top:var(--space-12);border-top:0.5px solid var(--color-border)}
+.mech-group:first-child{padding-top:0;border-top:0}
+.mech-group > .mech-card-title{margin:0 0 var(--space-6)}
 .mech-group-desc{margin:0 0 var(--space-10);font-size:var(--text-sm);line-height:1.5;color:var(--color-text-tertiary)}
 .mech-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--space-10)}
 .mech-row{border-top:0.5px solid var(--color-border);padding-top:10px}

@@ -7,6 +7,8 @@
 
 import { useMemo, useState } from "react";
 import type { CSSProperties } from "react";
+import { pressable } from "@/components/ui";
+import { cx } from "@/lib/cx";
 import { useSelection } from "@/lib/SelectionContext";
 import {
   classifyCell,
@@ -20,25 +22,14 @@ import {
   type SortedRounds,
 } from "@/lib/derivations";
 import { sameSampleSet } from "@/lib/sample-set";
-import {
-  COL_HEADER,
-  POP_COMPUTED,
-  POP_CURRENT,
-  POP_PLANNED,
-  ROW_LABEL,
-  SQ_ABSENT,
-  SQ_GAINED,
-  SQ_KEPT,
-  SQ_LOST,
-  SQ_NEW,
-} from "./trajectoryStyles";
 
-// Cell kind → swatch (presentation half; `classifyCell` owns the predicate).
-const CELL_STYLE: Record<Exclude<CellKind, "absent">, CSSProperties> = {
-  new: SQ_NEW,
-  gained: SQ_GAINED,
-  lost: SQ_LOST,
-  kept: SQ_KEPT,
+// Cell kind → CSS modifier (presentation half; `classifyCell` owns the predicate).
+// "gained" shares the "add" recipe — one colour for one meaning, wherever it lands.
+const CELL_CLASS: Record<Exclude<CellKind, "absent">, string> = {
+  new: "new",
+  gained: "add",
+  lost: "lost",
+  kept: "kept",
 };
 
 interface HoverState {
@@ -83,21 +74,17 @@ export function SeriesView({
 
   return (
     <div
-      style={{
-        overflowX: "auto",
-        overflowY: maxHeight != null ? "auto" : "visible",
-        maxHeight,
-        paddingBottom: 4,
-      }}
+      className={cx("st-series", maxHeight != null && "scrollable")}
+      style={maxHeight != null ? { maxHeight } : undefined}
       onMouseLeave={() => setHover(null)}
     >
-      <div style={{ display: "inline-flex", flexDirection: "column", gap: 3, minWidth: "fit-content" }}>
+      <div className="st-series-inner">
         {/* column header — sample ids */}
-        <div style={{ display: "flex", gap: 3 }}>
-          <span style={ROW_LABEL}>id</span>
-          <span style={{ display: "flex", gap: 3 }}>
+        <div className="st-series-row">
+          <span className="st-row-label">id</span>
+          <span className="st-series-cells">
             {columns.map((sid) => (
-              <span key={sid} style={COL_HEADER}>{sid}</span>
+              <span key={sid} className="st-sq st-col-header">{sid}</span>
             ))}
           </span>
         </div>
@@ -109,17 +96,16 @@ export function SeriesView({
           const everPrev = i > 0 ? everSeen[i - 1]! : new Set<number>();
           const total = r.selection.length;
           return (
-            <div key={r.round} style={{ display: "flex", gap: 3 }}>
-              <span style={ROW_LABEL}>R{r.round}</span>
-              <span style={{ display: "flex", gap: 3 }}>
+            <div key={r.round} className="st-series-row">
+              <span className="st-row-label">R{r.round}</span>
+              <span className="st-series-cells">
                 {columns.map((sid) => {
                   const kind = classifyCell(sid, pos, prev, everPrev);
                   if (kind === "absent") {
-                    return <span key={sid} style={SQ_ABSENT}>·</span>;
+                    return <span key={sid} className="st-sq absent">·</span>;
                   }
                   const p = pos.get(sid)!;
                   const pp = prev?.get(sid);
-                  const style = CELL_STYLE[kind];
                   // "new" covers first-appearance + re-add (split here by everPrev).
                   const titleNote =
                     kind === "new"
@@ -132,18 +118,15 @@ export function SeriesView({
                           ? `lost: pos ${pp} → ${p}`
                           : "kept position";
                   const isHovered = hover?.round === r.round && hover.sampleId === sid;
+                  const activate = () => {
+                    const o = orderAtStep(r.selection, sid, p);
+                    setSelectionForSampleSet(seedFromOrder(o, selectMode));
+                  };
                   return (
                     <span
                       key={sid}
-                      role="button"
-                      tabIndex={0}
+                      className={cx("st-sq", CELL_CLASS[kind], "st-series-cell", isHovered && "hovered")}
                       aria-label={`Sample ${sid}, round ${r.round}, position ${p} of ${total}. ${titleNote}. Hover for the sample order at this step; click to compare fitness on the samples up to here.`}
-                      style={{
-                        ...style,
-                        cursor: "pointer",
-                        outline: isHovered ? "1px solid var(--color-accent)" : undefined,
-                        outlineOffset: isHovered ? -1 : undefined,
-                      }}
                       onMouseEnter={(e) =>
                         setHover({ round: r.round, sampleId: sid, position: p, total, x: e.clientX, y: e.clientY })
                       }
@@ -159,17 +142,7 @@ export function SeriesView({
                         setHover({ round: r.round, sampleId: sid, position: p, total, x: box.right, y: box.bottom });
                       }}
                       onBlur={() => setHover((h) => (h?.round === r.round && h.sampleId === sid ? null : h))}
-                      onClick={() => {
-                        const o = orderAtStep(r.selection, sid, p);
-                        setSelectionForSampleSet(seedFromOrder(o, selectMode));
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          const o = orderAtStep(r.selection, sid, p);
-                          setSelectionForSampleSet(seedFromOrder(o, selectMode));
-                        }
-                      }}
+                      {...pressable(activate)}
                     >
                       {p}
                     </span>
@@ -213,44 +186,26 @@ function SeriesHoverPopup({
   const top = Math.min(hover.y + 14, vh - 280);
   const isLoaded = sameSampleSet(loadedSet, seedSet);
   return (
-    <div
-      role="tooltip"
-      style={{
-        position: "fixed",
-        left,
-        top,
-        zIndex: 1000,
-        width: 300,
-        maxHeight: 260,
-        overflowY: "auto",
-        padding: 8,
-        border: "0.5px solid var(--color-border)",
-        borderRadius: 4,
-        background: "var(--color-background-primary)",
-        boxShadow: "0 6px 24px rgba(0,0,0,0.35)",
-        fontFamily: "var(--font-mono)",
-        pointerEvents: "none",
-      }}
-    >
-      <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", marginBottom: 6 }}>
+    <div role="tooltip" className="st-hover" style={{ left, top } as CSSProperties}>
+      <div className="st-hover-head">
         R{hover.round} · order at sample #{hover.sampleId} (step {hover.position}/{hover.total})
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+      <div className="st-hover-chips">
         {order.computed.map((sid) => (
-          <span key={`c-${sid}`} style={POP_COMPUTED} title={`#${sid} — already computed`}>
+          <span key={`c-${sid}`} className="st-chip computed" title={`#${sid} — already computed`}>
             {sid}
           </span>
         ))}
-        <span style={POP_CURRENT} title={`#${order.current} — measuring now`}>
+        <span className="st-chip current" title={`#${order.current} — measuring now`}>
           ▶{order.current}
         </span>
         {order.planned.map((sid) => (
-          <span key={`p-${sid}`} style={POP_PLANNED} title={`#${sid} — planned`}>
+          <span key={`p-${sid}`} className="st-chip planned" title={`#${sid} — planned`}>
             {sid}
           </span>
         ))}
       </div>
-      <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-tertiary)", marginTop: 6 }}>
+      <div className="st-hover-foot">
         {order.computed.length} computed · {order.planned.length} planned —{" "}
         {isLoaded ? "loaded in fitness ✓" : `click to compare fitness on ${seedSet.length} samples`}
       </div>
@@ -259,19 +214,19 @@ function SeriesHoverPopup({
 }
 
 function Legend() {
-  const swatch = (style: CSSProperties, label: string) => (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-      <span style={{ ...style, width: 12, height: 12, fontSize: 0 }} />
-      <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-tertiary)", fontFamily: "var(--font-mono)" }}>{label}</span>
+  const swatch = (className: string, label: string) => (
+    <span className="st-legend-item">
+      <span className={cx("st-legend-swatch", className)} />
+      <span className="st-legend-label">{label}</span>
     </span>
   );
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 6, paddingLeft: 42 }}>
-      {swatch(SQ_NEW, "new / re-added")}
-      {swatch(SQ_GAINED, "gained position")}
-      {swatch(SQ_LOST, "lost position")}
-      {swatch(SQ_KEPT, "kept position")}
-      {swatch(SQ_ABSENT, "not in bank")}
+    <div className="st-legend">
+      {swatch("st-sq new", "new / re-added")}
+      {swatch("st-sq add", "gained position")}
+      {swatch("st-sq lost", "lost position")}
+      {swatch("st-sq kept", "kept position")}
+      {swatch("st-sq absent", "not in bank")}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
-import { postChangeSpendBudget, IngestApiError } from "@/lib/api";
-import { bumpRevalidation } from "@/lib/revalidate";
+import { postChangeSpendBudget } from "@/lib/api";
+import { useCommand } from "@/lib/hooks/useCommand";
 import { fmtUsd, fmtTokens } from "@/lib/format";
 import { parseCap } from "@/lib/run-limits";
 import { useWorkspace } from "@/lib/workspace";
@@ -53,10 +53,12 @@ export function SpendBudgetControl({
     setPrevTok(currentBudgetTokens);
     setTokDraft(currentBudgetTokens != null ? String(currentBudgetTokens) : "");
   }
-  const [pending, setPending] = useState(false);
+  // Scoped to the cycle for the same reason the buffers re-seed above: this panel is never
+  // remounted, so a refusal from the previous unit would sit under the new one's caps.
+  const cmd = useCommand<"change-spend-budget">("spend-budget", { scope: cycleId });
   const [confirmingHalt, setConfirmingHalt] = useState(false);
   const [note, setNote] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const pending = cmd.pending !== null;
 
   const disabled = !campaignId || !cycleId;
 
@@ -73,30 +75,21 @@ export function SpendBudgetControl({
   const apply = async () => {
     if (!campaignId || !cycleId || !hasChange) return;
     setConfirmingHalt(false);
-    setPending(true);
-    setErr(null);
     setNote(null);
-    try {
-      await postChangeSpendBudget(campaignId, cycleId, {
-        maxUsd: nextUsd,
-        maxTokens: nextTok,
-      });
-      bumpRevalidation();
-      // The note quotes NO number, deliberately. `quota.py::clamp_budget_change` silently mins
-      // the request against the account's remaining allowance, so composing this text from the
-      // draft told a spent free-tier account "Cap set to 8.0M tok" while 0 was written. The two
-      // rows above already show the ARMED ceiling as the server reports it, so the honest report
-      // is to point at them rather than to restate — or re-derive — what landed.
-      setNote(
-        isHalt
-          ? "Applied — halting after this round."
-          : "Applied — the armed cap is shown above; it takes at the next round.",
-      );
-    } catch (e) {
-      setErr(IngestApiError.toOperatorMessage(e));
-    } finally {
-      setPending(false);
-    }
+    const r = await cmd.run("change-spend-budget", () =>
+      postChangeSpendBudget(campaignId, cycleId, { maxUsd: nextUsd, maxTokens: nextTok }),
+    );
+    if (!r.ok) return;
+    // The note quotes NO number, deliberately. `quota.py::clamp_budget_change` silently mins
+    // the request against the account's remaining allowance, so composing this text from the
+    // draft told a spent free-tier account "Cap set to 8.0M tok" while 0 was written. The two
+    // rows above already show the ARMED ceiling as the server reports it, so the honest report
+    // is to point at them rather than to restate — or re-derive — what landed.
+    setNote(
+      isHalt
+        ? "Applied — halting after this round."
+        : "Applied — the armed cap is shown above; it takes at the next round.",
+    );
   };
 
   const onSet = () => {
@@ -132,7 +125,7 @@ export function SpendBudgetControl({
           onChange={(e) => {
             setUsdDraft(e.target.value);
             setNote(null);
-            setErr(null);
+            cmd.clear();
           }}
           aria-label="New spend cap in USD"
         />
@@ -157,7 +150,7 @@ export function SpendBudgetControl({
           onChange={(e) => {
             setTokDraft(e.target.value);
             setNote(null);
-            setErr(null);
+            cmd.clear();
           }}
           aria-label="New token cap"
         />
@@ -180,7 +173,9 @@ export function SpendBudgetControl({
           : "Re-read each round — raise to release, set a cap to 0 to halt. Whichever trips first wins. A raise is also clamped by your account allowance (Account → Security)."}
       </small>
       {note ? <small className="spend-control-note">{note}</small> : null}
-      {err ? <small className="new-campaign-error">{err}</small> : null}
+      {cmd.failure ? (
+        <small className="new-campaign-error">{cmd.failure.message}</small>
+      ) : null}
       <Modal
         open={confirmingHalt}
         title="Halt this run?"

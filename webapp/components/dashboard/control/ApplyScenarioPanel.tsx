@@ -15,9 +15,9 @@
 // choosing, rather than in a document.
 
 import { useState } from "react";
-import { postForkCycle, postPauseCycle } from "@/lib/api";
-import { bumpRevalidation } from "@/lib/revalidate";
-import { useAuth } from "@/lib/auth-context";
+import { postSteerFork } from "@/lib/api";
+import { useCommand } from "@/lib/hooks/useCommand";
+import { steeredBy, useAuth } from "@/lib/auth-context";
 
 export function ApplyScenarioPanel({
   campaignId,
@@ -41,34 +41,28 @@ export function ApplyScenarioPanel({
   nextRound: number;
 }) {
   const { me } = useAuth();
-  const [pending, setPending] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const cmd = useCommand<"apply-scenario">("apply-scenario");
   const [done, setDone] = useState(false);
 
   if (!criterion || !campaignId || !cycleId) return null;
   const at = divergentRound ?? nextRound;
+  const pending = cmd.pending !== null;
 
-  const apply = async () => {
-    setPending(true);
-    setErr(null);
-    try {
-      // The parent keeps running until told otherwise, and the fork launches immediately — so
-      // stop it first, exactly as a steer does. This supersedes the parent: the line moves.
-      if (isLive) await postPauseCycle(campaignId, cycleId);
-      await postForkCycle(campaignId, cycleId, at, "", {
-        // No `origin_prompt_fields`: rounds 0..at-1 are lifted and their round 0 IS the origin.
-        // The server refuses the pair, so this is the shape rather than a convention.
-        seed: { config_overrides: { scoring: criterion } },
-        steeredBy: me?.name || me?.email || me?.user_id || undefined,
-        keepRounds: true,
-      });
-      bumpRevalidation();
-      setDone(true);
-    } catch (e) {
-      setErr((e as Error).message);
-    }
-    setPending(false);
-  };
+  const apply = () =>
+    void cmd.run(
+      "apply-scenario",
+      () =>
+        postSteerFork(campaignId, cycleId, at, "", {
+          // No `origin_prompt_fields`: rounds 0..at-1 are lifted and their round 0 IS the
+          // origin. The server refuses the pair, so this is the shape rather than a convention.
+          seed: { config_overrides: { scoring: criterion } },
+          steeredBy: steeredBy(me),
+          keepRounds: true,
+          // This supersedes the parent: the line moves.
+          pauseFirst: isLive,
+        }),
+      () => setDone(true),
+    );
 
   return (
     <div className="mask-apply">
@@ -96,9 +90,9 @@ export function ApplyScenarioPanel({
         be re-read under, so it forks with no preview — that is the steer panel on a searchpoint.
         Budget and sample look-ahead are the only two that move a running cycle in place.
       </p>
-      {err && (
+      {cmd.failure && (
         <p className="l4-warn" role="alert">
-          apply: {err}
+          apply: {cmd.failure.message}
         </p>
       )}
       {done ? (
@@ -110,7 +104,7 @@ export function ApplyScenarioPanel({
           type="button"
           className="cmp-button"
           disabled={pending}
-          onClick={() => void apply()}
+          onClick={apply}
           title={`Mint a branch at round ${at} carrying this criterion, keeping every round before it. Tagged operator_rewind in lineage.`}
         >
           {pending ? "Applying…" : isLive ? `Stop & apply from round ${at}` : `Apply from round ${at}`}

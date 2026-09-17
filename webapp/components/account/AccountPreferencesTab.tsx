@@ -6,14 +6,16 @@ import { useEffect, useState } from "react";
 import { AccountSection } from "./AccountSection";
 import { Switch } from "@/components/ui";
 import { fetchUserSettings, patchUserSettings } from "@/lib/api";
+import { useCommand } from "@/lib/hooks/useCommand";
 import { applyTheme, readStoredTheme, useThemeVersion } from "@/lib/theme";
 
 export function AccountPreferencesTab() {
   const [demo, setDemo] = useState<boolean | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Nothing polls user settings, so the write re-ticks nothing; the answer IS the read-back.
+  const cmd = useCommand<"user-settings">("preferences", { revalidate: false });
+  const [readError, setReadError] = useState<string | null>(null);
 
-  // Hand-rolled, not useFetch: `demo` is mutable local state the toggle below
+  // Hand-rolled, not `useRead`: `demo` is mutable local state the toggle below
   // writes after each PATCH, not a read-only fetch result — the server load
   // only seeds it.
   useEffect(() => {
@@ -23,25 +25,22 @@ export function AccountPreferencesTab() {
         if (!cancelled) setDemo(s.demo_mode_enabled);
       })
       .catch(() => {
-        if (!cancelled) setError("Could not read this setting. Reopen the pane to retry.");
+        if (!cancelled) setReadError("Could not read this setting. Reopen the pane to retry.");
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const toggle = async (next: boolean) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const s = await patchUserSettings({ demo_mode_enabled: next });
-      setDemo(s.demo_mode_enabled);
-    } catch {
-      setError("The server did not save the change. Try again.");
-    } finally {
-      setBusy(false);
-    }
-  };
+  const toggle = (next: boolean) =>
+    void cmd.run(
+      "user-settings",
+      () => patchUserSettings({ demo_mode_enabled: next }),
+      (s) => setDemo(s.demo_mode_enabled),
+    );
+
+  const busy = cmd.pending !== null;
+  const error = cmd.failure?.message ?? readError;
 
   return (
     <>
@@ -55,7 +54,7 @@ export function AccountPreferencesTab() {
             locked={demo === null || busy}
             lockedNote={busy ? "saving" : "reading"}
             onChange={() => {
-              if (demo !== null) void toggle(!demo);
+              if (demo !== null) toggle(!demo);
             }}
           />
         }

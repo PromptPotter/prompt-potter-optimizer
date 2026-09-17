@@ -1,5 +1,6 @@
 /* Toolbar primitive — a single, non-wrapping row of icon controls. */
 
+@layer ui {
 .bar {
   display: flex;
   align-items: center;
@@ -19,4 +20,5 @@
 .spacer {
   flex: 1 1 auto;
   min-width: 8px;
+}
 }

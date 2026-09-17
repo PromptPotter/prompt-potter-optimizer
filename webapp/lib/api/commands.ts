@@ -78,13 +78,24 @@ export type OperatorForkOverride = Partial<
 // at `round` under the seed's overrides — what "apply this from here" means, and what the
 // terminal spells `resume --rewind N`. The server refuses the second with an
 // `origin_prompt_fields` seed: the lifted round 0 already is the origin.
-export async function postForkCycle(
+//
+// `pauseFirst` is the ORDER, not a convenience: a steer supersedes the parent, so a fork
+// launched beside a still-running loop races it. Whether the parent is live is the caller's
+// fact; what to do about it is not, which is why both panels state it here rather than
+// spelling the pause themselves.
+export async function postSteerFork(
   campaignId: string,
   cycleId: string,
   round: number,
   candidateId: string,
-  opts: { seed: OperatorForkOverride; steeredBy?: string; keepRounds?: boolean },
+  opts: {
+    seed: OperatorForkOverride;
+    steeredBy?: string;
+    keepRounds?: boolean;
+    pauseFirst: boolean;
+  },
 ): Promise<CommandAcceptedBody> {
+  if (opts.pauseFirst) await postPauseCycle(campaignId, cycleId);
   const payload: Record<string, unknown> = {
     campaign_id: campaignId,
     cycle_id: cycleId,

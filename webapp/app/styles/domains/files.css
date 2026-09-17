@@ -10,7 +10,15 @@
 .viewer-body.viewer-structured .card{margin:var(--space-8) 0}
 .round-file-summary{padding:var(--space-6) 0 var(--space-4);border-bottom:0.5px solid var(--color-border);margin-bottom:6px}
 .round-file-summary-row{display:flex;flex-wrap:wrap;gap:var(--space-14);align-items:center;font-size:var(--text-base);color:var(--color-text-secondary)}
-.round-file-summary-row .badge{font-family:var(--font-mono)}
+.round-file-badge{font-family:var(--font-mono)}
+.round-file-dim{color:var(--color-text-tertiary)}
+/* A one-line table cell — the whole value rides the cell's `title`, so the column stays a
+   column. `wide` is the changes description, which is a sentence rather than a field. */
+.round-file-clip{max-width:17.5rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.round-file-clip.wide{max-width:22.5rem}
+.round-file-raw{margin:var(--space-8) 0}
+.round-file-raw > summary{cursor:pointer;padding:var(--space-8) 0;color:var(--color-text-secondary);font-size:var(--text-base)}
+.round-file-raw > pre{margin-top:var(--space-6);padding:var(--space-10);background:var(--color-background-secondary);border-radius:var(--border-radius-md);font-family:var(--font-mono);font-size:var(--text-sm);line-height:1.5;color:var(--color-text-secondary);white-space:pre-wrap}
 .viewer-body.markdown h1,.viewer-body.markdown h2,.viewer-body.markdown h3{margin:var(--space-14) 0 var(--space-8)}
 .viewer-body.markdown p{margin:var(--space-6) 0}
 .viewer-body.markdown code{font-family:var(--font-mono);background:var(--color-background-secondary);padding:1px var(--space-4);border-radius:3px}

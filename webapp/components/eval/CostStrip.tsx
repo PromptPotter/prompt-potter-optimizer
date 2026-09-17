@@ -2,7 +2,7 @@
 import { memo, useMemo } from "react";
 import { Bar } from "react-chartjs-2";
 import { barChartDefaults, ensureChartRegistered, seriesColor, useThemeVersion } from "@/lib/theme";
-import { CardFrame } from "@/components/ui";
+import { Badge, CardFrame } from "@/components/ui";
 import { roundCosts } from "@/lib/derivations";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { fmtUsd } from "@/lib/format";
@@ -76,7 +76,7 @@ export const CostStrip = memo(function CostStrip() {
   return (
     <CardFrame
       title={<span>Cost by round</span>}
-      actions={<span className="badge">{fmtUsd(total)}</span>}
+      actions={<Badge>{fmtUsd(total)}</Badge>}
     >
       <div style={{ position: "relative", height: 140 }}>
         {rounds.length === 0 ? (

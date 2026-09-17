@@ -9,10 +9,10 @@
 // `MechanismConfig` schema (`GET /campaigns/mechanisms-schema`), so a toggle
 // added backend-side appears in both modes with no edit here.
 
-import { useFetch } from "@/lib/hooks/useFetch";
+import { readyData, useRead } from "@/lib/hooks/useRead";
 import { fetchCampaignDetail, fetchMechanismsSchema } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
-import { CardFrame, Badge, Switch } from "@/components/ui";
+import { Badge, Switch } from "@/components/ui";
 import { fmtValue } from "@/lib/format";
 
 type MechanismValues = Record<string, Record<string, boolean>>;
@@ -31,14 +31,26 @@ export function MechanismsPanel({
 } = {}) {
   const editable = onChange != null;
   const { campaignId } = useWorkspace();
-  const { data: schema } = useFetch(() => fetchMechanismsSchema(), []);
-  // Committed-config source — only the read-only (dashboard) mode needs it.
-  const { data: detail } = useFetch(
-    !editable && campaignId ? (signal) => fetchCampaignDetail(campaignId, signal) : null,
-    [editable, campaignId],
+  const schemaRead = useRead(
+    { key: "mechanisms-schema", fetch: fetchMechanismsSchema },
+    { surface: "mechanisms-schema" },
   );
+  // Committed-config source — only the read-only (dashboard) mode needs it.
+  const detailRead = useRead(
+    !editable && campaignId
+      ? { key: campaignId, fetch: (signal) => fetchCampaignDetail(campaignId, signal) }
+      : null,
+    { surface: "campaign-detail" },
+  );
+  const detail = readyData(detailRead);
 
-  if (!schema) return <p className="mech-empty">Loading mechanisms…</p>;
+  if (schemaRead.status === "failed" || detailRead.status === "failed") {
+    return <p className="mech-empty">Could not load the mechanism toggles.</p>;
+  }
+  if (schemaRead.status !== "ready" || detailRead.status === "loading") {
+    return <p className="mech-empty">Loading mechanisms…</p>;
+  }
+  const schema = schemaRead.data;
   if (!editable && !campaignId) {
     return <p className="mech-empty">Select a campaign to see its mechanism toggles.</p>;
   }
@@ -65,12 +77,11 @@ export function MechanismsPanel({
 
   return (
     <div className="mech-groups">
+      {/* A heading over a hairline, never a card: both hosts — the workflow panel and the ingest
+          dialog — already draw a border, and a card inside one nests two. */}
       {schema.groups.map((group) => (
-        <CardFrame
-          key={group.key}
-          className="mech-card"
-          title={<span className="mech-card-title">{group.label}</span>}
-        >
+        <section key={group.key} className="mech-group">
+          <h3 className="mech-card-title">{group.label}</h3>
           <p className="mech-group-desc">{group.description}</p>
           <ul className="mech-list">
             {group.toggles.map((t) => {
@@ -103,7 +114,7 @@ export function MechanismsPanel({
               );
             })}
           </ul>
-        </CardFrame>
+        </section>
       ))}
     </div>
   );

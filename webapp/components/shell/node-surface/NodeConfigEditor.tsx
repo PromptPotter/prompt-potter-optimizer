@@ -235,7 +235,8 @@ export function NodeConfigEditor(props: {
               {r.key}
               <EvolvedMark row={r} />
             </span>
-            <span className="config-value">
+            {/* A div: `ValueList` opens a `Popover`, which is flow content. */}
+            <div className="config-value">
               <ValueList
                 name={r.key}
                 values={values}
@@ -250,7 +251,7 @@ export function NodeConfigEditor(props: {
                 onAdd={narrowChannel ? (v) => add(i, v) : undefined}
               />
               {r.kind === "model" && caps ? <ModelCard caps={caps} /> : null}
-            </span>
+            </div>
           </div>
         );
       })}
@@ -462,7 +463,7 @@ function ConfigRowView({
           </span>
         )}
       </span>
-      <span className="config-value">
+      <div className="config-value">
         {!onValue ? (
           // No value channel — a sibling surface sets this one, or the value is structured and
           // nothing types it. Text rather than a disabled input: a greyed box says "you may not",
@@ -509,7 +510,7 @@ function ConfigRowView({
             onCommit={onValue}
           />
         )}
-      </span>
+      </div>
     </div>
   );
 }

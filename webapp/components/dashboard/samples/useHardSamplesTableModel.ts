@@ -72,15 +72,6 @@ export function useHardSamplesTableModel({
     { ord: string; fitness: number | null; x: number; y: number } | null
   >(null);
 
-  useEffect(() => {
-    if (!popover) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPopover(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [popover]);
-
   // Global ordinal universe — the union of every ord present across rows,
   // sorted lex. Each ord becomes one column in the Meas roster so rows
   // missing a given measurement show a blank cell at the same X as rows

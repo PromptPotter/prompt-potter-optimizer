@@ -50,10 +50,9 @@ export function Chip({
   );
 }
 
-// A cluster of related chips. `label` is the group's ACCESSIBLE name — the chips
-// inside never restate it — and is drawn only when `showLabel` is set. In a
-// toolbar it stays undrawn: a row of icons is dense precisely because it spends
-// no width on words, and the tooltips carry the meaning.
+// A cluster of related chips. `label` is the group's ACCESSIBLE name and is never
+// drawn — the chips inside don't restate it, and a row of icons is dense precisely
+// because it spends no width on words.
 //
 // `joined` fuses them into one framed bar with no internal borders and an
 // underline on whatever is on. Use it when the chips are facets of ONE concept
@@ -61,18 +60,25 @@ export function Chip({
 // outlined pill buttons say "three things", and they aren't.
 export function ChipGroup({
   label,
-  showLabel,
   joined,
+  showLabel,
   children,
 }: {
   label: string;
-  showLabel?: boolean;
   joined?: boolean;
+  // Draw the group's own name beside the chips. The accessible name is there either way;
+  // this says the operator needs it on screen too, because the chips are bare numbers that
+  // do not name their axis.
+  showLabel?: boolean;
   children: ReactNode;
 }) {
   return (
     <span className={cx(s.group, joined && s.joined)} role="group" aria-label={label}>
-      {showLabel && <span className={s.groupLabel}>{label}</span>}
+      {showLabel && (
+        <span className={s.groupLabel} aria-hidden="true">
+          {label}:
+        </span>
+      )}
       {children}
     </span>
   );

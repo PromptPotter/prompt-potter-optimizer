@@ -8,7 +8,6 @@ import {
 } from "../round-candidates";
 import { availableRounds } from "../round-axis";
 import { liveCandidateId } from "@/lib/candidate-label";
-import { liveCandidateRow } from "@/lib/poll";
 
 describe("roundCandidates — l2_terminal fixture", () => {
   // Reproduces the operator's justlogic__ca6d4d/cycle_2451d3cf6ebc exit
@@ -139,13 +138,12 @@ describe("roundCandidates — the in-flight round", () => {
     expect(row?.meanFitnessCiHi).toBe(0.69);
   });
 
-  // The LABEL is what both live readers join back on — `liveCandidate` (the sample tape) and
-  // `liveCandidateRow` (the inspector). It is the only key a selection minted off the tree and
-  // a row that has not been scored yet both carry; keyed on the lineage id instead, every
-  // in-flight bar click resolves in neither and the panel reads as "still scoring".
-  it("resolves both live readers on the row's label", () => {
+  // An in-flight row has no lineage id, so its `candidate_id` is POSITIONAL and is a row KEY
+  // only. The LABEL is what a live reader joins back on — the one key a selection minted off the
+  // tree and a row that has not been scored yet both carry.
+  it("keys an in-flight row on the positional id and carries its label", () => {
     expect(row?.candidate_id).toBe(liveCandidateId(2, 0));
-    expect(liveCandidateRow(live, row!.label)).not.toBeNull();
+    expect(row?.label).toBeTruthy();
   });
 
   it("holds no crown — the election is a round-scoped fit that has not run", () => {

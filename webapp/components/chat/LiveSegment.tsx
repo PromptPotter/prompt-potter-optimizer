@@ -1,7 +1,6 @@
 "use client";
-import { useState } from "react";
-import { postOriginGateDecision, IngestApiError, type OriginGateDecision } from "@/lib/api";
-import { bumpRevalidation } from "@/lib/revalidate";
+import { postOriginGateDecision, type OriginGateDecision } from "@/lib/api";
+import { useCommand } from "@/lib/hooks/useCommand";
 import { fmtPct0 } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { Hearts } from "@/components/ui";
@@ -43,8 +42,8 @@ export function LiveSegment({
   /** The bank's ceiling — the denominator. Passed down, never re-derived here. */
   livesCap?: number | null;
 }) {
-  const [pending, setPending] = useState<OriginGateDecision | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  // The decision value IS the verb, so `pending` drives the per-button "…" directly.
+  const cmd = useCommand<OriginGateDecision>("origin-gate");
 
   const empty = activity.length === 0 && !progress && !decision;
   // Nothing to show and nothing still coming — leave the thread to the ingest
@@ -54,15 +53,9 @@ export function LiveSegment({
   // Fire an existing control command. The decision item clears on its own when
   // the poll observes `run_phase` leave `gate` (a rescore re-enters with a fresh
   // verdict; proceed/abort end it) — same lifecycle the old modal had.
-  const decide = (d: OriginGateDecision) => {
-    setPending(d);
-    setErr(null);
-    postOriginGateDecision(campaignId, cycleId, d)
-      .then(() => bumpRevalidation())
-      .catch((e) => setErr(IngestApiError.toOperatorMessage(e)))
-      .finally(() => setPending(null));
-  };
-  const busy = pending !== null;
+  const decide = (d: OriginGateDecision) =>
+    void cmd.run(d, () => postOriginGateDecision(campaignId, cycleId, d));
+  const busy = cmd.pending !== null;
 
   // ONE row that means "now": the in-flight chip, or — with nothing landed yet —
   // the placeholder saying the socket is open. `empty` already implies no
@@ -113,13 +106,13 @@ export function LiveSegment({
                 disabled={busy}
                 onClick={() => decide(b.decision)}
               >
-                {pending === b.decision ? "…" : b.label}
+                {cmd.pending === b.decision ? "…" : b.label}
               </button>
             ))}
           </div>
-          {err ? (
+          {cmd.failure ? (
             <p className="chat-decision-err" role="alert">
-              {err}
+              {cmd.failure.message}
             </p>
           ) : null}
         </div>

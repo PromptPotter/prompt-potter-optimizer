@@ -1,10 +1,11 @@
 // The dashboard's card shell — a `.card` box with a `.card-title` header.
 // `title` is the heading content, `actions` the right-aligned badge or
 // button group; both sit inside `.card-title` (its flex layout pushes the
-// last child right). `headingTag` is `"h2"` where the title is a section
-// heading, `"div"` (default) where it is just a label.
+// last child right). With `headingTag="h2"` the title alone is the section
+// heading, so the actions stay out of its content and its accessible name.
 
 import type { CSSProperties, ReactNode } from "react";
+import { cx } from "@/lib/cx";
 
 export function CardFrame({
   title,
@@ -21,13 +22,12 @@ export function CardFrame({
   headingTag?: "div" | "h2";
   children: ReactNode;
 }) {
-  const Header = headingTag;
   return (
-    <div className={className ? `card ${className}` : "card"} style={style}>
-      <Header className="card-title">
-        {title}
+    <div className={cx("card", className)} style={style}>
+      <div className="card-title">
+        {headingTag === "h2" ? <h2>{title}</h2> : title}
         {actions}
-      </Header>
+      </div>
       {children}
     </div>
   );

@@ -1,7 +1,7 @@
-/* Badge primitive — a small pill label. Base ported verbatim from the old
-   global `.badge`; tones pair with the success/danger tokens for state pills
-   (always carry a text label too — never colour alone). */
+/* Badge primitive — a small pill label. A tone always rides text that carries
+   the same meaning; state is never conveyed by colour alone. */
 
+@layer ui {
 .badge {
   font-size:var(--text-xs);
   padding: 2px var(--space-8);
@@ -26,4 +26,5 @@
   color: var(--color-danger);
   border-color: var(--color-danger-border);
   background: var(--color-danger-bg);
+}
 }

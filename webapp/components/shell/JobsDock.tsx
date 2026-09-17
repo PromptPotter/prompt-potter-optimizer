@@ -1,8 +1,9 @@
 "use client";
 import { useWorkspace } from "@/lib/workspace";
 import { runPhaseLabel } from "@/lib/run-phase";
+import { campaignDisplayName } from "@/lib/names";
 import { cx } from "@/lib/cx";
-import { Popover } from "@/components/ui";
+import { Menu, MenuItem } from "@/components/ui";
 import { PotterMark } from "@/components/brand/PotterMark";
 
 // The dock of live runs, floating on the SIDEBAR'S OUTER EDGE and straddling the
@@ -15,10 +16,9 @@ import { PotterMark } from "@/components/brand/PotterMark";
 // and destroyed the all-quiet signal — it stays reachable as a sidebar row wearing
 // its phase. `detached` is a dead producer, and never appears either.
 //
-// A direct child of `.shell`, NOT of `.sidebar`: the sidebar is `overflow:hidden`
-// and `Popover` is not portaled, so a dock in there loses its multi-run panel with
-// nothing on screen to say so. Desktop only — a phone shows the same signal as the
-// dot on the app bar's back arrow, off the same `runningCycles`.
+// A direct child of `.shell`, NOT of `.sidebar`: the dock straddles the sidebar's edge,
+// and `.sidebar{overflow:hidden}` would shave its outer half. Desktop only — a phone shows
+// the same signal as the dot on the app bar's back arrow, off the same `runningCycles`.
 
 interface Props {
   // Called after a running cycle is picked, so the shell can switch to the
@@ -40,15 +40,19 @@ export function JobsDock({ onPicked }: Props) {
     onPicked?.();
   };
 
-  const labelFor = (campaignId: string, dataset: string) =>
-    campaigns.find((c) => c.campaign_id === campaignId)?.label || dataset || campaignId;
+  // A cycle the campaign list does not carry (archived, filtered) still names the run it is:
+  // its campaign id is the identity, and the dataset name alone would not say which run.
+  const labelFor = (campaignId: string) => {
+    const campaign = campaigns.find((c) => c.campaign_id === campaignId);
+    return campaign ? campaignDisplayName(campaign) : campaignId;
+  };
 
   // Exactly one in flight → the button IS the direct link, and still carries its
   // phase class: a run held at the origin gate is blocked on the operator and must
   // not be pixel-identical to one making progress.
   const c = n === 1 ? runningCycles[0] : undefined;
   if (c) {
-    const label = labelFor(c.campaign_id, c.dataset_name);
+    const label = labelFor(c.campaign_id);
     return (
       <div className="jobs-dock">
         <button
@@ -66,7 +70,7 @@ export function JobsDock({ onPicked }: Props) {
 
   return (
     <div className="jobs-dock">
-      <Popover
+      <Menu
         align="left"
         renderTrigger={({ open, toggle }) => (
           <button
@@ -86,33 +90,29 @@ export function JobsDock({ onPicked }: Props) {
         )}
       >
         {({ close }) => (
-          <ul className="jobs-dock-list" role="menu" aria-label="Active jobs">
+          <>
             {/* runningCycles already carries the shared order (dockPriority) —
                 see workspace.tsx's runningCycles memo. */}
             {runningCycles.map((c) => (
-              <li key={`${c.campaign_id}/${c.cycle_id}`} role="none">
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="jobs-dock-item"
-                  onClick={() => {
-                    pick(c.campaign_id, c.cycle_id);
-                    close();
-                  }}
-                >
+              <MenuItem
+                key={`${c.campaign_id}/${c.cycle_id}`}
+                onClick={() => {
+                  pick(c.campaign_id, c.cycle_id);
+                  close();
+                }}
+              >
+                <span className="jobs-dock-row">
                   <span className={cx("phase-chip", `phase-${c.run_phase}`)}>
                     <span className="phase-dot" aria-hidden="true" />
                     {runPhaseLabel(c.run_phase, c.status)}
                   </span>
-                  <span className="jobs-dock-item-label">
-                    {labelFor(c.campaign_id, c.dataset_name)}
-                  </span>
-                </button>
-              </li>
+                  <span className="jobs-dock-item-label">{labelFor(c.campaign_id)}</span>
+                </span>
+              </MenuItem>
             ))}
-          </ul>
+          </>
         )}
-      </Popover>
+      </Menu>
     </div>
   );
 }

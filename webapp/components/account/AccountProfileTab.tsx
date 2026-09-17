@@ -3,10 +3,10 @@
 // A session with no provider is the local workspace (sign-in off, or the CLI's own identity),
 // and every section says so rather than rendering an empty field.
 
-import { useState } from "react";
 import { AccountEmpty, AccountSection } from "./AccountSection";
 import { PROVIDER_LABEL, ProviderIcon } from "./providers";
 import { Badge, Button, CopyButton } from "@/components/ui";
+import { useCommand } from "@/lib/hooks/useCommand";
 import { postLogout, type MeResponse } from "@/lib/api";
 
 const CAP_PREFIX = "campaign.";
@@ -152,20 +152,15 @@ function PermissionsSection({ capabilities }: { capabilities: string[] }) {
 }
 
 function SessionSection({ me }: { me: MeResponse }) {
-  const [signingOut, setSigningOut] = useState(false);
-  const [failed, setFailed] = useState(false);
-
-  const signOut = async () => {
-    setSigningOut(true);
-    setFailed(false);
-    try {
-      await postLogout();
+  // Nothing polls the session; the navigation below is the read-back.
+  const cmd = useCommand<"logout">("account-session", {
+    revalidate: false,
+    describe: () => "The server did not end the session. Try again.",
+  });
+  const signOut = () =>
+    void cmd.run("logout", postLogout, () => {
       window.location.href = "/login";
-    } catch {
-      setFailed(true);
-      setSigningOut(false);
-    }
-  };
+    });
 
   if (!me.provider) {
     return (
@@ -181,14 +176,14 @@ function SessionSection({ me }: { me: MeResponse }) {
       title="Session"
       lede="Signing out ends this browser's session. Running campaigns keep running."
       aside={
-        <Button variant="danger" onClick={() => void signOut()} disabled={signingOut}>
-          {signingOut ? "Signing out…" : "Sign out"}
+        <Button variant="danger" onClick={signOut} disabled={cmd.pending !== null}>
+          {cmd.pending !== null ? "Signing out…" : "Sign out"}
         </Button>
       }
     >
-      {failed ? (
+      {cmd.failure ? (
         <p className="account-failure" role="alert">
-          The server did not end the session. Try again.
+          {cmd.failure.message}
         </p>
       ) : null}
     </AccountSection>

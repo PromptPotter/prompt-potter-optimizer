@@ -1,5 +1,6 @@
 /* Menu primitive — the overflow panel behind a toolbar's "⋯". */
 
+@layer ui {
 .menu {
   display: flex;
   flex-direction: column;
@@ -78,4 +79,5 @@
   height: 1px;
   margin: var(--space-4) var(--space-6);
   background: var(--color-border);
+}
 }

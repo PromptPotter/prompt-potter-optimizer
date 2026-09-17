@@ -34,7 +34,7 @@ export interface CompareChannel {
 
 /** A campaign's default channel: the branch that ANSWERS for it, which the server then reads at
  *  the winner its last election crowned. The answering cycle is not always the root's own —
- *  after a supersede cut the line continues on a fork, so `sidebar/grouping.ts::buildForest`
+ *  after a supersede cut the line continues on a fork, so `derivations/campaign-forest.ts::buildForest`
  *  resolves it and every surface that offers a campaign reads the same one. */
 export function defaultChannel(campaignId: string, answeringCycleId: string): CompareChannel {
   return { rootCampaignId: campaignId, subject: subjectKey("course", [campaignId, answeringCycleId]) };

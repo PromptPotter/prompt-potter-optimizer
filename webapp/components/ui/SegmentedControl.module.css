@@ -1,8 +1,6 @@
-/* SegmentedControl primitive — a joined group of buttons, exactly one on.
-   Base ported from the three hand-rolled variants it replaces (.cand-view-toggle,
-   .rsv-toggle, .pipeline-mode-toggle), which had drifted apart on radius, divider
-   weight and the active fill. */
+/* SegmentedControl primitive — a joined group of buttons, exactly one on. */
 
+@layer ui {
 .group {
   display: inline-flex;
   align-items: center;
@@ -64,4 +62,5 @@
   background: var(--color-accent);
   color: var(--color-text-on-accent);
   font-weight: 600;
+}
 }

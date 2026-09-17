@@ -4,19 +4,16 @@
 // catches it and shows a recoverable fallback instead. Boundaries catch
 // render-path errors only — async failures in fetch / interval callbacks
 // are already funnelled into component state by the poll loops.
-//
-// Inline styles throughout so the fallback renders even if the stylesheet
-// itself failed to load.
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import s from "./ErrorBoundary.module.css";
 
 interface Props {
   children: ReactNode;
 }
 
-// What the auto-reload did about a stale chunk, so the fallback can say the true one. It used to
-// say "reloading was tried once already" unconditionally, which is a guess on two of the three
-// arms — and on `cannot-track` it was the opposite of what happened.
+// What the auto-reload did about a stale chunk, so the fallback can say the true one rather than
+// guess at it.
 type ReloadOutcome = "reloading" | "already-tried" | "cannot-track";
 
 interface State {
@@ -78,53 +75,19 @@ export class ErrorBoundary extends Component<Props, State> {
     // sends the operator hunting a component stack for a file that simply is not there.
     const stale = STALE_BUILD.test(`${error.name} ${error.message}`);
     return (
-      <div
-        role="alert"
-        style={{
-          maxWidth: 560,
-          margin: "10vh auto",
-          padding: 24,
-          fontFamily: "system-ui, sans-serif",
-          color: "#e6e6e6",
-          background: "#1a1a1e",
-          border: "1px solid #3a3a42",
-          borderRadius: 10,
-        }}
-      >
-        <h1 style={{ fontSize: "var(--text-2xl)", margin: "0 0 8px" }}>
+      <div role="alert" className={s.panel}>
+        <h1 className={s.heading}>
           {stale ? "This tab is running an old build" : "The dashboard hit a render error"}
         </h1>
-        <p style={{ fontSize: "var(--text-md)", lineHeight: 1.5, margin: "0 0 12px" }}>
+        <p className={s.body}>
           {!stale
             ? "A render error never writes to disk — your campaign is untouched. Reloading usually clears it; if it repeats, the console has the component stack."
             : reload === "already-tried"
               ? "Your campaign is untouched — the app was rebuilt while this tab was open, so a piece of it is no longer on disk. Reloading was tried once already and the file is still missing, which usually means a build is still running; wait for it to finish, then reload."
               : "Your campaign is untouched — the app was rebuilt while this tab was open, so a piece of it is no longer on disk. Reload once the build has finished."}
         </p>
-        <pre
-          style={{
-            fontSize: "var(--text-sm)",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-            color: "#ff8a8a",
-            margin: "0 0 16px",
-          }}
-        >
-          {error.message}
-        </pre>
-        <button
-          type="button"
-          onClick={() => window.location.reload()}
-          style={{
-            fontSize: "var(--text-md)",
-            padding: "8px 16px",
-            color: "#fff",
-            background: "#3b6fe0",
-            border: "none",
-            borderRadius: 6,
-            cursor: "pointer",
-          }}
-        >
+        <pre className={s.detail}>{error.message}</pre>
+        <button type="button" className={s.action} onClick={() => window.location.reload()}>
           Reload
         </button>
       </div>

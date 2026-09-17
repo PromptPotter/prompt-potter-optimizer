@@ -2,6 +2,7 @@ import type { DashboardSnapshot } from "@/lib/poll";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { headlineStats } from "@/lib/derivations";
 import { fmtNum, fmtClock } from "@/lib/format";
+import { cx } from "@/lib/cx";
 import { CardFrame } from "@/components/ui";
 import { FreqChart } from "@/components/eval/FreqChart";
 import { TrendChart } from "@/components/eval/TrendChart";
@@ -32,18 +33,6 @@ const KNOWN_ORDER = [
 
 const WARN_IF_POSITIVE = new Set(["error_count", "degraded_count", "backend_retry_count"]);
 
-interface BackendWarning {
-  ts?: string;
-  kind?: string;
-  attempt?: number;
-  max_attempts?: number;
-  wait_s?: number;
-  error_class?: string;
-  status_code?: number;
-  final?: boolean;
-  query?: string;
-}
-
 const FORMATTERS: Record<string, (v: unknown) => string> = {
   origin_acc: (v) => fmtNum(v),
   current_acc: (v) => fmtNum(v),
@@ -52,7 +41,7 @@ const FORMATTERS: Record<string, (v: unknown) => string> = {
 
 export function LiveStateCard() {
   const { dash } = useDashboard();
-  const formula = (dash as { composite_fitness_formula?: string } | null)?.composite_fitness_formula || "—";
+  const formula = dash?.composite_fitness_formula || "—";
 
   // Build the KV grid: derived origin row first (origin is round 0 in
   // ``rounds[]``), then known-order fields, then any remaining scalar
@@ -87,22 +76,20 @@ export function LiveStateCard() {
     }
   }
 
-  const payload = (dash as { current_query_payload?: unknown } | null)?.current_query_payload;
-  const payloadEmpty = payload == null || payload === "";
+  const payload = dash?.current_query_payload ?? "";
+  const payloadEmpty = payload === "";
   const payloadText = payloadEmpty
-    ? ((dash as { state?: string } | null)?.state === "scoring" ? "in flight, payload not exposed" : "no query in flight")
-    : (typeof payload === "string" ? payload : JSON.stringify(payload, null, 2));
+    ? dash?.state === "scoring"
+      ? "in flight, payload not exposed"
+      : "no query in flight"
+    : payload;
 
   return (
     <CardFrame
       className="live-state-card"
       headingTag="h2"
-      title="2ndary-relevant-info"
-      actions={
-        <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-tertiary)", fontWeight: 400 }}>
-          all dashboard.json fields
-        </span>
-      }
+      title="Live state"
+      actions={<span className="lsc-source">all dashboard.json fields</span>}
     >
       <div className="formula-row" title="composite_fitness_formula">{formula}</div>
       <div className="kv-grid">
@@ -128,8 +115,8 @@ export function LiveStateCard() {
           </div>
         )}
       </div>
-      <div className="var-label" style={{ marginTop: 14 }}>In-flight query payload</div>
-      <div className={`payload-block${payloadEmpty ? " empty" : ""}`}>{payloadText}</div>
+      <div className="var-label">In-flight query payload</div>
+      <div className={cx("payload-block", payloadEmpty && "empty")}>{payloadText}</div>
       <BackendWarnings dash={dash} />
       <PoBBBackfillLog dash={dash} />
       {/* Trend + Score Frequency — relocated from the former Verdict lane
@@ -147,15 +134,6 @@ export function LiveStateCard() {
   );
 }
 
-// Mirrors the firm Python `BackfillLogEntry` (extra="forbid", all required).
-interface BackfillEntry {
-  round: number;
-  candidate_idx: number;
-  candidate_total: number;
-  sample_id: number;
-  prior_ids: string[];
-}
-
 function PoBBBackfillLog({ dash }: { dash: DashboardSnapshot | null }) {
   // ``backfill_log`` is the paired-PoBB telemetry stream: one entry per
   // sample where at least one prior gained a fresh measurement (cache-
@@ -164,26 +142,21 @@ function PoBBBackfillLog({ dash }: { dash: DashboardSnapshot | null }) {
   // caught up on that sample — so the operator can see paired comparison
   // becoming valid sample-by-sample.
   // See docs/methods/candidate-elimination.md.
-  const log = (dash as { backfill_log?: BackfillEntry[] } | null)?.backfill_log;
+  const log = dash?.backfill_log;
   if (!log || log.length === 0) return null;
   return (
     <>
-      <div className="var-label" style={{ marginTop: 14 }}>
-        Paired-PoBB backfill (last {log.length})
-      </div>
-      <div className="payload-block" style={{ fontSize: "var(--text-xs)", lineHeight: 1.5 }}>
+      <div className="var-label">Paired-PoBB backfill (last {log.length})</div>
+      <div className="payload-block">
         {log.slice().reverse().map((e, i) => {
           const { round, candidate_idx: cidx, candidate_total: ctot, sample_id: sid, prior_ids: priors } = e;
           return (
-            <div key={i} style={{ marginBottom: 2 }}>
-              <span style={{ color: "var(--color-text-tertiary)" }}>
+            <div key={i} className="log-row">
+              <span className="log-dim">
                 R{round} C{cidx + 1}/{ctot}
               </span>{" "}
-              <span style={{ color: "var(--color-accent)" }}>↻</span>{" "}
-              #{sid}
-              {priors.length > 0 && (
-                <span style={{ color: "var(--color-text-tertiary)" }}> — {priors.join(", ")}</span>
-              )}
+              <span className="log-mark">↻</span> #{sid}
+              {priors.length > 0 && <span className="log-dim"> — {priors.join(", ")}</span>}
             </div>
           );
         })}
@@ -198,12 +171,12 @@ function BackendWarnings({ dash }: { dash: DashboardSnapshot | null }) {
   // real time so a transient stall isn't mistaken for a stuck loop.
   // Surfaces nothing when no retries have happened — zero visual cost
   // in the happy path.
-  const warnings = (dash as { recent_backend_warnings?: BackendWarning[] } | null)?.recent_backend_warnings;
+  const warnings = dash?.recent_backend_warnings;
   if (!warnings || warnings.length === 0) return null;
   return (
     <>
-      <div className="var-label" style={{ marginTop: 14 }}>Recent backend retries (last {warnings.length})</div>
-      <div className="payload-block" style={{ fontSize: "var(--text-xs)", lineHeight: 1.5 }}>
+      <div className="var-label">Recent backend retries (last {warnings.length})</div>
+      <div className="payload-block">
         {warnings.slice().reverse().map((w, i) => {
           const ts = fmtClock(w.ts);
           const code = w.status_code != null ? ` HTTP ${w.status_code}` : "";
@@ -213,9 +186,9 @@ function BackendWarnings({ dash }: { dash: DashboardSnapshot | null }) {
           const attempts = w.attempt != null ? ` (attempt ${w.attempt}/${w.max_attempts ?? "?"})` : "";
           const q = w.query ? ` · q="${w.query.slice(0, 40)}${w.query.length > 40 ? "…" : ""}"` : "";
           return (
-            <div key={i} style={{ marginBottom: 2 }}>
-              <span style={{ color: "var(--color-text-tertiary)" }}>{ts}</span>{" "}
-              <span style={{ color: "var(--color-warn)" }}>{w.kind ?? "warning"}</span>
+            <div key={i} className="log-row">
+              <span className="log-dim">{ts}</span>{" "}
+              <span className="log-warn">{w.kind}</span>
               {code}{err}{attempts}{wait}{final}{q}
             </div>
           );

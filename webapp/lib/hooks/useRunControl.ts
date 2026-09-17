@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
-import { postPauseCycle, postStartRun, IngestApiError } from "@/lib/api";
-import { bumpRevalidation } from "@/lib/revalidate";
+import { postPauseCycle, postStartRun } from "@/lib/api";
+import { useCommand } from "@/lib/hooks/useCommand";
 import { phasePauseLabel, runPhaseAction, type RunAction } from "@/lib/run-phase";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
@@ -36,8 +36,7 @@ export interface RunControl {
 export function useRunControl(): RunControl | null {
   const { dash } = useDashboard();
   const { campaignId, cycleId } = useWorkspace();
-  const [pending, setPending] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const cmd = useCommand<"pause-cycle" | "start-run">("run-control");
   const [pausing, setPausing] = useState(false);
 
   const runPhase = dash?.run_phase;
@@ -54,39 +53,28 @@ export function useRunControl(): RunControl | null {
 
   if (!campaignId || !cycleId) return null;
 
-  const act = async (fn: () => Promise<unknown>) => {
-    setPending(true);
-    setErr(null);
-    try {
-      await fn();
-      bumpRevalidation(); // re-tick the workspace poll (cycle list run_phase)
-    } catch (e) {
-      setErr(IngestApiError.toOperatorMessage(e));
-    } finally {
-      setPending(false);
-    }
-  };
-
   const toggle = () => {
     if (action === "none") return;
     if (action === "pause") {
       setPausing(true);
-      void act(() => postPauseCycle(campaignId, cycleId));
+      void cmd.run("pause-cycle", () => postPauseCycle(campaignId, cycleId));
       return;
     }
     // A paused cycle's worker has exited — resume relaunches it from the last
     // completed round (the same start-run path as a cold start), not an in-place
     // unpause. `resume` and `start` therefore take the same branch.
-    void act(() => postStartRun(campaignId, cycleId, "resume"));
+    void cmd.run("start-run", () => postStartRun(campaignId, cycleId, "resume"));
   };
 
   return {
     action,
     running: action === "pause",
-    pending,
-    pausing,
+    pending: cmd.pending !== null,
+    // The optimistic note is a claim the pause is coming, so a refused pause retires it —
+    // left standing beside the failure it promises a wait that will never end.
+    pausing: pausing && cmd.failure === null,
     pausingNote: `Finishing ${phasePauseLabel(dash?.state)} — will pause after the current sample.`,
-    err,
+    err: cmd.failure?.message ?? null,
     label: action === "pause" ? "Pause run" : action === "resume" ? "Resume run" : "Start run",
     // At the origin gate the run is alive but holding for a decision the chat
     // thread owns; in check-in the ingest panel owns Start; with no phase at all

@@ -1,7 +1,7 @@
 "use client";
 import { renderMarkdownSafe } from "@/lib/markdown";
 import { fetchCycleFile } from "@/lib/api";
-import { useFetch } from "@/lib/hooks/useFetch";
+import { readyData, useRead } from "@/lib/hooks/useRead";
 import { RoundFileView, type RoundDoc } from "./RoundFileView";
 
 interface Props {
@@ -17,7 +17,6 @@ interface ViewerState {
   isMarkdown: boolean;
   roundDoc: RoundDoc | null;
   rawJson: string;
-  error: string | null;
 }
 
 const EMPTY: ViewerState = {
@@ -27,7 +26,6 @@ const EMPTY: ViewerState = {
   isMarkdown: false,
   roundDoc: null,
   rawJson: "",
-  error: null,
 };
 
 const LOADING: ViewerState = {
@@ -37,7 +35,6 @@ const LOADING: ViewerState = {
   isMarkdown: false,
   roundDoc: null,
   rawJson: "",
-  error: null,
 };
 
 const ROUND_FILE_RE = /^rounds\/round_\d+\.json$/;
@@ -46,76 +43,83 @@ function isRoundFile(selected: { scope: string; path: string } | null): boolean 
   return !!selected && selected.scope === "cycle" && ROUND_FILE_RE.test(selected.path);
 }
 
+async function loadViewerState(
+  ready: { campaignId: string; cycleId: string; selected: { scope: string; path: string } },
+  signal: AbortSignal,
+): Promise<ViewerState> {
+  const r = await fetchCycleFile(
+    ready.campaignId,
+    ready.cycleId,
+    ready.selected.scope,
+    ready.selected.path,
+    signal,
+  );
+  const ct = r.content_type;
+  const meta = `${r.size} B • ${ct}`;
+  if (r.content == null) {
+    return {
+      meta,
+      body:
+        r.size > 2 * 1024 * 1024
+          ? "(preview truncated — file > 2 MiB)"
+          : "(preview unavailable — binary)",
+      contentType: ct,
+      isMarkdown: false,
+      roundDoc: null,
+      rawJson: "",
+    };
+  }
+  if (ct === "json") {
+    let body = r.content;
+    let parsed: unknown = null;
+    try {
+      parsed = JSON.parse(r.content);
+      body = JSON.stringify(parsed, null, 2);
+    } catch {
+      /* keep raw */
+    }
+    const roundDoc =
+      isRoundFile(ready.selected) && parsed && typeof parsed === "object"
+        ? (parsed as RoundDoc)
+        : null;
+    return { meta, body, contentType: ct, isMarkdown: false, roundDoc, rawJson: body };
+  }
+  if (ct === "markdown") {
+    // `renderMarkdownSafe`, never `marked.parse` — this body reaches
+    // `dangerouslySetInnerHTML` below, and these artifacts quote tenant-supplied text.
+    return {
+      meta,
+      body: renderMarkdownSafe(r.content),
+      contentType: ct,
+      isMarkdown: true,
+      roundDoc: null,
+      rawJson: "",
+    };
+  }
+  return { meta, body: r.content, contentType: ct, isMarkdown: false, roundDoc: null, rawJson: "" };
+}
+
 export function FileViewer({ campaignId, cycleId, selected }: Props) {
   // Bundle the non-null trio so the fetcher closure inherits the narrowing.
   const ready = campaignId && cycleId && selected ? { campaignId, cycleId, selected } : null;
 
-  // useFetch owns cancellation + the key-scoped reset (data blanks to null on a
-  // deps change, in-render) — so this component no longer hand-rolls either.
-  const { data, error } = useFetch<ViewerState>(
+  const read = useRead(
     ready
-      ? async (): Promise<ViewerState> => {
-          const r = await fetchCycleFile(
-            ready.campaignId,
-            ready.cycleId,
-            ready.selected.scope,
-            ready.selected.path,
-          );
-          const ct = r.content_type;
-          const meta = `${r.size} B • ${ct}`;
-          if (r.content == null) {
-            return {
-              meta,
-              body:
-                r.size > 2 * 1024 * 1024
-                  ? "(preview truncated — file > 2 MiB)"
-                  : "(preview unavailable — binary)",
-              contentType: ct,
-              isMarkdown: false,
-              roundDoc: null,
-              rawJson: "",
-              error: null,
-            };
-          }
-          if (ct === "json") {
-            let body = r.content;
-            let parsed: unknown = null;
-            try {
-              parsed = JSON.parse(r.content);
-              body = JSON.stringify(parsed, null, 2);
-            } catch {
-              /* keep raw */
-            }
-            const roundDoc =
-              isRoundFile(ready.selected) && parsed && typeof parsed === "object"
-                ? (parsed as RoundDoc)
-                : null;
-            return { meta, body, contentType: ct, isMarkdown: false, roundDoc, rawJson: body, error: null };
-          }
-          if (ct === "markdown") {
-            // `renderMarkdownSafe`, never `marked.parse` — this body reaches
-            // `dangerouslySetInnerHTML` below, and these artifacts quote tenant-supplied text.
-            return {
-              meta,
-              body: renderMarkdownSafe(r.content),
-              contentType: ct,
-              isMarkdown: true,
-              roundDoc: null,
-              rawJson: "",
-              error: null,
-            };
-          }
-          return { meta, body: r.content, contentType: ct, isMarkdown: false, roundDoc: null, rawJson: "", error: null };
+      ? {
+          key: [ready.campaignId, ready.cycleId, ready.selected.scope, ready.selected.path].join(
+            "\x1f",
+          ),
+          fetch: (signal) => loadViewerState(ready, signal),
         }
       : null,
-    [campaignId, cycleId, selected?.scope ?? "", selected?.path ?? ""],
+    { surface: "file" },
   );
 
   const state: ViewerState = !ready
     ? EMPTY
-    : error
-      ? { ...EMPTY, meta: "", body: `Failed to load: ${error}`, error }
-      : (data ?? LOADING);
+    : read.status === "failed"
+      ? { ...EMPTY, meta: "", body: "Could not load this file." }
+      : (readyData(read) ?? LOADING);
 
   const headerPath = selected ? `${selected.scope}: ${selected.path}` : "(no file selected)";
   return (

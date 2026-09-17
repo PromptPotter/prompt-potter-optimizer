@@ -14,21 +14,23 @@
 // Reads the quota the account already answers to; it adds no endpoint and
 // recomputes nothing, per webapp/CLAUDE.md § Scoring authority.
 //
-// Reuses .account-overlay / .account-modal / .account-pane-head /
-// .account-pane-body from the account domain stylesheet; .consent-actions from
-// the auth one.
+// Reuses .account-modal / .account-pane-head / .account-pane-body from the
+// account domain stylesheet; .consent-actions from the auth one.
 
 import { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { Dialog } from "@/components/ui";
 import { fetchQuotaStatus } from "@/lib/api";
 import { fmtUsd } from "@/lib/format";
-import { useFetch } from "@/lib/hooks/useFetch";
+import { readyData, useRead } from "@/lib/hooks/useRead";
 
 const DISMISSED = "pp.allowance-spent.dismissed";
 
 export function AllowanceSpent() {
   const { status, me } = useAuth();
-  const { data: quota } = useFetch(() => fetchQuotaStatus(), []);
+  const quota = readyData(
+    useRead({ key: "quota", fetch: fetchQuotaStatus }, { surface: "allowance", auth: true }),
+  );
   const [dismissed, setDismissed] = useState(() => {
     try {
       return window.localStorage.getItem(DISMISSED) === "1";
@@ -56,7 +58,7 @@ export function AllowanceSpent() {
   };
 
   return (
-    <div className="account-overlay" role="dialog" aria-labelledby="allowance-spent-title">
+    <Dialog open onClose={onDismiss} labelledBy="allowance-spent-title" bare>
       <div className="account-modal consent-modal">
         <header className="account-pane-head">
           <h3 id="allowance-spent-title">That&rsquo;s the last of your free runs</h3>
@@ -81,6 +83,6 @@ export function AllowanceSpent() {
           </div>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

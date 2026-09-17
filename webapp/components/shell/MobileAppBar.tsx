@@ -1,6 +1,7 @@
 "use client";
 import { useAuth } from "@/lib/auth-context";
 import { useWorkspace } from "@/lib/workspace";
+import { campaignDisplayName } from "@/lib/names";
 import { cx } from "@/lib/cx";
 import { CampaignMenu } from "@/components/shell/sidebar/CampaignMenu";
 import s from "./MobileAppBar.module.css";
@@ -29,7 +30,8 @@ export function MobileAppBar({ listScreen, onBack, onNewCycle }: Props) {
   if (listScreen) return null;
 
   const campaign = campaigns.find((c) => c.campaign_id === campaignId);
-  const title = campaign?.label || campaign?.dataset_name || "PromptPotter";
+  // With no campaign at all there is no name to say, so the bar rests on the product's.
+  const title = campaign ? campaignDisplayName(campaign) : "PromptPotter";
   const anon = status === "unauthed";
   const running = runningCycles.length;
 

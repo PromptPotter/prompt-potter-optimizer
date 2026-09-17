@@ -12,6 +12,8 @@ import {
   ChipGroup,
   CopyButton,
   HoverCard,
+  IconMore,
+  IconTree,
   Menu,
   MenuCheck,
   MenuRadioGroup,
@@ -20,7 +22,6 @@ import {
   ToolbarSep,
   ToolbarSpacer,
 } from "@/components/ui";
-import { IconMore, IconTree } from "./toolbar-icons";
 import { liveCandidates } from "@/lib/poll";
 import { ABORT_LENS_LABELS } from "@/lib/api/types.generated";
 import type { DashboardCandidate, RoundSummary } from "@/lib/api/types";
@@ -40,8 +41,7 @@ import {
 import { FitnessRankSummary } from "./FitnessRankSummary";
 import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
 import type { LineageNode } from "@/lib/api";
-import { useAuth } from "@/lib/auth-context";
-import { useFetch } from "@/lib/hooks/useFetch";
+import { readyData, useRead } from "@/lib/hooks/useRead";
 import {
   barsAreCourses,
   candidateViews,
@@ -57,7 +57,7 @@ import { isSelectedCandidate } from "@/lib/types";
 import { encodeCyclePath } from "@/lib/ids";
 import { useWorkspace } from "@/lib/workspace";
 import { useLineage } from "./useLineage";
-import { useCycleEvaluators } from "./useCycleEvaluators";
+import { useCycleEvaluators } from "@/components/shell/mask/useCycleEvaluators";
 import { SampleSetControl } from "./SampleSetControl";
 import { measuredUniverse } from "@/lib/sample-set";
 import { useViewedLineage, divergenceRoundsFor } from "@/lib/lineage";
@@ -144,10 +144,14 @@ export function CandidatesCard() {
   // ── 2b. Diagnostic-run records — one per `promptpotter verify`. Fetched per cycle switch,
   // never polled: re-run verify and reload for a fresh red bar. Gated on a confirmed session,
   // because the route is workspace-scoped and 401s for anon (I5).
-  const { status } = useAuth();
-  const { data: diagRunsResp } = useFetch(
-    status === "authed" ? (s) => fetchDiagnosticRuns(undefined, s) : null,
-    [status, campaignId, cycleId],
+  const diagRunsResp = readyData(
+    useRead(
+      {
+        key: `${campaignId}\x1f${cycleId}`,
+        fetch: (s) => fetchDiagnosticRuns(undefined, s),
+      },
+      { surface: "diagnostic-runs", auth: true },
+    ),
   );
   const diagByLabel = useMemo(() => {
     const m = new Map<string, DiagnosticRunRecord>();
@@ -160,12 +164,9 @@ export function CandidatesCard() {
     return m;
   }, [diagRunsResp, campaignId, cycleId]);
 
-  // ── 3. The scoring mask: the shared value, plus this cycle's own evaluator rows. The hook is
-  // called UNCONDITIONALLY — see its own warning: `lib/lineage.tsx` reads the same store to build
-  // the tree's `?lens=`, so a seed deferred to the panel's mount costs an unmasked refetch and one
-  // wrong frame.
+  // ── 3. The scoring mask: the shared value, plus this cycle's own evaluator rows.
   const { open: maskOpen, mask } = useScoringMask();
-  const evaluators = useCycleEvaluators({ cycleId, dash, inflightCandidates, history });
+  const evaluators = useCycleEvaluators();
   // The criterion on screen. Derived once — three consumers asking `lensOf` separately is three
   // chances to disagree about whether the panel is even open.
   const activeLens = maskOpen ? lensOf(mask) : null;

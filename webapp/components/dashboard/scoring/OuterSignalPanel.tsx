@@ -15,13 +15,10 @@ import { useDashboard } from "@/lib/hooks/useDashboard";
 import type { RoundSummary, RoundSummaryCandidate } from "@/lib/api/types";
 import { CardFrame, Badge } from "@/components/ui";
 import { NOT_SEPARABLE } from "@/lib/fitness";
+import { fmtSigned } from "@/lib/format";
 
 const AXIS_W = 220;
 const ROW_H = 18;
-
-function fmt(n: number): string {
-  return (n >= 0 ? "+" : "") + n.toFixed(3);
-}
 
 // The arm the round's verdict is about — SERVED (`round_summary.py::_leading_arm`), the same one
 // `panel_precision` is measured on, so the two stacks below cannot describe different arms. The
@@ -85,7 +82,7 @@ function LiftRow({ d, x }: { d: Lift; x: (v: number) => number }) {
     : d.hi < 0
       ? "var(--color-danger)"
       : "var(--color-text-secondary)";
-  const value = `${fmt(d.lift)} [${fmt(d.lo)}, ${fmt(d.hi)}]`;
+  const value = `${fmtSigned(d.lift)} [${fmtSigned(d.lo)}, ${fmtSigned(d.hi)}]`;
   return (
     <div className="ov-row">
       <span className="ov-cell-label" title={`${d.label} — round ${d.round}`}>
@@ -149,8 +146,8 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
             <Badge tone={verdictWord(latest).tone}>
               {verdictWord(latest).word}
             </Badge>{" "}
-            Round {latest.round}&rsquo;s leading arm lifts <strong>{fmt(latest.lift)}</strong> [
-            {fmt(latest.lo)}, {fmt(latest.hi)}] over its parent, on the cells both measured.
+            Round {latest.round}&rsquo;s leading arm lifts <strong>{fmtSigned(latest.lift)}</strong> [
+            {fmtSigned(latest.lo)}, {fmtSigned(latest.hi)}] over its parent, on the cells both measured.
             {latest.lo <= 0 && latest.hi >= 0
               ? " The interval spans 0 — this panel cannot yet tell that arm from its parent, and the point estimate above should not be read as a win."
               : ""}

@@ -37,12 +37,10 @@ export function Menu({
 export function MenuItem({
   onClick,
   disabled,
-  title,
   children,
 }: {
   onClick: () => void;
   disabled?: boolean;
-  title?: string;
   children: ReactNode;
 }) {
   return (
@@ -51,7 +49,6 @@ export function MenuItem({
       role="menuitem"
       className={s.item}
       disabled={disabled}
-      title={title}
       // A menu row's click is the menu's, never the frame's. Without this a menu opened from
       // inside a `<summary>` or a clickable row fires that frame on the way out.
       onClick={(e) => {

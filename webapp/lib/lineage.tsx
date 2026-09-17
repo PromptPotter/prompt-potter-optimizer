@@ -30,6 +30,7 @@ import { reportIncident } from "@/lib/diagnostics";
 import { indexLineage, type LineageIndex } from "@/lib/derivations";
 import { createRegistry, type TreeFetchOpts } from "@/lib/lineage-registry";
 import { lensOf, useScoringMask } from "@/components/shell/mask/scoring-mask";
+import { useScoringMaskSeed } from "@/components/shell/mask/useCycleEvaluators";
 import { useAuthGate } from "@/lib/auth-context";
 import { useDebounced } from "@/lib/hooks/useDebounced";
 import { usePoll } from "@/lib/hooks/usePoll";
@@ -130,7 +131,10 @@ export function LineageProvider({
   }
 
   // The scoring-mask panel is the master: when open, the tree follows its live mask (the SAME
-  // criterion as the bars), debounced so a continuous drag doesn't spam the fetch.
+  // criterion as the bars), debounced so a continuous drag doesn't spam the fetch. The seed rides
+  // here because this is where the mask becomes a fetch key: seeded anywhere later, the first
+  // tree of a cycle goes out unmasked.
+  useScoringMaskSeed();
   const { open: maskOpen, mask } = useScoringMask();
   // The fixed sample-set chip is ALSO a mask: re-score accuracy over only those ids
   // backend-side. Serialized to a stable string so a same-content set doesn't re-fire.

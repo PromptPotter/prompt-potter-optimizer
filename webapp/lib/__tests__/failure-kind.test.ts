@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { ApiError, failureKind, IngestApiError } from "@/lib/api";
+import { ApiError, failureKind, IngestApiError, operatorMessage } from "@/lib/api";
 import { clearIncidents, formatDiagnostics, getIncidents, reportIncident } from "@/lib/diagnostics";
 
 // The classifier decides how a poll REACTS to a failure, so its direction of error
@@ -38,6 +38,20 @@ describe("failureKind", () => {
     expect(write(403)).toBe("denied");
     expect(write(422)).toBe("invalid");
     expect(write(500)).toBe("transient");
+  });
+
+  it("words a write failure as the server's sentence, else one per kind — never the raw failure", () => {
+    const said = new IngestApiError(409, "/api/v1/commands/fork-cycle", "Already forked.");
+    expect(operatorMessage(said, failureKind(said))).toBe("Already forked.");
+    // No envelope (a proxy 502) and no response at all: neither the status line nor the
+    // browser's network text reaches the operator, and neither claims the write did not land.
+    const bare = new IngestApiError(502, "/api/v1/commands/fork-cycle", null);
+    const offline = new TypeError("Failed to fetch");
+    for (const e of [bare, offline]) {
+      const text = operatorMessage(e, failureKind(e));
+      expect(text).not.toMatch(/502|fetch/i);
+      expect(text).toMatch(/may not have been applied/);
+    }
   });
 
   it("carries the server's envelope fields so a report can name the cause", () => {

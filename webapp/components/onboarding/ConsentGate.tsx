@@ -12,61 +12,48 @@
 // capability, so it is not about to submit anything. AccessGate has it instead.
 //
 // Unlike WelcomeLockoutModal this has no close affordance: no ×, no
-// overlay-click dismiss, no ESC (the a11y hook's onClose is a no-op). The only
-// way out is to agree — that's the point of a gate.
+// overlay-click dismiss, no ESC (`Dialog` with no `onClose`). The only way out
+// is to agree — that's the point of a gate.
 //
-// Reuses .account-overlay / .account-modal / .account-pane-head /
-// .account-pane-body from the account domain stylesheet; .consent-* live in
-// the auth domain stylesheet.
+// Reuses .account-modal / .account-pane-head / .account-pane-body from the
+// account domain stylesheet; .consent-* live in the auth domain stylesheet.
 
 import { useState } from "react";
 import { BRAND } from "@/lib/brand";
 import { useAuth } from "@/lib/auth-context";
 import { acceptTerms } from "@/lib/api/account";
-import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
-
-const NOOP = () => {};
+import { useCommand } from "@/lib/hooks/useCommand";
+import { Dialog } from "@/components/ui";
 
 export function ConsentGate() {
   const { status, me, refresh } = useAuth();
   const [checked, setChecked] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // One sentence for every refusal, because the recovery is the same one either way: the
+  // re-probe below reloads the live terms and this gate re-renders against them.
+  const cmd = useCommand<"accept-terms">("consent-gate", {
+    revalidate: false,
+    describe: () => "Couldn't record that — reloading the current terms. Try again.",
+  });
 
-  // Focus-trap + focus-into-card, but NO ESC dismiss — onClose is a no-op so
-  // the gate can't be keyboard-escaped.
   const open =
     status === "authed" &&
     !!me &&
     me.access_state === "active" &&
     me.terms_accepted_version !== me.terms_version;
-  const cardRef = useDialogA11y(open, NOOP);
 
   if (!open) return null;
 
-  const onAccept = async () => {
-    setSubmitting(true);
-    setError(null);
-    try {
-      await acceptTerms(me.terms_version);
-      refresh(); // re-probe /auth/me → terms_accepted_version matches → gate clears
-    } catch {
-      // A 409 means the displayed terms went stale mid-session; re-probing pulls
-      // the current version so the gate re-renders against it.
-      setError("Couldn't record that — reloading the current terms. Try again.");
-      setSubmitting(false);
-      refresh();
-    }
-  };
+  // Either way the answer is a fresh /auth/me: on success `terms_accepted_version` matches and
+  // the gate clears; on a 409 the displayed terms went stale mid-session and the re-probe pulls
+  // the current ones.
+  const onAccept = () =>
+    void cmd.run("accept-terms", () => acceptTerms(me.terms_version), refresh).then((r) => {
+      if (!r.ok) refresh();
+    });
 
   return (
-    <div
-      className="account-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="consent-gate-title"
-    >
-      <div ref={cardRef} className="account-modal consent-modal">
+    <Dialog open labelledBy="consent-gate-title" bare>
+      <div className="account-modal consent-modal">
         <header className="account-pane-head">
           <h3 id="consent-gate-title">One thing before you start</h3>
         </header>
@@ -109,9 +96,9 @@ export function ConsentGate() {
             </span>
           </label>
 
-          {error ? (
+          {cmd.failure ? (
             <p className="account-error" role="alert">
-              {error}
+              {cmd.failure.message}
             </p>
           ) : null}
 
@@ -119,14 +106,14 @@ export function ConsentGate() {
             <button
               type="button"
               className="login-button"
-              disabled={!checked || submitting}
+              disabled={!checked || cmd.pending !== null}
               onClick={onAccept}
             >
-              {submitting ? "Recording…" : "Agree & continue"}
+              {cmd.pending !== null ? "Recording…" : "Agree & continue"}
             </button>
           </div>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

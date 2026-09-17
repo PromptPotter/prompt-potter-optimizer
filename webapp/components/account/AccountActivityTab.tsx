@@ -5,8 +5,8 @@
 import { useState } from "react";
 import { AccountEmpty, AccountFailure, AccountLoading } from "./AccountSection";
 import { fmtCompact, fmtUsd } from "@/lib/format";
-import { seriesColor, useThemeVersion } from "@/lib/theme";
-import { useFetch } from "@/lib/hooks/useFetch";
+import { seriesVar } from "@/lib/theme";
+import { useRead } from "@/lib/hooks/useRead";
 import {
   fetchActivity,
   type ActivityBucket,
@@ -29,15 +29,15 @@ const WINDOW_LABEL: Record<ActivityWindow, string> = {
 const WINDOW_ORDER = Object.keys(WINDOW_LABEL) as ActivityWindow[];
 
 export function AccountActivityTab() {
-  // The SVG paints literal fills, so a theme flip has to re-run this component to re-read them.
-  useThemeVersion();
   const [window, setWindow] = useState<ActivityWindow>("1d");
   const [groupBy, setGroupBy] = useState<ActivityGroupBy>("model");
-  // useFetch blanks data on the (window, group_by) key change in-render, so the
-  // old buckets never render against the new axis labels — the reset is built in.
-  const { data, error, kind } = useFetch(
-    () => fetchActivity(window, groupBy),
-    [window, groupBy],
+  // Keyed on the axis, so the old buckets never render against the new axis labels.
+  const read = useRead(
+    {
+      key: `${window}\x1f${groupBy}`,
+      fetch: (signal) => fetchActivity(window, groupBy, signal),
+    },
+    { surface: "activity" },
   );
 
   return (
@@ -65,17 +65,17 @@ export function AccountActivityTab() {
           <option value="api_key">By API Key</option>
         </select>
       </div>
-      {error ? (
-        <AccountFailure kind={kind} subject="activity" />
-      ) : data === null ? (
+      {read.status === "failed" ? (
+        <AccountFailure kind={read.failure.kind} subject="activity" />
+      ) : read.status !== "ready" ? (
         <AccountLoading subject="activity" />
-      ) : data.total_requests === 0 ? (
+      ) : read.data.total_requests === 0 ? (
         <AccountEmpty title={`No model calls in the ${WINDOW_LABEL[window].toLowerCase()}`}>
           Spend, requests and tokens appear here as soon as a campaign runs. Widen the window to
           look further back.
         </AccountEmpty>
       ) : (
-        <ActivityCharts data={data} />
+        <ActivityCharts data={read.data} />
       )}
     </>
   );
@@ -83,7 +83,7 @@ export function AccountActivityTab() {
 
 function ActivityCharts({ data }: { data: ActivityResponse }) {
   const labels = data.series_labels;
-  const palette = labels.map((_, i) => seriesColor(i));
+  const palette = labels.map((_, i) => seriesVar(i));
   return (
     <>
       <ul className="activity-legend">

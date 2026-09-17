@@ -28,7 +28,6 @@ import type {
   DatasetPipelineResponse,
   OptimizerPipelineResponse,
   CyclesResponse,
-  DatasetIndexEntry,
   DatasetIndexResponse,
   DatasetPreviewResponse,
   DatasetStorageResponse,
@@ -52,11 +51,10 @@ import type {
 } from "./types";
 
 // Derived, never re-declared: the closed sets live on the server's own response model
-// (`auth.py::ActivityWindow` / `ActivityGroupBy`, `datasets/index.py::DatasetIndexEntry.tier`),
-// and these read them back off the generated interface so a member added there arrives here.
+// (`auth.py::ActivityWindow` / `ActivityGroupBy`), and these read them back off the generated
+// interface so a member added there arrives here.
 export type ActivityWindow = ActivityResponse["window"];
 export type ActivityGroupBy = ActivityResponse["group_by"];
-export type DatasetTier = DatasetIndexEntry["tier"];
 // `domain/results.py::HardSampleOrder`, the key the leaderboard ranks by. Both hard-sample
 // responses echo it, so either one can be read back for the alias.
 export type HardSampleOrder = DatasetPreviewResponse["order"];

@@ -5,7 +5,14 @@ import { measurementNode } from "@/lib/derivations";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
-import { Button, CopyButton, Dialog } from "@/components/ui";
+import {
+  Button,
+  CopyButton,
+  Dialog,
+  IconSliders,
+  Toolbar,
+  ToolbarSpacer,
+} from "@/components/ui";
 import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
 import { MechanismsPanel } from "@/components/dashboard/control/MechanismsPanel";
 import { RoundAxis } from "./RoundAxis";
@@ -22,10 +29,8 @@ import type { PipelineDoc } from "./types";
 // lane said only where the values are stored. Read-only here — the editable mode is
 // ingest's, at authoring time.
 //
-// The trigger rides the CANVAS, not the toolbar: the toolbar is already four things
-// competing for one glance (title, round axis, live status, copy), and a fifth word there
-// buried the one that moves — the round and its state. On the dot grid beside the nodes it
-// is an icon on the thing it configures.
+// Their trigger is the header's last icon, never a word or a canvas sibling: the card sizes to
+// its graph, so anything beside the flow widens the frame the flow draws.
 
 interface Props {
   pipeline: PipelineDoc | null;
@@ -79,15 +84,17 @@ export function OptimizerCard({ pipeline }: Props) {
 
   return (
     <div className={cx("workflow-card", runIsRunning && "running")}>
-      <div className="workflow-toolbar">
+      <Toolbar className="workflow-toolbar">
         <span className="workflow-title">Optimizer</span>
         <RoundAxis />
         <span
+          className="workflow-status"
           style={{ color: runIsRunning ? "var(--color-success)" : "var(--color-text-secondary)" }}
           aria-live="polite"
         >
           ● {status}
         </span>
+        <ToolbarSpacer />
         {/* Off while the round has no node yet — an empty `{}` on the clipboard reads as a
             broken copy, not as "nothing has run". */}
         <CopyButton
@@ -99,7 +106,18 @@ export function OptimizerCard({ pipeline }: Props) {
               : "Copy the viewed round's nodes as JSON"
           }
         />
-      </div>
+        <Button
+          variant="ghost"
+          className="workflow-mech"
+          aria-haspopup="dialog"
+          aria-expanded={mechanismsOpen}
+          aria-label="Mechanisms"
+          title="Mechanisms — pluggable sorting + early-abort toggles"
+          onClick={() => setMechanismsOpen(true)}
+        >
+          <IconSliders />
+        </Button>
+      </Toolbar>
       <div className="workflow-graph">
         <PipelineFlow
           bare
@@ -116,17 +134,6 @@ export function OptimizerCard({ pipeline }: Props) {
           tone="neutral"
           models={models}
         />
-        <Button
-          variant="ghost"
-          className="workflow-mech"
-          aria-haspopup="dialog"
-          aria-expanded={mechanismsOpen}
-          aria-label="Mechanisms"
-          title="Mechanisms — pluggable sorting + early-abort toggles"
-          onClick={() => setMechanismsOpen(true)}
-        >
-          <SlidersIcon />
-        </Button>
       </div>
       <Dialog
         open={mechanismsOpen}
@@ -139,26 +146,5 @@ export function OptimizerCard({ pipeline }: Props) {
         <MechanismsPanel />
       </Dialog>
     </div>
-  );
-}
-
-// Module level, not a closure inside the card: a component defined during render is
-// remounted on every poll tick.
-function SlidersIcon() {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3" />
-      <path d="M1 14h6M9 8h6M17 16h6" />
-    </svg>
   );
 }

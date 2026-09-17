@@ -131,6 +131,13 @@ export function useAuth(): AuthCtx {
   return ctx;
 }
 
+// Who a fork is stamped as having been steered by — the most identifying name this envelope
+// carries. One spelling, because two panels naming the same operator differently is a lineage
+// that cannot be joined on.
+export function steeredBy(me: MeResponse | null): string | undefined {
+  return me?.name || me?.email || me?.user_id || undefined;
+}
+
 // Poll gate. Every protected `/api/v1/*` read 401s without a session, so a
 // poll loop must (1) not run while unauthed and (2) detect a session that
 // died mid-run. `authed` gates `usePoll`'s `enabled`; `onAuthError`, called

@@ -1,11 +1,10 @@
 "use client";
 import { useState } from "react";
 import { Term } from "@/components/ui";
-import { failureKind, fetchQuotaStatus, type FailureKind, type QuotaStatus } from "@/lib/api";
-import { useAuth } from "@/lib/auth-context";
+import { fetchQuotaStatus } from "@/lib/api";
 import { cx } from "@/lib/cx";
 import { fmtTokens, fmtUsd } from "@/lib/format";
-import { usePoll } from "@/lib/hooks/usePoll";
+import { useRead } from "@/lib/hooks/useRead";
 import { useRevalidation } from "@/lib/revalidate";
 import { useWorkspace } from "@/lib/workspace";
 
@@ -16,38 +15,33 @@ const QUOTA_POLL_MS = 60_000;
 // What this ACCOUNT has spent, against its ALLOWANCE — pinned to the sidebar in every state,
 // the collapsed rail included. Both numbers are `/auth/quota-status`'s.
 export function AccountSpend() {
-  const { status } = useAuth();
   const { campaigns } = useWorkspace();
   const generation = useRevalidation();
-  const authed = status === "authed";
-  const [data, setData] = useState<QuotaStatus | null>(null);
-  const [failure, setFailure] = useState<FailureKind | null>(null);
 
   const signature = campaigns.map((c) => c.spend_used_usd).join(",");
   const [moved, setMoved] = useState({ signature, count: 0 });
   if (signature !== moved.signature) setMoved({ signature, count: moved.count + 1 });
 
-  usePoll(
-    (signal) =>
-      fetchQuotaStatus(signal).then(
-        (q) => {
-          setData(q);
-          setFailure(null);
-        },
-        (e: unknown) => {
-          if (!signal.aborted) setFailure(failureKind(e));
-        },
-      ),
-    { intervalMs: QUOTA_POLL_MS, enabled: authed, revalidateOn: generation + moved.count },
+  const read = useRead(
+    { key: "quota", fetch: fetchQuotaStatus },
+    {
+      surface: "account-spend",
+      auth: true,
+      intervalMs: QUOTA_POLL_MS,
+      revalidateOn: generation + moved.count,
+    },
   );
 
-  if (!authed) return null;
+  if (read.status === "idle") return null;
   // The last good reading stays up through a failed re-read; only a first read can fail visibly.
+  const data = read.status === "ready" ? read.data : read.kept;
   if (data == null) {
     return (
-      <div className="account-spend" aria-busy={failure == null}>
+      <div className="account-spend" aria-busy={read.status === "loading"}>
         <span className="account-spend-label">Spend</span>
-        <span className="account-spend-muted">{failure == null ? "…" : "unavailable"}</span>
+        <span className="account-spend-muted">
+          {read.status === "loading" ? "…" : "unavailable"}
+        </span>
       </div>
     );
   }

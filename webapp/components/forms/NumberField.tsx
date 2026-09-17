@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { useAppliableField } from "@/lib/hooks/useAppliableField";
 
 export function NumberField({
@@ -15,14 +16,18 @@ export function NumberField({
   max?: number;
   onApply: (value: number) => void;
 }) {
+  const id = useId();
   // Buffer the numeric value as a string so partial / empty edits don't
   // round-trip a NaN; parse + guard on Apply.
   const { local, setLocal, dirty } = useAppliableField(String(value));
   return (
-    <label className="new-campaign-field">
-      <span>{label}</span>
-      <span style={{ display: "flex", gap: "0.5rem" }}>
+    <div className="new-campaign-field">
+      {/* The label names the INPUT alone — wrapping the button too would fold "Apply" into the
+          field's accessible name and let a click on the caption press it. */}
+      <label htmlFor={id}>{label}</label>
+      <span className="new-campaign-apply">
         <input
+          id={id}
           type="number"
           value={local}
           min={min}
@@ -38,6 +43,6 @@ export function NumberField({
           Apply
         </button>
       </span>
-    </label>
+    </div>
   );
 }

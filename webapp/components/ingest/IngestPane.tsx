@@ -17,8 +17,7 @@
 import { useState } from "react";
 import { IngestConversation } from "./IngestConversation";
 import { useIngest } from "@/lib/ingest-flow";
-import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
-import { SignInPrompt } from "@/components/ui";
+import { Button, Dialog, IconClose, SignInPrompt } from "@/components/ui";
 
 interface Props {
   open: boolean;
@@ -40,7 +39,6 @@ export function IngestPane({ open, onClose }: Props) {
     setPrevOpen(open);
     if (open) startNew();
   }
-  const cardRef = useDialogA11y(open, onClose);
 
   if (!open) return null;
 
@@ -66,24 +64,18 @@ export function IngestPane({ open, onClose }: Props) {
     );
 
   return (
-    <div
-      className="new-campaign-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-label="New campaign"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div ref={cardRef} className="new-campaign-modal">
+    <Dialog open onClose={onClose} labelledBy="new-campaign-title" bare>
+      <div className="new-campaign-modal">
         <header className="new-campaign-header">
-          <h2>{flow.phase.stage === "ready" ? "Set up campaign" : "New campaign"}</h2>
-          <button type="button" className="new-campaign-close" aria-label="Close" onClick={onClose}>
-            ×
-          </button>
+          <h2 id="new-campaign-title">
+            {flow.phase.stage === "ready" ? "Set up campaign" : "New campaign"}
+          </h2>
+          <Button variant="ghost" aria-label="Close" onClick={onClose}>
+            <IconClose />
+          </Button>
         </header>
         {body}
       </div>
-    </div>
+    </Dialog>
   );
 }

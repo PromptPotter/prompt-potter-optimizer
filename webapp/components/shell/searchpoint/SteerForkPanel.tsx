@@ -3,16 +3,15 @@
 import { useRef, useState } from "react";
 import {
   fetchForkPreview,
-  postForkCycle,
-  postPauseCycle,
+  postSteerFork,
   type RunLimitOverrides,
   type OperatorForkOverride,
 } from "@/lib/api";
-import { useFetch } from "@/lib/hooks/useFetch";
+import { readyData, useRead } from "@/lib/hooks/useRead";
+import { useCommand } from "@/lib/hooks/useCommand";
 import type { NodeConfigParam, NodeOutputSchema, NodeSearchNarrowing } from "@/lib/api/types";
-import { bumpRevalidation } from "@/lib/revalidate";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
-import { useAuth } from "@/lib/auth-context";
+import { steeredBy, useAuth } from "@/lib/auth-context";
 import type { CyclePath } from "@/lib/ids";
 import type { DashboardSnapshot } from "@/lib/poll";
 import {
@@ -89,7 +88,7 @@ export function SteerForkPanel({
   const campaignId = hop?.campaignId ?? "";
   const cycleId = hop?.cycleId ?? "";
   const isLive = parentIsLive;
-  const { isLive: roundIsLive, doc } = useRoundSource(path, candidate.round, dash);
+  const { live: roundIsLive, doc } = useRoundSource(path, candidate.round, dash);
   const { me } = useAuth();
   const seed = roundIsLive
     ? liveCandidateSearchPoint(dash, candidate.label)
@@ -118,17 +117,23 @@ export function SteerForkPanel({
   // long as nothing served it, which is exactly the drift `frontend-surface-contract.md::I9`
   // forbids. Keyed on the picked overlay, so a commit re-asks and a stale answer cannot render.
   const steerOverlay = pickedOverlay ?? overlay;
-  const preview = useFetch(
-    campaignId ? (signal) => fetchForkPreview(campaignId, steerOverlay, signal) : null,
-    [campaignId, JSON.stringify(steerOverlay)],
+  const preview = useRead(
+    campaignId
+      ? {
+          key: `${campaignId}\x1f${JSON.stringify(steerOverlay)}`,
+          fetch: (signal) => fetchForkPreview(campaignId, steerOverlay, signal),
+        }
+      : null,
+    { surface: "fork-preview" },
   );
-  const steersDisallowedModel = preview.data?.steers_disallowed_model ?? false;
+  const verdict = readyData(preview);
+  const steersDisallowedModel = verdict?.steers_disallowed_model ?? false;
   // The list the warning NAMES comes off the same response as the verdict, flattened for its one
   // sentence. Off `permittedModels(schema)` it was a second answer: the rows move with a cycle
   // seed and the gate reads the campaign's frozen narrowing, so the sentence could name models
   // that had nothing to do with the verdict beside it — and say nothing about the difference.
   const permittedList = [
-    ...new Set(Object.values(preview.data?.permitted_models ?? {}).flat()),
+    ...new Set(Object.values(verdict?.permitted_models ?? {}).flat()),
   ];
 
   // Captured working copies, read at confirm. Refs (not state) so a textarea
@@ -148,15 +153,11 @@ export function SteerForkPanel({
     configOverridesFromDefaults(forkReconcileDefaults(dash)),
   );
 
-  const [pending, setPending] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const cmd = useCommand<"steer-fork">("steer-fork");
+  const pending = cmd.pending !== null;
 
-  const steeredBy = me?.name || me?.email || me?.user_id || undefined;
-
-  const confirm = async () => {
+  const confirm = () => {
     if (!campaignId || !cycleId) return;
-    setPending(true);
-    setErr(null);
     const forkSeed: OperatorForkOverride = {
       origin_prompt_fields: editedPrompt.current ?? seedPrompt,
       // The overlay rides verbatim. A model/provider value in it is a locked-axis
@@ -168,20 +169,18 @@ export function SteerForkPanel({
         ? { optimizer_narrowing: editedNarrowing.current }
         : {}),
     };
-    try {
-      // The steer redirects the run — pause the live parent first (the worker
-      // exits cleanly) so the fork launch doesn't race the parent's loop.
-      if (isLive) await postPauseCycle(campaignId, cycleId);
-      await postForkCycle(campaignId, cycleId, candidate.round, candidate.candidate_id, {
-        seed: forkSeed,
-        steeredBy,
-      });
-      bumpRevalidation();
-      onDone();
-    } catch (e) {
-      setErr((e as Error).message);
-      setPending(false);
-    }
+    void cmd.run(
+      "steer-fork",
+      () =>
+        postSteerFork(campaignId, cycleId, candidate.round, candidate.candidate_id, {
+          seed: forkSeed,
+          steeredBy: steeredBy(me),
+          // The steer redirects the run — the live parent's worker exits cleanly first, so
+          // the fork launch doesn't race its loop.
+          pauseFirst: isLive,
+        }),
+      onDone,
+    );
   };
 
   return (
@@ -201,7 +200,7 @@ export function SteerForkPanel({
       {/* A verdict that never arrived is not a clean steer. Silence here would let the operator
           confirm into grade C with nothing on screen — the failure mode the served verdict
           exists to close, reappearing as an unresolved read. */}
-      {preview.error && canBabysit ? (
+      {preview.status === "failed" && canBabysit ? (
         <p className="steer-fork-note" role="alert">
           Couldn&apos;t check this steer against what the campaign permits. Confirming may mark
           the branch operator-babysat (grade C).
@@ -249,7 +248,9 @@ export function SteerForkPanel({
 
       <LimitReconcile onChange={(l) => (limits.current = l)} />
 
-      {err && <span className="steer-fork-err" role="alert">fork: {err}</span>}
+      {cmd.failure && (
+        <span className="steer-fork-err" role="alert">fork: {cmd.failure.message}</span>
+      )}
 
       <div className="steer-fork-actions">
         <button type="button" className="steer-fork-cancel" onClick={onCancel} disabled={pending}>
@@ -258,7 +259,7 @@ export function SteerForkPanel({
         <button
           type="button"
           className="steer-fork-confirm"
-          onClick={() => void confirm()}
+          onClick={confirm}
           disabled={pending}
           title="Mint a fork rooted at this searchpoint, carrying your edits. Tagged operator_steered in lineage."
         >

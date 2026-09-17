@@ -7,7 +7,7 @@
 // config-edit surface — not scaffolding, and out of scope for any "hide non-functional controls"
 // sweep. Peers: `chat/ChatPane.tsx`, `shell/Sidebar.tsx`.
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { AboutUnit } from "./AboutUnit";
 import { AccountFailure, AccountLoading } from "./AccountSection";
 import { AccountProfileTab } from "./AccountProfileTab";
@@ -15,9 +15,9 @@ import { AccountUsageTab } from "./AccountUsageTab";
 import { AccountActivityTab } from "./AccountActivityTab";
 import { AccountPreferencesTab } from "./AccountPreferencesTab";
 import { WorkspaceStoragePanel } from "./WorkspaceStoragePanel";
+import { Button, Dialog, IconClose } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { useFetch } from "@/lib/hooks/useFetch";
-import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
+import { readyData, useRead } from "@/lib/hooks/useRead";
 import { fetchMe } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
 import { DEFAULT_ACCOUNT_PANE, type AccountPane } from "@/lib/view-tab";
@@ -50,32 +50,22 @@ export function AccountModal({ open, onClose }: Props) {
   // survives a reload — the same rule the main view axis follows.
   const { accountPane, openAccount } = useWorkspace();
   const tab: AccountPane = accountPane ?? DEFAULT_ACCOUNT_PANE;
-  // `open` in the deps key means useFetch re-runs (and blanks me/error) on every
-  // open — stale data from a prior session never flashes in, so no separate reset.
-  const { data: me, error, kind } = useFetch(open ? () => fetchMe() : null, [open]);
-  // ESC + focus-trap + focus-restore from the shared hook; this modal keeps its
-  // own two-pane .account-modal layout rather than Dialog's confirm-card.
-  const cardRef = useDialogA11y(open, onClose);
-  // Runs after the hook's own first-focusable focus: land on the pane the address opened, or a
+  // Parked while closed, so every open is a new read and a prior session's profile never flashes in.
+  const profile = useRead(open ? { key: "me", fetch: fetchMe } : null, { surface: "profile" });
+  const me = readyData(profile);
+  const cardRef = useRef<HTMLDivElement>(null);
+  // Runs after Dialog's own first-focusable focus: land on the pane the address opened, or a
   // ring on "Profile" reads as the selection while another pane is showing.
   useEffect(() => {
     if (open) cardRef.current?.querySelector<HTMLElement>('[aria-current="page"]')?.focus();
-  }, [open, cardRef]);
+  }, [open]);
 
   if (!open) return null;
 
   const who = me ? (me.name ?? me.email ?? (me.provider ? me.user_id : "Local workspace")) : null;
 
   return (
-    <div
-      className="account-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Account"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
+    <Dialog open title="Account" onClose={onClose} bare>
       <div ref={cardRef} className="account-modal">
         <nav className="account-nav" aria-label="Account sections">
           <div className="account-nav-head">
@@ -105,14 +95,14 @@ export function AccountModal({ open, onClose }: Props) {
         <section className="account-pane">
           <header className="account-pane-head">
             <h3>{TAB_TITLES[tab]}</h3>
-            <button type="button" className="account-close" aria-label="Close" onClick={onClose}>
-              ×
-            </button>
+            <Button variant="ghost" aria-label="Close" onClick={onClose}>
+              <IconClose />
+            </Button>
           </header>
           <div className="account-pane-body">
             {tab === "profile" ? (
-              error ? (
-                <AccountFailure kind={kind} subject="your profile" />
+              profile.status === "failed" ? (
+                <AccountFailure kind={profile.failure.kind} subject="your profile" />
               ) : me ? (
                 <AccountProfileTab me={me} />
               ) : (
@@ -127,6 +117,6 @@ export function AccountModal({ open, onClose }: Props) {
           </div>
         </section>
       </div>
-    </div>
+    </Dialog>
   );
 }

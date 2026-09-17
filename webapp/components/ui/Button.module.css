@@ -1,7 +1,7 @@
-/* Button primitive. Ported from the old global `.modal-btn*` rules so the
-   confirm-dialog footer keeps its exact look; now the one button surface every
-   caller reaches for. Reads design tokens — theme-agnostic. */
+/* Button primitive — the one button surface. Tokens only, so it is
+   theme-agnostic. */
 
+@layer ui {
 .btn {
   padding: var(--space-6) var(--space-14);
   font-size:var(--text-base);
@@ -50,4 +50,5 @@
 }
 .ghost:hover {
   background: var(--color-background-hover);
+}
 }

@@ -16,12 +16,12 @@
 // own verdict with its own interval, not a difference of two accuracies computed in the browser.
 
 import type { ElectedRow, PipelineStatus, SampleRow } from "@/lib/types";
-import type { DraftPatch, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
+import type { NodeConfigParam, NodeOutputSchema } from "@/lib/api";
 import { cacheShare, prefixReading, type ObserveConfig } from "@/lib/derivations";
 import { TERMS } from "@/lib/terms";
 import { NOT_SEPARABLE, liftSeparates } from "@/lib/fitness";
 import { Term } from "@/components/ui";
-import { fmtPct1, fmtSigned, fmtTokens } from "@/lib/format";
+import { fmtPct0, fmtPct1, fmtSigned, fmtTokens } from "@/lib/format";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 import { SampleRowItem, SAMPLE_RENDER_CAP } from "@/components/shell/samples/SampleRowItem";
 
@@ -36,7 +36,6 @@ export function SearchpointDrillIn({
   pending,
   overlay,
   onOverlay,
-  onApply,
   actions,
 }: {
   // The point's served row. `null` while its source is still loading, or where no source holds
@@ -63,7 +62,6 @@ export function SearchpointDrillIn({
   // it. The emission is the point's WHOLE running config, never a delta: diff it against what was
   // seeded (`overlayEdits`) before reading it as "what changed".
   onOverlay?: (next: Record<string, Record<string, unknown>>) => void;
-  onApply?: (patch: DraftPatch) => void;
   // Whatever this host lets the operator DO with the point — steer & fork, move a channel here.
   // The verbs differ per surface; the reading of the point does not.
   actions?: React.ReactNode;
@@ -83,7 +81,6 @@ export function SearchpointDrillIn({
           // of this drill-in name the point in the line directly above, so here it is the same
           // string twice.
           mode="values"
-          onApply={onApply}
           onConfigChange={onOverlay}
         />
       ) : (
@@ -189,7 +186,7 @@ export function SearchpointDrillIn({
                 list is capped or still filling. */}
             {row && typeof row.accuracy === "number" && typeof row.n_samples === "number" && (
               <span className="rsv-tally">
-                {(row.accuracy * 100).toFixed(0)}% of {row.n_samples}
+                {fmtPct0(row.accuracy)} of {row.n_samples}
               </span>
             )}
           </div>

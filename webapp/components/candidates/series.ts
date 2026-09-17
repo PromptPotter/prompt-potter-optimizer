@@ -83,15 +83,6 @@ const metricInk =
   (ctx: SeriesCtx): string =>
     metricInkToken(m, ctx.electedMetric);
 
-// Every token the table can resolve to, so the stylesheet check needs no campaign.
-export const SERIES_INK_TOKENS = [
-  "--series-elected",
-  "--series-reading",
-  "--series-counterfactual",
-  "--color-overlap",
-  "--color-cache",
-] as const;
-
 // The set drifts as the adopted line grows and changes outright when the operator pins one, so
 // the legend reads its size off the data.
 function basisN(ctx: SeriesCtx): number {

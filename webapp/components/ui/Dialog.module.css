@@ -1,8 +1,7 @@
-/* Dialog primitive. Backdrop + centred card ported verbatim from the old
-   global `.modal-backdrop` / `.modal-card` so existing confirm dialogs are
-   pixel-stable. Adds the a11y behaviour (focus trap, ESC, focus restore) in
-   Dialog.tsx. Rendered through a portal to document.body. */
+/* Dialog primitive — backdrop + centred card. The a11y behaviour (focus trap,
+   ESC, focus restore) and the portal to document.body live in Dialog.tsx. */
 
+@layer ui {
 .backdrop {
   position: fixed;
   inset: 0;
@@ -49,4 +48,12 @@
   gap: var(--space-8);
   justify-content: flex-end;
   flex-wrap: wrap;
+}
+
+/* `bare`: no chrome — the host's child is the card, centred as the backdrop would centre it. */
+.bare {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
 }

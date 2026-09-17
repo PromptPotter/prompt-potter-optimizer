@@ -8,13 +8,13 @@
 // microcopy, and the legal footer trio — the bits that would crowd the
 // standalone /login page, which renders the bare core instead.
 //
-// Reuses .account-overlay + .account-modal + .account-pane-head +
-// .account-pane-body + .account-close, plus .auth-headline / .auth-note /
-// .auth-link / .auth-legal-row from the auth domain stylesheet.
+// Reuses .account-modal + .account-pane-head + .account-pane-body, plus
+// .auth-headline / .auth-note / .auth-link / .auth-legal-row from the auth
+// domain stylesheet.
 
 import { BRAND } from "@/lib/brand";
 import { useAuth } from "@/lib/auth-context";
-import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
+import { Button, Dialog, IconClose } from "@/components/ui";
 import { AuthCore } from "@/components/login/AuthCore";
 
 // Props-free on purpose: it is mounted ONCE (app/page.tsx) and every trigger —
@@ -24,28 +24,17 @@ import { AuthCore } from "@/components/login/AuthCore";
 export function WelcomeLockoutModal() {
   const { authPrompt, closeAuthPrompt } = useAuth();
   const { open, code: errorCode, email: errorEmail } = authPrompt;
-  // ESC + focus-trap + focus-restore from the shared hook; this modal keeps its
-  // own tall .account-modal-auth layout rather than Dialog's confirm-card.
-  const cardRef = useDialogA11y(open, closeAuthPrompt);
 
   if (!open) return null;
 
   return (
-    <div
-      className="account-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="auth-prompt-title"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) closeAuthPrompt();
-      }}
-    >
-      <div ref={cardRef} className="account-modal account-modal-auth">
+    <Dialog open onClose={closeAuthPrompt} labelledBy="auth-prompt-title" bare>
+      <div className="account-modal account-modal-auth">
         <header className="account-pane-head">
           <h3 id="auth-prompt-title">Log in or sign up</h3>
-          <button type="button" className="account-close" aria-label="Close" onClick={closeAuthPrompt}>
-            ×
-          </button>
+          <Button variant="ghost" aria-label="Close" onClick={closeAuthPrompt}>
+            <IconClose />
+          </Button>
         </header>
 
         <div className="account-pane-body account-pane-body-auth">
@@ -79,6 +68,6 @@ export function WelcomeLockoutModal() {
           </nav>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

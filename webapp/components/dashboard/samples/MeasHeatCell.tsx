@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { pressable } from "@/components/ui";
 import {
   bucketRow,
   colX,
@@ -170,23 +171,24 @@ export function MeasHeatCell({
     return { idx, discrete: layout.mode === "discrete" };
   };
 
+  // Keyboard entry point into the ord selection the pointer path reaches via
+  // click. Pick the first ord this row actually has a measurement for;
+  // arrow-key pan then takes over (window listener). `pressable` supplies
+  // role/tabIndex/onKeyDown; its `onClick` is dropped in favour of the
+  // canvas's own pointer-position pick below.
+  const { role, tabIndex, onKeyDown } = pressable(() => {
+    const first = ordCols.find((o) => byOrd.has(o)) ?? ordCols[0];
+    if (first != null) onSelectOrd(first);
+  });
+
   return (
     <canvas
       ref={canvasRef}
       className="hs-heat-canvas"
-      role="button"
-      tabIndex={0}
+      role={role}
+      tabIndex={tabIndex}
       aria-label={`Measurement history — ${byOrd.size} measurement${byOrd.size === 1 ? "" : "s"}. Enter to inspect; arrow keys pan.`}
-      onKeyDown={(e) => {
-        // Keyboard entry point into the ord selection the pointer path
-        // reaches via click. Pick the first ord this row actually has a
-        // measurement for; arrow-key pan then takes over (window listener).
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          const first = ordCols.find((o) => byOrd.has(o)) ?? ordCols[0];
-          if (first != null) onSelectOrd(first);
-        }
-      }}
+      onKeyDown={onKeyDown}
       onPointerDown={(e) => {
         const hit = locate(e);
         const ord = hit ? ordCols[hit.idx] : null;

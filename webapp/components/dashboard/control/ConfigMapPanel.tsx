@@ -7,7 +7,7 @@
 // pre-run preflight warning), so this panel never disagrees with the engine on
 // which knobs collide.
 
-import { useFetch } from "@/lib/hooks/useFetch";
+import { useRead } from "@/lib/hooks/useRead";
 import { fetchConfigMap, type ConfigCoupling } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
 import { CardFrame, Badge, type BadgeTone } from "@/components/ui";
@@ -41,15 +41,17 @@ function CouplingRow({ c }: { c: ConfigCoupling }) {
 
 export function ConfigMapPanel() {
   const { campaignId } = useWorkspace();
-  const { data: map } = useFetch(
-    campaignId ? (signal) => fetchConfigMap(campaignId, signal) : null,
-    [campaignId],
+  const read = useRead(
+    campaignId ? { key: campaignId, fetch: (signal) => fetchConfigMap(campaignId, signal) } : null,
+    { surface: "config-map" },
   );
 
-  if (!campaignId) {
+  if (read.status === "idle") {
     return <p className="mech-empty">Select a campaign to see its config map.</p>;
   }
-  if (!map) return <p className="mech-empty">Loading config map…</p>;
+  if (read.status === "failed") return <p className="mech-empty">Could not load the config map.</p>;
+  if (read.status === "loading") return <p className="mech-empty">Loading config map…</p>;
+  const map = read.data;
 
   // Active clashes first, then by severity weight, so the collision (if any) leads.
   const order = ["collision", "inert", "info"];
