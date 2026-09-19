@@ -1,73 +1,95 @@
 "use client";
-import { useFetch } from "@/lib/hooks/useFetch";
+import { useRead } from "@/lib/hooks/useRead";
 import { fetchWorkspaceStorage } from "@/lib/api";
 import { fmtBytes } from "@/lib/format";
 import { cx } from "@/lib/cx";
+import { AccountEmpty, AccountFailure, AccountLoading, AccountSection } from "./AccountSection";
 import { ArchiveCompactionControl } from "./ArchiveCompactionControl";
 
 // Workspace-wide storage rollup — per-campaign on-disk totals, fattest first, plus
 // the shared caches and a residual "Other" line so the parts sum to the real total.
 // Answers "where did the bucket sizes go?". Self-fetches `GET /workspace/storage`.
 export function WorkspaceStoragePanel() {
-  const { data, error } = useFetch((signal) => fetchWorkspaceStorage(signal), []);
+  const read = useRead(
+    { key: "workspace-storage", fetch: fetchWorkspaceStorage },
+    { surface: "workspace-storage" },
+  );
 
-  if (error) return <p className="account-error">{error}</p>;
-  if (!data) return <p className="account-loading">Loading…</p>;
+  if (read.status === "failed") {
+    return <AccountFailure kind={read.failure.kind} subject="workspace storage" />;
+  }
+  if (read.status !== "ready") return <AccountLoading subject="workspace storage" />;
+  const data = read.data;
 
   const max = data.campaigns.reduce((m, c) => Math.max(m, c.on_disk_bytes), 0) || 1;
+  const n = data.campaigns.length;
 
   return (
-    <div className="wstorage">
-      <div className="account-row">
-        <span className="account-label">Total on disk</span>
-        <div className="account-row-main">
-          <strong className="wstorage-total">{fmtBytes(data.total_bytes)}</strong>
-          <span className="account-muted"> across {data.campaigns.length} campaign(s)</span>
-        </div>
-      </div>
-      <p className="account-muted wstorage-note">
-        Per-campaign trees, fattest first, then the shared reuse cache (measurements,
-        survives a campaign delete) and everything else — together they sum to the total.
-      </p>
-      <ul className="wstorage-list">
-        {data.campaigns.map((c) => (
-          <li key={c.campaign_id} className="wstorage-item">
+    <>
+      <AccountSection
+        title="On disk"
+        lede="Campaign trees, fattest first, then the shared reuse cache and everything else. The parts sum to the total."
+        aside={
+          <span className="account-figure">
+            {fmtBytes(data.total_bytes)}
+            <span className="account-figure-of">
+              {" "}
+              across {n} campaign{n === 1 ? "" : "s"}
+            </span>
+          </span>
+        }
+      >
+        {n === 0 ? (
+          <AccountEmpty title="No campaigns yet">
+            Each campaign&rsquo;s tree lands here once one is started, so you can see which one
+            the disk went to.
+          </AccountEmpty>
+        ) : null}
+        <ul className="wstorage-list">
+          {data.campaigns.map((c) => (
+            <li key={c.campaign_id} className="wstorage-item">
+              <div className="wstorage-item-head">
+                <span className="wstorage-name" title={c.campaign_id}>
+                  {c.dataset_name}
+                  {c.lifecycle_status !== "active" && (
+                    <span className={cx("wstorage-tag", c.lifecycle_status)}>
+                      {c.lifecycle_status}
+                    </span>
+                  )}
+                </span>
+                <span className="wstorage-bytes">{fmtBytes(c.on_disk_bytes)}</span>
+              </div>
+              <div className="wstorage-bar" aria-hidden="true">
+                <div
+                  className="wstorage-bar-fill"
+                  style={{ width: `${Math.max(2, (c.on_disk_bytes / max) * 100)}%` }}
+                />
+              </div>
+            </li>
+          ))}
+          <li className="wstorage-item wstorage-aux">
             <div className="wstorage-item-head">
-              <span className="wstorage-name" title={c.campaign_id}>
-                {c.dataset_name}
-                {c.lifecycle_status !== "active" && (
-                  <span className={cx("wstorage-tag", c.lifecycle_status)}>
-                    {c.lifecycle_status}
-                  </span>
-                )}
+              <span className="wstorage-name">
+                Shared cache
+                <span className="account-note"> — measurements; survives a campaign delete</span>
               </span>
-              <span className="wstorage-bytes">{fmtBytes(c.on_disk_bytes)}</span>
-            </div>
-            <div className="wstorage-bar" aria-hidden="true">
-              <div
-                className="wstorage-bar-fill"
-                style={{ width: `${Math.max(2, (c.on_disk_bytes / max) * 100)}%` }}
-              />
+              <span className="wstorage-bytes">{fmtBytes(data.shared_cache_bytes)}</span>
             </div>
           </li>
-        ))}
-        {data.campaigns.length === 0 && (
-          <li className="account-muted">No campaigns yet.</li>
-        )}
-        <li className="wstorage-item wstorage-aux">
-          <div className="wstorage-item-head">
-            <span className="wstorage-name">Shared cache</span>
-            <span className="wstorage-bytes">{fmtBytes(data.shared_cache_bytes)}</span>
-          </div>
-        </li>
-        <li className="wstorage-item wstorage-aux">
-          <div className="wstorage-item-head">
-            <span className="wstorage-name">Other</span>
-            <span className="wstorage-bytes">{fmtBytes(data.other_bytes)}</span>
-          </div>
-        </li>
-      </ul>
-      <ArchiveCompactionControl />
-    </div>
+          <li className="wstorage-item wstorage-aux">
+            <div className="wstorage-item-head">
+              <span className="wstorage-name">Other</span>
+              <span className="wstorage-bytes">{fmtBytes(data.other_bytes)}</span>
+            </div>
+          </li>
+        </ul>
+      </AccountSection>
+      <AccountSection
+        title="Archive maintenance"
+        lede="Preview first: nothing is written until a dry run has shown what would move."
+      >
+        <ArchiveCompactionControl />
+      </AccountSection>
+    </>
   );
 }

@@ -32,6 +32,16 @@ describe("Popover", () => {
     expect(screen.queryByText("item")).toBeNull();
   });
 
+  // Portaled out of the wrapper, so "outside" must still exclude the panel itself.
+  it("renders the panel outside any clipping ancestor, and a press inside keeps it open", () => {
+    const { container } = render(<Harness />);
+    fireEvent.click(screen.getByText(/trigger/));
+    const item = screen.getByText("item");
+    expect(container.contains(item)).toBe(false);
+    fireEvent.mouseDown(item);
+    expect(screen.getByText("item")).toBe(item);
+  });
+
   it("closes on Escape", () => {
     render(<Harness />);
     fireEvent.click(screen.getByText(/trigger/));

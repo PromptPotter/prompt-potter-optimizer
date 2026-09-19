@@ -21,7 +21,13 @@ from promptpotter.application.optimization.round_analysis import compute_round_d
 from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.application.runner.termination import panel_gate_tripped
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
-from promptpotter.domain.phases import CampaignPhase, RunPhase, StopLoop, StopReason, emit_phase
+from promptpotter.domain.phases import (
+    STOP_REASON_INFO,
+    CampaignPhase,
+    RunPhase,
+    StopLoop,
+    emit_phase,
+)
 from promptpotter.domain.results import RoundResult, is_leader_eligible, unscoreable_cells
 from promptpotter.domain.validators import StopRule
 
@@ -169,8 +175,8 @@ async def execute_round(
     # cannot see it.
     #
     # The `is_leader_eligible` conjunct matters. A degradation / scoring-error abort also
-    # produces error rows, and it already owns a channel (`backend_unreachable_tripped`);
-    # halting on it here would be a second mechanism doing one job.
+    # produces error rows, and it already owns a channel (the candidate-scoped scoring-error
+    # escalation); halting on it here would be a second mechanism doing one job.
     holed = sorted(
         c.candidate_id
         for c in round_result.candidate_scores
@@ -201,30 +207,35 @@ async def execute_round(
         },
         round=round_num,
     )
-    if panel_gate_tripped(holed, opt.panel_gate) is not None:
-        for cid in holed:
-            rows = round_result.all_candidate_results.get(cid) or []
-            for row in rows:
-                if is_error_result(row):
-                    logger.warning(
-                        "round %d panel HOLE: candidate %s, sample %s — %s",
-                        round_num,
-                        cid,
-                        row.get("sample_id"),
-                        row.get("error") or row.get("error_category"),
-                    )
+    # The gate reads the holed ROWS, not their candidates' ids: which of the two resumable halts
+    # this is depends on whether a declared bound cut the cell, and the advice the operator is
+    # handed (completion box, log, job record) follows from that — the gate's verdict, not a wording.
+    holed_rows = [
+        (cid, row)
+        for cid in holed
+        for row in round_result.all_candidate_results.get(cid) or []
+        if is_error_result(row)
+    ]
+    if (reason := panel_gate_tripped([row for _, row in holed_rows], opt.panel_gate)) is not None:
+        for cid, row in holed_rows:
+            logger.warning(
+                "round %d panel HOLE: candidate %s, sample %s — %s",
+                round_num,
+                cid,
+                row.get("sample_id"),
+                row.get("error") or row.get("error_category"),
+            )
         logger.warning(
             "Round %d halted BEFORE electing on an incomplete panel: %d of %d electable "
-            "candidate(s) carry cells that returned no measurement. The round is not "
-            "persisted — `resume` re-runs it, replays the cached candidates, re-measures "
-            "the missing cells and decides on a complete panel. Set "
-            "`optimization.panel_gate: off` to elect on holed panels instead.",
+            "candidate(s) carry cells that returned no measurement. The round is not persisted "
+            "— a resume re-runs it, replays the cached candidates and re-measures the holes. %s",
             round_num,
             len(holed),
             sum(1 for c in round_result.candidate_scores if is_leader_eligible(c)),
+            STOP_REASON_INFO[reason].next_step,
         )
         declare_run_phase(session, RunPhase.PAUSED)
-        raise StopLoop(StopReason.PAUSED)
+        raise StopLoop(reason)
 
     # The 1-to-1 series. Here and nowhere earlier: the election, the ruler extension and the
     # panel gate are all behind us, so no cell this buys can reach a decision this round made —

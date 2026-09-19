@@ -174,10 +174,11 @@ _ENTRIES: tuple[MetricSpec, ...] = (
         unit="seconds",
         higher_is_better=False,
         description=(
-            "Seconds the seed's inner campaign was blocked rather than working — the machine "
-            "suspended, or queued behind the rate limiter another cell was using — and handed "
-            "back to its deadline. Read it beside a short run: it separates a cell that was slow "
-            "from a box that was oversubscribed while it ran."
+            "Seconds the cell was blocked rather than working — the machine suspended, or queued "
+            "behind the rate limiter another cell was using — and handed back to its deadline. "
+            "Read it beside a slow cell: it separates one that was slow from a box that was "
+            "oversubscribed while it ran. Blank where the backend declares no envelope, which is "
+            "no reading rather than a clean one."
         ),
     ),
     MetricSpec(

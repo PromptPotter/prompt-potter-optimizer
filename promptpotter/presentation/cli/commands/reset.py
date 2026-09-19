@@ -18,6 +18,7 @@ from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import (
+    iter_files,
     read_json_optional,
     rmtree_robust,
     unlink_robust,
@@ -126,8 +127,11 @@ def _human_size(path: Path) -> str:
         if path.is_file():
             return f"{path.stat().st_size:,} B"
         if path.is_dir():
-            total = sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
-            n = sum(1 for _ in path.rglob("*") if _.is_file())
+            n = 0
+            total = 0
+            for _p, st in iter_files(path):
+                n += 1
+                total += st.st_size
             return f"{n:,} files / {total / 1_048_576:.1f} MiB"
     except OSError:
         pass

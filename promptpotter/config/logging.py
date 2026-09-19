@@ -32,7 +32,9 @@ class _QuietPolls(logging.Filter):
     silenced nothing while that 2 s poll and ``machine-status`` logged a line each per tick, forever."""
 
     _POLLED = re.compile(r"^/api/v1/(cycles|campaigns|machine-status|sessions/active)(\?|$)")
-    _SUFFIX = ("/dashboard", "/health")
+    # `/tree` and `/ray` are polled every 5 s for EACH open sidebar course, `/measurement-series`
+    # every 8 s — conditional GETs, so a quiet tick is a 304 and nothing more.
+    _SUFFIX = ("/dashboard", "/health", "/tree", "/ray", "/measurement-series")
     _QUIET_STATUS = frozenset({200, 304})
 
     def filter(self, record: logging.LogRecord) -> bool:

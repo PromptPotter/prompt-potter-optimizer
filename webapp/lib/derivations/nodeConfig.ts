@@ -20,7 +20,7 @@ export type ConfigMode = "search-space" | "values";
 
 // One row of the config editor. Search-space fields (`locked`, `allowed`,
 // `baseValue`) drive the optimizer search-space lever; values fields
-// (`fromCandidate`, `neverAxis`) drive the concrete fork-value lever. A row
+// (`inSeed`, `neverAxis`) drive the concrete fork-value lever. A row
 // carries both; the active `mode` decides which it renders + emits.
 export interface ConfigRow {
   node: string;
@@ -50,9 +50,10 @@ export interface ConfigRow {
   // search-space: the server STATED `permitted` — an absent entry would not resolve to it — so the
   // emit writes the set out even where it equals the menu.
   stated: boolean;
-  // values: present in the candidate overlay (vs the config floor) — keep it in
-  // the emitted overlay even when the operator leaves it untouched.
-  fromCandidate: boolean;
+  // values: the seed document carries this key — keep it in the emitted overlay even when the
+  // operator leaves it untouched. A transport fact, never provenance: that is `source`.
+  inSeed: boolean;
+  source: NodeConfigParam["source"];
   // WHICH construction forbids this key from ever being an axis, "" where none does — served,
   // because a browser reading it off the key's name can only ever tell one of the two stories.
   // Shown as a hint; a cap-holding operator may still set a cost lever on a fork (a babysit
@@ -83,37 +84,17 @@ export function effortLadder(row: ConfigRow, caps: ModelCapability | undefined):
   return caps?.reasoning_efforts ?? row.options;
 }
 
-/** Client twin of the Python `overlay_sets_model_outside_allowed`
- *  (`promptpotter/domain/pipeline_overlay.py`). True iff a fork's `pipeline_overlay` steers a node
- *  to a responder the origin has NOT permitted — the ADR-0005 babysit (grade-C) trigger. Keeps the
- *  client warning on the SAME predicate the server gate enforces at `fork-cycle`.
- *
- *  *permitted* is per NODE — the frozen `config.optimizer_narrowing[node].param_allowed_values
- *  .model`, which is the ONE permitted set. A node absent from it permits nothing, the restrictive
- *  default. A cost lever — the gateway or the route, the two keys served as `never_axis:
- *  "cost_lever"` — has no permitted set that could sanction it, so an edit to one always counts. */
-export function overlaySetsModelOutsideAllowed(
-  overlay: Record<string, unknown> | null | undefined,
-  permitted: Record<string, readonly string[]> | null | undefined,
-): boolean {
-  for (const [node, cfg] of Object.entries(overlay ?? {})) {
-    if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) continue;
-    const c = cfg as Record<string, unknown>;
-    if ("provider" in c || "route_order" in c) return true;
-    const model = c.model;
-    if (model != null && !new Set(permitted?.[node] ?? []).has(String(model))) return true;
-  }
-  return false;
-}
-
 /** The per-node permitted model sets, read off the SERVED rows — `permitted` when the gate accepts
  *  something narrower than the menu, and `options` when it does not. That `null` is not `[]` is the
  *  whole distinction: `[]` says nothing may be picked, while `null` says `options` IS the permitted
  *  set (`domain/pipeline_schema.py::NodeConfigParam.permitted`).
  *
- *  Off THESE rows and never off the campaign's frozen `config.optimizer_narrowing`: that one
- *  answers for the mint, so a fork or a cycle seed that moved the set steers against the wrong
- *  list. */
+ *  **It answers what the editor may OFFER, and that is the only question it answers.** The two are
+ *  not one: these rows move with a cycle seed, while the babysit gate reads the campaign's frozen
+ *  `config.optimizer_narrowing` — so both the VERDICT and the list a warning NAMES come from
+ *  `POST /campaigns/{id}/fork-preview` (`steers_disallowed_model` + `permitted_models`). Wiring
+ *  this back into either is the drift that endpoint exists to end, and it fails silently: the
+ *  sentence renders, naming models that decided nothing. */
 export function permittedModels(
   schema: Record<string, NodeConfigParam[]> | null | undefined,
 ): Record<string, readonly string[]> {
@@ -254,9 +235,9 @@ export function nodeSchemaPatch(
 // **`valuesSeed` is read in `values` mode ONLY, and that asymmetry is the point.** A search-space
 // row's value, lock and permitted set are all SERVED — deriving them from a client-held overlay
 // re-answers in the browser what the server's merge already settled, and answers differently
-// (`frontend-surface-contract.md::I9`). A fork's seed is a sparse delta that exists nowhere else
-// until it is confirmed, so `values` takes one: `fromCandidate` is what keeps an
-// inherited-but-untouched param out of the emission.
+// (`frontend-surface-contract.md::I9`). A fork's seed exists nowhere else until it is confirmed,
+// so `values` takes one: `inSeed` is what keeps an inherited-but-untouched param out of the
+// emission.
 export function configRows(
   schema: Record<string, NodeConfigParam[]> | null,
   valuesSeed: Record<string, unknown>,
@@ -290,7 +271,8 @@ export function configRows(
           locked: p.movable_by.length === 0,
           allowed: permitted,
           stated: p.permitted !== null,
-          fromCandidate: false,
+          inSeed: false,
+          source: p.source,
           neverAxis: p.never_axis,
           movableBy: p.movable_by,
           held: p.held,
@@ -299,8 +281,8 @@ export function configRows(
       } else {
         // values: the seed is the flat fork delta — `nodeSeed[key]` is the value
         // directly (no `config`/`optimizer` nesting).
-        const fromCandidate = p.key in nodeSeed;
-        const seedVal = fromCandidate ? nodeSeed[p.key] : p.value;
+        const inSeed = p.key in nodeSeed;
+        const seedVal = inSeed ? nodeSeed[p.key] : p.value;
         rows.push({
           node: n,
           key: p.key,
@@ -310,11 +292,12 @@ export function configRows(
           baseValue,
           locked: false,
           // The whole MENU, not the permitted subset: a babysit-capable operator may steer a fork
-          // outside it deliberately, taking the grade-C taint. `SteerForkPanel` warns off
-          // `permittedModels` instead — restricting here would delete the act.
+          // outside it deliberately, taking the grade-C taint. `SteerForkPanel` warns off the
+          // SERVED verdict instead — restricting here would delete the act.
           allowed: p.options,
           stated: false,
-          fromCandidate,
+          inSeed,
+          source: p.source,
           neverAxis: p.never_axis,
           movableBy: p.movable_by,
           held: p.held,
@@ -426,7 +409,7 @@ export function flatConfigKey(node: string, param: string): string {
 // from.
 //
 // **The emission is not a diff, and reading it as one is the trap.** `configRows` sets
-// `fromCandidate` for every param the resolved config carries, and a searchpoint's resolved config
+// `inSeed` for every param the resolved config carries, and a searchpoint's resolved config
 // carries every param's running value rather than a sparse delta. So `seedOverlayFromRows` emits
 // the WHOLE running configuration on the first keystroke, and anything treating that as "what
 // changed" marks every parameter edited at once.
@@ -478,8 +461,8 @@ export function applyFlatEdits(
 }
 
 // values emit: the sparse `{node:{param:value}}` fork seed, from the rows + the
-// operator's edited string values (keyed `"{node}.{key}"`). A param lands when it
-// came from the candidate OR the operator changed it from the seeded value —
+// operator's edited string values (keyed `"{node}.{key}"`). A param lands when the
+// seed carries it OR the operator changed it from the seeded value —
 // inherited-untouched params stay out (they already live in `pipeline_params`).
 export function seedOverlayFromRows(
   rows: ConfigRow[],
@@ -489,7 +472,7 @@ export function seedOverlayFromRows(
   for (const r of rows) {
     if (r.kind === "prompt") continue; // the fork's prompt rides `origin_prompt_fields`, never config
     const edit = edits[flatConfigKey(r.node, r.key)];
-    if (!r.fromCandidate && (edit === undefined || edit === r.value)) continue; // inherited + untouched
+    if (!r.inSeed && (edit === undefined || edit === r.value)) continue; // inherited + untouched
     const raw = edit ?? r.value;
     if (raw === "") continue; // empty = drop (inherit)
     const value = coerce(r.kind, raw);

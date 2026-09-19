@@ -3,11 +3,15 @@ from __future__ import annotations
 import asyncio
 import enum
 import logging
+import re
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.shared.hashing import shapes_optimizer_prompt
+
+if TYPE_CHECKING:
+    from promptpotter.domain.spend import StepTokenUsage
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +20,93 @@ class ErrorCategory(enum.StrEnum):
     CLIENT = "CLIENT"
     SERVER = "SERVER"
     CONNECTION = "CONNECTION"
+    # A wallet refused the cell's calls — the provider account's credit, or the run's spend or token
+    # ceiling. A hole, like CONNECTION: every later cell meets the same refusal.
+    PROVIDER_CREDIT = "PROVIDER_CREDIT"
+    SPEND_CEILING = "SPEND_CEILING"
+    TOKEN_CEILING = "TOKEN_CEILING"
     PIPELINE = "PIPELINE"
+    # A bound WE declared ended the cell. Re-measuring under the same declaration ends it at the
+    # same place for the same price, so a repair leaves one alone (:func:`is_repairable_hole`).
+    HALTED = "HALTED"
+    # The cell ran to its own end and produced nothing gradeable. Not the configuration under
+    # test failing, so never a fatal code.
+    UNSCOREABLE = "UNSCOREABLE"
     UNKNOWN = "UNKNOWN"
+
+
+class CellUnscoreableError(RuntimeError):
+    """Raised where a cell answers with no verdict; ``measure_sample`` is the one catcher and banks
+    :attr:`category`, so the configuration under test is never charged.
+
+    ``spent`` (``step_tokens`` shape) and ``step_timings`` are what the cell paid before it had no
+    verdict, and the catcher bills them. ``{}`` where a ledger holds it already (an L4 inner cycle)."""
+
+    category: ErrorCategory = ErrorCategory.UNSCOREABLE
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        spent: Mapping[str, StepTokenUsage],
+        step_timings: Mapping[str, float],
+    ) -> None:
+        super().__init__(message)
+        self.spent = spent
+        self.step_timings = step_timings
+
+
+class CellHaltedError(CellUnscoreableError):
+    """A bound we DECLARED cut the cell, so there is no verdict AND no point re-measuring: the same
+    declaration cuts the next attempt at the same place, after paying for it again."""
+
+    category = ErrorCategory.HALTED
+
+
+class CellInfrastructureError(CellUnscoreableError):
+    """The machine could not run the cell — a registry, a package mirror, the network — after the
+    backend's own bounded retries. Banked as ``CONNECTION``, which stops the walk (``query_loop``)."""
+
+    category = ErrorCategory.CONNECTION
+
+
+class CellWalletExhaustedError(CellInfrastructureError):
+    """A wallet behind the cell refused it — the provider account's credit, or a ceiling the run
+    holds; ``category`` names which. No backoff refills either, so it is raised on the first
+    refusal and the walk halts on the hole."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        category: ErrorCategory,
+        spent: Mapping[str, StepTokenUsage],
+        step_timings: Mapping[str, float],
+    ) -> None:
+        super().__init__(message, spent=spent, step_timings=step_timings)
+        self.category = category
+
+
+# The refusals once an account's credit or a key's limit is spent: OpenRouter's two (HTTP 402 /
+# 403) and Anthropic's, which arrives as an HTTP 400 `invalid_request_error`.
+_PROVIDER_CREDIT_REFUSAL = re.compile(
+    r"requires more credits|Key limit exceeded|credit balance is too low"
+)
+
+
+def is_provider_credit_refusal(detail: str) -> bool:
+    return _PROVIDER_CREDIT_REFUSAL.search(detail) is not None
+
+
+class WalletExhaustedError(RuntimeError):
+    """A wallet refused one of our paid calls — the provider account's credit, or a ceiling the run
+    holds (``infrastructure/llm/spend_book.py``), which refuses BEFORE sending. Nothing but the
+    operator refills either, so a run ends on the stop ``category`` maps to
+    (``domain/phases.py::WALLET_STOPS``) rather than crashing."""
+
+    def __init__(self, message: str, *, category: ErrorCategory) -> None:
+        super().__init__(message)
+        self.category = category
 
 
 class PotterError(Exception):
@@ -287,11 +376,11 @@ def has_pipeline_warnings(result: Mapping[str, Any]) -> bool:
 
 @contextmanager
 def graceful(msg: str) -> Iterator[None]:
-    """Suppress non-interrupt exceptions with a log message. ``KeyboardInterrupt`` and
-    ``asyncio.CancelledError`` re-raise, so graceful shutdown is never swallowed."""
+    """Suppress non-interrupt exceptions with a log message. ``KeyboardInterrupt``,
+    ``asyncio.CancelledError`` and a spent provider account re-raise: each ends the run."""
     try:
         yield
-    except (KeyboardInterrupt, asyncio.CancelledError):
+    except (KeyboardInterrupt, asyncio.CancelledError, WalletExhaustedError):
         raise
     except Exception:
         logger.warning(msg, exc_info=True)
@@ -312,8 +401,18 @@ def error_category(result: Mapping[str, Any]) -> ErrorCategory | None:
         return None
 
 
+def is_repairable_hole(result: Mapping[str, Any]) -> bool:
+    """A hole a re-measure could plug. ``HALTED`` is not one: the bound that cut the cell is
+    declared, so the next attempt is cut at the same place and the measurement is paid for twice."""
+    return is_error_result(result) and error_category(result) is not ErrorCategory.HALTED
+
+
 __all__ = [
     "BadRequestError",
+    "CellHaltedError",
+    "CellInfrastructureError",
+    "CellUnscoreableError",
+    "CellWalletExhaustedError",
     "ConflictError",
     "ContentTooLargeError",
     "DatasetIdentityError",
@@ -329,8 +428,11 @@ __all__ = [
     "ServiceUnavailableError",
     "StoredConfigInvalidError",
     "UnauthorizedError",
+    "WalletExhaustedError",
     "error_category",
     "graceful",
     "has_pipeline_warnings",
     "is_error_result",
+    "is_provider_credit_refusal",
+    "is_repairable_hole",
 ]

@@ -78,13 +78,24 @@ export type OperatorForkOverride = Partial<
 // at `round` under the seed's overrides — what "apply this from here" means, and what the
 // terminal spells `resume --rewind N`. The server refuses the second with an
 // `origin_prompt_fields` seed: the lifted round 0 already is the origin.
-export async function postForkCycle(
+//
+// `pauseFirst` is the ORDER, not a convenience: a steer supersedes the parent, so a fork
+// launched beside a still-running loop races it. Whether the parent is live is the caller's
+// fact; what to do about it is not, which is why both panels state it here rather than
+// spelling the pause themselves.
+export async function postSteerFork(
   campaignId: string,
   cycleId: string,
   round: number,
   candidateId: string,
-  opts: { seed: OperatorForkOverride; steeredBy?: string; keepRounds?: boolean },
+  opts: {
+    seed: OperatorForkOverride;
+    steeredBy?: string;
+    keepRounds?: boolean;
+    pauseFirst: boolean;
+  },
 ): Promise<CommandAcceptedBody> {
+  if (opts.pauseFirst) await postPauseCycle(campaignId, cycleId);
   const payload: Record<string, unknown> = {
     campaign_id: campaignId,
     cycle_id: cycleId,
@@ -195,7 +206,7 @@ export async function postVerifyCandidate(
     label,
   });
 }
-// Set how many of a candidate's samples the scoring walk holds in flight; `cells: 1` disarms,
+// Set how many calls the scoring round holds in flight; `cells: 1` disarms,
 // so it is a cancel rather than a second verb. The request is sent unclamped and the walk
 // clamps it to the backend's ceiling (`dashboard.json::max_cells_in_flight`). It also ends on
 // its own — spent by the round that scored under it, the same on every backend. Unlike skip it
@@ -204,11 +215,13 @@ export async function postVerifyCandidate(
 //
 // The one command addressed by PATH rather than by the root hop: throughput is what an inner
 // run answers for itself, so an L4 inner cycle is armed by descending to it — the same
-// `descend` grammar the dashboard poll uses, empty at depth 1.
+// `descend` grammar the dashboard poll uses, empty at depth 1. `auto` keeps the arming past its
+// round and past a relaunch, until a later press replaces it.
 // Per `api-openapi.yaml::setSampleLookahead`.
 export async function postSetSampleLookahead(
   path: CyclePath,
   cells: number,
+  auto: boolean,
 ): Promise<CommandAcceptedBody> {
   const root = pathRoot(path);
   const descend = encodeDescend(path);
@@ -216,6 +229,7 @@ export async function postSetSampleLookahead(
     campaign_id: root.campaignId,
     cycle_id: root.cycleId,
     cells,
+    auto,
     ...(descend ? { descend } : {}),
   });
 }
@@ -256,24 +270,21 @@ export async function postChangeSpendBudget(
   if (typeof caps.maxTokens === "number") payload.max_tokens = caps.maxTokens;
   return postCommand("change-spend-budget", payload);
 }
+// The caller's OWN account limit — workspace-scoped, so no cycle. Refused (422) above the
+// machine ceiling and on the host's key; read the result back off `/auth/quota-status`.
+export async function postSetConcurrentCycles(limit: number): Promise<CommandAcceptedBody> {
+  return postCommand("set-concurrent-cycles", { max_concurrent_cycles: limit });
+}
+// No cap args. A cap is declared where there is a surface to declare it on — the check-in's own
+// Start (`start-checkin`) for a fresh launch, `change-spend-budget` for a run already going — and
+// a resume inherits what the cycle already carries. The two optional ones that stood here reached
+// `useRunControl`, the sole caller, which has never passed either.
 export async function postStartRun(
   campaignId: string,
   cycleId: string,
   kind: "new" | "resume",
-  opts: { haltAtAccuracy?: number; spendBudgetUsd?: number } = {},
 ): Promise<CommandAcceptedBody> {
-  const payload: Record<string, unknown> = {
-    campaign_id: campaignId,
-    cycle_id: cycleId,
-    kind,
-  };
-  if (opts.haltAtAccuracy !== undefined) {
-    payload.halt_at_accuracy = opts.haltAtAccuracy;
-  }
-  if (opts.spendBudgetUsd !== undefined) {
-    payload.spend_budget_usd = opts.spendBudgetUsd;
-  }
-  return postCommand("start-run", payload);
+  return postCommand("start-run", { campaign_id: campaignId, cycle_id: cycleId, kind });
 }
 
 // Archive maintenance — the one command whose PREVIEW is the product. Every mode defaults to a

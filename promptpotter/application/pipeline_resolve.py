@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import logging
 from collections.abc import Callable, Mapping, MutableMapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from pydantic import Field
@@ -37,11 +38,11 @@ from promptpotter.config.settings import (
 )
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
 from promptpotter.domain.pipeline_overlay import fold_output_contract, node_config_items
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response, parse_resolved_schema
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_TEXT,
+    OUTPUT_SCHEMA_KEY,
     SCHEMA_TOGGLE_PARAM,
     ModelCapability,
     NestedPipelineRef,
@@ -54,6 +55,7 @@ from promptpotter.domain.pipeline_schema import (
     reach_map,
     stable_hash,
 )
+from promptpotter.domain.search_point import strip_rendered_prompt
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.capabilities import resolve_schema_menu
 from promptpotter.infrastructure.runtime_flags import is_checkin
@@ -63,9 +65,14 @@ from promptpotter.infrastructure.store.dataset_access import (
     dataset_pipeline_path,
     readable_dataset_dir,
 )
-from promptpotter.infrastructure.store.io import read_yaml_optional
+from promptpotter.infrastructure.store.io import read_yaml_optional, stat_key
+from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.judges import get as get_judge
-from promptpotter.shared.errors import PayloadInvalidError
+from promptpotter.shared.errors import (
+    CellUnscoreableError,
+    PayloadInvalidError,
+    StoredConfigInvalidError,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -73,6 +80,7 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.run_records import CycleSeed
     from promptpotter.infrastructure.store.stores import Stores
     from promptpotter.judges.protocol import JudgeSpec
 
@@ -87,13 +95,19 @@ neither a tunable — nothing may put either in `param_keys`."""
 
 __all__ = [
     "CampaignPipelineResponse",
+    "CampaignRunsWith",
+    "RunsWithParam",
+    "apply_identity_layer",
     "apply_node_overlay",
+    "campaign_runs_with",
     "configure_and_apply_pipeline",
+    "merge_declared_layers",
     "missing_template_vars",
     "resolve_campaign_config",
     "resolve_pipeline_config_params",
     "resolve_pipeline_for_campaign",
     "resolve_pipeline_for_draft",
+    "resolve_root_config",
     "resolved_dataset_name",
 ]
 
@@ -161,7 +175,34 @@ def resolve_pipeline_config_params(
     with ``GET /origins``, so the prospective origin and the real one cannot diverge.
     ``base_config`` is the layer a CHECK-IN has instead of a dataset file: the backend's own
     captured declaration. ``provenance`` is the display sink of :func:`apply_node_overlay`."""
+    params = merge_declared_layers(
+        active,
+        campaign_overlay,
+        dataset_dir,
+        schema,
+        base_config=base_config,
+        provenance=provenance,
+    )
+    return apply_identity_layer(
+        params,
+        active,
+        dataset_dir,
+        schema,
+        judges=judges,
+        experiment=experiment,
+        provenance=provenance,
+    )
 
+
+def merge_declared_layers(
+    active: list[str],
+    campaign_overlay: Mapping[str, Any],
+    dataset_dir: Path | None,
+    schema: PipelineSchema,
+    *,
+    base_config: Mapping[str, Any] | None = None,
+    provenance: MutableMapping[str, dict[str, ParamSource]] | None = None,
+) -> dict[str, Any]:
     pipeline_params: dict[str, Any] = {"steps": list(active)}
     if base_config is not None:
         pipeline_params = apply_node_overlay(
@@ -189,19 +230,29 @@ def resolve_pipeline_config_params(
         if isinstance(value, dict) and key in active:
             valid_overrides[key] = value
         elif isinstance(value, dict):
-            logger.debug(
-                "resolve_pipeline_config_params: skipping override for inactive node %r", key
-            )
+            logger.debug("merge_declared_layers: skipping override for inactive node %r", key)
         else:
             logger.warning(
-                "resolve_pipeline_config_params: ignoring non-nested override %r=%r "
+                "merge_declared_layers: ignoring non-nested override %r=%r "
                 '(use {"node_name": {"param": value}} format)',
                 key,
                 value,
             )
-    pipeline_params = apply_node_overlay(
+    return apply_node_overlay(
         pipeline_params, valid_overrides, schema, source="campaign", provenance=provenance
     )
+
+
+def apply_identity_layer(
+    pipeline_params: dict[str, Any],
+    active: list[str],
+    dataset_dir: Path | None,
+    schema: PipelineSchema,
+    *,
+    judges: Mapping[str, JudgeSpec] | None,
+    experiment: Mapping[str, Any] | None,
+    provenance: MutableMapping[str, dict[str, ParamSource]] | None = None,
+) -> dict[str, Any]:
     # Identity contributions LAST and unoverridable: what a measurement was taken UNDER that no
     # operator wrote — the connector's and the judges', ONE channel, or a second place a fact can
     # enter the archive key.
@@ -322,20 +373,6 @@ def _apply_starting_prompts(
     """Assumes the caller checked ``has_dataset_prompts``."""
 
     prompt_nodes = [n for n in filtered.prompt_node_names() if n in active]
-    if not prompt_nodes:
-        # The dataset ships starting prompts but no active node declares
-        # `prompt_info` — so the rendered prompt has nowhere to land and is
-        # dropped before the wire. Silent here = every backend call runs with
-        # an empty system prompt (the bug that made an ingested dataset score
-        # 0% on email-replies). Fail loud: an LLM node must advertise
-        # `prompt_info` in GET /pipeline (or the dataset overlay).
-        logger.warning(
-            "configure_and_apply_pipeline: dataset %r has starting prompts but NO "
-            "prompt-bearing node in the active pipeline %s — the prompt will "
-            "NOT reach the backend. An LLM node must declare `prompt_info`.",
-            dataset_name,
-            active,
-        )
     prompt_info_by_node = {n.name: n.prompt_info for n in filtered.nodes}
     for pnode in prompt_nodes:
         template = load_node_prompt(dataset_dir, pnode, "default")
@@ -365,6 +402,43 @@ def _apply_starting_prompts(
         # config above — never on `current_config`.
         pipeline_params.setdefault(pnode, {})["prompt"] = rendered
         log(f"Starting prompt: {dataset_name}/prompts/[{pnode}|default].yaml → {pnode}")
+
+
+def _validate_prompt_reach(
+    *,
+    filtered: PipelineSchema,
+    active: list[str],
+    has_starting_prompts: bool,
+    dataset_name: str,
+) -> None:
+    """Where this campaign's prompt LANDS, asked before the first call rather than read off a flat
+    scoreboard after it. **Two channels carry one and a dataset needs exactly one:** a node
+    declaring ``prompt_info`` receives the searchpoint's render, or a node naming prompt fields in
+    ``optimizer.param_keys`` mutates its own template — which is why prompt fields in
+    ``param_keys`` cannot be the test (``promptpotter-self`` declares them and no ``prompt_info``,
+    deliberately). With neither open every candidate is byte-identical on the wire."""
+    if any(n in active for n in filtered.prompt_node_names()):
+        return
+    if has_starting_prompts:
+        raise PayloadInvalidError(
+            f"dataset {dataset_name!r} ships starting prompts but no active node in {active} "
+            f"declares `prompt_info`, so the rendered prompt is dropped before the wire and "
+            f"every cell runs with an empty system prompt. An LLM node must declare it, in "
+            f"GET /pipeline or in the dataset's pipeline.yaml.",
+            code="pipeline_config_invalid",
+        )
+    if not any(
+        node.param_keys & set(PROMPT_STRING_FIELDS)
+        for name in active
+        if (node := filtered.get_node(name)) is not None
+    ):
+        raise PayloadInvalidError(
+            f"dataset {dataset_name!r}: no active node in {active} can receive a prompt — none "
+            f"declares `prompt_info` and none names a prompt field in `optimizer.param_keys`, so "
+            f"every candidate scores as the same no-skill call and the round reports a tie it "
+            f"never measured. Declare one of the two on the node the prompt is meant for.",
+            code="pipeline_config_invalid",
+        )
 
 
 def _validate_model_ownership(
@@ -469,7 +543,7 @@ def nested_pipeline_ref(dataset_dir: Path, view: PipelineView | None) -> NestedP
     no name test recognises one. Here because both read doors need it and neither imports a router."""
     try:
         panel = load_inner_tasks(inner_tasks_path(dataset_dir))
-    except InnerCycleUnscoreableError:
+    except CellUnscoreableError:
         # A read-only view must not raise where the runner would.
         return None
     node = next((n for n in (view.nodes if view else []) if n.kind == "measurement"), None)
@@ -517,18 +591,141 @@ def _config_floor(campaign: Campaign, dataset_dir: Path | None) -> CampaignConfi
     return load_campaign_config({"optimization": dict(defaults)})
 
 
+def _dataset_dir_of(stores: Stores, campaign: Campaign) -> Path | None:
+    try:
+        return readable_dataset_dir(stores, campaign.dataset_name)
+    except DatasetAccessError:
+        # A campaign outlives its dataset dir; `_config_floor` says what answers instead.
+        return None
+
+
+def _inherited_config(
+    campaign: Campaign, dataset_dir: Path | None, seed: CycleSeed | None
+) -> CampaignConfig:
+    return apply_inherited_overlay(
+        _config_floor(campaign, dataset_dir), campaign.config or {}, seed
+    )
+
+
 def resolve_campaign_config(
     stores: Stores, campaign: Campaign, hop: CycleHop | None
 ) -> CampaignConfig:
     """What a campaign RUNS under: its frozen declaration over the live dataset file, a cycle seed's
     narrowing last (``hop=None`` reads none). Resume, ``ab`` and the served pipeline all ask it."""
-    try:
-        dataset_dir: Path | None = readable_dataset_dir(stores, campaign.dataset_name)
-    except DatasetAccessError:
-        dataset_dir = None
     seed = stores.campaigns.read_cycle_seed(hop) if hop is not None else None
-    return apply_inherited_overlay(
-        _config_floor(campaign, dataset_dir), campaign.config or {}, seed
+    return _inherited_config(campaign, _dataset_dir_of(stores, campaign), seed)
+
+
+def _authoring_draft(stores: Stores, campaign: Campaign) -> DraftCampaign | None:
+    """The FLAG decides a campaign is authoring, never the presence of a draft:
+    ``finalize_checkin_to_active`` leaves ``draft.json`` in place after Start."""
+    if not is_checkin(stores.campaigns.cycle_dir(campaign.root_hop)):
+        return None
+    return load_checkin_draft(stores, campaign.campaign_id)
+
+
+def resolve_root_config(stores: Stores, campaign: Campaign) -> CampaignConfig:
+    draft = _authoring_draft(stores, campaign)
+    if draft is not None:
+        return draft_campaign_config(draft)
+    return resolve_campaign_config(stores, campaign, campaign.root_hop)
+
+
+@dataclass(frozen=True)
+class _Merge:
+    declared: PipelineSchema
+    filtered: PipelineSchema
+    active: list[str]
+    cfg: CampaignConfig
+    params: dict[str, Any]
+    provenance: dict[str, dict[str, ParamSource]]
+
+
+@dataclass(frozen=True)
+class _CampaignMerge(_Merge):
+    dataset_dir: Path | None
+    hop: CycleHop
+    raw: dict[str, Any] | None
+    seed: CycleSeed | None
+
+    def with_seed(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.seed is None or not self.seed.pipeline_overlay:
+            return params
+        return apply_node_overlay(
+            params,
+            self.seed.pipeline_overlay,
+            self.filtered,
+            source="seed",
+            provenance=self.provenance,
+        )
+
+
+def _draft_merge(draft: DraftCampaign) -> _Merge:
+    schema = parse_pipeline_response(rendered_pipeline_json(draft))
+    cfg = draft_campaign_config(draft)
+    active, filtered = _resolve_active_schema(
+        schema,
+        exclude=list(cfg.exclude_nodes),
+        narrowing=cfg.optimizer_narrowing,
+        dataset_dir=None,
+    )
+    provenance: dict[str, dict[str, ParamSource]] = {}
+    params = merge_declared_layers(
+        active,
+        cfg.pipeline_overlay,
+        None,
+        filtered,
+        base_config={n.name: dict(n.current_config) for n in filtered.config_nodes},
+        provenance=provenance,
+    )
+    return _Merge(
+        # What was on OFFER before this draft narrowed anything, so a menu cannot shrink to its
+        # own pick.
+        declared=parse_pipeline_response(declared_pipeline_json(draft)),
+        filtered=filtered,
+        active=active,
+        cfg=cfg,
+        params=params,
+        provenance=provenance,
+    )
+
+
+def _campaign_merge(stores: Stores, campaign: Campaign, at: SubjectSpec) -> _CampaignMerge:
+    dataset_dir = _dataset_dir_of(stores, campaign)
+    hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=at.cycle_id or campaign.root_cycle_id)
+    # WHAT THE ADDRESSED CYCLE RAN, in preference to what its dataset file says. The committed file
+    # carries values and no `param_keys` at all, because `merge_pipeline_overlay` deliberately
+    # refuses to freeze the backend's declaration at check-in — so read alone it serves every row
+    # `movable_by: []` and reports a live search space as nothing. The run records its own merge
+    # (`wiring::_resolve_pipeline_schema` → `init_cycle`); a campaign that never ran has no backend
+    # answer to give and falls to the file, which is then the honest one.
+    raw = stores.campaigns.read_resolved_pipeline(hop)
+    if raw is None and dataset_dir:
+        raw = read_yaml_optional(dataset_pipeline_path(dataset_dir))
+    schema = parse_pipeline_response(raw or {"nodes": {}, "pipelines": {"default": []}})
+    seed = stores.campaigns.read_cycle_seed(hop)
+    cfg = _inherited_config(campaign, dataset_dir, seed)
+    active, filtered = _resolve_active_schema(
+        schema,
+        exclude=list(cfg.exclude_nodes),
+        narrowing=cfg.optimizer_narrowing,
+        dataset_dir=dataset_dir,
+    )
+    provenance: dict[str, dict[str, ParamSource]] = {}
+    params = merge_declared_layers(
+        active, cfg.pipeline_overlay, dataset_dir, filtered, provenance=provenance
+    )
+    return _CampaignMerge(
+        declared=schema,
+        filtered=filtered,
+        active=active,
+        cfg=cfg,
+        params=params,
+        provenance=provenance,
+        dataset_dir=dataset_dir,
+        hop=hop,
+        raw=raw,
+        seed=seed,
     )
 
 
@@ -545,33 +742,21 @@ def resolve_pipeline_for_draft(
     The dataset file is not consulted even when the slug exists — one file, shared by every
     campaign on it, is the defect this seam ends; a reused origin's values arrive via
     ``origins.py::draft_from_origin`` instead."""
-    schema = parse_pipeline_response(rendered_pipeline_json(draft))
-    # What was on OFFER before this draft narrowed anything, so a menu cannot shrink to its own pick.
-    declared = parse_pipeline_response(declared_pipeline_json(draft))
-    cfg = draft_campaign_config(draft)
-    active, filtered = _resolve_active_schema(
-        schema,
-        exclude=list(cfg.exclude_nodes),
-        narrowing=cfg.optimizer_narrowing,
-        dataset_dir=None,
-    )
-
-    provenance: dict[str, dict[str, ParamSource]] = {}
-    params = resolve_pipeline_config_params(
-        active,
-        cfg.pipeline_overlay,
+    m = _draft_merge(draft)
+    params = apply_identity_layer(
+        m.params,
+        m.active,
         None,
-        filtered,
-        judges=cfg.judges,
+        m.filtered,
+        judges=m.cfg.judges,
         experiment=None,
-        base_config={n.name: dict(n.current_config) for n in filtered.config_nodes},
-        provenance=provenance,
+        provenance=m.provenance,
     )
-    rows = filtered.node_config_schema(
+    rows = m.filtered.node_config_schema(
         values={n: c for n, c in params.items() if isinstance(c, dict)},
-        sources=provenance,
-        model_menu=filtered.selectable_models(),
-        declared=declared,
+        sources=m.provenance,
+        model_menu=m.filtered.selectable_models(),
+        declared=m.declared,
     )
     return CampaignPipelineResponse(
         campaign_id=campaign_id,
@@ -581,13 +766,13 @@ def resolve_pipeline_for_draft(
         backend_type=draft.connector,
         params=params,
         node_config_schema=rows,
-        view=filtered.view,
-        node_output_schema=resolved_output_schemas(filtered, params),
-        model_capabilities=resolve_schema_menu(filtered, workspace=workspace),
+        view=m.filtered.view,
+        node_output_schema=resolved_output_schemas(m.filtered, params),
+        model_capabilities=resolve_schema_menu(m.filtered, workspace=workspace),
         reach=reach_map(rows),
         # A dataset dir is what declares an inner panel, and a check-in has none yet.
         nests=None,
-        is_single_node=filtered.is_single_node,
+        is_single_node=m.filtered.is_single_node,
     )
 
 
@@ -603,96 +788,167 @@ def resolve_pipeline_for_campaign(
     ``identity``. ``stores`` must already be the store *campaign* lives in: for an L4 inner
     searchpoint the caller descends ``at.inside`` first, so manifest and rounds come off one tree.
 
-    A campaign still AUTHORING takes the check-in arm — one door, two sets of layers. The FLAG
-    decides it, never the presence of a draft: ``finalize_checkin_to_active`` leaves ``draft.json``
-    in place, so a started campaign would otherwise answer from state it has since frozen."""
-    hop_now = campaign.root_hop
-    if is_checkin(stores.campaigns.cycle_dir(hop_now)):
-        draft = load_checkin_draft(stores, campaign.campaign_id)
-        if draft is not None:
-            return resolve_pipeline_for_draft(
-                draft,
-                campaign_id=campaign.campaign_id,
-                cycle_id=hop_now.cycle_id,
-                workspace=workspace,
-            )
-
-    dataset_dir: Path | None
-    try:
-        dataset_dir = readable_dataset_dir(stores, campaign.dataset_name)
-    except DatasetAccessError:
-        # A campaign outlives its dataset dir; `_config_floor` below says what answers instead.
-        dataset_dir = None
-
-    hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=at.cycle_id or campaign.root_cycle_id)
-    # WHAT THE ADDRESSED CYCLE RAN, in preference to what its dataset file says. The committed file
-    # carries values and no `param_keys` at all, because `merge_pipeline_overlay` deliberately
-    # refuses to freeze the backend's declaration at check-in — so read alone it serves every row
-    # `movable_by: []` and reports a live search space as nothing. The run records its own merge
-    # (`wiring::_resolve_pipeline_schema` → `init_cycle`); a campaign that never ran has no backend
-    # answer to give and falls to the file, which is then the honest one.
-    raw = stores.campaigns.read_resolved_pipeline(hop)
-    if raw is None and dataset_dir:
-        raw = read_yaml_optional(dataset_pipeline_path(dataset_dir))
-    schema = parse_pipeline_response(raw or {"nodes": {}, "pipelines": {"default": []}})
-
-    seed = stores.campaigns.read_cycle_seed(hop) if at.cycle_id else None
-    cfg = resolve_campaign_config(stores, campaign, hop if at.cycle_id else None)
-
-    active, filtered = _resolve_active_schema(
-        schema,
-        exclude=list(cfg.exclude_nodes),
-        narrowing=cfg.optimizer_narrowing,
-        dataset_dir=dataset_dir,
-    )
-
-    provenance: dict[str, dict[str, ParamSource]] = {}
-    params = resolve_pipeline_config_params(
-        active,
-        cfg.pipeline_overlay,
-        dataset_dir,
-        filtered,
-        judges=cfg.judges,
-        experiment=experiment_outside_run(dataset_dir),
-        provenance=provenance,
-    )
-    if seed is not None and seed.pipeline_overlay:
-        params = apply_node_overlay(
-            params, seed.pipeline_overlay, filtered, source="seed", provenance=provenance
+    A campaign still AUTHORING takes the check-in arm — one door, two sets of layers."""
+    draft = _authoring_draft(stores, campaign)
+    if draft is not None:
+        return resolve_pipeline_for_draft(
+            draft,
+            campaign_id=campaign.campaign_id,
+            cycle_id=campaign.root_cycle_id,
+            workspace=workspace,
         )
+
+    m = _campaign_merge(stores, campaign, at)
+    params = apply_identity_layer(
+        m.params,
+        m.active,
+        m.dataset_dir,
+        m.filtered,
+        judges=m.cfg.judges,
+        # WHAT THE ADDRESSED CYCLE MEASURED, on the preference `_campaign_merge` reads the
+        # declaration by and for a sharper reason: this feeds the instrument fingerprint, so
+        # resolving it live would recompute a banked campaign's identity off a roster it never ran.
+        experiment=stores.campaigns.read_resolved_experiment(m.hop)
+        or experiment_outside_run(m.dataset_dir),
+        provenance=m.provenance,
+    )
+    params = m.with_seed(params)
     evolved, measured = _evolved_overlay(stores, at)
     if evolved:
         params = apply_node_overlay(
-            params, evolved, filtered, source="evolved", provenance=provenance
+            params, evolved, m.filtered, source="evolved", provenance=m.provenance
         )
     # LAST, after the layer that computed them: a measured point's identity is a fact of the
     # measurement, not of today's files.
     if measured:
-        params = _recorded_identity(params, measured, provenance)
+        params = _recorded_identity(params, measured, m.provenance)
 
-    rows = filtered.node_config_schema(
+    rows = m.filtered.node_config_schema(
         values={n: c for n, c in params.items() if isinstance(c, dict)},
-        sources=provenance,
-        model_menu=filtered.selectable_models(),
-        declared=schema,
+        sources=m.provenance,
+        model_menu=m.filtered.selectable_models(),
+        declared=m.declared,
     )
     return CampaignPipelineResponse(
         campaign_id=campaign.campaign_id,
-        cycle_id=hop.cycle_id,
+        cycle_id=m.hop.cycle_id,
         dataset_name=campaign.dataset_name,
-        connector=str((raw or {}).get("backend_name") or campaign.dataset_name),
+        connector=str((m.raw or {}).get("backend_name") or campaign.dataset_name),
         # The campaign's FROZEN kind — one `pipeline.yaml` serves every campaign on the slug.
         backend_type=campaign.backend_type,
         params=params,
         node_config_schema=rows,
-        view=filtered.view,
-        node_output_schema=resolved_output_schemas(filtered, params),
-        model_capabilities=resolve_schema_menu(filtered, workspace=workspace),
+        view=m.filtered.view,
+        node_output_schema=resolved_output_schemas(m.filtered, params),
+        model_capabilities=resolve_schema_menu(m.filtered, workspace=workspace),
         reach=reach_map(rows),
         # On this read so the L4 drill-in needs no second fetch to stitch against.
-        nests=nested_pipeline_ref(dataset_dir, filtered.view) if dataset_dir else None,
-        is_single_node=filtered.is_single_node,
+        nests=nested_pipeline_ref(m.dataset_dir, m.filtered.view) if m.dataset_dir else None,
+        is_single_node=m.filtered.is_single_node,
     )
+
+
+class RunsWithParam(StrictModel):
+    """One setting a campaign's root course runs with, and the layer that chose it."""
+
+    node: str
+    key: str = Field(description="The config grid's own param key (`NodeConfigParam.key`)")
+    value: Any
+    source: ParamSource
+
+
+class CampaignRunsWith(StrictModel):
+    """What a campaign's root course runs with — the root's pipeline resolution, cut to settings."""
+
+    params: list[RunsWithParam] = Field(
+        description="Scalar settings in active-step order, `model` included; no prompt text"
+    )
+    max_rounds: int | None = Field(
+        description="The DECLARED rounds cap, not the armed one: 0 = origin only, null = unlimited"
+    )
+
+
+# A prompt, a description and a nested value are no setting one line can print.
+_RUNS_WITH_KINDS = frozenset({"model", "enum", "number", "bool", "string"})
+_RUNS_WITH: dict[Path, tuple[tuple[Any, ...], CampaignRunsWith | None]] = {}
+
+
+def campaign_runs_with(stores: Stores, campaign: Campaign) -> CampaignRunsWith | None:
+    """The campaign LIST's reading of what a root runs with — the two merges
+    :func:`resolve_pipeline_for_campaign` takes, without the identity and evolved layers or the
+    rows. Cached per root on the stat of every file the merge reads, because the list is polled.
+    ``None`` is a root whose pipeline did not resolve; one broken dataset drops its own row only."""
+    root = stores.campaigns.cycle_dir(campaign.root_hop)
+    key: tuple[Any, ...] | None = None
+    answer: CampaignRunsWith | None
+    try:
+        draft = _authoring_draft(stores, campaign)
+        key = _runs_with_key(stores, campaign, root, draft)
+        hit = _RUNS_WITH.get(root)
+        if hit is not None and hit[0] == key:
+            return hit[1]
+        answer = _runs_with(stores, campaign, draft)
+    except (
+        OSError,
+        ValueError,
+        KeyError,
+        TypeError,
+        StoredConfigInvalidError,
+        PayloadInvalidError,
+    ):
+        logger.exception("runs_with: root pipeline of %s did not resolve", campaign.campaign_id)
+        answer = None
+    if key is not None:
+        _RUNS_WITH[root] = (key, answer)
+    return answer
+
+
+def _runs_with_key(
+    stores: Stores, campaign: Campaign, root: Path, draft: DraftCampaign | None
+) -> tuple[Any, ...]:
+    dataset_dir = _dataset_dir_of(stores, campaign)
+    dataset_files = (
+        (dataset_pipeline_path(dataset_dir), dataset_campaign_path(dataset_dir))
+        if dataset_dir is not None
+        else ()
+    )
+    layout = CycleLayout(root)
+    return (
+        stable_hash(campaign.config),
+        campaign.backend_type,
+        campaign.dataset_name,
+        campaign.root_cycle_id,
+        dataset_dir,
+        *(stat_key(p) for p in dataset_files),
+        stat_key(layout.resolved_pipeline),
+        stat_key(layout.ledger),
+        None if draft is None else stable_hash(draft.to_disk()),
+    )
+
+
+def _runs_with(stores: Stores, campaign: Campaign, draft: DraftCampaign | None) -> CampaignRunsWith:
+    m: _Merge
+    if draft is not None:
+        m = _draft_merge(draft)
+        params = m.params
+    else:
+        read = _campaign_merge(stores, campaign, SubjectSpec("campaign", campaign.campaign_id))
+        m, params = read, read.with_seed(read.params)
+    stripped = strip_rendered_prompt(params)
+    nodes = {n.name: n for n in m.filtered.config_nodes}
+    out: list[RunsWithParam] = []
+    for name in m.active:
+        if name not in stripped:
+            continue
+        cfg = stripped[name]
+        for key in sorted(set(cfg) - {OUTPUT_SCHEMA_KEY}):
+            if nodes[name].param_kind(key) in _RUNS_WITH_KINDS:
+                out.append(
+                    RunsWithParam(
+                        node=name, key=key, value=cfg[key], source=m.provenance[name][key]
+                    )
+                )
+    return CampaignRunsWith(params=out, max_rounds=m.cfg.optimization.max_rounds)
 
 
 def configure_and_apply_pipeline(
@@ -729,8 +985,16 @@ def configure_and_apply_pipeline(
         experiment=session.backend_client.workload.experiment,
     )
 
+    ships_prompts = dataset_dir is not None and has_dataset_prompts(dataset_dir)
+    _validate_prompt_reach(
+        filtered=filtered,
+        active=active,
+        has_starting_prompts=ships_prompts,
+        dataset_name=dataset_name,
+    )
+
     # Starting prompts from `{dataset_dir}/prompts/[<node>|default].yaml`, per prompt-bearing node.
-    if dataset_dir is not None and has_dataset_prompts(dataset_dir):
+    if dataset_dir is not None and ships_prompts:
         _apply_starting_prompts(
             pipeline_params,
             filtered=filtered,
@@ -743,6 +1007,9 @@ def configure_and_apply_pipeline(
     _validate_model_ownership(
         pipeline_params, filtered=filtered, active=active, dataset_name=dataset_name
     )
+    # The connector refuses a channel it cannot run (harbor's `skill_delivery`); asked here, that
+    # refusal stops init instead of erroring every cell of the origin.
+    session.backend_client.prompt_delivery(pipeline_params)
 
     session.pipeline_schema = filtered
     session.pipeline_params = pipeline_params

@@ -56,6 +56,7 @@ Internal `User` / `Group` records use SCIM 2.0 Core + EnterpriseUser field names
 * **Good** — RLS makes cross-tenant data leaks structurally impossible at Stage 2; the Stage-0 file layout is the degenerate one-tenant-per-OS-directory case of the same contract.
 * **Good** — pre-vetted Stage-2 swap targets (IdPs + authz engines) decouple our roadmap from any single vendor's survival.
 * **Neutral** — Stage 1 adds the `cryptography` Python dep for JWT/JWS signature verification against JWKS.
+* **Bad** — two accounts measuring the same benchmark each pay for its cells: Stage 1 mints one tenant per user, and the content-addressed caches are tenant-scoped by decision (§ Contract B).
 * **Bad** — we own ~200 LoC of OIDC client code (`infrastructure/identity/`). Tradeoff vs. pulling a Python auth library is intentional ([The Copenhagen Book](https://thecopenhagenbook.com/), Lucia Auth deprecation rationale).
 
 ### Confirmation
@@ -97,7 +98,7 @@ The tenant boundary is enforced **at the data engine**, not by every `WHERE tena
 - **Today's file-based layout is the degenerate case.** `projects/{tenant_id}/` is a one-tenant-per-directory isolation primitive enforced by the OS. The contract shape — "every storage operation is scoped to `IdentityContext.tenant_id`, no exceptions" — is the same.
 - **Stage-2 form** — every tenant-scoped table carries a `tenant_id` column; an RLS policy of the form `USING (tenant_id = current_setting('app.tenant_id')::uuid)` is attached; the application sets `SET LOCAL app.tenant_id = …` at the start of each request inside a transaction. The store adapter (below) is the single place this happens.
 - **Store adapter** — `infrastructure/store/stores.py::build_stores(identity: IdentityContext, …)` is the single construction route. Stage 0 returns file-backed stores rooted at `projects/{tenant_id}/`. Stage 2 returns Postgres-backed stores that set the RLS session variable. **No application caller knows which.** The RLS adapter is a swap, not a rewrite.
-- **Cross-tenant primitives.** `measurements/` is dataset-scoped + cross-campaign by design (per `docs/architecture.md` § Measurement archive (the actual database)), as are its peers under `store/layout.py::SHARED_CACHE_DIRS` — all are keyed by content hash, which is what makes them shareable at all. They stay cross-tenant within a single install; cross-*install* sharing is an explicit non-goal (per `../specs/roadmap.md`). The RLS policy on the measurement tables omits the tenant filter; install-level isolation comes from running separate databases per install.
+- **The content-addressed caches are tenant-scoped — by decision (amended 2026-09-17).** `measurements/` is dataset-scoped + cross-campaign (per `docs/architecture.md` § Measurement archive (the actual database)), as are its peers under `store/layout.py::SHARED_CACHE_DIRS`; the content hash is what lets a row be shared across campaigns and into an L4 sandbox. `build_stores` roots all of them at `shared_root / tenant_id`, so none is shared across tenants. Pooling them across tenants was considered and refused: a cache hit would tell one account that another ran the identical dataset and prompt, and once users bring their own keys ([`0003-spend-and-tenancy.md`](0003-spend-and-tenancy.md) § Host coupon + BYO keys) it would bill one account's cells to another. Cross-*install* sharing stays a non-goal. At Stage 2 the measurement tables carry the tenant filter like every other table.
 
 ### Data model — SCIM 2.0 Core + EnterpriseUser
 
@@ -158,7 +159,7 @@ class IdentityContext:
 ```
 
 - **Stage 0** — `IdentityContext(user_id=UserId("default"), tenant_id=TenantId("default"), issuer=None, claims={}, capabilities=frozenset())`. Constructed once at init. The single-operator path is the auth-off branch — one branch, not a feature flag.
-- **Stage 1** — constructed by the OIDC middleware from a verified ID Token. `user_id = f"{issuer}:{sub}"`, `tenant_id` from the custom `tenant_id` claim (provider-set for B2B, install-scoped fallback for casual users), `issuer` from `iss`.
+- **Stage 1** — constructed by the OIDC middleware from a verified ID Token. `user_id` is `infrastructure/identity/user.py::derive_user_id` over `(issuer, sub)` — a hash, not a concatenation — and `tenant_id` is that same id (one tenant per user); `issuer` from `iss`. A provider-set B2B tenant claim waits for Stage 2.
 - **`TenantContext` collapsed into `IdentityContext`** (shipped). `Session.identity: IdentityContext` (`application/initialization/session.py`) replaces the deleted `Session.tenant`. The spend seam — and every consumer — takes `IdentityContext`, never bare `tenant_id` or bare `TenantContext`. Behavior change, no shim.
 
 ### No-drift gates
@@ -195,7 +196,7 @@ Both decisions stay deferrable because the seams speak OIDC, so the swap is a mi
 
 ### Stage 1 implementation (shipped)
 
-Stage 1 OIDC sign-up landed at `promptpotter/infrastructure/identity/` and `promptpotter/presentation/api/middleware/oidc.py`. The package splits per provider (`google.py`, `github.py`) on top of shared infrastructure (`verifier.py`, `jwks.py`, `session.py`, `bundle.py`, `provider_config.py`, `allowlist.py`, `migration.py`, `paths.py`, `user.py`); `cryptography` is the only new Python dep per the minimal-deps invariant. The middleware at `presentation/api/middleware/oidc.py` verifies the inbound ID Token against the issuer's JWKS, populates `IdentityContext`, and ensures tokens never appear past the boundary (gate #2 — review-enforced; no standing test). `presentation/api/deps.py::resolve_identity` reads the verified context from the session-cookie store; Stage 0 (auth-off) substitutes `default_identity()`. Auto-mint at first sign-in is one-tenant-per-user (`tenant_id = UserId`), encoded by `infrastructure/identity/user.py::derive_user_id`. Sign-up surface lives at `webapp/app/login/page.tsx` over `/auth/login/{provider}` → `/auth/callback/{provider}`.
+Stage 1 OIDC sign-up landed at `promptpotter/infrastructure/identity/` and `promptpotter/presentation/api/middleware/oidc.py`. The package splits per provider (`google.py`, `github.py`) on top of shared infrastructure (`verifier.py`, `jwks.py`, `session.py`, `bundle.py`, `provider_config.py`, `blocklist.py`, `grants.py`, `migration.py`, `paths.py`, `user.py`); `cryptography` is the only new Python dep per the minimal-deps invariant. The middleware at `presentation/api/middleware/oidc.py` verifies the inbound ID Token against the issuer's JWKS, populates `IdentityContext`, and ensures tokens never appear past the boundary (gate #2 — review-enforced; no standing test). `presentation/api/deps.py::resolve_identity` reads the verified context from the session-cookie store; Stage 0 (auth-off) substitutes `default_identity()`. Auto-mint at first sign-in is one-tenant-per-user (`tenant_id = UserId`), encoded by `infrastructure/identity/user.py::derive_user_id`. Sign-up surface lives at `webapp/app/login/page.tsx` over `/auth/login/{provider}` → `/auth/callback/{provider}`.
 
 ### §0 amendment
 
@@ -219,7 +220,7 @@ Stage-0 work (the `IdentityContext` seam — shipped) does **not** require the a
 - **SCIM provisioning.** Enterprise-tier — Stage 2+ at earliest, defer until requested.
 - **SAML.** Enterprise B2B SSO — Stage 2+. Delegated to whichever IdP we front (Keycloak / Ory / Zitadel speak it; we don't implement SAML ourselves).
 - **WebAuthn / passkey *provider* mode.** Stage 2 or later. Stage 1 leverages Google / Apple / Microsoft's passkey implementations via OIDC federation — we get passkey UX for free without owning the ceremony.
-- **RBAC beyond a flat `frozenset[str]`** — `IdentityContext.capabilities` exists but stays empty until a real authorization model is needed.
+- **RBAC beyond a flat `frozenset[str]`.** The flat set itself is populated and enforced: `shared/identity.py` declares the `CAMPAIGN_*_CAP` ladder that `require_capability` checks, and a sub-principal's set resolves from the sealed file-backed grants of [`0005-delegated-principals-and-capability-scoping.md`](0005-delegated-principals-and-capability-scoping.md). Roles, groups and relations beyond that set stay out.
 - **Billing / quotas / per-tenant rate limiting.** Post-M13.
 
 ### Cross-refs

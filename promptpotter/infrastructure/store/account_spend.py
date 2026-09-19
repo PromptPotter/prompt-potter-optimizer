@@ -4,18 +4,16 @@ block is cumulative-from-seed, so summing those snapshots double-counts a fork's
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.run_records import SpendTombstoneRecord
-from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.pricing import compute_usd
-from promptpotter.infrastructure.store.io import read_json_optional
+from promptpotter.infrastructure.store.io import stat_key
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import iter_jsonl
+from promptpotter.shared.clock import epoch_seconds
 
 if TYPE_CHECKING:
     # Type-only: the campaign store imports THIS module to bank a spend before it destroys the
@@ -40,10 +38,8 @@ def _iter_dated_records(
     malformed CONTENT is skipped."""
     for ledger_path in ledgers:
         for rec in iter_jsonl(ledger_path):
-            ts_str = rec.get("timestamp", "")
-            try:
-                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).timestamp()
-            except (ValueError, TypeError, AttributeError):
+            ts = epoch_seconds(rec.get("timestamp"))
+            if ts is None:
                 continue
             if since <= ts < until:
                 yield {**rec, "ts": ts}
@@ -52,49 +48,32 @@ def _iter_dated_records(
 def iter_user_token_usage(
     *, ledgers: Iterable[Path], since: float, until: float
 ) -> list[dict[str, Any]]:
-    """Every ``TokenUsageRecord`` in the window, shaped for the pricer and the activity chart."""
+    """Every ``TokenUsageRecord`` in the window, shaped for :func:`record_cost_usd` and the activity
+    chart."""
     out: list[dict[str, Any]] = []
     for rec in _iter_dated_records(ledgers, since=since, until=until):
         if rec.get("record_type") != "token_usage":
             continue
-        raw_cost = rec.get("cost_usd")
-        input_t = int(rec.get("input_tokens", 0))
-        output_t = int(rec.get("output_tokens", 0))
         out.append(
             {
                 "ts": rec["ts"],
-                "cost_usd": float(raw_cost) if isinstance(raw_cost, int | float) else None,
-                "input_tokens": input_t,
-                "output_tokens": output_t,
-                "tokens": input_t + output_t,
+                "cost_usd": rec.get("cost_usd"),
+                "tokens": int(rec.get("input_tokens", 0)) + int(rec.get("output_tokens", 0)),
                 "model": rec.get("model"),
-                # `lookup_rate` keys on the (provider, model) PAIR and refuses a namespaced model
-                # id alone, so dropping this prices the row at nothing rather than raising.
-                "provider": rec.get("provider"),
                 "kind": rec.get("kind"),
                 "cached": bool(rec.get("cached", False)),
-                "cache_read_tokens": int(rec.get("cache_read_tokens", 0)),
-                "cache_write_tokens": int(rec.get("cache_write_tokens", 0)),
             }
         )
     return out
 
 
 def record_cost_usd(rec: dict[str, Any]) -> float | None:
-    """Billed USD for one usage record; only ``cached=False`` is money that left the account. ``None``
-    means unpriced — no wire cost and no rate on file — which each caller answers for itself."""
+    """Billed USD for one usage record — the price it was stamped with — and only ``cached=False``
+    is money that left the account. ``None`` means unpriced, which each caller answers for itself."""
     if rec.get("cached"):
         return 0.0
     raw = rec.get("cost_usd")
-    return compute_usd(
-        rec.get("model"),
-        int(rec.get("input_tokens", 0)),
-        int(rec.get("output_tokens", 0)),
-        override_usd=float(raw) if isinstance(raw, int | float) else None,
-        provider=rec.get("provider"),
-        cache_read_tokens=int(rec.get("cache_read_tokens", 0)),
-        cache_write_tokens=int(rec.get("cache_write_tokens", 0)),
-    )
+    return float(raw) if isinstance(raw, int | float) else None
 
 
 class UserSpend(NamedTuple):
@@ -105,110 +84,108 @@ class UserSpend(NamedTuple):
     used_tokens: int
     unpriced_tokens: int
 
-
-class BilledSpend(NamedTuple):
-    """``UserSpend`` with the token halves kept apart, because a forwarding emitter has to hand
-    ``emit_token_usage`` an input and an output count rather than their sum."""
-
-    used_usd: float
-    input_tokens: int
-    output_tokens: int
-    unpriced_tokens: int
-    # The three SUBSETS a ``TokenAccount`` carries, kept so an L4 inner campaign forwards the
-    # BREAKDOWN with its spend rather than the totals alone.
-    cache_read_tokens: int = 0
-    cache_write_tokens: int = 0
-    reasoning_tokens: int = 0
-
-    @property
-    def used_tokens(self) -> int:
-        return self.input_tokens + self.output_tokens
-
-    def plus(self, other: BilledSpend) -> BilledSpend:
-        return BilledSpend(
+    def plus(self, other: UserSpend) -> UserSpend:
+        return UserSpend(
             self.used_usd + other.used_usd,
-            self.input_tokens + other.input_tokens,
-            self.output_tokens + other.output_tokens,
+            self.used_tokens + other.used_tokens,
             self.unpriced_tokens + other.unpriced_tokens,
-            self.cache_read_tokens + other.cache_read_tokens,
-            self.cache_write_tokens + other.cache_write_tokens,
-            self.reasoning_tokens + other.reasoning_tokens,
-        )
-
-    def since(self, mark: BilledSpend) -> BilledSpend:
-        """What this total holds beyond ``mark``. Clamped at zero per component: a ledger can
-        SHRINK under ``--keep-results`` or a rewind while the mark beside it survives, and a
-        negative residue would refund money at the account tier."""
-        return BilledSpend(
-            max(0.0, self.used_usd - mark.used_usd),
-            max(0, self.input_tokens - mark.input_tokens),
-            max(0, self.output_tokens - mark.output_tokens),
-            max(0, self.unpriced_tokens - mark.unpriced_tokens),
-            max(0, self.cache_read_tokens - mark.cache_read_tokens),
-            max(0, self.cache_write_tokens - mark.cache_write_tokens),
-            max(0, self.reasoning_tokens - mark.reasoning_tokens),
-        )
-
-    def as_user_spend(self) -> UserSpend:
-        return UserSpend(self.used_usd, self.used_tokens, self.unpriced_tokens)
-
-    def as_account(self) -> TokenAccount:
-        return TokenAccount(
-            input=self.input_tokens,
-            output=self.output_tokens,
-            reasoning=self.reasoning_tokens,
-            cache_read=self.cache_read_tokens,
-            cache_write=self.cache_write_tokens,
         )
 
 
-ZERO_SPEND = BilledSpend(0.0, 0, 0, 0)
-
-FORWARDED_SPEND_KEY = "forwarded_spend"
+ZERO_SPEND = UserSpend(0.0, 0, 0)
 
 
-def _billed_of(rec: dict[str, Any]) -> BilledSpend:
+def _billed_of(rec: dict[str, Any]) -> UserSpend:
     """One non-cached ``token_usage`` row as billed spend. Unpriced means the count is known and
     the rate is not, so the tokens land in the residue and the USD stays at zero."""
-    inp = int(rec.get("input_tokens", 0))
-    out = int(rec.get("output_tokens", 0))
-    cache_read = int(rec.get("cache_read_tokens", 0))
-    cache_write = int(rec.get("cache_write_tokens", 0))
-    reasoning = int(rec.get("reasoning_tokens", 0))
+    tokens = int(rec.get("input_tokens", 0)) + int(rec.get("output_tokens", 0))
     usd = record_cost_usd(rec)
-    if usd is None:
-        return BilledSpend(0.0, inp, out, inp + out, cache_read, cache_write, reasoning)
-    return BilledSpend(usd, inp, out, 0, cache_read, cache_write, reasoning)
+    return UserSpend(0.0, tokens, tokens) if usd is None else UserSpend(usd, tokens, 0)
 
 
-def billed_spend(ledgers: Iterable[Path]) -> BilledSpend:
-    """What these ledgers' own rows say was spent, over their whole life. Token usage only — a
-    tombstone is appended to the WORKSPACE ledger, never a cycle's, so no cycle ledger can carry
-    one to double-count."""
+def _fold_billed(records: Iterable[dict[str, Any]]) -> UserSpend:
+    """Billed spend over the usage rows — and over every hold no row settled, a call a killed run
+    left out, at the most it could have cost. A nested run's row that was carried onto its outer
+    run's ledger is summed there, never here."""
     total = ZERO_SPEND
-    for rec in _iter_dated_records(ledgers, since=0.0, until=float("inf")):
-        if rec.get("record_type") != "token_usage" or rec.get("cached"):
-            continue
+    open_holds: dict[str, dict[str, Any]] = {}
+    for rec in records:
+        if rec.get("record_type") == "spend_hold":
+            open_holds[str(rec.get("hold_id"))] = rec
+        elif rec.get("record_type") == "token_usage":
+            if (hold_id := rec.get("hold_id")) is not None:
+                open_holds.pop(str(hold_id), None)
+            if not rec.get("cached") and not rec.get("mirrored"):
+                total = total.plus(_billed_of(rec))
+    for rec in open_holds.values():
         total = total.plus(_billed_of(rec))
     return total
 
 
-def forwarded_mark(cycle_dir: Path) -> BilledSpend:
-    """How much of this cycle's own ledger has already reached ANOTHER ledger — the L4 roll-up's
-    high-water mark. Absent means nothing was forwarded, which is every cycle outside a sandbox."""
-    data = read_json_optional(CycleLayout(cycle_dir).manifest)
-    raw = data.get(FORWARDED_SPEND_KEY) if isinstance(data, dict) else None
-    if not isinstance(raw, dict):
+_BILLED = frozenset({"token_usage", "spend_hold"})
+_TOMBSTONE = frozenset({"spend_tombstone"})
+_BILLED_BY_LEDGER: dict[Path, tuple[tuple[int, int], UserSpend]] = {}
+_BANKED_BY_LEDGER: dict[Path, tuple[tuple[int, int], dict[str, UserSpend]]] = {}
+
+
+def _ledger_billed(ledger: Path) -> UserSpend:
+    """One ledger's whole-life billed spend, re-read only when the file's size or mtime moved — the
+    campaign list is polled, and a ledger is append-only between the rewinds that restat it."""
+    key = stat_key(ledger)
+    if key is None:
         return ZERO_SPEND
-    return BilledSpend(
-        float(raw.get("used_usd", 0.0)),
-        int(raw.get("input_tokens", 0)),
-        int(raw.get("output_tokens", 0)),
-        int(raw.get("unpriced_tokens", 0)),
-        int(raw.get("cache_read_tokens", 0)),
-        int(raw.get("cache_write_tokens", 0)),
-        int(raw.get("reasoning_tokens", 0)),
+    hit = _BILLED_BY_LEDGER.get(ledger)
+    if hit is not None and hit[0] == key:
+        return hit[1]
+    total = _fold_billed(
+        rec
+        for rec in iter_jsonl(ledger, record_types=_BILLED)
+        if epoch_seconds(rec.get("timestamp")) is not None
     )
+    _BILLED_BY_LEDGER[ledger] = (key, total)
+    return total
+
+
+def billed_spend(ledgers: Iterable[Path]) -> UserSpend:
+    """What these ledgers' own rows say was spent, over their whole life. Token usage only — a
+    tombstone is appended to the WORKSPACE ledger, never a cycle's, so no cycle ledger can carry
+    one to double-count."""
+    total = ZERO_SPEND
+    for ledger in ledgers:
+        total = total.plus(_ledger_billed(ledger))
+    return total
+
+
+def _banked_by_campaign(workspace_ledger: Path) -> dict[str, UserSpend]:
+    key = stat_key(workspace_ledger)
+    if key is None:
+        return {}
+    hit = _BANKED_BY_LEDGER.get(workspace_ledger)
+    if hit is not None and hit[0] == key:
+        return hit[1]
+    banked: dict[str, UserSpend] = {}
+    for rec in iter_jsonl(workspace_ledger, record_types=_TOMBSTONE):
+        if rec.get("record_type") != "spend_tombstone":
+            continue
+        campaign_id = str(rec.get("campaign_id", ""))
+        prior = banked.get(campaign_id, UserSpend(0.0, 0, 0))
+        banked[campaign_id] = UserSpend(
+            prior.used_usd + float(rec.get("used_usd", 0.0)),
+            prior.used_tokens + int(rec.get("used_tokens", 0)),
+            prior.unpriced_tokens + int(rec.get("unpriced_tokens", 0)),
+        )
+    _BANKED_BY_LEDGER[workspace_ledger] = (key, banked)
+    return banked
+
+
+def campaign_spend(campaigns: CampaignStore, campaign_id: str) -> UserSpend:
+    """One campaign's share of :func:`sum_user_spend`'s lifetime total: its cycle ledgers plus the
+    tombstones banked under its id (a deleted stub fork, a reaped inner sandbox's residue)."""
+    held = billed_spend(campaigns.campaign_cycle_ledgers(campaign_id))
+    banked = _banked_by_campaign(CycleEventLog.workspace_path(campaigns.workspace)).get(
+        campaign_id, ZERO_SPEND
+    )
+    return held.plus(banked)
 
 
 def sandbox_cycle_dirs(sandbox: Path) -> list[Path]:
@@ -221,22 +198,20 @@ def sandbox_cycle_dirs(sandbox: Path) -> list[Path]:
 def sum_user_spend(*, ledgers: Iterable[Path], since: float, until: float) -> UserSpend:
     """Both units plus the unpriceable residue, over live usage AND banked tombstones — a tombstone
     is spend whose rows are gone, so it is added whole rather than re-priced."""
-    used_usd = 0.0
-    used_tokens = 0
-    unpriced_tokens = 0
+    banked = ZERO_SPEND
+    billable: list[dict[str, Any]] = []
     for rec in _iter_dated_records(ledgers, since=since, until=until):
         if rec.get("record_type") == "spend_tombstone":
-            used_usd += float(rec.get("used_usd", 0.0))
-            used_tokens += int(rec.get("used_tokens", 0))
-            unpriced_tokens += int(rec.get("unpriced_tokens", 0))
-            continue
-        if rec.get("record_type") != "token_usage" or rec.get("cached"):
-            continue
-        billed = _billed_of(rec)
-        used_usd += billed.used_usd
-        used_tokens += billed.used_tokens
-        unpriced_tokens += billed.unpriced_tokens
-    return UserSpend(used_usd, used_tokens, unpriced_tokens)
+            banked = banked.plus(
+                UserSpend(
+                    float(rec.get("used_usd", 0.0)),
+                    int(rec.get("used_tokens", 0)),
+                    int(rec.get("unpriced_tokens", 0)),
+                )
+            )
+        elif rec.get("record_type") in _BILLED:
+            billable.append(rec)
+    return banked.plus(_fold_billed(billable))
 
 
 def bank_spend(
@@ -253,16 +228,11 @@ def bank_spend(
     banking precedes the delete, so a crash between the two leaves the tombstone standing and a
     retry counts the money twice. ``cycle_id`` is empty for a whole campaign.
 
-    A cycle whose spend already reached another ledger banks only the REMAINDER: an L4 inner cycle
-    forwards onto its outer cycle as it runs, so summing its rows whole would bill that money a
-    second time on the way out."""
+    What an L4 inner cycle spent that already reached its outer ledger is not banked again: those
+    rows are ``mirrored``, and :func:`billed_spend` leaves them out."""
     # Unbounded on purpose: this banks everything the subject ever wrote, not a window of it.
-    residue = ZERO_SPEND
-    for cycle_dir in cycle_dirs:
-        held = billed_spend([CycleLayout(cycle_dir).ledger])
-        residue = residue.plus(held.since(forwarded_mark(cycle_dir)))
-    spent = residue.as_user_spend()
-    if spent == UserSpend(0.0, 0, 0):
+    spent = billed_spend(CycleLayout(d).ledger for d in cycle_dirs)
+    if spent == ZERO_SPEND:
         return spent
     log = CycleEventLog.open_workspace(workspace)
     if _already_banked(log.path, campaign_id=campaign_id, cycle_id=cycle_id):
@@ -291,14 +261,12 @@ def _already_banked(workspace_ledger: Path, *, campaign_id: str, cycle_id: str) 
 
 
 __all__ = [
-    "FORWARDED_SPEND_KEY",
     "ZERO_SPEND",
-    "BilledSpend",
     "UserSpend",
     "account_ledgers",
     "bank_spend",
     "billed_spend",
-    "forwarded_mark",
+    "campaign_spend",
     "iter_user_token_usage",
     "record_cost_usd",
     "sandbox_cycle_dirs",

@@ -233,13 +233,10 @@ export function NodeConfigEditor(props: {
           <div key={`${r.node}.${r.key}`} className="config-row">
             <span className="config-label" title={r.description || undefined}>
               {r.key}
-              {r.fromCandidate ? (
-                <span className="config-evolved" title="Carried from this searchpoint">
-                  ·evolved
-                </span>
-              ) : null}
+              <EvolvedMark row={r} />
             </span>
-            <span className="config-value">
+            {/* A div: `ValueList` opens a `Popover`, which is flow content. */}
+            <div className="config-value">
               <ValueList
                 name={r.key}
                 values={values}
@@ -254,7 +251,7 @@ export function NodeConfigEditor(props: {
                 onAdd={narrowChannel ? (v) => add(i, v) : undefined}
               />
               {r.kind === "model" && caps ? <ModelCard caps={caps} /> : null}
-            </span>
+            </div>
           </div>
         );
       })}
@@ -400,6 +397,17 @@ function ModelCard({ caps }: { caps: ModelCapability }) {
     </dl>
   );
 }
+
+// The served `source`, never whether the seed carries the key: a searchpoint's seed carries every
+// key. `seed` stays unmarked because a steered fork's seed writes every key, so it would mark all.
+function EvolvedMark({ row }: { row: ConfigRow }) {
+  return row.source === "evolved" ? (
+    <span className="config-evolved" title="Set by this searchpoint's own mutation">
+      ·evolved
+    </span>
+  ) : null;
+}
+
 // One row of FREE-VALUED config — number, string, bool, nested. An enumerable axis is a
 // `ValueList` and takes none of this chrome, in every host alike.
 function ConfigRowView({
@@ -423,11 +431,7 @@ function ConfigRowView({
     <div className="config-row">
       <span className="config-label">
         {row.key}
-        {row.fromCandidate ? (
-          <span className="config-evolved" title="Carried from this searchpoint">
-            ·evolved
-          </span>
-        ) : null}
+        <EvolvedMark row={row} />
         {/* A setting the provider DROPS must not render as live: the value sits there looking
             set, the model never receives it, and nothing else says so. Wears the same badge as a
             held axis, because to a reader it is the same fact — not in play, reason in the
@@ -459,7 +463,7 @@ function ConfigRowView({
           </span>
         )}
       </span>
-      <span className="config-value">
+      <div className="config-value">
         {!onValue ? (
           // No value channel — a sibling surface sets this one, or the value is structured and
           // nothing types it. Text rather than a disabled input: a greyed box says "you may not",
@@ -506,7 +510,7 @@ function ConfigRowView({
             onCommit={onValue}
           />
         )}
-      </span>
+      </div>
     </div>
   );
 }

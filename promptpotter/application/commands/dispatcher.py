@@ -35,6 +35,7 @@ from promptpotter.application.commands.payloads import (
     RegisterBackendPayload,
     ReplaceDatasetPayload,
     SetCampaignLabelPayload,
+    SetConcurrentCyclesPayload,
     SetSampleLookaheadPayload,
     SkipSearchpointPayload,
     StartRunPayload,
@@ -52,7 +53,12 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     mint_campaign_command,
     start_run_command,
 )
-from promptpotter.application.jobs.quota import clamp_budget_change, hold_ceiling
+from promptpotter.application.jobs.quota import (
+    admit_spend,
+    clamp_budget_change,
+    hold_ceiling,
+    set_concurrent_cycles,
+)
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import (
     ArchiveReport,
@@ -70,15 +76,13 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.launch_limits import LaunchLimits
-from promptpotter.domain.pipeline_overlay import (
-    overlay_sets_model_outside_allowed,
-    permitted_models_from_narrowing,
-)
+from promptpotter.domain.pipeline_overlay import steers_disallowed_model
 from promptpotter.domain.results import parse_candidate_label
 from promptpotter.domain.run_records import CommandAckRecord, CommandRecord, CycleSeed
 from promptpotter.domain.spend import BudgetChange
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.spend_book import spending_under
 from promptpotter.infrastructure.llm.telemetry import (
     emit_command,
     emit_command_ack,
@@ -203,6 +207,9 @@ CAP_FOR_KIND: dict[str, str] = {
     # still, enforced in `JobRegistry.cancel_queued`, so a delegate holding `campaign.run`
     # cannot withdraw somebody else's launch.
     "cancel-queued-run": CAMPAIGN_RUN_CAP,
+    # How many runs this account may hold is a spend-RATE decision, so it sits with the ceilings.
+    # Holding the rung is not enough on the host's key: `quota.py::set_concurrent_cycles`.
+    "set-concurrent-cycles": CAMPAIGN_BUDGET_CAP,
     "register-backend": CAMPAIGN_CREATE_CAP,
     "edit-draft-campaign": CAMPAIGN_CREATE_CAP,
     "resolve-origin": CAMPAIGN_CREATE_CAP,
@@ -404,6 +411,9 @@ class CommandDispatcher:
         elif isinstance(payload, CancelQueuedRunPayload):
             job_id = payload.job_id
             applier = Applier(lambda: self._apply_cancel_queued_run(job_id))
+        elif isinstance(payload, SetConcurrentCyclesPayload):
+            limit = payload.max_concurrent_cycles
+            applier = Applier(lambda: set_concurrent_cycles(stores=self._stores, limit=limit))
         elif isinstance(payload, MintCampaignPayload):
             mint = payload
 
@@ -530,33 +540,33 @@ class CommandDispatcher:
 
             async def _apply_verify() -> None:
                 # The one application function the CLI also calls, so both raise the same record.
+                # It spends on the host's key outside any run, so the account's headroom is its book.
                 cand_round, cand_idx = parse_candidate_label(payload.label)
-                await verify_candidate(
-                    stores=self._stores,
-                    identity=self._stores.identity,
-                    hop=hop,
-                    round_num=cand_round,
-                    cand_idx=cand_idx,
-                    label=payload.label,
-                    samples=payload.samples,
-                    seed=None,
-                )
+                book = await asyncio.to_thread(admit_spend, stores=self._stores, bucket="verify")
+                with spending_under(book):
+                    await verify_candidate(
+                        stores=self._stores,
+                        identity=self._stores.identity,
+                        hop=hop,
+                        round_num=cand_round,
+                        cand_idx=cand_idx,
+                        label=payload.label,
+                        samples=payload.samples,
+                        seed=None,
+                    )
 
             return Applier(_apply_verify)
         if isinstance(payload, ForkCyclePayload):
             seed = _parse_cycle_seed(payload.seed)
             # Steering the model OUTSIDE what the node permits (nothing declared = nothing
             # sanctioned) is the ADR-0005 §4 babysit action, a distinct cap above the
-            # `campaign.run` fork. A PERMITTED steer is a clean human fork.
-            permitted = permitted_models_from_narrowing(
-                campaign.config.get("optimizer_narrowing") if campaign else None
+            # `campaign.run` fork. A PERMITTED steer is a clean human fork. The same call
+            # answers `POST /campaigns/{id}/fork-preview`, so the pre-confirm warning and this
+            # gate cannot disagree.
+            disallowed = steers_disallowed_model(
+                campaign.config if campaign else None, seed.pipeline_overlay
             )
-            steers_disallowed_model = seed is not None and overlay_sets_model_outside_allowed(
-                seed.pipeline_overlay, permitted
-            )
-            if steers_disallowed_model and not has_capability(
-                self._stores.identity, CAMPAIGN_BABYSIT_CAP
-            ):
+            if disallowed and not has_capability(self._stores.identity, CAMPAIGN_BABYSIT_CAP):
                 logger.warning(
                     "fork-cycle disallowed-model steer denied for principal %s (missing %s)",
                     acting_principal_id(self._stores.identity),
@@ -614,8 +624,8 @@ class CommandDispatcher:
         if isinstance(payload, PauseCyclePayload):
             return Applier(lambda: self._apply_pause_cycle(hop))
         if isinstance(payload, SetSampleLookaheadPayload):
-            cells = payload.cells
-            return Applier(lambda: self._apply_set_sample_lookahead(hop, cells=cells))
+            cells, auto = payload.cells, payload.auto
+            return Applier(lambda: self._apply_set_sample_lookahead(hop, cells=cells, auto=auto))
         if isinstance(payload, OriginGateDecisionPayload):
             decision = payload.decision
             return Applier(lambda: self._apply_origin_gate_decision(hop, decision))
@@ -665,17 +675,26 @@ class CommandDispatcher:
         return {"slug": result.slug}
 
     def _apply_compact_archive(self, payload: CompactArchivePayload) -> dict[str, Any]:
-        """Three modes, one application-layer function each — this arm only picks and reports.
+        """The three WRITE modes, one application-layer function each — this arm only picks and
+        reports. The verb's fourth mode, ``inventory``, is a census and reaches the terminal alone:
+        this highway records a `CommandRecord` per call, which would bill an act changing nothing.
 
         A refusal is an OUTCOME, not an exception: ``archive_writers`` is on the response either
         way, so a client learns "a cycle is still appending" from the same shape as a success
         rather than from an error it has to special-case."""
-        run = {
-            "compact": compact_measurement_archive,
-            "restore": restore_measurement_archive,
-            "purge-cold": purge_cold_store,
-        }[payload.mode]
-        report = run(self._stores, dataset=payload.dataset, apply=payload.apply)
+        match payload.mode:
+            case "compact":
+                report = compact_measurement_archive(
+                    self._stores, dataset=payload.dataset, apply=payload.apply
+                )
+            case "restore":
+                report = restore_measurement_archive(
+                    self._stores, dataset=payload.dataset, apply=payload.apply
+                )
+            case "purge-cold":
+                report = purge_cold_store(
+                    self._stores, dataset=payload.dataset, apply=payload.apply
+                )
         return report.model_dump(mode="json")
 
     def _apply_register_backend(self, payload: RegisterBackendPayload) -> None:
@@ -706,12 +725,12 @@ class CommandDispatcher:
         flag.parent.mkdir(parents=True, exist_ok=True)
         flag.write_text(f"requested_at={utcnow_iso()}\n", encoding="utf-8")
 
-    def _apply_set_sample_lookahead(self, hop: CycleHop, *, cells: int) -> None:
-        """Arm the walk to hold ``cells`` samples in flight; ``1`` disarms. Recorded UNCLAMPED —
+    def _apply_set_sample_lookahead(self, hop: CycleHop, *, cells: int, auto: bool) -> None:
+        """Arm the round to hold ``cells`` calls in flight; ``1`` disarms. Recorded UNCLAMPED —
         the walk clamps to the connector's ceiling, and clamping twice lets the two disagree.
         Pointedly does NOT ``mark_human_intervened`` as its neighbour above does — skip changes what
         was measured, this cannot, and a babysat stamp would assert a steer that did not happen."""
-        write_sample_lookahead(self._stores.campaigns.cycle_dir(hop), cells)
+        write_sample_lookahead(self._stores.campaigns.cycle_dir(hop), cells, auto=auto)
 
     def _apply_origin_gate_decision(self, hop: CycleHop, decision: GateDecision) -> None:
         """The browser's half of the gate. The write itself is

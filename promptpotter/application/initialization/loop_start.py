@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.initialization.session import Session, open_cycle_ledger
@@ -21,21 +22,27 @@ from promptpotter.application.runner.inner.spawn_context import retarget_inner_s
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.scoring.formula import compile_scorer, split_scoring_block
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.phases import CampaignPhase, emit_phase
+from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopLoop, emit_phase
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.scoring import all_verifier_graded
+from promptpotter.infrastructure.llm.spend_book import (
+    bind_spend_book,
+    bound_spend_book,
+    unbounded_spend_book,
+)
 from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 from promptpotter.judges import build_evaluators
 from promptpotter.shared.errors import graceful
 from promptpotter.shared.statistics import warm_stats_backend
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Mapping
 
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.origin import CampaignOrigin
     from promptpotter.application.run_observers import RunCallbacks
+    from promptpotter.application.scoring.search_point_scorer import ScoredWalk
     from promptpotter.domain.results import HeadlineMetric
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
@@ -73,12 +80,18 @@ def init_cycle(
     # panel owes the operator is what the NEXT round will search, not what the first one did.
     if session.pipeline_declaration:
         store.write_resolved_pipeline(hop, session.pipeline_declaration)
+    # The CELLS beside the search space, and write-once where that one is re-written — a roster a
+    # connector only NAMES (a Harbor dataset version) can move under its name, and every read of
+    # this campaign after today must see what it measured rather than what the registry now says.
+    store.write_resolved_experiment(hop, session.backend_client.workload.experiment)
     # Beside the declaration and on the same cadence: the declaration says which keys exist, this
     # says which the optimizer MOVES and whether the model can even see them. The connector owns
     # the channel, so it is read off the client rather than assumed.
     store.write_optimized_surface(
         hop,
-        session.pipeline_schema.value_tree(prompt_delivery=session.backend_client.prompt_delivery),
+        session.pipeline_schema.value_tree(
+            prompt_delivery=session.backend_client.prompt_delivery(session.pipeline_params)
+        ),
     )
     if resume_from_round_override is not None:
         store.rewind_to_round(hop, resume_from_round_override)
@@ -158,8 +171,13 @@ def arm_diagnostic_scoring(
 
     ``source`` is required here though :func:`populate_session_scoring` defaults it. ``ab`` was the
     one caller that omitted it, so its replays stamped the session ``optimization_loop`` — the
-    provenance of the run being replayed rather than of the replay."""
+    provenance of the run being replayed rather than of the replay.
 
+    A verb run inside a campaign — the saturation ``verify`` — spends under that run's book; one
+    run on its own gets a book for its task, which no ceiling binds yet."""
+
+    if bound_spend_book() is None:
+        bind_spend_book(unbounded_spend_book())
     pipeline_params = configure_and_apply_pipeline(
         session, campaign_config, log=log or (lambda *_a, **_k: None)
     )
@@ -175,6 +193,27 @@ def arm_diagnostic_scoring(
         source=source,
     )
     return pipeline_params
+
+
+async def diagnostic_pass(
+    error: Callable[[str], Exception], scoring: Awaitable[ScoredWalk]
+) -> ScoredWalk:
+    """Score for a verb armed by :func:`arm_diagnostic_scoring`, whole or not at all. Nothing
+    above it catches the round loop's ``StopLoop``, so a stop ends as the verb's own
+    resolved-state error instead; and a pass decided before its last cell is refused the same
+    way, because a reading over part of it describes whatever stopped it."""
+    try:
+        scored = await scoring
+    except StopLoop as stop:
+        info = STOP_REASON_INFO[stop.reason]
+        unmeasured = "" if stop.unmeasured is None else f", {stop.unmeasured} cell(s) unmeasured"
+        raise error(f"{info.label}{unmeasured}. {info.next_step}".strip()) from None
+    if scored.stopped is not None:
+        raise error(
+            f"Scoring stopped after {len(scored.results)} cell(s): {scored.stopped}. A reading "
+            "over part of the pass would describe the stop, not the configuration."
+        )
+    return scored
 
 
 async def _emit_preflight_and_init_session(
@@ -472,6 +511,7 @@ async def init_optimization_loop(
 
 
 __all__ = [
+    "diagnostic_pass",
     "init_cycle",
     "init_optimization_loop",
     "populate_session_scoring",

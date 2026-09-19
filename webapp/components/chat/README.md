@@ -50,8 +50,10 @@ To strip this down to a generic chat + tool-activity app, remove:
   group); keep the `DecisionItem` shape + `LiveSegment`'s button rendering and
   point them at your own gated commands.
 - **The run card** — `components/chat/RunCard.tsx` plus the three derivations it reads,
-  `lib/derivations/{run-summary,flipped-samples,sample-walk}.ts`, and the `runCard` slot in
-  `IngestConversation`. Keep the `run` item kind and re-point it at your own task summary.
+  `lib/derivations/{run-summary,flipped-samples,sample-walk}.ts`, its `<TrendChart compact />`
+  (`components/eval/`, the card's running indicator and its link to the dashboard), and the
+  `runCard` slot in `IngestConversation`. Keep the `run` item kind and re-point it at your own
+  task summary.
 - The job-bar + pipeline hero inside `ChatPane.tsx` (the campaign telemetry chrome) —
   leave the `.chat-panel` thread + `LiveSegment`.
 - **The optimize row** of `ingest/ComposerTools.tsx` and the `useRunControl` behind it —

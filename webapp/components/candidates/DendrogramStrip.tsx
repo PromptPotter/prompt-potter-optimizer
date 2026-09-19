@@ -3,6 +3,7 @@ import { memo, useMemo } from "react";
 import { cx } from "@/lib/cx";
 import { fmtHeadlineValue, type HeadlineMetric } from "@/lib/derivations";
 import { useStableContent } from "@/lib/stable";
+import { pressable } from "@/components/ui";
 import type { LineageNode } from "@/lib/api";
 import type { CandidateView } from "@/lib/types";
 import { dendrogram, type DendroRow } from "./dendrogram";
@@ -115,8 +116,7 @@ export const DendrogramStrip = memo(function DendrogramStrip({
           return (
             <g key={n.key} className="cand-dendro-node">
               <g
-                role="button"
-                tabIndex={0}
+                {...pressable(() => onSelect(selected ? null : (view ?? null)))}
                 aria-pressed={selected}
                 aria-label={
                   n.isFork
@@ -124,12 +124,6 @@ export const DendrogramStrip = memo(function DendrogramStrip({
                     : `Candidate ${n.label}${n.isElected ? ", round winner" : ""} — ${value}`
                 }
                 className={cx("cand-dendro-hit", selected && "selected")}
-                onClick={() => onSelect(selected ? null : (view ?? null))}
-                onKeyDown={(e) => {
-                  if (e.key !== "Enter" && e.key !== " ") return;
-                  e.preventDefault();
-                  onSelect(selected ? null : (view ?? null));
-                }}
               >
                 <title>
                   {n.label}
@@ -141,9 +135,9 @@ export const DendrogramStrip = memo(function DendrogramStrip({
                         ? " · the round's only arm — it advances without an election"
                         : " · eliminated"}
                 </title>
-                {/* Transparent backing rect — the 3px dot alone is an unfair
-                    click/focus target. Mirrors the workflow node's hit rect. */}
-                <rect x={pct(n.xf)} y={0} width={1} height={geo.height} className="cand-dendro-hitrect" />
+                {/* Transparent backing disc, CENTRED on the dot: the 3px dot alone is an unfair
+                    target, and a full-height stub takes the hit test off every node it crosses. */}
+                <circle cx={pct(n.xf)} cy={n.y} r={8} className="cand-dendro-hitarea" />
                 <circle
                   className={cx("cand-dendro-dot", n.isFork ? "fork" : n.isWinner ? "winner" : "eliminated")}
                   cx={pct(n.xf)}
@@ -153,16 +147,9 @@ export const DendrogramStrip = memo(function DendrogramStrip({
               </g>
               {forkCycle && (
                 <g
-                  role="button"
-                  tabIndex={0}
+                  {...pressable(() => onFreeHierarchy(forkCycle))}
                   aria-label={`A sibling cycle was forked from ${n.label} — open the forest view on it`}
                   className="cand-dendro-fork"
-                  onClick={() => onFreeHierarchy(forkCycle)}
-                  onKeyDown={(e) => {
-                    if (e.key !== "Enter" && e.key !== " ") return;
-                    e.preventDefault();
-                    onFreeHierarchy(forkCycle);
-                  }}
                 >
                   <title>Forked here — open the forest view on the sibling cycle</title>
                   <text className="cand-dendro-fork-glyph" x={pct(n.xf)} y={n.y - 6}>

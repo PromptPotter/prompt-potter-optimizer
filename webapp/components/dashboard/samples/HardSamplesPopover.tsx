@@ -1,10 +1,10 @@
 "use client";
+import { Dialog } from "@/components/ui";
 import { COLUMNS, type ColId } from "./columns";
 import { isHit } from "@/lib/fitness";
 
 // Full-text popover for a clipped left-aligned cell — opened by clicking an
-// expandable cell, dismissed by backdrop click or Escape (the Escape handler
-// lives on the owner so it can coexist with the table's other key handlers).
+// expandable cell, dismissed by backdrop click or Escape (both owned by `Dialog`).
 export function HardSamplesPopover({
   popover,
   onClose,
@@ -13,10 +13,10 @@ export function HardSamplesPopover({
   onClose: () => void;
 }) {
   return (
-    <div className="hs-popover-backdrop" onClick={onClose}>
-      <div className="hs-popover" onClick={(e) => e.stopPropagation()}>
+    <Dialog open onClose={onClose} labelledBy="hs-popover-title" bare>
+      <div className="hs-popover">
         <div className="hs-popover-header">
-          <span>
+          <span id="hs-popover-title">
             Sample {popover.sampleId} ·{" "}
             {COLUMNS.find((c) => c.id === popover.col)?.label}
           </span>
@@ -26,7 +26,7 @@ export function HardSamplesPopover({
         </div>
         <pre className="hs-popover-body">{popover.text}</pre>
       </div>
-    </div>
+    </Dialog>
   );
 }
 

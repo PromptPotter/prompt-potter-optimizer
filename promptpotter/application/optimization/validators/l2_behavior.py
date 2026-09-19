@@ -19,8 +19,9 @@ __all__ = ["run_all_l2_checks"]
 # l3_plan length floor in `l3_output.py`.
 L2_RATIONALE_FLOOR_CHARS = 40
 
-# A digit or a `#N` sample reference — the cheap evidence-anchor signal.
-_EVIDENCE_RE = re.compile(r"#\d+|\d")
+# A sample reference (`#17`) or a MEASUREMENT (`0.42`, `12%`, `3/20`). A bare integer is not a
+# citation: `\d` alone passed "round 2", so every rationale mentioning a round number scored anchored.
+_EVIDENCE_RE = re.compile(r"#\d+|\d+\.\d+|\d+\s*%|\d+\s*/\s*\d+")
 
 
 def extract_l2_output(round_dict: dict[str, Any] | None) -> dict[str, Any]:

@@ -15,47 +15,33 @@
 //
 // Unlike ConsentGate there IS a way out, because there is nothing to agree to:
 // signing out is the only action a blocked user can take, so it is the one
-// affordance. Still no × / ESC / overlay-click — leaving means leaving.
+// affordance. Still no × / ESC / overlay-click (`Dialog` with no `onClose`) —
+// leaving means leaving.
 //
-// Reuses .account-overlay / .account-modal / .account-pane-head /
-// .account-pane-body from the account domain stylesheet; .consent-actions from
-// the auth one.
+// Reuses .account-modal / .account-pane-head / .account-pane-body from the
+// account domain stylesheet; .consent-* from the auth one.
 
-import { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { postLogout } from "@/lib/api/account";
-import { useDialogA11y } from "@/lib/hooks/useDialogA11y";
-
-const NOOP = () => {};
+import { useCommand } from "@/lib/hooks/useCommand";
+import { Dialog } from "@/components/ui";
 
 export function AccessGate() {
   const { status, me } = useAuth();
-  const [leaving, setLeaving] = useState(false);
+  const cmd = useCommand<"logout">("access-gate", { revalidate: false });
 
   const open = status === "authed" && !!me && me.access_state === "blocked";
-  const cardRef = useDialogA11y(open, NOOP);
 
   if (!open) return null;
 
-  const onSignOut = async () => {
-    setLeaving(true);
-    try {
-      await postLogout();
-    } finally {
-      // Hard navigation either way — a failed logout still shouldn't strand
-      // them on a blocking overlay with a dead button.
-      window.location.assign("/login");
-    }
-  };
+  // Hard navigation either way — a failed logout still shouldn't strand them on a blocking
+  // overlay with a dead button.
+  const onSignOut = () =>
+    void cmd.run("logout", postLogout).then(() => window.location.assign("/login"));
 
   return (
-    <div
-      className="account-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="access-gate-title"
-    >
-      <div ref={cardRef} className="account-modal consent-modal">
+    <Dialog open labelledBy="access-gate-title" bare>
+      <div className="account-modal consent-modal">
         <header className="account-pane-head">
           <h3 id="access-gate-title">This account is switched off</h3>
         </header>
@@ -71,14 +57,14 @@ export function AccessGate() {
             <button
               type="button"
               className="login-button"
-              disabled={leaving}
+              disabled={cmd.pending !== null}
               onClick={onSignOut}
             >
-              {leaving ? "Signing out…" : "Sign out"}
+              {cmd.pending !== null ? "Signing out…" : "Sign out"}
             </button>
           </div>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

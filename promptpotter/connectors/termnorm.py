@@ -253,6 +253,9 @@ CONNECTOR = Connector(
     version_check=_termnorm_version_check,
     preflight=_termnorm_preflight,
     auth_token=_termnorm_auth_token,
+    # The knee measured on `llm_only`: past 16 in flight the wall clock stops falling and the call
+    # tail grows. The web-search pipeline was not measured, and Brave rate-limits per key.
+    max_cells_in_flight=16,
     # First-tenant default — skip the heavy retrieval/scoring nodes (R4).
     # The production-benchmark pipeline includes them; a fresh CSV upload
     # should not pay Brave Search billing + multi-second latency on round 1.

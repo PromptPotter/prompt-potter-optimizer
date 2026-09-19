@@ -29,10 +29,18 @@ both stay desk tiers run by hand.
 Two servers rather than one, because `PROMPTPOTTER_HOME` is bound at import and one process
 cannot hold both. **Neither binds 8001** — that port is the operator's.
 
+**One spec inside `cold` brings a THIRD**, and it is not a fourth world: `onboarding-signed-in`
+needs an identity that is signed in and is not the host, which neither server above can produce
+because both pass `PROMPTPOTTER_AUTH=off`. So `fake_issuer.ts` runs the same `serve.mjs` with
+that one variable unset — same preflight, same fault tee, same interpreter — over a workspace it
+mints and deletes per file. Auth posture is the whole difference, which is why that variable is
+declared by each caller rather than inside the script.
+
 | Variable | Default | For |
 |---|---|---|
 | `PP_E2E_PORT` | `8123` | the walk server |
 | `PP_E2E_COLD_PORT` | `8124` | the throwaway server |
+| `PP_E2E_FAKEAUTH_PORT` | `8125` | the auth-CLOSED server `onboarding-signed-in.spec.ts` raises for itself |
 | `PP_E2E_COLD_HOME` | `<tmp>/promptpotter-e2e` | where the throwaway world lives; it must sit under the system temp dir or `reset_world.py` refuses to wipe it |
 | `PP_E2E_BASE_URL` | — | walk a server already up (your `:8001`, a deployed box); the walk server then never starts |
 | `PP_E2E_SPEND` | — | `1` arms the spend tier |

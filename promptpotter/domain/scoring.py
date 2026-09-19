@@ -8,8 +8,8 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Annotated, Any, NamedTuple, NotRequired, TypedDict, cast
 
-from promptpotter.config.settings import ANSWER_SPACE_CAP
-from promptpotter.shared.errors import ErrorCategory
+from promptpotter.config.settings import ANSWER_SPACE_CAP, NO_RESULT
+from promptpotter.shared.errors import ErrorCategory, is_error_result
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
@@ -92,6 +92,12 @@ class LedgerPipelineData(TypedDict, total=False):
     step_timings: dict[str, Any]
     step_tokens: dict[str, dict[str, Any]]
     diagnostics: dict[str, Any]
+    # Seconds this cell was BLOCKED rather than working — machine suspend plus time queued behind
+    # the shared rate limiter — handed back to its wall-clock envelope by the seam that holds one
+    # (``application/scoring/cell_envelope.py``). ABSENT where the backend declares no envelope: no
+    # give-back is installed there, so nothing watched, and 0.0 would be a reading nobody took.
+    # It rides the LEDGER half because the campaign's wall clock is summed off the chronology.
+    unworked_s: float
     # L4: one outer sample IS a whole inner campaign, so its "answer" is a lift.
     mean_round_delta: float
     error: str | None
@@ -140,7 +146,6 @@ class PipelineData(LedgerPipelineData, total=False):
     inner_rounds_ran: int
     inner_round_budget: int
     inner_stop_reason: str
-    inner_unworked_s: float
     inner_spend_usd: float | None
     inner_tokens: int | None
     inner_campaign_id: str
@@ -172,7 +177,7 @@ class QueryMeasurement(TypedDict):
     # and errored, carrying the missing term's own message. Presence IS the state; ``fitness`` and
     # ``objective`` are then absent, which is what keeps a stale archived verdict from reading as
     # this formula's. Never an error: the backend answered and the row is worth keeping, so it must
-    # not reach the walk's abort classifier (`query_loop.py::_classify_abort`).
+    # not reach the walk's abort classifier (`query_loop.py::Walk._abort_reason`).
     unscored: NotRequired[str]
     pipeline_data: PipelineData | None
     # ---- Stamped after measurement, by the scorer and the walk -------------------
@@ -510,12 +515,24 @@ def modal_answer_share(rows: Sequence[Mapping[str, Any]]) -> float | None:
 
 def is_answer_collapsed(rows: Sequence[Mapping[str, Any]]) -> bool:
     """The ABSENCE of a measurement, not a low score — θ fitted to a constant answer is an
-    artifact, so the candidate is withheld from θ and eliminated by PoBB."""
-    truth = enumerable_truth_labels(rows)
-    if truth is None or len(truth) < 2:
+    artifact, so the candidate is withheld from θ and eliminated by PoBB.
+
+    One answer to every cell, CONTRADICTED by the cells. What contradicts it is whatever the bank
+    has: a truth set that varies, or — with no labels at all — a verifier that left a cell
+    unsolved, so an arm answering every cell alike AND solving every one of them is not collapsed.
+    Errored rows carry no answer and are dropped first, or a broken backend reads as a verdict on
+    the idea — and neither is a row that answered nothing, so an empty or ``NO_RESULT`` prediction
+    disqualifies the whole set rather than counting as the one answer everything shares."""
+    answered = [r for r in rows if not is_error_result(r)]
+    said = {str(r.get("predicted") or "") for r in answered}
+    if len(said) != 1 or said & {"", NO_RESULT}:
         return False
-    said = Counter(str(v) for r in rows if (v := r.get("predicted")) not in (None, ""))
-    return len(said) == 1
+    truth = enumerable_truth_labels(answered)
+    if truth is not None:
+        return len(truth) >= 2
+    return all_verifier_graded(str(r.get("ground_truth") or "") for r in answered) and not all(
+        is_hit(r.get("fitness")) for r in answered
+    )
 
 
 __all__ = [

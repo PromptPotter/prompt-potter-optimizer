@@ -1,6 +1,6 @@
 "use client";
 import { ForestRows, type TreeCtx } from "./sidebar/ForestRows";
-import type { OriginGroup } from "./sidebar/grouping";
+import type { OriginGroup } from "@/lib/derivations";
 
 interface Props {
   origins: OriginGroup[];

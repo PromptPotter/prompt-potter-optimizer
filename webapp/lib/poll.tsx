@@ -54,7 +54,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { liveCandidateId } from "@/lib/candidate-label";
 import { reportIncident } from "@/lib/diagnostics";
 import { failureKind, fetchDashboardByPath, fetchTimeRay } from "./api";
 import { encodeCyclePath, pathLeaf, type CyclePath } from "./ids";
@@ -67,6 +66,7 @@ import type {
   RayItem,
   ValidationFailure,
 } from "./api/types";
+import { RUN_FRESH_S } from "./api/types.generated";
 import { usePoll } from "./hooks/usePoll";
 import { bumpRevalidation, useRevalidation } from "./revalidate";
 import { hasLiveProducer } from "./run-phase";
@@ -216,19 +216,11 @@ function matchLiveCandidate<T extends { label?: string }>(
   return candidates.find((c) => c.label === label) ?? null;
 }
 
-// Output-candidate slot — the sample tape. For a candidate's numbers, `liveCandidateRow`.
+// Output-candidate slot — the sample tape.
 export const liveCandidate = (
   dash: DashboardSnapshot | null,
   label: string,
 ): LiveCandidate | null => matchLiveCandidate(liveL1Candidates(dash), label);
-
-// The in-flight row's NUMBERS, by the same label its tape and its seed resolve on.
-export function liveCandidateRow(
-  dash: DashboardSnapshot | null,
-  label: string,
-): DashboardCandidate | null {
-  return matchLiveCandidate(liveCandidates(dash), label);
-}
 
 // Input-candidate slot — the seed-able prompt_fields / resolved_pipeline_params
 // half, for steer-fork seeding from a still-in-flight candidate.
@@ -370,7 +362,10 @@ export function ageBucket(ageS: number | null): BucketResult {
       termKey: "status_nowall",
     };
   }
-  if (ageS < 30) {
+  // The GENERATED `RUN_FRESH_S` — the same window the server splits `running` from `detached` on,
+  // so the banner and `run_phase` cannot disagree about whether a producer is still there. The 5 m
+  // below is this banner's own, dividing two flavours of stale that the server does not name.
+  if (ageS < RUN_FRESH_S) {
     return {
       status: "live",
       statusText: `Live · last write ${ageS.toFixed(0)}s ago`,
@@ -843,18 +838,20 @@ function useCycleStreamSource(
   return { stream, ray: rayState };
 }
 
+// The live beat, matched by the workspace's active-pointer poll so a CLI-minted cycle is
+// followed without the registry's lag.
+const DASHBOARD_INTERVAL_MS = 2000;
+
 export function CycleStreamProvider({
   path,
-  intervalMs = 2000,
   children,
 }: {
   // The single viewed-cycle address (root → leaf hops). The stream re-roots to
   // the leaf hop's dashboard; an inner descendant is just a deeper path.
   path: CyclePath | null;
-  intervalMs?: number;
   children: ReactNode;
 }) {
-  const { stream, ray } = useCycleStreamSource(path, intervalMs);
+  const { stream, ray } = useCycleStreamSource(path, DASHBOARD_INTERVAL_MS);
   return (
     <CycleStreamContext.Provider value={stream}>
       <TimeRayContext.Provider value={ray}>{children}</TimeRayContext.Provider>

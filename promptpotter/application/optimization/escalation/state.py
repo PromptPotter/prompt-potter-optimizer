@@ -11,7 +11,7 @@ from promptpotter.domain.phases import CampaignPhase, StopReason
 from promptpotter.domain.run_records import CycleRecord, PhaseRecord, view_fields
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import LivesConfig
+    from promptpotter.application.campaign_config import EscalationLadder, LivesConfig
     from promptpotter.infrastructure.ledger import CycleEventLog
 
 
@@ -209,6 +209,7 @@ class EscalationFSM:
         separable: bool | None,
         current_objective: float | None,
         l1_patience: int,
+        escalation_ladder: EscalationLadder,
         lives: LivesConfig | None = None,
         axes_with_positive_yield: int | None = None,
         l1_mandatory_breach: bool = False,
@@ -230,6 +231,7 @@ class EscalationFSM:
             current_objective=current_objective,
             l1_stall_count=self._l1_stall_count,
             l1_patience=l1_patience,
+            escalation_ladder=escalation_ladder,
             # Already banked above; the objective-ceiling stop reads it too, because a headline is
             # not a result until you know whether the round it came from resolved anything.
             separable=separable,
@@ -249,7 +251,8 @@ class EscalationFSM:
         current_composite_fitness: float,
         current_theta: float | None = None,
         current_theta_se: float | None = None,
-        l2_patience: int | None,
+        escalation_ladder: EscalationLadder,
+        l2_patience: int,
         l3_patience: int | None,
     ) -> EscalationEvent:
         """L2 escalation requested. First-invocation grace: stall only advances after a layer has fired at
@@ -264,7 +267,7 @@ class EscalationFSM:
             )
             self._l2_stall_count = 0 if l2_improved else self._l2_stall_count + 1
 
-        if l2_patience is None or self._l2_stall_count < l2_patience:
+        if not escalation_ladder.fires_l3 or self._l2_stall_count < l2_patience:
             return EscalationEvent(next_action=NextAction.FIRE_L2)
 
         if self._l3_round > 0:

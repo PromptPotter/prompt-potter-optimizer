@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import functools
 import logging
 import subprocess
 import sys
@@ -89,11 +90,15 @@ class _OrderedFakeBackend:
 
     async def measure(self, sample: Sample, session: Any, *, pipeline_params: Any = None) -> Any:
         self.calls.append(sample.id)
+        return await self.hold(sample)
+
+    async def hold(self, sample: Sample, pace: float = 0.01) -> Any:
+        """One call's worth of backend capacity — a PoBB backfill spends it as a cell does."""
         self._inflight += 1
         self.entries.append(self._inflight)
         rank = sample.id if self.slowest_last else (self.n - sample.id + 1)
         try:
-            await asyncio.sleep(rank * 0.01)
+            await asyncio.sleep(rank * pace)
         finally:
             self._inflight -= 1
         return {
@@ -118,16 +123,15 @@ class _CutAfter:
     def __init__(self, n: int) -> None:
         self.n = n
 
-    def check(self, results: list[Any], ci: int, ct: int) -> Any:
+    def earliest_stop(self, results: list[Any], upcoming: list[Any]) -> int | None:
+        m = max(self.n, len(results) + 1)
+        return m if m <= len(results) + len(upcoming) else None
+
+    def check(self, results: list[Any]) -> Any:
         if len(results) < self.n:
             return None
         return EscalationSignal(
-            check_name=self.name,
-            target=EscalationTarget.ELIMINATE_CANDIDATE,
-            check_result={"queries_scored": len(results)},
-            candidate_idx=ci,
-            candidates_scored=len(results),
-            candidates_skipped=0,
+            self.name, EscalationTarget.ELIMINATE_CANDIDATE, {"queries_scored": len(results)}
         )
 
 
@@ -217,6 +221,74 @@ def test_layout_only_override_moves_optimizer_prompt_hash() -> None:
         }, "layout edit on one node must not move other nodes' hashes"
     finally:
         set_optimizer_prompt_overrides(None)
+
+
+async def test_the_determinism_clamp_outranks_every_other_layer_and_keys_the_bank(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A campaign that PINS its draw and its route must actually run pinned, and two pins must
+    not share a banked reply.
+
+    Both halves are silent and both destroy a measurement's identity. `l1_generate` passes
+    `temperature=creativity` as a per-call override, so a clamp merged anywhere but last leaves
+    the loudest noise source running while every surface reports the campaign as pinned — the
+    run is then unreproducible and nothing says so. And hosts of one model disagree
+    SYSTEMATICALLY rather than randomly (measured: on a `justlogic-d234` query Groq answered
+    FALSE 28/28 where every other host answered Uncertain), so a `route_order` that reached the
+    wire without reaching `hash_call` would replay one route's answer under the other's name for
+    the life of the cache — unrecoverable, because the row on disk is indistinguishable from one
+    the pinned route really produced.
+    """
+    from promptpotter.application.campaign_config import DeterminismClamp
+    from promptpotter.application.optimization.dispatch.llm_call import call as call_mod
+    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+        set_determinism_clamp,
+    )
+    from promptpotter.infrastructure.llm.response import LLMResponse
+    from promptpotter.infrastructure.store.stores import LLMReuseCache
+
+    sent: list[dict[str, Any]] = []
+
+    class _Recorder:
+        async def chat(self, **kwargs: Any) -> LLMResponse:
+            sent.append(kwargs)
+            return LLMResponse(content="ok", model="m")
+
+    monkeypatch.setattr(call_mod, "get_llm_client", lambda _provider: _Recorder())
+    cache = LLMReuseCache(tmp_path, "optimizer_reuse")
+    ctx = call_mod.LLMCallContext(cache=cache)
+
+    async def ask(clamp: DeterminismClamp | None) -> None:
+        set_determinism_clamp(clamp)
+        await call_mod.llm_call(
+            [{"role": "user", "content": "q"}],
+            config={"provider": "openrouter", "model": "m", "temperature": 0.9},
+            context=ctx,
+            temperature=0.7,
+        )
+
+    try:
+        pinned = DeterminismClamp(temperature=0.0, seed=7, route_order=["Alibaba"])
+        await ask(pinned)
+        assert sent[0]["temperature"] == 0.0, (
+            "the node's file value or the per-call override beat the clamp — the campaign "
+            "reports itself pinned and runs unpinned"
+        )
+        assert sent[0]["seed"] == 7
+        assert sent[0]["route_order"] == ["Alibaba"]
+
+        # Same prompt, same model, a different host: a second measurement, so a second entry.
+        await ask(pinned.model_copy(update={"route_order": ["Baidu"]}))
+        assert len(sent) == 2, "the second route replayed the first route's banked answer"
+        assert len(list((tmp_path / "optimizer_reuse").glob("*.json"))) == 2
+
+        # And an unpinned campaign is left alone rather than handed a `None` for every key.
+        await ask(None)
+        assert sent[2]["temperature"] == 0.7
+        assert sent[2]["seed"] is None
+        assert "route_order" not in sent[2]
+    finally:
+        set_determinism_clamp(None)
 
 
 def test_inner_campaign_id_separates_two_candidates_and_is_stable() -> None:
@@ -521,6 +593,169 @@ def test_whether_the_episode_opened_the_injected_skill_is_measured(
     assert re.match(rb"^---\n(.*?)\n---\n", raw, re.DOTALL), (
         "the frontmatter must satisfy the agent's own parser, or the skill is skipped silently"
     )
+
+
+def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """terminus-2 retries a 429 inside the turn, so the throttle spends the agent's clock and the
+    verifier then grades whatever was left — a 0.0 banked as the model's, and replayed as one. An
+    account out of credit ends every episode at turn 0: banked as holes, the walk spends the panel,
+    and on the optimizer's own call a swallowed refusal runs the round on without its critique. A
+    judge's refused grading banked as absent is a cell that replays ungraded forever.
+
+    Namespaces stand in for ``TrialResult`` and ``ExceptionInfo`` on the argument
+    ``test_whether_the_episode_opened_the_injected_skill_is_measured`` makes: declared fields only.
+    The provider clients are wiring seams, so a namespace stands in for each too."""
+    import asyncio
+    from types import SimpleNamespace
+
+    import httpx
+    import openai
+    from factories import measurement
+
+    from promptpotter.connectors import harbor
+    from promptpotter.infrastructure.llm.anthropic import AnthropicClient
+    from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
+    from promptpotter.infrastructure.llm.spend_book import (
+        CallLabel,
+        bind_spend_book,
+        unbounded_spend_book,
+    )
+    from promptpotter.judges import _compute
+    from promptpotter.judges import call as judge_call
+    from promptpotter.judges.grounding import ANSWER_GROUNDING
+    from promptpotter.judges.protocol import JudgeSpec, JudgeStage
+    from promptpotter.shared.errors import (
+        CellWalletExhaustedError,
+        ErrorCategory,
+        WalletExhaustedError,
+        graceful,
+    )
+
+    monkeypatch.setattr(harbor, "_TRIALS_ROOT", tmp_path)
+    throttled = "Unknown Error in LLM interaction: litellm.RateLimitError: RateLimitError: 429\n"
+
+    def trial(name: str, log: str, exc_type: str | None, message: str = "") -> SimpleNamespace:
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "trial.log").write_text(log, encoding="utf-8")
+        exc = SimpleNamespace(exception_type=exc_type, exception_message=message)
+        return SimpleNamespace(
+            trial_name=name, step_results=None, exception_info=exc if exc_type else None
+        )
+
+    def banked_as(t: SimpleNamespace) -> ErrorCategory | None:
+        failure = harbor._infrastructure_failure(t)
+        return None if failure is None else failure[1]
+
+    timeout = "Agent execution timed out after 600.0 seconds"
+    for throttle in (
+        trial("clock", throttled, "AgentTimeoutError", timeout),
+        trial("ended", "", "RateLimitError", "litellm.RateLimitError: 429"),
+    ):
+        assert banked_as(throttle) is ErrorCategory.CONNECTION
+    # Out of credit halts on the first attempt: no backoff can top the key up.
+    bodies = (
+        '{"error":{"message":"This request requires more credits","code":402}}',
+        '{"error":{"message":"Key limit exceeded (daily limit).","code":403}}',
+    )
+    client = OpenAICompatibleClient(api_key="k", provider="openrouter", display_name="OpenRouter")
+    for code, body in zip((402, 403), bodies, strict=True):
+        failed = trial(str(code), "", "APIError", f"litellm.APIError: {body}")
+        assert banked_as(failed) is ErrorCategory.PROVIDER_CREDIT
+        # The same refusal on our own client is the same fact, and no best-effort block eats it.
+        refused = openai.APIStatusError(
+            f"Error code: {code} - {body}",
+            response=httpx.Response(code, request=httpx.Request("POST", "https://x")),
+            body=None,
+        )
+        with pytest.raises(WalletExhaustedError), graceful("best-effort step"):
+            client._try_recover_from_chat_error(refused, {}, None)
+
+    class _StatusError(Exception):
+        def __init__(self, status_code: int, message: str) -> None:
+            super().__init__(message)
+            self.status_code = status_code
+
+    anthropic_body = "invalid_request_error: Your credit balance is too low to access the API."
+
+    async def _anthropic_refuses(**_: Any) -> None:
+        raise _StatusError(400, anthropic_body)
+
+    claude = AnthropicClient(api_key="k")
+    claude._client = SimpleNamespace(  # type: ignore[assignment]
+        messages=SimpleNamespace(with_raw_response=SimpleNamespace(create=_anthropic_refuses))
+    )
+
+    async def _refused() -> None:
+        bind_spend_book(unbounded_spend_book())
+        await claude.chat(
+            [{"role": "user", "content": "q"}], model="m", label=CallLabel("probe", "optimizer")
+        )
+
+    with pytest.raises(WalletExhaustedError), graceful("best-effort step"):
+        asyncio.run(_refused())
+
+    # A judge: a spent account is a hole that halts, any other grader failure stays absent.
+    row = measurement(
+        sample_id=0, fitness=0.0, predicted="1999", pipeline_data={"reasoning_trace": "read it"}
+    )
+    spec = JudgeSpec(name="answer_grounding", stages=[JudgeStage(model="m", provider="p")])
+
+    def grade_under(failure: Exception) -> float | None:
+        async def _chat(**_: Any) -> None:
+            raise failure
+
+        monkeypatch.setattr(judge_call, "get_llm_client", lambda _p: SimpleNamespace(chat=_chat))
+        return asyncio.run(_compute(result=row, judge=ANSWER_GROUNDING, spec=spec, term="ground"))
+
+    with pytest.raises(CellWalletExhaustedError) as hole:
+        grade_under(WalletExhaustedError("the spend ceiling", category=ErrorCategory.SPEND_CEILING))
+    assert hole.value.category is ErrorCategory.SPEND_CEILING
+    assert grade_under(_StatusError(500, "upstream exploded")) is None
+    # The agent's own slowness is its score, and a throttle it outlived is only latency.
+    assert harbor._infrastructure_failure(trial("slow", "", "AgentTimeoutError", timeout)) is None
+    assert harbor._infrastructure_failure(trial("outlived", throttled, None)) is None
+
+
+def test_a_skill_in_the_system_prompt_reaches_the_first_request_and_is_measured_there(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``skill_delivery: system_prompt`` silently not applied runs every arm as the same
+    prompt-less episode, banked under the key of a mode it never ran, and reads as "the prompt
+    does not matter". Namespaces stand in for ``TrialResult`` as in the skill-opened test."""
+    import json
+    from types import SimpleNamespace
+
+    from promptpotter.connectors import harbor
+
+    cfg = {"provider": "openrouter", "model": "m", "prompt": "Keep {braces} as written."}
+    in_prompt = {"agent": {**cfg, "skill_delivery": "system_prompt"}}
+    assert harbor.harbor_wire_adapter("t", in_prompt)["skill_delivery"] == "system_prompt"
+    assert harbor.harbor_wire_adapter("t", {"agent": cfg})["skill_delivery"] == "agent_skill"
+    assert harbor.CONNECTOR.prompt_delivery(in_prompt) == "request"
+    assert harbor.CONNECTOR.prompt_delivery({"agent": cfg}) == "artifact_body"
+
+    # terminus-2 fills its template with `str.format`, which must leave the skill verbatim.
+    template = (
+        "Rules.\n\nTask Description:\n{instruction}\n\nCurrent terminal state:\n{terminal_state}"
+    )
+    sent = harbor._system_skill_template(template, cfg["prompt"]).format(
+        instruction="solve it", terminal_state="$"
+    )
+    assert cfg["prompt"] in sent and "solve it" in sent
+
+    monkeypatch.setattr(harbor, "_TRIALS_ROOT", tmp_path)
+
+    def trial(name: str, first_message: str) -> SimpleNamespace:
+        agent_dir = tmp_path / name / "agent"
+        agent_dir.mkdir(parents=True)
+        steps = [{"source": "user", "message": first_message}]
+        (agent_dir / "trajectory.json").write_text(json.dumps({"steps": steps}), encoding="utf-8")
+        return SimpleNamespace(trial_name=name, step_results=None)
+
+    assert harbor._skill_in_first_request(trial("carried", sent), cfg["prompt"]) == 1.0
+    assert harbor._skill_in_first_request(trial("dropped", template), cfg["prompt"]) == 0.0
 
 
 def test_a_judge_never_grades_a_cell_that_has_no_answer() -> None:
@@ -938,6 +1173,65 @@ def test_render_does_not_leak_l3_plan_into_target_prompt() -> None:
     assert sentinel not in opt_sp.render()
 
 
+def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing() -> None:
+    """The panel IS the text L1 replaces, so whatever it shows comes back as the raw field. Showing
+    a SPLICED ``problem_description`` therefore returns the operator's context inside it, and the
+    next render splices the context around that copy — a strict accumulator, no error, and every
+    candidate after it scored on the grown prompt. Ten banked rounds of one campaign carried the
+    same 58-char ``upstream_context`` while ``problem_description`` ran 906 → 5,024 chars."""
+    from promptpotter.application.optimization.dispatch.bundle import (
+        CycleSlice,
+        InjectionBundle,
+        RoundDigest,
+    )
+    from promptpotter.application.optimization.dispatch.injections.layer_state import (
+        _r_rendered_prompt,
+        _r_task_context,
+    )
+    from promptpotter.domain.opt_search_point import L2L3Memory
+    from promptpotter.domain.round_diagnostics import RoundDiagnostics
+    from promptpotter.domain.search_point import TaskDecomposition
+
+    upstream = "Raw invoice text is provided directly as the input column."
+    opt_sp = OptSearchPoint(
+        persona="You assign Swiss account codes.",
+        problem_description="Assign the four-digit account code for the invoice.",
+        memory=L2L3Memory(
+            task_context=TaskDecomposition(
+                upstream_context=upstream,
+                downstream_context="The assigned code books a ledger entry.",
+            )
+        ),
+    )
+    bundle = InjectionBundle(
+        opt_sp=opt_sp,
+        pipeline_schema=None,
+        cycle_slice=CycleSlice(
+            round_num=1,
+            l1_stall_count=0,
+            l2_round=0,
+            l2_stall_count=0,
+            l3_round=0,
+            l3_stall_count=0,
+            exploration_budget="tight",
+        ),
+        digest=RoundDigest(diagnostics=RoundDiagnostics(n_valid=0, samples=[]), critique=None),
+        axes=None,
+    )
+    panel = "\n\n".join(i.text for i in _r_rendered_prompt(bundle))
+    shown = {
+        label.removeprefix("[").removesuffix("]"): body
+        for label, _, body in (s.partition("\n") for s in panel.split("\n\n"))
+        if label.startswith("[")
+    }
+    # A generator that replaces every field with exactly what it was shown changes nothing.
+    assert opt_sp.mutate(**shown).render() == opt_sp.render()
+    # The framing still reaches the target prompt, and L1 still sees it — as context, not as the
+    # field it is being asked to rewrite. Dropping either half trades this bug for a blinder one.
+    assert upstream in opt_sp.render()
+    assert upstream in "".join(i.text for i in _r_task_context(bundle))
+
+
 def test_earned_blocks_gate_on_credible_lift_and_task_fit() -> None:
     """The earned-block library must never feed the optimizer a noise-win or a cross-task block
     — both are wrong-content-forward with no error. Built from real ``ScoredCandidate.model_dump()``
@@ -1039,7 +1333,7 @@ def test_earned_block_mining_is_blind_inside_an_instrument() -> None:
         mine_earned_blocks(store)
 
     def _inside_instrument() -> dict[str, Any]:
-        enter_instrument_mode(evidence_epoch=frozenset(), optimizer_clamp=None, ruler=None)
+        enter_instrument_mode(evidence_epoch=frozenset(), ruler=None)
         return mine_earned_blocks(store)
 
     # Own context, exactly as a real spawn binds it — and so the mode cannot leak sideways.
@@ -1784,6 +2078,59 @@ def test_answering_in_TEXT_sends_no_contract_to_answer_INTO() -> None:
     assert resolved_output_schemas(schema, text_point)["llm_only"] is None
 
 
+def test_the_campaign_list_names_the_model_its_root_course_runs(built_stores: Any) -> None:
+    """Sibling campaigns on one slug differ only in what their roots run, so the list row is where
+    an operator tells them apart. Three layers name a model here; the root's seed is the one that
+    runs, and a list reading the shared file or the frozen delta names the wrong model with every
+    row rendering. The campaign read without `at` skipped that same seed."""
+    from promptpotter.application.evidence.subjects import SubjectSpec
+    from promptpotter.application.pipeline_resolve import resolve_pipeline_for_campaign
+    from promptpotter.connectors import DEFAULT_CONNECTOR, get
+    from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.run_records import CycleSeed
+    from promptpotter.presentation.api.routers.campaigns.manifests import list_campaigns
+
+    stores = built_stores
+    dataset = stores.tenant_datasets.dataset_dir("ds")
+    write_yaml(
+        dataset / "pipeline.yaml",
+        {
+            "nodes": {"llm_only": {"type": "llm", "config": {"model": "A"}}},
+            "pipelines": {"default": ["llm_only"]},
+        },
+    )
+    write_yaml(
+        dataset / "campaign.yaml",
+        {"campaign_config": {"optimization": dict(get(DEFAULT_CONNECTOR).default_optimization)}},
+    )
+    campaign = Campaign(
+        campaign_id="ds__000001",
+        dataset_name="ds",
+        created_at="2026-09-17T00:00:00Z",
+        root_cycle_id="cycle_root",
+        owner_user_id=str(stores.identity.user_id),
+        config={"pipeline_overlay": {"llm_only": {"model": "B"}}},
+    )
+    stores.campaigns.create_campaign(campaign)
+    stores.campaigns.create(campaign.root_hop, {})
+    seed = CycleSeed(pipeline_overlay={"llm_only": {"model": "C"}}, origin_source="campaign_origin")
+    stores.campaigns.write_cycle_seed(campaign.root_hop, seed)
+
+    listed = list_campaigns(stores, dataset=None, lifecycle="active", descend=None)
+    runs_with = listed.campaigns[0].runs_with
+    assert runs_with is not None
+    models = [(p.value, p.source) for p in runs_with.params if p.key == "model"]
+    assert models == [("C", "seed")]
+
+    for at in (
+        SubjectSpec("campaign", campaign.campaign_id),
+        SubjectSpec("course", campaign.campaign_id, campaign.root_cycle_id),
+    ):
+        served = resolve_pipeline_for_campaign(stores, campaign, at=at)
+        row = next(p for p in served.node_config_schema["llm_only"] if p.key == "model")
+        assert [(row.value, row.source)] == models, at.kind
+
+
 # 5. The dispatch frame — what a node is shown, within what budget
 
 
@@ -2360,7 +2707,7 @@ def test_the_l4_dataset_is_recognized_as_one() -> None:
 
     # The SHIPPED config, not a hand-built one — the question is what the panel runs under.
     base = load_campaign_config(read_yaml(d / "campaign.yaml")["campaign_config"])
-    ctx = types.SimpleNamespace(dataset_config_dir=d)
+    ctx = types.SimpleNamespace(dataset_config_dir=d, panel=panel)
     for task in panel.tasks:
         derived = inner_instrument_config(
             resolve_inner_task(ctx, task.id),
@@ -2378,61 +2725,290 @@ def test_the_l4_dataset_is_recognized_as_one() -> None:
 # 7. Money — what a call is billed, and against which price
 
 
+def _walk_over(
+    dataset: list[Sample],
+    session: Any,
+    *,
+    checks: list[Any],
+    measured: Any = None,
+    on_sample_starting: Any = None,
+    on_taken: Any = None,
+    cached: dict[int, Any] | None = None,
+    banked: dict[int, Any] | None = None,
+) -> Any:
+    """A walk as the gateway opens one, over stubbed persistence: ``cached`` is the archive it
+    replays from, ``banked`` collects what a stop keeps for its resumption."""
+    from promptpotter.shared.instrument import measured_candidate_context
+
+    ctx = query_loop.QueryLoopState(
+        search_point=JobSearchPoint(),
+        session=session,
+        cached_sample_results=dict(cached or {}),
+        on_sample_scored=None,
+        axes=None,
+        scorer=types.SimpleNamespace(
+            fitness=lambda r: r["fitness"], objective=lambda r: r["objective"]
+        ),
+        deprecated_samples={},
+        persist_fresh=on_taken or (lambda rows: {"accuracy": 1.0}),
+        running_scores=lambda rows: {"accuracy": 1.0},
+        record_run=lambda rows, scores: None,
+        bank=lambda rows, kept: (banked if banked is not None else {}).update(
+            {r["sample_id"]: r for r in kept}
+        ),
+    )
+    return query_loop.Walk(
+        dataset, ctx, checks, on_sample_starting, measured_candidate_context(measured)
+    )
+
+
+async def _stopped_by_operator(phase: Any) -> str | None:
+    """Run a scoring phase; the reason if a pause or a spend ceiling ended it."""
+    from promptpotter.domain.phases import WALLET_STOPS, StopLoop
+    from promptpotter.shared.errors import WalletExhaustedError
+
+    try:
+        await phase
+    except KeyboardInterrupt as stop:
+        return str(stop)
+    except StopLoop as stop:
+        return stop.reason.value
+    except WalletExhaustedError as refused:
+        return WALLET_STOPS[refused.category].value
+    return None
+
+
 async def _walk(
     dataset: list[Sample],
     *,
     armed: int,
     cut_at: int | None,
     max_cells: int = 2,
-    rearm_after: int | None = None,
-    slowest_last: bool = False,
+    parent_lacks_cells: bool = False,
+    backfill_pace: float = 0.01,
+    pause_after_call: int | None = None,
+    cached: dict[int, Any] | None = None,
+    stall: int | None = None,
+    skip_at: int | None = None,
+    cap_usd: float | None = None,
 ) -> dict[str, Any]:
-    backend = _OrderedFakeBackend(len(dataset), slowest_last=slowest_last)
-    request = {"cells": armed}
+    """``stall`` names a sample whose call lands well after every other; ``skip_at`` is a skip on
+    record from before a stop. Every cell is admitted at, and bills, $1, against ``cap_usd``."""
+    from promptpotter.application.optimization.pobb.checks import PoBBCheck, PoBBConfig
+    from promptpotter.application.runner.termination import BudgetGate
+    from promptpotter.domain.pipeline_schema import WebSpendBound
+    from promptpotter.domain.spend import TokenAccount
+    from promptpotter.infrastructure.llm.spend_book import (
+        Billed,
+        CallLabel,
+        SendBound,
+        SpendBook,
+        admitted,
+        spending_under,
+    )
+
+    backend = _OrderedFakeBackend(len(dataset))
+    banked: dict[int, Any] = {}
     depths: list[int] = []
+    committed: list[int] = []
+    returned: list[int] = []
+    book = SpendBook(usd_cap=lambda: cap_usd, tokens_cap=lambda: None)
+    dollar = SendBound(input_tokens=0, output_tokens=0, usd=1.0)
+
+    async def _measure(sample: Sample, session: Any, *, pipeline_params: Any = None) -> Any:
+        with admitted(CallLabel("cell", "backend"), dollar, model=None, provider=None) as bill:
+            if sample.id == stall:
+                await asyncio.sleep(0.3)
+            row = await backend.measure(sample, session, pipeline_params=pipeline_params)
+            returned.append(sample.id)
+            bill.settle(Billed(TokenAccount(), 1.0))
+        return row
+
+    gate = BudgetGate(book=book)
+
+    def _backfill(sp: Any, sample: Sample, prior_id: str) -> Any:
+        call = asyncio.ensure_future(backend.hold(sample, backfill_pace))
+
+        def _commit() -> list[Any]:
+            committed.append(sample.id)
+            return [call.result()]
+
+        return call, _commit
+
+    # A parent measured on none of the round's cells, so every cell owes it one catch-up call.
+    priors = PoBBCheck(PoBBConfig(), n_samples=len(dataset), ruler=None, backfill_fn=_backfill)
+    priors.register_completed([], candidate_id="parent", sp=JobSearchPoint())
     # The one seam stubbed; the window, cursors, checkpoints and discard are shipping code.
-    with mock.patch.object(query_loop, "measure_sample", backend.measure):
+    with mock.patch.object(query_loop, "measure_sample", _measure), spending_under(book):
         session = types.SimpleNamespace(
             scoring=types.SimpleNamespace(scorer=lambda r: 1.0, round_scorer=None),
-            pause_check=None,
+            state=types.SimpleNamespace(ledger=None),
+            pause_check=lambda: pause_after_call is not None and len(returned) >= pause_after_call,
             skip_check=None,
             skip_consume=None,
-            budget_tripped=None,
-            # The flag's real behaviour: the round that scored under the arming consumes it, so
-            # nothing inside one walk ever spends it. `rearm_after` is the OPERATOR pressing
-            # mid-walk — the flag reads 1 until that many samples have been launched, then the
-            # armed depth, which is the only way to observe a press binding at the next launch
-            # rather than waiting for the window to drain.
-            sample_lookahead_check=(
-                lambda: request["cells"] if rearm_after is None or len(depths) >= rearm_after else 1
+            budget_tripped=gate.tripped,
+            spend_used=lambda: book.usd_spent,
+            sample_lookahead_check=lambda: armed,
+            backend_client=types.SimpleNamespace(
+                max_cells_in_flight=max_cells, cancel_stops_billing=False, holds_own_sends=False
             ),
-            sample_lookahead_consume=(lambda: request.update(cells=1)),
-            backend_client=types.SimpleNamespace(max_cells_in_flight=max_cells),
+            # One node the backend bounds at the cell's dollar, so the scheduler counts in them.
+            pipeline_schema=types.SimpleNamespace(
+                nodes=[
+                    types.SimpleNamespace(
+                        name="search",
+                        is_llm=False,
+                        spend_bound=WebSpendBound(kind="web", queries=1, usd_per_query=1.0),
+                    )
+                ]
+            ),
+            flight=None,
         )
-        result = await query_loop.run_query_loop(
-            JobSearchPoint(),
+        walk = _walk_over(
             dataset,
             session,
-            cached_sample_results={},
-            deprecated_samples={},
-            on_sample_scored=None,
-            on_sample_starting=lambda q, i, t, sid, depth: depths.append(depth),
-            degradation_checks=[_CutAfter(cut_at)] if cut_at else [],
-            candidate_idx=0,
-            n_total_candidates=1,
-            axes=None,
-            persist_fresh=lambda rows: {"accuracy": 1.0},
-            running_scores=lambda rows: {"accuracy": 1.0},
-            on_sample_pre_check=None,
+            checks=[_CutAfter(cut_at)] if cut_at else [],
+            on_sample_starting=lambda q, i, t, sid, depth, horizon: depths.append(depth),
+            cached=cached,
+            banked=banked,
+        )
+        walk.skip_at = skip_at
+        stopped = await _stopped_by_operator(
+            query_loop.run_walks([walk], session, backfills=priors if parent_lacks_cells else None)
         )
     return {
-        "rows": result.results,
-        "stop_reason": result.stop_reason,
+        "rows": walk.results,
+        "stop_reason": stopped or walk.outcome.stop_reason,
         "calls": list(backend.calls),
         "entries": list(backend.entries),
+        "committed": committed,
+        "banked": banked,
+        "returned": returned,
+        "billed": book.usd_spent,
         "depths": depths,
         "max_depth": max(depths) if depths else 0,
     }
+
+
+async def _round(
+    dataset: list[Sample],
+    *,
+    armed: int,
+    cuts: list[int | None],
+    slowest_last: bool = False,
+    pause_after_call: int | None = None,
+) -> dict[str, Any]:
+    """Several candidates' walks driven as one round, as `score_population` drives them. Each
+    backend call is logged under the walk whose context it ran in. ``pause_after_call`` presses
+    pause as that call returns."""
+    from promptpotter.shared.instrument import MeasuredCandidate, measured_candidate
+
+    backend = _OrderedFakeBackend(len(dataset), slowest_last=slowest_last)
+    events: list[tuple[str, int, int]] = []
+    flag = {"pause": False}
+
+    async def _measure(sample: Sample, session: Any, *, pipeline_params: Any = None) -> Any:
+        call = len(backend.calls) + 1
+        events.append(("call", cast("MeasuredCandidate", measured_candidate()).idx, sample.id))
+        row = await backend.measure(sample, session, pipeline_params=pipeline_params)
+        if call == pause_after_call:
+            flag["pause"] = True
+        return row
+
+    def _taken(walk: int, rows: list[Any]) -> dict[str, float]:
+        events.append(("absorb", walk, rows[-1]["sample_id"]))
+        return {"accuracy": 1.0}
+
+    session = types.SimpleNamespace(
+        scoring=types.SimpleNamespace(scorer=lambda r: 1.0, round_scorer=None),
+        state=types.SimpleNamespace(ledger=None),
+        pause_check=lambda: flag["pause"],
+        skip_check=None,
+        skip_consume=None,
+        budget_tripped=None,
+        spend_used=None,
+        sample_lookahead_check=lambda: armed,
+        backend_client=types.SimpleNamespace(
+            max_cells_in_flight=armed, cancel_stops_billing=False, holds_own_sends=True
+        ),
+        flight=None,
+    )
+    walks = [
+        _walk_over(
+            dataset,
+            session,
+            checks=[_CutAfter(cut)] if cut else [],
+            measured=MeasuredCandidate(idx=w, candidate_id=f"c{w}", label=f"C1.{w + 1}"),
+            on_taken=functools.partial(_taken, w),
+        )
+        for w, cut in enumerate(cuts)
+    ]
+    with mock.patch.object(query_loop, "measure_sample", _measure):
+        stopped = await _stopped_by_operator(query_loop.run_walks(walks, session))
+    return {
+        "rows": [walk.results for walk in walks],
+        "stops": [stopped or walk.outcome.stop_reason for walk in walks],
+        "absorbed": [(w, sid) for kind, w, sid in events if kind == "absorb"],
+        "events": events,
+        "calls": list(backend.calls),
+        "peak": max(backend.entries),
+    }
+
+
+async def test_a_cell_that_ran_without_a_grade_still_bills_what_it_spent() -> None:
+    """A connector that runs a paid episode and gets no verdict raises ``CellUnscoreableError``,
+    and ``measure_sample`` is its one catcher. The success path bills ``step_tokens``; the raise
+    had nothing to bill with, so a verifier timeout banked the hole and dropped the agent's spend —
+    the campaign ceiling under-counted and the sidebar read $0.00 for a cell that cost money."""
+    from promptpotter.application.scoring.sample_measurement import measure_sample
+    from promptpotter.domain.run_records import TokenUsageRecord
+    from promptpotter.infrastructure.backend import BackendClient
+    from promptpotter.infrastructure.llm import telemetry
+    from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
+    from promptpotter.shared.errors import CellUnscoreableError, ErrorCategory
+
+    spent = {"agent": {"input": 1200, "output": 300, "estimated": False, "cost_usd": 0.0076}}
+
+    async def _ran_ungraded(*_args: Any) -> dict[str, Any]:
+        raise CellUnscoreableError("verifier timed out", spent=spent, step_timings={"agent": 138.0})
+
+    client = BackendClient(
+        "http://unused",
+        wire_adapter=lambda query, params: {"query": query},
+        session=types.SimpleNamespace(),  # type: ignore[arg-type]
+        execution="in_process",
+        in_process_run=_ran_ungraded,
+        workload=types.SimpleNamespace(),  # type: ignore[arg-type]
+        prompt_delivery=types.SimpleNamespace(),  # type: ignore[arg-type]
+    )
+
+    class _Ledger:
+        def __init__(self) -> None:
+            self.records: list[Any] = []
+
+        def append(self, record: Any) -> int:
+            self.records.append(record)
+            return len(self.records)
+
+    ledger = _Ledger()
+    session = types.SimpleNamespace(
+        pipeline_schema=types.SimpleNamespace(nodes=[]),
+        state=types.SimpleNamespace(ledger=None),
+        backend_client=client,
+    )
+    token = telemetry.set_cycle_ledger(ledger)  # type: ignore[arg-type]
+    try:
+        with spending_under(unbounded_spend_book()):
+            row = await measure_sample(
+                Sample(id=0, query="10452", ground_truth=None),
+                session,  # type: ignore[arg-type]
+            )
+    finally:
+        telemetry.reset_cycle_ledger(token)
+
+    assert row["error_category"] == ErrorCategory.UNSCOREABLE
+    billed = [r for r in ledger.records if isinstance(r, TokenUsageRecord)]
+    assert [(r.cost_usd, r.input_tokens, r.cached) for r in billed] == [(0.0076, 1200, False)]
 
 
 def test_a_rate_belongs_to_the_provider_model_pair_not_the_model_alone(
@@ -2584,7 +3160,7 @@ def test_wire_cost_reaches_the_response_or_nothing_prices_the_optimizer() -> Non
     assert _billed_cost(None, None) is None
 
 
-async def test_sample_lookahead_changes_the_bill_and_never_the_record() -> None:
+async def test_sample_lookahead_changes_the_bill_and_never_the_record(tmp_path: Path) -> None:
     """Look-ahead must move the wall clock and NOTHING a measurement is read from.
 
     Silent by construction: if the second in-flight sample could reach the archive, or shift where a
@@ -2624,77 +3200,191 @@ async def test_sample_lookahead_changes_the_bill_and_never_the_record() -> None:
     assert (await _walk(dataset, armed=4, cut_at=None, max_cells=1))["max_depth"] == 1
     assert (await _walk(dataset, armed=4, cut_at=None, max_cells=2))["max_depth"] == 2
 
-    # 6. An arming is NOT spent inside the walk — the round that scored under it spends it
-    #    (`l1/score/winner.py`), the one control loop every armable walk sits inside. So the
-    #    depth holds to the walk's own end. There is no second arming shape to test: a
-    #    connector declares the CEILING and nothing about how long a press lasts, because it
-    #    cannot know whether the walk in front of it is inside a round.
-    r = await _walk(dataset, armed=2, cut_at=None, max_cells=4)
-    assert r["depths"] == [2] * len(dataset)
-    assert r["rows"] == d1["rows"]
+    # 6. What a cut discards is bounded by the stop rule's HORIZON, not by the depth: armed far
+    #    past the cut, the walk launches one cell beyond the earliest row the rule could fire at.
+    deep = await _walk(dataset, armed=8, cut_at=4, max_cells=8)
+    assert deep["stop_reason"] == "escalation"
+    assert deep["rows"] == c1["rows"]
+    assert 0 <= len(deep["calls"]) - len(c1["calls"]) <= 1
+    assert len(c1["calls"]) == 4, "an unarmed walk launched before the cell ahead was decided"
+    # …and a remote call it discards still lands on the bill: the backend finishes it and the
+    # provider charges for it whether or not anyone waits, so cancelling only lost the record.
+    assert sorted(deep["returned"]) == sorted(deep["calls"])
+    assert deep["billed"] == len(deep["calls"])
 
-    # 7. A press landing while a sample is in flight TOPS THE WINDOW UP at the next launch
-    #    rather than waiting for the window to drain — the press exists to shorten the wait, so
-    #    a running sample is JOINED. Asserted on `depths` (the window the walk OPENED) rather
-    #    than on backend-observed overlap, which is a wall-clock race: an in-flight peer that
-    #    retires early lowers the reading without the window having closed, so a loaded box
-    #    reported a press that never landed. `entries` carries the launch burst exactly.
-    late = await _walk(dataset, armed=3, cut_at=None, max_cells=4, rearm_after=2, slowest_last=True)
-    assert late["depths"][:2] == [1, 1], "the walk ran sequentially before the press"
-    assert late["depths"][2:] == [3] * (len(dataset) - 2), "the press bound at the next launch"
-    assert max(late["entries"]) == 3, "the window never physically overlapped"
-    assert late["rows"] == d1["rows"]
+    # 7. A PoBB catch-up call is a whole inner campaign on L4, so it holds a slot like a cell —
+    #    the depth bounds everything the walk has out, which is what keeps the connector's
+    #    ceiling a memory bound. It may START early, but it lands in the archive only for a cell
+    #    the walk absorbed, in walk order: one written for a cell past the cut would be a row
+    #    the unarmed walk never measured, replayed later as if it had been.
+    lone = await _walk(dataset, armed=1, cut_at=4, parent_lacks_cells=True)
+    wide = await _walk(dataset, armed=3, cut_at=4, max_cells=3, parent_lacks_cells=True)
+    # Catch-up far faster than a cell, so the one started past the cut is back before the cut.
+    quick = await _walk(
+        dataset, armed=8, cut_at=4, max_cells=8, parent_lacks_cells=True, backfill_pace=0.0001
+    )
+    assert max(lone["entries"]) == 1
+    assert max(wide["entries"]) <= 3
+    absorbed = [s.id for s in dataset[:4]]
+    assert lone["committed"] == wide["committed"] == quick["committed"] == absorbed
+    assert lone["rows"] == wide["rows"] == quick["rows"] == c1["rows"]
+
+    # 8. A round's candidates walk AT ONCE and decide IN TURN: a later walk may measure ahead
+    #    of the ones before it, but is taken, cut and persisted only in its turn — so the rows,
+    #    the cuts and their order are the serial round's. The depth bounds the ROUND, not each
+    #    walk, or three walks would hold three times the declared ceiling.
+    serial = await _round(dataset, armed=1, cuts=[4, None, 6])
+    fanned = await _round(dataset, armed=4, cuts=[4, None, 6])
+    assert serial["peak"] == 1
+    assert fanned["peak"] <= 4
+    assert fanned["rows"] == serial["rows"]
+    assert fanned["stops"] == serial["stops"] == ["escalation", None, "escalation"]
+    assert fanned["absorbed"] == serial["absorbed"]
+    # A cell the one loop launched runs as the candidate it measures, or an L4 inner campaign is
+    # filed under the candidate on turn. First cells fastest, so the second walk's calls go out
+    # while the first still has cells to take.
+    ahead = await _round(dataset, armed=4, cuts=[None, None], slowest_last=True)
+    assert ahead["absorbed"] == [(w, s.id) for w in (0, 1) for s in dataset]
+    last_of_first = max(i for i, e in enumerate(ahead["events"]) if e[:2] == ("absorb", 0))
+    assert any(e[:2] == ("call", 1) for e in ahead["events"][:last_of_first]), (
+        "no later candidate measured ahead — the identity check below proves nothing"
+    )
+    for w in (0, 1):
+        calls = sorted(sid for kind, who, sid in ahead["events"] if kind == "call" and who == w)
+        assert calls == [s.id for s in dataset], f"walk {w}'s calls ran under another identity"
+    # A stop keeps what is already back and owes nothing: the call that returned as the pause was
+    # pressed is absorbed, not discarded and paid again on resume.
+    paused = await _round(dataset, armed=1, cuts=[None], pause_after_call=3)
+    assert paused["stops"] == ["graceful"]
+    assert len(paused["rows"][0]) == len(paused["calls"]) == 3
+    # …and starts nothing while it does: a pause is a promise to spend nothing more. A catch-up
+    # no one started stays unstarted, and waiting on one already out launches no cell.
+    owing = await _walk(dataset, armed=1, cut_at=None, parent_lacks_cells=True, pause_after_call=2)
+    assert owing["stop_reason"] == "graceful"
+    assert owing["committed"] == [dataset[0].id]
+    assert len(owing["rows"]) == len(owing["calls"]) == 2
+    landing = await _walk(
+        dataset,
+        armed=2,
+        cut_at=None,
+        parent_lacks_cells=True,
+        backfill_pace=0.02,
+        pause_after_call=1,
+    )
+    assert landing["stop_reason"] == "graceful"
+    assert landing["committed"] == [dataset[0].id]
+    assert len(landing["rows"]) == len(landing["calls"]) == 1
+    # What came back behind a head still out is banked, not dropped: the resumed walk replays it
+    # rather than paying again, and still takes the uninterrupted walk's rows in its order.
+    head = dataset[0].id
+    stopped = await _walk(
+        dataset, armed=4, max_cells=4, cut_at=None, pause_after_call=3, stall=head
+    )
+    assert stopped["rows"] == [] and set(stopped["banked"]) == set(stopped["returned"])
+    resumed = await _walk(dataset, armed=4, max_cells=4, cut_at=None, cached=stopped["banked"])
+    assert not set(resumed["calls"]) & set(stopped["banked"]), "a banked cell was paid again"
+    assert [r["sample_id"] for r in resumed["rows"]] == [s.id for s in dataset]
+    # …but never one past where a rule could cut: the serial walk would not have measured it.
+    capped = await _walk(dataset, armed=4, max_cells=4, cut_at=2, pause_after_call=2, stall=head)
+    assert set(capped["banked"]) == {head, dataset[1].id}
+    # A spend ceiling binds BEFORE a call rather than after it: every cell out is counted at its
+    # bound, so a window of four never carries the run past the ceiling it was checked against.
+    ceiling = await _walk(dataset, armed=4, max_cells=4, cut_at=None, cap_usd=5.0)
+    assert ceiling["stop_reason"] == "spend_budget"
+    assert ceiling["billed"] == 5.0
+    # A skip made before a stop outlives it: the resumed round reads the last decision the ledger
+    # holds for each candidate, replays it at the same row, and launches nothing the skip spared.
+    from promptpotter.application.optimization.l1.score.loop import _skips_on_record
+    from promptpotter.infrastructure.ledger import CycleEventLog
+
+    ledger = CycleEventLog(tmp_path / "ledger.jsonl")
+    for cid, n, reason in (("a", 3, "skip"), ("b", 2, "skip"), ("b", 8, ""), ("c", 4, "skip")):
+        scores = {"candidate_id": cid, "scored_samples": n, "partial_reason": reason}
+        ledger.append(SnapshotRecord(event="candidate_scored", round=2, payload={"scores": scores}))
+    assert _skips_on_record(ledger, 2) == {"a": 3, "c": 4}
+    replayed = await _walk(dataset, armed=4, max_cells=4, cut_at=None, skip_at=3)
+    assert replayed["stop_reason"] == "skip" and len(replayed["rows"]) == 3
+    assert sorted(replayed["calls"]) == [s.id for s in dataset[:3]]
 
 
-class _CountingClient:
-    """One provider, counting round-trips. ``chat`` is the seam a judge actually reaches."""
+def _counting_client(reply: str) -> tuple[Any, list[int]]:
+    """One provider reached through the real client's send seam — only its SDK is stubbed — and
+    the round-trips it took."""
+    from openai.types.chat import ChatCompletion
 
-    def __init__(self, reply: str = "A") -> None:
-        self.reply = reply
-        self.calls = 0
+    from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
 
-    async def chat(self, **_kw: Any) -> Any:
-        from promptpotter.domain.spend import TokenAccount
-        from promptpotter.infrastructure.llm.response import LLMResponse
+    calls: list[int] = []
 
-        self.calls += 1
-        return LLMResponse(
-            content=self.reply,
-            model="grader-1",
-            # The provider's own prefix-cache discount rides `cache_read`. A judge prompt is the
-            # most cacheable shape we send — the rubric is a module constant, so most of it is
-            # byte-identical on every cell — so a stub reporting none cannot catch the metering
-            # dropping it.
-            usage=TokenAccount(input=11, output=1, cache_read=8),
+    async def create(**_kw: Any) -> Any:
+        calls.append(1)
+        # The provider's own prefix-cache discount rides `cached_tokens`. A judge prompt is the most
+        # cacheable shape we send — the rubric is a module constant, so most of it is byte-identical
+        # on every cell — so a stub reporting none cannot catch the metering dropping it.
+        completion = ChatCompletion.model_validate(
+            {
+                "id": "c",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "grader-1",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": reply},
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 11,
+                    "completion_tokens": 1,
+                    "total_tokens": 12,
+                    "prompt_tokens_details": {"cached_tokens": 8},
+                },
+            }
         )
+        return types.SimpleNamespace(headers={}, parse=lambda: completion)
+
+    client = OpenAICompatibleClient(api_key="k", provider="p", display_name="P")
+    client._client = types.SimpleNamespace(  # type: ignore[assignment]
+        chat=types.SimpleNamespace(
+            completions=types.SimpleNamespace(
+                with_raw_response=types.SimpleNamespace(create=create)
+            )
+        )
+    )
+    return client, calls
 
 
 async def _grade_twice(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, reply: str
-) -> tuple[_CountingClient, list[Any], Any]:
-    """Grade one identical cell twice through the real evaluator, and report what it cost."""
+) -> tuple[list[int], list[Any], Any]:
+    """Grade one identical cell twice through the real evaluator, and report the round-trips and
+    what they metered."""
     from factories import measurement
 
+    from promptpotter.infrastructure.llm import spend_book
     from promptpotter.infrastructure.store.stores import LLMReuseCache
     from promptpotter.judges import build_evaluators
     from promptpotter.judges import call as judge_call
     from promptpotter.judges.protocol import JudgeSpec, JudgeStage
 
-    client = _CountingClient(reply)
+    client, calls = _counting_client(reply)
     monkeypatch.setattr(judge_call, "get_llm_client", lambda _p: client)
     metered: list[Any] = []
     monkeypatch.setattr(judge_call, "emit_token_usage", lambda **kw: metered.append(kw))
+    monkeypatch.setattr(spend_book, "emit_token_usage", lambda **kw: metered.append(kw))
 
     cache = LLMReuseCache(tmp_path, "judge_reuse")
     (ev,) = build_evaluators(
         {"answer": JudgeSpec(name="sealqa", stages=[JudgeStage(model="grader-1", provider="p")])},
         cache=cache,
     )
-    for _ in range(2):
-        row = measurement(sample_id=0, fitness=0.0)
-        row["query"], row["predicted"], row["ground_truth"] = "who?", "Ada", "Ada"
-        last = await ev.compute(result=row, schema=None)
-    return client, metered, last
+    with spend_book.spending_under(spend_book.unbounded_spend_book()):
+        for _ in range(2):
+            row = measurement(sample_id=0, fitness=0.0)
+            row["query"], row["predicted"], row["ground_truth"] = "who?", "Ada", "Ada"
+            last = await ev.compute(result=row, schema=None)
+    return calls, metered, last
 
 
 async def test_a_second_grading_of_one_comparison_is_not_re_billed(
@@ -2706,13 +3396,15 @@ async def test_a_second_grading_of_one_comparison_is_not_re_billed(
 
     Both halves are asserted, because each fails on its own. The provider is reached ONCE, and the
     replay is still METERED — flagged ``cached`` — since the cell was still graded and grading cost
-    must stay invariant to our cache history, exactly as ``llm_call`` and ``emit_step_token_usage``
+    must stay invariant to our cache history, exactly as ``llm_call`` and ``emit_replayed_step_tokens``
     keep it."""
-    client, metered, score = await _grade_twice(tmp_path, monkeypatch, reply="A")
+    calls, metered, score = await _grade_twice(tmp_path, monkeypatch, reply="A")
 
     assert score == 1.0, "the replayed reply must grade identically, not merely cheaply"
-    assert client.calls == 1, f"an identical comparison re-billed the provider: {client.calls}x"
-    assert [m["cached"] for m in metered] == [False, True], "a served grading went unmetered"
+    assert len(calls) == 1, f"an identical comparison re-billed the provider: {len(calls)}x"
+    assert [m.get("cached", False) for m in metered] == [False, True], (
+        "a served grading went unmetered"
+    )
     assert {m["kind"] for m in metered} == {"judge"}, "grading spend landed outside its own bucket"
 
 
@@ -2876,10 +3568,10 @@ async def test_an_empty_grading_reply_is_never_made_permanent(
     points at the cache: the operator sees a cell that cannot be graded, forever.
 
     Same scar as ``llm_call``'s, at the judge's own chokepoint."""
-    client, _metered, score = await _grade_twice(tmp_path, monkeypatch, reply="   ")
+    calls, _metered, score = await _grade_twice(tmp_path, monkeypatch, reply="   ")
 
     assert score is None, "an unreadable grading is an absent verdict, never a zero"
-    assert client.calls == 2, "an empty reply was cached and replayed as if it were a verdict"
+    assert len(calls) == 2, "an empty reply was cached and replayed as if it were a verdict"
 
 
 async def test_an_unusable_cache_entry_costs_a_re_sample_and_never_the_cell(
@@ -2894,14 +3586,14 @@ async def test_an_unusable_cache_entry_costs_a_re_sample_and_never_the_cell(
     answer — sample it again."""
     from factories import measurement
 
+    from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
     from promptpotter.infrastructure.store.stores import LLMReuseCache
     from promptpotter.judges import build_evaluators
     from promptpotter.judges import call as judge_call
     from promptpotter.judges.protocol import JudgeSpec, JudgeStage
 
-    client = _CountingClient("A")
+    client, calls = _counting_client("A")
     monkeypatch.setattr(judge_call, "get_llm_client", lambda _p: client)
-    monkeypatch.setattr(judge_call, "emit_token_usage", lambda **_kw: None)
 
     cache = LLMReuseCache(tmp_path, "judge_reuse")
     (ev,) = build_evaluators(
@@ -2910,16 +3602,19 @@ async def test_an_unusable_cache_entry_costs_a_re_sample_and_never_the_cell(
     )
     row = measurement(sample_id=0, fitness=0.0)
     row["query"], row["predicted"], row["ground_truth"] = "who?", "Ada", "Ada"
-    assert await ev.compute(result=row, schema=None) == 1.0
+    with spending_under(unbounded_spend_book()):
+        assert await ev.compute(result=row, schema=None) == 1.0
 
-    # Poison every entry the first grading wrote — a half-written file is the realistic shape.
-    poisoned = list(tmp_path.glob("judge_reuse/*.json"))
-    assert poisoned, "the first grading banked nothing, so this proves nothing"
-    for path in poisoned:
-        path.write_text('{"content": ', encoding="utf-8")
+        # Poison every entry the first grading wrote — a half-written file is the realistic shape.
+        poisoned = list(tmp_path.glob("judge_reuse/*.json"))
+        assert poisoned, "the first grading banked nothing, so this proves nothing"
+        for path in poisoned:
+            path.write_text('{"content": ', encoding="utf-8")
 
-    assert await ev.compute(result=row, schema=None) == 1.0, "a bad entry cost the cell its grade"
-    assert client.calls == 2, "an unusable entry must fall through to a fresh sample"
+        assert await ev.compute(result=row, schema=None) == 1.0, (
+            "a bad entry cost the cell its grade"
+        )
+    assert len(calls) == 2, "an unusable entry must fall through to a fresh sample"
 
 
 def test_a_judge_term_cannot_take_a_name_that_already_measures_something() -> None:

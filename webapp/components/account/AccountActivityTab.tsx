@@ -3,39 +3,43 @@
 // tokens) over a selectable window, coloured by model or API key.
 
 import { useState } from "react";
+import { AccountEmpty, AccountFailure, AccountLoading } from "./AccountSection";
 import { fmtCompact, fmtUsd } from "@/lib/format";
-import { seriesColor, useThemeVersion } from "@/lib/theme";
-import { useFetch } from "@/lib/hooks/useFetch";
+import { seriesVar } from "@/lib/theme";
+import { useRead } from "@/lib/hooks/useRead";
 import {
   fetchActivity,
   type ActivityBucket,
   type ActivityGroupBy,
+  type ActivityResponse,
   type ActivityWindow,
 } from "@/lib/api";
 
-const ACTIVITY_WINDOWS: { id: ActivityWindow; label: string }[] = [
-  { id: "15m", label: "Past 15 min" },
-  { id: "30m", label: "Past 30 min" },
-  { id: "1h", label: "Past hour" },
-  { id: "3h", label: "Past 3 hours" },
-  { id: "1d", label: "Past day" },
-  { id: "2d", label: "Past 2 days" },
-  { id: "1w", label: "Past week" },
-  { id: "1mo", label: "Past month" },
-  { id: "1y", label: "Past year" },
-];
+const WINDOW_LABEL: Record<ActivityWindow, string> = {
+  "15m": "Past 15 min",
+  "30m": "Past 30 min",
+  "1h": "Past hour",
+  "3h": "Past 3 hours",
+  "1d": "Past day",
+  "2d": "Past 2 days",
+  "1w": "Past week",
+  "1mo": "Past month",
+  "1y": "Past year",
+};
+const WINDOW_ORDER = Object.keys(WINDOW_LABEL) as ActivityWindow[];
 
 export function AccountActivityTab() {
-  // The SVG paints literal fills, so a theme flip has to re-run this component to re-read them.
-  useThemeVersion();
   const [window, setWindow] = useState<ActivityWindow>("1d");
   const [groupBy, setGroupBy] = useState<ActivityGroupBy>("model");
-  // useFetch blanks data on the (window, group_by) key change in-render, so the
-  // old buckets never render against the new axis labels — the reset is built in.
-  const { data, error } = useFetch(() => fetchActivity(window, groupBy), [window, groupBy]);
+  // Keyed on the axis, so the old buckets never render against the new axis labels.
+  const read = useRead(
+    {
+      key: `${window}\x1f${groupBy}`,
+      fetch: (signal) => fetchActivity(window, groupBy, signal),
+    },
+    { surface: "activity" },
+  );
 
-  const labels = data?.series_labels ?? [];
-  const palette = labels.map((_, i) => seriesColor(i));
   return (
     <>
       <div className="activity-window-row">
@@ -45,9 +49,9 @@ export function AccountActivityTab() {
           value={window}
           onChange={(e) => setWindow(e.target.value as ActivityWindow)}
         >
-          {ACTIVITY_WINDOWS.map((w) => (
-            <option key={w.id} value={w.id}>
-              {w.label}
+          {WINDOW_ORDER.map((id) => (
+            <option key={id} value={id}>
+              {WINDOW_LABEL[id]}
             </option>
           ))}
         </select>
@@ -61,25 +65,43 @@ export function AccountActivityTab() {
           <option value="api_key">By API Key</option>
         </select>
       </div>
-      {error ? <p className="account-error">{error}</p> : null}
-      {labels.length > 0 ? (
-        <ul className="activity-legend">
-          {labels.map((label, i) => (
-            <li key={label}>
-              <span
-                className="activity-legend-swatch"
-                style={{ background: palette[i] }}
-                aria-hidden="true"
-              />
-              <span className="activity-legend-label">{label}</span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
+      {read.status === "failed" ? (
+        <AccountFailure kind={read.failure.kind} subject="activity" />
+      ) : read.status !== "ready" ? (
+        <AccountLoading subject="activity" />
+      ) : read.data.total_requests === 0 ? (
+        <AccountEmpty title={`No model calls in the ${WINDOW_LABEL[window].toLowerCase()}`}>
+          Spend, requests and tokens appear here as soon as a campaign runs. Widen the window to
+          look further back.
+        </AccountEmpty>
+      ) : (
+        <ActivityCharts data={read.data} />
+      )}
+    </>
+  );
+}
+
+function ActivityCharts({ data }: { data: ActivityResponse }) {
+  const labels = data.series_labels;
+  const palette = labels.map((_, i) => seriesVar(i));
+  return (
+    <>
+      <ul className="activity-legend">
+        {labels.map((label, i) => (
+          <li key={label}>
+            <span
+              className="activity-legend-swatch"
+              style={{ background: palette[i] }}
+              aria-hidden="true"
+            />
+            <span className="activity-legend-label">{label}</span>
+          </li>
+        ))}
+      </ul>
       <ActivityBarChart
         title="Spend"
-        valueLabel={data ? fmtUsd(data.total_spend_usd) : "$0.00"}
-        buckets={data?.buckets ?? []}
+        valueLabel={fmtUsd(data.total_spend_usd)}
+        buckets={data.buckets}
         labels={labels}
         palette={palette}
         accessor={(b) => b.series_spend}
@@ -87,8 +109,8 @@ export function AccountActivityTab() {
       />
       <ActivityBarChart
         title="Requests"
-        valueLabel={data ? data.total_requests.toLocaleString() : "0"}
-        buckets={data?.buckets ?? []}
+        valueLabel={data.total_requests.toLocaleString()}
+        buckets={data.buckets}
         labels={labels}
         palette={palette}
         accessor={(b) => b.series_requests}
@@ -96,8 +118,8 @@ export function AccountActivityTab() {
       />
       <ActivityBarChart
         title="Tokens"
-        valueLabel={data ? fmtCompact(data.total_tokens) : "0"}
-        buckets={data?.buckets ?? []}
+        valueLabel={fmtCompact(data.total_tokens)}
+        buckets={data.buckets}
         labels={labels}
         palette={palette}
         accessor={(b) => b.series_tokens}

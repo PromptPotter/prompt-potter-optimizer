@@ -17,9 +17,11 @@ during an admissibility check.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from pydantic import ValidationError
 
+from promptpotter.domain.phases import CampaignPhase, RunPhase
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
 from promptpotter.domain.run_records import (
     CandidateMintedRecord,
@@ -27,8 +29,11 @@ from promptpotter.domain.run_records import (
     ElectionRecord,
     LedgerCandidate,
     LedgerRoundClose,
+    WallClock,
 )
+from promptpotter.domain.spend import TOKEN_KIND_BUCKET
 from promptpotter.infrastructure.store.read_model import iter_jsonl
+from promptpotter.shared.clock import epoch_seconds
 
 # The `ScoredCandidate` keys the fold copies verbatim — `LedgerCandidate`'s own field list
 # minus the ones identity and the fold itself supply. DERIVED from `model_fields`, the same
@@ -207,10 +212,150 @@ def scan_ledger_round_closes(ledger_path: Path) -> dict[int, LedgerRoundClose]:
     return out
 
 
+def _phase_seconds(rows: list[dict[str, Any]]) -> dict[str, float]:
+    """Bracketed clock per :class:`CampaignPhase`, paired on ``(phase, round)``.
+
+    The roster is the ENUM, never a hand-listed set: ``round`` is an open marker with no exit,
+    ``control`` is the run-phase channel and ``backend`` a warning channel, and each would read as
+    a bracket that never closes. An unpaired enter contributes nothing — a phase the run died
+    inside measured no span, and inventing one would close it at a moment nothing recorded."""
+    brackets = {p.value for p in CampaignPhase}
+    open_at: dict[tuple[str, object], float] = {}
+    out: dict[str, float] = {}
+    for rec in rows:
+        phase = rec.get("phase")
+        if rec.get("record_type") != "phase" or phase not in brackets:
+            continue
+        if (at := epoch_seconds(rec.get("timestamp"))) is None:
+            continue
+        key = (str(phase), rec.get("round"))
+        if rec.get("event") == "enter":
+            open_at[key] = at
+        elif rec.get("event") == "exit" and (entered := open_at.pop(key, None)) is not None:
+            out[str(phase)] = out.get(str(phase), 0.0) + max(0.0, at - entered)
+    return out
+
+
+def _gate_seconds(rows: list[dict[str, Any]], *, until: float | None) -> float:
+    """Seconds held at the origin gate, off the ``control`` channel ``declare_run_phase`` owns.
+
+    A rescore re-declares ``gate``, so a second one CLOSES the first: the wait and the re-measure
+    both happened inside it, and nothing else brackets the re-measure, so it is counted here. An
+    abandoned gate — abort, or a producer that vanished — closes at *until*, because the operator
+    held it that long."""
+    total, opened = 0.0, None
+    for rec in rows:
+        if rec.get("record_type") != "phase" or rec.get("phase") != "control":
+            continue
+        if (at := epoch_seconds(rec.get("timestamp"))) is None:
+            continue
+        if opened is not None:
+            total += max(0.0, at - opened)
+            opened = None
+        if rec.get("event") == RunPhase.GATE.value:
+            opened = at
+    if opened is not None and until is not None:
+        total += max(0.0, until - opened)
+    return total
+
+
+def _worked_seconds(rows: list[dict[str, Any]]) -> dict[str, float]:
+    """Summed call time per spend bucket. Cached calls are excluded for the reason the BILL
+    excludes them — a replay reached no wire and occupied no clock."""
+    out: dict[str, float] = {}
+    for rec in rows:
+        if rec.get("record_type") != "token_usage" or rec.get("cached"):
+            continue
+        bucket = TOKEN_KIND_BUCKET.get(rec.get("kind"))  # type: ignore[arg-type]
+        seconds = rec.get("duration_s")
+        if bucket is None or not isinstance(seconds, (int, float)) or isinstance(seconds, bool):
+            continue
+        out[bucket] = out.get(bucket, 0.0) + max(0.0, float(seconds))
+    return out
+
+
+def _round_ended_seconds(rows: list[dict[str, Any]], *, opened: float | None) -> dict[str, float]:
+    """``round -> seconds from the run's start to that round's FIRST close``, the wall clock beside
+    every round count. ``setdefault`` rather than last-wins: round 0 closes again when the ruler
+    warms and a rewind re-runs its round, and neither is when the campaign first got there."""
+    out: dict[str, float] = {}
+    if opened is None:
+        return out
+    for rec in rows:
+        if rec.get("record_type") != "phase" or rec.get("phase") != "round":
+            continue
+        rnd = rec.get("round")
+        if rec.get("event") != "complete" or not isinstance(rnd, int) or isinstance(rnd, bool):
+            continue
+        if (at := epoch_seconds(rec.get("timestamp"))) is not None:
+            out.setdefault(str(rnd), max(0.0, at - opened))
+    return out
+
+
+def _unworked_seconds(rows: list[dict[str, Any]]) -> float | None:
+    """Seconds the run's cells were not ALLOWED to spend, off each cell's own envelope.
+
+    ``None`` where no measured cell carried one — an unenveloped backend installs no give-back, so
+    nothing WATCHED for a suspend and 0.0 would be a reading nobody took. A replayed cell is
+    skipped for the same reason its bill is: the seconds on it were another run's."""
+    total: float | None = None
+    for rec in rows:
+        if rec.get("record_type") != "snapshot" or rec.get("event") != "sample_scored":
+            continue
+        result = (rec.get("payload") or {}).get("result")
+        if not isinstance(result, dict) or result.get("cached"):
+            continue
+        data = result.get("pipeline_data")
+        seconds = data.get("unworked_s") if isinstance(data, dict) else None
+        if not isinstance(seconds, (int, float)) or isinstance(seconds, bool):
+            continue
+        total = (total or 0.0) + max(0.0, float(seconds))
+    return total
+
+
+def scan_ledger_wall_clock(ledger_path: Path, *, started_at: str, finished_at: str) -> WallClock:
+    """Where this cycle's wall clock went — ONE screened pass, four folds, banked by ``_finalize_run``.
+
+    Physical like its neighbours, so a fork answers for its OWN clock and not its parent's history.
+    The endpoints are the RUNNER's, because the ledger's first record is already past
+    ``init_services``: the ``init`` bracket reads under two seconds and is not a setup measurement.
+
+    ``sample_scored`` is an event and not a record type, but the screen is a raw-line substring
+    probe, so naming it there is what keeps the per-cell rows in and every other snapshot out."""
+    rows = iter_jsonl(
+        ledger_path, record_types=frozenset({"phase", "token_usage", "sample_scored"})
+    )
+    opened, closed = epoch_seconds(started_at), epoch_seconds(finished_at)
+    # A resumed cycle's ledger holds every earlier launch, while both endpoints are THIS launch's —
+    # so the folds read this launch alone, and a round an earlier one closed reports no clock
+    # rather than an instant one.
+    if opened is not None:
+        rows = [
+            r
+            for r in rows
+            if (at := epoch_seconds(r.get("timestamp"))) is not None and at >= opened
+        ]
+    elapsed = None if opened is None or closed is None else max(0.0, closed - opened)
+    phase_s = _phase_seconds(rows)
+    gate_s = _gate_seconds(rows, until=closed)
+    return WallClock(
+        elapsed_s=elapsed,
+        phase_s=phase_s,
+        worked_s=_worked_seconds(rows),
+        round_ended_s=_round_ended_seconds(rows, opened=opened),
+        gate_s=gate_s,
+        unattributed_s=(
+            None if elapsed is None else max(0.0, elapsed - sum(phase_s.values()) - gate_s)
+        ),
+        unworked_s=_unworked_seconds(rows),
+    )
+
+
 __all__ = [
     "scan_ledger_candidates",
     "scan_ledger_cycle_seed",
     "scan_ledger_decisions",
     "scan_ledger_elections",
     "scan_ledger_round_closes",
+    "scan_ledger_wall_clock",
 ]

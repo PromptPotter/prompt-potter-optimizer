@@ -16,9 +16,11 @@ from promptpotter.domain.run_records import (
     ErrorRecord,
     RoundWarningKind,
     RoundWarningRecord,
+    SpendHoldRecord,
     TokenUsageRecord,
 )
 from promptpotter.domain.spend import TokenAccount, TokenUsageKind
+from promptpotter.infrastructure.llm.pricing import compute_usd
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -93,31 +95,83 @@ def emit_token_usage(
     served_by: str | None = None,
     cost_usd: float | None = None,
     cached: bool = False,
-) -> None:
-    """Build ``TokenUsageRecord`` and append it. ``cached`` marks a call served from the content-addressed
-    cache: it consumed the recorded tokens but spent no money, and the rollup keeps the two apart.
+    unsettled: bool = False,
+    hold_id: str | None = None,
+    mirrored: bool = False,
+) -> TokenUsageRecord | None:
+    """Build ``TokenUsageRecord`` and append it; the record once it is on the ledger, else ``None``.
+    ``cached`` marks a call served from the content-addressed cache: it consumed the recorded tokens
+    but spent no money, and the rollup keeps the two apart.
+
+    **Priced here, once.** ``cost_usd`` is what the provider billed, else the rate table's price at
+    the moment of the call, and every reader sums the stamp rather than re-pricing — so a rate
+    refresh cannot rewrite what a call cost. ``None`` stays unpriced.
 
     **The one place the account is flattened**, and it stays flat: the record is the persisted
     chronology every lifetime-spend read sums off raw JSON, so nesting the counts under a key
     would zero every account's history. ``cache_read=None`` lands as ``0`` here."""
-    _append_record(
-        TokenUsageRecord(
-            kind="diagnostic" if _DIAGNOSTIC_SPEND.get() else kind,
-            node=node,
-            model=model,
+    record = TokenUsageRecord(
+        kind="diagnostic" if _DIAGNOSTIC_SPEND.get() else kind,
+        node=node,
+        model=model,
+        provider=provider,
+        served_by=served_by,
+        input_tokens=usage.input,
+        output_tokens=usage.output,
+        reasoning_tokens=usage.reasoning,
+        cache_read_tokens=usage.cache_read or 0,
+        cache_write_tokens=usage.cache_write,
+        duration_s=float(duration_s),
+        cost_usd=compute_usd(
+            model,
+            usage.input,
+            usage.output,
+            override_usd=cost_usd,
             provider=provider,
-            served_by=served_by,
-            input_tokens=usage.input,
-            output_tokens=usage.output,
-            reasoning_tokens=usage.reasoning,
             cache_read_tokens=usage.cache_read or 0,
             cache_write_tokens=usage.cache_write,
-            duration_s=float(duration_s),
-            cost_usd=cost_usd,
-            cached=cached,
-            round=_CURRENT_ROUND.get(),
-        )
+        ),
+        unsettled=unsettled,
+        hold_id=hold_id,
+        mirrored=mirrored,
+        cached=cached,
+        round=_CURRENT_ROUND.get(),
     )
+    return record if _append_record(record) is not None else None
+
+
+def emit_spend_hold(
+    *,
+    hold_id: str,
+    node: str,
+    kind: TokenUsageKind,
+    input_tokens: int,
+    output_tokens: int,
+    cost_usd: float | None,
+    model: str | None,
+    provider: str | None,
+    ledger: CycleEventLog | None,
+) -> None:
+    """Write a paid call's admission ahead of the call — onto ``ledger`` where the admitting book
+    keeps one, else the active ledger — in the bucket :func:`emit_token_usage` would file it in."""
+    record = SpendHoldRecord(
+        hold_id=hold_id,
+        kind="diagnostic" if _DIAGNOSTIC_SPEND.get() else kind,
+        node=node,
+        model=model,
+        provider=provider,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cost_usd=cost_usd,
+        round=_CURRENT_ROUND.get(),
+    )
+    if ledger is None:
+        _append_record(record)
+        return
+    try:
+        ledger.append(record)
+    except Exception:
+        logger.exception("ledger append failed for %s", type(record).__name__)
 
 
 def emit_command(

@@ -21,6 +21,7 @@ sys.path.insert(0, str(_REPO))
 from promptpotter.application.commands.payloads import (
     CommandAcceptedBody,
     OriginGateDecisionPayload,
+    StartCheckinPayload,
 )
 from promptpotter.application.evidence.comparison import (
     ArmReplicate,
@@ -51,7 +52,11 @@ from promptpotter.application.evidence.subjects import (
     WinnerChainPoint,
 )
 from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
-from promptpotter.application.pipeline_resolve import CampaignPipelineResponse
+from promptpotter.application.pipeline_resolve import (
+    CampaignPipelineResponse,
+    CampaignRunsWith,
+    RunsWithParam,
+)
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import (
     DashboardCandidate,
@@ -144,6 +149,7 @@ from promptpotter.presentation.api.routers.campaigns.manifests import (
     ConfigEstimandGroup,
     ConfigKnob,
     ConfigMapResponse,
+    ForkPreviewResponse,
     MechanismGroup,
     MechanismSchemaResponse,
     MechanismToggle,
@@ -231,11 +237,18 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     CyclesResponse,
     # --- commands middleware ---
     CommandAcceptedBody,
+    # The Start verb's payload, so the browser's launch ceilings are the wire's own three fields
+    # rather than a hand-kept list that a fourth `LaunchLimits` field would not reach.
+    StartCheckinPayload,
     # --- campaigns/manifests router ---
+    RunsWithParam,  # nested in CampaignRunsWith — the emitter does not recurse
+    CampaignRunsWith,  # nested in CampaignSummary
     CampaignSummary,
     CampaignListResponse,
     # What ONE campaign runs at one searchpoint (`frontend-surface-contract.md::I9`).
     CampaignPipelineResponse,
+    # The fork gate's own babysit verdict, so the browser never re-derives it.
+    ForkPreviewResponse,
     # --- cross-subject evidence (application/evidence) — nested types first ---
     EffectProvenance,
     EditSpread,
@@ -485,8 +498,9 @@ def _emit_stop_reason_tables() -> str:
     walk's spend tier was carrying one. Emitted TOTAL over the table, so a new `StopReason`
     arrives classified rather than silently absent.
     """
-    from promptpotter.domain.phases import STOP_REASON_INFO
+    from promptpotter.domain.phases import STOP_REASON_INFO, StopOutcome
 
+    outcome_union = " | ".join(repr(o.value) for o in StopOutcome)
     rows = "\n".join(
         f"  {reason.value!r}: {info.label!r}," for reason, info in STOP_REASON_INFO.items()
     )
@@ -514,7 +528,8 @@ def _emit_stop_reason_tables() -> str:
         "// `StopOutcome`, where `paused` is the one non-terminal member. TOTAL over the reasons,\n"
         "// so ask it rather than matching names: a hand-listed set of crash names rots in both\n"
         "// directions, missing the reason added yesterday and keeping one that was renamed.\n"
-        "export const STOP_REASON_OUTCOMES: Record<string, string> = {\n"
+        f"export type StopOutcome = {outcome_union};\n"
+        "export const STOP_REASON_OUTCOMES: Record<string, StopOutcome> = {\n"
         f"{outcomes}\n"
         "};"
     )
@@ -593,6 +608,23 @@ def _emit_prompt_string_fields() -> str:
         "export const PROMPT_STRING_FIELDS = [\n"
         f"{rows}\n"
         "] as const;"
+    )
+
+
+def _emit_run_freshness() -> str:
+    """Emit ``RUN_FRESH_S`` (``infrastructure/runtime_flags.py``) — the staleness window that splits
+    a live producer from a vanished one.
+
+    The browser's status banner hand-copied the ``30``, so the two answered the same question in two
+    languages: a change to the server's window would have left the banner calling a reaped cycle
+    live, with nothing anywhere to say the numbers had parted."""
+    from promptpotter.infrastructure.runtime_flags import RUN_FRESH_S
+
+    return (
+        "// Seconds of silence after which a cycle's producer is treated as vanished. Mirror of\n"
+        "// infrastructure/runtime_flags.py::RUN_FRESH_S, which owns it and derives `run_phase`\n"
+        "// from it. Don't hand-copy this threshold.\n"
+        f"export const RUN_FRESH_S = {RUN_FRESH_S};"
     )
 
 
@@ -693,6 +725,7 @@ def main() -> int:
     blocks.append(_emit_stop_reason_tables())
     blocks.append(_emit_abort_lens_labels())
     blocks.append(_emit_evaluator_meta())
+    blocks.append(_emit_run_freshness())
     blocks.append(_emit_cycle_path_grammar())
     blocks.append(_emit_prompt_string_fields())
     content = _HEADER + "\n\n".join(blocks) + "\n"

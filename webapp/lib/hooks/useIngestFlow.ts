@@ -2,7 +2,9 @@
 
 import { useRef, useState } from "react";
 import {
+  failureKind,
   IngestApiError,
+  operatorMessage,
   postDraftFromDataset,
   postDraftFromOrigin,
   getCampaignCheckin,
@@ -19,6 +21,7 @@ import {
   type OriginEntry,
   type OriginLastResolution,
   type RaisedCommand,
+  type StartCheckinLimits,
 } from "@/lib/api";
 import { plainLanguageRecap } from "@/lib/origin-readiness";
 import type { RunSummary } from "@/lib/derivations";
@@ -110,8 +113,10 @@ export interface IngestFlow {
   buildCandidateLibraryFromColumn: (column: string) => void;
   // Re-run the check-in on the current ready draft (recovery after a degraded turn).
   rerunCheckin: () => void;
-  // Commit the ready draft + spawn the runner.
-  startFromReady: () => void;
+  // Commit the ready draft + spawn the runner, under the ceilings this press declares. They are
+  // the caller's because they are not draft state: nothing persists them, and a reopened check-in
+  // must not appear to still be holding a budget nobody re-entered.
+  startFromReady: (limits: StartCheckinLimits) => void;
   // Collision choices.
   useExistingFromCollision: () => void;
   saveAsNew: () => void;
@@ -164,7 +169,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   const pushError = (e: unknown) =>
     setMessages((m) => [
       ...m,
-      { id: uid(), kind: "error", text: IngestApiError.toOperatorMessage(e) },
+      { id: uid(), kind: "error", text: operatorMessage(e, failureKind(e)) },
     ]);
 
   // The origin check-in — the single LLM call that configures the draft from the
@@ -432,7 +437,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     void runCheckin(phase.draft);
   };
 
-  const startFromReady = async () => {
+  const startFromReady = async (limits: StartCheckinLimits) => {
     if (phase.stage !== "ready" || !phase.draft.readiness.complete) return;
     setMinting(true);
     try {
@@ -442,7 +447,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
       while (pendingDraftWrites.current.size > 0) {
         await Promise.allSettled([...pendingDraftWrites.current]);
       }
-      const r = await postStartCheckin(phase.draft.draft_id);
+      const r = await postStartCheckin(phase.draft.draft_id, limits);
       pushAi("Campaign started.");
       setPhase({ stage: "idle" });
       onMint({ campaignId: r.campaign_id, cycleId: r.cycle_id });
@@ -518,7 +523,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     uploadCandidateLibrary: (file) => void uploadCandidateLibrary(file),
     buildCandidateLibraryFromColumn: (column) => void buildCandidateLibraryFromColumn(column),
     rerunCheckin,
-    startFromReady: () => void startFromReady(),
+    startFromReady: (limits) => void startFromReady(limits),
     useExistingFromCollision,
     saveAsNew,
     replaceExisting: () => void replaceExisting(),

@@ -1,6 +1,6 @@
 "use client";
 import { type HardSampleOrder, type HardSamplesScope } from "@/lib/api";
-import { SegmentedControl } from "@/components/ui";
+import { HoverCard, SegmentedControl, Term } from "@/components/ui";
 import { ORDER_COLUMN } from "./columns";
 
 interface Props {
@@ -97,53 +97,54 @@ export function HardSamplesFooter({
           ]}
         />
       ) : null}
-      <label
-        className="hs-sync-toggle"
-        title={
+      <HoverCard
+        content={
           syncLive
             ? `Sort follows the served ${orderLabel}ranking. Order only refreshes when the artifact regenerates (round boundary) — not on every 2 s poll, so the table doesn't flash. Untick to sort columns manually.`
             : `Sort with column headers. Tick to follow the served ${orderLabel}ranking — order refreshes once per round, not per poll.`
         }
       >
-        <input type="checkbox" checked={syncLive} onChange={onToggleSyncLive} />
-        Auto-sort
-      </label>
-      <label
-        className="hs-sync-toggle"
-        title={
+        <label className="hs-sync-toggle">
+          <input type="checkbox" checked={syncLive} onChange={onToggleSyncLive} />
+          Auto-sort
+        </label>
+      </HoverCard>
+      <HoverCard
+        content={
           hideUnmeasured
             ? "Showing only samples with at least one measurement. Untick to show every sample."
             : "Showing every sample, including those the optimizer hasn't measured yet. Tick to hide unmeasured rows."
         }
       >
-        <input
-          type="checkbox"
-          checked={hideUnmeasured}
-          onChange={onToggleHideUnmeasured}
-        />
-        Hide unmeasured
-      </label>
-      <span
-        className="hs-counts"
-        title={
-          datasetSplitTest != null
-            ? `This table is the ${total}-sample training bank. A separate ` +
-              `${datasetSplitTest}-sample test fold is held out — not shown here.`
-            : undefined
-        }
-      >
-        {tag}Measured {measuredCount} · Unmeasured {unmeasuredCount} · Total{" "}
-        {total}
-        {datasetSplitTest != null ? ` · ${datasetSplitTest} test held out` : ""}
+        <label className="hs-sync-toggle">
+          <input
+            type="checkbox"
+            checked={hideUnmeasured}
+            onChange={onToggleHideUnmeasured}
+          />
+          Hide unmeasured
+        </label>
+      </HoverCard>
+      {datasetSplitTest != null ? (
+        <Term
+          content={`This table is the ${total}-sample training bank. A separate ${datasetSplitTest}-sample test fold is held out — not shown here.`}
+        >
+          <span className="hs-counts">
+            {tag}Measured {measuredCount} · Unmeasured {unmeasuredCount} · Total {total} · {datasetSplitTest} test held out
+          </span>
+        </Term>
+      ) : (
+        <span className="hs-counts">
+          {tag}Measured {measuredCount} · Unmeasured {unmeasuredCount} · Total {total}
+        </span>
+      )}
+      <span className="hs-reset-wrap">
+        <HoverCard content="Reset column widths, folds, wraps, sort">
+          <button type="button" className="hs-reset" onClick={onResetLayout}>
+            Reset layout
+          </button>
+        </HoverCard>
       </span>
-      <button
-        type="button"
-        className="hs-reset"
-        onClick={onResetLayout}
-        title="Reset column widths, folds, wraps, sort"
-      >
-        Reset layout
-      </button>
     </div>
   );
 }

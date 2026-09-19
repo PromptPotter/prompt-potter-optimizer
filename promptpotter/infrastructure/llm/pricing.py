@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import json
 import logging
@@ -22,11 +23,15 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "BUNDLED_PATH",
     "CACHE_PATH",
+    "OPENROUTER_ENDPOINTS_URL",
     "UPSTREAM_URL",
+    "PriceTier",
     "Rate",
+    "RateCeiling",
     "compute_usd",
     "load_rates",
     "lookup_rate",
+    "rate_ceiling",
     "refresh_rates",
     "refresh_rates_in_background",
 ]
@@ -42,6 +47,39 @@ class Rate:
     output: float
     cache_write: float | None = None
     cache_read: float | None = None
+    # The longest reply the model returns, where upstream lists one.
+    max_output: int | None = None
+
+
+@dataclass(frozen=True)
+class PriceTier:
+    """Per-token prices from a prompt length on — a host may bill a whole call dearer once its
+    prompt passes a length. ``input`` is the dearest input tier (a cache write may out-price it)."""
+
+    from_input_tokens: int
+    input: float
+    output: float
+
+
+@dataclass(frozen=True)
+class RateCeiling:
+    """The dearest one call to a ``(provider, model)`` can be billed — per token, by prompt length
+    (``tiers``, ascending from 0), and per request — and the longest reply it can return, ``None``
+    where nothing says. What a spend hold is priced on (``spend_book.py``), never what a call cost."""
+
+    tiers: tuple[PriceTier, ...]
+    per_request: float = 0.0
+    max_output: int | None = None
+
+    def at(self, input_tokens: int) -> PriceTier:
+        """The dearest prices a call reading up to ``input_tokens`` can be billed at."""
+        reached = [t for t in self.tiers if t.from_input_tokens <= input_tokens]
+        return PriceTier(
+            input_tokens, max(t.input for t in reached), max(t.output for t in reached)
+        )
+
+    def dearest(self) -> PriceTier:
+        return self.at(max(t.from_input_tokens for t in self.tiers))
 
 
 UPSTREAM_URL = (
@@ -57,6 +95,7 @@ _KEEP_FIELDS = (
     "output_cost_per_token",
     "cache_creation_input_token_cost",
     "cache_read_input_token_cost",
+    "max_output_tokens",
     "litellm_provider",
     "mode",
 )
@@ -153,8 +192,18 @@ def _models_to_rates(models: dict[str, Any]) -> dict[str, Rate]:
             output=float(out_c or 0.0),
             cache_write=_optional_cost(body, "cache_creation_input_token_cost"),
             cache_read=_optional_cost(body, "cache_read_input_token_cost"),
+            max_output=_as_tokens(body.get("max_output_tokens")),
         )
     return rates
+
+
+def _as_tokens(raw: object) -> int | None:
+    if isinstance(raw, bool) or not isinstance(raw, int | float | str):
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
 
 
 @functools.lru_cache(maxsize=1)
@@ -238,4 +287,113 @@ def compute_usd(
         + cache_read * (rate.cache_read if rate.cache_read is not None else rate.input)
         + cache_write * (rate.cache_write if rate.cache_write is not None else rate.input)
         + output_tokens * rate.output
+    )
+
+
+OPENROUTER_ENDPOINTS_URL = "https://openrouter.ai/api/v1/models/{model}/endpoints"
+"""Every host OpenRouter routes one model to, each with its own price list — public, keyless."""
+
+# OpenRouter's routing shortcuts: a different ORDER over the same hosts, so the same ceiling.
+_ROUTE_SORTS = frozenset({"nitro", "floor"})
+_ROUTE_MEMO: dict[str, tuple[float, RateCeiling]] = {}
+
+
+async def rate_ceiling(model: str, provider: str) -> RateCeiling | None:
+    """The most one call can be billed, or ``None`` where nothing bounds it. A gateway routes one
+    model to hosts whose prices differ several-fold, so its ceiling is the DEAREST host it lists —
+    whichever answers, the call was admitted on a price none of them passes. A provider that is its
+    own host bills its table rate."""
+    if provider.lower() == "openrouter":
+        return await _openrouter_ceiling(model)
+    rate = lookup_rate(model, provider)
+    if rate is None:
+        return None
+    return RateCeiling(
+        tiers=(PriceTier(0, max(rate.input, rate.cache_write or 0.0), rate.output),),
+        max_output=rate.max_output,
+    )
+
+
+def _route_model(model: str) -> str | None:
+    """The catalogue id a route selector sorts over, or ``None`` for a suffix that changes what the
+    call BUYS (``:online`` adds priced search) rather than which host serves it."""
+    base, _, suffix = model.strip().lower().partition(":")
+    return base if not suffix or suffix in _ROUTE_SORTS else None
+
+
+async def _openrouter_ceiling(model: str) -> RateCeiling | None:
+    key = _route_model(model)
+    if key is None:
+        return None
+    memo = _ROUTE_MEMO.get(key)
+    if memo is not None and time.time() - memo[0] < _TTL_SECONDS:
+        return memo[1]
+    ceiling = await asyncio.to_thread(_fetch_route_ceiling, key)
+    if ceiling is not None:
+        _ROUTE_MEMO[key] = (time.time(), ceiling)
+    return ceiling
+
+
+def _fetch_route_ceiling(model: str) -> RateCeiling | None:
+    url = OPENROUTER_ENDPOINTS_URL.format(model=model)
+    try:
+        with urllib.request.urlopen(url, timeout=_FETCH_TIMEOUT_S) as resp:
+            payload = json.loads(resp.read(_MAX_BODY_BYTES).decode("utf-8"))
+    except (urllib.error.URLError, OSError, TimeoutError, json.JSONDecodeError) as exc:
+        logger.warning("spend: no host price list for %s from %s (%s)", model, url, exc)
+        return None
+    data = payload.get("data") if isinstance(payload, dict) else None
+    endpoints = [e for e in (data or {}).get("endpoints") or [] if isinstance(e, dict)]
+    if not endpoints:
+        logger.warning("spend: OpenRouter lists no host for %s", model)
+        return None
+    try:
+        hosts = [_host_tiers(e.get("pricing") or {}) for e in endpoints]
+    except (TypeError, ValueError):
+        logger.warning("spend: %s lists a price no ceiling can read", model)
+        return None
+    # A negative price is OpenRouter's "decided per request" — a router, which no list bounds.
+    if any(v < 0 for host, _ in hosts for tier in host for v in (tier.input, tier.output)):
+        return None
+    starts = sorted({tier.from_input_tokens for host, _ in hosts for tier in host})
+    tiers = tuple(
+        PriceTier(
+            start,
+            max(_host_at(host, start).input for host, _ in hosts),
+            max(_host_at(host, start).output for host, _ in hosts),
+        )
+        for start in starts
+    )
+    replies = [
+        _as_tokens(e.get("max_completion_tokens") or e.get("context_length")) for e in endpoints
+    ]
+    return RateCeiling(
+        tiers=tiers,
+        per_request=max(request for _, request in hosts),
+        max_output=None if None in replies else max(r for r in replies if r is not None),
+    )
+
+
+def _host_tiers(pricing: dict[str, Any]) -> tuple[list[PriceTier], float]:
+    """One host's prices by prompt length, and what it charges per request. A tier names only the
+    prices it changes; the rest are the host's base prices."""
+
+    def tier(start: int, prices: dict[str, Any], base: dict[str, Any]) -> PriceTier:
+        def rate(*keys: str) -> float:
+            return max(float(prices.get(k, base.get(k)) or 0.0) for k in keys)
+
+        return PriceTier(
+            start, rate("prompt", "input_cache_write"), rate("completion", "internal_reasoning")
+        )
+
+    tiers = [tier(0, pricing, pricing)]
+    for override in pricing.get("overrides") or ():
+        tiers.append(tier(int(override["min_prompt_tokens"]), override, pricing))
+    return tiers, float(pricing.get("request") or 0.0)
+
+
+def _host_at(tiers: list[PriceTier], input_tokens: int) -> PriceTier:
+    return max(
+        (t for t in tiers if t.from_input_tokens <= input_tokens),
+        key=lambda t: t.from_input_tokens,
     )

@@ -13,7 +13,7 @@ test.describe("records", () => {
     const tick = page.getByRole("button", { name: "Add to the comparison" }).first();
     await tick.click();
     await ready(page);
-    // `/evidence` 400s on a selection with no scored rows, and `useFetch`'s `survive` keeps
+    // `/evidence` 400s on a selection with no scored rows, and `useRead`'s `survive` keeps
     // the last good read — so what is asserted is that the pane resolves to SOMETHING, never
     // that it found numbers. A campaign whose origin never ran legitimately has none.
     await expect(page.locator("#main-content")).toBeVisible();

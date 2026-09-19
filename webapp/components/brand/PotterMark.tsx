@@ -2,10 +2,6 @@
 // silhouette is a mirrored density curve, the belly is the mode, and the fill
 // level is where the area accumulates.
 //
-// Replaces the v2 hexagon glyph, which was hand-duplicated in three components
-// (login showcase, running-jobs button, About-this-unit). One definition now,
-// so the next mark change is one edit.
-//
 // The artwork is the approved raster (public/brand/mark-pot.png). It is used
 // as a CSS mask with `background: currentColor` rather than an <img>, because an
 // <img> bakes the ink in: these three surfaces sit on cobalt, on white and on

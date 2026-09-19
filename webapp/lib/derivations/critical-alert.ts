@@ -187,6 +187,6 @@ export function criticalAlert({
   }
   // `warming_up` (server reachable, no snapshot yet — e.g. a forked cycle whose
   // runner hasn't started) is NOT a lost connection, so it raises nothing here.
-  // The CyclePicker's run-phase label ("scoring origin") surfaces this benign state.
+  // The masthead's STATE chip ("scoring origin") surfaces this benign state.
   return null;
 }

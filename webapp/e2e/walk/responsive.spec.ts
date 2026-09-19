@@ -39,6 +39,40 @@ for (const vp of WIDTHS) {
       await ready(page);
       await noSidewaysScroll(page);
     });
+
+    test("the outer-signal panel and the lineage forest fit their viewport", async ({
+      page,
+      rich,
+    }) => {
+      // `OuterSignalPanel` ("Outer signal") mounts unconditionally on every Dashboard — round 0
+      // or an empty read renders its own placeholder text — so unlike its per-round lift chart
+      // (which needs a real `promptpotter-self` campaign to ever draw a bar, and so stays
+      // untested by this walk), the CARD's own fit needs no special campaign shape. Read
+      // `code-debt-cleanup.md` before touching this claim again.
+      await open(page, `${rich.addr}/dashboard`);
+      await expect(page.getByRole("heading", { name: "Outer signal" })).toBeVisible();
+      await noSidewaysScroll(page);
+
+      // The forest is the OTHER half of that same gap: `CandidatesCard`'s own dendrogram moved
+      // into `ForestCard` behind this toggle, so opening it is what a plain tab visit never did.
+      await page.getByRole("button", { name: /the lineage forest/i }).click();
+      const cladogram = page.getByRole("img", { name: "Session lineage cladogram" });
+      await expect(cladogram).toBeVisible();
+      await noSidewaysScroll(page);
+
+      // The failure class `noSidewaysScroll` cannot see: a `viewBox`'d SVG at `width:100%`
+      // never overflows, it SCALES — silently compressing until labels collide, with the page
+      // never growing wider (webapp/CLAUDE.md § Stylesheet organization). `Forest.tsx` gives the
+      // `<svg>` an explicit intrinsic `width` for exactly this reason; assert it actually reaches
+      // the DOM at that width instead of being squeezed into the viewport.
+      const attrWidth = Number(await cladogram.getAttribute("width"));
+      expect(attrWidth, "the cladogram <svg> carries no width attribute").toBeGreaterThan(0);
+      const box = await cladogram.boundingBox();
+      expect(
+        box?.width,
+        "the lineage cladogram scaled down instead of overflowing its wrapper",
+      ).toBeGreaterThanOrEqual(attrWidth - 1);
+    });
   });
 }
 

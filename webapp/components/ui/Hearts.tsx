@@ -16,12 +16,10 @@ import { heartPips, heartsLabel } from "@/lib/derivations";
 export const Hearts = memo(function Hearts({
   hearts,
   cap,
-  size,
   className,
 }: {
   hearts: number;
   cap: number | null | undefined;
-  size?: number;
   className?: string;
 }) {
   const { filled, empty, dead } = heartPips(hearts, cap);
@@ -35,10 +33,10 @@ export const Hearts = memo(function Hearts({
       ) : (
         <>
           {Array.from({ length: filled }, (_, i) => (
-            <HeartIcon key={`f${i}`} filled size={size} />
+            <HeartIcon key={`f${i}`} filled />
           ))}
           {Array.from({ length: empty }, (_, i) => (
-            <HeartIcon key={`e${i}`} filled={false} size={size} />
+            <HeartIcon key={`e${i}`} filled={false} />
           ))}
         </>
       )}

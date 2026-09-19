@@ -17,6 +17,12 @@ from dataclasses import dataclass
 from promptpotter.infrastructure.llm.capabilities import STANDARD_EFFORT_LADDER
 from promptpotter.infrastructure.llm.openai_compat import PROVIDER_DEFAULT_EFFORT
 from promptpotter.infrastructure.llm.registry import get_llm_client, normalize_model_id
+from promptpotter.infrastructure.llm.spend_book import (
+    CallLabel,
+    bind_spend_book,
+    reset_spend_book,
+    unbounded_spend_book,
+)
 
 # One terse-answer task. The measurand is the reasoning token COUNT, not the answer, so the prompt
 # only has to be something a reasoning model will think about and a terse one will not.
@@ -56,6 +62,7 @@ async def _one(client: object, model: str, rung: str | None) -> RungReading:
         resp = await client.chat(  # type: ignore[attr-defined]
             messages=[{"role": "user", "content": _PROMPT}],
             model=model,
+            label=CallLabel("probe_reasoning", "diagnostic"),
             temperature=0.0,
             max_tokens=_MAX_TOKENS,
             **kwargs,
@@ -71,9 +78,14 @@ async def probe_reasoning(
     """Every rung plus an unset baseline, serially — concurrent probes hit one endpoint's rate
     limit and a 429 would read as a refusal, which is the one answer this must not fabricate."""
     client = get_llm_client(provider)
-    readings = [await _one(client, model, None)]
-    for rung in rungs:
-        readings.append(await _one(client, model, rung))
+    # Bound by `_MAX_TOKENS` per rung, not by a ceiling; the book still admits each send.
+    token = bind_spend_book(unbounded_spend_book())
+    try:
+        readings = [await _one(client, model, None)]
+        for rung in rungs:
+            readings.append(await _one(client, model, rung))
+    finally:
+        reset_spend_book(token)
     return readings
 
 

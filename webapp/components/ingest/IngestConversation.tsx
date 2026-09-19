@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import type { DatasetIndexEntry, OriginEntry } from "@/lib/api";
+import type { DatasetIndexEntry, OriginEntry, StartCheckinLimits } from "@/lib/api";
 import type { IngestFlow } from "@/lib/hooks/useIngestFlow";
 import { cx } from "@/lib/cx";
 import { ChoiceField } from "@/components/forms/ChoiceField";
@@ -306,8 +306,93 @@ export function IngestConversation({
 // and pipeline are shown expanded + prefilled for confirmation — they're the
 // origin the operator is about to evolve. Only the meta-optimizer knobs (which
 // model drives the search, run bounds) collapse into an optional expander.
+// The three launch caps as TEXT, because a half-typed "0." is not a number and coercing per
+// keystroke arms a value on the way to the one the operator meant — the same reason
+// `ui/CommitInput` exists. Blank is a real answer: "no cap of mine", leaving the account's own.
+interface CapDrafts {
+  halt: string;
+  usd: string;
+  tokens: string;
+}
+const NO_CAPS: CapDrafts = { halt: "", usd: "", tokens: "" };
+
+// Anything finite is SENT, range and all: `StartCheckinPayload` declares the bounds and refuses
+// what it must, and a 422 naming the field teaches where a silently dropped key would not.
+function launchLimits(c: CapDrafts): StartCheckinLimits {
+  const num = (s: string) => {
+    const n = Number(s);
+    return s.trim() !== "" && Number.isFinite(n) ? n : undefined;
+  };
+  return {
+    halt_at_accuracy: num(c.halt),
+    spend_budget_usd: num(c.usd),
+    token_budget: num(c.tokens),
+  };
+}
+
+function LaunchCaps({
+  caps,
+  onChange,
+}: {
+  caps: CapDrafts;
+  onChange: (next: CapDrafts) => void;
+}) {
+  return (
+    <>
+      <label className="new-campaign-field">
+        <span>Spend cap (USD)</span>
+        <input
+          type="number"
+          min={0}
+          step={0.5}
+          inputMode="decimal"
+          value={caps.usd}
+          placeholder="account's own"
+          aria-label="Spend cap in USD"
+          onChange={(e) => onChange({ ...caps, usd: e.target.value })}
+        />
+      </label>
+      <label className="new-campaign-field">
+        <span>Token cap</span>
+        <input
+          type="number"
+          min={0}
+          step={1000}
+          inputMode="numeric"
+          value={caps.tokens}
+          placeholder="account's own"
+          aria-label="Token cap"
+          onChange={(e) => onChange({ ...caps, tokens: e.target.value })}
+        />
+      </label>
+      <label className="new-campaign-field">
+        <span>Halt at accuracy</span>
+        <input
+          type="number"
+          min={0}
+          max={1}
+          step={0.05}
+          inputMode="decimal"
+          value={caps.halt}
+          placeholder="never halt on accuracy"
+          aria-label="Halt at accuracy"
+          onChange={(e) => onChange({ ...caps, halt: e.target.value })}
+        />
+      </label>
+      {/* Bare `<small>`, the register `ChoiceField`'s own hint uses — one note for all three,
+          because "not saved" is the fact that separates them from the knobs below. */}
+      <small>
+        What THIS launch may spend — not saved with the setup, so a reopened check-in starts
+        from blank. Whichever cap trips first stops the run; your account&apos;s own allowance
+        still binds underneath.
+      </small>
+    </>
+  );
+}
+
 function ReadyBlock({ flow }: { flow: IngestFlow }) {
   const blockersId = useId();
+  const [caps, setCaps] = useState<CapDrafts>(NO_CAPS);
   if (flow.phase.stage !== "ready") return null;
   const { draft, resolution, raised, degradedCause } = flow.phase;
   // `blocked` mirrors the server gate alone — adding `gaps.length` is a second
@@ -378,11 +463,15 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
       <OptimizerSetupSection />
 
       <details className="new-campaign-optional ingest-advanced">
-        {/* Bounds on the LOOP, not the optimizer's wiring — that is the section above.
-            Both knobs are campaign policy (`OptimizationConfig`), which is why they are
-            here and not on a node. */}
-        <summary>Loop bounds (optional)</summary>
+        {/* Bounds on the RUN, not the optimizer's wiring — that is the section above. Nothing
+            here is a node's. Two persistence classes, deliberately in one place because they
+            answer one question: the knobs below are campaign policy (`OptimizationConfig`) and
+            patch the draft, while the three caps ride the Start press and are saved nowhere,
+            which is what the caps' own note says. Splitting them into two expanders asks
+            "how far does this go" twice. */}
+        <summary>Run bounds (optional)</summary>
         <div className="new-campaign-optional-body">
+          <LaunchCaps caps={caps} onChange={setCaps} />
           <NumberField
             label="Max rounds"
             value={draft.optimization_overrides.max_rounds}
@@ -403,6 +492,19 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
             hint="Proven persona / thinking-style / answer-format blocks the optimizer can draw on."
             onApply={(prompt_block_catalogue) =>
               flow.applyPatch({ optimization_overrides: { prompt_block_catalogue } })
+            }
+          />
+          <ChoiceField
+            label="Escalation ladder"
+            value={draft.optimization_overrides.escalation_ladder}
+            options={[
+              { value: "full", label: "Full (L1 → L2 → L3)" },
+              { value: "l1_l2", label: "L1 + L2 (no replan)" },
+              { value: "l1", label: "L1 only" },
+            ]}
+            hint="How far the loop may escalate when L1 stalls. L1 only never composes an L2 or L3 prompt — the ablation arm."
+            onApply={(escalation_ladder) =>
+              flow.applyPatch({ optimization_overrides: { escalation_ladder } })
             }
           />
           {/* Pluggable orchestration mechanisms — sorting/selection + early-abort
@@ -444,7 +546,7 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         className="chat-cta-btn"
         disabled={blocked || flow.busy}
         aria-describedby={blocked ? blockersId : undefined}
-        onClick={flow.startFromReady}
+        onClick={() => flow.startFromReady(launchLimits(caps))}
       >
         {flow.busy ? "Starting…" : flow.saving ? "Saving…" : "Start campaign"}
       </button>

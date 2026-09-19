@@ -13,17 +13,15 @@ from shared_config import Record, export_results
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
 from promptpotter.application.datasets.loaders import samples_from_dicts
-from promptpotter.application.embedded_run import (
-    mint_and_score_origin,
-    open_session,
-    run_campaign,
-)
+from promptpotter.application.embedded_run import open_session, run_campaign
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.runner.entry import RunMode
 from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
+from promptpotter.application.scoring.sample_measurement import cell_billing, cell_bound
 from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.sample import Sample
+from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
 from promptpotter.presentation.terminal.completion import report_completion
 from promptpotter.presentation.terminal.live.display import LiveDisplay
 from promptpotter.presentation.terminal.primitives import set_display_tags
@@ -53,9 +51,9 @@ def build_campaign_config(
     (``promptpotter/assets/optimizer/pipeline.yaml``) — edit that to change the optimizer
     model/provider, not the campaign config.
     """
-    # Rasch-validation run scaffolding (git log): a large l1_patience defers L2/L3 firing for the
-    # run window so the per-round adaptive queue accumulates δ evidence.
-    optimization: dict[str, Any] = {"max_rounds": 5, "l1_patience": 99}
+    # Rasch-validation scaffolding: the L1-only arm, so the per-round adaptive queue accumulates
+    # δ evidence with no L2/L3 fire in the window.
+    optimization: dict[str, Any] = {"max_rounds": 5, "escalation_ladder": "l1"}
     optimization.update(
         {k: v for k, v in {"max_rounds": max_rounds, "n_variants": n_variants}.items() if v}
     )
@@ -109,26 +107,16 @@ async def run_bbeh_campaign(
                 f"node {llm_node!r} resolved no model — datasets/bbeh/pipeline.yaml must pin one."
             )
 
-        observers, dataset_obj, origin = await mint_and_score_origin(
+        cycle_result = await run_campaign(
             session,
             train_norm,
             campaign_config,
-            pipeline_params=pipeline_params,
             display=LiveDisplay.for_campaign(session, campaign_config),
-            on_status=print,
-        )
-        origin_train_acc = origin.report.accuracy
-
-        cycle_result = await run_campaign(
-            observers,
-            dataset_obj,
-            origin,
-            campaign_config,
-            session=session,
             limits=LaunchLimits(),
             mode=RunMode(),
         )
         report_completion(cycle_result, session=session)
+        origin_train_acc = cycle_result.origin_accuracy
         # Ask the outcome table, never a hand-authored string: the export below is only
         # meaningful for a run that finished, and every halted/failed/paused reason must skip it.
         if stop_reason_outcome(cycle_result.stop_reason) is not StopOutcome.SUCCESS:
@@ -147,19 +135,25 @@ async def run_bbeh_campaign(
         print("=" * 60)
 
         per_task_results: dict[str, Record] = {}
-        for i, task in enumerate(tasks, start=1):
-            test_items = test_norm_by_task[task]
-            hits = 0
-            for ex in test_items:
-                resp = await session.backend_client.run_query(
-                    ex.query, pipeline_params=winner_pipeline_params
+        # Outside the run, so under a book of its own: every cell is still admitted and metered.
+        bound = await cell_bound(session, winner_pipeline_params or {})
+        billed = cell_billing(session.pipeline_schema, winner_pipeline_params or {})
+        with spending_under(unbounded_spend_book()):
+            for i, task in enumerate(tasks, start=1):
+                test_items = test_norm_by_task[task]
+                hits = 0
+                for ex in test_items:
+                    resp = await session.backend_client.run_query(
+                        ex.query, pipeline_params=winner_pipeline_params, bound=bound, billed=billed
+                    )
+                    ranking = resp.get("data", {}).get("final_ranking") or []
+                    predicted = ranking[0].get("candidate", "") if ranking else ""
+                    hits += int(exact_match(predicted, ex.ground_truth))
+                acc = hits / len(test_items) if test_items else 0.0
+                per_task_results[task] = {"accuracy": round(acc, 4), "n_test": len(test_items)}
+                print(
+                    f"  [{i:2d}/{len(tasks)}] {task:<40s} {acc:>6.1%}  ({hits}/{len(test_items)})"
                 )
-                ranking = resp.get("data", {}).get("final_ranking") or []
-                predicted = ranking[0].get("candidate", "") if ranking else ""
-                hits += int(exact_match(predicted, ex.ground_truth))
-            acc = hits / len(test_items) if test_items else 0.0
-            per_task_results[task] = {"accuracy": round(acc, 4), "n_test": len(test_items)}
-            print(f"  [{i:2d}/{len(tasks)}] {task:<40s} {acc:>6.1%}  ({hits}/{len(test_items)})")
 
         macro_avg = sum(r["accuracy"] for r in per_task_results.values()) / len(per_task_results)
         total_test = sum(r["n_test"] for r in per_task_results.values())

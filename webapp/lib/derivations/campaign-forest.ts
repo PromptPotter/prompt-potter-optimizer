@@ -1,5 +1,5 @@
-// Sidebar data model — the FOREST, and the collapsed-node codec. Pure: no
-// React; the tree-row components own the rendering.
+// The campaign FOREST, and the collapsed-node codec. Pure: no React; the sidebar
+// rows and the masthead switcher render the same groups.
 //
 // One store is one forest, and the structure is self-similar:
 //
@@ -34,6 +34,8 @@ export interface RunGroup {
   // Display-data sources, "a cut that moved the line means the BRANCH answers").
   // Usually the root; never assumed to be.
   answering: CycleListEntry;
+  // The root's siblings, most-recently-updated first — every fork and diag cut from it.
+  branches: CycleListEntry[];
   // Most-recent updated_at across every cycle — sorts so the run being actively
   // worked on stays at the top.
   updatedAt: string;
@@ -54,6 +56,10 @@ export interface OriginGroup {
 // values, or null when none has scored a round yet (renders as "—"). A fresh
 // sibling carries 0.0 (a real value); a no-rounds-yet cycle carries null, so
 // the `!= null` guard keeps "—" distinct from a genuine 0%.
+//
+// A SELECTION, not a computation — what renders is byte-identical to one served `best_accuracy`.
+// Both tiers it selects over are this file's groupings, and an ORIGIN (campaigns sharing a
+// `root_cycle_id`) is no server entity, so a `CampaignSummary.best_accuracy` would leave it max'ing.
 function bestAccuracyOf(entries: CycleListEntry[]): number | null {
   let best: number | null = null;
   for (const e of entries) {
@@ -117,6 +123,7 @@ function groupRuns(
       campaign,
       root,
       answering: answeringCycle(root, branches),
+      branches,
       updatedAt: all.reduce(
         (m, c) => (c.updated_at > m ? c.updated_at : m),
         campaign.created_at,

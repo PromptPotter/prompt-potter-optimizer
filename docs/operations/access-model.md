@@ -41,8 +41,7 @@ explicitly **not** an inbound API route. **No `/commands/{kind}` verb is admin-o
 person running the box presses exactly the buttons its users press.
 
 That is a decision, not an absence. The one verb that used to sit here —
-`set-sample-lookahead`, arming the scoring walk to hold several of a candidate's samples in
-flight — spends the **box's** shared provider key and rate bucket rather than the campaign's
+`set-sample-lookahead`, arming the scoring round to hold several calls in flight — spends the **box's** shared provider key and rate bucket rather than the campaign's
 budget, so a user holding it can throttle every other user to finish sooner. It was
 host-admin for exactly that reason, and moved to `campaign.lookahead` (the authorization
 boundary) when the
@@ -51,8 +50,11 @@ the abuse now is the per-account spend ceiling plus the delegate carve: it is it
 `CAMPAIGN_CAP_BY_NAME`, so a host can withhold it from a delegate without withholding the
 run. It is still deliberately **not** `campaign.babysit` — babysit marks a cycle whose
 measurement an operator steered, and this verb cannot steer one (the overshoot sample is
-discarded precisely so the recorded rows stay identical at either depth). The ceiling and what
-one press buys are the CONNECTOR's declarations; the boundary answers only who may press.
+discarded precisely so the recorded rows stay identical at either depth). The ceiling is the
+CONNECTOR's declaration; how far past a possible cut the walk may reach — and so how deep an
+`auto` arming, which names no number, actually runs — is the stop rules'
+([`candidate-elimination.md`](../methods/candidate-elimination.md)); the boundary answers only
+who may press.
 
 **It is reachable from the browser only** — no CLI verb, no config key, no dataset knob. It is
 also the one command whose address may DESCEND (`payload.descend`), because the arming is not
@@ -121,16 +123,25 @@ grants (require unspoofable channel identity) and the babysat *subtree* model.
 ## user ↔ user — tenancy
 
 **Cross-tenant isolation is structural, not a check.** `build_stores`
-(`infrastructure/store/stores.py`) roots every leaf store at `projects_root / tenant_id`; a
-`Stores` object cannot name another tenant's directory, so cross-tenant reads are physically
-impossible. `Stores.tenant_id` is a derived property off the identity, never an independent
+(`infrastructure/store/stores.py`) roots every leaf store at `projects_root / tenant_id`, and the
+content-addressed caches at `shared_root / tenant_id`; a CONSTRUCTED `Stores` cannot name another
+tenant's directory. `Stores.tenant_id` is a derived property off the identity, never an independent
 field. Today `tenant_id == user_id` (one tenant per operator).
+
+**The guarantee is "no constructed `Stores` crosses a tenant", not "no read crosses a tenant"** —
+and the difference is the whole of it. A second `build_stores` under a different identity crosses
+freely, which is how the two deliberate cross-tenant readers work at all
+(`user_store.py::count_accounts`, `quota.py::is_host_tenant_dir`); so does `--tenant <any>` from a
+shell, which resolves to `default_identity` carrying `OWNER_COMMAND_CAPABILITIES`. **Through the
+served API the isolation holds absolutely** — `deps.py::resolve_identity` builds only from the
+session — and the local shell is the separate boundary § loop ↔ everything already concedes.
 
 **Ownership within a tenant is one rule:** `CampaignStore.load_owned(campaign_id, owner_user_id)`
 returns the campaign iff it exists *and* is owned, else `None` — a missing and a cross-owner
-campaign collapse to the same 404. Its four callers (the command dispatcher's
-`_load_owned_campaign`, and the campaign detail / config-map / storage read routes) keep their own
-error text; only the ownership predicate lives in `load_owned`.
+campaign collapse to the same 404. Its callers keep their own error text; only the ownership
+predicate lives there. **Two launch paths inline the same comparison instead** and raise
+`LaunchError` (422, not 404) — `jobs/launcher/mint_and_start.py` and `jobs/launcher/checkin.py`.
+Same existence-hiding effect, a second copy of the rule, and a third status code for one question.
 
 **One deliberate exception — not a bug:** `routers/origins.py` is **tenant-scoped, not
 owner-scoped** (documented in-code). A CLI-minted campaign is owned by the registered-developer
@@ -257,7 +268,7 @@ Four gates, each with a different owner, and only the first two adapt on their o
 |---|---|---|
 | Campaigns admitted at once | `Settings.MACHINE_RUN_CAPACITY` | Yes — lowered under provider back-pressure, never raised above the ceiling |
 | Share of the provider's 60 s window | nothing — derived per call | Yes — least-served tenant next (`infrastructure/llm/rate_limit.py`) |
-| Campaigns ONE person may hold | `user.json::max_concurrent_cycles` | No |
+| Campaigns ONE person may hold | `user.json::max_concurrent_cycles` — the host, or `set-concurrent-cycles` by an account on its own key | No |
 | What an account may ever spend | the free-tier ceilings above, in both units | No |
 
 **The first gate WAITS; the third refuses.** A full machine is temporary and nobody's fault, so a

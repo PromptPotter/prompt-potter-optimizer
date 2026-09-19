@@ -74,7 +74,7 @@ export function MetricPicker({
 
 // The composed metric's input. It COMMITS on Enter or blur, never per keystroke: the metric is a
 // fetch key, so a keystroke-driven one fires a request per character, 400s on every half-typed
-// formula, and — because `useFetch` resets in the render phase — blanks the card under the cursor
+// formula, and — because a new key reads afresh — blanks the card under the cursor
 // that is still typing.
 export function MetricExpression({
   reading,

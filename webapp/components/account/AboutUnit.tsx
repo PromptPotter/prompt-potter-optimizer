@@ -16,15 +16,16 @@ import { PotterMark } from "@/components/brand/PotterMark";
 import { CopyButton } from "@/components/ui";
 import { BRAND, softwareApplicationLd } from "@/lib/brand";
 import { fetchHealth } from "@/lib/api";
-import { useFetch } from "@/lib/hooks/useFetch";
+import { readyData, useRead } from "@/lib/hooks/useRead";
 import { formatDiagnostics, useIncidents } from "@/lib/diagnostics";
+import { cx } from "@/lib/cx";
 
 export function AboutUnit() {
   const [showHow, setShowHow] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
 
   // Health unreachable → version stays null (we render blank, never invent one).
-  const { data: health } = useFetch(() => fetchHealth(), []);
+  const health = readyData(useRead({ key: "health", fetch: fetchHealth }, { surface: "health" }));
   const version = health?.version ?? null;
   const incidents = useIncidents();
 
@@ -88,12 +89,12 @@ export function AboutUnit() {
             aria-expanded={showHow}
             onClick={() => setShowHow((v) => !v)}
           >
-            <span className={`about-unit-caret${showHow ? " open" : ""}`} aria-hidden="true">
+            <span className={cx("about-unit-caret", showHow && "open")} aria-hidden="true">
               ›
             </span>
             How this works
           </button>
-          <div className={`about-unit-disclosure${showHow ? " open" : ""}`}>
+          <div className={cx("about-unit-disclosure", showHow && "open")}>
             <div className="about-unit-disclosure-inner">
               <p>
                 This unit declares who makes it through the same standards any web
@@ -148,7 +149,7 @@ export function AboutUnit() {
               onClick={() => setShowRaw((v) => !v)}
             >
               <span
-                className={`about-unit-caret${showRaw ? " open" : ""}`}
+                className={cx("about-unit-caret", showRaw && "open")}
                 aria-hidden="true"
               >
                 ›
@@ -161,7 +162,7 @@ export function AboutUnit() {
               </CopyButton>
             ) : null}
           </div>
-          <div className={`about-unit-disclosure${showRaw ? " open" : ""}`}>
+          <div className={cx("about-unit-disclosure", showRaw && "open")}>
             <div className="about-unit-disclosure-inner">
               <pre className="about-unit-code">{raw}</pre>
               <p className="account-muted">
@@ -232,7 +233,7 @@ function ResourceLink({ href, label }: { href: string; label: string }) {
 // genuinely `verified` declaration gets the affirmative treatment.
 function ProvenancePill({ verified }: { verified: boolean }) {
   return (
-    <span className={`about-unit-pill${verified ? " verified" : " declared"}`}>
+    <span className={cx("about-unit-pill", verified ? "verified" : "declared")}>
       <span className="about-unit-pill-icon" aria-hidden="true">
         {verified ? "✓" : "ⓘ"}
       </span>

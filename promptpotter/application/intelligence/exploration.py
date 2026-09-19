@@ -49,6 +49,7 @@ __all__ = [
     "observations_from_results",
     "parent_level_trajectory",
     "select_round_subset",
+    "theta_bounds_given_delta",
     "theta_lift_over_parent",
 ]
 
@@ -359,16 +360,7 @@ def fit_theta_given_delta(
     grading it δ=0 — zero is a POSITION on this scale, not a neutral value, so a ruler centred
     well above it would read an unmeasured cell as easier than anything ever measured.
     """
-    if delta is None:
-        graded: dict[int, tuple[float, float]] = dict.fromkeys(
-            (o.sample_id for o in observations), (0.0, 1.0)
-        )
-    else:
-        observed = {o.sample_id for o in observations}
-        missing = sorted(observed - delta.keys())
-        if missing:
-            raise RulerCoverageError(missing, anchor_id=anchor_id)
-        graded = {sid: ruler_entry(delta[sid]) for sid in observed}
+    graded = _cell_parameters({o.sample_id for o in observations}, delta, anchor_id)
 
     by_c: dict[str, list[tuple[float, float, float]]] = {}
     for o in observations:
@@ -400,6 +392,63 @@ def fit_theta_given_delta(
         phi = (dof * raw_phi + _EB_NU0 * _EB_S0_SQ) / (dof + _EB_NU0)
         out[cid] = (theta, float(np.sqrt(phi) / np.sqrt(max(info, 1e-9))))
     return out
+
+
+def _cell_parameters(
+    sample_ids: Collection[int], delta: Ruler | None, anchor_id: str
+) -> dict[int, tuple[float, float]]:
+    if delta is None:
+        return dict.fromkeys(sample_ids, (0.0, 1.0))
+    missing = sorted(set(sample_ids) - delta.keys())
+    if missing:
+        raise RulerCoverageError(missing, anchor_id=anchor_id)
+    return {sid: ruler_entry(delta[sid]) for sid in sample_ids}
+
+
+# The Newton fit stops within `tol` of its root, so two fits are never compared tighter than this.
+_FIT_SLACK = 1e-3
+
+
+def theta_bounds_given_delta(
+    measured: Mapping[int, float],
+    open_cells: Collection[int],
+    delta: Ruler | None,
+    *,
+    anchor_id: str = "",
+) -> tuple[float, float, float]:
+    """``(θ_low, θ_high, se_floor)`` around what :func:`fit_theta_given_delta` can return for ONE
+    arm once ``open_cells`` resolve — each to any grade in [0, 1], or to an error that drops it.
+
+    The MAP rises with every response, and dropping a cell leaves the root where grading it at its
+    own fitted p would, so the all-0 and all-1 fits bound θ exactly. The SE moves both ways — its
+    dispersion grows with misfit — so it is floored instead: φ by the least misfit the measured
+    cells can show anywhere in that interval, the information by each cell at its most informative
+    θ inside it."""
+    params = _cell_parameters({*measured, *open_cells}, delta, anchor_id)
+
+    def fit(fill: float) -> float:
+        obs = [Observation("", sid, y) for sid, y in measured.items()]
+        obs += [Observation("", sid, fill) for sid in open_cells]
+        return fit_theta_given_delta(obs, delta, anchor_id=anchor_id).get("", (0.0, 0.0))[0]
+
+    low, high = fit(0.0) - _FIT_SLACK, fit(1.0) + _FIT_SLACK
+
+    def p_at(theta: NDArray[np.float64], d: NDArray[np.float64], a: NDArray[np.float64]) -> Any:
+        return 1.0 / (1.0 + np.exp(-np.clip(a * (theta - d), -50, 50)))
+
+    d, a = (np.array([params[s][k] for s in params], dtype=np.float64) for k in (0, 1))
+    p = p_at(np.clip(d, low, high), d, a)
+    info = 1.0 / (_INIT_SIGMA_THETA * _INIT_SIGMA_THETA) + float(np.sum(a * a * p * (1.0 - p)))
+    # Misfit is unimodal in p with its zero at p = y, so each cell's least lies at y clamped into
+    # the p range the interval allows.
+    y = np.fromiter(measured.values(), dtype=np.float64, count=len(measured))
+    dm, am = (np.array([params[s][k] for s in measured], dtype=np.float64) for k in (0, 1))
+    ends = p_at(np.array([low, high]), dm[:, None], am[:, None])
+    pm = np.clip(y, ends.min(axis=1), ends.max(axis=1))
+    misfit = float(np.sum((y - pm) ** 2 / np.clip(pm * (1.0 - pm), 1e-6, None)))
+    dof = max(len(params) - 1, 1)
+    phi = (misfit + _EB_NU0 * _EB_S0_SQ) / (dof + _EB_NU0)
+    return low, high, float(np.sqrt(phi) / np.sqrt(info))
 
 
 def extend_ruler(

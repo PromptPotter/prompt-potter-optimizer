@@ -14,7 +14,7 @@ replayers read it; none of them may reconstruct one.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.intelligence.exploration import (
@@ -22,6 +22,7 @@ from promptpotter.application.intelligence.exploration import (
     Observation,
     candidate_abilities,
     fit_theta_given_delta,
+    theta_bounds_given_delta,
     theta_lift_over_parent,
 )
 from promptpotter.application.optimization.pobb.classification import scoreable_rows
@@ -43,6 +44,7 @@ __all__ = [
     "distinct_valid_cells",
     "elect_round_winner",
     "elimination_p_best",
+    "elimination_p_best_bounds",
     "matched_parent_lift",
     "mean_fitness_ci",
     "paired_fitness",
@@ -296,16 +298,63 @@ def elimination_p_best(
         # is still an arm that function would refuse to crown. It caps only how far the reading may
         # sit FROM 0.5, and the docstring says why only a threshold takes that cap.
         p = p_exceeds(theta_c, se_c, theta_p, se_p)
-        bound = sign_posterior(*discordant_counts(candidate_grades, grades))
-        # The paired posterior's mass on the SIDE θ read — not its DISTANCE from 0.5, which is what
-        # made this bound direction-blind. `sign_posterior` is symmetric about the split, so
-        # `|bound - 0.5|` answered the same for 3 wins as for 3 losses: lost-3-of-3 licensed 0.9375
-        # and lost-1-of-1 licensed 0.75, i.e. adverse cells bought WIDTH. `p_best` is the number
-        # `lock_in` tests (`pobb/checks.py`), so that let an arm every discordant cell went against
-        # stop the round on the strength of θ alone — the panel-vs-shared-cell gap, made actionable.
-        # Agreeing pairs and no pairs at all read exactly as before; only a CONTRADICTING one moves,
-        # and it moves to 0.5 — no claim, and still no crossing of the side the rank owns.
-        support = bound if p > 0.5 else 1.0 - bound
-        reach = min(abs(p - 0.5), max(0.0, support - 0.5))
-        per_prior[pid] = 0.5 + reach if p > 0.5 else 0.5 - reach
+        per_prior[pid] = _capped(p, sign_posterior(*discordant_counts(candidate_grades, grades)))
     return min(per_prior.values()), per_prior
+
+
+def _capped(p: float, bound: float) -> float:
+    """``p`` held on its side of 0.5 and no further from it than ``bound`` supports — which is
+    ``median(p, bound, 0.5)``, so it rises with both."""
+    # The paired posterior's mass on the SIDE θ read — not its DISTANCE from 0.5, which is what
+    # made this bound direction-blind. `sign_posterior` is symmetric about the split, so
+    # `|bound - 0.5|` answered the same for 3 wins as for 3 losses: lost-3-of-3 licensed 0.9375
+    # and lost-1-of-1 licensed 0.75, i.e. adverse cells bought WIDTH. `p_best` is the number
+    # `lock_in` tests (`pobb/checks.py`), so that let an arm every discordant cell went against
+    # stop the round on the strength of θ alone — the panel-vs-shared-cell gap, made actionable.
+    # Agreeing pairs and no pairs at all read exactly as before; only a CONTRADICTING one moves,
+    # and it moves to 0.5 — no claim, and still no crossing of the side the rank owns.
+    support = bound if p > 0.5 else 1.0 - bound
+    reach = min(abs(p - 0.5), max(0.0, support - 0.5))
+    return 0.5 + reach if p > 0.5 else 0.5 - reach
+
+
+def elimination_p_best_bounds(
+    cells: Sequence[int],
+    candidate: Mapping[int, float],
+    priors: Mapping[str, Mapping[int, float]],
+    ruler: DeltaRuler | None,
+    *,
+    settled: Collection[str],
+) -> tuple[float, float]:
+    """``(low, high)`` around every value :func:`elimination_p_best` can return over ``cells`` once
+    the grades missing from ``candidate`` and ``priors`` arrive — each anywhere in [0, 1], or an
+    error that drops the cell. Only ``settled`` priors are sure to stay paired; any other may drop
+    out, which can only RAISE the minimum, so ``high`` is taken over the settled ones alone.
+
+    Bounded from the reading's two inputs rather than by trying completions: each prior's reading
+    rises with the θ gap and with the sign bound, the gap's extremes are exact and its noise has a
+    floor, and the discordant counts are extreme at their corners."""
+    sids = [int(s) for s in cells]
+    entries = ruler.entries_covering(sids) if ruler is not None else None
+    anchor = ruler.anchor_id if ruler is not None else ""
+    known = {s: candidate[s] for s in sids if s in candidate}
+    c_low, c_high, c_floor = theta_bounds_given_delta(
+        known, [s for s in sids if s not in known], entries, anchor_id=anchor
+    )
+    low: dict[str, float] = {}
+    high: dict[str, float] = {}
+    for pid, grades in priors.items():
+        both = {s: grades[s] for s in known if s in grades}
+        rest = [s for s in sids if s not in both]
+        p_low, p_high, p_floor = theta_bounds_given_delta(both, rest, entries, anchor_id=anchor)
+        wins, losses = discordant_counts([known[s] for s in both], list(both.values()))
+        # An absent grade can go either way, so it is read as the worst case for each bound.
+        can_lose = sum(1 for s in rest if candidate.get(s, 0.0) < grades.get(s, 1.0))
+        can_win = sum(1 for s in rest if candidate.get(s, 1.0) > grades.get(s, 0.0))
+        worst = p_exceeds(c_low, c_floor, p_high, p_floor) if c_low < p_high else 0.5
+        best = p_exceeds(c_high, c_floor, p_low, p_floor) if c_high > p_low else 0.5
+        low[pid] = _capped(worst, sign_posterior(wins, losses + can_lose))
+        high[pid] = _capped(best, sign_posterior(wins + can_win, losses))
+    if not low:
+        return 1.0, 1.0
+    return min(low.values()), min(high[p] for p in settled) if settled else max(high.values())

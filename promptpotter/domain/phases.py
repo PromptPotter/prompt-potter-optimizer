@@ -8,8 +8,10 @@ from pydantic import ConfigDict, Field
 
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import ErrorCategory
 
 __all__ = [
+    "WALLET_STOPS",
     "CampaignPhase",
     "DashboardState",
     "PhaseEvent",
@@ -33,13 +35,14 @@ class CampaignPhase(enum.StrEnum):
 
 
 class StopReason(enum.StrEnum):
-    """``BACKEND_UNREACHABLE`` halts on a round that was ≥ ``BACKEND_UNREACHABLE_RATE``
-    backend-down samples, rather than grinding zero-accuracy rounds against a dead backend."""
+    """``BACKEND_UNREACHABLE`` halts at the first cell the backend could not reach once its own
+    retries were spent (``query_loop.py::Walk.take``)."""
 
     PERFECT = "perfect_score"
     MAX_ROUNDS = "max_rounds"
     LIVES_EXHAUSTED = "lives_exhausted"
     PAUSED = "paused"
+    PANEL_CUT = "panel_cut"
     CRASHED = "crashed"
     DIVERGED = "diverged"
     ABORT = "escalation_abort"
@@ -51,6 +54,7 @@ class StopReason(enum.StrEnum):
     TOKEN_BUDGET = "token_budget"
     ORIGIN_GATE = "origin_gate"
     BACKEND_UNREACHABLE = "backend_unreachable"
+    PROVIDER_CREDIT = "provider_credit_exhausted"
     RENDER_ERROR = "render_error"
     OPTIMIZER_TIMEOUT = "optimizer_timeout"
     REBASED = "rebased_to_fork"
@@ -151,16 +155,18 @@ class StopReasonInfo(NamedTuple):
 # import time below — adding a StopReason without a row here raises before the module loads.
 #
 # Mid-round is decided by WHERE the stop is raised, not by how bad it sounds:
-#   - `scoring/query_loop.py` raises inside the per-sample loop -> SPEND_BUDGET, TOKEN_BUDGET.
-#   - a pause returns from that same loop between samples -> PAUSED.
-#   - CRASHED / RENDER_ERROR / OPTIMIZER_TIMEOUT are exceptions from anywhere, round included.
+#   - `scoring/query_loop.py::run_walks` raises inside the scoring phase -> SPEND_BUDGET,
+#     TOKEN_BUDGET, BACKEND_UNREACHABLE, PROVIDER_CREDIT.
+#   - a pause is raised from that same loop between samples -> PAUSED.
+#   - CRASHED / RENDER_ERROR / OPTIMIZER_TIMEOUT are exceptions from anywhere, round included, and
+#     so is PROVIDER_CREDIT when an optimizer call is the one refused.
 #   - everything else fires at a round BOUNDARY: `runner/round.py` raises only after
 #     `close_round`, escalation's ABORT/REBASED ride the post-round transition seam,
-#     ORIGIN_GATE runs once round 0 is scored, BACKEND_UNREACHABLE reads a CLOSED round's
-#     verdict, and DIVERGED is decided at resume before any round starts.
+#     ORIGIN_GATE runs once round 0 is scored, and DIVERGED is decided at resume before any
+#     round starts.
 #
 # `next_step` is filled ONLY where the verb cannot be read off the label. "Fix the backend, then
-# resume" is the reason restated, not advice; the four below each name a flag, a threshold or a
+# resume" is the reason restated, not advice; the ones below each name a flag, a threshold or a
 # reading the label does not carry.
 STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
     StopReason.PERFECT: StopReasonInfo(
@@ -192,6 +198,18 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
     StopReason.PAUSED: StopReasonInfo(
         "Paused", StopOutcome.PAUSED, True, False, "`resume` picks it up at the next checkpoint."
     ),
+    # Non-terminal like its neighbour and advised the OPPOSITE way: the panel is holed by cells a
+    # declared bound CUT (`ErrorCategory.HALTED`), so the same declaration cuts the re-run at the
+    # same place and `resume` alone only re-buys the round. The round is discarded, not persisted
+    # partial, which is the one fact separating this row from `PAUSED`'s.
+    StopReason.PANEL_CUT: StopReasonInfo(
+        "Panel cut by a declared bound",
+        StopOutcome.PAUSED,
+        False,
+        False,
+        "Give the cut cells room (`Connector.cell_envelope_s`) before `resume`, or "
+        "`optimization.panel_gate: off` to elect on the holed panel.",
+    ),
     StopReason.ABORT: StopReasonInfo("Escalation abort", StopOutcome.HALTED, False, False, ""),
     # The two the private or-chain missed: the budget gate stops INSIDE the sample loop. The
     # counter is CUMULATIVE across resume, so a new ceiling must clear what is already spent —
@@ -214,7 +232,21 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         "Origin gate (unhealthy origin)", StopOutcome.HALTED, False, False, ""
     ),
     StopReason.BACKEND_UNREACHABLE: StopReasonInfo(
-        "Backend unreachable", StopOutcome.HALTED, False, False, ""
+        "Backend unreachable",
+        StopOutcome.HALTED,
+        True,
+        False,
+        "The unreached cell is a hole, not a score: restore the backend or the network it "
+        "needs, then `resume` re-measures it.",
+    ),
+    # Not SPEND_BUDGET: that ceiling is ours and `set-budget` moves it. This one is the provider's.
+    StopReason.PROVIDER_CREDIT: StopReasonInfo(
+        "Provider out of credit",
+        StopOutcome.HALTED,
+        True,
+        False,
+        "Raise the provider key's limit or top up its credit, then `resume`; a refused cell is a "
+        "hole it re-measures.",
     ),
     StopReason.CRASHED: StopReasonInfo("Crashed", StopOutcome.FAILED, True, True, ""),
     # Written by the REAPER straight onto index.json — the producer is already gone, so
@@ -248,11 +280,22 @@ def stop_reason_outcome(reason: StopReason | str) -> StopOutcome:
     return STOP_REASON_INFO[StopReason(reason)].outcome
 
 
+# Which stop each wallet's refusal ends a run on — raised before a call (`WalletExhaustedError`) or
+# banked on the hole a refused cell leaves (`CellWalletExhaustedError`), one table for both.
+WALLET_STOPS: dict[ErrorCategory, StopReason] = {
+    ErrorCategory.PROVIDER_CREDIT: StopReason.PROVIDER_CREDIT,
+    ErrorCategory.SPEND_CEILING: StopReason.SPEND_BUDGET,
+    ErrorCategory.TOKEN_CEILING: StopReason.TOKEN_BUDGET,
+}
+
+
 class StopLoop(Exception):  # noqa: N818 — control-flow signal, not an error
     """Control-flow signal caught once at the top of the round loop."""
 
-    def __init__(self, reason: StopReason) -> None:
+    def __init__(self, reason: StopReason, *, unmeasured: int | None = None) -> None:
         self.reason = reason
+        # Cells of the walk this stop left unmeasured, where the raiser is a walk.
+        self.unmeasured = unmeasured
         super().__init__(reason.value)
 
 

@@ -8,7 +8,6 @@ from fastapi import Query
 from pydantic import Field
 
 from promptpotter.application.campaign_config import (
-    CampaignConfig,
     Estimand,
     MechanismConfig,
     estimand_doc,
@@ -24,11 +23,19 @@ from promptpotter.application.knobs import (
 )
 from promptpotter.application.pipeline_resolve import (
     CampaignPipelineResponse,
+    CampaignRunsWith,
+    campaign_runs_with,
     resolve_pipeline_for_campaign,
+    resolve_root_config,
 )
 from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.pipeline_overlay import (
+    permitted_models_for_campaign,
+    steers_disallowed_model,
+)
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.stores import descend_store
+from promptpotter.infrastructure.store.account_spend import campaign_spend
+from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.presentation.api.deps import StoresDep, decode_descend
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import BadRequestError, NotFoundError, PayloadInvalidError
@@ -79,6 +86,28 @@ class CampaignSummary(StrictModel):
         default="",
         description="Optional operator-supplied reason for the last lifecycle transition",
     )
+    spend_used_usd: float = Field(
+        description=(
+            "What this campaign has billed over its whole life — every cycle's ledger, forks and "
+            "forwarded L4 inner spend included, plus spend banked when one of its cycles was "
+            "deleted. Its share of `QuotaStatus.spend_used_total_usd`. A FLOOR while "
+            "`spend_unpriced_tokens` is non-zero."
+        )
+    )
+    spend_unpriced_tokens: int = Field(
+        description=(
+            "Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them. Zero "
+            "means the dollar figure is complete."
+        )
+    )
+    runs_with: CampaignRunsWith | None = Field(
+        description=(
+            "What the ROOT course runs with — a second transport of the answer "
+            "`GET /campaigns/{id}/pipeline` gives at the root, never a second source. Null when "
+            "the root pipeline did not resolve. `max_rounds` is the DECLARED rounds cap; 0 means "
+            "origin only."
+        )
+    )
 
 
 class CampaignListResponse(StrictModel):
@@ -93,7 +122,8 @@ class CampaignDetailResponse(CampaignSummary):
     config: dict[str, Any] = Field(description="Frozen CampaignConfig snapshot for this campaign")
 
 
-def _campaign_summary(campaign: Campaign) -> CampaignSummary:
+def _campaign_summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
+    spent = campaign_spend(stores.campaigns, campaign.campaign_id)
     return CampaignSummary(
         campaign_id=campaign.campaign_id,
         dataset_name=campaign.dataset_name,
@@ -106,6 +136,9 @@ def _campaign_summary(campaign: Campaign) -> CampaignSummary:
         lifecycle_status=campaign.lifecycle_status,
         lifecycle_changed_at=campaign.lifecycle_changed_at,
         lifecycle_reason=campaign.lifecycle_reason,
+        spend_used_usd=round(spent.used_usd, 6),
+        spend_unpriced_tokens=spent.unpriced_tokens,
+        runs_with=campaign_runs_with(stores, campaign),
     )
 
 
@@ -212,7 +245,7 @@ def list_campaigns(
     campaigns = leaf.campaigns.list_campaigns(dataset, lifecycle=lifecycle, owner_user_id=owner)
     campaigns.sort(key=lambda c: c.created_at, reverse=True)
     return CampaignListResponse(
-        campaigns=[_campaign_summary(c) for c in campaigns],
+        campaigns=[_campaign_summary(c, leaf) for c in campaigns],
         total=len(campaigns),
     )
 
@@ -255,17 +288,7 @@ def get_campaign(stores: StoresDep, campaign_id: str) -> CampaignDetailResponse:
     if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
     return CampaignDetailResponse(
-        campaign_id=campaign.campaign_id,
-        dataset_name=campaign.dataset_name,
-        label=campaign.label,
-        created_at=campaign.created_at,
-        root_cycle_id=campaign.root_cycle_id,
-        backend_id=campaign.backend_id,
-        backend_type=campaign.backend_type,
-        owner_user_id=campaign.owner_user_id,
-        lifecycle_status=campaign.lifecycle_status,
-        lifecycle_changed_at=campaign.lifecycle_changed_at,
-        lifecycle_reason=campaign.lifecycle_reason,
+        **_campaign_summary(campaign, stores).model_dump(),
         root_content_hash=campaign.root_content_hash,
         config=campaign.config,
     )
@@ -291,6 +314,54 @@ def get_campaign_pipeline(
     if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
     return resolve_pipeline_for_campaign(leaf, campaign, at=spec, workspace=leaf.base_dir)
+
+
+class ForkPreviewRequest(StrictModel):
+    pipeline_overlay: dict[str, Any] = Field(
+        description="The `nodes.*.config` overlay the fork would carry, as `OperatorForkOverride` sends it"
+    )
+
+
+class ForkPreviewResponse(StrictModel):
+    """What `POST /commands/fork-cycle` would decide about this steer, asked without forking."""
+
+    steers_disallowed_model: bool = Field(
+        description=(
+            "The overlay picks a responder the campaign's frozen `optimizer_narrowing` never "
+            "sanctioned, or touches a cost lever, which no permitted set can sanction. True means "
+            "the fork is the ADR-0005 babysit act: it needs `campaign.babysit` (404 without it) "
+            "and stamps the branch grade C."
+        )
+    )
+    permitted_models: dict[str, list[str]] = Field(
+        description=(
+            "What the verdict above was compared AGAINST, per node — this campaign's frozen "
+            "`optimizer_narrowing[node].param_allowed_values.model`. Served beside the verdict so "
+            "a surface naming the permitted models cannot name a different set than the one that "
+            "decided. A node absent from it sanctions nothing, which is why any model steer there "
+            "counts."
+        )
+    )
+
+
+@campaigns_router.post("/campaigns/{campaign_id}/fork-preview", response_model=ForkPreviewResponse)
+def preview_fork_steer(
+    stores: StoresDep, campaign_id: str, body: ForkPreviewRequest
+) -> ForkPreviewResponse:
+    """Would this steer take the babysit path? — the fork gate's own verdict, asked without forking.
+
+    A READ despite the POST: the subject is an overlay that exists nowhere on disk yet, so it
+    cannot be a query string. Nothing is written — no `CommandRecord`, no ack — which is why this
+    is its own endpoint rather than a `dry_run` flag on `fork-cycle`. Capability-free: it reports
+    what the gate WOULD say, and `campaign.babysit` is what decides whether the fork lands.
+    """
+    campaign = stores.campaigns.load_owned(campaign_id, str(stores.identity.user_id))
+    if campaign is None:
+        raise NotFoundError(f"Campaign not found: {campaign_id}")
+    return ForkPreviewResponse(
+        steers_disallowed_model=steers_disallowed_model(campaign.config, body.pipeline_overlay),
+        permitted_models=permitted_models_for_campaign(campaign.config),
+    )
 
 
 def _pipeline_subject(at: str, campaign_id: str) -> SubjectSpec:
@@ -365,13 +436,13 @@ def get_campaign_config_map(stores: StoresDep, campaign_id: str) -> ConfigMapRes
     """The knob coupling/provenance map for one campaign — what moves which
     statistical estimand, what overwrites what, and which knobs currently collide.
 
-    Read-only: resolves the frozen ``CampaignConfig`` snapshot against the declared
-    ``knobs`` registry. 404 on cross-user reads.
+    Read-only: resolves the config the campaign's root runs under — its draft while it is
+    still authoring — against the declared ``knobs`` registry. 404 on cross-user reads.
     """
     campaign = stores.campaigns.load_owned(campaign_id, str(stores.identity.user_id))
     if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
-    config = CampaignConfig.model_validate(campaign.config)
+    config = resolve_root_config(stores, campaign)
 
     states = resolve_knob_states(config)
     knob_models = {

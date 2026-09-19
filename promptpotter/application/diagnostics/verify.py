@@ -1,6 +1,7 @@
-"""Re-score one campaign candidate on N ADDITIONAL samples. Not a cycle or a fork: no round
-id, and the verdict lands in the workspace ``diagnostics/`` tree. Its SPEND is the exception and
-joins the campaign's ledger in the ``diagnostic`` bucket — inside every ceiling, banked apart."""
+"""Re-score one campaign candidate — C0 included — on N ADDITIONAL samples. Not a cycle or a fork:
+no round id, and the verdict lands in the workspace ``diagnostics/`` tree. Its SPEND is the
+exception and joins the campaign's ledger in the ``diagnostic`` bucket — inside every ceiling,
+banked apart."""
 
 from __future__ import annotations
 
@@ -14,9 +15,14 @@ from typing import TYPE_CHECKING, Any, cast
 from promptpotter.application.campaign_config import (
     load_campaign_config as validate_campaign_config,
 )
-from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring
+from promptpotter.application.initialization.loop_start import (
+    arm_diagnostic_scoring,
+    diagnostic_pass,
+)
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.optimization.l1.population import merge_pipeline_params
+from promptpotter.application.optimization.task_context import committed_task_context
+from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.metrics import compute_composite_fitness
@@ -25,10 +31,12 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import (
     DiagnosticRunRecord,
+    diagnostic_held,
     parse_candidate_label,
     resolved_fitness,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.spend_book import bound_spend_book
 from promptpotter.infrastructure.llm.telemetry import (
     active_cycle_ledger,
     diagnostic_spend,
@@ -40,6 +48,7 @@ from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError
 
 if TYPE_CHECKING:
+    from promptpotter.application.initialization.session import Session
     from promptpotter.domain.sample import Measurement
     from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.infrastructure.store.stores import Stores
@@ -101,7 +110,12 @@ def _diagnostic_trace(stores: Stores, hop: CycleHop) -> Iterator[None]:
         with diagnostic_spend():
             yield
         return
-    token = set_cycle_ledger(CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop))))
+    ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
+    # The verb's own book files here too, so what an L4 cell spends beneath it lands on this
+    # ledger rather than only on the sandbox's.
+    if (book := bound_spend_book()) is not None and book.ledger is None:
+        book.ledger = ledger
+    token = set_cycle_ledger(ledger)
     try:
         with diagnostic_spend():
             yield
@@ -123,6 +137,41 @@ class VerifyOutcome:
     already_measured: int
     record: DiagnosticRunRecord | None = None
     cache_replays: int = 0
+
+
+def _resolve_round_candidate(
+    stores: Stores, hop: CycleHop, *, round_num: int, cand_idx: int, label: str
+) -> tuple[OptSearchPoint, dict[str, Any]]:
+    _cached = stores.campaigns.load_round_candidates(hop, round_num)
+    proposals = _cached[0] if _cached else None
+    if not proposals:
+        raise VerifyError(
+            f"no cached candidates for round {round_num} in "
+            f"{hop.campaign_id}/{hop.cycle_id} — looked under .runtime/cache/candidates/."
+        )
+    if cand_idx >= len(proposals):
+        raise VerifyError(
+            f"round {round_num} only has {len(proposals)} candidates; "
+            f"{label!r} requested index {cand_idx + 1}."
+        )
+    proposal = proposals[cand_idx]
+    return OptSearchPoint.model_validate(proposal["opt_sp"]), proposal.get("pipeline_overlay") or {}
+
+
+def _resolve_origin_searchpoint(
+    stores: Stores, session: Session, hop: CycleHop
+) -> tuple[OptSearchPoint, dict[str, Any]]:
+    """C0 through the SAME resolver a run mints it with: the origin is not a round proposal, so the
+    candidate cache holds none of it and a recovery written here would be a second origin."""
+    seed = stores.campaigns.read_cycle_seed(hop)
+    opt_sp = resolve_origin_opt_search_point(
+        prompt_node_names=session.pipeline_schema.prompt_node_names(),
+        dataset_dir=session.dataset_config_dir,
+        task_context=committed_task_context(stores, session.dataset_name),
+        seed=seed,
+    )
+    # C0's overlay is the seed's, read where the runner reads it; an L1 proposal carries its own.
+    return opt_sp, dict(seed.pipeline_overlay) if seed is not None else {}
 
 
 def _archive_measurement_to_qm(m: Measurement) -> QueryMeasurement:
@@ -159,28 +208,6 @@ async def verify_candidate(
     if campaign is None:
         raise VerifyError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
 
-    if round_num == 0:
-        raise VerifyError(
-            "verifying C0 (origin) is not implemented yet — "
-            "the origin's prompt fields don't live in the round-candidate cache. "
-            "Pass a C{round}.{n} label instead."
-        )
-    _cached = stores.campaigns.load_round_candidates(hop, round_num)
-    proposals = _cached[0] if _cached else None
-    if not proposals:
-        raise VerifyError(
-            f"no cached candidates for round {round_num} in "
-            f"{hop.campaign_id}/{hop.cycle_id} — looked under .runtime/cache/candidates/."
-        )
-    if cand_idx >= len(proposals):
-        raise VerifyError(
-            f"round {round_num} only has {len(proposals)} candidates; "
-            f"{label!r} requested index {cand_idx + 1}."
-        )
-    proposal = proposals[cand_idx]
-    opt_sp = OptSearchPoint.model_validate(proposal["opt_sp"])
-    pipeline_overlay = proposal.get("pipeline_overlay") or {}
-
     round_file = stores.campaigns.load_round_file(hop, round_num)
     if round_file is None:
         raise VerifyError(
@@ -211,6 +238,14 @@ async def verify_candidate(
     log_fn = log or (lambda *_a, **_k: None)
     pipeline_params = arm_diagnostic_scoring(
         session, campaign_config, source=f"verify:{hop.campaign_id}:{label}", log=log_fn
+    )
+
+    opt_sp, pipeline_overlay = (
+        _resolve_origin_searchpoint(stores, session, hop)
+        if round_num == 0
+        else _resolve_round_candidate(
+            stores, hop, round_num=round_num, cand_idx=cand_idx, label=label
+        )
     )
 
     schema = session.pipeline_schema
@@ -262,19 +297,22 @@ async def verify_candidate(
         len(measured_ids),
     )
     with _diagnostic_trace(stores, hop):
-        await score_search_point(
-            jsp,
-            picked,
-            session,
-            label="verify",
-            # `verify` replays a RECORDED config against fresh samples; the optimizer state that
-            # produced it is not in scope here, and the workspace side it is compared against
-            # (`compute_composite_fitness` below) has none either.
-            opt_sp=None,
-            measured=None,
-            on_sample_scored=lambda *_a, **_k: None,
-            on_sample_starting=lambda *_a, **_k: None,
-            source=f"verify:{hop.campaign_id}:{label}",
+        await diagnostic_pass(
+            VerifyError,
+            score_search_point(
+                jsp,
+                picked,
+                session,
+                label="verify",
+                # `verify` replays a RECORDED config against fresh samples; the optimizer state
+                # that produced it is not in scope here, and the workspace side it is compared
+                # against (`compute_composite_fitness` below) has none either.
+                opt_sp=None,
+                measured=None,
+                on_sample_scored=lambda *_a, **_k: None,
+                on_sample_starting=lambda *_a, **_k: None,
+                source=f"verify:{hop.campaign_id}:{label}",
+            ),
         )
 
     # Workspace aggregate: archive rows matching this candidate's node-configs, deduped per sample (latest wins).
@@ -329,6 +367,7 @@ async def verify_candidate(
         source_campaign_accuracy=source_campaign_accuracy,
         source_campaign_composite=source_campaign_composite,
         source_campaign_n=source_campaign_n,
+        held=diagnostic_held(workspace_accuracy, source_campaign_accuracy),
     )
     sidecar_path = stores.diagnostic_runs.save(record)
     logger.info("verify: wrote diagnostic-run record → %s", sidecar_path)
@@ -361,7 +400,7 @@ async def verify_on_saturation(
     CADENCE, so a cycle sitting at 100% for twenty rounds pays for four checks and not twenty. The
     gate reads records that PERSIST, which is also what makes a resumed round decline to repeat its
     own earlier check. Never fatal: a ``VerifyError`` means the candidate would not resolve off disk
-    (C0, or a pruned candidate cache), which is a reason to say nothing, not to end a healthy run.
+    (a pruned candidate cache), which is a reason to say nothing, not to end a healthy run.
 
     ``budget`` is the SAME ceiling the round loop halts on, and it is required rather than optional
     because this is the loop spending, not an operator: a discretionary check that could start on an

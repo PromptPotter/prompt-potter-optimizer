@@ -1,7 +1,5 @@
-// @vitest-environment jsdom
 import { describe, it, expect } from "vitest";
-import { renderHook } from "@testing-library/react";
-import { useRoundSource } from "@/lib/hooks/useRoundSource";
+import { isLiveRound } from "@/lib/hooks/useRoundSource";
 import type { DashboardSnapshot } from "@/lib/poll";
 
 // Regression: the live/historical guard must key off round *closure*, not
@@ -11,8 +9,7 @@ import type { DashboardSnapshot } from "@/lib/poll";
 // interrupt during next-round prep, and at some finish states). A round that
 // has migrated into `dash.rounds[]` is historical even while it still equals
 // `roundOf(dash)` — otherwise its samples/freq/node-detail get misrouted to the
-// now-empty in-flight projection. The viewed path is null so the inner
-// round-file fetch idles and we assert the synchronous `isLive` derivation.
+// now-empty in-flight projection.
 
 function dash(currentRoundNum: number, closedRounds: number[]): DashboardSnapshot {
   return {
@@ -21,34 +18,22 @@ function dash(currentRoundNum: number, closedRounds: number[]): DashboardSnapsho
   } as unknown as DashboardSnapshot;
 }
 
-describe("useRoundSource closure guard", () => {
+describe("isLiveRound closure guard", () => {
   it("treats a closed round as historical even when it equals current_round.round", () => {
     // round 3 closed into rounds[] AND current_round.round still 3 (interrupted
     // during round-4 prep) — the reported bug's exact shape.
-    const { result } = renderHook(() =>
-      useRoundSource(null, 3, dash(3, [1, 2, 3])),
-    );
-    expect(result.current.isLive).toBe(false);
+    expect(isLiveRound(dash(3, [1, 2, 3]), 3)).toBe(false);
   });
 
   it("treats the genuine in-flight round (not yet in rounds[]) as live", () => {
-    const { result } = renderHook(() =>
-      useRoundSource(null, 4, dash(4, [1, 2, 3])),
-    );
-    expect(result.current.isLive).toBe(true);
+    expect(isLiveRound(dash(4, [1, 2, 3]), 4)).toBe(true);
   });
 
   it("treats an explicitly selected earlier completed round as historical", () => {
-    const { result } = renderHook(() =>
-      useRoundSource(null, 2, dash(4, [1, 2, 3])),
-    );
-    expect(result.current.isLive).toBe(false);
+    expect(isLiveRound(dash(4, [1, 2, 3]), 2)).toBe(false);
   });
 
   it("is never live for a null round", () => {
-    const { result } = renderHook(() =>
-      useRoundSource(null, null, dash(4, [1, 2, 3])),
-    );
-    expect(result.current.isLive).toBe(false);
+    expect(isLiveRound(dash(4, [1, 2, 3]), null)).toBe(false);
   });
 });

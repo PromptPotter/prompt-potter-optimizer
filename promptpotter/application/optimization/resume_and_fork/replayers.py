@@ -214,8 +214,9 @@ def _replay_elimination_cut(
     before ``elimination_p_best`` is reached, so it holds no posterior and re-deriving it under ε
     tests a real ``p_best`` against a bar nobody set — which no collapse can re-derive as true."""
     if inputs_ref.get("gate") == EliminationGate.COLLAPSED:
-        # Bit-exact by construction: `is_answer_collapsed` reads only `predicted` / `ground_truth`,
-        # which rescoring never touches, so this arm can never false-positive on a scorer change.
+        # Re-asked, not re-derived under ε: on a labelled round the answer and its truths decide
+        # it and rescoring touches neither, while a labelless one reads `fitness` — so a formula
+        # that now solves every cell retires the cut, which is the verdict this replay exists for.
         cid = str(inputs_ref.get("candidate_id", ""))
         rows = ctx.round_data.all_candidate_results.get(cid) or []
         return is_answer_collapsed(rows[: int(inputs_ref["queries_scored"])])

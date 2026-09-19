@@ -154,11 +154,14 @@
 /* The rail. The strip carries its own intrinsic width now (72px per node, 132
    for the expanded one), so this is what scrolls when a pipeline outgrows the
    chip — at every width, not as a phone special case: twelve nodes crowd a
-   1440px screen too, just later. */
-.wf-hero-multi-rail{max-width:100%;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scroll-behavior:smooth}
+   1440px screen too, just later.
+   The top padding is the running node's glow: a top-row dot sits 7px from the viewBox edge and
+   `pulse-active` reaches 14px, so without room inside the rail's own clip the halo is shaved. */
+.wf-hero-multi-rail{max-width:100%;padding-top:8px;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scroll-behavior:smooth}
 /* No height: the strip carries `height={CELL_H}` beside a viewBox of the same height, and
-   a CSS height contradicting it makes `meet` scale the level instead of shortening it. */
-.wf-hero-multi-svg{display:block}
+   a CSS height contradicting it makes `meet` scale the level instead of shortening it.
+   `overflow:visible` lets the glow paint into the rail's padding above. */
+.wf-hero-multi-svg{display:block;overflow:visible}
 /* The cells reflow when one expands; without this the whole strip jumps. */
 .wf-hero-multi-node{transition:transform .18s ease}
 @media (prefers-reduced-motion:reduce){
@@ -333,9 +336,8 @@
    Its rows are three coming-soon features and one switch nobody turns off, so it
    reads as a note about what this chat can do; anything louder would promise a
    decision that is not there.
-   In FLOW, not absolute: `Popover.module.css` owns `position` on this wrap, so an
-   absolute here is a specificity fight that the module wins — and it cost the
-   textarea both the chip's width and the padding reserved to clear it. */
+   In FLOW, not absolute: an absolute chip leaves the row, and the textarea loses
+   both the chip's width and the padding reserved to clear it. */
 .chat-tools-wrap{margin:0 var(--space-6) var(--space-8) 0}
 .chat-tools{display:inline-flex;align-items:center;gap:var(--space-4);padding:2px var(--space-4);background:transparent;border:0;border-radius:5px;color:var(--color-text-tertiary);opacity:.55;font-family:var(--font-sans);font-size:var(--text-xs);line-height:1;cursor:pointer;white-space:nowrap;transition:opacity .15s,color .15s}
 .chat-tools:hover{opacity:1;color:var(--color-text-secondary)}
@@ -542,6 +544,10 @@
 .run-card.is-live{border-color:rgba(var(--color-accent-rgb),0.45)}
 .run-box{min-width:0;display:flex;flex-direction:column;gap:var(--space-6)}
 .run-box+.run-box{border-top:1px solid var(--color-border);padding-top:var(--space-6)}
+.run-trend{cursor:pointer;border-radius:var(--border-radius-md)}
+.run-trend:hover{outline:1px solid rgba(var(--color-accent-rgb),0.45);outline-offset:var(--space-4)}
+.run-trend:focus-visible{outline-offset:var(--space-4)}
+.run-trend .card{border:0;background:transparent;padding:0;margin:0}
 /* Wraps rather than clips: the head is numbers, and `overflow:hidden` on a nowrap
    row cut "from 30%" to "from 3". The picker drops to its own line instead. */
 .run-box-head{display:flex;align-items:center;gap:var(--space-8);flex-wrap:wrap;min-height:20px}

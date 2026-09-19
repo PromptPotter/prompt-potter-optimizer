@@ -80,6 +80,26 @@ export async function jget<T>(url: string, signal?: AbortSignal): Promise<T> {
   return (await r.json()) as T;
 }
 
+// A READ whose subject will not fit in a URL — an in-progress overlay, not a resource id.
+// Same seam, same `ApiError`, so `failureKind` classifies it like any other read; it mints no
+// `Idempotency-Key`, because nothing it reaches writes.
+export async function jpost<T>(
+  url: string,
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
+  const init: RequestInit = {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  };
+  if (signal) init.signal = signal;
+  const r = await fetch(url, init);
+  if (!r.ok) throw await toApiError(r, url);
+  return (await r.json()) as T;
+}
+
 // Conditional GET — for poll loops over slow-changing files. The caller stores the
 // validator the server issued and passes it back next tick; the server answers
 // `304 Not Modified` (no body) when nothing changed. Returns a discriminated union

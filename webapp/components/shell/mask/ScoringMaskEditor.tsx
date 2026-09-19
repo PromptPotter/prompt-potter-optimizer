@@ -14,12 +14,48 @@
 // so a keystroke commit fires a request per character and 400s on every half-typed formula. The
 // grid commits per click, which is the same rule — a toggle is not a half-value.
 
-import type { ReactNode } from "react";
-import { CommitInput, SegmentedControl } from "@/components/ui";
+import type { ComponentType, ReactNode } from "react";
+import {
+  CommitInput,
+  IconArrowToBase,
+  IconBolt,
+  IconChecklist,
+  IconCirclePlus,
+  IconCoin,
+  IconDatabase,
+  IconPulse,
+  IconSearch,
+  IconTarget,
+  IconTrendUp,
+  IconType,
+  IconWarning,
+  SegmentedControl,
+  Term,
+} from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { TERMS } from "@/lib/terms";
-import { maskIconFor } from "@/components/candidates/icons";
 import { DEFAULT_MASK_WEIGHT, type Row, type ScoringMask } from "./scoring-mask";
+
+const EVALUATOR_GLYPHS: Record<string, ComponentType> = {
+  accuracy: IconTarget,
+  error_rate: IconWarning,
+  degraded_rate: IconPulse,
+  latency: IconBolt,
+  source_recall: IconSearch,
+  candidate_recall: IconChecklist,
+  cache_hit_rate: IconDatabase,
+  retrieval_shortfall: IconArrowToBase,
+  mean_retrieval_shortfall: IconTrendUp,
+  tokens: IconType,
+  cost: IconCoin,
+};
+
+// A namespaced display name (`fuzzy_matching_source_recall`) falls back to its registry stem,
+// so a node-bound metric wears its glyph whichever node owns it this round.
+function maskIconFor(displayName: string, registryName: string): ReactNode {
+  const Glyph = EVALUATOR_GLYPHS[displayName] ?? EVALUATOR_GLYPHS[registryName] ?? IconCirclePlus;
+  return <Glyph />;
+}
 
 const MODES = [
   {
@@ -186,15 +222,22 @@ function WeightGrid({
                   !r.applicable && "disabled",
                 )}
               >
+                {/* The direction glyph is the TILE's, beside the toggle: it is a `Term`, so inside
+                    the control reading it would press the control — and a `<button>` may hold no
+                    focusable descendant at all. */}
+                <Term
+                  className={cx("mask-dir", down ? "down" : "up")}
+                  content={down ? TERMS.mask_down : TERMS.mask_up}
+                >
+                  {down ? "↓" : "↑"}
+                </Term>
                 <button
                   type="button"
-                  className="mask-sq-toggle"
-                  disabled={!r.applicable}
+                  className={cx("mask-sq-toggle", !r.applicable && "mask-sq-toggle-disabled")}
                   role="checkbox"
                   aria-checked={enabled}
                   aria-disabled={!r.applicable}
                   aria-label={r.displayName}
-                  tabIndex={r.applicable ? 0 : -1}
                   title={r.description || r.displayName}
                   onClick={() => r.applicable && toggle(r.displayName)}
                 >
@@ -209,13 +252,6 @@ function WeightGrid({
                     >
                       <path d="M2.5 8.5 L6.5 12.5 L13.5 3.5" />
                     </svg>
-                  </span>
-                  <span
-                    className={cx("mask-dir", down ? "down" : "up")}
-                    title={down ? TERMS.mask_down : TERMS.mask_up}
-                    aria-hidden="true"
-                  >
-                    {down ? "↓" : "↑"}
                   </span>
                   <span className="mask-ico">{maskIconFor(r.displayName, r.registryName)}</span>
                   <span className="mask-name">{r.displayName}</span>

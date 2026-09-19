@@ -49,7 +49,7 @@ export function NowTriad({ pipeline }: Props) {
           own width rather than being bound to the chart's geometry. */}
       {showForest && <ForestCard />}
       {candidate && (
-        <div className="card inspector-row">
+        <div className="card inspector-card">
           <ScoringInspector
             selected={candidate}
             onClose={() => setSelectionForCandidate(null)}

@@ -40,7 +40,7 @@ Two questions resolve here. **(1)** Does spend ride the canonical per-cycle ledg
 
 Chosen: **A.** Tokens ride the canonical per-cycle ledger alongside every other record. The "highway" is the existing Persistence stream, and this arc promoted the path tokens take through it to the optimal sequence by eliminating four middlemen — the process global (B), the wrapper dataclass (C), the dual writer (D) and the multi-hop apply chain. Both cost routes, backend-LLM and optimizer-loop, flow through the same ledger as `TokenUsageRecord` distinguished by `kind`. `AuditTrailProjection` records them into `round_NNNN.json`; `LiveDashboardProjection._handle_token_usage` projects them into `dashboard.json::spend` and is sole writer. Identity scope rides the ledger path — no per-record `tenant_id`.
 
-The halt probe at `application/runner/entry.py` reads `observers.dashboard.spend_total_used_usd`. Operator-accepted Display→Control short-circuit: the dashboard owns spend semantics, so reading it back is not a parallel pipeline.
+The ceiling is the run's spend book (`infrastructure/llm/spend_book.py`), armed at `application/runner/entry.py`: seeded off `observers.dashboard.spend_total_used_usd`, then fed by the same ledger, it admits every paid call at its worst case BEFORE the call is sent. The dashboard stays the display; the book is the one control, and it reads the same records rather than a parallel pipeline.
 
 ### Consequences
 
@@ -112,7 +112,7 @@ The ordering inside each destroyer is the rest of the design. Banking runs AFTER
 
 *A request may lower a ceiling and never raise one.* A `CycleSeed`'s `config_overrides` wins over run-scoped values for every policy knob it carries, but the budget arms are an authority bound rather than a preference, so `runner/entry.py::_bound_by_admitted_caps` composes them as a `min` against what the wallet admitted. The seed arrives over `fork-cycle` as request input from anyone holding `campaign.run` — which signup grants — so an override there is a stranger naming the ceiling their own run halts on.
 
-**D2 — live, not a mint-time snapshot.** The per-cycle `BudgetGate` (`application/runner/termination.py`) reads coupon-remaining, re-summed from the host-key ledger every tick, instead of a launch snapshot — closing the liveness gap. New `StopReason.HOST_ALLOWANCE`.
+**D2 — live, not a mint-time snapshot.** The run's spend book (`infrastructure/llm/spend_book.py`) caps at coupon-remaining, re-summed from the host-key ledger as it admits, instead of a launch snapshot — closing the liveness gap. New `StopReason.HOST_ALLOWANCE`.
 
 ### §0 amendment?
 

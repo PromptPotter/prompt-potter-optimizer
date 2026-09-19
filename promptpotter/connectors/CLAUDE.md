@@ -125,12 +125,22 @@ and moves every round.
   `AgentConfig.skills`, because that is the injection channel Harbor already has and the artifact
   class the skill-evolution literature evolves; the frontmatter `description` is FIXED and never a
   search axis, since the agent sees only that eagerly and a candidate free to write its own could
-  win by making itself uninviting. **The panel is the workload's `experiment`**, its published
-  roster pinned by `resolve_experiment`, and `extract_experiment` publishes nothing. **Trial
-  scratch goes to the system temp dir, not the workspace**: Harbor nests
-  `<trials_dir>/<trial>/<role>/…` and a workspace path is already deep, which is the same
-  `MAX_PATH` wall that forced `.inner` flat. Nothing durable lives there — reward, digest and
-  token counts are projected into the measurement archive, which is where a fact belongs.
+  win by making itself uninviting. **`nodes.agent.config.skill_delivery: system_prompt` is the
+  second channel** — the literature's setting, the skill body at the head of terminus-2's prompt
+  template — fixed per campaign, never listed in `param_keys`, and absent means the Agent Skill.
+  It enters identity as the node config it is, so only a campaign that writes it is re-keyed.
+  **The panel is the workload's `experiment`**, its published roster pinned by
+  `resolve_experiment`, and `extract_experiment` publishes nothing. **Trial scratch goes to the
+  system temp dir, not the workspace**: Harbor nests `<trials_dir>/<trial>/<role>/…` and a
+  workspace path is already deep, which is the same `MAX_PATH` wall that forced `.inner` flat.
+  Nothing durable lives there — reward, digest and token counts are projected into the measurement
+  archive, which is where a fact belongs. **The one thing a cell leaves on the Docker host is its
+  task image**, tagged `hb__<content hash>` by `resources/harbor-docker-compose.yaml` — one per
+  distinct task environment, never one per cell. **A trial that measured the machine is never a
+  cell**: `_infrastructure_failure` retries it and then raises `CellInfrastructureError`, which
+  halts the walk — at once and as `CellWalletExhaustedError` when the provider account is out of
+  credit. The rule, and the package cache that keeps downloads out of a cell, are
+  [`../../docs/operations/package-cache.md`](../../docs/operations/package-cache.md).
 
 ## The answer shape — declared in `extract_experiment`, never inferred
 
@@ -211,13 +221,15 @@ belong here, because they are what a connector author gets wrong:
 ## Injection is not consumption — one backend, and the absence elsewhere is DECLARED
 
 **On every connector but one, the candidate prompt is IN the request, so "did the model receive it"
-is not a question.** termnorm, dspy and promptpotter all put the rendered prompt on the wire. Harbor
-does not: `harbor.py::_write_skill` drops it into the container as an Agent Skill, and `terminus-2`
-eagerly shows the model only the frontmatter — name, description, location — *"so the model can
-`cat` the file to activate a skill"*. **The candidate's prompt is the BODY, and it reaches the model
+is not a question.** termnorm, dspy and promptpotter all put the rendered prompt on the wire.
+Harbor, by default, does not: `harbor.py::_write_skill` drops it into the container as an Agent
+Skill, and `terminus-2` eagerly shows the model only the frontmatter — name, description, location
+— *"so the model can `cat` the file to activate a skill"*. **The candidate's prompt is the BODY, and it reaches the model
 only if the model opens the file.** An episode that never does ran as no-skill, so every arm of that
 round was the same episode, the δ ruler is flat by construction, and the round reports a tie it
 never measured. `harbor.py::_skill_opened` measures it and `SKILL_KEY` is a required observation.
+Under `skill_delivery: system_prompt` the same key reports whether the first request CARRIED the
+body (`_skill_in_first_request`), so a healthy campaign in that mode reads 1.0 rather than warning.
 
 **There is deliberately no core `turn_scalars` member for this, and that hole is not an oversight to
 fix.** A term whose value is decided by which backend you are on is not a core projection: on the
@@ -254,10 +266,18 @@ backend ([`../../docs/methods/verdict-resolution.md`](../../docs/methods/verdict
 
 **And `cell` implies NOTHING about the run's CONTROL LOOP — a flag reasoning "a cell is expensive,
 therefore…" is the one to refuse.** A connector declares what a row costs (`max_cells_in_flight`,
-the ceiling it may be run at); how long an operator's look-ahead arming lasts is the round's to
-spend, and no connector can see the round it is inside. The shape to watch for is a second flag
-that ships beside `measured_unit` and is set by RESEMBLING the recursion rather than by any fact
-about the run — which is how a declaration reaches every backend whose cells merely look alike.
+the ceiling it may be run at; `cell_envelope_s`, the wall clock ONE of them may spend); how long an
+operator's look-ahead arming lasts is the round's and the operator's to decide, and no connector
+can see the round it is inside. The shape to watch for is a second flag that ships beside `measured_unit` and is set by
+RESEMBLING the recursion rather than by any fact about the run — which is how a declaration reaches
+every backend whose cells merely look alike.
+
+**`cell_envelope_s` is the test passing, and the template for anything that wants to join it:** it
+is a fact about one cell of THIS backend, resolved from the same pair the request is built from,
+and it decides nothing — the round it sits in is neither consulted nor changed.
+`application/scoring/cell_envelope.py` enforces it. **A ceiling on measured COUNTS would fail the
+same test** — tokens and dollars jitter run to run, so the same cell is cut on one run and not the
+next, which is a property of the weather rather than of the backend.
 
 ## Registering a connector
 

@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.15] — 2026-09-18
+
+> Campaigns run fast: a round measures all of its candidates at once, and still reads like a round that took them one at a time. Around that, a campaign says what it runs with and holds what it may spend, an agent's skill actually reaches the agent, and a round says which clock its verdict quotes. 42 commits since `v0.8.14`.
+
+### Added
+
+- **A round measures every candidate at once** — up to 16 cells in flight, or a depth it picks itself — and still decides them in order, so the record is the serial round's.
+- **Set how many campaigns you run at once**, beside the account's spend and token meters.
+- **Author a node's structured output in the check-in.** A field tree sets the schema, the answer field and the JSON format in one save, and each field can be locked against the optimizer on its own.
+- **What an agent is, in one place.** Prompt, skill, tools and context are leaves of one tree, each declaring how it reaches the model — handed over, or left there to be opened. It lands in the backend connector, so every backend gains it.
+- **`ab --campaign X` replays any banked campaign**, not only the one you are attached to.
+- **A campaign is reproducible.** Seed, temperature and route order are one campaign-level clamp that every way in reaches.
+
+### Changed
+
+- **A spend cap is held before each paid call, not read after it.** A call whose worst case does not fit is never sent, and a call that never reports is charged its whole bound.
+- **An agent's skill now reaches the agent.** On a Windows host its frontmatter was dropped in silence, so every arm ran the same episode with no skill at all: 0 of 4 opened it before the fix, 10 of 10 after.
+- **Infrastructure failure is not a score.** A trial that died on a registry, a mirror, a provider throttle or a harness timeout used to bank as the agent's result. It is retried, then halts the walk.
+- **A cell measured but ungraded is not a cell that failed** — it keeps its paid output as unscored, instead of scoring 0 and abandoning the candidate's whole walk.
+- **`improved` is the promotion clock, not a result.** Time to the first separable round is served beside it, and the headline names which one it quotes.
+- **A campaign row says what it runs with**, and reads in dollars.
+- An optimizer call that hits its deadline ends the run.
+
+### Fixed
+
+- **A round that graded no cell used to take its readers down** — every arm errored, or the backend grades by verifier. An accuracy nobody measured is a gap end to end now.
+- **A named campaign was paired with another's cycle** — `pause`, `set-budget`, `skip-searchpoint` and `step-cycle` under `--campaign` acted on whatever was active.
+
+### Technical Details
+
+- **42 commits since `v0.8.14`** (2026-09-10 → 2026-09-17): 18 features, 11 fixes, 11 refactors, 2 docs.
+- **BREAKING — start clean.** `LaunchLimits` is the one carrier a launch asks, admits and holds, replacing `RunLimitsPayload`; `n_rounds` is `rounds_closed`; stored `param_keys` migrate to schema paths, so banked L4 origins re-measure; `new --sweep-batch` is gone, replaced by `axes:` in 0.8.14.
+- **A TermNorm backend needs `03fc7cf` or later**, which serves each node's `spend_bound`; harbor and dspy cannot run under a cap yet.
+- Eight dependency advisories cleared, the last two a `soupsieve` ReDoS (≥ 2.9.0).
+- `pyproject.toml` → 0.8.15; `APP_VERSION` derives from it and `uv.lock` records it.
+
 ## [0.8.14] — 2026-09-10
 
 > Until now PromptPotter tuned one prompt and read one answer. It can now optimize a **multi-turn conversation** and a **tool-calling agent**: the prompt goes into a container, the agent works the task, and the task's own checker scores it — with each step scored separately instead of one number for the whole run. The rest matters mostly when you are choosing *between* setups: `evidence` reads any two variables as a grid, so "which model is actually faster here" is one question instead of launching each point by hand, and the optimizer now only tries settings the model in that slot will accept. 82 commits since `v0.8.13`.

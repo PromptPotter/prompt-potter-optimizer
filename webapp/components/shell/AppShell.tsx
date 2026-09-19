@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "r
 import dynamic from "next/dynamic";
 import { fetchCycleFile, subjectKey } from "@/lib/api";
 import { postPauseCycle } from "@/lib/api/commands";
+import { useCommand } from "@/lib/hooks/useCommand";
 import { CycleStreamProvider } from "@/lib/poll";
 import { ConnectorProvider } from "@/lib/hooks/useConnector";
 import { useDashboard } from "@/lib/hooks/useDashboard";
@@ -14,6 +15,7 @@ import { decodeCyclePath, encodeCyclePath, type CyclePath } from "@/lib/ids";
 import { applyChartDefaults } from "@/lib/theme";
 import { cx } from "@/lib/cx";
 import type { Tab } from "@/lib/view-tab";
+import { AccountModal } from "@/components/account/AccountModal";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { SidebarResizer } from "@/components/shell/SidebarResizer";
 import { JobsDock } from "@/components/shell/JobsDock";
@@ -105,7 +107,14 @@ function AppShellInner() {
     dismissGoneNotice,
     tab,
     setTab,
+    // Open-ness is on the ADDRESS (`#/account/<pane>`), so the modal is linkable.
+    accountPane,
+    closeAccount,
   } = useWorkspace();
+
+  // The banner's escape hatch. A slot rather than a bare call: its failure is otherwise an
+  // unhandled rejection, which reports nothing and re-probes no dead session.
+  const pause = useCommand<"pause-cycle">("critical-alert");
 
   // ── Per-campaign view memory: remember where the operator was, put them back.
   const { viewFor, recordView } = useViewMemory();
@@ -266,7 +275,7 @@ function AppShellInner() {
 
   // The cycle's start stamp from index.json — the burn-rate denominator behind the remote
   // strip's ETA. Hand-rolled on purpose: it must KEEP the prior value across a unit switch,
-  // where useFetch blanks data on a deps change and the ETA would flash "—" every time.
+  // where a keyed read starts empty and the ETA would flash "—" every time.
   // It used to fan into a second slot for a dataset title; the only reader of that was the
   // chat job-bar, and the remote strip reads the served `dataset_name` off the cycle list.
   useEffect(() => {
@@ -349,13 +358,14 @@ function AppShellInner() {
     // Keyed on the LEAF hop, like the dashboard stream — selection scopes the
     // inspector / samples / round files, and those read the leaf.
     <SelectionProvider cycleId={leafCycleId}>
+    <ConnectorProvider campaignId={leafHop?.campaignId ?? null} at={connectorAt}>
     {/* THE served lineage — ONE fetch owner for every consumer (the forest, the bars,
         the sidebar rows, the L4 samples panel). Rooted at the ROOT hop: the tree's own
         recursion reaches every fork and inner run below it, so drilling in re-addresses
         rather than re-fetching. Sits inside SelectionProvider, whose `sampleSet` is one
-        of the masks it composes. */}
+        of the masks it composes, and inside ConnectorProvider, whose pipeline shape decides
+        which evaluators the scoring mask it seeds can offer. */}
     <LineageProvider campaignId={campaignId} cycleId={cycleId}>
-    <ConnectorProvider campaignId={leafHop?.campaignId ?? null} at={connectorAt}>
     {/* The roster for the unit in view + the scope and ranking that pick it. Here
         rather than in the chat tab because its consumers sit on two different
         branches of that tab — the hero's heat-map and the run card's table. */}
@@ -416,8 +426,8 @@ function AppShellInner() {
         />
       )}
       {/* The active-run dock, floating on the sidebar's OUTER edge. A `.shell`
-          child, not a sidebar one: the sidebar clips its overflow and Popover is
-          not portaled. Desktop only — see JobsDock. */}
+          child, not a sidebar one: the sidebar clips its overflow. Desktop only —
+          see JobsDock. */}
       <JobsDock onPicked={() => openView("dashboard")} />
       <main className="main" id="main-content" tabIndex={-1}>
         {/* Phone chrome — the back arrow to the list screen and the campaign's
@@ -441,13 +451,18 @@ function AppShellInner() {
           onOpenFiles={() => openView("files")}
           onPauseCampaign={
             campaignId && cycleId
-              ? () => void postPauseCycle(campaignId, cycleId)
+              ? () =>
+                  void pause.run("pause-cycle", () => postPauseCycle(campaignId, cycleId))
               : undefined
           }
         />
         {/* The unit header — what am I looking at, and which view of it. Chrome
             rather than a pane's first child, so the strip cannot scroll away. */}
-        <RunMasthead tab={tab} onSelectTab={openView} />
+        <RunMasthead
+          tab={tab}
+          onSelectTab={openView}
+          onFollowed={() => openView("dashboard")}
+        />
         {tab === "chat" ? (
           <ChatPane
             // A durable check-in has no dashboard.json, so it is authored rather than
@@ -455,6 +470,7 @@ function AppShellInner() {
             // hero, the pipeline and the samples on the way — when it is really one
             // stage of this surface: hand the campaign over and let the thread reopen it.
             checkinCampaignId={showCheckin ? campaignId : null}
+            onOpenDashboard={() => openView("dashboard")}
           />
         ) : tab === "dashboard" ? (
           <DashboardTab />
@@ -467,24 +483,23 @@ function AppShellInner() {
         )}
       </main>
       {/* Global remote — a bottom-fixed hovering strip on every tab, and the ONE surface
-          answering "what is this run doing and costing": cycle picker, play/pause/skip,
-          round/spend, babysat tag, the Lift/ETA/Δ-per-$ readout, and an upward panel with
-          identity, spend and the finishing criteria. It deliberately survives `terminal` and
-          `detached` — that is where the restart control and the outcome numbers matter — and
-          renders null only for check-in and a cycle with no phase yet. Following the active
-          run lands on its dashboard, same as the sidebar's jobs dock. */}
-      <RemoteControl
-        onFollowed={() => openView("dashboard")}
-        cycleStartedAt={leafCreatedAt ?? cycleStartedAt}
-      />
+          answering "what is this run DOING": play/pause/skip, the inner/outer drill, the
+          Lift readout, and an upward panel with identity, spend and the finishing criteria.
+          What the run IS and how it reads is the masthead's. It deliberately survives
+          `terminal` and `detached` — that is where the restart control and the outcome
+          numbers matter — and renders null only for check-in and a cycle with no phase yet. */}
+      <RemoteControl cycleStartedAt={leafCreatedAt ?? cycleStartedAt} />
       {/* Mounted only while open so its chunk (+ ingest wizard deps) stays off
           first paint — IngestPane already hard-returns null when closed, so
           gating the mount is behaviour-identical. */}
       {newCampaignOpen && <IngestPane open onClose={() => setNewCampaignOpen(false)} />}
+      {/* A `.shell` child, not a sidebar one: the phone hides the sidebar off its list
+          screen, and a deep link to `#/account/<pane>` must open wherever it lands. */}
+      <AccountModal open={accountPane != null} onClose={closeAccount} />
     </div>
     </HardSamplesProvider>
-    </ConnectorProvider>
     </LineageProvider>
+    </ConnectorProvider>
     </SelectionProvider>
   );
 }

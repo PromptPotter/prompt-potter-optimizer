@@ -76,6 +76,10 @@ async def measure_overlap(
         if not gaps:
             continue
         fresh = await _measure_gaps(cycle, gaps, scoring_pool, step=step)
+        if fresh is None:
+            # A member short of the set breaks the one claim the reading makes. What it did buy
+            # is archived, so the next round's pass replays it rather than paying twice.
+            return
         bought[step.candidate_id] = fresh
         rows_by_key[step.key] = merge_known_outcomes(step.rows, fresh)
 
@@ -104,9 +108,10 @@ async def _measure_gaps(
     scoring_pool: list[Sample],
     *,
     step: ParentStep,
-) -> list[dict[str, Any]]:
+) -> list[dict[str, Any]] | None:
     """*step*'s OWN configuration on *gaps* — never the round subject's. A member measured under
-    another arm's prompt is that arm's reading wearing this one's label."""
+    another arm's prompt is that arm's reading wearing this one's label. ``None`` when the pass
+    stopped before its last gap."""
 
     schema = cycle.session.pipeline_schema
     assert step.opt_sp is not None, (
@@ -120,7 +125,7 @@ async def _measure_gaps(
         step.label,
         len(samples),
     )
-    results, _scores, _signal = await score_search_point(
+    scored = await score_search_point(
         step.opt_sp.to_job_search_point(base_pipeline_params=step.pipeline_params, schema=schema),
         samples,
         cycle.session,
@@ -133,8 +138,6 @@ async def _measure_gaps(
         # feed `axis_memory`, which is an optimizer panel, from rows one arm alone paid for.
         opt_sp=None,
         axes=None,
-        n_total_candidates=0,
-        degradation_checks=None,
         on_sample_scored=None,
         on_sample_starting=None,
         measured=MeasuredCandidate(
@@ -144,4 +147,13 @@ async def _measure_gaps(
             role=MeasurementRole.OVERLAP,
         ),
     )
-    return list(cast("list[dict[str, Any]]", results))
+    if scored.stopped is not None:
+        logger.warning(
+            "overlap: %s stopped after %d/%d cell(s) (%s); no reading this round",
+            step.label,
+            len(scored.results),
+            len(samples),
+            scored.stopped,
+        )
+        return None
+    return list(cast("list[dict[str, Any]]", scored.results))

@@ -18,13 +18,12 @@ max_tokens. Storing the model's reply is what makes ONE cache enough:
 * The economically large hit is two candidates whose mutation did not change the answer, which is
   the common case and is composition-independent.
 
-Four rules ride with it, three inherited from the optimizer's call path and each a scar. **Meter
-first, then store** — a disk error above the emit loses a row the provider already billed.
-**Meter cache hits too**, flagged, so grading cost stays invariant to our cache history. **Never
-store an empty reply** — emptiness is transient, the key is the prompt hash, and the tree is
-tenant-global, so caching one makes that comparison ungradeable forever with nothing on any
-surface pointing at the cause. And this seam's own: **absent, unreadable and stale are ONE answer
-— sample it again.**
+Three rules ride with it, two inherited from the optimizer's call path and each a scar. A fresh
+grading is metered by the client at its send, before anything here can fail. **Meter cache hits
+too**, flagged, so grading cost stays invariant to our cache history. **Never store an empty
+reply** — emptiness is transient, the key is the prompt hash, and the tree is tenant-global, so
+caching one makes that comparison ungradeable forever with nothing on any surface pointing at the
+cause. And this seam's own: **absent, unreadable and stale are ONE answer — sample it again.**
 """
 
 from __future__ import annotations
@@ -40,13 +39,9 @@ from typing import Any
 
 from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
 from promptpotter.config.settings import NO_RESULT
-from promptpotter.infrastructure.llm.rate_limit import (
-    MAX_429_ATTEMPTS,
-    decide_429_wait,
-    wait_with_countdown,
-)
 from promptpotter.infrastructure.llm.registry import get_llm_client
 from promptpotter.infrastructure.llm.response import LLMResponse
+from promptpotter.infrastructure.llm.spend_book import CallLabel
 from promptpotter.infrastructure.llm.telemetry import (
     _CURRENT_ROUND,
     _CYCLE_LEDGER,
@@ -54,6 +49,7 @@ from promptpotter.infrastructure.llm.telemetry import (
 )
 from promptpotter.infrastructure.store.stores import LLMReuseCache, hash_call
 from promptpotter.judges.protocol import JudgeStage, JudgeVerdict
+from promptpotter.shared.errors import CellWalletExhaustedError, WalletExhaustedError
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +74,9 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
     """Run one judge stage. Returns ``(reply, error)`` — exactly one is non-empty.
 
     **Never raises**, which every caller relies on: a grading failure must stay a failed grading,
-    not kill the measurement of a cell the backend already paid for."""
+    not kill the measurement of a cell the backend already paid for. The one exception is a wallet
+    that refused the call — a spent provider account or the run's ceiling — which is no grading at
+    all: it raises ``CellWalletExhaustedError``."""
     started = time.monotonic()
     cache = _CACHE.get()
     key: str | None = None
@@ -99,33 +97,35 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
     else:
         try:
             response = await _sample(stage, prompt, judge=judge, started=started)
+        except WalletExhaustedError as exc:
+            # `spent` is empty because `measure_sample` bills the cell's backend spend before any
+            # judge runs; its catch banks the hole and the walk halts on it.
+            raise CellWalletExhaustedError(
+                str(exc), category=exc.category, spent={}, step_timings={}
+            ) from exc
         except Exception as exc:
             logger.warning("judge %s stage %s failed: %s", judge, stage.role, exc)
             return "", f"{type(exc).__name__}: {exc}"
 
-    # Both branches converge here, so a grading is metered by ARRIVING rather than by each branch
-    # remembering to. A hit is metered too, flagged, so grading cost stays invariant to our cache
-    # history rather than making a re-read of an old comparison read as free.
-    #
-    # `cached` below is the OTHER fact: we replayed, so no provider was reached. A grading is the
-    # one call shape with a naturally cacheable prefix — the rubric is a module constant, so most
-    # of the prompt is byte-identical on every cell of every campaign.
-    emit_token_usage(
-        node=f"{judge}:{stage.role}",
-        kind="judge",
-        model=response.model or stage.model,
-        provider=stage.provider,
-        served_by=response.served_by,
-        usage=response.usage,
-        cost_usd=response.cost_usd,
-        duration_s=time.monotonic() - started,
-        cached=cached is not None,
-    )
+    # A hit is metered too, flagged, so grading cost stays invariant to our cache history rather
+    # than making a re-read of an old comparison read as free. A fresh grading was metered at its
+    # send. A grading is the one call shape with a naturally cacheable prefix — the rubric is a
+    # module constant, so most of the prompt is byte-identical on every cell of every campaign.
+    if cached is not None:
+        emit_token_usage(
+            node=f"{judge}:{stage.role}",
+            kind="judge",
+            model=response.model or stage.model,
+            provider=stage.provider,
+            served_by=response.served_by,
+            usage=response.usage,
+            cost_usd=response.cost_usd,
+            duration_s=time.monotonic() - started,
+            cached=True,
+        )
 
-    # Meter FIRST, then store — `cache.save` writes a file, and a disk error above the emit loses a
-    # row the provider already billed. And never store an EMPTY reply: emptiness is transient, the
-    # key is the prompt hash, and this tree is tenant-global, so caching one makes that comparison
-    # ungradeable forever.
+    # Never store an EMPTY reply: emptiness is transient, the key is the prompt hash, and this tree
+    # is tenant-global, so caching one makes that comparison ungradeable forever.
     if cached is None and cache is not None and key is not None and response.content.strip():
         cache.save(key, response.model_dump())
 
@@ -196,8 +196,8 @@ def _replay(cache: LLMReuseCache, key: str, *, judge: str, role: str) -> LLMResp
 
 
 async def _sample(stage: JudgeStage, prompt: str, *, judge: str, started: float) -> LLMResponse:
-    """One provider round-trip — heartbeated, and retried on a 429. RAISES; :func:`ask` is the half
-    that never does."""
+    """One provider round-trip, heartbeated; the client admits, retries and meters it. RAISES;
+    :func:`ask` is the half that never does."""
     # Local: `judges/` is a leaf package and this reaches back into `application/`.
 
     client = get_llm_client(stage.provider)
@@ -216,35 +216,13 @@ async def _sample(stage: JudgeStage, prompt: str, *, judge: str, started: float)
         )
     )
     try:
-        for attempt in range(MAX_429_ATTEMPTS):
-            try:
-                return await client.chat(
-                    messages=[{"role": "user", "content": prompt}],
-                    model=stage.model,
-                    temperature=stage.temperature,
-                    max_tokens=stage.max_tokens,
-                )
-            except Exception as exc:
-                if getattr(exc, "status_code", None) != 429:
-                    raise
-                resp = getattr(exc, "response", None)
-                headers = getattr(resp, "headers", None) if resp is not None else None
-                body = getattr(resp, "text", None) if resp is not None else None
-                if body is None:
-                    body = str(exc)
-                decision = decide_429_wait(headers, body, attempt)
-                if decision is None:
-                    raise
-                logger.warning(
-                    "Rate limit on judge %s [%s] (attempt %d/%d); waiting %.1fs",
-                    label,
-                    decision.scope,
-                    attempt + 1,
-                    MAX_429_ATTEMPTS,
-                    decision.seconds,
-                )
-                await wait_with_countdown(decision.seconds, f"{label} {decision.scope}")
-        raise RuntimeError(f"judge {label}: still rate-limited after {MAX_429_ATTEMPTS} attempts")
+        return await client.chat(
+            messages=[{"role": "user", "content": prompt}],
+            model=stage.model,
+            label=CallLabel(label, "judge"),
+            temperature=stage.temperature,
+            max_tokens=stage.max_tokens,
+        )
     finally:
         # Cancel whether the call returned or raised — an in-flight task survives the function exit
         # and keeps appending progress against a closed call.

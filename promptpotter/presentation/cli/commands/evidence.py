@@ -70,8 +70,9 @@ def _roster_lines(ev: Evidence) -> list[str]:
         f"Offered here: {', '.join(s.key for s in m.catalogue) or '-'} — pass --metric KEY, or "
         f"--metric 'expr:<formula>' over {', '.join(m.namespace) or '-'}.",
         "",
-        f"{'created':<10}  {'kind':<9}  {'subject':<26}  {'dataset':<18}  {'arm':<8}  "
-        f"{'ruler':<8}  {'value':>10}  {'95% CI':>20}  {'cells':>5}  {'unread':>6}  {'rounds':>6}",
+        f"{'created':<10}  {'kind':<9}  {'subject':<26}  {'dataset':<18}  {'author':<18}  "
+        f"{'arm':<8}  {'ruler':<8}  {'value':>10}  {'95% CI':>20}  {'cells':>5}  {'unread':>6}  "
+        f"{'rounds':>6}",
     ]
     for r in ev.subjects:
         value = "         ." if r.value is None else f"{spec.format(r.value):>10}"
@@ -84,7 +85,8 @@ def _roster_lines(ev: Evidence) -> list[str]:
         kind = f"{r.kind}~" if r.mask else r.kind
         lines.append(
             f"{r.created_at[:10]:<10}  {kind:<9}  {mark}{r.label[:25]:<25}  "
-            f"{r.dataset_name[:18]:<18}  {(r.arm_id or '-')[:8]:<8}  {ruler[:8]:<8}  {value}  "
+            f"{r.dataset_name[:18]:<18}  {(r.authorship or '-')[:18]:<18}  "
+            f"{(r.arm_id or '-')[:8]:<8}  {ruler[:8]:<8}  {value}  "
             f"{fmt_ci(r.ci_lo, r.ci_hi, spec=spec):>20}  {r.n_cells:>5}  "
             f"{len(r.unscorable_cells):>6}  {r.cycle_rounds_scored:>6}"
         )
@@ -100,6 +102,13 @@ def _roster_lines(ev: Evidence) -> list[str]:
         lines.append(
             "\nNo campaign scored a cell under this metric — unavailable for this selection, "
             "which is not the same as a value of zero."
+        )
+    # Under the table rather than as a column: it names only the subjects it applies to.
+    babysat = [r.label for r in ev.subjects if r.human_intervened]
+    if babysat:
+        lines.append(
+            f"\nAn operator intervened mid-run on: {', '.join(babysat)}. Those cycles are no "
+            "longer purely reproducible, whoever authored the searchpoint they read at."
         )
     lines.append(f"\n{ev.comparability.note}")
     off = [r.label for r in ev.subjects if r.comparable is False]
@@ -377,21 +386,23 @@ def _ranking_lines(ev: Evidence, top: int) -> list[str]:
             "",
             "Edit ranking not computed — pass `--ranking`. It is the widest walk here: "
             "everything above reads one round-0 document per campaign, while this opens every "
-            "round of every campaign selected.",
+            "round of every campaign selected, and ranks each searchpoint against its own "
+            "campaign's origin.",
         ]
     if not ev.edits:
         return [
             "",
-            "No scored edits: one needs its campaign's round-0 origin plus at least one later "
-            "round to compare against.",
+            "No scored edits: one needs its campaign's round-0 origin plus a second searchpoint "
+            "measured on cells that origin also scored.",
         ]
     spec = _UNIT_SPEC[m.spec.unit]
     lines = [
         "",
-        f"{len(ev.edits)} edit(s) ranked by how much each beat its own origin on the same cells, "
-        f"in {m.spec.label}",
+        f"{len(ev.edits)} searchpoint(s) ranked by how much each beat its OWN campaign's origin "
+        f"on the same cells, in {m.spec.label}. Identity is `sp_hash`, so a prompt-only edit "
+        "ranks like any other; nothing pools across campaigns, which share no anchor to pool on.",
         "",
-        f"{'effect':>11}  {'95% CI':>20}  {'cells':>5}  {'obs':>4}  edit",
+        f"{'effect':>11}  {'95% CI':>20}  {'cells':>5}  {'obs':>4}  {'campaign':<10}  edit",
     ]
     for c in ev.edits[:top]:
         # An interval straddling zero is the ordinary outcome on a small panel; say so per row
@@ -399,7 +410,8 @@ def _ranking_lines(ev: Evidence, top: int) -> list[str]:
         clears = c.ci_lo is not None and c.ci_hi is not None and not (c.ci_lo <= 0.0 <= c.ci_hi)
         lines.append(
             f"{spec.format(c.anchor_effect):>11}  {fmt_ci(c.ci_lo, c.ci_hi, spec=spec):>20}  "
-            f"{c.n_cells:>5}  {c.n_measurements:>4}{'*' if clears else ' '} {c.label}"
+            f"{c.n_cells:>5}  {c.n_measurements:>4}{'*' if clears else ' '} "
+            f"{c.campaign_id[:10]:<10}  {c.label}"
         )
     spread = ev.spread
     return [

@@ -53,6 +53,30 @@ describe("Dialog", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("takes its name from a host heading, and with no onClose a dismissal gesture is inert", () => {
+    render(
+      <Dialog open labelledBy="gate-h">
+        <h2 id="gate-h">Accept the terms</h2>
+      </Dialog>,
+    );
+    const dialog = screen.getByRole("dialog", { name: "Accept the terms" });
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.mouseDown(dialog.parentElement as HTMLElement);
+    expect(screen.getByRole("dialog")).toBe(dialog);
+  });
+
+  it("draws no heading when the host brings its own card, and still takes the name", () => {
+    render(
+      <Dialog open title="Account" onClose={() => {}} bare>
+        <div>
+          <h3>Profile</h3>
+        </div>
+      </Dialog>,
+    );
+    expect(screen.getByRole("dialog").getAttribute("aria-label")).toBe("Account");
+    expect(screen.queryByRole("heading", { name: "Account" })).toBeNull();
+  });
+
   it("moves focus in on open and restores it on close", () => {
     const outside = document.createElement("button");
     outside.textContent = "outside";

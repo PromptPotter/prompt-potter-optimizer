@@ -4,16 +4,11 @@ h1{font-size:var(--text-4xl);font-weight:600;line-height:1.2}
 .meta{font-size:var(--text-base);color:var(--color-text-secondary);display:flex;align-items:center;gap:var(--space-6)}
 .avatar{width:18px;height:18px;border-radius:50%;background:var(--color-background-tint-icon);display:inline-flex;align-items:center;justify-content:center;font-size:var(--text-xs);color:var(--color-accent);font-weight:500}
 
-/* TopStrip — merged hero + progress. One frameless status line for the
-   stats the operator scans first: best%, last query time. */
+/* TopStrip — one frameless status line for what no other band carries: banked
+   lives, the last query's clock, and the trace link. */
 .topstrip{display:flex;align-items:center;gap:var(--space-12);flex-wrap:wrap;padding:2px 0;font-family:var(--font-mono)}
 .topstrip-label{font-size:var(--text-xs);letter-spacing:.08em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:600}
 .topstrip-sep{width:1px;height:13px;background:var(--color-border);flex:0 0 auto}
-.topstrip-best{display:inline-flex;align-items:center;gap:var(--space-6)}
-.topstrip-best-val{font-size:var(--text-lg);font-weight:600;color:var(--color-text-primary);font-family:var(--font-mono);line-height:1}
-.topstrip-spark{width:88px;height:15px;display:block}
-.topstrip-spark .line{stroke:var(--color-accent);stroke-width:1.5;fill:none}
-.topstrip-spark .area{fill:var(--color-accent-glow);stroke:none}
 .topstrip-last{display:inline-flex;align-items:center;gap:var(--space-6);font-size:var(--text-xs);color:var(--color-text-secondary)}
 /* Banked lives ("hearts") — improvement-banked-budget mode. Warm/danger hue
    reads as "lives" in both themes; the heart SVG inherits it via currentColor.
@@ -28,7 +23,7 @@ h1{font-size:var(--text-4xl);font-weight:600;line-height:1.2}
 
 .card{background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-lg);padding:var(--space-16)}
 .card-title{font-size:var(--text-md);font-weight:500;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between}
-.badge{font-size:var(--text-xs);padding:2px var(--space-8);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border)}
+.card-title > h2{font:inherit}
 
 .table-wrap{overflow-x:auto;max-height:340px;overflow-y:auto}
 table{width:100%;border-collapse:collapse;font-size:var(--text-base)}
@@ -48,6 +43,17 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .kv-val.muted{color:var(--color-text-tertiary);font-weight:400}
 .kv-val.warn{color:var(--color-danger)}
 .kv-val.ok{color:var(--color-success)}
+/* Where the grid above came from — a caption on the card's own header row. */
+.lsc-source{font-size:var(--text-xs);color:var(--color-text-tertiary);font-weight:400}
+/* A sub-heading over one block of raw payload, and the block itself. Both scroll rather than
+   clip: a retry log and a query payload are each unbounded. */
+.var-label{margin-top:14px;font-size:var(--text-xs);letter-spacing:.06em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:500}
+.payload-block{margin-top:var(--space-6);padding:var(--space-8) var(--space-12);background:var(--color-background-secondary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-md);font-family:var(--font-mono);font-size:var(--text-xs);line-height:1.5;color:var(--color-text-secondary);max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+.payload-block.empty{color:var(--color-text-tertiary);font-style:italic}
+.payload-block .log-row{margin-bottom:2px}
+.payload-block .log-dim{color:var(--color-text-tertiary)}
+.payload-block .log-mark{color:var(--color-accent)}
+.payload-block .log-warn{color:var(--color-warn)}
 
 /* Shared sample-state tokens — consumed by both LiveTape and
    RoundSamplesTable. HIT/MISS colour reads identically across the

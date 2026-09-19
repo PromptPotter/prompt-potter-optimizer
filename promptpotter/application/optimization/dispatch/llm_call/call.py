@@ -1,5 +1,6 @@
 """The optimizer LLM call itself. ``llm_call`` is the chokepoint every optimizer prompt call goes
-through for 429-retry, the wall-clock deadline, the heartbeat, token emit, the ledger, the cache."""
+through for the wall-clock deadline, the heartbeat, the ledger and the cache; the client admits,
+retries and meters each send."""
 
 from __future__ import annotations
 
@@ -33,14 +34,10 @@ from promptpotter.infrastructure.llm.json_parse import (
     OptimizerPromptParseError,
     extract_parsed_json,
 )
-from promptpotter.infrastructure.llm.rate_limit import (
-    MAX_429_ATTEMPTS,
-    decide_429_wait,
-    wait_with_countdown,
-)
 from promptpotter.infrastructure.llm.registry import get_llm_client
 from promptpotter.infrastructure.llm.response import LLMResponse
-from promptpotter.infrastructure.llm.telemetry import emit_round_warning, emit_token_usage
+from promptpotter.infrastructure.llm.spend_book import CallLabel
+from promptpotter.infrastructure.llm.telemetry import emit_token_usage
 from promptpotter.infrastructure.store.stores import LLMReuseCache, hash_call
 
 if TYPE_CHECKING:
@@ -95,35 +92,17 @@ async def _chat_under_deadline(
     **chat_kwargs: Any,
 ) -> LLMResponse:
     """The provider SDK's ``timeout`` is a per-read-gap bound, so a slowly streaming reasoning model
-    never trips it; this is the wall clock. A first timeout retries, and that retry hits the ledger."""
+    never trips it; this is the wall clock. A call past it is not sent again — the provider may
+    still be generating the first, and its admission is charged in full — so the run halts on it."""
     budget_s = OPTIMIZER_CALL_DEADLINE_S * _MAX_ROUND_TRIPS_PER_CALL
-    for attempt in range(2):
-        try:
-            async with asyncio.timeout(budget_s):
-                return await llm_client.chat(**chat_kwargs)
-        except TimeoutError:
-            if attempt == 0:
-                logger.warning(
-                    "optimizer call %s exceeded the %.0fs deadline — retrying once",
-                    node_label,
-                    budget_s,
-                )
-                emit_round_warning(
-                    kind="optimizer_deadline_retry",
-                    message=(
-                        f"optimizer call {node_label} exceeded its {budget_s:.0f}s wall and "
-                        f"was retried once — this round spent up to {budget_s * 2:.0f}s on it"
-                    ),
-                    detail={"node": node_label, "budget_s": budget_s, "attempt": 1},
-                )
-                continue
-            logger.error(
-                "optimizer call %s exceeded the %.0fs deadline twice — halting",
-                node_label,
-                budget_s,
-            )
-            raise
-    raise AssertionError("unreachable — the loop returns or raises on every path")
+    try:
+        async with asyncio.timeout(budget_s):
+            return await llm_client.chat(**chat_kwargs)
+    except TimeoutError:
+        logger.error(
+            "optimizer call %s exceeded the %.0fs deadline — halting", node_label, budget_s
+        )
+        raise
 
 
 def _replay(cache: LLMReuseCache, key: str, *, label: str) -> LLMResponse | None:
@@ -183,15 +162,16 @@ async def llm_call(
     merged = {**_LLM_DEFAULTS, **config, **overrides}
     # The outer L4 cycle evolving the inner OPTIMIZER's model as a searchpoint: ONE model the
     # outer carrier node set, fanned onto every inner node. Beats the node's file config, stays
-    # UNDER the instrument clamp below, which pins only temperature+seed. `hash_call` already
-    # keys on `merged["model"]`, so the swap gets its own cache key for free.
+    # UNDER the determinism clamp below, which pins no model. `hash_call` already keys on
+    # `merged["model"]`, so the swap gets its own cache key for free.
     if node and (specimen := resolve_node_override(node)).model:
         merged["model"] = specimen.model
         if specimen.provider:
             merged["provider"] = specimen.provider
-    # The inner-cycle determinism clamp, applied LAST so it beats both the node's file config
-    # and any per-call override — notably `l1_generate`'s `temperature=creativity`, the
-    # dominant run-to-run noise source. Bound only inside an inner asyncio task.
+    # The campaign's determinism clamp, applied LAST so it beats both the node's file config and
+    # any per-call override — notably `l1_generate`'s `temperature=creativity`, the dominant
+    # run-to-run noise source. Before `route_kwargs` and `hash_call`: a pinned route must reach
+    # the wire AND key the reply it banks.
     if config_overrides := get_optimizer_config_overrides():
         merged = {**merged, **config_overrides}
     llm_client = get_llm_client(merged["provider"])
@@ -306,63 +286,29 @@ async def llm_call(
                     ),
                 )
             )
-        # Bounded honor-Retry-After loop: if the header is missing or attempts run out, the SDK
-        # exception surfaces unchanged.
+        # Metered at the send, attempt by attempt (`LLMClientBase._admitted_send`) — a call that
+        # failed to parse was billed like one that parsed, and is already on the ledger.
         try:
-            for attempt in range(MAX_429_ATTEMPTS):
-                try:
-                    response = await _chat_under_deadline(
-                        llm_client,
-                        node_label=label,
-                        messages=messages,
-                        model=merged.get("model"),
-                        temperature=merged["temperature"],
-                        max_tokens=merged.get("max_tokens"),
-                        response_model=response_model,
-                        response_schema=response_schema,
-                        reasoning_effort=merged.get("reasoning_effort"),
-                        top_p=merged.get("top_p"),
-                        seed=merged.get("seed"),
-                        **route_kwargs,
-                    )
-                    break
-                except Exception as exc:
-                    if getattr(exc, "status_code", None) != 429:
-                        raise
-                    resp = getattr(exc, "response", None)
-                    headers = getattr(resp, "headers", None) if resp is not None else None
-                    body = getattr(resp, "text", None) if resp is not None else None
-                    if body is None:
-                        body = str(exc)
-                    decision = decide_429_wait(headers, body, attempt)
-                    if decision is None:
-                        raise
-                    logger.warning(
-                        "Rate limit on %s [%s] (attempt %d/%d); waiting %.1fs",
-                        label,
-                        decision.scope,
-                        attempt + 1,
-                        MAX_429_ATTEMPTS,
-                        decision.seconds,
-                    )
-                    await wait_with_countdown(decision.seconds, f"{label} {decision.scope}")
+            response = await _chat_under_deadline(
+                llm_client,
+                node_label=label,
+                messages=messages,
+                model=merged.get("model"),
+                label=CallLabel(label, "optimizer"),
+                temperature=merged["temperature"],
+                max_tokens=merged.get("max_tokens"),
+                response_model=response_model,
+                response_schema=response_schema,
+                reasoning_effort=merged.get("reasoning_effort"),
+                top_p=merged.get("top_p"),
+                seed=merged.get("seed"),
+                **route_kwargs,
+            )
         except OptimizerPromptParseError as parse_err:
-            # A call that failed to parse was billed exactly like one that parsed, and the
-            # raise happens upstream of the success path's usage block — so this is the ONLY
-            # metering point on this path, and without it every malformed response is invisible
-            # to the ledger, the dashboard and the spend gate alike.
             logger.error(
                 "%s: optimizer call failed to parse — %s",
                 label,
                 parse_err.diagnosis(),
-            )
-            emit_token_usage(
-                node=label,
-                kind="optimizer",
-                usage=parse_err.usage,
-                duration_s=round(time.monotonic() - _t0, 2),
-                model=parse_err.model or merged.get("model"),
-                provider=merged["provider"],
             )
             raise
         finally:
@@ -385,27 +331,22 @@ async def llm_call(
 
         duration_s = round(time.monotonic() - _t0, 2)
 
-    # THE metering point: both branches converge here, so a round-trip is metered by ARRIVING
-    # rather than by each branch remembering to. Only the parse failure skips it, and it meters
-    # itself before raising. A cache hit is metered too, flagged — it spends nothing, but the
-    # search still MADE the call, so incurred cost stays invariant to our cache history and the
-    # always-warmest L4 origin arm does not read as free.
-    emit_token_usage(
-        node=label,
-        kind="optimizer",
-        usage=response.usage,
-        provider=merged["provider"],
-        served_by=response.served_by,
-        duration_s=duration_s,
-        model=response.model,
-        cost_usd=response.cost_usd,
-        cached=replayed is not None,
-    )
+    # A cache hit is metered too, flagged — it spends nothing, but the search still MADE the call,
+    # so incurred cost stays invariant to our cache history and the always-warmest L4 origin arm
+    # does not read as free. A fresh call was metered at its send, before anything here can fail.
+    if replayed is not None:
+        emit_token_usage(
+            node=label,
+            kind="optimizer",
+            usage=response.usage,
+            provider=merged["provider"],
+            served_by=response.served_by,
+            duration_s=duration_s,
+            model=response.model,
+            cost_usd=response.cost_usd,
+            cached=True,
+        )
 
-    # Meter FIRST, then store: the provider has already billed this call, so nothing that can
-    # fail belongs between the response and its record. `cache.save` writes a file, and a disk
-    # error above the emit loses the row silently — a missing record reads exactly like a call
-    # that never happened.
     # Never cache a response carrying no payload. Empty content is a TRANSIENT provider
     # failure, and storing it makes it PERMANENT: the key is the prompt hash, so every later
     # call replays the emptiness and the caller sees a zero-candidate round forever. The cache

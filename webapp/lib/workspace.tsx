@@ -160,19 +160,13 @@ function urlAddress(): Address | null {
   return parseAddress(window.location.hash);
 }
 
-export function WorkspaceProvider({
-  // Registry-list cadence (`/cycles` + `/campaigns`) — the passive floor for
-  // rarely-changing data. The active-pointer poll runs faster (below).
-  intervalMs = 10000,
-  // Active-pointer cadence (`/sessions/active`) — matches the dashboard's 2 s
-  // live beat so a CLI-minted cycle is followed without the registry's lag.
-  pointerIntervalMs = 2000,
-  children,
-}: {
-  intervalMs?: number;
-  pointerIntervalMs?: number;
-  children: ReactNode;
-}) {
+// Registry-list cadence (`/cycles` + `/campaigns`) — the passive floor for rarely-changing data.
+const REGISTRY_INTERVAL_MS = 10000;
+// Active-pointer cadence (`/sessions/active`) — matches the dashboard's 2 s live beat so a
+// CLI-minted cycle is followed without the registry's lag.
+const POINTER_INTERVAL_MS = 2000;
+
+export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // The explicit pin — the viewed path while not following (null while
   // following). Both the top-level and inner-descendant selections live here as
   // one address; there is no separate inner-focus axis.
@@ -358,13 +352,13 @@ export function WorkspaceProvider({
   // both loops off to the 5 s reconnect probe. Either succeeding = reachable.
   const wsOffline = activeError != null && cyclesError != null;
   usePoll(pointerTick, {
-    intervalMs: wsOffline ? RECONNECT_INTERVAL_MS : pointerIntervalMs,
+    intervalMs: wsOffline ? RECONNECT_INTERVAL_MS : POINTER_INTERVAL_MS,
     tickOnFocus: true,
     enabled: authed,
     revalidateOn: reval,
   });
   usePoll(registryTick, {
-    intervalMs: wsOffline ? RECONNECT_INTERVAL_MS : intervalMs,
+    intervalMs: wsOffline ? RECONNECT_INTERVAL_MS : REGISTRY_INTERVAL_MS,
     tickOnFocus: true,
     enabled: authed,
     revalidateOn: reval,

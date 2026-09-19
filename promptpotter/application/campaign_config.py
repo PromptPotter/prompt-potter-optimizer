@@ -24,6 +24,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CampaignConfig",
+    "DeterminismClamp",
+    "EscalationLadder",
     "Estimand",
     "Knob",
     "LivesConfig",
@@ -166,7 +168,8 @@ class EliminationMechanisms(StrictModel):
 
 class MechanismConfig(StrictModel):
     """Add a mechanism by adding a bool to the right group — it auto-surfaces to the webapp via
-    the schema. Patience-driven L1/L2/L3 escalation is governed separately (``None`` disarms L2/L3)."""
+    the schema. Which LAYERS the loop may escalate to is ``OptimizationConfig.escalation_ladder``;
+    the patiences beside it only PACE a ladder, they never shorten one."""
 
     selection: SelectionMechanisms = Field(default_factory=SelectionMechanisms)
     elimination: EliminationMechanisms = Field(default_factory=EliminationMechanisms)
@@ -188,11 +191,64 @@ class LivesConfig(StrictModel):
     )
 
 
+class DeterminismClamp(StrictModel):
+    """What a campaign PINS on every optimizer call — how the draw is made and which host makes
+    it. Applied last, so it beats the node's file config and any per-call override alike."""
+
+    temperature: Annotated[float | None, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+        None,
+        ge=0.0,
+        le=2.0,
+        description=(
+            "Sampling temperature EVERY optimizer node runs at, overriding its own — including "
+            "`l1_generate`'s `temperature: creativity`, the dominant run-to-run noise source. "
+            "`None` (default) leaves each node the value its pipeline file declares."
+        ),
+    )
+    seed: Annotated[int | None, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+        None,
+        description=(
+            "Sampling seed every optimizer node sends. Temperature 0 pins the distribution and "
+            "not the draw, so without a seed the provider is still free to sample differently "
+            "on identical input. It rides `hash_call`, so two campaigns differing only here "
+            "bank separate replies rather than serving one campaign's answer under the other's "
+            "name. `None` (default) sends none."
+        ),
+    )
+    route_order: Annotated[list[str] | None, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+        None,
+        description=(
+            "The upstream HOSTS behind the gateway, in order, every optimizer call is routed "
+            "to (the gateway's own `provider_name`s — read them off `served_by` in the ledger, "
+            "never from a catalogue). Hosts of one model disagree systematically, so an "
+            "unpinned route makes a measurement whose producer nothing can name. `None` "
+            "(default) lets the gateway re-rank per call."
+        ),
+    )
+
+
 # The prompt-block-library modes — named once so the draft override
 # (``OptimizationOverrides``) references the same closed set instead of
 # re-spelling it (a 4th mode added there-but-not-here silently never
 # reached check-in, and vice versa).
 PromptBlockCatalogue = Literal["guidance", "restrict", "off"]
+
+
+class EscalationLadder(StrEnum):
+    """How far up the L1 → L2 → L3 ladder a cycle may climb. The two predicates are the ONE
+    question every fire site asks, so no site re-derives depth from a patience."""
+
+    L1 = "l1"
+    L1_L2 = "l1_l2"
+    FULL = "full"
+
+    @property
+    def fires_l2(self) -> bool:
+        return self is not EscalationLadder.L1
+
+    @property
+    def fires_l3(self) -> bool:
+        return self is EscalationLadder.FULL
 
 
 class OptimizationConfig(StrictModel):
@@ -237,8 +293,40 @@ class OptimizationConfig(StrictModel):
         ),
     )
 
-    l2_patience: Annotated[int | None, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(2)
-    l3_patience: Annotated[int | None, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(1)
+    escalation_ladder: Annotated[EscalationLadder, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(
+        EscalationLadder.FULL,
+        description=(
+            "How far up the L1 → L2 → L3 ladder this campaign may climb — the ablation "
+            "switch. ``full`` (default) is the whole ladder. ``l1_l2`` lets L2 re-frame "
+            "but never reaches L3, including the post-L2 layout-breach force-trigger. "
+            "``l1`` is the L1-only arm: no escalation rule can return a fire, so "
+            "``escalate_l2`` is never called and neither the ``l2_context`` nor the "
+            "``l3_plan`` prompt is ever composed. A patience PACES a ladder and can "
+            "never shorten one, so a large ``l1_patience`` is a deferral bounded by the "
+            "round budget rather than a suppression. L1's own prompt is bit-for-bit "
+            "identical across all three arms (the property "
+            "``rebase_capability`` / ``terminate_capability`` also have), so the arms "
+            "differ in what the loop DOES and in nothing it says: a stalled ``l1`` round "
+            "simply continues until ``max_rounds`` / ``lives`` / spend binds."
+        ),
+    )
+    l2_patience: Annotated[int, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(
+        2,
+        ge=0,
+        description=(
+            "Consecutive non-improving L2 fires before the cycle escalates to L3. "
+            "How DEEP the ladder runs is ``escalation_ladder``, never a patience."
+        ),
+    )
+    l3_patience: Annotated[int | None, Knob(Scope.POLICY, Estimand.ESCALATION)] = Field(
+        1,
+        ge=0,
+        description=(
+            "Consecutive non-improving L3 fires before the cycle stops on "
+            "``L3_PATIENCE``. ``None`` replans without limit, leaving the round and "
+            "spend ceilings as the only stops."
+        ),
+    )
     degradation_threshold: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(...)
 
     elimination_n_min: Annotated[
@@ -444,6 +532,17 @@ class OptimizationConfig(StrictModel):
             "it can never regress a dataset. Off → always 1PL (the slice-2 behaviour)."
         ),
     )
+    # No `Knob` — the walk descends into DeterminismClamp, so its three fields are the knobs.
+    determinism: DeterminismClamp | None = Field(
+        None,
+        description=(
+            "Pin the optimizer's decoding and its route so a re-run reproduces this "
+            "campaign's trajectory and can name the host that produced each number. `None` "
+            "(default) → every node runs at its own file settings and the gateway routes per "
+            "call. An L4 inner cell is one caller among the rest: its panel's "
+            "`inner_optimizer_temperature` and its cell seed arrive here."
+        ),
+    )
     mechanisms: MechanismConfig = Field(default_factory=MechanismConfig)
 
 
@@ -534,6 +633,19 @@ class CampaignConfig(StrictModel):
         "Rasch ruler δ_s alone, hardest first. DISPLAY config: it picks the order the human "
         "READS and never what the engine scores, which is `build_round_order` and reaches no "
         "knob. Client-overridable per session, like `headline_metric`.",
+    )
+    accuracy_ceiling: Annotated[float | None, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(
+        None,
+        gt=0.0,
+        le=1.0,
+        description="The accuracy a best-reachable prompt would score on this dataset at this "
+        "campaign's model. `index.json::final.rounds_to_ceiling` counts rounds against "
+        "`CEILING_FRACTION` of it, and the value is banked beside that count so a reader never "
+        "has to guess the denominator. `None` (default) → the clock reports nothing, which is the "
+        "honest reading: a ceiling is a joint claim about the dataset AND the model, so only the "
+        "dataset owner can declare one (`datasets/{slug}/campaign.yaml::campaign_config`) and a "
+        "guessed value makes every campaign on it publish a round count nobody can defend. "
+        "DISPLAY config — it moves no gate, no selection and no stop.",
     )
     # Carries a `Knob`, so the walk STOPS here: the split is one knob, not two.
     dataset_split: Annotated[DatasetSplit | None, Knob(Scope.POLICY, Estimand.DISPLAY)] = Field(

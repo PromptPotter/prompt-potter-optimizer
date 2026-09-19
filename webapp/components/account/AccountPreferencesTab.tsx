@@ -3,15 +3,19 @@
 // appearance/theme (client-only, per-device).
 
 import { useEffect, useState } from "react";
+import { AccountSection } from "./AccountSection";
+import { Switch } from "@/components/ui";
 import { fetchUserSettings, patchUserSettings } from "@/lib/api";
+import { useCommand } from "@/lib/hooks/useCommand";
 import { applyTheme, readStoredTheme, useThemeVersion } from "@/lib/theme";
 
 export function AccountPreferencesTab() {
   const [demo, setDemo] = useState<boolean | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Nothing polls user settings, so the write re-ticks nothing; the answer IS the read-back.
+  const cmd = useCommand<"user-settings">("preferences", { revalidate: false });
+  const [readError, setReadError] = useState<string | null>(null);
 
-  // Hand-rolled, not useFetch: `demo` is mutable local state the toggle below
+  // Hand-rolled, not `useRead`: `demo` is mutable local state the toggle below
   // writes after each PATCH, not a read-only fetch result — the server load
   // only seeds it.
   useEffect(() => {
@@ -20,49 +24,48 @@ export function AccountPreferencesTab() {
       .then((s) => {
         if (!cancelled) setDemo(s.demo_mode_enabled);
       })
-      .catch((e) => {
-        if (!cancelled) setError(String(e));
+      .catch(() => {
+        if (!cancelled) setReadError("Could not read this setting. Reopen the pane to retry.");
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const toggle = async (next: boolean) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const s = await patchUserSettings({ demo_mode_enabled: next });
-      setDemo(s.demo_mode_enabled);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const toggle = (next: boolean) =>
+    void cmd.run(
+      "user-settings",
+      () => patchUserSettings({ demo_mode_enabled: next }),
+      (s) => setDemo(s.demo_mode_enabled),
+    );
+
+  const busy = cmd.pending !== null;
+  const error = cmd.failure?.message ?? readError;
 
   return (
     <>
-      <div className="account-row">
-        <span className="account-label">Try &amp; learn</span>
-        <div className="account-row-main">
-          <label className="account-pref-toggle">
-            <input
-              type="checkbox"
-              checked={demo ?? false}
-              disabled={demo === null || busy}
-              onChange={(e) => void toggle(e.target.checked)}
-            />
-            <span>Show the try-and-learn demo dataset</span>
-          </label>
-          <p className="account-muted">
-            A small support-ticket dataset, ready to optimize, in your collection.
-            Turn it off once you&rsquo;re set up.
+      <AccountSection
+        title="Try & learn"
+        lede="A small support-ticket dataset, ready to optimize, in your collection. Turn it off once you are set up."
+        aside={
+          <Switch
+            label="Show the try-and-learn demo dataset"
+            checked={demo ?? false}
+            locked={demo === null || busy}
+            lockedNote={busy ? "saving" : "reading"}
+            onChange={() => {
+              if (demo !== null) toggle(!demo);
+            }}
+          />
+        }
+      >
+        {error ? (
+          <p className="account-failure" role="alert">
+            {error}
           </p>
-          {error ? <p className="account-error">{error}</p> : null}
-        </div>
-      </div>
-      <ThemeRow />
+        ) : null}
+      </AccountSection>
+      <ThemeSection />
     </>
   );
 }
@@ -70,26 +73,20 @@ export function AccountPreferencesTab() {
 // Theme lives in settings (not the navbar) so it's reachable the same way on
 // every device — on phones the standalone navbar toggle is hidden. Client-only
 // state via lib/theme.ts; deliberately not a server-side user setting.
-function ThemeRow() {
+function ThemeSection() {
   useThemeVersion();
   const dark = readStoredTheme() === "dark";
   return (
-    <div className="account-row">
-      <span className="account-label">Appearance</span>
-      <div className="account-row-main">
-        <label className="account-pref-toggle">
-          <input
-            type="checkbox"
-            checked={dark}
-            onChange={(e) => applyTheme(e.target.checked ? "dark" : "light")}
-          />
-          <span>Dark mode &mdash; DOOM/lava operator view</span>
-        </label>
-        <p className="account-muted">
-          The light, editorial register is the default. Switch to dark for deep
-          operator work; the choice is remembered on this device.
-        </p>
-      </div>
-    </div>
+    <AccountSection
+      title="Operator mode"
+      lede="Light is the default. Dark is the dense operator view for long optimization sessions. Kept on this device only."
+      aside={
+        <Switch
+          label="Dark operator mode"
+          checked={dark}
+          onChange={() => applyTheme(dark ? "light" : "dark")}
+        />
+      }
+    />
   );
 }

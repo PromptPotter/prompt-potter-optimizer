@@ -1,6 +1,5 @@
 /* PromptPotter — design tokens + global styles.
-   Lifted from webapp/index.html (vanilla preservation list, commit f1dab82).
-   Glassmorphism preserved verbatim at the 5 sites it appears (operator veto). */
+   Lifted from webapp/index.html (vanilla preservation list, commit f1dab82). */
 
 :root{
   --color-background-primary:#1a1a1a; --color-background-secondary:#0d0d0d; --color-background-tertiary:#0d0d0d;

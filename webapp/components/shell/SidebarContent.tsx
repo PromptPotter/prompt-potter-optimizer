@@ -2,7 +2,7 @@
 import { SignInPrompt } from "@/components/ui";
 import type { AuthStatus } from "@/lib/auth-context";
 import type { LifecycleFilter } from "@/lib/api";
-import type { OriginGroup } from "./sidebar/grouping";
+import type { OriginGroup } from "@/lib/derivations";
 import type { TreeCtx } from "./sidebar/ForestRows";
 import { CampaignTreePane } from "./CampaignTreePane";
 import { SidebarFilterPopover } from "./sidebar/SidebarFilterPopover";

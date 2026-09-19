@@ -7,6 +7,7 @@ import { ensureChartRegistered, getCss, useThemeVersion } from "@/lib/theme";
 import { partialPanels, type HeadlineMetric } from "@/lib/derivations";
 import type { MeasuredUnit } from "@/lib/api/types";
 import { fmtSigned, unitCount } from "@/lib/format";
+import { NOT_SEPARABLE, liftSeparates } from "@/lib/fitness";
 import type { CandidateView } from "@/lib/types";
 import {
   activeSeries,
@@ -586,13 +587,13 @@ export const FitnessChart = memo(function FitnessChart({
             if (typeof ciLo === "number" && typeof ciHi === "number") {
               lines.push(`95% CI [${ciLo.toFixed(3)}, ${ciHi.toFixed(3)}]`);
             }
-            // The gate's own verdict. Says "could not separate" out loud rather than leaving
-            // an interval that spans 0 to be read as a win.
+            // The gate's own verdict, said out loud rather than leaving an interval that spans 0
+            // to be read as a win.
             const lift = views[idx]?.matchedParentLift;
             const lLo = views[idx]?.matchedParentLiftCiLo;
             const lHi = views[idx]?.matchedParentLiftCiHi;
             if (lift != null && lLo != null && lHi != null) {
-              const flat = lLo <= 0 && lHi >= 0 ? " — could not separate from its parent" : "";
+              const flat = liftSeparates(lLo, lHi) ? "" : ` — ${NOT_SEPARABLE}`;
               lines.push(
                 `lift vs parent ${fmtSigned(lift)} [${fmtSigned(lLo)}, ${fmtSigned(lHi)}]${flat}`,
               );

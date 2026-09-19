@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections import Counter
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -12,8 +13,11 @@ from promptpotter.application.optimization.pobb.classification import (
     extract_warning_types,
     is_deprecated,
 )
-from promptpotter.application.scoring.selection import elimination_p_best
-from promptpotter.config.settings import POBB_DEFAULT_EPSILON
+from promptpotter.application.scoring.selection import (
+    elimination_p_best,
+    elimination_p_best_bounds,
+)
+from promptpotter.config.settings import NO_RESULT, POBB_DEFAULT_EPSILON
 from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
 from promptpotter.domain.results import EliminationGate
 from promptpotter.domain.results_health import classify_result
@@ -29,36 +33,25 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.domain.search_point import JobSearchPoint
 
-    # The prior's id rides along so the backfill can stamp WHOSE catch-up this is. Without
-    # it the pass inherited the foreground candidate's identity and recorded the prior's
-    # measurement under it.
-    BackfillFn = Callable[[JobSearchPoint, list[Sample], str], Awaitable[list[QueryMeasurement]]]
+    # A catch-up is a call already started and the commit that takes it: the commit writes the
+    # prior's row and hands it back, and runs only when a walk takes the cell it pairs. The prior's
+    # id rides along so the call stamps WHOSE catch-up it is — inheriting the foreground candidate's
+    # identity once recorded the prior's measurement under it.
+    Backfill = tuple[asyncio.Future[Any], Callable[[], list[QueryMeasurement]]]
+    BackfillFn = Callable[[JobSearchPoint, Sample, str], Backfill]
 
 
-def _eliminate(
-    name: str, check_result: dict[str, Any], candidate_idx: int, n_total_candidates: int
-) -> EscalationSignal:
-    return EscalationSignal(
-        check_name=name,
-        target=EscalationTarget.ELIMINATE_CANDIDATE,
-        check_result=check_result,
-        candidate_idx=candidate_idx,
-        candidates_scored=candidate_idx + 1,
-        candidates_skipped=n_total_candidates - candidate_idx - 1,
-    )
+def _graded(rows: Iterable[QueryMeasurement]) -> dict[str, float]:
+    """Each cell's grade; an error row carries no outcome for the θ fit."""
+    return {
+        str(sid): graded_response(r)
+        for r in rows
+        if (sid := r.get("sample_id")) is not None and not is_error_result(r)
+    }
 
 
-def _leader_locked(
-    name: str, check_result: dict[str, Any], candidate_idx: int, n_total_candidates: int
-) -> EscalationSignal:
-    return EscalationSignal(
-        check_name=name,
-        target=EscalationTarget.LEADER_LOCKED,
-        check_result=check_result,
-        candidate_idx=candidate_idx,
-        candidates_scored=candidate_idx + 1,
-        candidates_skipped=n_total_candidates - candidate_idx - 1,
-    )
+def _eliminate(name: str, check_result: dict[str, Any]) -> EscalationSignal:
+    return EscalationSignal(name, EscalationTarget.ELIMINATE_CANDIDATE, check_result)
 
 
 class DegradationCheck:
@@ -73,9 +66,7 @@ class DegradationCheck:
         self.min_samples = min_samples
         self.fatal_fastpath = fatal_fastpath
 
-    def check(
-        self, results: list[QueryMeasurement], candidate_idx: int, n_total_candidates: int
-    ) -> EscalationSignal | None:
+    def check(self, results: list[QueryMeasurement]) -> EscalationSignal | None:
         if self.fatal_fastpath and results:
             classification = classify_result(results[-1])
             fatal = classification.dominant_fatal
@@ -91,8 +82,6 @@ class DegradationCheck:
                         "dominant_warning": fatal,
                         "fatal": True,
                     },
-                    candidate_idx,
-                    n_total_candidates,
                 )
 
         n = len(results)
@@ -121,9 +110,20 @@ class DegradationCheck:
                 "warning_types": dict(wtypes),
                 "dominant_warning": dominant,
             },
-            candidate_idx,
-            n_total_candidates,
         )
+
+    def earliest_stop(
+        self,
+        results: list[QueryMeasurement],
+        upcoming: Sequence[tuple[Sample, QueryMeasurement | None]],
+    ) -> int | None:
+        """The RATE alone — the fatal fast-path fires on one row's content."""
+        degraded = sum(1 for r in results if is_deprecated(r))
+        for m, (_, row) in enumerate(upcoming, start=len(results) + 1):
+            degraded += row is None or is_deprecated(row)
+            if m >= self.min_samples and degraded / m >= self.threshold:
+                return m
+        return None
 
 
 @dataclass(frozen=True)
@@ -184,15 +184,21 @@ class PoBBCheck:
         self.prior_ids: list[str] = []
         self._current_id: str = ""
         self._on_snapshot: Callable[[PoBBSnapshot], None] | None = None
+        self._on_backfill: Callable[[int, list[str]], None] | None = None
         self._backfill_fn = backfill_fn
+        # One measurement per (prior, cell) however many walks reach the cell: started in a free
+        # slot, committed when a walk takes the cell, and dropped unwritten if none ever does.
+        self._pending: dict[tuple[str, int], Backfill] = {}
 
     def set_current(
         self,
         candidate_id: str,
         on_snapshot: Callable[[PoBBSnapshot], None] | None = None,
+        on_backfill: Callable[[int, list[str]], None] | None = None,
     ) -> None:
         self._current_id = candidate_id
         self._on_snapshot = on_snapshot
+        self._on_backfill = on_backfill
 
     def register_completed(
         self,
@@ -202,38 +208,81 @@ class PoBBCheck:
         sp: JobSearchPoint,
     ) -> None:
         """Add a completed candidate's per-sample grades to the priors pool; ``sp`` is retained so an unseen
-        (prior, sample) pair can be backfilled later. Error/deprecated rows carry no outcome for the θ fit."""
-        grades_by_sample: dict[str, float] = {}
-        for r in results:
-            sid = r.get("sample_id")
-            if sid is None or is_error_result(r):
-                continue
-            grades_by_sample[str(sid)] = graded_response(r)
-        self.priors_by_sample[candidate_id] = grades_by_sample
+        (prior, sample) pair can be backfilled later."""
+        self.priors_by_sample[candidate_id] = _graded(results)
         self.prior_sps[candidate_id] = sp
         if candidate_id not in self.prior_ids:
             self.prior_ids.append(candidate_id)
 
-    async def backfill_for_sample(self, sample: Sample) -> list[str]:
-        """Catch each prior up on ``sample``, scoring on a miss; idempotent. With no ``backfill_fn`` this
-        no-ops and paired ``check()`` skips the incomplete prior — surfacing the gap, never substituting 0."""
+    def _unstarted(self, sample: Sample) -> list[str]:
         if not self._backfill_fn:
             return []
+        return [
+            cid
+            for cid in self.prior_ids
+            if str(sample.id) not in self.priors_by_sample[cid]
+            and (cid, sample.id) not in self._pending
+        ]
+
+    def start_backfill(self, sample: Sample, room: int) -> list[asyncio.Future[Any]]:
+        """Start measuring up to ``room`` of the priors that lack ``sample``, so the calls overlap
+        the cell's own. Nothing is written or graded until :meth:`commit_backfills` takes them."""
+        measure = self._backfill_fn
+        if measure is None:
+            return []
+        started: list[asyncio.Future[Any]] = []
+        for cid in self._unstarted(sample)[: max(room, 0)]:
+            backfill = measure(self.prior_sps[cid], sample, cid)
+            self._pending[(cid, sample.id)] = backfill
+            started.append(backfill[0])
+        return started
+
+    def owed_backfills(self, sample: Sample) -> int:
+        """Catch-up calls ``sample`` still needs that nothing has started. With no ``backfill_fn``
+        there are none, and paired ``check()`` skips the incomplete prior — surfacing the gap,
+        never substituting 0."""
+        return len(self._unstarted(sample))
+
+    def backfills_in_flight(self) -> list[asyncio.Future[Any]]:
+        return [call for call, _ in self._pending.values() if not call.done()]
+
+    def backfills_for(self, sample: Sample) -> list[asyncio.Future[Any]]:
+        """The catch-up calls started for ``sample`` and not yet committed."""
+        return [call for (_, sid), (call, _) in self._pending.items() if sid == sample.id]
+
+    def commit_backfills(self, sample: Sample) -> None:
+        """Take every started catch-up on ``sample``, in prior order — the moment a serial round
+        would have measured them, so what reaches disk, and in what order, is the serial round's."""
         key = str(sample.id)
         fresh: list[str] = []
         for cid in self.prior_ids:
-            existing = self.priors_by_sample[cid]
-            if key in existing:
+            backfill = self._pending.pop((cid, sample.id), None)
+            if backfill is None:
                 continue
-            new_results = await self._backfill_fn(self.prior_sps[cid], [sample], cid)
-            for r in new_results:
-                sid_new = r.get("sample_id")
-                if sid_new is None or is_error_result(r):
-                    continue
-                existing[str(sid_new)] = graded_response(r)
-            if key in existing:
+            self.priors_by_sample[cid].update(_graded(backfill[1]()))
+            if key in self.priors_by_sample[cid]:
                 fresh.append(cid)
-        return fresh
+        if fresh and self._on_backfill is not None:
+            self._on_backfill(sample.id, fresh)
+
+    def bank_backfills(self, samples: Sequence[Sample]) -> None:
+        """Write, ungraded, the catch-ups back for *samples* — cells a stopped round's walks were
+        sure to take, so the resumed round replays these rather than paying for them again."""
+        wanted = {s.id for s in samples}
+        for key, (call, commit) in list(self._pending.items()):
+            landed = call.done() and not call.cancelled() and call.exception() is None
+            if key[1] in wanted and landed:
+                del self._pending[key]
+                commit()
+
+    def discard_backfills(self) -> None:
+        """Drop every measurement no walk took — paid, and never written, as a serial round would
+        never have made it — save what :meth:`bank_backfills` kept."""
+        for call, _ in self._pending.values():
+            call.cancel()
+            # Retrieved, so a discarded call's own failure is not reported as unhandled.
+            call.add_done_callback(lambda done: done.cancelled() or done.exception())
+        self._pending.clear()
 
     def snapshot_priors(self, sample_ids: Sequence[int | str]) -> dict[str, dict[str, float]]:
         """The per-prior grades over ``sample_ids``, for decision archival — uncovered IDs are omitted, not
@@ -261,9 +310,7 @@ class PoBBCheck:
         scale = min(1.0, max(0.0, min(ramp_in, ramp_out)))
         return self.epsilon_floor + (self.epsilon - self.epsilon_floor) * scale
 
-    def check(
-        self, results: list[QueryMeasurement], candidate_idx: int, n_total_candidates: int
-    ) -> EscalationSignal | None:
+    def check(self, results: list[QueryMeasurement]) -> EscalationSignal | None:
         n = len(results)
         if n < self.n_min:
             return None
@@ -289,8 +336,6 @@ class PoBBCheck:
                     "queries_scored": n,
                     "total_samples": self.n_samples,
                 },
-                candidate_idx,
-                n_total_candidates,
             )
         if not self.priors_by_sample:
             return None
@@ -352,8 +397,9 @@ class PoBBCheck:
 
         # Leader lock-in: stop measuring when P(cand > every prior) ≥ lock_in.
         if self.leader_lock_in and n >= self.lock_in_n_min and p_best_current >= self.lock_in:
-            return _leader_locked(
+            return EscalationSignal(
                 self.name,
+                EscalationTarget.LEADER_LOCKED,
                 {
                     "gate": EliminationGate.LOCK_IN,
                     "queries_scored": n,
@@ -365,8 +411,6 @@ class PoBBCheck:
                     "leader_id": hardest_prior_id,
                     "paired_breakdown": paired_breakdown,
                 },
-                candidate_idx,
-                n_total_candidates,
             )
 
         # ε is the ONLY futility gate, and it now tests the SAME bar adoption does:
@@ -407,9 +451,65 @@ class PoBBCheck:
                 "leader_id": hardest_prior_id,
                 "paired_breakdown": paired_breakdown,
             },
-            candidate_idx,
-            n_total_candidates,
         )
+
+    def earliest_stop(
+        self,
+        results: list[QueryMeasurement],
+        upcoming: Sequence[tuple[Sample, QueryMeasurement | None]],
+        *,
+        unresolved: Mapping[str, Iterable[QueryMeasurement]] | None = None,
+    ) -> int | None:
+        """Each gate of :meth:`check`, asked of every completion at once. Priors already short of a
+        measured cell stay out, as they do there: the backfill that could cover it has run.
+        ``unresolved`` are candidates ahead of this one still being walked, with the rows each has
+        back so far. Each may yet become a prior or never become one, so it is graded where its
+        rows say and anything anywhere else, and never counted on."""
+        measured = [r for r in results if not is_error_result(r)]
+        grades = {int(r.get("sample_id", 0)): graded_response(r) for r in measured}
+        cells = list(grades)
+        said = {str(r.get("predicted") or "") for r in measured}
+        priors = {
+            pid: {int(s): g for s, g in self.priors_by_sample[pid].items()}
+            for pid in self.prior_ids
+            if all(str(s) in self.priors_by_sample[pid] for s in cells)
+        }
+        pending = {
+            pid: {int(s): g for s, g in _graded(rows).items()}
+            for pid, rows in (unresolved or {}).items()
+            if pid not in self.priors_by_sample
+        }
+        priors.update(pending)
+        for m, (sample, row) in enumerate(upcoming, start=len(results) + 1):
+            if row is None or not is_error_result(row):
+                cells.append(sample.id)
+            if row is not None and not is_error_result(row):
+                grades[sample.id] = graded_response(row)
+                said.add(str(row.get("predicted") or ""))
+            if m < self.n_min:
+                continue
+            # Collapse needs one answer everywhere; a second, or an empty one, rules it out for good.
+            if len(said) <= 1 and not said & {"", NO_RESULT}:
+                return m
+            if not priors:
+                continue
+            settled = [
+                pid
+                for pid, g in priors.items()
+                if pid not in pending and all(s in g for s in cells)
+            ]
+            low, high = elimination_p_best_bounds(
+                cells, grades, priors, self.ruler, settled=settled
+            )
+            if self.leader_lock_in and m >= self.lock_in_n_min and high >= self.lock_in:
+                return m
+            if (
+                self.epsilon_elimination
+                and self.n_samples - m >= self.n_min
+                and low < self.epsilon_at(m)
+            ):
+                return m
+        return None
 
 
 def build_degradation_checks(config: CampaignConfig) -> list[StopRule]:

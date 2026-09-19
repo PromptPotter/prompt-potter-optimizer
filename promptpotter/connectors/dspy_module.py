@@ -82,7 +82,7 @@ class DspySession:
 def _extract_experiment(
     experiment_data: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """Always empty: a DSPy caller hands its rows to ``mint_and_score_origin`` directly, so there
+    """Always empty: a DSPy caller hands its rows to ``run_campaign`` directly, so there
     is no experiment doc for this connector to read one out of."""
     return [], []
 
@@ -175,7 +175,7 @@ async def _in_process_run(
 
 def _step_tokens(prediction: Any) -> dict[str, StepTokenUsage]:
     """The student's usage on the SAME channel a remote backend's rides — one ``step_tokens``
-    entry, metered by ``emit_step_token_usage`` on both the fresh and the cache-replay path. No
+    entry, metered where the cell is admitted and, on a replay, by ``emit_replayed_step_tokens``. No
     ``cost_usd``: pricing is our rate table's job, and an unpriced model is already a named
     signal rather than a silent zero.
 

@@ -24,12 +24,6 @@ export function fmtPct0(v: number | null | undefined): string {
   return typeof v === "number" && Number.isFinite(v) ? `${(v * 100).toFixed(0)}%` : "—";
 }
 
-// Signed percentage, no decimals — "+4%" / "-2%". Non-finite → "—".
-export function fmtPctSigned(v: number | null | undefined): string {
-  if (typeof v !== "number" || !Number.isFinite(v)) return "—";
-  return `${v >= 0 ? "+" : ""}${(v * 100).toFixed(0)}%`;
-}
-
 // Short elapsed time — "840ms" / "4.20s" / "1.5m". Non-finite → "—".
 export function fmtSecs(s: number | null | undefined): string {
   if (typeof s !== "number" || !Number.isFinite(s)) return "—";
@@ -69,9 +63,22 @@ export function fmtGap(seconds: number): string {
   return `${Math.round(seconds / 86_400)}d`;
 }
 
-// USD spend — 4dp under a cent, else 2dp. "$0.0042" / "$1.30".
+// USD spend — 4dp below a dollar, zero included, else 2dp: "$0.0000" / "$0.0042" / "$0.2386" /
+// "$1.30". Development campaigns cost fractions of a cent, so a column of them stays aligned.
 export function fmtUsd(n: number): string {
-  return n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
+  return n < 1 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
+}
+
+// USD at cents, for a row that is SCANNED rather than audited — "$0.41" / "$12.30". A spend that
+// rounds to nothing still reads as spend: below half a cent it is "<$0.01", never "$0.00".
+export function fmtUsdCents(n: number): string {
+  return n > 0 && n < 0.005 ? "<$0.01" : `$${n.toFixed(2)}`;
+}
+
+// A model id's own name — "openai/gpt-oss-20b:nitro" → "gpt-oss-20b:nitro". The `:suffix` stays:
+// it routes and bills differently, so two rows differing only in it are two different runs.
+export function shortModel(id: string): string {
+  return id.slice(id.lastIndexOf("/") + 1);
 }
 
 // Compact bare number — "3.4M" / "12.0k" / "840". For headline counts where
@@ -158,6 +165,13 @@ export function shortId(campaignId: string): string {
 export function fmtSigned(v: number | null | undefined, digits = 3): string {
   if (typeof v !== "number" || !Number.isFinite(v)) return "—";
   return `${v >= 0 ? "+" : ""}${v.toFixed(digits)}`;
+}
+
+// An ability LIFT, wearing its own symbol — "θ +0.12". Logits, so it never renders as a
+// percent: the two are different bases, not two renderings of one number.
+export function fmtTheta(v: number | null | undefined): string {
+  if (typeof v !== "number" || !Number.isFinite(v)) return "—";
+  return `θ ${fmtSigned(v, 2)}`;
 }
 
 // Does a served interval clear zero? The ONE rule every effect table colours on, so the pairwise

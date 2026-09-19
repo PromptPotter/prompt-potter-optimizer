@@ -19,6 +19,7 @@ import {
   liveObserveConfig,
 } from "@/lib/derivations";
 import { TERMS } from "@/lib/terms";
+import { Icon, pressable } from "@/components/ui";
 import { cx } from "@/lib/cx";
 
 // One level of the stack: a UNIT that opens into another one. `PipelineStack` composes them
@@ -41,50 +42,23 @@ const EDGE_KINDS: readonly string[] = ["forward", "loop", "escalate", "directive
 const LABEL_BELOW_EXTENT = 38;
 
 const ATTACH_ICON = (
-  <svg
-    width="28"
-    height="28"
-    viewBox="0 0 20 20"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.4"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
+  <Icon size={28} viewBox="0 0 20 20" strokeWidth={1.4}>
     <polyline points="18 10 13 10 11.5 12.5 8.5 12.5 7 10 2 10" />
     <path d="M4.6 4.4 2 10v5a1.5 1.5 0 0 0 1.5 1.5h13a1.5 1.5 0 0 0 1.5-1.5v-5l-2.6-5.6a1.5 1.5 0 0 0-1.36-.9H5.96a1.5 1.5 0 0 0-1.36.9Z" />
-  </svg>
+  </Icon>
 );
 
 const ANSWER_ICON = (
-  <svg
-    width="28"
-    height="28"
-    viewBox="0 0 20 20"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.4"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
+  <Icon size={28} viewBox="0 0 20 20" strokeWidth={1.4}>
     <path d="M5 2h6l4 4v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z" />
     <path d="M11 2v5h4" />
     <path d="M6.5 12.5h6" />
     <path d="m10.5 10.5 2.5 2-2.5 2" />
-  </svg>
+  </Icon>
 );
 
 const LLM_ICON = (
-  <svg
-    width="30"
-    height="30"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.6"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
+  <Icon size={30} strokeWidth={1.6}>
     <path d="M12 2.5 6.5 18h11Z" fill="currentColor" fillOpacity="0.18" />
     <path d="M5 18c2.4 1.6 4.7 2 7 2s4.6-.4 7-2" />
     <path d="M5 18h14" />
@@ -93,7 +67,7 @@ const LLM_ICON = (
       fill="currentColor"
     />
     <circle cx="10.2" cy="13.2" r="0.7" fill="currentColor" />
-  </svg>
+  </Icon>
 );
 
 // No view to draw. Never fabricate a node here — that would show a failed read as a real
@@ -331,11 +305,13 @@ function PipelineBox({
           disabled={scope == null && soleNest?.onIsolate == null}
           onClick={() => activate(sole.id)}
         >
-          <div className="head">
-            <div className="ico">{LLM_ICON}</div>
-            <div className="lbl">{sole.label}</div>
-          </div>
-          <div className="val">{calling ? (soleModel ?? "running") : "idle"}</div>
+          {/* Spans, not divs: a `<button>` takes phrasing content only, and every one of these
+              is a flex item, so the box each draws is its parent's doing. */}
+          <span className="head">
+            <span className="ico">{LLM_ICON}</span>
+            <span className="lbl">{sole.label}</span>
+          </span>
+          <span className="val">{calling ? (soleModel ?? "running") : "idle"}</span>
         </button>
       </div>
     );
@@ -461,8 +437,7 @@ function PipelineBox({
               key={n.id}
               className={cx("wf-hero-multi-node", inert && "inert", muted && "muted")}
               transform={`translate(${cxPos} 0)`}
-              role={inert ? undefined : "button"}
-              tabIndex={inert ? undefined : 0}
+              {...(inert ? {} : pressable(() => activate(n.id)))}
               aria-pressed={inert || nests?.onIsolate ? undefined : isSelected}
               aria-label={
                 nests?.onIsolate
@@ -471,14 +446,6 @@ function PipelineBox({
                     ? `${n.label} — ${reachNote}`
                     : n.label
               }
-              onClick={inert ? undefined : () => activate(n.id)}
-              onKeyDown={(e) => {
-                if (inert) return;
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  activate(n.id);
-                }
-              }}
             >
               {/* Hit target: the whole cell on a rail, where the gap between dot and label
                   is otherwise dead — but only this node's own band on a grid, where a
@@ -631,11 +598,11 @@ function FlowEnd({
       aria-label={path.label}
       onClick={path.onClick}
     >
-      <div className="ico">{icon}</div>
-      <div className="text-col">
-        <div className="lbl">{lbl}</div>
-        <div className="val">{val}</div>
-      </div>
+      <span className="ico">{icon}</span>
+      <span className="text-col">
+        <span className="lbl">{lbl}</span>
+        <span className="val">{val}</span>
+      </span>
     </button>
   );
 }

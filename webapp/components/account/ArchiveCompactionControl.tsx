@@ -2,8 +2,7 @@
 import { useState } from "react";
 import { postCompactArchive } from "@/lib/api";
 import type { ArchiveReport } from "@/lib/api/types";
-import { failureKind } from "@/lib/api/client";
-import { bumpRevalidation } from "@/lib/revalidate";
+import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import { fmtBytes } from "@/lib/format";
 import { Button, SegmentedControl, type Segment } from "@/components/ui";
 
@@ -25,6 +24,18 @@ const BLURB: Record<Mode, string> = {
     "Deletes the compressed copy for good. The rows cost real money and hours to measure again, and nothing puts them back.",
 };
 
+// A dry run reaches nothing a poll reads, and an apply rewrites the tree — so the two are two
+// slots rather than one, `revalidate` being per-slot. They carry the same refusal and differ
+// only in what a failure leaves standing.
+const describeFailure =
+  (apply: boolean) =>
+  (f: CommandFailure): string =>
+    f.kind === "denied"
+      ? "This account cannot run archive maintenance."
+      : apply
+        ? "The archive did not finish. Some runs may already have been rewritten — preview again to see what stands."
+        : "Could not reach the archive. Nothing was changed.";
+
 // Archive maintenance. PREVIEW FIRST is the whole design: `apply` is unreachable until a dry run
 // has returned, so the operator consents to a byte count they have actually seen rather than to a
 // verb. The report shape is identical for both, so one renderer serves them.
@@ -32,8 +43,13 @@ export function ArchiveCompactionControl() {
   const [mode, setMode] = useState<Mode>("compact");
   const [preview, setPreview] = useState<ArchiveReport | null>(null);
   const [done, setDone] = useState<ArchiveReport | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const dry = useCommand<Mode>("archive-preview", {
+    revalidate: false,
+    describe: describeFailure(false),
+  });
+  const commit = useCommand<Mode>("archive-apply", { describe: describeFailure(true) });
+  const busy = dry.pending !== null || commit.pending !== null;
+  const error = commit.failure?.message ?? dry.failure?.message ?? null;
 
   // A preview belongs to the mode that produced it; switching modes must not leave the old one
   // standing as consent for the new one.
@@ -41,35 +57,24 @@ export function ArchiveCompactionControl() {
     setMode(next);
     setPreview(null);
     setDone(null);
-    setError(null);
+    dry.clear();
+    commit.clear();
   }
 
   async function run(apply: boolean) {
-    setBusy(true);
-    setError(null);
-    try {
-      const report = await postCompactArchive({ mode, apply });
-      if (apply) {
-        setDone(report);
-        setPreview(null);
-        bumpRevalidation();
-      } else {
-        setPreview(report);
-      }
-    } catch (err) {
-      const kind = failureKind(err);
+    const slot = apply ? commit : dry;
+    const r = await slot.run(mode, () => postCompactArchive({ mode, apply }));
+    if (!r.ok) {
       // Only a PREVIEW can promise nothing moved: each run swaps atomically, the batch does not,
       // so a failed apply drops its preview too — that was consent for a state that may be gone.
       if (apply) setPreview(null);
-      setError(
-        kind === "denied"
-          ? "This account cannot run archive maintenance."
-          : apply
-            ? "The archive did not finish. Some runs may already have been rewritten — preview again to see what stands."
-            : "Could not reach the archive. Nothing was changed.",
-      );
-    } finally {
-      setBusy(false);
+      return;
+    }
+    if (apply) {
+      setDone(r.value);
+      setPreview(null);
+    } else {
+      setPreview(r.value);
     }
   }
 

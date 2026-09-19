@@ -1,8 +1,8 @@
 "use client";
 import { useState } from "react";
-import { Badge, CardFrame } from "@/components/ui";
+import { Badge, CardFrame, Term } from "@/components/ui";
 import type { RoundResult } from "@/lib/api/types";
-import { fmtNum, fmtPct1 } from "@/lib/format";
+import { fmtNum, fmtPct1, fmtSigned } from "@/lib/format";
 import { isHit } from "@/lib/fitness";
 
 // The round file IS `RoundResult.model_dump()`, so its shape is DERIVED from the generated wire
@@ -27,13 +27,9 @@ interface ResultRow {
   fitness?: number;
 }
 
-function fmtTheta(v: number | null | undefined): string {
-  return typeof v === "number" ? (v >= 0 ? `+${v.toFixed(3)}` : v.toFixed(3)) : "—";
-}
-
 function fmtLift(lift: number | null | undefined, lo: number | null | undefined, hi: number | null | undefined): string {
   if (typeof lift !== "number" || typeof lo !== "number" || typeof hi !== "number") return "—";
-  return `${fmtTheta(lift)} [${fmtTheta(lo)}, ${fmtTheta(hi)}]`;
+  return `${fmtSigned(lift, 3)} [${fmtSigned(lo, 3)}, ${fmtSigned(hi, 3)}]`;
 }
 
 interface Props {
@@ -55,31 +51,25 @@ export function RoundFileView({ doc, raw }: Props) {
     <div className="round-file-view">
       <div className="round-file-summary">
         <div className="round-file-summary-row">
-          <Badge>round {doc.round ?? "—"}</Badge>
-          <span>accuracy {fmtPct1(doc.accuracy)} {parentShown != null && (<span style={{ color: "var(--color-text-tertiary)" }} title={matched != null ? "The parent — the origin at round 0, the prior round's winner after — re-scored on the samples this round's winner measured. The floor the promotion gate used." : "The parent's full-set rate. This round carries no matched floor, so it is not directly comparable to a partially-scored winner."}>({parentLabel} {fmtPct1(parentShown)})</span>)}</span>
+          <Badge className="round-file-badge">round {doc.round ?? "—"}</Badge>
+          <span>accuracy {fmtPct1(doc.accuracy)} {parentShown != null && (<span className="round-file-dim"><Term content={matched != null ? "The parent — the origin at round 0, the prior round's winner after — re-scored on the samples this round's winner measured. The floor the promotion gate used." : "The parent's full-set rate. This round carries no matched floor, so it is not directly comparable to a partially-scored winner."}>({parentLabel} {fmtPct1(parentShown)})</Term></span>)}</span>
           <span>composite {fmtNum(doc.composite_fitness)}</span>
           <span>n {doc.total ?? "—"}</span>
           {typeof doc.ability?.theta === "number" && (
-            <span title="Ability of the adopted lineage on the cycle's fixed δ ruler — the subset-invariant series the round was won on. The cell count is how much of that ruler was real when this round was read.">
-              θ {fmtTheta(doc.ability.theta)}{doc.ability.ruler_n > 0 ? ` (${doc.ability.ruler_n} cells)` : ""}
-            </span>
+            <Term content="Ability of the adopted lineage on the cycle's fixed δ ruler — the subset-invariant series the round was won on. The cell count is how much of that ruler was real when this round was read.">
+              θ {fmtSigned(doc.ability.theta, 3)}{doc.ability.ruler_n > 0 ? ` (${doc.ability.ruler_n} cells)` : ""}
+            </Term>
           )}
           {typeof doc.p_value === "number" && <span>p {fmtNum(doc.p_value, 3)}</span>}
-          {doc.improved ? <span className="pass">improved</span> : <span style={{ color: "var(--color-text-tertiary)" }}>no improvement</span>}
+          {doc.improved ? <span className="pass">improved</span> : <span className="round-file-dim">no improvement</span>}
         </div>
         {doc.verdict_reason && (
-          <div className="round-file-summary-row" style={{ color: "var(--color-text-tertiary)" }}>
-            {doc.verdict_reason}
-          </div>
+          <div className="round-file-summary-row round-file-dim">{doc.verdict_reason}</div>
         )}
       </div>
 
       {scoreboard.length > 0 && (
-        <CardFrame
-          style={{ margin: "8px 0" }}
-          title={<span>Scoreboard</span>}
-          actions={<Badge>{scoreboard.length}</Badge>}
-        >
+        <CardFrame title={<span>Scoreboard</span>} actions={<Badge>{scoreboard.length}</Badge>}>
           <div className="table-wrap">
             <table>
               <thead>
@@ -88,8 +78,8 @@ export function RoundFileView({ doc, raw }: Props) {
                   <th>Candidate</th>
                   <th>Accuracy</th>
                   <th>Composite</th>
-                  <th title="Difficulty-adjusted Rasch ability on the cycle's fixed δ ruler — the metric the round winner is elected on, which is what explains a lower-accuracy winner. Empty outside the election fit, and for every row while the ruler is cold.">θ</th>
-                  <th title="The candidate's blocked lift over the parent on the cells both measured, with its 95% interval. An interval spanning 0 means the round could not separate them.">Lift vs parent</th>
+                  <th><Term content="Difficulty-adjusted Rasch ability on the cycle's fixed δ ruler — the metric the round winner is elected on, which is what explains a lower-accuracy winner. Empty outside the election fit, and for every row while the ruler is cold.">θ</Term></th>
+                  <th><Term content="The candidate's blocked lift over the parent on the cells both measured, with its 95% interval. An interval spanning 0 means the round could not separate them.">Lift vs parent</Term></th>
                   <th>Win</th>
                 </tr>
               </thead>
@@ -97,12 +87,12 @@ export function RoundFileView({ doc, raw }: Props) {
                 {scoreboard.map((s, i) => (
                   <tr key={s.candidate_id ?? i}>
                     <td>{s.rank ?? i + 1}</td>
-                    <td style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.changes_description}>
+                    <td className="round-file-clip wide" title={s.changes_description}>
                       {s.changes_description || s.candidate_id || "—"}
                     </td>
                     <td>{fmtPct1(s.accuracy)}</td>
                     <td>{fmtNum(s.composite_fitness)}</td>
-                    <td>{fmtTheta(s.theta)}</td>
+                    <td>{fmtSigned(s.theta, 3)}</td>
                     <td>{fmtLift(s.matched_parent_lift, s.matched_parent_lift_ci_lo, s.matched_parent_lift_ci_hi)}</td>
                     <td>{s.is_winner ? <span className="pass">win</span> : ""}</td>
                   </tr>
@@ -114,20 +104,16 @@ export function RoundFileView({ doc, raw }: Props) {
       )}
 
       {results.length > 0 && (
-        <CardFrame
-          style={{ margin: "8px 0" }}
-          title={<span>Per-sample results</span>}
-          actions={<Badge>{results.length}</Badge>}
-        >
+        <CardFrame title={<span>Per-sample results</span>} actions={<Badge>{results.length}</Badge>}>
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th title="Sample ID — stable identifier from the project.">ID</th>
-                  <th title="Hit / miss for this sample.">Status</th>
-                  <th title="Input given to the pipeline for this sample.">Query</th>
-                  <th title="Top-1 prediction returned by the pipeline.">Predicted</th>
-                  <th title="Ground-truth answer from the project.">Ground</th>
+                  <th><Term content="Sample ID — stable identifier from the project.">ID</Term></th>
+                  <th><Term content="Hit / miss for this sample.">Status</Term></th>
+                  <th><Term content="Input given to the pipeline for this sample.">Query</Term></th>
+                  <th><Term content="Top-1 prediction returned by the pipeline.">Predicted</Term></th>
+                  <th><Term content="Ground-truth answer from the project.">Ground</Term></th>
                 </tr>
               </thead>
               <tbody>
@@ -138,13 +124,13 @@ export function RoundFileView({ doc, raw }: Props) {
                     <tr key={String(id)}>
                       <td>{String(id)}</td>
                       <td>{hit ? <span className="pass">HIT</span> : <span className="fail">MISS</span>}</td>
-                      <td style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.query}>
+                      <td className="round-file-clip" title={r.query}>
                         {r.query || "—"}
                       </td>
-                      <td style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.predicted}>
+                      <td className="round-file-clip" title={r.predicted}>
                         {r.predicted || "—"}
                       </td>
-                      <td style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.ground_truth}>
+                      <td className="round-file-clip" title={r.ground_truth}>
                         {r.ground_truth || "—"}
                       </td>
                     </tr>
@@ -156,13 +142,13 @@ export function RoundFileView({ doc, raw }: Props) {
         </CardFrame>
       )}
 
-      <details open={showRaw} onToggle={(e) => setShowRaw((e.target as HTMLDetailsElement).open)} style={{ margin: "8px 0" }}>
-        <summary style={{ cursor: "pointer", padding: "8px 0", color: "var(--color-text-secondary)", fontSize: "var(--text-base)" }}>
-          Raw JSON ({raw.length.toLocaleString()} chars)
-        </summary>
-        <pre style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-sm)", lineHeight: 1.5, whiteSpace: "pre-wrap", color: "var(--color-text-secondary)", background: "var(--color-background-secondary)", padding: 10, borderRadius: "var(--border-radius-md)", marginTop: 6 }}>
-          {raw}
-        </pre>
+      <details
+        className="round-file-raw"
+        open={showRaw}
+        onToggle={(e) => setShowRaw((e.target as HTMLDetailsElement).open)}
+      >
+        <summary>Raw JSON ({raw.length.toLocaleString()} chars)</summary>
+        <pre>{raw}</pre>
       </details>
     </div>
   );

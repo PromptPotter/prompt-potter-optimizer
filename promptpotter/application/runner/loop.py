@@ -27,14 +27,14 @@ from promptpotter.application.runner.round import (
     post_round,
 )
 from promptpotter.application.runner.termination import (
+    RUN_STOPS,
     BudgetGate,
-    backend_unreachable_tripped,
     origin_gate_tripped,
+    run_stop_reason,
 )
 from promptpotter.domain.phases import (
     CampaignPhase,
     RunPhase,
-    StopLoop,
     StopReason,
     emit_phase,
 )
@@ -100,9 +100,9 @@ async def run_round_loop(
 
         while clean_rounds < max_rounds and round_num < HARD_CAP:
             # Pause cooperation: exit cleanly at the round boundary when the
-            # operator set the pause flag. The per-sample loop (run_query_loop)
-            # checks the same predicate, so a mid-round pause lands within one
-            # sample; this boundary check covers the single-LLM-call phases
+            # operator set the pause flag. The scoring phase (run_walks)
+            # checks the same predicate, so a mid-round pause lands once the
+            # calls already sent have; this boundary check covers the single-LLM-call phases
             # (generate / L2 / L3) that have no inner loop. The cycle stays
             # resumable — `_finalize_run` skips terminal marking on PAUSED.
             if pause_requested(session):
@@ -185,8 +185,6 @@ async def run_round_loop(
                     warning_types=signal.check_result.get("warning_types"),
                 )
                 await close_round(cycle, round_result, round_num, session, cb)
-                if backend_unreachable_tripped(round_result.health) is not None:
-                    return StopReason.BACKEND_UNREACHABLE, None
                 if session.state.cycle_id:
                     session.store.campaigns.delete_round_candidates(
                         session.hop,
@@ -206,11 +204,6 @@ async def run_round_loop(
                 budget_gate,
                 is_final_round=is_final_round,
             )
-            # A round that was mostly backend-down isn't a measurement — halt instead
-            # of grinding more zero-accuracy rounds against a dead backend (the operator
-            # restarts it and ``resume``s). Mid-run sibling of the round-0 origin gate.
-            if backend_unreachable_tripped(round_result.health) is not None:
-                return StopReason.BACKEND_UNREACHABLE, None
             round_num += 1
             clean_rounds += 1
 
@@ -235,8 +228,8 @@ async def run_round_loop(
 
         return (StopReason.HARD_CAP if round_num >= HARD_CAP else StopReason.MAX_ROUNDS), None
 
-    except StopLoop as sl:
-        return sl.reason, None
+    except RUN_STOPS as stop:
+        return run_stop_reason(stop), None
     except KeyboardInterrupt as exc:
         # The PAUSE FLAG's stop (`scoring/search_point_scorer.py`), not the terminal's — a
         # Ctrl+C arrives as ``CancelledError`` and lands in `runner/entry.py`. Which is also why

@@ -4,6 +4,7 @@ import { connectorReachability, criticalAlert } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
+import { readyData } from "@/lib/hooks/useRead";
 import type { StatusKind } from "@/lib/poll";
 
 // The loud, can't-miss failure surface — a full-width sticky bar at the top of
@@ -44,7 +45,7 @@ export function CriticalAlertBanner({
   const { down: connectorDown } = connectorReachability(health);
   // Cross-user busy state — its own 5 s poll (useMachineStatus), surfaced in the
   // same bar so "someone else is running" reaches an alt-tabbed operator.
-  const machine = useMachineStatus();
+  const machine = readyData(useMachineStatus());
   const alert = criticalAlert({
     bannerStatus,
     bannerText,
@@ -54,13 +55,14 @@ export function CriticalAlertBanner({
     connectorDown,
     connectorName: connector,
     connectorDetail: health?.detail ?? null,
-    machineBusy: machine.busy,
-    machineBusyHolder: machine.holder?.user ?? null,
-    machineBusySince: machine.holder?.started_at ?? null,
+    // No tick landed yet: say nothing about the machine rather than call it free or full.
+    machineBusy: machine !== null && machine.busy,
+    machineBusyHolder: machine?.holder?.user ?? null,
+    machineBusySince: machine?.holder?.started_at ?? null,
     // The served queue is already ordered and already scoped to this caller, so the
     // first entry IS their nearest place in line — no client-side sort, and no second
     // opinion about a position the drain owns.
-    queuePosition: machine.queue[0]?.position ?? null,
+    queuePosition: machine?.queue[0]?.position ?? null,
   });
   if (!alert) return null;
 

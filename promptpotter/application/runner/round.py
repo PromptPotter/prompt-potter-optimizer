@@ -239,6 +239,7 @@ async def post_round(
         # The round was elected on the composite, so the stop that ends the campaign asks it too.
         current_objective=cycle.tracking.current_composite_fitness,
         l1_patience=config.optimization.l1_patience,
+        escalation_ladder=config.optimization.escalation_ladder,
         lives=config.optimization.lives,
         axes_with_positive_yield=axes_with_positive_yield,
         l1_mandatory_breach=l1_mandatory_breach,

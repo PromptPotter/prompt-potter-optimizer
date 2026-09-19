@@ -22,6 +22,7 @@ import json
 import pathlib
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from pydantic import Field, computed_field
@@ -45,6 +46,7 @@ from promptpotter.infrastructure.store.archive_queries import (
     read_cold_payload,
     reindex_measurements,
     replace_measurement_detail,
+    run_signatures,
     write_cold_payload,
 )
 from promptpotter.infrastructure.store.io import read_json_optional
@@ -56,9 +58,12 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = [
+    "ArchiveInventory",
     "ArchiveReport",
+    "InventoryRow",
     "archive_writers",
     "compact_measurement_archive",
+    "inventory_measurement_archive",
     "iter_cycle_ledgers",
     "purge_cold_store",
     "reindex_measurement_archive",
@@ -180,6 +185,160 @@ class ArchiveReport(StrictModel):
 
 def _blocked(writers: int) -> ArchiveReport:
     return ArchiveReport(archive_writers=writers)
+
+
+# -- the inventory ------------------------------------------------------------
+#
+# The census the reclaim is sized against, and it comes FIRST for that reason: a delete destroys
+# its own evidence, so the one moment both halves exist is before it runs.
+
+_AGE_BANDS: tuple[tuple[str, float], ...] = (
+    ("0-7d", 7.0),
+    ("7-30d", 30.0),
+    ("30-90d", 90.0),
+    ("90d+", float("inf")),
+)
+_UNDATED_BAND = "undated"
+
+
+def _age_band(created_at: str, *, now: datetime) -> str:
+    try:
+        age_days = (now - datetime.fromisoformat(created_at)).total_seconds() / 86400.0
+    except (TypeError, ValueError):
+        # Its own band, never the oldest one: an unreadable date is not evidence of age.
+        return _UNDATED_BAND
+    return next(band for band, upper in _AGE_BANDS if age_days < upper)
+
+
+def _label_family(label: str) -> str:
+    """A trailing index is stripped and nothing else is: ``candidate_0`` and ``candidate_1`` are
+    one family, while ``round_parent``, ``pobb_backfill`` and ``line_overlap`` are each whole."""
+    head, _, tail = label.rpartition("_")
+    return head if head and tail.isdigit() else label
+
+
+class InventoryRow(StrictModel):
+    """One cut of the archive — a dataset, a run-label family, or an age band."""
+
+    key: str
+    runs: int
+    cells: int
+    replayed_cells: int
+    hot_bytes: int
+    cold_bytes: int
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def replay_rate(self) -> float | None:
+        """``None`` over a cut holding no cell: a rate off nothing is unanswerable, and reporting
+        it as 0.0 says the opposite — that nothing in it ever replayed."""
+        return self.replayed_cells / self.cells if self.cells else None
+
+
+@dataclass(slots=True)
+class _Tally:
+    runs: int = 0
+    cells: int = 0
+    replayed: int = 0
+    hot: int = 0
+    cold: int = 0
+
+    def add(self, *, cells: int, replayed: int, hot: int, cold: int) -> None:
+        self.runs += 1
+        self.cells += cells
+        self.replayed += replayed
+        self.hot += hot
+        self.cold += cold
+
+    def row(self, key: str) -> InventoryRow:
+        return InventoryRow(
+            key=key,
+            runs=self.runs,
+            cells=self.cells,
+            replayed_cells=self.replayed,
+            hot_bytes=self.hot,
+            cold_bytes=self.cold,
+        )
+
+
+class ArchiveInventory(StrictModel):
+    """What the archive HOLDS, cut three ways — never what a pass would do to it.
+
+    Apart from :class:`ArchiveReport` because the two answer different questions: that one is a
+    plan over the runs a mode is eligible to touch, this one is a census over every run there is."""
+
+    by_dataset: list[InventoryRow]
+    by_label: list[InventoryRow]
+    by_age: list[InventoryRow]
+    total: InventoryRow
+    orphan_index_rows: int = 0
+    """Index rows whose detail file is absent.
+
+    Such a row can be neither replayed nor read, so it is a claim rather than a measurement, and
+    every count here is an upper bound while one stands. `reindex` is what clears them."""
+    archive_writers: int = 0
+    """Cycles that can still append. REPORTED, never a refusal: this pass writes nothing, and the
+    numbers are wanted most while a campaign is still filling the store."""
+
+
+def _by_bytes(tallies: Mapping[str, _Tally]) -> list[InventoryRow]:
+    rows = [tally.row(key) for key, tally in tallies.items()]
+    rows.sort(key=lambda r: r.hot_bytes + r.cold_bytes, reverse=True)
+    return rows
+
+
+def _in_band_order(tallies: Mapping[str, _Tally]) -> list[InventoryRow]:
+    order = [band for band, _ in _AGE_BANDS] + [_UNDATED_BAND]
+    return [tallies[band].row(band) for band in order if band in tallies]
+
+
+def inventory_measurement_archive(
+    stores: Stores,
+    *,
+    dataset: str | None = None,
+) -> ArchiveInventory:
+    """Run counts, byte split and replay rate by dataset, label family and age.
+
+    *dataset* scopes the census the way every other pass here is scoped. Reads the RAW index
+    (`maintenance_runs`), so an instrument's own runs are counted rather than hidden behind an
+    evidence epoch — an inventory that cannot see a run cannot size what deleting it would cost."""
+    now = datetime.now(UTC)
+    sizes = run_signatures(stores)
+    by_dataset: dict[str, _Tally] = {}
+    by_label: dict[str, _Tally] = {}
+    by_age: dict[str, _Tally] = {}
+    total = _Tally()
+    orphans = 0
+
+    for entry in maintenance_runs(stores, dataset_name=dataset):
+        run_id = str(entry.get("run_id") or "")
+        if not run_id:
+            continue
+        signature = sizes.get(run_id)
+        if signature is None:
+            orphans += 1
+        detail = load_run(stores, run_id)
+        rows = detail.get("measurements", []) if detail is not None else []
+        cells = len(rows)
+        replayed = sum(1 for row in rows if row.get("cached"))
+        hot = signature[1] if signature is not None else 0
+        cold = cold_payload_bytes(stores, run_id)
+        for table, key in (
+            (by_dataset, str(entry.get("dataset_name") or "<unstamped>")),
+            (by_label, _label_family(str(entry.get("name") or "<unlabelled>"))),
+            (by_age, _age_band(str(entry.get("created_at") or ""), now=now)),
+        ):
+            table.setdefault(key, _Tally()).add(cells=cells, replayed=replayed, hot=hot, cold=cold)
+        total.add(cells=cells, replayed=replayed, hot=hot, cold=cold)
+
+    return ArchiveInventory(
+        by_dataset=_by_bytes(by_dataset),
+        by_label=_by_bytes(by_label),
+        by_age=_in_band_order(by_age),
+        total=total.row(dataset or "all"),
+        orphan_index_rows=orphans,
+        archive_writers=archive_writers(stores.shared_root),
+    )
 
 
 # -- compaction ---------------------------------------------------------------

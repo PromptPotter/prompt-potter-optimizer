@@ -2,13 +2,13 @@
 import { measurementNode } from "@/lib/derivations";
 import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import { useSelection } from "@/lib/SelectionContext";
+import { Toolbar, ToolbarSpacer } from "@/components/ui";
 import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
 import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 
 // The OPTIMIZER, on the setup surface — the loop that is about to search, shown while
 // the operator is still deciding what to search over. `PipelineSetupSection` beside it
-// answers "what gets optimized"; this one answers "what does the optimizing", and until
-// now the only trace of it here was a `Max rounds` number field.
+// answers "what gets optimized"; this one answers "what does the optimizing".
 //
 // It draws through `PipelineFlow` — the SAME renderer the chat hero uses for the
 // optimizer level of its stack — rather than a list of its own. Not `PipelineStack`,
@@ -21,8 +21,7 @@ import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 //
 // The picked node opens the ONE `NodeDetail` — the same panel the chat hero and the
 // dashboard canvas open, so config and the prompt each node STARTS from read here
-// exactly as they do there. It used to hand-roll a header, a close button and a bare
-// config editor, which showed the knobs and silently dropped the prompt.
+// exactly as they do there, and it reads the served schema itself.
 //
 // Node config is READ-ONLY here, and that is a boundary rather than an omission:
 // `OptimizationConfig` declares no optimizer-node field and `assets/optimizer/
@@ -35,7 +34,6 @@ export function OptimizerSetupSection() {
   const { node: selected, setSelectionForNode } = useSelection();
 
   const view = doc?.view ?? null;
-  const schema = doc?.node_config_schema ?? null;
   // The selection axis is app-global and node ids are not disjoint across pipelines, so
   // match on the SCOPE as well as the id — a `target` click in the section below must
   // not open an optimizer node that happens to share its name (on a self-optimizing
@@ -44,12 +42,11 @@ export function OptimizerSetupSection() {
 
   return (
     <section className="setup-preview">
-      <header className="setup-preview-head">
+      <Toolbar>
         <span className="setup-preview-title">Optimizer</span>
-        <span className="setup-preview-side">
-          <span className="setup-preview-sub">the loop that searches</span>
-        </span>
-      </header>
+        <ToolbarSpacer />
+        <span className="setup-preview-sub">the loop that searches</span>
+      </Toolbar>
       <p className="bnode-role">
         The evolution loop itself — generate, score, critique, and the two escalation
         steps it reaches for when a round stalls. Pick a node to read what it runs on.

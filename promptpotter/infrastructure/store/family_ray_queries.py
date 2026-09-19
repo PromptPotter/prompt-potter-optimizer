@@ -7,7 +7,6 @@ import base64
 import json
 import logging
 from collections import deque
-from datetime import datetime
 from pathlib import Path
 from typing import Any, NamedTuple, cast
 
@@ -28,6 +27,7 @@ from promptpotter.infrastructure.store.layout import (
     cycle_dir_for,
 )
 from promptpotter.infrastructure.store.lineage_queries import FamilyCourse
+from promptpotter.shared.clock import epoch_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -159,19 +159,6 @@ class _Raw(NamedTuple):
     payload: dict[str, Any]
 
 
-def _epoch(raw: object) -> float | None:
-    """A record timestamp as a sortable instant. Parsed, never string-compared — ``utcnow_iso`` omits
-    the fractional part at exactly zero microseconds, which sorts AFTER ``...T12:00:00.5Z``."""
-    if not isinstance(raw, str) or not raw:
-        return None
-    try:
-        return datetime.fromisoformat(raw).timestamp()
-    except (ValueError, OSError, OverflowError):
-        # `.timestamp()` raises OSError/OverflowError (not ValueError) for out-of-range
-        # datetimes on Windows; one corrupt line must not 500 the whole ray.
-        return None
-
-
 def _curated(kind: str, rec: dict[str, Any], *, depth: int) -> bool:
     if kind in _NEVER_KINDS:
         return False
@@ -218,7 +205,7 @@ def _read_curated(
             if not isinstance(kind, str) or kind not in _VALID_KINDS:
                 continue
 
-            own = _epoch(rec.get("timestamp"))
+            own = epoch_seconds(rec.get("timestamp"))
             if own is None:
                 if last_epoch is None:
                     # No usable time yet. A fabricated epoch would sort below every

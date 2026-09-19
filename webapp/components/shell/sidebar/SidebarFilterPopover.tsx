@@ -1,6 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
-import { Popover } from "@/components/ui";
+import { Icon, Popover, SegmentedControl, type Segment } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import type { LifecycleFilter } from "@/lib/api";
 
@@ -19,22 +19,25 @@ interface Props {
 
 // Two-slider "adjust filters" glyph (currentColor → tints with theme + state).
 const FILTER_GLYPH = (
-  <svg
-    viewBox="0 0 24 24"
-    width="15"
-    height="15"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.7"
-    strokeLinecap="round"
-    aria-hidden="true"
-  >
+  <Icon size={15} strokeWidth={1.7}>
     <line x1="8" y1="4" x2="8" y2="20" />
     <line x1="16" y1="4" x2="16" y2="20" />
     <circle cx="8" cy="9" r="2.3" fill="var(--color-background-secondary)" />
     <circle cx="16" cy="15" r="2.3" fill="var(--color-background-secondary)" />
-  </svg>
+  </Icon>
 );
+
+// The two lifecycles a campaign can be listed under. Deleted is not a third: the tree is gone,
+// so there is nothing to list.
+const LIFECYCLE_SEGMENTS: readonly Segment<LifecycleFilter>[] = [
+  { value: "active", label: "Active" },
+  {
+    value: "archived",
+    label: "Archived",
+    title:
+      "Show archived campaigns. Deleted campaigns are hidden — read them by id from the file tree.",
+  },
+];
 
 export function SidebarFilterPopover({
   lifecycleFilter,
@@ -93,31 +96,13 @@ function FilterPanel({
 
   return (
     <div className="sidebar-filter-panel" role="dialog" aria-label="Filter campaigns">
-      <div
-        className="unit-library-tabs"
-        role="tablist"
-        aria-label="Campaign lifecycle"
-      >
-        <button
-          type="button"
-          role="tab"
-          className={cx("unit-library-tab", lifecycleFilter === "active" && "active")}
-          onClick={() => setLifecycleFilter("active")}
-          aria-selected={lifecycleFilter === "active"}
-        >
-          Active
-        </button>
-        <button
-          type="button"
-          role="tab"
-          className={cx("unit-library-tab", lifecycleFilter === "archived" && "active")}
-          onClick={() => setLifecycleFilter("archived")}
-          aria-selected={lifecycleFilter === "archived"}
-          title="Show archived campaigns. Deleted campaigns are hidden — read them by id from the file tree."
-        >
-          Archived
-        </button>
-      </div>
+      <SegmentedControl
+        className="sidebar-filter-lifecycle"
+        options={LIFECYCLE_SEGMENTS}
+        value={lifecycleFilter}
+        onChange={setLifecycleFilter}
+        ariaLabel="Campaign lifecycle"
+      />
 
       {datasetNames.length > 1 && (
         <>

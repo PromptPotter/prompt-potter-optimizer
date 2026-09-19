@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.jobs.mint import CyclePlan
     from promptpotter.application.scoring.evaluators import Evaluator
+    from promptpotter.application.scoring.query_loop import FlightGauge
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.validators import StopRule
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -167,19 +168,22 @@ class Session:
     skip_consume: Callable[[], None] | None = None
     # `sample_lookahead_check`: the depth in force — how many samples the walk holds in flight, 1
     # when unset. Same read-and-consume pair as skip, spent a phase later — by the ROUND that
-    # scored under it, which is the one control loop every armable walk sits inside.
+    # scored under it, which is the one control loop every armable walk sits inside. An `auto`
+    # arming is left standing by the spend.
     sample_lookahead_check: Callable[[], int] | None = None
     sample_lookahead_consume: Callable[[], None] | None = None
+    # What the scoring phase has out and what its stop rules allow, summed over every walk and
+    # published to the ledger. ``None`` outside a run, where there is nobody to show it to.
+    flight: FlightGauge | None = None
     # `budget_tripped` returns the `StopReason` once a spend/token ceiling is met, else None.
     # Bound at the runner seam to the SAME `BudgetGate.tripped` the round loop consults — one
     # object, so the two cadences can't disagree and a mid-flight ceiling change moves both.
-    # The round-boundary check alone let a whole round of scoring run past the ceiling; for an
-    # L4 outer round that is `n_candidates x n_samples` inner CAMPAIGNS of overshoot.
+    # Whether a call may be SENT is the spend book's to answer, at the send; this is the stop a
+    # phase reads between samples once a ceiling is reached.
     budget_tripped: Callable[[], StopReason | None] | None = None
-    # What has been spent so far, for the panel that tells an optimizer how much run is left.
-    # A callable off the same rollup `budget_tripped` reads, bound at the same seam, because the
-    # amount lives only on the dashboard projection and `application/optimization/` must not
-    # import one. A FLOOR while unpriced tokens are outstanding.
+    # What has been spent so far, for the panel that tells an optimizer how much run is left —
+    # the spend book's own total, bound at the same seam. A FLOOR while unpriced tokens are
+    # outstanding.
     spend_used: Callable[[], float] | None = None
 
 

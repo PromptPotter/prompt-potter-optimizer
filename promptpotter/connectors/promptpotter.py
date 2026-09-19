@@ -13,7 +13,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     optimizer_resolved_schemas,
 )
 from promptpotter.application.runner.inner import ruler
-from promptpotter.application.runner.inner.spawn import run_inner_cycle
+from promptpotter.application.runner.inner.spawn import inner_cell_envelope_s, run_inner_cycle
 from promptpotter.application.scoring import metrics, selection
 from promptpotter.config.prompt_blocks import block_library
 from promptpotter.connectors.protocol import Connector, InProcessWorkload
@@ -39,9 +39,9 @@ logger = logging.getLogger(__name__)
 
 # Most inner campaigns the operator may set running at once — a RESOURCE ceiling (peak RSS and
 # one shared provider key), never a scientific one: rows absorb in walk order at any depth.
-# The true peak only because `run_query_loop` pops and AWAITS a slot before `_absorb` runs, so a
-# PoBB backfill (itself a whole inner campaign) replaces the finished cell rather than adding to
-# it. Move `on_sample_pre_check` above the pop and this constant understates the peak.
+# The true peak only because the ROUND counts a PoBB backfill — itself a whole inner campaign —
+# against the same depth as a cell, and a cancelled call until it has wound down
+# (`query_loop.py::run_walks`). Stop counting one and this constant understates the peak.
 MAX_CELLS_IN_FLIGHT = 4
 
 
@@ -236,6 +236,12 @@ async def _in_process_run(
     return await run_inner_cycle(query, payload)
 
 
+def _cell_envelope_s(query: str, pipeline_params: dict[str, Any] | None) -> float:
+    """Through this connector's OWN adapter, so the envelope and the run that spends it read one
+    payload — the cell's identity, and therefore its banked depth, is in the overrides."""
+    return inner_cell_envelope_s(query, promptpotter_wire_adapter(query, pipeline_params))
+
+
 CONNECTOR = Connector(
     name="promptpotter",
     execution="in_process",
@@ -246,6 +252,13 @@ CONNECTOR = Connector(
     # One sample is a whole inner campaign — tens of minutes, almost all of it waiting on the
     # provider — so the ceiling here is what bounds a press, and it is the only thing that does.
     max_cells_in_flight=MAX_CELLS_IN_FLIGHT,
+    # The inner campaign's calls go through this process's clients, each admitted on its own; and
+    # cancelling one stops the calls it has not made yet.
+    holds_own_sends=True,
+    cancel_stops_billing=True,
+    # A whole campaign runs per cell, so the awaits inside one are unbounded in sum: without this
+    # a throttle storm stretches one cell across the round that was measuring it.
+    cell_envelope_s=_cell_envelope_s,
     measured_unit="cell",
     # Every key `run_inner_cycle` puts on the wire that the outer formula reads. Verified against
     # the dataset's declared observation_mappings at init.

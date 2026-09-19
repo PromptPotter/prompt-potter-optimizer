@@ -18,8 +18,6 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.pipeline_overlay import (
     allowed_values_from_narrowing,
     node_config_items,
-    overlay_sets_model_outside_allowed,
-    permitted_models_from_narrowing,
 )
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.results import RoundResult
@@ -52,8 +50,6 @@ __all__ = [
     "cleanup_stub_fork_if_empty",
     "declare_steered_values",
     "mint_operator_fork",
-    "permitted_models",
-    "steer_is_babysit",
 ]
 
 
@@ -298,27 +294,6 @@ def cleanup_stub_fork_if_empty(
     return deleted, reason
 
 
-def steer_is_babysit(stores: Stores, campaign_id: str, overlay: dict[str, Any] | None) -> bool:
-    """Does *overlay* steer a node OUTSIDE the models that node permits — the ADR-0005 §4 babysit
-    action, a distinct capability above the `campaign.run` fork?
-
-    ONE read of the sanction, off the campaign manifest where it is FROZEN. A session's resolved
-    config is the wrong list — it has already been through the inherited overlay and the cycle
-    seed, so a seeded fork answers differently there than on the wire for the same steer.
-    """
-
-    return overlay_sets_model_outside_allowed(overlay, permitted_models(stores, campaign_id))
-
-
-def permitted_models(stores: Stores, campaign_id: str) -> dict[str, list[str]]:
-    """The origin's frozen permitted model set, per NODE — for the gate above and for any surface
-    that has to NAME them in its refusal."""
-
-    campaign = stores.campaigns.load_campaign(campaign_id)
-    narrowing = campaign.config.get("optimizer_narrowing") if campaign else None
-    return permitted_models_from_narrowing(narrowing)
-
-
 def declare_steered_values(seed: CycleSeed, narrowing: Mapping[str, Any] | None) -> CycleSeed:
     """A steered value on an enumerable axis joins the fork's OWN permitted set. Without it the
     fork runs ``model=X`` beside a set that excludes X, and L1 is offered a menu the running value
@@ -328,9 +303,9 @@ def declare_steered_values(seed: CycleSeed, narrowing: Mapping[str, Any] | None)
     An axis the caller's seed already declares is theirs and stays.
 
     Applied at the MINT, so the terminal and the browser cannot mint two different forks from the
-    same steer. It widens the FORK's search space and nothing else: `steer_is_babysit` reads the
-    campaign manifest, never a cycle seed, so a branch steered outside the origin's sanction stays
-    babysat in every fork below it."""
+    same steer. It widens the FORK's search space and nothing else: `steers_disallowed_model`
+    reads the campaign manifest, never a cycle seed, so a branch steered outside the origin's
+    sanction stays babysat in every fork below it."""
 
     origin = allowed_values_from_narrowing(narrowing)
     declared = dict(seed.optimizer_narrowing)

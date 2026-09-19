@@ -1,6 +1,7 @@
 "use client";
 import { useMemo, useRef, type CSSProperties } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { pressable } from "@/components/ui";
 import { useHardSamples } from "@/lib/hard-samples";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { MeasHeatCell } from "./MeasHeatCell";
@@ -247,7 +248,7 @@ export function HardSamplesTable({ perSample }: Props) {
                       !col.numeric &&
                       col.align === "left" &&
                       Boolean(cell.raw);
-                    const onClick = folded
+                    const activate = folded
                       ? () => toggleFold(col.id)
                       : isExpandable
                         ? () =>
@@ -256,12 +257,12 @@ export function HardSamplesTable({ perSample }: Props) {
                               sampleId: item.sample_id,
                               text: String(cell.raw),
                             })
-                        : undefined;
+                        : null;
                     // A clickable cell is keyboard-operable: folded cells
                     // unfold, expandable text cells open the read-out
                     // popover. Virtualization bounds this to visible rows,
                     // so the tab order never spans the whole roster.
-                    const interactive = onClick != null;
+                    const interactive = activate != null;
                     return (
                       <div
                         key={col.id}
@@ -270,20 +271,8 @@ export function HardSamplesTable({ perSample }: Props) {
                         data-running={isRunning ? "true" : undefined}
                         style={cell.style}
                         title={folded ? undefined : cell.title}
-                        role={interactive ? "button" : undefined}
-                        tabIndex={interactive ? 0 : undefined}
                         aria-label={interactive && folded ? "Unfold column" : undefined}
-                        onClick={onClick}
-                        onKeyDown={
-                          interactive
-                            ? (e) => {
-                                if (e.key === "Enter" || e.key === " ") {
-                                  e.preventDefault();
-                                  onClick();
-                                }
-                              }
-                            : undefined
-                        }
+                        {...(activate ? pressable(activate) : {})}
                       >
                         {folded ? "" : isMeas ? (
                           ordCols.length === 0 && !isRunning ? (

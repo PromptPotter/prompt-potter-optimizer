@@ -14,7 +14,6 @@ from promptpotter.infrastructure.store.layout import SHARED_CACHE_DIRS
 
 
 def _add_global_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--session", default=None, help="Session ID (default: active)")
     parser.add_argument(
         "--tenant",
         default=None,
@@ -140,6 +139,17 @@ def _add_new_args(p_new: argparse.ArgumentParser) -> None:
 
 
 def _add_resume_args(p_resume: argparse.ArgumentParser) -> None:
+    p_resume.add_argument(
+        "--campaign",
+        default="",
+        help="Campaign id, 6-hex suffix, or unambiguous prefix (default: the active one). Its "
+        "cycle's own session is resumed; the active pointer is not consulted.",
+    )
+    p_resume.add_argument(
+        "--cycle",
+        default="",
+        help="Cycle id (default: the active one, or the named campaign's only cycle).",
+    )
     p_resume.add_argument(
         "--from",
         dest="resume_from_round",
@@ -426,9 +436,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_compact = sub.add_parser(
         "compact-archive",
-        help="Move the fields nothing reads out of candidate measurement rows into a gzip cold "
-        "store beside them (`compact`), put them back (`restore`), or delete the store "
-        "(`purge-cold`). A measurement row is paid LLM spend, so `compact` never drops a field — "
+        help="Count what the archive holds (`inventory`), move the fields nothing reads out of "
+        "candidate measurement rows into a gzip cold store beside them (`compact`), put them back "
+        "(`restore`), or delete the store (`purge-cold`). `inventory` writes nothing and refuses "
+        "nothing: runs, cells, bytes and replay rate by dataset, run-label family and age, plus "
+        "the index rows carrying no detail file, which is what makes every other count an upper "
+        "bound. It is what a reclaim is sized against, so it is taken BEFORE a bulk delete — the "
+        "delete destroys its own evidence. "
+        "A measurement row is paid LLM spend, so `compact` never drops a field — "
         "it moves `hit`/`scored`/`objective` plus pipeline_data's `reasoning_trace`, "
         "`result_ranking`, `final_ranking` and `total_time`, and stamps the run header with what "
         "left. `origin` and `round_parent` runs are never touched: they serve the overwhelming "
@@ -437,7 +452,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_compact.add_argument(
         "mode",
-        choices=["compact", "restore", "purge-cold"],
+        choices=["inventory", "compact", "restore", "purge-cold"],
         help="Which step to run.",
     )
     p_compact.add_argument(
@@ -445,7 +460,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Scope to one dataset (default: every dataset).",
     )
-    p_compact.add_argument("--apply", action="store_true", help="Write (default: report only).")
+    p_compact.add_argument(
+        "--apply",
+        action="store_true",
+        help="Write (default: report only). `inventory` never writes and ignores it.",
+    )
 
     p_restamp = sub.add_parser(
         "restamp",
@@ -725,6 +744,13 @@ def build_parser() -> argparse.ArgumentParser:
         "Ctrl+C; this reaches the ones that cannot, such as a browser launch behind a full box.",
     )
     p_cancel_q.add_argument("job_id", help="The queued job id, as served by /machine-status.")
+
+    p_concurrency = sub.add_parser(
+        "set-concurrent-cycles",
+        help="How many campaigns this account may hold at once, queued launches included. At most "
+        "the machine's MACHINE_RUN_CAPACITY; an account on the host's key cannot move its own.",
+    )
+    p_concurrency.add_argument("limit", type=int, help="The new limit (1 or more).")
 
     return parser
 

@@ -9,15 +9,11 @@ from typing import Literal
 from promptpotter.application.optimization.validators.behavior_base import CheckResult
 from promptpotter.domain.results import L1_PARSE_FAILURE_CHARGED, RoundResult
 
-__all__ = ["HEADLINE_ACC", "L1Stats", "compute_l1_stats", "first_round_at_threshold"]
+__all__ = ["L1Stats", "compute_l1_stats"]
 
 # The four the verdict can take, typed rather than described: the L4 outer loop reads this, so an
 # arm nothing emits is a measurement nobody can get and one nothing checks is a typo that ships.
 RoundOneVerdict = Literal["healthy", "degraded", "broken", "unknown"]
-
-
-# Headline-accuracy threshold for ``rounds_to_95``.
-HEADLINE_ACC = 0.95
 
 
 @dataclass(frozen=True)
@@ -25,7 +21,6 @@ class L1Stats:
     """``None`` on any rate means NOT MEASURED and renders as a dash. Never 0.0 (nothing yielded) or 1.0 (all passed): a
     cycle with no rounds did not fail to yield, and a rate over zero checks is not a clean bill of health."""
 
-    rounds_to_95: int | None
     yield_rate: float | None
     top_lift_mean: float | None
     behavior_pass_rate: float | None
@@ -44,7 +39,6 @@ def compute_l1_stats(
     behavior_results: list[list[CheckResult]],
     l2_behavior_results: list[list[CheckResult]] | None = None,
 ) -> L1Stats:
-    rounds_to_95 = first_round_at_threshold(rounds, HEADLINE_ACC)
     yield_rate = _mean_yield_rate(rounds)
     top_lifts = _top_lifts(rounds, origin_composite_fitness)
     top_lift_mean = sum(top_lifts) / len(top_lifts) if top_lifts else None
@@ -57,7 +51,6 @@ def compute_l1_stats(
         round_1_behavior=behavior_results[0] if behavior_results else [],
     )
     return L1Stats(
-        rounds_to_95=rounds_to_95,
         yield_rate=yield_rate,
         top_lift_mean=top_lift_mean,
         behavior_pass_rate=behavior_pass_rate,
@@ -98,15 +91,6 @@ def _compute_round_1_verdict(
 
 
 # --- aggregation helpers ---------------------------------------------------
-
-
-def first_round_at_threshold(rounds: list[RoundResult], threshold: float) -> int | None:
-    """First round whose accuracy clears *threshold* — ``rounds_to_95``'s one
-    definition, shared with the ``index.json::final`` writer. A round that measured nothing
-    readable clears nothing."""
-    return next(
-        (r.round for r in rounds if r.accuracy is not None and r.accuracy >= threshold), None
-    )
 
 
 def _mean_yield_rate(rounds: list[RoundResult]) -> float | None:

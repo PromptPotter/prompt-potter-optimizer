@@ -2,18 +2,21 @@
 // The footer search icon is an INTENTIONAL placeholder previewing the analytics-search surface —
 // not scaffolding, and out of scope for any "hide non-functional controls" sweep. Peers:
 // `chat/ChatPane.tsx`, `account/AccountModal.tsx`.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useWorkspace } from "@/lib/workspace";
 import { useAuth } from "@/lib/auth-context";
 import { postLogout } from "@/lib/api";
+import { useCommand } from "@/lib/hooks/useCommand";
 import { BRAND } from "@/lib/brand";
 import { TERMS } from "@/lib/terms";
+import { Term } from "@/components/ui";
+import { PotterMark } from "@/components/brand/PotterMark";
 import { encodeCyclePath, rootCycleId, type CyclePath } from "@/lib/ids";
 import { useNodeToggle } from "@/lib/view-memory";
 import { applyTheme, readStoredTheme } from "@/lib/theme";
-import { AccountModal } from "@/components/account/AccountModal";
-import { buildForest, nodeKey } from "./sidebar/grouping";
+import { buildForest, nodeKey } from "@/lib/derivations";
 import type { TreeCtx } from "./sidebar/ForestRows";
+import { AccountSpend } from "./sidebar/AccountSpend";
 import { SidebarContent } from "./SidebarContent";
 
 interface Props {
@@ -74,11 +77,7 @@ export function Sidebar({
     activeCampaignId,
     lifecycleFilter,
     setLifecycleFilter,
-    // The account modal's open-ness is on the ADDRESS (`#/account/<pane>`), not local
-    // state — the modal is a view like any other, so it is linkable and survives a reload.
-    accountPane,
     openAccount,
-    closeAccount,
   } = useWorkspace();
   // Expand/collapse, remembered PER CAMPAIGN (`lib/view-memory.tsx`) — the campaign a node
   // belongs to is read off its own address, so nothing here has to carry one.
@@ -91,16 +90,12 @@ export function Sidebar({
   // out, anon gets Log in / Sign up. It also drives the campaign-list resting
   // state (anon → sign-in prompt, not perpetual loading).
   const { status, openAuthPrompt } = useAuth();
-  const [signingOut, setSigningOut] = useState(false);
-  const handleSignOut = useCallback(async () => {
-    setSigningOut(true);
-    try {
-      await postLogout();
+  // Nothing polls the session; the navigation below is the read-back.
+  const logout = useCommand<"logout">("sidebar-session", { revalidate: false });
+  const handleSignOut = () =>
+    void logout.run("logout", postLogout, () => {
       window.location.href = "/login/";
-    } catch {
-      setSigningOut(false);
-    }
-  }, []);
+    });
 
   // Filter BEFORE grouping: the dataset filter drops runs, and an origin's run
   // count is what decides whether its tier renders at all. Grouping first would
@@ -148,9 +143,6 @@ export function Sidebar({
     nodes.markAutoExpanded(activeCampaignId, activeCycleId, focusKey);
   }, [focusKey, activeCampaignId, activeCycleId, nodes]);
 
-  // Everything the tree needs, at any depth. The pointer here is the TOP-LEVEL
-  // store's; each inner forest overrides it with its own (a sandbox's live loop
-  // is not the workspace's active session).
   const ctx: TreeCtx = useMemo(
     () => ({
       isNodeOpen: nodes.isOpen,
@@ -158,10 +150,8 @@ export function Sidebar({
       viewedPath,
       viewedCandidateId,
       selectCyclePath: onSelectPath,
-      activeCampaignId,
-      activeCycleId,
     }),
-    [nodes, viewedPath, viewedCandidateId, onSelectPath, activeCampaignId, activeCycleId],
+    [nodes, viewedPath, viewedCandidateId, onSelectPath],
   );
 
   // Wait for BOTH the cycle list and the campaign list for the CURRENT
@@ -184,16 +174,13 @@ export function Sidebar({
       <div className="brand">
         <div className="brand-lockup">
           <div className="brand-mark">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-              <rect x="1" y="1" width="4" height="4" rx="1" fill="white" />
-              <rect x="7" y="1" width="4" height="4" rx="1" fill="white" opacity=".7" />
-              <rect x="1" y="7" width="4" height="4" rx="1" fill="white" opacity=".7" />
-              <rect x="7" y="7" width="4" height="4" rx="1" fill="white" opacity=".4" />
-            </svg>
+            <PotterMark size={12} />
           </div>
           <span className="brand-name">PromptPotter</span>
         </div>
-        <div className="brand-sub" title={TERMS.brand_live_preview}>LIVE PREVIEW</div>
+        <div className="brand-sub">
+          <Term content={TERMS.brand_live_preview}>LIVE PREVIEW</Term>
+        </div>
       </div>
       <div className="sidebar-primary">
         <button
@@ -216,6 +203,7 @@ export function Sidebar({
         origins={origins}
         ctx={ctx}
       />
+      <AccountSpend />
       <div className="sidebar-footer">
         <div className="sidebar-footer-chrome">
           {/* Search — the disabled placeholder this file's header refuses to sweep.
@@ -292,13 +280,12 @@ export function Sidebar({
             type="button"
             className="sidebar-footer-item"
             onClick={handleSignOut}
-            disabled={signingOut}
+            disabled={logout.pending !== null}
           >
-            {signingOut ? "Signing out…" : "Log out"}
+            {logout.pending !== null ? "Signing out…" : "Log out"}
           </button>
         )}
       </div>
-      <AccountModal open={accountPane != null} onClose={closeAccount} />
     </nav>
   );
 }

@@ -36,7 +36,6 @@ from promptpotter.domain.scoring import (
 )
 from promptpotter.domain.spend import TOKEN_KIND_BUCKET, SpendBucket, SpendRollup
 from promptpotter.infrastructure.ledger import open_with_history
-from promptpotter.infrastructure.llm.pricing import compute_usd
 from promptpotter.infrastructure.projections.audit_trail import (
     audit_rounds_dir,
     build_node_block,
@@ -73,6 +72,7 @@ from promptpotter.infrastructure.runtime_flags import (
     effective_lookahead,
     read_sample_lookahead,
     read_spend_caps,
+    sample_lookahead_auto,
 )
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import (
@@ -242,6 +242,10 @@ class LiveDashboardProjection(Projection):
         # sample_id -> (query_text, candidate_idx, cand_total, depth)
         # The depth it LAUNCHED at is what separates look-ahead cost from a plain failure.
         self._open_samples: dict[int, tuple[str, int, int, int]] = {}
+        # The last `flight` reading (out, allowed, most); all zero while nothing is scoring. And the
+        # call a decision waits on, as (sample_id, launched at).
+        self._flight: tuple[int, int, int] = (0, 0, 0)
+        self._waiting: tuple[int, float] | None = None
         # Sticky LLM-call mirror for ``current_round.nodes`` — owned here, not on the
         # audit-trail, which records the same event independently into its round flush.
         self._sticky_llm_calls: dict[str, dict[str, Any]] = dict(initial_llm_nodes or {})
@@ -664,6 +668,18 @@ class LiveDashboardProjection(Projection):
             self._buffer.update_p_best(ci, ct, current_id, n_samples, p_best)
             # Mirrored into the shared core so LiveDisplay sees the same round-wide state.
             apply_p_best_update(self._core, current_id, n_samples, p_best)
+        elif ev == "flight":
+            self._flight = (
+                int(payload.get("out") or 0),
+                int(payload.get("allowed") or 0),
+                int(payload.get("most") or 0),
+            )
+            waiting = payload.get("waiting")
+            self._waiting = (
+                (int(waiting["sample_id"]), float(waiting["since"]))
+                if isinstance(waiting, dict)
+                else None
+            )
         elif ev == "pobb_backfill":
             self._append_backfill(
                 int(record.round or 0),
@@ -765,17 +781,9 @@ class LiveDashboardProjection(Projection):
         """EVERY call lands in ``incurred``; only one that reached the wire lands in the bill. A
         cached call spent nothing, so billing it would halt a run over money it never cost.
 
-        Banked TWICE from ONE pricing — into the cycle's running total and into the round the call
-        stamped itself with — so the two sides stay reconcilable."""
-        usd = compute_usd(
-            record.model,
-            int(record.input_tokens),
-            int(record.output_tokens),
-            override_usd=record.cost_usd,
-            provider=record.provider,
-            cache_read_tokens=int(record.cache_read_tokens),
-            cache_write_tokens=int(record.cache_write_tokens),
-        )
+        Banked TWICE from ONE price, the one the record carries — into the cycle's running total and
+        into the round the call stamped itself with — so the two sides stay reconcilable."""
+        usd = record.cost_usd
         _bank_call(self.state.spend, record, usd)
         # A call carrying no round ran before any round closed (init, the origin score); banking it
         # at 0 rather than dropping it is what keeps the two sides reconcilable.
@@ -987,6 +995,21 @@ class LiveDashboardProjection(Projection):
         s.sample_lookahead = effective_lookahead(
             read_sample_lookahead(self.cycle_dir), s.max_cells_in_flight
         )
+        s.sample_lookahead_auto = sample_lookahead_auto(self.cycle_dir)
+        # Nothing scoring: the most the NEXT round could hold — every candidate's cells and one
+        # catch-up per cell — so a press can be sized before the round it will apply to begins.
+        s.in_flight, s.lookahead_allowed, s.lookahead_most = (
+            self._flight if any(self._flight) else (0, 0, (s.n_variants + 1) * s.sp_budget_round)
+        )
+        # Named off the launch that opened the cell, the one record that says whose it is.
+        opened = self._open_samples.get(self._waiting[0]) if self._waiting else None
+        if self._waiting is None or opened is None:
+            s.waiting_on, s.waiting_since = None, None
+        else:
+            ci = opened[1]
+            owner = "parent" if ci == NO_ROUND_SLOT else candidate_label(s.round, ci)
+            s.waiting_on = f"{owner} · sample {self._waiting[0]}"
+            s.waiting_since = self._waiting[1]
         # Both inputs are already served and already settled by here — the fold is one division,
         # and it is here so that no reader performs it against a different poll of either.
         used = s.spend.total_used_usd

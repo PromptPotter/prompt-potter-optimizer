@@ -83,15 +83,6 @@ const metricInk =
   (ctx: SeriesCtx): string =>
     metricInkToken(m, ctx.electedMetric);
 
-// Every token the table can resolve to, so the stylesheet check needs no campaign.
-export const SERIES_INK_TOKENS = [
-  "--series-elected",
-  "--series-reading",
-  "--series-counterfactual",
-  "--color-overlap",
-  "--color-cache",
-] as const;
-
 // The set drifts as the adopted line grows and changes outright when the operator pins one, so
 // the legend reads its size off the data.
 function basisN(ctx: SeriesCtx): number {
@@ -266,6 +257,10 @@ export interface WhiskerBand {
 // θ arrives as a standard error, so it is widened HERE rather than drawn raw — two whiskers drawn
 // alike have to mean alike, and one SE beside a 95% interval is the same picture for a third of
 // the coverage.
+// The QUANTILE is Python's choice (`shared/statistics.py::mean_ci_t`: t and z are not
+// interchangeable over a handful of cells), and z is right only because θ's SE is the Rasch fit's
+// posterior SE rather than a mean over cells. That reasoning belongs on a served
+// `theta_ci_lo/hi`; it stays here while the band is only ever DRAWN — the tooltip prints `se`.
 const Z95 = 1.96;
 
 // EVERY band the chart draws — one per channel that has an interval and is currently showing.

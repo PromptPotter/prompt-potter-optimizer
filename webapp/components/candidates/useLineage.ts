@@ -20,7 +20,7 @@ import {
   type HeadlineMetric,
 } from "@/lib/derivations";
 import { encodeCyclePath, rootCycleId, type CyclePath } from "@/lib/ids";
-import { bumpRevalidation } from "@/lib/revalidate";
+import { useCommand } from "@/lib/hooks/useCommand";
 import { useViewedLineage } from "@/lib/lineage";
 import { useViewMemory } from "@/lib/view-memory";
 import { setCandidatesState, useCandidatesState } from "./candidates-store";
@@ -212,43 +212,32 @@ export function useLineage({
   );
 
   // Empty-stub cleanup mutation + its modal state.
+  const cmd = useCommand<"cleanup-empty-cycles">("lineage-cleanup");
   const [cleanupOpen, setCleanupOpen] = useState(false);
-  const [cleanupError, setCleanupError] = useState<string | null>(null);
-  const [cleaning, setCleaning] = useState(false);
   const [cleanupAcked, setCleanupAcked] = useState(false);
-
-  const confirmCleanup = useCallback(async () => {
-    const rootId = tree?.id;
-    if (!campaignId || !rootId) return;
-    setCleaning(true);
-    setCleanupError(null);
-    try {
-      await postCleanupEmpty(campaignId, rootId);
-      setCleanupAcked(true);
-      setCleanupOpen(false);
-      bumpRevalidation();
-    } catch (err) {
-      setCleanupError((err as Error).message);
-    } finally {
-      setCleaning(false);
-    }
-  }, [campaignId, tree]);
 
   const cleanup: LineageCleanup = {
     open: cleanupOpen,
-    error: cleanupError,
-    cleaning,
+    error: cmd.failure?.message ?? null,
+    cleaning: cmd.pending !== null,
     acked: cleanupAcked,
     stubCount,
-    request: useCallback(() => {
-      setCleanupError(null);
+    request: () => {
+      cmd.clear();
       setCleanupOpen(true);
-    }, []),
-    cancel: useCallback(() => {
+    },
+    cancel: () => {
       setCleanupOpen(false);
-      setCleanupError(null);
-    }, []),
-    confirm: confirmCleanup,
+      cmd.clear();
+    },
+    confirm: async () => {
+      const rootId = tree?.id;
+      if (!campaignId || !rootId) return;
+      await cmd.run("cleanup-empty-cycles", () => postCleanupEmpty(campaignId, rootId), () => {
+        setCleanupAcked(true);
+        setCleanupOpen(false);
+      });
+    },
   };
 
   return {

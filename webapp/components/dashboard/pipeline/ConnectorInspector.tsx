@@ -58,8 +58,9 @@ export function ConnectorInspector({ view }: Props) {
           : `unreachable${health.detail ? ` · ${health.detail}` : ""}`;
   const interior = interiorNodes(pipelineView);
 
+  // A div host, not a span: the popover below is flow content, which no inline element may hold.
   return (
-    <span className={cx("connector", stateCls)}>
+    <div className={cx("connector", stateCls)}>
       <button
         type="button"
         className="connector-dot"
@@ -142,6 +143,6 @@ export function ConnectorInspector({ view }: Props) {
         )}
         <div className="connector-pop-foot">{footText}</div>
       </div>
-    </span>
+    </div>
   );
 }

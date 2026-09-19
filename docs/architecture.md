@@ -47,9 +47,9 @@ target backend's `pipeline.yaml` — so accumulated `OptSearchPoint` data is the
 One round = generate → score → critique.
 
 - `l1_generate` produces N candidate searchpoints from the parent.
-- `l1_score` runs each candidate against the dataset via the **sole
-  scoring entry point** `score_search_point()`
-  (`application/scoring/search_point_scorer.py::score_search_point`).
+- `l1_score` walks the candidates against the dataset through the **sole
+  scoring gateway** (`application/scoring/search_point_scorer.py`):
+  `open_walk` → `run_walks` → `close_walk`.
 - `l1_critique` reads the round's outcomes and writes a structured
   critique. The critique flows into next round's `l1_generate`.
 
@@ -64,16 +64,18 @@ Both are first-class:
   could still beat the leader. Otherwise it is eliminated and we
   move to the next candidate in the round. Concentrates query
   budget on candidates that might actually win.
-- **Hard-sample ordering (Rasch sort).** Samples are scored in order
-  of decreasing signal-to-noise — the most discriminating samples
-  first. Separates winners from losers with the fewest queries.
-  The same sort drives the operator's hard-sample leaderboard for
-  free, since "most discriminating" is exactly what an operator
-  wants to inspect.
+- **Hard-sample ordering (`build_round_order`).** ONE static order per
+  round, shared by every candidate: a three-strata partition on the
+  PARENT's per-sample grades — misses by ascending δ, hits by
+  descending, cells the parent never answered nearest the ruler's
+  centre — with every 4th slot a hit, the regression probe. Separates
+  winners from losers with the fewest queries. Owned by
+  [`methods/verdict-resolution.md`](methods/verdict-resolution.md)
+  § The round order.
 
 #### Three single-place-to-extend mechanisms
 
-Exactly one entry for each shape: **scoring** goes through `score_search_point()`,
+Exactly one entry for each shape: **scoring** goes through the scoring gateway,
 **persistence** through `CycleEventLog.append`, **prompt-fill** through the `injection_table()`
 registry.
 
@@ -527,7 +529,8 @@ scopes from one query path: **campaign** (`campaign_id=…`),
 **dataset** (`dataset_name=…`), **workspace** (no filter). The
 archive is the Workspace datastore — a peer of `campaigns/`, never
 siloed into a campaign dir. **Cross-cycle, cross-session,
-cross-tenant.**
+cross-campaign, and shared into an L4 sandbox — but rooted per
+tenant** (`build_stores`: `shared_root / tenant_id`).
 
 The on-disk format is human-readable
 (operator can `cat` a row); programmatic reads go through two
@@ -796,10 +799,11 @@ the PR description.
   test harness). Audit during cleanup §1 for accumulated cruft, but
   don't delete the underlying scripts without operator confirmation.
 
-- **`score_search_point()` gateway**
-  (`application/scoring/search_point_scorer.py::score_search_point`) — sole scoring
-  ingress. Sibling to `CycleEventLog.append` and `injection_table()`. Don't
-  add a second scoring entry path "for convenience."
+- **The scoring gateway** (`application/scoring/search_point_scorer.py`) — sole
+  scoring ingress: `open_walk` → `run_walks` → `close_walk`, with
+  `score_search_point()` the form for a search point scored alone. Sibling to
+  `CycleEventLog.append` and `injection_table()`. Don't add a second scoring
+  entry path "for convenience."
 
 - **Composite-fitness resolution chain** — **fitness is never one fixed number;
   always ask "under which formula?"** Formula-relative (the **active** formula
@@ -845,17 +849,22 @@ the PR description.
     may raise as well as lower, which is the only way a budget-halted cycle is
     ever continued. Bounding that one downward too was one guard doing two jobs,
     and it silently destroyed every legitimate raise.
-  - **Only the cycle tier halts a run** (`termination.py::BudgetGate`, both units,
-    whichever trips first); the account tier admits or refuses and never
-    interrupts a campaign in flight.
-  - **An L4 inner cycle needs no fourth source** — it forwards its spend onto the
-    OUTER cycle's ledger as a `backend` `TokenUsageRecord`
-    (`inner/spawn.py::_forward_inner_spend`), so the account walk must not reach
-    `.inner/`: a sandbox is a SIBLING of the tenant tree, and summing it counts
-    the forwarded half twice. Spend is summed one way
-    (`store/account_spend.py::account_ledgers`) and priced one way
-    (`infrastructure/llm/pricing.py::compute_usd`, which returns `None` for a
-    call it cannot price rather than `0.0`).
+  - **Only the cycle tier halts a run, and it halts one BEFORE a call is sent**:
+    its spend book (`infrastructure/llm/spend_book.py`) admits every paid call
+    at the most it may cost, in both units, beside everything still out, and a
+    call that ends without reporting is charged that whole bound. A ceiling
+    read after the fact is a guess about the calls in flight.
+    `termination.py::BudgetGate` reads the same book at the round boundary; the
+    account tier admits or refuses and never interrupts a campaign in flight.
+  - **An L4 inner cycle needs no fourth source** — it spends under its ROOT's
+    book, and each call is carried onto the OUTER cycle's ledger as it settles
+    (`SpendBook.mirror`), its own row flagged `mirrored`. So the account walk
+    must not reach `.inner/`: a sandbox is a SIBLING of the tenant tree, and
+    summing it counts the carried half twice. Spend is summed one way
+    (`store/account_spend.py::account_ledgers`) and priced once, when it is
+    recorded (`infrastructure/llm/telemetry.py::emit_token_usage`, via
+    `pricing.py::compute_usd`, which returns `None` for a call it cannot price
+    rather than `0.0`).
 
 - **`observed_node()` context manager** — the trace-emission seam
   every optimizer LLM call wraps. Cutting it removes Langfuse-shape

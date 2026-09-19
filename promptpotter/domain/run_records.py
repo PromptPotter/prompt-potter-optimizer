@@ -35,7 +35,9 @@ __all__ = [
     "RoundWarningKind",
     "RoundWarningRecord",
     "SnapshotRecord",
+    "SpendHoldRecord",
     "TokenUsageRecord",
+    "WallClock",
     "view_fields",
 ]
 
@@ -165,7 +167,40 @@ class TokenUsageRecord(StrictModel):
     makes the next read cheap, so all writes and no reads is paying for a prefix nothing collects."""
     duration_s: float = 0.0
     cost_usd: float | None = None
+    """The call's price, stamped once when it is recorded (``telemetry.py::emit_token_usage``) and
+    only ever summed after — ``None`` is unpriced. A cached call carries what it WOULD have cost."""
+    unsettled: bool = False
+    """The call never reported what it used — cancelled, timed out, failed after it was sent — so
+    the counts and the price are the bound it was ADMITTED on (``infrastructure/llm/spend_book.py``),
+    the most the provider may have billed, never a measurement."""
+    hold_id: str | None = None
+    """The :class:`SpendHoldRecord` this call settles; ``None`` for a call nothing held (a replay)."""
+    mirrored: bool = False
+    """A nested run's call, carried as it settled onto the ledger of the run it measured for
+    (``spend_book.py::SpendBook.mirror``) — that copy is the one money is summed off; this one is
+    the nested run's own view of what it spent."""
     cached: bool = False
+    round: int | None = None
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+class SpendHoldRecord(StrictModel):
+    """A paid call ADMITTED, written before it is sent at the most it may cost. The usage record
+    carrying its ``hold_id`` settles it; a hold nothing settled belongs to a run killed with the
+    call out, and is charged in full (``spend_book.py::charge_open_holds``) — so a hard exit never
+    leaves a billed call off the ledger."""
+
+    model_config = ConfigDict(frozen=True)
+
+    record_type: Literal["spend_hold"] = "spend_hold"
+    hold_id: str
+    kind: TokenUsageKind
+    node: str
+    model: str | None = None
+    provider: str | None = None
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float | None = None
     round: int | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
@@ -315,7 +350,6 @@ RoundWarningKind = Literal[
     "l1_zero_candidates",
     "injection_budget_overrun",
     "layer_parse_failure",
-    "optimizer_deadline_retry",
     # The cycle STOPPED and a human has to act. Its reason is the layer's own sentence, and it
     # rides a warning rather than a log line so the why reaches disk with the halt.
     "layer_terminated_cycle",
@@ -583,6 +617,45 @@ class LedgerRoundClose(StrictModel):
     abilities: dict[str, LedgerAbility] = Field(default_factory=dict)
 
 
+class WallClock(StrictModel):
+    """Where a cycle's wall clock went. Folded from the ledger's own chronology at finalize and
+    BANKED, because the records it is read from are compactable and the clock is not re-derivable
+    from the round documents — none of them carries a timestamp.
+
+    Two denominators, and confusing them is the whole trap. ``phase_s`` is CLOCK: the brackets do
+    not nest, so they sum, and a leg over ``elapsed_s`` is impossible. ``worked_s`` is summed CALL
+    time, which exceeds the clock whenever cells run concurrently and understates it whenever they
+    replay — it says what the search WORKED, never what share of the run a bucket held."""
+
+    model_config = ConfigDict(frozen=True)
+
+    # ``None`` where either endpoint is unparseable; every share below is then unanswerable too.
+    elapsed_s: float | None
+    # Keyed by ``CampaignPhase`` value — a phase that never fired, or whose exit never landed, is
+    # ABSENT rather than 0.0: an unclosed bracket measured nothing.
+    phase_s: dict[str, float] = Field(default_factory=dict)
+    # Keyed by ``TOKEN_KIND_BUCKET``'s bucket. Cached calls are excluded, as they are from the
+    # BILL: a replay occupied no clock.
+    worked_s: dict[str, float] = Field(default_factory=dict)
+    # Round number (as a JSON key) → seconds from ``started_at`` to that round's FIRST close. This
+    # is what puts a wall clock beside ``RoundClocks``'s round counts, and it takes the first close
+    # rather than the last because the last is round 0's ruler restamp and a rewind's re-run —
+    # neither is when the campaign first reached the round.
+    round_ended_s: dict[str, float] = Field(default_factory=dict)
+    # Time held at the origin gate — HUMAN, so it is never folded into a machine leg. An abandoned
+    # gate closes at ``finished_at``, since the operator held it until the cycle ended.
+    gate_s: float = 0.0
+    # ``elapsed_s`` minus every leg above. What it holds is real and unbracketed: the round's tail
+    # (the overlap series, the election, the critique call, the persist) and run init before the
+    # ledger exists. It is the number to drive DOWN, and never the one to explain away.
+    unattributed_s: float | None = None
+    # Seconds cells were not ALLOWED to spend — machine suspend plus the shared limiter's queue,
+    # summed off the cells' own envelopes. ``None`` = no cell was measured under one, so nothing
+    # observed a wait; 0.0 = enveloped cells waited for nothing. A headline counting a suspended
+    # box as work is not publishable, which is why the two silences stay apart.
+    unworked_s: float | None = None
+
+
 class ElectionRecord(StrictModel):
     """What the round's ELECTION produced, at its own coordinate: ``elect_round_winner`` is the
     last thing ``l1_score`` does, so all of this exists a whole ``l1_critique`` call before the
@@ -663,6 +736,7 @@ CycleRecord = Annotated[
     | RoundWarningRecord
     | RulerRecord
     | SnapshotRecord
+    | SpendHoldRecord
     | SpendTombstoneRecord
     | TokenUsageRecord,
     Field(discriminator="record_type"),

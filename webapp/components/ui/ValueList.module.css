@@ -3,9 +3,10 @@
    panel drops OVER that line (`Popover side="over"`), so the value is on screen exactly once.
    Square corners and a hard 1px frame, deliberately: this is the dropdown LIST, not a card. */
 
+@layer ui {
 /* Doubled deliberately. `Popover` composes its own `.wrap` with this one, and two single-class
-   selectors tie on specificity — so which wins would depend on bundle order rather than on
-   intent. The axis list fills its column; the toolbar popovers stay shrink-to-fit. */
+   selectors in one layer tie on specificity — so which wins would depend on bundle order rather
+   than on intent. The axis list fills its column; the toolbar popovers stay shrink-to-fit. */
 .wrap.wrap {
   display: block;
   flex: 1 1 auto;
@@ -57,8 +58,8 @@
 }
 
 /* The panel overrides `Popover`'s rounded card: square, hard-edged, and scrolling past a long
-   catalogue rather than running off the viewport. `Popover.module.css::.sideOver` already pins it
-   over the trigger and floors its width at the trigger's. */
+   catalogue rather than running off the viewport. `Popover side="over"` already pins it over the
+   trigger and floors its width at the trigger's. */
 .panel {
   display: flex;
   flex-direction: column;
@@ -199,4 +200,5 @@ button.name:focus-visible {
 .addInput:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 1px;
+}
 }

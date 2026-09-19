@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.connector import (
+    CellEnvelopeSeconds,
     ConnectorExecution,
     MeasuredUnit,
     SessionProtocol,
@@ -58,6 +59,14 @@ PreflightFn = Callable[[str], Awaitable[None]]
 # so an env change lands without a reimport). ``None`` return = send no auth header.
 AuthTokenFn = Callable[[], str | None]
 
+# ``pipeline_params → Delivery``: where a backend offers more than one channel, which one carries
+# the prompt is the campaign's instrument choice, so it is resolved from the params a run hashes.
+PromptDelivery = Callable[[dict[str, Any] | None], Delivery]
+
+
+def _in_the_request(pipeline_params: dict[str, Any] | None) -> Delivery:
+    return "request"
+
 
 @dataclass(frozen=True)
 class Connector:
@@ -94,9 +103,10 @@ class Connector:
     ``in_process_run`` (no HTTP). ``BackendClient.run_query`` dispatches on this."""
 
     max_cells_in_flight: int = 2
-    """Most samples of one candidate the scoring walk may hold in flight once armed. Declared
-    here rather than read off ``execution``, a transport fact: ``dspy`` and ``promptpotter`` are
-    both ``in_process`` and want opposite answers. ``1`` opts out.
+    """Most calls a scoring round may hold in flight once armed — every candidate's cells and the
+    catch-up calls that pair them, together. Declared here rather than read off ``execution``, a
+    transport fact: ``dspy`` and ``promptpotter`` are both ``in_process`` and want opposite
+    answers. ``1`` opts out.
 
     **This is the whole of what a connector may say about concurrency — never how long an operator
     arming lasts.** A connector cannot see whether the walk in front of it sits inside a round;
@@ -104,13 +114,41 @@ class Connector:
     every press, and a screen declares its depth at launch instead
     (``application/diagnostics/seed_screen.py``)."""
 
+    holds_own_sends: bool = False
+    """Whether every paid call this backend makes passes through this process's own LLM clients,
+    which admit each send against the run's spend book (``infrastructure/llm/spend_book.py``) — so
+    a cell holds nothing itself. ``False`` (default): the cell is held whole, at the bound the
+    backend serves per node (``PipelineNode.spend_bound``), and a backend serving none cannot run
+    under a spend ceiling. Only the recursion is ``True``; ``dspy`` runs in this process but pays
+    through litellm, which no admission sees."""
+
+    cancel_stops_billing: bool = False
+    """Whether cancelling a cell that is already sent stops what it bills. ``False`` (default): a
+    sent cell is left to land, because the backend finishes it and the provider bills it whether or
+    not anyone waits — cancelling would lose the result and learn nothing of the cost. Declared,
+    never read off ``execution``: an in-process call that is one provider request bills all the
+    same."""
+
+    cell_envelope_s: CellEnvelopeSeconds | None = None
+    """Seconds ONE cell of this backend may SPEND, resolved per cell. ``None`` (default) = this
+    backend's cells carry no wall-clock bound.
+
+    **It bounds the SUM.** Every await inside a cell is bounded on its own and nothing bounds them
+    together, so a throttle storm stretches one cell across tens of minutes with no surface saying
+    so. Time the cell was not ALLOWED to spend is handed back at the seam that enforces this
+    (``application/scoring/cell_envelope.py``), leaving the cell's OWN work.
+
+    **Reaching it is HALTED, never a zero** — a cut we made is not an answer, so the row carries
+    :attr:`~promptpotter.shared.errors.ErrorCategory.HALTED`, no verdict, and no claim on a repair:
+    this declaration cuts the next attempt at the same place."""
+
     measured_unit: MeasuredUnit = "sample"
     """What one measured row of this backend is CALLED: ``cell`` where it is a whole inner campaign
     or agent episode, else ``sample``. Declared, never sniffed off a row."""
 
-    prompt_delivery: Delivery = "request"
-    """The CHANNEL the candidate's rendered prompt reaches the model by, read by
-    ``PipelineSchema.value_tree``.
+    prompt_delivery: PromptDelivery = _in_the_request
+    """The CHANNEL the candidate's rendered prompt reaches the model by, resolved per run from the
+    params it hashes and read by ``PipelineSchema.value_tree``.
 
     ``request`` — in the message that carries the task, so it always arrives. Three of the four
     connectors, and the reason this is the default.
@@ -120,7 +158,8 @@ class Connector:
     this channel **may never arrive**, which no param name says and no roster of keys could; the
     connector owes an arrival observation beside it (``harbor.py::SKILL_KEY``). Declared here and
     not inferred from ``execution`` or ``measured_unit``: an in-process agent backend could just as
-    well put the prompt in the request, and a guess would be silently wrong exactly once."""
+    well put the prompt in the request, and ``harbor`` does exactly that under
+    ``skill_delivery: system_prompt``."""
 
     required_observation_keys: tuple[str, ...] = ()
     """Observation keys this backend ALWAYS emits; ``wiring.py::_verify_required_observation_keys``
@@ -240,5 +279,6 @@ __all__ = [
     "InProcessRun",
     "InProcessWorkload",
     "PreflightFn",
+    "PromptDelivery",
     "VersionCheck",
 ]

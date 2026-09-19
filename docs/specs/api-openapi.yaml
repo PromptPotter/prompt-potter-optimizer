@@ -209,32 +209,79 @@ paths:
         '403': { $ref: '#/components/responses/CapabilityDenied' }
         '422': { $ref: '#/components/responses/PayloadInvalid' }
 
+  /commands/set-concurrent-cycles:
+    post:
+      operationId: setConcurrentCycles
+      summary: Set how many campaigns the caller's own account may hold at once.
+      description: |
+        Rewrites `user.json::max_concurrent_cycles` for the CALLER's account and
+        records who asked on the workspace ledger. The limit counts running and
+        queued launches alike (`check_launch_quotas`); lowering it below what is
+        already in flight stops nothing, it refuses the next launch.
+
+        Requires `campaign.budget`, the rung that moves spend ceilings: more runs
+        at once is a faster draw on the same wallet. Holding the rung is not
+        enough on the host's provider key. There the limit is the host's bound on
+        that person, written in `user.json` alone, so the command answers 422
+        `concurrency_set_by_host`; only an account spending its own key moves
+        its own. `GET /auth/quota-status` serves which case the caller is in as
+        `max_concurrent_cycles_writable`.
+
+        Refused with 422 `concurrency_above_machine` above the machine's
+        `MACHINE_RUN_CAPACITY` (`GET /machine-status`'s `ceiling`), which stays
+        environment-configured and has no command.
+      tags: [budget]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: set-concurrent-cycles }
+                    payload: { $ref: '#/components/schemas/SetConcurrentCyclesPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
   /commands/set-sample-lookahead:
     post:
       operationId: setSampleLookahead
-      summary: Set how many samples the scoring walk holds in flight — host-admin only.
+      summary: Set how many calls the scoring round holds in flight — host-admin only.
       description: |
-        Writes `.runtime/sample_lookahead.json` (`cells: 1` removes it). While set, the walk
-        holds that many of one candidate's samples at once instead of one, cutting the wall
-        clock of its sample walk roughly in proportion.
+        Writes `.runtime/sample_lookahead.json` (`cells: 1` without `auto` removes it). While set,
+        the round holds that many calls at once instead of one — its candidates walk together
+        and decide in turn — cutting the wall clock of its scoring roughly in proportion.
 
         **The request is recorded unclamped; the walk clamps it** to the backend's declared
         `Connector.max_cells_in_flight`, which is where the connector being walked is known.
-        Two fields are served on `dashboard.json`: `max_cells_in_flight` (the ceiling, `1`
-        meaning the control does not apply to this backend) and `sample_lookahead` — **the
-        depth in force, and the only reading of it there is.** It is the flag re-read on the
-        way out of the dashboard route and the SSE snapshot, never served as the runner last
-        flushed it, so a press is visible on the next poll rather than at the next launch.
-        There is deliberately no second field for "what the loop last held": that is a log
-        with no round-boundary writer, and a control reconciling the two reported a spent
-        depth as the depth still in force.
+        `dashboard.json` serves `max_cells_in_flight` (the ceiling, `1` meaning the control does
+        not apply to this backend) and `sample_lookahead` — **the depth in force, and the only
+        reading of it there is**, re-read from the flag on the way out of the dashboard route and
+        the SSE snapshot, so a press is visible on the next poll rather than at the next launch.
+        Beside them, the round's own gauge: `in_flight`, `lookahead_allowed` (what the stop rules
+        let the round hold right now) and `lookahead_most` (the most it could hold were nothing
+        cut) — each summed over every candidate walking and the PoBB catch-ups, and between
+        rounds `lookahead_most` is the next round's, so a press can be sized before it applies.
 
         **The depth lasts ONE ROUND of scoring** and is cleared when that round's scoring
         completes, so one set outside a scoring phase waits for the next round rather than
-        expiring unused. This is the same on every backend: a connector declares the ceiling
-        and cannot declare how long a depth lasts, because it cannot see whether the walk in
-        front of it is inside a round. The walk re-reads the flag at every launch boundary, so
-        a press mid-walk tops the window up rather than waiting for it to drain.
+        expiring unused. **`auto: true` asks for no depth at all**: every round holds as many
+        calls as its stop rules allow, up to the ceiling, until an `auto: false` press replaces
+        it; `cells` is ignored while it stands, and it is served as
+        `dashboard.json::sample_lookahead_auto`. Leaving it on is safe because the walk launches
+        no further than one cell past the earliest row a stop rule could cut at. This is the same
+        on every backend: a connector declares the ceiling and cannot declare how long a depth
+        lasts, because it cannot see whether the walk in front of it is inside a round. The walk
+        re-reads the flag at every launch boundary, so a press mid-walk tops the window up rather
+        than waiting for it to drain.
 
         **The measurement is unchanged, at any depth.** Samples are
         acquired in parallel but absorbed in walk order, and an acquisition still in flight when
@@ -1292,9 +1339,18 @@ paths:
         is the caller's own tenant tree; a hop chain re-roots the list into an
         L4 `.inner/<key>` sandbox, so one route lists the top level and
         any depth. Response shape is owned by the server model
-        (`registry.py::CampaignListResponse`, generated into
+        (`routers/campaigns/manifests.py::CampaignListResponse`, generated into
         `webapp/lib/api/types.generated.ts::CampaignSummary`) — not duplicated
-        here.
+        here. Each summary carries the campaign's lifetime billed spend
+        (`spend_used_usd`, a floor while `spend_unpriced_tokens > 0`), summed
+        server-side over its cycle ledgers and banked tombstones — the
+        per-campaign split of `GET /auth/quota-status`'s account total, so the
+        sidebar prints dollars it never adds up itself. Each also carries
+        `runs_with` — what the ROOT course runs with (models and every scalar
+        setting, each with the layer that won it, plus the DECLARED rounds cap)
+        — a second transport of the `GET /campaigns/{id}/pipeline` answer at the
+        root, never a second source; null when the root pipeline did not
+        resolve, so one broken dataset drops its own row's answer only.
       tags: [cycles]
       parameters:
         - name: dataset
@@ -1450,6 +1506,60 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+
+  /campaigns/{campaign_id}/fork-preview:
+    post:
+      operationId: previewForkSteer
+      summary: Would this steer take the babysit path? — the fork gate's own verdict, asked without forking.
+      description: |
+        The ADR-0005 babysit verdict `POST /commands/fork-cycle` reaches inside its
+        own dispatch, answered instead of enforced. A steer picking a responder the
+        campaign never sanctioned costs the branch grade C, so the operator is owed
+        the verdict BEFORE confirming — and the browser must not re-derive it, which
+        is what `frontend-surface-contract.md::I9` forbids and what the deleted
+        `overlaySetsModelOutsideAllowed` did.
+
+        POST because the subject is the in-progress overlay, which exists nowhere
+        on disk yet. It is a READ all the same: no `CommandRecord`, no ack, no
+        `Idempotency-Key`, nothing written. A `dry_run` flag on `fork-cycle` was the
+        alternative and is refused — a control-plane verb that sometimes records
+        nothing is the redundant mechanism root `CLAUDE.md` § STOP rejects.
+
+        Campaign-scoped, not cycle-scoped, because the permitted set is the
+        campaign's frozen `config.optimizer_narrowing` and nothing below it.
+        Capability-free: it reports what the gate WOULD say, and holding
+        `campaign.babysit` is what decides whether the fork itself lands.
+      tags: [campaigns]
+      parameters:
+        - name: campaign_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForkPreviewRequest'
+      responses:
+        '200':
+          description: The verdict this overlay would draw at `fork-cycle`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForkPreviewResponse'
+        '404':
+          description: |
+            No such campaign, or cross-tenant — `load_owned` and nothing else, so a
+            probe cannot enumerate other tenants' campaign ids.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
 
   /campaigns/{campaign_id}/cycles/{cycle_id}/dashboard:
     get:
@@ -2930,7 +3040,7 @@ components:
           enum: [checkin, running, paused, detached, terminal]
           default: detached
         best_accuracy: { type: [number, 'null'] }
-        n_rounds: { type: integer, default: 0 }
+        rounds_closed: { type: integer, default: 0 }
         created_at: { type: string, default: '' }
         updated_at: { type: string, default: '' }
         human_intervened: { type: boolean, default: false }
@@ -3026,12 +3136,19 @@ components:
               type: integer
               minimum: 1
               description: >
-                How many of one candidate's samples the walk may hold in flight. `1` clears it —
+                How many calls the scoring round may hold in flight. `1` clears it —
                 one on-disk state for "never set" and "cancelled", so the two cannot read
                 alike. Recorded as sent and clamped by the walk to the backend's declared
                 ceiling (`dashboard.json::max_cells_in_flight`), so a value above it runs at the
                 ceiling rather than being rejected. The depth also ends on its own — after the
                 round that scores under it — so `1` is a cancel, not the normal way it ends.
+            auto:
+              type: boolean
+              default: false
+              description: >
+                Hold as many calls as the stop rules allow, up to the ceiling, every round and
+                past a fresh launch, until an `auto: false` press replaces it; `cells` is ignored
+                while it stands. `false` is the one-round press.
             descend:
               type: string
               maxLength: 512
@@ -3059,6 +3176,19 @@ components:
             The queued job to withdraw, from `GET /machine-status`'s `queue`. Not a
             `CycleRef`: the queue holds launch INTENT, and a queued mint names no
             cycle until the drainer runs it.
+
+    SetConcurrentCyclesPayload:
+      type: object
+      additionalProperties: false
+      required: [max_concurrent_cycles]
+      properties:
+        max_concurrent_cycles:
+          type: integer
+          minimum: 1
+          description: |
+            The caller's own account limit, queued launches included. At most
+            `GET /machine-status`'s `ceiling`; a larger value is refused, never
+            clamped.
 
     StepCyclePayload:
       allOf:
@@ -3828,6 +3958,58 @@ components:
             opened. Distinct from a node ABSENT from the map, which is unknown: an
             unread node depicted as shut is a claim nobody made.
 
+    ForkPreviewRequest:
+      type: object
+      required: [pipeline_overlay]
+      additionalProperties: false
+      description: |
+        The in-progress steer, and only the half the verdict reads. The rest of an
+        `OperatorForkOverride` — the origin prompt, the narrowing, the reconciled
+        limits — decides nothing here, and asking for it would let a caller believe
+        the answer covered them.
+      properties:
+        pipeline_overlay:
+          type: object
+          additionalProperties: true
+          description: |
+            The `nodes.*.config` value overlay the fork would carry, exactly as
+            `OperatorForkOverride.pipeline_overlay` sends it.
+
+    ForkPreviewResponse:
+      type: object
+      required: [steers_disallowed_model, permitted_models]
+      additionalProperties: false
+      description: |
+        One verdict, the same one `fork-cycle` dispatch reaches, plus the set it
+        was reached against. Both, because an operator reads them as one sentence:
+        a verdict and the models it is a verdict about. Served apart, the sentence
+        can name models that had nothing to do with the answer, and it fails
+        silently — the same defect one field to the left.
+      properties:
+        steers_disallowed_model:
+          type: boolean
+          description: |
+            The overlay picks a responder the campaign's frozen
+            `optimizer_narrowing` never sanctioned, or touches a cost lever, which
+            no permitted set can sanction. True means the fork is the ADR-0005
+            babysit act: it needs `campaign.babysit` (404 without it) and stamps
+            the branch grade C — excluded from clean comparison, origin reuse and
+            the L4 rollup.
+        permitted_models:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          description: |
+            What the verdict was compared AGAINST, keyed by node — this campaign's
+            `optimizer_narrowing[node].param_allowed_values.model`, off the same
+            walk the verdict takes. A node absent from it sanctions nothing, which
+            is why any model steer there counts. Distinct from the served row's
+            `permitted` (`CampaignPipelineResponse.node_config_schema`), which is
+            what the editor may OFFER — that one answers for the rows and moves
+            with a cycle seed, so naming it beside this verdict is the drift.
+
     CampaignPipelineResponse:
       type: object
       required:
@@ -3918,6 +4100,16 @@ components:
             values only — an off-library value fails `L1_PROMPT_BLOCKS_IN_LIBRARY`
             and rides the existing forbidden-value wound), `off` (render empty;
             prompt bit-for-bit identical to a no-library ablation).
+        escalation_ladder:
+          type: string
+          enum: [full, l1_l2, l1]
+          default: full
+          description: |
+            How far up L1 → L2 → L3 this campaign may climb. `full` is the whole
+            ladder; `l1_l2` lets L2 re-frame but never reaches L3, force-trigger
+            included; `l1` is the L1-only ablation arm, where no escalation rule
+            can return a fire and neither the `l2_context` nor the `l3_plan` prompt
+            is ever composed. L1's own prompt is identical under all three.
         mechanisms:
           type: object
           additionalProperties:
@@ -4282,7 +4474,7 @@ components:
     MachineStatusResponse:
       type: object
       additionalProperties: false
-      required: [capacity, running, queued, busy, queue]
+      required: [capacity, ceiling, running, queued, busy, queue]
       properties:
         capacity:
           type: integer
@@ -4290,6 +4482,12 @@ components:
             Campaigns the machine admits right now. Resolved per read against the
             same rule a launch is admitted on, and lowered from the operator's
             ceiling while the shared provider throttle is saturated.
+        ceiling:
+          type: integer
+          description: |
+            The operator's `MACHINE_RUN_CAPACITY`, set in the server environment and
+            writable nowhere else. `capacity` never exceeds it, and
+            `set-concurrent-cycles` refuses an account limit above it.
         running:
           type: integer
           description: Campaigns currently live on the machine.

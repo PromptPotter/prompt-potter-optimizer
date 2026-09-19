@@ -46,7 +46,7 @@
      The row it shares with the sample buttons is the hero's own, at every width. */
   .round-axis-label{display:none}
   .round-tab{min-width:30px;height:30px;min-height:30px;font-size:var(--text-xs)}
-  .hs-heat-mini-btn,.st-mini-btn{height:26px}
+  .hs-mini-btn{height:26px}
   /* ── The chat's readouts, miniature ──────────────────────────────
      Everything the Dashboard shows at size is still HERE, at a size that lets the
      thread be the subject. Type down one step, padding halved, and the touch floor
@@ -98,13 +98,9 @@
   .toggle-row .name{font-size:var(--text-base)}
   .toggle-row.wand-row{margin:0 -2px;padding:var(--space-10)}
 
-  /* Welcome lockout modal — now class-driven (no inline overrides),
-     so !important is unnecessary. Drop overlay padding (24px eats
-     48px of viewport width on 375) and let the modal claim the full
-     screen comfortably. account-modal is shared with AccountModal
-     (operator-facing); if a phone operator opens it the same compact
-     layout applies, which is the right call. */
-  .account-overlay{padding:var(--space-8);align-items:flex-start;padding-top:24px}
+  /* Let the modal claim the full screen. `.account-modal` is shared with
+     AccountModal (operator-facing); if a phone operator opens it the same
+     compact layout applies, which is the right call. */
   .account-modal{max-width:none;width:100%;height:auto;min-height:0;max-height:calc(var(--vh-full) - 32px)}
   .account-modal-auth{height:auto;max-height:calc(var(--vh-full) - 32px)}
   .account-pane-body{padding:var(--space-18) var(--space-16) var(--space-14);gap:var(--space-12)}
@@ -119,9 +115,7 @@
    always-visible on coarse pointers. */
 @media (pointer:coarse){
   .hs-header-tools{opacity:1}
-  .hs-heat-mini-btn::after{opacity:1}
-  /* Stays pointer-events:none, so it can't intercept a tap meant for the chip. */
-  .remote-follow .follow-active-btn{opacity:1}
+  .hs-mini-btn.resizable::after{opacity:1}
 }
 
 /* ── Touch-pointer floor (Phase 0 foundation) ─────────────────────
@@ -136,7 +130,7 @@
    focus-zoom — the sweep applies that per-input, this block keeps the
    touch region honest in the meantime. */
 @media (pointer:coarse){
-  button:not(.btn-tight):not(.account-menu-item):not(.account-nav-item),
+  button:not(.btn-tight):not(.account-nav-item),
   a[role="button"],
   input[type="submit"],
   input[type="button"],

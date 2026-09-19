@@ -2,6 +2,7 @@
    `actions` slot. Muted until hover/focus so it never competes with the box's
    own controls; the accent on hover signals it's live. */
 
+@layer ui {
 .copy {
   padding: 2px var(--space-6);
   font-size:var(--text-base);
@@ -19,4 +20,5 @@
 .text {
   font-size: var(--text-xs);
   padding: 3px var(--space-8);
+}
 }

@@ -1,6 +1,14 @@
 "use client";
 import { useMemo } from "react";
-import { CardFrame, Chip, CopyButton, Toolbar, ToolbarSpacer } from "@/components/ui";
+import {
+  Badge,
+  CardFrame,
+  Chip,
+  CopyButton,
+  IconBroom,
+  Toolbar,
+  ToolbarSpacer,
+} from "@/components/ui";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useWorkspace } from "@/lib/workspace";
@@ -12,7 +20,6 @@ import { fmtPct0 } from "@/lib/format";
 import { CleanupConfirmModal } from "./CleanupConfirmModal";
 import { Forest, type CladogramCtx } from "./Forest";
 import { ROOMY } from "./forest-layout";
-import { IconBroom } from "./toolbar-icons";
 import { useLineage } from "./useLineage";
 
 // The lineage forest — its OWN card, not a section inside the candidates card.
@@ -98,9 +105,9 @@ export function ForestCard() {
       title={
         <Toolbar>
           <span className="cand-title">Lineage</span>
-          <span className="badge">
+          <Badge>
             {totalDescendants} {totalDescendants === 1 ? "descendant" : "descendants"}
-          </span>
+          </Badge>
           <ToolbarSpacer />
           {cleanup.stubCount > 0 && (
             <Chip
@@ -126,7 +133,7 @@ export function ForestCard() {
         </Toolbar>
       }
     >
-      <RotatePrompt surfaceName="The lineage forest" skipRender>
+      <RotatePrompt surfaceName="The lineage forest">
         <section className="family-cladogram" aria-label="Campaign lineage tree">
           {/* One fixed-height, operator-resizable viewport for the campaign's tree.
               Keyed on campaignId so a campaign switch remounts it: the dragged

@@ -8,6 +8,7 @@ import {
   type HeadlineMetric,
 } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
+import { pressable } from "@/components/ui";
 import { pathLeaf, shortFamilyTail } from "@/lib/ids";
 import { heartsText } from "@/lib/derivations";
 import type { LineageNode } from "@/lib/api";
@@ -130,17 +131,9 @@ const CandidateNode = memo(function CandidateNode({
         invalidated && "unknown",
         ink && "channel",
       )}
-      role="button"
-      tabIndex={0}
+      {...pressable(() => onPick(n))}
       aria-pressed={selected}
       aria-label={`Round ${n.round} candidate ${n.candidateLabel}, ${invalidated ? "unknown — a setting was changed at or above this point" : `${headlineMetricLabel(metric)} ${fmtHeadlineValue(metric, accuracy, theta)}`}${n.isElected ? ", round winner" : ""}${ink ? ", a channel of the comparison" : ""}${retiredBy ? ", retired — the run branched away and continued elsewhere" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
-      onClick={() => onPick(n)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onPick(n);
-        }
-      }}
       style={{ cursor: "pointer" }}
     >
       <title>
@@ -397,16 +390,8 @@ export function Forest({
                 width={width}
                 height={bandH(l)}
                 className="family-cladogram-lane-hit"
-                role="button"
-                tabIndex={0}
+                {...pressable(() => onLaneActivate(nodeKeyOf(course)))}
                 aria-label={`${verb} ${courseName(course)}`}
-                onClick={() => onLaneActivate(nodeKeyOf(course))}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    onLaneActivate(nodeKeyOf(course));
-                  }
-                }}
                 style={{ cursor: "pointer" }}
               >
                 <title>
@@ -463,16 +448,8 @@ export function Forest({
                     isDivergence && "mask-divergence",
                     ink && "channel",
                   )}
-                  role="button"
-                  tabIndex={0}
+                  {...pressable(() => onLaneActivate(n.courseKey))}
                   aria-label={`Expand ${cycName}${ink ? ", holding a channel of the comparison" : ""}`}
-                  onClick={() => onLaneActivate(n.courseKey)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      onLaneActivate(n.courseKey);
-                    }
-                  }}
                   style={{ cursor: "pointer" }}
                 >
                   <circle

@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { useAppliableField } from "@/lib/hooks/useAppliableField";
 
 export function SlugField({
@@ -9,12 +10,16 @@ export function SlugField({
   slug: string;
   onApply: (slug: string) => void;
 }) {
+  const id = useId();
   const { local, setLocal, dirty } = useAppliableField(slug);
   return (
-    <label className="new-campaign-field">
-      <span>Slug</span>
-      <span style={{ display: "flex", gap: "0.5rem" }}>
+    <div className="new-campaign-field">
+      {/* The label names the INPUT alone — wrapping the button too would fold "Apply" into the
+          field's accessible name and let a click on the caption press it. */}
+      <label htmlFor={id}>Slug</label>
+      <span className="new-campaign-apply">
         <input
+          id={id}
           type="text"
           value={local}
           onChange={(e) => setLocal(e.target.value)}
@@ -24,6 +29,6 @@ export function SlugField({
           Apply
         </button>
       </span>
-    </label>
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 ---
 name: potter-box
-description: Operating the self-hosted Linux box that serves the PromptPotter API/webapp and the TermNorm backend. Use this whenever the user mentions the linux box, the fedora box, the server, "start termnorm", "termnorm isn't reachable", restarting the app, editing the box's .env, or checking what is actually running in production — and also when a change you just made locally needs to reach the deployed instance, even if the user does not name the server. Holds only what cannot be answered in one command: preferences, and lessons that cost real time. Everything else, go read the box.
+description: Operating the self-hosted Linux box that serves the PromptPotter API/webapp and the TermNorm backend. Use this whenever the user mentions the linux box, the fedora box, the server, "start termnorm", "termnorm isn't reachable", restarting the app, editing the box's .env, or checking what is actually running in production — and also when a change you just made locally needs to reach the deployed instance, even if the user does not name the server. Every use opens the TermNorm window on the box first. Holds only what cannot be answered in one command: preferences, and lessons that cost real time. Everything else, go read the box.
 compatibility: OpenSSH client with a `potter-box` Host alias configured (see Setup); tmux on the box; a Wayland desktop session for the GUI-terminal recipe.
 ---
 
@@ -59,18 +59,22 @@ destroyed by the next update, silently. `git status --porcelain` in the install 
 updating tells you what you are about to lose — and it is routinely non-empty, so treat a clean
 tree as the surprise rather than the default.
 
-## "start termnorm" means a terminal on the box's own display
+## TermNorm runs in a window on the box's own display — open it FIRST, every time
 
-Not a background process — the operator wants to watch it. `tmux` holds the server so closing the
-window cannot kill it; `ptyxis` is the only emulator installed, and it draws on the Wayland
-session.
+Not a background process — the operator wants to watch it, so **every use of this skill starts
+here**, whatever the ask. The script opens the window, and starts TermNorm (pulled first) if a
+reboot took it down. `tmux` holds the server so closing the window cannot kill it; `ptyxis` is the
+only emulator installed, and it draws on the Wayland session.
 
 ```bash
-export XDG_RUNTIME_DIR=/run/user/$(id -u) WAYLAND_DISPLAY=wayland-0 DISPLAY=:0
-export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus
-tmux kill-session -t termnorm 2>/dev/null
-tmux new -d -s termnorm "$HOME/potter/TermNorm-excel/start-server-py-LLMs.sh"
-setsid ptyxis -- tmux attach -t termnorm >/dev/null 2>&1 </dev/null &
+ssh potter-box 'bash -s' < .claude/skills/potter-box/open-termnorm.sh
+```
+
+**A deploy ends with it too, as `bash -s -- restart`.** `deploy-linux/update.sh` syncs and restarts
+the app only; `BACKEND_DIR` is unset on this box, so TermNorm keeps its old code until this runs.
+
+```bash
+ssh -t potter-box 'cd ~/potter/prompt-potter-optimizer/deploy-linux && ./update.sh'   # sudo prompts
 ```
 
 Three things that cost time to learn:

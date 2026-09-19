@@ -170,8 +170,7 @@ summary fields instead and still serves such a cycle.
   would have scored on these round-level terms*, never as the number the election used.
 - **Record unchanged.** A mask is a projection on top. The realized lineage and its winners
   never move.
-- **One scoring home.** No mask math in TypeScript; `score_search_point()` stays the single
-  gateway; the fold is a read-time `application/` service, never an infrastructure
+- **One scoring home.** No mask math in TypeScript; the scoring gateway stays the single one; the fold is a read-time `application/` service, never an infrastructure
   ledger-projection; no mask state is persisted.
 - **Selection unchanged.** Divergent nodes stay clickable — dimming is opacity and a label,
   never a disabled interaction.

@@ -29,7 +29,7 @@ archive's own bytes — 102.6 MB of ledger, 56.6% of it duplication.
 
 | Projection | Scope | Writes | Role |
 |---|---|---|---|
-| `LiveDashboardProjection` (`projections/live_dashboard/projection.py`) | per cycle | `dashboard.json` | **Display surface** — completed-round summaries (`dash.rounds[]`; **round 0 = the origin's round-0 score**, a one-candidate round (the origin scored) emitted via the standard `close_round` path, no separate origin block) + in-flight `current_round` block + `spend` rollup (sole writer for every bucket via `_handle_token_usage`, which picks one through `domain/spend.py::TOKEN_KIND_BUCKET` and folds the totals over `SpendRollup.buckets` — never a hand-named pair, or a new spend kind is money the cap cannot see; halt probe reads `spend_total_used_usd` accessor). Sole webapp source for the chart, lineage tree, trend sparkline. |
+| `LiveDashboardProjection` (`projections/live_dashboard/projection.py`) | per cycle | `dashboard.json` | **Display surface** — completed-round summaries (`dash.rounds[]`; **round 0 = the origin's round-0 score**, a one-candidate round (the origin scored) emitted via the standard `close_round` path, no separate origin block) + in-flight `current_round` block + `spend` rollup (sole writer for every bucket via `_handle_token_usage`, which picks one through `domain/spend.py::TOKEN_KIND_BUCKET` and folds the totals over `SpendRollup.buckets` — never a hand-named pair, or a new spend kind is money the cap cannot see; a run's spend book is seeded off the `spend_total_used_usd` accessor when it is armed). Sole webapp source for the chart, lineage tree, trend sparkline. |
 | `AuditTrailProjection` (`projections/audit_trail.py`) | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — full LLM I/O, per-sample results, scoreboard with `per_sample`. Fetched lazily by the webapp (`useRoundAudit`) only when an operator drills into a specific round; `useRoundFile` is the peer hook for the PUBLIC `rounds/` tree. |
 | `PoBBStreamProjection` (`projections/pobb_stream.py`) | per cycle | `.runtime/streams/round_NNNN_p_best.jsonl` | Per-sample P(best) trajectory for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
 
@@ -147,11 +147,11 @@ writes, and why — [`docs/operations/persistence-and-state.md`](../../docs/oper
 
 Shared I/O in `store/io.py`, and **format follows authorship**: `write_json`/`read_json*` for what code writes and only code reads, `write_yaml`/`read_yaml*` for the operator-authored config tier under `datasets/`. There is deliberately no `read_yaml_tolerant` — a corrupt config degrading to "not there" attributes a measurement to the wrong fingerprint.
 
-Path helpers live in `store/layout.py`, the per-tenant active-session pointer in `store/session_pointer.py`, and derived reads are free functions in query modules (`store/archive_queries.py` is the template). `measurements/` is cross-cycle and cross-tenant; `MeasurementArchive` is the DB core and `store/archive_queries.py` its single-writer facade — a write not going through that facade is the bug.
+Path helpers live in `store/layout.py`, the per-tenant active-session pointer in `store/session_pointer.py`, and derived reads are free functions in query modules (`store/archive_queries.py` is the template). `measurements/` is cross-cycle and cross-campaign **within one tenant** — `build_stores` roots it and every `SHARED_CACHE_DIRS` peer at `shared_root / identity.tenant_id`, so content-addressing makes a row shareable across campaigns and into an L4 sandbox, never across accounts. `MeasurementArchive` is the DB core and `store/archive_queries.py` its single-writer facade — a write not going through that facade is the bug.
 
 The `CycleDir` / `WorkspaceDir` write-target newtypes live in `domain/cycle_paths.py` — projections and stores accept these, not raw `str`/`Path` — as does `CycleHop`, which every per-cycle `CampaignStore` method takes in place of a `(campaign_id, cycle_id)` pair (both `str`, so a swapped call read as "no data" rather than raising). Build it from the carrier that owns both, never by re-pairing.
 
-**`store/account_spend.py` banks what a subject still HOLDS, not what its rows say.** It sums an account's lifetime spend and banks it as a `SpendTombstoneRecord` before a delete takes the rows carrying it. It sits in `infrastructure/` rather than `application/` for exactly that reason: the three destroyers (`delete_campaign`, `try_delete_stub_cycle`, `delete_inner_sandbox`) call it themselves, so no caller can destroy a ledger and skip the bank. An L4 inner cycle forwards onto its outer ledger as it runs and records how far it got in `index.json::forwarded_spend`, so banking the rows whole would bill that money twice; absent mark ⇒ nothing forwarded, which is every cycle outside a sandbox.
+**`store/account_spend.py` banks what a subject still HOLDS, not what its rows say.** It sums an account's lifetime spend and banks it as a `SpendTombstoneRecord` before a delete takes the rows carrying it. It sits in `infrastructure/` rather than `application/` for exactly that reason: the three destroyers (`delete_campaign`, `try_delete_stub_cycle`, `delete_inner_sandbox`) call it themselves, so no caller can destroy a ledger and skip the bank. An L4 inner cycle's calls are carried onto its outer ledger as they settle, and its own copies are flagged `mirrored`, which the sum skips — banking them would bill that money twice.
 
 **Two read-once ledger records ride `CampaignStore`.** `write_cycle_seed`/`read_cycle_seed` append and scan the cycle seed as a `CycleSeedRecord` (a steered fork's or campaign-origin's typed `CycleSeed`, written by `_mint_fork` or the mint seam, read once at the runner seam; the pure scan is in `ledger_scan.py`, no subscribers fire). A fork inherits the parent's seed record virtually then appends its own, so a scan of the cycle's own ledger returns that cycle's seed.
 
@@ -172,7 +172,7 @@ real one. That is how `.inner/` reached 343 MB with no code path able to reclaim
 
 **`measurements/` is ONE content-addressed tree per workspace, and it outlives the campaigns that filled it.** Three consequences, each of which has already been read backwards:
 
-- **A row is filed under the dataset it MEASURED, never under the campaign that paid for it.** On the recursion that is the *inner* benchmark (`datasets/{name}/inner_tasks.yaml::inner_benchmark`) — an inner sandbox isolates campaign state but deliberately shares `shared_root`, so **`promptpotter-self`'s bytes are almost all filed under the inner dataset's name.** Scoping anything by `--dataset promptpotter-self` reaches the outer cells and essentially nothing L4 actually cost. Count before concluding: `compact-archive compact --dataset <name>` dry-runs and prints the split by label.
+- **A row is filed under the dataset it MEASURED, never under the campaign that paid for it.** On the recursion that is the *inner* benchmark (`datasets/{name}/inner_tasks.yaml::inner_benchmark`) — an inner sandbox isolates campaign state but deliberately shares `shared_root`, so **`promptpotter-self`'s bytes are almost all filed under the inner dataset's name.** Scoping anything by `--dataset promptpotter-self` reaches the outer cells and essentially nothing L4 actually cost. Count before concluding: `compact-archive inventory --dataset <name>` prints runs, cells, bytes and replay rate by dataset, label and age.
 - **Nothing on a run names a campaign.** The index entry is content, provenance and a label — no `campaign_id`, no `cycle_id`, because a cache hit is supposed to cross campaigns. So "what did this campaign cost on disk" is not a question the archive answers, and the join a surface needs is `LineageNode.sp_hash` → the row's `prompt_fields_id` (`docs/developer/README.md` § Cross-run memory).
 - **Cycle state is disposable and the rows are not**, so the rows routinely outlive every campaign that could select them: an emptied `.inner/` leaves its measurements addressable only by dataset. Selecting a family and acting on "what it produced" is therefore a claim about *surviving* state — say so, rather than reporting a smaller number as if it were the whole.
 
@@ -199,8 +199,8 @@ fail the whole read. Use **optional** wherever the caller acts differently on th
 two, and say which in a comment: `try_delete_stub_cycle` (absent = a stub to
 delete, corrupt = a cycle we cannot vouch for), the SSE snapshot (corrupt serves
 a `dashboard_unreadable` reason), and the three identity readers, where absent
-and malformed are opposite security answers (`check_allowlist` allows on absent
-and denies on malformed — collapsing them would fail OPEN). Hand-rolling
+and malformed are opposite security answers (`check_blocklist` admits on absent
+and blocks everyone on malformed — collapsing them would fail OPEN). Hand-rolling
 `json.loads(path.read_text())` in a `try` is the bug; picking the stricter helper
 on purpose is not.
 
@@ -208,8 +208,13 @@ on purpose is not.
 
 `llm/openai_compat.py`: `OpenAICompatibleClient` serves Groq/OpenAI/OpenRouter
 as instances (no subclasses) parameterized by a `ProviderSpec` registry.
-`llm/anthropic.py::AnthropicClient` is its peer. SDK `max_retries` handles 503/429 +
-Retry-After.
+`llm/anthropic.py::AnthropicClient` is its peer.
+
+**No paid request is sent unadmitted.** `LLMClientBase._admitted_send` holds each attempt's worst
+case against the run's spend book (`llm/spend_book.py`), sends, and settles it with the usage record
+it writes itself; `BackendClient.run_query` does the same for a whole cell. SDK retries are off —
+only a 429, a 5xx and a connection never made are sent again, each admitted anew — and a send that
+ends unreported is charged its whole bound. A caller meters only a cache replay.
 
 **Provider selection is always EXPLICIT** — the caller passes it to
 `registry.get_llm_client`, sourced from the optimizer node's `config.provider`. No
@@ -253,7 +258,7 @@ This note sits here rather than only in `mlflow_sink.py`'s docstring because the
 ## Identity — the OIDC foundation
 
 `identity/` holds the sign-in machinery: provider config + the two issuers
-(`google.py`, `github.py`), `verifier.py`/`jwks.py`, `allowlist.py`, `grants.py`,
+(`google.py`, `github.py`), `verifier.py`/`jwks.py`, `blocklist.py`, `grants.py`,
 browser `session.py`, `user.py`, and `migration.py` (the first web sign-in RENAMES
 `projects/default/` to `projects/{user_id}/`). It builds the Stage-0 `IdentityContext`
 that `build_stores` takes; the capability vocabulary that reads it lives one layer out

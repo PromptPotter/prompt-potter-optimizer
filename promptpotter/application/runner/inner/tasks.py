@@ -10,11 +10,15 @@ from typing import TYPE_CHECKING, Any
 from pydantic import ConfigDict, Field, ValidationError, model_validator
 
 from promptpotter import connectors
-from promptpotter.application.campaign_config import CampaignConfig, LivesConfig
+from promptpotter.application.campaign_config import (
+    CampaignConfig,
+    DeterminismClamp,
+    LivesConfig,
+)
 from promptpotter.config.settings import DEFAULT_ORIGIN_BUDGET
-from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import read_yaml_optional
+from promptpotter.shared.errors import CellUnscoreableError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -230,22 +234,33 @@ def load_inner_tasks(path: Path) -> InnerTasks:
     """Read + validate the panel. It is the source of truth: an unreadable one is unscoreable, never defaulted."""
     raw = read_yaml_optional(path)
     if raw is None:
-        raise InnerCycleUnscoreableError(
+        raise CellUnscoreableError(
             f"{path} is missing — the inner benchmark, its sample count and its round cap are "
-            "all declared there. There is no default to run."
+            "all declared there. There is no default to run.",
+            spent={},
+            step_timings={},
         )
     try:
         return InnerTasks.model_validate(raw)
     except ValidationError as exc:
-        raise InnerCycleUnscoreableError(
-            f"{path} does not declare a runnable panel: {exc}"
+        raise CellUnscoreableError(
+            f"{path} does not declare a runnable panel: {exc}", spent={}, step_timings={}
         ) from exc
 
 
 def resolve_inner_task(ctx: InnerSpawnContext, query: str) -> InnerTaskSpec:
     """Map an outer query to its inner-campaign spec — the top-level benchmark + budget, overlaid by the
-    matching cell. A query with no matching cell runs the panel's default."""
-    panel = load_inner_tasks(inner_tasks_path(ctx.dataset_config_dir))
+    matching cell. A query with no matching cell runs the panel's default.
+
+    Off the panel the CONTEXT carries, so every cell of one run resolves against the panel that
+    run opened with."""
+    if (panel := ctx.panel) is None:
+        raise CellUnscoreableError(
+            f"{inner_tasks_path(ctx.dataset_config_dir)} is missing — the inner benchmark, its "
+            "sample count and its round cap are all declared there. There is no default to run.",
+            spent={},
+            step_timings={},
+        )
     cfg = panel.inner_benchmark_config
     cell = next((t for t in panel.tasks if t.id == query), None)
     return InnerTaskSpec(
@@ -280,7 +295,7 @@ def inner_instrument_config(
         # await — which inside an outer sample is a deadlock nothing but the sample wall clock
         # can end, and the operator is never shown a prompt because the gate belongs to a cycle
         # buried in `.inner/`. A bad inner origin is not lost either way: it lands as a poor
-        # trajectory or an `InnerCycleUnscoreableError`, which is exactly the measurement the
+        # trajectory or a `CellUnscoreableError`, which is exactly the measurement the
         # outer loop is there to take.
         "origin_gate": "off",
         # ONE RULER UNIT ACROSS THE PANEL. Under 1PL the ruler is δ alone and the unit is pinned
@@ -297,6 +312,12 @@ def inner_instrument_config(
         opt_update["n_variants"] = spec.n_variants
     if spec.lives is not None:
         opt_update["lives"] = spec.lives
+    if spec.inner_optimizer_temperature is not None:
+        # The clamp's seed is the CELL's, matching the target model's, so every candidate measured
+        # on a cell draws one random stream (CRN). Laid ONTO the inner dataset's own declaration.
+        opt_update["determinism"] = (
+            base.optimization.determinism or DeterminismClamp()
+        ).model_copy(update={"temperature": spec.inner_optimizer_temperature, "seed": spec.seed})
     po: dict[str, Any] = {k: dict(v) for k, v in (base.pipeline_overlay or {}).items()}
     node = dict(po.get(llm_node, {}))
     node["seed"] = spec.seed

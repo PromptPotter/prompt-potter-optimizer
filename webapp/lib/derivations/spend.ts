@@ -52,8 +52,11 @@ export interface SpendView {
   // At least one bucket reported a USD rate; when false, USD is unreliable
   // and the caller should fall back to a token count.
   rateKnown: boolean;
-  // Per-bucket input+output token sums — the no-rate fallback display, and the only
-  // sums still made here, because no bucket serves its own.
+  // Per-bucket input+output token sums — the no-rate fallback display, and the only sums still
+  // made here. They STAY: a `SpendBucket.total_tokens` would be a third field derivable from the
+  // two beside it, which is the `cached_share` shape `candidates/series.ts` has refused three
+  // times — and this model is `extra="forbid"` on disk, so a `@computed_field` would serialize
+  // into `dashboard.json` and then refuse to read back (`DashboardSample.cache_share` says so).
   backendTokens: number;
   loopTokens: number;
   judgeTokens: number;
@@ -67,7 +70,8 @@ export interface SpendView {
   // Fraction of the LOOP bucket's output tokens the optimizer spent thinking rather
   // than answering; null when nothing has been billed yet or the models report no
   // breakdown. A subset of the output tokens, never an addition to them — it explains
-  // where the wall-clock went, not where the money did.
+  // where the wall-clock went, not where the money did. Same reading as `backendTokens`
+  // above: two served integers over each other, and nothing decides on it.
   loopReasoningShare: number | null;
   // Fraction of each bucket's input tokens the PROVIDER served off its own prompt-prefix cache —
   // the discount on calls that did reach a provider. A different fact from a sample marked 📖,

@@ -16,6 +16,16 @@ Phase events (`init`, `l1_generate`, `l1_score`, `refine_strategy`, `modify_plan
 | Escalation rule firing | `escalation/rule_fired` | `{layer, rule_name, rule_priority, next_action, reason, signal_inputs}` |
 | Stale-data protocol | Event | ladder step taken, resolution |
 
+## The wall clock, and where the claim stops
+
+`index.json::final.wall_clock` is the cycle's own clock, folded from the ledger at finalize (`ledger_scan.py::scan_ledger_wall_clock`) and rendered by `review.md` § Wall clock. It is banked rather than derived on read because no round document carries a timestamp and the records it is folded from are compactable. **A resumed cycle's clock is its LAST launch's** — a round an earlier launch closed carries no seconds rather than a wrong number, so a result quoting a clock quotes an unbroken run.
+
+**Two denominators, and they are not interchangeable.** `phase_s` is CLOCK, keyed by `CampaignPhase`: the brackets do not nest, so the legs sum and each is a real share of `elapsed_s`. `worked_s` is summed CALL time per spend bucket, off `TokenUsageRecord.duration_s`: concurrent cells overshoot the clock and replayed calls are excluded, so it says what the search *worked*, never what share of the run a bucket held. Quote `phase_s` for a share; quote `worked_s` for a cost.
+
+**What we can publish is `ledger open → first improvement`, fully decomposed. What we cannot publish is `clean machine → first improvement`.** Installing the package, pulling an image, materializing a benchmark's rows and `init_services` all run before the ledger's first record, are observed by nothing, and are unrecoverable after the fact — so `elapsed_s` starts at the ledger, and the `init` leg beside it is preflight plus cycle construction, which reads under two seconds. Anyone quoting that leg as a setup measurement is out by orders of magnitude. `ORIGIN` also fires before `INIT` on every ledger, so the legs are not in reading order.
+
+`gate_s` is the one HUMAN leg — time held at the origin gate — and is never folded into a machine one. `unworked_s` is the opposite correction: seconds cells were not *allowed* to spend (machine suspend, or queued behind the shared limiter), summed off each cell's own envelope, and `None` where no cell ran under one. A headline counting a suspended box as work is not publishable, which is why absent and zero stay apart.
+
 ## Per-sample P(best) stream
 
 PoBB emits a per-sample Posterior-of-Being-Best snapshot for every candidate, on four channels:

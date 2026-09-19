@@ -54,6 +54,18 @@ describe("CommitInput", () => {
     expect(onCommit).toHaveBeenCalledWith('{"answer": {}}');
   });
 
+  it("leaves Enter alone on a multi-line value", () => {
+    const onCommit = vi.fn();
+    render(<CommitInput value="" onCommit={onCommit} rows={4} aria-label="layout" />);
+    const box = screen.getByLabelText("layout");
+    fireEvent.change(box, { target: { value: "one" } });
+    // A schema typed across four lines cannot be a control whose first Return sends it.
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(onCommit).not.toHaveBeenCalled();
+    fireEvent.blur(box);
+    expect(onCommit).toHaveBeenCalledWith("one");
+  });
+
   it("takes a value arriving from elsewhere in the SAME render", () => {
     const { rerender } = render(<CommitInput value="a" onCommit={() => {}} aria-label="cell" />);
     fireEvent.change(screen.getByLabelText("cell"), { target: { value: "typed" } });

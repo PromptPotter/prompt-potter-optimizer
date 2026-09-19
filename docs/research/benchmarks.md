@@ -33,9 +33,9 @@ Two ways to misread the bar:
 - **A low score is not admission either.** A dataset the model scores near-zero on has no reachable
   headroom and ties just as hard — the floor and the ceiling produce the same symptom from opposite
   directions.
-- **The constant-answer floor is invisible to the bar.** On a 3-class set whose majority label holds
-  40% of the bank, a pipeline that has stopped reading the input scores 40% and reads as a healthy
-  in-band origin. Screen it *before* the score.
+- **The constant-answer floor is invisible to the bar** — owned by
+  [`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md)
+  § Selection criteria, criterion 1b. Screen it before reading any origin in the roster below.
 
 ## Order of use
 
@@ -61,8 +61,9 @@ upward before trusting it.
 | Dataset | Origin | Verdict |
 |---|---|---|
 | BBEH mini | **28%** | ✅ headline |
-| `justlogic-d234` | **0.500–0.625** (floor 0.350) | ✅ focus instrument |
+| `justlogic-d234` | **0.500–0.625** (floor 0.350) — the recon slice, not the current wiring; re-read off `noise-floor --k 3` on a cold workspace before quoting it | ✅ focus instrument |
 | AIME 2025 | **30%** | ✅ wired; too small to split |
+| `sealqa-longseal-12` | published no-skill **26.3–33.0%**, ceiling 39.4–44.7% (literature — the bar cannot screen it, being a judge-graded agent episode) | ✅ wired; one harbor episode per cell, graded by the `sealqa` judge |
 | PlanBench `task_1` | **36%** | 🟡 next-priority; needs a PDDL plan validator |
 | NaturalPlan | **36%** macro | 🟡 next-priority; `meeting_planning`-only (43%) is the clean cut |
 | MuSiQue | **60%** macro, **38%** 3hop | 🟡 3hop held; overlaps BBEH's RC subtasks |
@@ -78,7 +79,7 @@ upward before trusting it.
 | FOLIO | **80%** | ❌ saturated; reproduced across two providers |
 | MuSR | **81%** | ❌ ceiling — B-skewed binary golds, frequency-bias coast |
 | SATBench | **100%** | ❌ saturated at every filter the schema exposes |
-| GSM8K | **~78%** (literature — the one row here never measured at the bar) | ⏳ verdict withdrawn, see § Order of use |
+| GSM8K | **~78%** (literature — never measured at the bar, and unlike `sealqa` it could be) | ⏳ verdict withdrawn, see § Order of use |
 | BBEH @ `high` | ~25% naïve | ❌ the *effort* is rejected, not the dataset — the reasoning trace exhausts the visible-token budget |
 | IFBench · CRUXEval-O · MuSR (2-subtask) | — | ❌ desk-rejected / not measurable |
 
@@ -136,20 +137,26 @@ Definition only; instance assembly TBD. PromptPotter is the reference solver.
   PopQA, FEVER · multi-step agent: GAIA, τ-bench · code pipeline: SWE-bench · long-context: LongBench,
   FRAMES. Aspiration: ship our own procedurally-generated instances.
 
-## The four metrics we report
+## What we report
 
-Absolute accuracy is meaningful only against a known base model and origin prompt: 60 → 75 and 90 → 93 look comparable until you know the first captured 75% of the available headroom and the second 33%. A published table reports all four per (method, model), from `results_*.json`.
+**Absolute Accuracy** — `correct / total` on test — per (method, model), from `results_*.json`. It is
+the raw performance of the best prompt found, and the standard comparison point.
 
-| Metric | Symbol | Formula | What it separates |
-|---|---|---|---|
-| **Absolute Accuracy** | Acc | `correct / total` on test | Raw performance of the best prompt found — the standard comparison point |
-| **Headroom Captured** | HC | `(Acc_opt − Acc_base) / (Acc_ceil − Acc_base)` | Fraction of available improvement realized; normalizes across models |
-| **Sample Efficiency** | SE | `HC / N_queries` | Headroom captured per optimization query spent |
-| **Convergence Profile** | R₉₀ | queries to reach 90% of final HC | "Finds good prompts" from "finds them fast" |
+Beside it, two of the round counts a cycle banks in `index.json::final`, which say how *fast* rather
+than how *high*: **`rounds_to_separable`**, the first round whose arms could be told apart at all,
+and **`rounds_to_improved`**, the first round that crowned a winner. Quote the first. The second is
+a promotion verdict on `lift > 0.0` with no interval and no multiplicity correction
+([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § The crowning bar), so the
+two are routinely far apart and a claim that does not name which one it rests on is not a result.
+
+A query denominator is deliberately absent from all of them. Nearly all of a campaign's wall clock
+and spend is backend scoring, and the optimizer's own calls are a few percent of it, so "per
+optimization query" prices the cheap part and hides the bill the operator actually pays. Price a
+lift in wall clock and dollars.
 
 ### The winner's own number is biased upward
 
-All four are read off the **selected** candidate, and selection and estimation must not come from the same rows. Where they do, the reported figure overstates what the prompt will do on deployment: the argmax of noisy means is optimistic, and PoBB compounds it, because elimination stops an arm at a data-dependent time, so the survivor's mean is already biased before a max is taken over it. Being Bayesian is not an exemption — the selected arm's posterior mean still conditions on the selection that chose it. Neither is subset-invariant θ, which corrects for *which samples* were scored rather than *which candidate was chosen*; reaching for θ here is the plausible wrong move.
+Accuracy is read off the **selected** candidate, and selection and estimation must not come from the same rows. Where they do, the reported figure overstates what the prompt will do on deployment: the argmax of noisy means is optimistic, and PoBB compounds it, because elimination stops an arm at a data-dependent time, so the survivor's mean is already biased before a max is taken over it. Being Bayesian is not an exemption — the selected arm's posterior mean still conditions on the selection that chose it. Neither is subset-invariant θ, which corrects for *which samples* were scored rather than *which candidate was chosen*; reaching for θ here is the plausible wrong move.
 
 **Published head-to-head figures are clean** — the split that makes them so is owned by [`bbeh-comparison/README.md`](bbeh-comparison/README.md) § The protocol. **In-campaign figures are not:** the winner's `composite_fitness`, the round banner, the dashboard headline and `export.json`'s fitness are all computed on the rows that selected the winner. The fix is a reserved partition the loop never scores on, tracked in [`../specs/roadmap.md`](../specs/roadmap.md) § Selection-clean reporting.
 

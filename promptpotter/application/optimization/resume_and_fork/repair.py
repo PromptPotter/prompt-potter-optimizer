@@ -25,7 +25,7 @@ from promptpotter.application.scoring.row_diagnostics import count_degraded_samp
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.results import is_leader_eligible, unscoreable_cells
+from promptpotter.domain.results import is_leader_eligible
 from promptpotter.domain.run_records import (
     CandidateMintedRecord,
     ForkDirection,
@@ -38,7 +38,7 @@ from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import reset_current_round, set_current_round
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_candidates
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.shared.errors import graceful, is_error_result
+from promptpotter.shared.errors import graceful, is_repairable_hole
 from promptpotter.shared.instrument import MeasuredCandidate, MeasurementRole
 
 if TYPE_CHECKING:
@@ -73,11 +73,14 @@ def _headline_disagrees(t: RoundResult) -> bool:
 
 def _first_divergent_candidate(t: RoundResult) -> str | None:
     """The earliest candidate in *t* the repair will move. Two ways a round stops re-deriving:
-    a HOLE (about one candidate's rows) or a HEADLINE that no longer matches its winner."""
+    a HOLE (about one candidate's rows) or a HEADLINE that no longer matches its winner.
+
+    A hole only counts where a re-measure could plug it: a cell a declared bound HALTED is settled,
+    not incomplete, so branching on one mints a fork per resume that corrects nothing."""
 
     for cs in t.candidate_scores:
-        if is_leader_eligible(cs) and unscoreable_cells(
-            t.all_candidate_results.get(cs.candidate_id) or []
+        if is_leader_eligible(cs) and any(
+            map(is_repairable_hole, t.all_candidate_results.get(cs.candidate_id) or [])
         ):
             return cs.candidate_id
     if _headline_disagrees(t) and t.opt_sp is not None:
@@ -225,7 +228,7 @@ async def repair_incomplete_rounds(
         changed = False
         for i, cs in enumerate(t.candidate_scores):
             rows = list(t.all_candidate_results.get(cs.candidate_id) or [])
-            if not is_leader_eligible(cs) or not unscoreable_cells(rows):
+            if not is_leader_eligible(cs) or not any(map(is_repairable_hole, rows)):
                 continue
             attempted = [by_id[sid] for r in rows if (sid := str(r.get("sample_id"))) in by_id]
             cand_osp = opt_sps.get(cs.candidate_id)
@@ -253,7 +256,7 @@ async def repair_incomplete_rounds(
             missing = [
                 by_id[sid]
                 for r in rows
-                if is_error_result(r) and (sid := str(r.get("sample_id"))) in by_id
+                if is_repairable_hole(r) and (sid := str(r.get("sample_id"))) in by_id
             ]
             # PHASE 1 — plug each hole with a REAL measurement, one cell at a time.
             for hole in missing:
@@ -263,8 +266,6 @@ async def repair_incomplete_rounds(
                     session,
                     label="round_repair",
                     opt_sp=None,
-                    degradation_checks=None,
-                    n_total_candidates=0,
                     axes=cycle.axes,
                     on_sample_scored=None,
                     on_sample_starting=None,
@@ -274,24 +275,34 @@ async def repair_incomplete_rounds(
             # PHASE 2 — re-score the whole attempted set (all cache hits by now), so the
             # composite comes from the scoring GATEWAY over the complete panel rather than a
             # local computation stitched onto phase 1's partial return.
-            results, scores, _signal = await score_search_point(
+            scored = await score_search_point(
                 sp,
                 attempted,
                 session,
                 label="round_repair",
                 opt_sp=None,
-                degradation_checks=None,
-                n_total_candidates=0,
                 axes=cycle.axes,
                 on_sample_scored=None,
                 on_sample_starting=None,
                 measured=stamp,
             )
+            if scored.stopped is not None:
+                logger.warning(
+                    "Round %d candidate %s: re-scoring its cells stopped after %d/%d (%s) — "
+                    "leaving it holed rather than reporting part of its panel as the whole.",
+                    t.round,
+                    cs.label,
+                    len(scored.results),
+                    len(attempted),
+                    scored.stopped,
+                )
+                continue
+            results = scored.results
             t.all_candidate_results[cs.candidate_id] = results
             t.candidate_scores[i] = build_score_report(
                 cand_osp,
                 cs.pipeline_overlay,
-                scores,
+                scored.scores,
                 results,
                 attempted,
                 label=cs.label,
@@ -309,7 +320,7 @@ async def repair_incomplete_rounds(
                 "re-measured %d, composite %.4f → %.4f",
                 t.round,
                 cs.label,
-                unscoreable_cells(rows),
+                len(missing),
                 len(results),
                 cs.composite_fitness,
                 t.candidate_scores[i].composite_fitness,

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from promptpotter import connectors
+from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.search_point import has_framing
 from promptpotter.infrastructure.store.io import read_json_tolerant, read_yaml_optional
 from promptpotter.infrastructure.store.layout import validate_dataset_name
@@ -212,7 +213,7 @@ def _read_n_samples(stores: Stores, name: str) -> int | None:
     try:
         if (panel := dataset_panel_rows(stores, name)) is not None:
             return len(panel[0])
-    except (ValueError, OSError, ImportError):
+    except (ValueError, OSError, ImportError, BackendUnreachableError):
         return None
     raw = readable_dataset_rows(stores, name)
     if raw is None:

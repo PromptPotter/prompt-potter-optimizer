@@ -8,16 +8,14 @@
 import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { ageText, fmtFitness, fmtPct0 } from "@/lib/format";
-import { useFetch } from "@/lib/hooks/useFetch";
-import { ErrorNote, Loading, SignInPrompt } from "@/components/ui";
+import { useRead } from "@/lib/hooks/useRead";
+import { ErrorNote, Loading, SignInPrompt, Term } from "@/components/ui";
 
 export function VerifyPane() {
   const { status } = useAuth();
-  // Gate on a confirmed session — `null` fetcher means useFetch fires nothing,
-  // so anon never 401s the protected read (frontend-surface-contract.md § I5).
-  const { data, error } = useFetch(
-    status === "authed" ? (s) => fetchDiagnosticRuns(undefined, s) : null,
-    [status],
+  const read = useRead(
+    { key: "diagnostic-runs", fetch: (s) => fetchDiagnosticRuns(undefined, s) },
+    { surface: "diagnostic-runs", auth: true },
   );
 
   if (status !== "authed") {
@@ -32,20 +30,21 @@ export function VerifyPane() {
     );
   }
 
-  if (error) {
+  if (read.status === "failed") {
     return (
       <div className="verify-pane">
         <ErrorNote>Couldn’t load diagnostic runs — retry shortly.</ErrorNote>
       </div>
     );
   }
-  if (data === null) {
+  if (read.status !== "ready") {
     return (
       <div className="verify-pane">
         <Loading>Loading diagnostic runs…</Loading>
       </div>
     );
   }
+  const data = read.data;
 
   if (data.n === 0) {
     return (
@@ -83,13 +82,13 @@ export function VerifyPane() {
           <thead>
             <tr>
               <th>Source</th>
-              <th title="Samples requested at the CLI; how many were newly measured (the rest were already in the cross-cycle archive).">Samples</th>
-              <th title="Total samples this candidate has measurements for across the dataset's archive.">Workspace n</th>
-              <th title="Source campaign's accuracy for this candidate, as persisted on the round file.">Campaign acc</th>
-              <th title="Workspace accuracy = mean hit rate over the workspace measurement set.">Workspace acc</th>
-              <th title="Source campaign's composite for this candidate, as persisted on the round file.">Campaign cf</th>
-              <th title="Composite recomputed under the campaign's scorer over every workspace measurement for this candidate's config.">Workspace cf</th>
-              <th title="Grey = source-campaign accuracy. Red overlay = workspace accuracy. A red bar shorter than the grey one means the verdict didn't hold.">Trend</th>
+              <th><Term content="Samples requested at the CLI; how many were newly measured (the rest were already in the cross-cycle archive).">Samples</Term></th>
+              <th><Term content="Total samples this candidate has measurements for across the dataset's archive.">Workspace n</Term></th>
+              <th><Term content="Source campaign's accuracy for this candidate, as persisted on the round file.">Campaign acc</Term></th>
+              <th><Term content="Workspace accuracy = mean hit rate over the workspace measurement set.">Workspace acc</Term></th>
+              <th><Term content="Source campaign's composite for this candidate, as persisted on the round file.">Campaign cf</Term></th>
+              <th><Term content="Composite recomputed under the campaign's scorer over every workspace measurement for this candidate's config.">Workspace cf</Term></th>
+              <th><Term content="Grey = source-campaign accuracy. Red overlay = workspace accuracy. A red bar shorter than the grey one means the verdict didn't hold.">Trend</Term></th>
               <th>When</th>
             </tr>
           </thead>
@@ -123,10 +122,14 @@ function VerifyRow({ run }: { run: DiagnosticRunRecord }) {
       <td className="verify-num">{fmtFitness(run.source_campaign_composite)}</td>
       <td className="verify-num">{fmtFitness(run.workspace_composite)}</td>
       <td className="verify-bar-cell">
-        {run.source_campaign_accuracy === null ? (
+        {run.source_campaign_accuracy === null || run.held === null ? (
           "—"
         ) : (
-          <TrendBar source={run.source_campaign_accuracy} workspace={run.workspace_accuracy} />
+          <TrendBar
+            source={run.source_campaign_accuracy}
+            workspace={run.workspace_accuracy}
+            held={run.held}
+          />
         )}
       </td>
       <td className="verify-when">{ageText(run.ts)}</td>
@@ -138,11 +141,20 @@ function VerifyRow({ run }: { run: DiagnosticRunRecord }) {
 // = workspace accuracy. Accuracy is the primary metric matched against the
 // dashboard's per-candidate fitness bars (blue = accuracy). Both clamped to
 // [0,1].
-function TrendBar({ source, workspace }: { source: number; workspace: number }) {
+// `held` is SERVED (`DiagnosticRunRecord.held`) — the producer owns when two measured rates count
+// as equal, so no surface picks its own epsilon. The two widths are geometry, clamped here.
+function TrendBar({
+  source,
+  workspace,
+  held,
+}: {
+  source: number;
+  workspace: number;
+  held: boolean;
+}) {
   const clamp = (v: number) => Math.max(0, Math.min(1, v));
   const s = clamp(source);
   const w = clamp(workspace);
-  const held = workspace + 1e-9 >= source;
   return (
     <div className="verify-bar" role="img" aria-label={`workspace ${held ? "≥" : "<"} campaign accuracy`}>
       <div className="verify-bar-source" style={{ width: `${s * 100}%` }} />

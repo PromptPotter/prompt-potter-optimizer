@@ -90,7 +90,20 @@ LEDGER_BASELINE = {
     # instead of subsystems — an Agent Skill is a directory of instructions, resources and programs,
     # and an MCP tool is a name, a description and a schema. It PAYS for itself: `node_param_keys`
     # projects off it instead of walking the same declarations again.
-    "modules": 355,
+    # +1: `application/scoring/cell_envelope.py` — the wall clock ONE measured cell may spend,
+    # enforced at the single seam a cell is measured. It is a module and not a helper beside
+    # `sample_measurement.py` because three things move together and none of them is measurement:
+    # an `asyncio.timeout` scope, the give-back that keeps it measuring the cell rather than the
+    # box (the shared limiter's queue, a machine sleep), and the UNSCOREABLE resolution that stops
+    # a truncated trajectory being graded. It PAID for itself: `runner/inner/spawn.py` held all
+    # three for L4 alone, so harbor's container episodes and every remote cell were unbounded in
+    # sum, and it is now a connector declaration any backend can make.
+    # +1: `infrastructure/llm/spend_book.py` — the ONE admission of a paid request, held at its
+    # worst case before it is sent. Every ceiling compared a cap against spend already recorded,
+    # so each call out when it tripped landed past it ($0.1018 on a $0.10 campaign) and a
+    # cancelled call billed with no record. It PAYS for itself: the SDK retries, the two caller
+    # 429 loops, the deadline re-send and the three caller emits fold into the one send seam.
+    "modules": 357,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     "init_files": 53,
@@ -103,12 +116,32 @@ LEDGER_BASELINE = {
     # whatever its shape, and how a campaign grades a cell IS one decision however many steps it
     # takes. `Scope.DATA` because swapping a judge invalidates every verdict taken under the old
     # one; `Estimand.GATE` because it decides what counts as a correct answer.
+    # +1: `CampaignConfig.accuracy_ceiling` — the accuracy a best-reachable prompt would score on
+    # this dataset at this model, which `rounds_to_ceiling` counts rounds against. It folds into no
+    # neighbour: `dataset_split` is a fold SIZE and `headline_metric` picks which existing number
+    # renders, while this one is a claim no code can derive — only the dataset owner holds it, and
+    # the clock reported nothing on any benchmark until a field existed to say it. `Scope.POLICY` /
+    # `Estimand.DISPLAY`: it moves no gate, no selection and no stop.
     # −1: `CampaignConfig.allowed_models` — folded into `optimizer_narrowing`, which already
     # carried a per-node `param_allowed_values`. With `model` a real search axis, "which models
     # may this node run" and "which models may a human steer a fork to un-tainted" stopped being
     # two questions, and the second field could only disagree with the first. Its command kind,
     # store method, CLI verb and dashboard panel went with it.
-    "config_leaf_fields": 39,
+    # +3: `DeterminismClamp.{temperature,seed,route_order}` — what a campaign pins on every
+    # optimizer call. Three leaves and not one: the draw and the HOST are different decisions with
+    # different evidence behind them (a temperature is read off the noise it removes, a route off
+    # `served_by` in the ledger), and pinning either without the other is a real, common state.
+    # They fold into no neighbour — the node's pipeline file is install content shared by every
+    # campaign, so a per-campaign pin has nowhere else to live, and `pipeline_overlay` addresses
+    # BACKEND nodes. `Scope.POLICY` because past rounds stay valid; `Estimand.SEARCH` because what
+    # moves is the optimizer's trajectory. They replace `InstrumentMode.optimizer_clamp`, which was
+    # reachable only from inside an L4 inner asyncio task.
+    # +1: `OptimizationConfig.escalation_ladder` — which LAYERS a campaign may escalate to. It
+    # folds into no neighbour: the three patiences PACE a ladder and can only defer a fire, and
+    # the L1 / L1+L2 / full ablation needs an arm where L2 cannot fire at all. Every earlier
+    # attempt at it was a patience set high enough to outlast the round budget, which is a
+    # property of the budget rather than of the arm.
+    "config_leaf_fields": 44,
     # +1: `QUEUE_MAX_WAIT_S` — how long a launch may wait in line before it is withdrawn. It is a
     # setting and not a constant because it is the one queue number a HOST has to be able to
     # answer for: on a shared box it decides when someone else's waiting launch is given up on.
@@ -144,7 +177,21 @@ LEDGER_BASELINE = {
     # and the number is the WINNER's, which the rows at this altitude cannot say. Without it a round
     # that graded six of ten reads as one that graded ten. Distinct from `not_attempted` because the
     # remedies invert: a cell never sent is re-run, an ungraded one re-graded off the banked row.
-    "cycle_result_fields": 166,
+    # 166 -> 213: the COUNTER was corrected, not the package — no surface moved for this raise, so
+    # the total is not comparable across it and the ROWS are what to read. `_count_leaves` deduped
+    # on one `seen` set shared across sibling branches, so a model reached at a second field
+    # contributed ZERO leaves: `SpendBucket` is declared four times on `SpendRollup`
+    # (backend/loop/judge/diagnostic) and was priced once; `RuntimeFailure` and `ValidationFailure`
+    # twice each, on `OptSearchPoint` and on `RoundResult`. A row whose whole purpose is to price
+    # nested surface was blind at exactly the sites that have it — deleting one of the four buckets
+    # lowered it by nothing, and adding a fifth would have raised it by nothing. The guard is the
+    # walk PATH now, so a genuine cycle still returns 0 and a second declaration costs what it is.
+    # +17: `DegradationHealth`, reached through `RoundResult.health`. It was priced as ONE leaf
+    # because its annotation was still a forward reference at count time — so the row read 213 or
+    # 230 depending only on whether anything in the process had validated a `RoundResult` first,
+    # and the gate saw 213 because `test_complexity_ledger` sorts ahead of every file that builds
+    # one. The walk rebuilds each model now; nothing was added.
+    "cycle_result_fields": 230,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -154,7 +201,9 @@ LEDGER_BASELINE = {
     # answered with pre-copy nodes. Derived on read now. A real subtraction, not a re-annotation.
     # -1: `candidate_diff.py::parent_param_value(…, proposed: Any)` — it read the proposal only to
     # know which fields a nested description dict named; one key per path names its own.
-    "any_params": 49,
+    # -1: `evidence/read.py::_coerce_state(raw: Any)` is GONE with the overlay-keyed edit identity
+    # it existed to canonicalise. `sp_hash` is a stamped string, so nothing coerces a nested dict.
+    "any_params": 48,
     # +1: `results.py::is_floor_pinned(rows: Sequence[Mapping[str, Any]])`, the same signature as
     # `measured_cells` and `is_answer_collapsed` beside it — a round row read off disk is a plain
     # mapping, so a narrower annotation here would be a claim the callers cannot honour.
@@ -169,11 +218,31 @@ LEDGER_BASELINE = {
     # (an unmeasured `Sample`, where the fact is `None`, and a measured row, where it is `""`), so
     # a row signature could only ever serve one of them and the other would have re-derived it.
     # Its set arity `all_verifier_graded` takes labels for the same reason and adds none back.
-    "domain_any_maps": 88,
+    # +1: `connector.py::CellEnvelopeSeconds.__call__(…, pipeline_params: dict[str, Any] | None)` —
+    # the SAME pair `WireAdapter` beside it takes, and deliberately so: what a cell may spend is
+    # decided by the query and the candidate's params, which is exactly what the request is built
+    # from. A narrower annotation here would be one the connector's own adapter cannot honour.
+    # +2: `pipeline_overlay.py::steers_disallowed_model` — the frozen campaign config and the
+    # overlay, which is the pair the babysit verdict is a function of. Both are genuinely
+    # untyped maps: `Campaign.config` is a `dict[str, Any]` snapshot and an overlay is
+    # `{node: {param: value}}`, the same spelling every function in this module already takes.
+    # Naming the two-step ONCE is what let the browser's copy of the rule be deleted; it had
+    # answered off a different permitted list than `fork-cycle` dispatch did. Taking `Campaign`
+    # instead would buy one of these back and couple a pipeline-SHAPE module to the manifest
+    # entity, which is the worse structure of the two.
+    # +1: `permitted_models_for_campaign` — the campaign->permitted hop named apart from the
+    # verdict, so a surface can SERVE the comparison set instead of deriving a second one beside
+    # it. Its return is typed; only the `Campaign.config` snapshot param counts.
+    # −2: `EscalationSignal.to_dict` and `ValidatorOutcome.to_dict` — neither had a caller, and the
+    # signal's candidate position they would have serialized was read by nothing either.
+    "domain_any_maps": 90,
     "models_lax": 3,
     "prompt_string_fields": 6,
     "injections": 32,
-    "escalation_rules": 6,
+    # +1: `l1_only_ladder`. The L1 / L1+L2 / full ablation needs an arm where L2 PROVABLY never
+    # fires, and a rule is the only place that can be true of: the router is the whole policy, so
+    # a gate at the caller would leave the policy saying FIRE_L2 while the loop quietly did not.
+    "escalation_rules": 7,
     # DEBT, and the only row here whose whole purpose is to fall. A function-local import of our
     # own package is habit, and the habit is the defect: unmarked, it cannot be told from a
     # load-bearing one, so nobody can hoist safely or add one knowingly. The three reasons people
@@ -187,14 +256,18 @@ LEDGER_BASELINE = {
     # `domain/l4/inner_origin.py`, so no cycle closes through `evidence`.
     # +3: an own-package `importlib.import_module` counts too, which the `import` statements alone
     # never showed — the two registries' member walks and the CLI's `COMMANDS` table.
-    # Of the 11, 10 are deliberate: `complexity_ledger`'s own 7 (it counts every layer, so it may
+    # -1: `campaign_runner.py::COMMANDS` now names each handler at module scope instead of
+    # resolving `"module:attr"` through `importlib.import_module` on dispatch. Its own startup
+    # justification measured false: `_shared`/`reaper` already ride most handlers' own module-scope
+    # imports, so `--help` paid their cost either way; hoisting the 24 handlers adds only their
+    # verb-specific tail (numpy for `ab`, httpx for `new`).
+    # Of the 10, all are deliberate: `complexity_ledger`'s own 7 (it counts every layer, so it may
     # import none at module scope), `escalation/state` (1, documented there) and the two walks,
-    # which import each member when the table completes. `COMMANDS` defers for startup, the reason
-    # `conventions.md` § Code shape measured and refused. Count cycles with care: an
+    # which import each member when the table completes. Count cycles with care: an
     # `if TYPE_CHECKING:` import sits in the module body and reads as top-level to an AST walk,
     # which made three "pairs" that were never runtime edges. The files whose cycle is invisible
     # until the build breaks say so at the import.
-    "deferred_imports": 11,
+    "deferred_imports": 10,
     # +1: `judges/CLAUDE.md` — the per-layer contract for a new top-level package, indexed from
     # `promptpotter/CLAUDE.md` like every other. It earns a page rather than a section in
     # `connectors/CLAUDE.md` because its load-bearing rule is the OPPOSITE concern: a connector
@@ -296,7 +369,54 @@ LEDGER_BASELINE = {
     # +1: whether a harbor episode OPENED the skill its prompt IS. Unopened is a no-skill episode,
     # so a round of them is arms-all-identical read as a tie — and a silent layout drift reads 0.0
     # on every cell, which is indistinguishable from exactly that finding. (test_integrity § 1)
-    "test_functions": 181,
+    # +1: the panel L1 rewrites offers each field's OWN value — shown the spliced
+    # `problem_description`, a faithful rewrite hands the operator's framing back as the raw field
+    # and the next render splices it around that copy, once per elected round. Silent, and every
+    # candidate after it is scored on the grown prompt. (test_integrity § 3)
+    # +1: the COLLAPSED cut on a bank with no labels — the gate keyed on a truth SET, so on every
+    # benchmark the preprint runs it was permanently False and the constant answerer bought its
+    # whole budget. Both directions are pinned in one function because the verifier's evidence
+    # cuts both ways: a cell left unsolved convicts, and an arm that solves every cell alike is
+    # degenerate and CORRECT, so the ceiling exemption is what stops the fix eating the best arm.
+    # (test_numerics § PoBB elimination)
+    # +1: a campaign that pins its draw and its route RUNS pinned, and two pins bank apart. The
+    # clamp merges last or `l1_generate`'s per-call `temperature` survives it; the route reaches
+    # `hash_call` or one host's answer is replayed under another's name. Silent both ways — every
+    # number renders — and the banked row cannot be told from one the pinned route produced.
+    # (test_integrity § 1)
+    # +1: an L1-only ablation arm that escalates once has measured something else under the arm's
+    # name, and nothing on any surface tells the two apart. (test_numerics § 10)
+    # +1: a resumed cycle's wall clock folded every earlier launch against this launch's endpoints,
+    # so each round closed before the resume read as instant in the published clock. (test_resume)
+    # +1: the ADR-0005 babysit trigger's own decision boundaries. The 13 vitest cases deleted with
+    # the browser's copy of the rule were the ONLY automated assertion of that truth table
+    # anywhere, and a false negative is silent twice over: the fork is admitted without
+    # `campaign.babysit` AND the branch is never stamped grade C, so it enters clean comparison,
+    # origin reuse and the L4 rollup as untainted with every number rendering. (test_security)
+    # +1: a human-authored arm pooled with the L1 arm that shares its `arm_id`. The read groups
+    # replicates by optimizer-prompt hash, which two forks of one campaign hold identically, so the
+    # paired test the human-in-the-loop claim is published from compares an arm against itself and
+    # reports the real difference as this instrument's noise. Every number still renders.
+    # (test_numerics § 7)
+    # +2: a cell a declared bound CUT read as a hole in the measurement at BOTH readers. The same
+    # declaration cuts the re-measure, so the repair branched the cycle and re-bought the cell
+    # (test_resume), and the panel gate halted the live round advising the resume that re-buys it
+    # (test_numerics § 10) — unbounded forks and unbounded spend, every number rendering.
+    # +1: a cell that RAN and had no grade dropped its spend at `measure_sample`'s one catch, so
+    # the ceiling under-counted a paid episode and the sidebar read $0.00 (test_integrity § 7).
+    # +1: a harbor episode a provider throttle ran out of clock banked its verifier's 0.0 as the
+    # model's grade, and the archive replays it under that identity; the same test holds an
+    # account out of credit to a halt rather than a panel of holes (test_integrity § 1).
+    # +1: a harbor campaign declaring `skill_delivery: system_prompt` whose skill never reached
+    # the first request runs every arm prompt-less under that mode's key (test_integrity § 1).
+    # +1: a look-ahead walk launches one cell past its stop rule's horizon, so a horizon that
+    # answers after the real cut discards paid calls unrecorded (test_numerics § 5).
+    # +1: a burst of concurrent sends — answered, cancelled, timed out — records spend past its
+    # ceiling, or a send that never reported is billed with no record (test_security).
+    # +1: a campaign list row naming a model its root does not run — the shared file's or the
+    # frozen delta's instead of the root seed's — and the campaign read without `at` skipping that
+    # seed; every row renders, and siblings are told apart by the wrong model (test_integrity § 4).
+    "test_functions": 196,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -325,7 +445,59 @@ LEDGER_BASELINE = {
     # none. `labels` is the display projection of the same walk and IS read, so the dotted paths
     # beside it were the raw form of a thing already answered; `estimand` is the grouping key the
     # panel never groups by. Dropping them narrows what a browser can start depending on.
-    "served_fields": 577,
+    # +2: `ForkPreviewRequest.pipeline_overlay` + `ForkPreviewResponse.steers_disallowed_model` —
+    # the ADR-0005 babysit verdict, which `fork-cycle` dispatch reached and never returned. Two
+    # served fields buy the DELETION of the browser's own copy of the rule
+    # (`overlaySetsModelOutsideAllowed`, `costLeverKeys` and 13 vitest cases), which answered
+    # off a different permitted list than the gate did. It folds into no neighbour: every other
+    # campaign read is addressed by id, and this one's subject is an overlay that exists nowhere
+    # on disk until the fork is confirmed.
+    # +1: `ForkPreviewResponse.permitted_models` — the set the gate compared against, served
+    # beside its verdict. Without it the panel named models off the served pipeline rows while the
+    # verdict came off the frozen campaign narrowing, so the sentence and its answer could disagree
+    # on a cycle seed that moved the set. Per node, never flattened: the panel flattens for one
+    # sentence, which is display, not derivation.
+    # +1: `SubjectReading.authorship` — WHO proposed the configuration a subject reads at. The read
+    # could already compute the human-against-loop contrast and had no key to LABEL or group it by:
+    # `arm_id` hashes round 0's optimizer prompts, which every fork of one campaign shares whoever
+    # wrote the edit. It folds into `arm_id` only by destroying that distinction, and into `label`
+    # not at all — a label names the branch, not its author.
+    # +1: `SubjectReading.human_intervened` — whether an operator touched the subject's CYCLE
+    # mid-run. Apart from `authorship` because it is about the run rather than the point: a
+    # loop-authored arm carries it too, and a babysat cycle is not comparable to an untouched one
+    # however it was authored. Already on `index.json`; nothing served it to a comparison.
+    # +1: `SubjectReading.cached_samples` — how many of the point's cells REPLAYED. The effort half
+    # of the same pairing: a rewind fork inherits its parent's rows, so `n_cells` beside it reads
+    # that evidence as independently bought. `int | None`, because 0 is the measurement "it earned
+    # every cell" and absent is no report — collapsing them is what credits the inherited arm.
+    # +1: `RankedEdit.campaign_id` — the other half of that row's identity, once the ranking keys
+    # on `sp_hash` and pools within one campaign. Two campaigns that ran the same searchpoint hold
+    # one hash and are two rows, each measured against its own origin, so serving the hash alone
+    # collides them on every table that keys a row. `provenance[]` carries the same id per
+    # occurrence and cannot replace it: a list expresses no guarantee that the row HAS one.
+    # (`RankedEdit.state_hash` → `sp_hash` is a rename in the same commit and moves nothing.)
+    # +1: `DiagnosticRunRecord.held` — did the verdict hold on the wider set. The pane drew the
+    # answer already; what it did not have was the TOLERANCE, so the browser picked its own
+    # epsilon for when two measured rates count as equal. It folds into neither rate beside it:
+    # those are measurements, this is the comparison's own decision, and the one reader it buys
+    # is the bar that was authoring it. (`RoundSummary.separable` lands in the same arc and costs
+    # nothing here — `dashboard.json` is served verbatim and reaches no OpenAPI schema.)
+    # +4: `CampaignSummary.spend_used_usd` + `.spend_unpriced_tokens`, counted twice because
+    # `CampaignDetailResponse` inherits them. The sidebar row prints a campaign's dollars, and the
+    # only other money carriers are per-cycle (`dashboard.json`, cumulative from the seed, so a
+    # fork double-counts) or per-account (`QuotaStatus`); adding up cycles in the browser is the
+    # arithmetic `webapp/CLAUDE.md` forbids. The pair mirrors `QuotaStatus`'s spend + unpriced.
+    # +3: `MachineStatusResponse.ceiling`, `QuotaStatus.concurrent_queued` and
+    # `.max_concurrent_cycles_writable` — the Account panel's run-concurrency section. The machine
+    # ceiling was served nowhere, the queued half of the account limit only inside a refusal, and
+    # who may move the limit is a server decision the browser would otherwise re-derive.
+    # +8: `CampaignSummary.runs_with` (counted twice through `CampaignDetailResponse`), its
+    # `CampaignRunsWith.params` + `.max_rounds`, and `RunsWithParam`'s node/key/value/source — what
+    # a root runs with, on the list. Sibling campaigns differ only there, and the per-campaign
+    # `/pipeline` read is too heavy per row while the frozen `config` is a delta the browser may not
+    # merge (I9). A second transport of that resolver's answer, so it folds into no neighbour.
+    # (`CycleListEntry.n_rounds` → `rounds_closed` is a rename in the same change and moves nothing.)
+    "served_fields": 600,
 }
 
 

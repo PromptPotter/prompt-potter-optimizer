@@ -62,7 +62,7 @@ import {
   walkCourses,
   type LineageIndex,
 } from "@/lib/derivations";
-import { useFetch } from "@/lib/hooks/useFetch";
+import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useRoundFile } from "@/lib/hooks/useRoundFile";
 import { useLineageTree } from "@/lib/lineage";
 import { fmtMetricInterval, fmtMetricValue, fmtPct0, fmtUsd, shortId } from "@/lib/format";
@@ -266,21 +266,21 @@ function ChannelCard({
     [pickedPath, selected],
   );
   const pickedCampaign = pickedPath?.at(-1)?.campaignId ?? "";
-  const {
-    data: pipeline,
-    loading: pipelineLoading,
-    error: pipelineError,
-  } = useFetch(
+  const pipelineRead = useRead(
     pickedCampaign && at
-      ? (s: AbortSignal) => fetchCampaignPipeline(pickedCampaign, at, s)
+      ? {
+          key: `${pickedCampaign}\x1f${at}`,
+          fetch: (s) => fetchCampaignPipeline(pickedCampaign, at, s),
+        }
       : null,
-    [pickedCampaign, at],
+    { surface: "campaign-pipeline" },
   );
+  const pipeline = readyData(pipelineRead);
   // The state of THIS fetch, handed down beside the schema it produced.
   const pipelineStatus = pipelineReadStatus({
-    bound: Boolean(pickedCampaign && at),
-    loading: pipelineLoading,
-    failed: Boolean(pipelineError),
+    bound: pipelineRead.status !== "idle",
+    loading: pipelineRead.status === "loading",
+    failed: pipelineRead.status === "failed",
   });
   // The point's own round, on its own course: how many arms stood, and where this one sat among
   // them. Both come off the tree, which is the only thing that knows a round's shape.
@@ -478,12 +478,35 @@ function ChannelCard({
               <dt>rounds on branch</dt>
               <dd>{reading.cycle_rounds_scored}</dd>
             </div>
+            {/* WHO proposed this configuration, served (`authorship`). The arm beside it groups by
+                optimizer CONFIG, which two forks of one campaign share whoever wrote the edit — so
+                this is the only row on the card that separates a human's prompt from L1's. */}
+            <div>
+              <dt>authored by</dt>
+              <dd title={reading.authorship}>{reading.authorship || "—"}</dd>
+            </div>
+            {/* Of the cells behind the number above, how many REPLAYED instead of being measured
+                here. Absent and zero are different facts: `—` is no report for this point, `0` is
+                every cell earned, and a rewind fork's inherited rows are neither. */}
+            <div>
+              <dt>replayed cells</dt>
+              <dd>{reading.cached_samples ?? "—"}</dd>
+            </div>
           </dl>
           {/* The SENTENCE is served (`comparable_note`). A different ruler and a different
               dataset are not one fact worded twice, and the copy that lived here said "its cells
               still pair where they overlap" over a pair that shared no question at all. */}
           {reading.comparable === false && (
             <p className="l4-warn">{reading.comparable_note}</p>
+          )}
+          {/* A fact about the RUN, not about who authored the point — a loop-authored arm carries
+              it too. Served, because a babysat cycle is no longer purely reproducible and pairing
+              it against one nobody touched is a comparison of two different things. */}
+          {reading.human_intervened && (
+            <p className="l4-warn">
+              An operator intervened mid-run on this cycle, so it is no longer purely
+              reproducible.
+            </p>
           )}
 
           {/* The MAP first, then what the point it highlights IS. Walking the cladogram is what
@@ -525,11 +548,9 @@ function ChannelCard({
               whole point of being able to walk at all — so it stays OPEN across a pick. Closing
               it when the operator walks somewhere would shut the panel at the exact moment they
               asked to see something. */}
-          {/* The copy control rides the summary's row as a SIBLING of the disclosure, never
-              inside it. `<summary>` takes phrasing content and its accessible name is computed
-              from its own descendants, so a `CopyButton` offering several readings put a floating
-              `role="menu"` into both: invalid markup, and — while open — its rows spoken as part
-              of the disclosure's name. */}
+          {/* The restore and copy controls ride the summary's row as SIBLINGS of the disclosure.
+              `<summary>` is a label: a control inside it is invalid markup, a word in the
+              disclosure's accessible name, and a press that toggles the fold on the way out. */}
           <div className="cmp-channel-setup-row">
             <details className="cmp-channel-setup" open={setupOpen}>
               <summary
@@ -549,7 +570,6 @@ function ChannelCard({
                     — this channel reads at {head.own?.label ?? reading.label}
                   </span>
                 )}
-                <ChannelRestore edits={edits} subjectKey={pickedKey} onEdits={onEdits} />
               </summary>
               <SearchpointDrillIn
                 row={pickedRow}
@@ -599,21 +619,20 @@ function ChannelCard({
                 }
               />
             </details>
+            <ChannelRestore edits={edits} subjectKey={pickedKey} onEdits={onEdits} />
             {/* Same readings the dashboard's Scoring inspector offers, off the same builder: a
                 point pasted from a Compare channel has to be comparable to one pasted there, and
                 two hosts each deciding what "this searchpoint" means is exactly how that stops
                 being true. */}
-            <span className="cmp-channel-setup-copy">
-              <CopyButton
-                choices={searchpointCopyChoices({
-                  cfg: pickedCfg,
-                  row: pickedRow,
-                  samples: pickedSamples,
-                  arms: pickedArms,
-                })}
-                title="Copy this searchpoint"
-              />
-            </span>
+            <CopyButton
+              choices={searchpointCopyChoices({
+                cfg: pickedCfg,
+                row: pickedRow,
+                samples: pickedSamples,
+                arms: pickedArms,
+              })}
+              title="Copy this searchpoint"
+            />
           </div>
         </>
       )}

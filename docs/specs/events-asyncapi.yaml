@@ -357,7 +357,8 @@ components:
           minimum: 0
         candidate_idx:
           type: [integer, 'null']
-          minimum: 0
+          minimum: -1
+          description: "`-1` (`NO_ROUND_SLOT`) names no candidate: the parent's re-measure, and the round-wide `flight` gauge."
         candidate_total:
           type: [integer, 'null']
           minimum: 0
@@ -455,7 +456,6 @@ components:
             - l1_zero_candidates
             - injection_budget_overrun
             - layer_parse_failure
-            - optimizer_deadline_retry
             # The round measured cleanly and still resolved nothing: no arm's
             # blocked lift over the parent excluded 0
             # (`ScoredCandidate.matched_parent_lift_ci_*`). The round's numbers

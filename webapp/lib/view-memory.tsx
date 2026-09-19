@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
-import { isNodeOpen, nodeKey, type NodeKind } from "@/components/shell/sidebar/grouping";
+import { isNodeOpen, nodeKey, type NodeKind } from "@/lib/derivations";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { ownerOfNodeAddress } from "@/lib/ids";
 
@@ -27,7 +27,7 @@ export interface CampaignView {
   v: number;
   // Epoch ms of the last visit — drives both the TTL and the LRU eviction order.
   at: number;
-  // Sidebar nodes TOGGLED AWAY FROM THEIR DEFAULT (`grouping.ts::isNodeOpen`), this
+  // Sidebar nodes TOGGLED AWAY FROM THEIR DEFAULT (`campaign-forest.ts::isNodeOpen`), this
   // campaign's only. Same semantics the global blob had, minus the sharing.
   toggled: string[];
   // The active cycle whose one-shot "reveal the running course" already fired. Without

@@ -11,6 +11,9 @@ import {
   Chip,
   ChipGroup,
   CopyButton,
+  HoverCard,
+  IconMore,
+  IconTree,
   Menu,
   MenuCheck,
   MenuRadioGroup,
@@ -19,7 +22,6 @@ import {
   ToolbarSep,
   ToolbarSpacer,
 } from "@/components/ui";
-import { IconMore, IconTree } from "./toolbar-icons";
 import { liveCandidates } from "@/lib/poll";
 import { ABORT_LENS_LABELS } from "@/lib/api/types.generated";
 import type { DashboardCandidate, RoundSummary } from "@/lib/api/types";
@@ -39,8 +41,7 @@ import {
 import { FitnessRankSummary } from "./FitnessRankSummary";
 import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
 import type { LineageNode } from "@/lib/api";
-import { useAuth } from "@/lib/auth-context";
-import { useFetch } from "@/lib/hooks/useFetch";
+import { readyData, useRead } from "@/lib/hooks/useRead";
 import {
   barsAreCourses,
   candidateViews,
@@ -56,7 +57,7 @@ import { isSelectedCandidate } from "@/lib/types";
 import { encodeCyclePath } from "@/lib/ids";
 import { useWorkspace } from "@/lib/workspace";
 import { useLineage } from "./useLineage";
-import { useCycleEvaluators } from "./useCycleEvaluators";
+import { useCycleEvaluators } from "@/components/shell/mask/useCycleEvaluators";
 import { SampleSetControl } from "./SampleSetControl";
 import { measuredUniverse } from "@/lib/sample-set";
 import { useViewedLineage, divergenceRoundsFor } from "@/lib/lineage";
@@ -143,10 +144,14 @@ export function CandidatesCard() {
   // ── 2b. Diagnostic-run records — one per `promptpotter verify`. Fetched per cycle switch,
   // never polled: re-run verify and reload for a fresh red bar. Gated on a confirmed session,
   // because the route is workspace-scoped and 401s for anon (I5).
-  const { status } = useAuth();
-  const { data: diagRunsResp } = useFetch(
-    status === "authed" ? (s) => fetchDiagnosticRuns(undefined, s) : null,
-    [status, campaignId, cycleId],
+  const diagRunsResp = readyData(
+    useRead(
+      {
+        key: `${campaignId}\x1f${cycleId}`,
+        fetch: (s) => fetchDiagnosticRuns(undefined, s),
+      },
+      { surface: "diagnostic-runs", auth: true },
+    ),
   );
   const diagByLabel = useMemo(() => {
     const m = new Map<string, DiagnosticRunRecord>();
@@ -159,12 +164,9 @@ export function CandidatesCard() {
     return m;
   }, [diagRunsResp, campaignId, cycleId]);
 
-  // ── 3. The scoring mask: the shared value, plus this cycle's own evaluator rows. The hook is
-  // called UNCONDITIONALLY — see its own warning: `lib/lineage.tsx` reads the same store to build
-  // the tree's `?lens=`, so a seed deferred to the panel's mount costs an unmasked refetch and one
-  // wrong frame.
+  // ── 3. The scoring mask: the shared value, plus this cycle's own evaluator rows.
   const { open: maskOpen, mask } = useScoringMask();
-  const evaluators = useCycleEvaluators({ cycleId, dash, inflightCandidates, history });
+  const evaluators = useCycleEvaluators();
   // The criterion on screen. Derived once — three consumers asking `lensOf` separately is three
   // chances to disagree about whether the panel is even open.
   const activeLens = maskOpen ? lensOf(mask) : null;
@@ -578,25 +580,24 @@ export function CandidatesCard() {
                   }}
                 />
                 <MenuSep />
-                <MenuCheck
-                  on={maskOpen}
-                  onClick={() => setScoringMask({ open: !maskOpen })}
-                  title="Pick evaluators and reweight them to recompute every score under a criterion you choose."
-                >
-                  Scoring mask
-                </MenuCheck>
+                <HoverCard content="Pick evaluators and reweight them to recompute every score under a criterion you choose.">
+                  <MenuCheck on={maskOpen} onClick={() => setScoringMask({ open: !maskOpen })}>
+                    Scoring mask
+                  </MenuCheck>
+                </HoverCard>
                 {/* Never disabled — the origin is normally the cached one, so greying out
                     when only C0 was replayed hides the case this is opened for. */}
-                <MenuCheck
-                  on={showCache}
-                  onClick={() => setCandidatesState({ showCache: !showCache })}
-                  title={TERMS.cache_replayed}
-                >
-                  {/* "Replayed", never "cache": the word `cache` names the PROVIDER's prefix
-                      discount everywhere else in this app (the `c39%` badge), and one word cannot
-                      mean both. The count is CANDIDATES carrying a replayed sample, not samples. */}
-                  Replayed{cacheHitCount > 0 ? ` · ${cacheHitCount} of ${views.length}` : ""}
-                </MenuCheck>
+                <HoverCard content={TERMS.cache_replayed}>
+                  <MenuCheck
+                    on={showCache}
+                    onClick={() => setCandidatesState({ showCache: !showCache })}
+                  >
+                    {/* "Replayed", never "cache": the word `cache` names the PROVIDER's prefix
+                        discount everywhere else in this app (the `c39%` badge), and one word cannot
+                        mean both. The count is CANDIDATES carrying a replayed sample, not samples. */}
+                    Replayed{cacheHitCount > 0 ? ` · ${cacheHitCount} of ${views.length}` : ""}
+                  </MenuCheck>
+                </HoverCard>
                 <MenuSep />
                 {/* A searchpoint is picked where it is being LOOKED AT — the lit bar, the
                     dendrogram node and the forest stub all write one selection slot, so the

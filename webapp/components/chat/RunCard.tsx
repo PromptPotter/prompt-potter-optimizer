@@ -1,20 +1,15 @@
 "use client";
 import { useMemo } from "react";
-import type { DatasetItem, HardSampleOrder, HardSamplesScope, SampleSeries } from "@/lib/api";
-import type { SeriesTotals } from "@/lib/hooks/useDatasetPreview";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useObserveSearchPoint } from "@/lib/hooks/useObserveSearchPoint";
-import { useRoundCandidates } from "@/lib/hooks/useRoundCandidates";
-import { useRoundFile } from "@/lib/hooks/useRoundFile";
-import { useWorkspace } from "@/lib/workspace";
+import { useRoundRows, type RoundRows } from "@/lib/hooks/useRoundRows";
 import {
   candidateObserveConfig,
   isSelfOptimization,
   observeOptions,
   runSummary,
   sampleFlips,
-  samplesForRow,
   searchPointDiff,
   searchpointCopyChoices,
   type DiffGroup,
@@ -23,21 +18,25 @@ import {
   type RunSummary,
   type SampleFlip,
 } from "@/lib/derivations";
-import type { RoundResult } from "@/lib/types";
+import type { ElectedRow } from "@/lib/types";
 import { PROMPT_STRING_FIELDS } from "@/lib/prompt-fields";
 import { runPhaseLabel, stopReasonNextStep } from "@/lib/run-phase";
-import { fmtPct0, fmtUsd } from "@/lib/format";
+import { fmtPct0, fmtTheta, fmtUsd } from "@/lib/format";
 import { cx } from "@/lib/cx";
-import { CopyButton, HoverCard, SegmentedControl } from "@/components/ui";
+import { CopyButton, HoverCard, SegmentedControl, pressable } from "@/components/ui";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 import { HardSamplesPreview } from "@/components/dashboard/samples/HardSamplesPreview";
+import { TrendChart } from "@/components/eval/TrendChart";
 
 // The run card — what the operator came for, inside the thread rather than in the
-// chrome above it. TWO boxes on the chat's own background, not one shaded compartment,
-// and neither wears a title: a box that has to announce what it is has already failed
+// chrome above it. Boxes on the chat's own background, not one shaded compartment,
+// and none wears a title: a box that has to announce what it is has already failed
 // to show it, and three title rows cost three of the six lines this card gets.
 //
-// The split is by QUESTION, and there are only two. What did the optimizer do and what
+// The first box is the campaign's Trend in miniature — the chat's only running
+// indicator — and a click on it opens the Dashboard, where it is read at size.
+//
+// Below it the split is by QUESTION, and there are only two. What did the optimizer do and what
 // did it buy — spend, lift, the fields it changed, the rows that changed hands. And
 // where is the run in the data — the walk, and the shape of the roster it walks.
 //
@@ -53,22 +52,22 @@ interface Props {
   // The declared scoring order, from the chat's ONE EventSource. Threaded rather than
   // subscribed here — a second `useCycleEvents` would open a second stream.
   sampleOrder: number[] | null;
+  onOpenDashboard: () => void;
 }
 
-export function RunCard({ sampleOrder }: Props) {
+export function RunCard({ sampleOrder, onOpenDashboard }: Props) {
   const { dash, isLive } = useDashboard();
-  const { viewedPath } = useWorkspace();
   const cv = useConnector();
   // No node is selected here, so this is the WHOLE-pipeline view: the prompt plus
   // config across every node — the shape a reader means by "my prompt".
   const observe = useObserveSearchPoint(null);
   const summary = runSummary(dash);
 
-  // ROUND 0, fetched ONCE for the whole card. Both the "changed vs origin" summary
+  // ROUND 0, read ONCE for the whole card. Both the "changed vs origin" summary
   // and the flipped rows are questions about the origin, and two hooks asking for the
   // same file would be two GETs of one static document.
-  const originFile = useRoundFile(viewedPath, dash ? 0 : null);
-  const originCfg = candidateObserveConfig(originFile.doc, "C0", "origin · C0", null);
+  const origin = useRoundRows(dash ? 0 : null);
+  const originCfg = candidateObserveConfig(origin.doc, "C0", "origin · C0", null);
 
   // Nothing measured, nothing to show. Silence beats an empty frame — the ingest
   // thread above is the surface at that point.
@@ -76,12 +75,20 @@ export function RunCard({ sampleOrder }: Props) {
 
   return (
     <section className={cx("run-card", isLive && "is-live")} aria-label="This run" role="region">
+      {/* A div, not a button: the `CardFrame` inside is flow content. `pressable` restores the
+          native activation that trades away. */}
+      <div
+        className="run-box run-trend"
+        {...pressable(onOpenDashboard)}
+        aria-label="Open the dashboard"
+      >
+        <TrendChart compact />
+      </div>
       <ConfigBox
         observe={observe}
         summary={summary}
         originCfg={originCfg}
-        originDoc={originFile.doc}
-        originLoading={originFile.loading}
+        origin={origin}
         schema={cv.nodeConfigSchema}
         schemaStatus={cv.pipelineStatus}
         outputSchema={cv.nodeOutputSchema}
@@ -97,10 +104,6 @@ export function RunCard({ sampleOrder }: Props) {
       )}
     </section>
   );
-}
-
-function fmtTheta(v: number | null): string {
-  return v != null ? `θ ${v >= 0 ? "+" : ""}${v.toFixed(2)}` : "—";
 }
 
 // What the shown searchpoint bought, in the units a reader already owns: its own rate
@@ -198,8 +201,7 @@ function ConfigBox({
   observe,
   summary,
   originCfg,
-  originDoc,
-  originLoading,
+  origin,
   schema,
   schemaStatus,
   outputSchema,
@@ -207,8 +209,7 @@ function ConfigBox({
   observe: ReturnType<typeof useObserveSearchPoint>;
   summary: RunSummary;
   originCfg: ReturnType<typeof candidateObserveConfig>;
-  originDoc: RoundResult | null;
-  originLoading: boolean;
+  origin: RoundRows;
   schema: Parameters<typeof NodeSurface>[0]["schema"];
   schemaStatus: Parameters<typeof NodeSurface>[0]["schemaStatus"];
   outputSchema: Parameters<typeof NodeSurface>[0]["outputSchema"];
@@ -219,17 +220,15 @@ function ConfigBox({
   // ONE subject for the whole box: whichever searchpoint the picker names is what the
   // rate, the diff and the flipped rows all describe. Splitting it — a run-level rate
   // over a candidate-level diff — is what made the picker read as half-broken.
-  const { byRound } = useRoundCandidates();
-  const shownRow = observe.target
-    ? (byRound.get(observe.target.round)?.[observe.target.idx] ?? null)
-    : null;
+  // Round 0 IS the origin above, so the shown round reads that same one rather than a second copy.
+  const target = observe.target;
+  const shownRound = useRoundRows(target && target.round > 0 ? target.round : null);
+  const shown = target?.round === 0 ? origin : shownRound;
+  const shownRow = target ? shown.row(target.idx) : null;
 
   return (
     <div className="run-box">
       <div className="run-box-head">
-        {/* A div, not a <p>: `Lift` hangs a HoverCard off the accuracy pair, and that
-            renders a <div> — which a <p> may not contain. Invalid nesting there is a
-            HYDRATION error, not a lint nit: the server and client trees disagree. */}
         <div className="run-headline">
           <strong>{summary.usedUsd != null ? fmtUsd(summary.usedUsd) : "—"}</strong>
           <span className="run-headline-unit">spent</span>
@@ -274,7 +273,7 @@ function ConfigBox({
         <details className="run-diff">
           <summary>
             <span className="run-diff-label">{cfg.label}</span>
-            {originLoading ? (
+            {origin.loading ? (
               <span className="run-diff-changes">comparing to origin…</span>
             ) : diff.length === 0 ? (
               <span className="run-diff-changes">identical to the origin you submitted</span>
@@ -299,7 +298,7 @@ function ConfigBox({
           />
         </details>
       )}
-      <Flips originDoc={originDoc} target={observe.target} />
+      <Flips origin={origin} shown={shown} shownRow={shownRow} target={target} />
     </div>
   );
 }
@@ -395,31 +394,26 @@ function copyPayload(cfg: {
 // with the round's own served `improved`, and two channels for one fact is the
 // redundancy that made this card long.
 function Flips({
-  originDoc,
+  origin,
+  shown,
+  shownRow,
   target,
 }: {
-  originDoc: RoundResult | null;
+  origin: RoundRows;
+  shown: RoundRows;
+  shownRow: ElectedRow | null;
   target: ObserveTarget | null;
 }) {
-  const { dash } = useDashboard();
-  const { viewedPath } = useWorkspace();
-  const { byRound } = useRoundCandidates();
-  const originRow = byRound.get(0)?.[0] ?? null;
-  const shownRow = target ? (byRound.get(target.round)?.[target.idx] ?? null) : null;
-  // Round 0 = the origin itself; there is nothing to compare it against but itself, so
-  // its file is not fetched twice.
+  const originRow = origin.row(0);
+  // Round 0 = the origin itself; there is nothing to compare it against but itself.
   const comparable = !!target && target.round > 0 && !!originRow && !!shownRow;
-  const shownFile = useRoundFile(viewedPath, comparable && target ? target.round : null);
 
   const flips = useMemo(() => {
-    if (!comparable || !originRow || !shownRow) return null;
-    return sampleFlips(
-      samplesForRow(originRow, dash, originDoc),
-      samplesForRow(shownRow, dash, shownFile.doc),
-    );
-  }, [comparable, originRow, shownRow, dash, originDoc, shownFile.doc]);
+    if (!comparable) return null;
+    return sampleFlips(origin.samples(originRow), shown.samples(shownRow));
+  }, [comparable, origin, originRow, shown, shownRow]);
 
-  if (!comparable || !flips || flips.compared === 0) return null;
+  if (!flips || flips.compared === 0) return null;
   const { gained, lost, compared, unchanged } = flips;
   return (
     <div className="run-flips">

@@ -8,13 +8,15 @@ export type BadgeTone = "default" | "accent" | "success" | "danger";
 // pill. Presentational — pair a tone with text that carries the meaning.
 export function Badge({
   tone = "default",
-  className,
   title,
+  className,
   children,
 }: {
   tone?: BadgeTone;
-  className?: string;
   title?: string;
+  // A host's own geometry for this one badge. Unlayered, so it beats the primitive's
+  // defaults whatever order the chunks load in (`webapp/CLAUDE.md` § Stylesheet organization).
+  className?: string;
   children: ReactNode;
 }) {
   return (

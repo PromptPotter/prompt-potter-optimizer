@@ -16,7 +16,7 @@ from promptpotter.application.datasets.origin_readiness import (
     resolution_block,
 )
 from promptpotter.application.jobs.launcher.checkin import save_checkin_draft
-from promptpotter.application.jobs.quota import admit_llm_turn
+from promptpotter.application.jobs.quota import admit_spend
 from promptpotter.application.optimization.dispatch.llm_call.call import (
     LLMCallContext,
     run_optimizer_node,
@@ -26,6 +26,7 @@ from promptpotter.application.optimization.task_context import checkin_call_cont
 from promptpotter.application.scoring.formula.matchers import extraction_note_for_scoring
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.origin_provenance import Provenance
+from promptpotter.infrastructure.llm.spend_book import spending_under
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.tracing.bridge import observed_node
@@ -158,9 +159,9 @@ async def resolve_origin_turn(
 ) -> OriginResolutionResult:
     """Persists the mutated draft + resolution block under the draft's ``draft_id``."""
     # The one optimizer call reachable before a campaign exists, so no launch admission has run
-    # and no `BudgetGate` is watching — an exhausted account would otherwise keep spending the
-    # host's key here indefinitely. Offloaded: admission globs every cycle ledger.
-    await asyncio.to_thread(admit_llm_turn, stores=stores)
+    # and no run's book is watching — the account's headroom is this turn's book. Offloaded:
+    # admission globs every cycle ledger.
+    book = await asyncio.to_thread(admit_spend, stores=stores, bucket="turn")
     user_content, consultation_instruction = build_origin_consultation(draft, message)
 
     # Bound here as well as in `CommandDispatcher` so the CLI path (`new <file>`,
@@ -171,19 +172,20 @@ async def resolve_origin_turn(
     context = _checkin_call_context(stores, draft.draft_id)
     token = set_cycle_ledger(context.ledger)
     try:
-        async with observed_node(
-            "origin_checkin",
-            "llm",
-            obs=None,
-            campaign_id=draft.draft_id,
-            round_num=0,
-        ):
-            raw, _prompt, repair_attempts = await run_optimizer_node(
-                template_name="checkin",
-                prompt_vars={"consultation_instruction": consultation_instruction},
-                user_content=user_content,
-                context=context,
-            )
+        with spending_under(book):
+            async with observed_node(
+                "origin_checkin",
+                "llm",
+                obs=None,
+                campaign_id=draft.draft_id,
+                round_num=0,
+            ):
+                raw, _prompt, repair_attempts = await run_optimizer_node(
+                    template_name="checkin",
+                    prompt_vars={"consultation_instruction": consultation_instruction},
+                    user_content=user_content,
+                    context=context,
+                )
     finally:
         reset_cycle_ledger(token)
 

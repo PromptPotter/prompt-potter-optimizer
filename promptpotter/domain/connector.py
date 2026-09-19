@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BackendUnreachableError",
+    "CellEnvelopeSeconds",
     "ConnectorExecution",
     "MeasuredUnit",
     "SessionProtocol",
@@ -62,6 +63,18 @@ class WireAdapter(Protocol):
         query: str,
         pipeline_params: dict[str, Any] | None,
     ) -> dict[str, Any]: ...
+
+
+class CellEnvelopeSeconds(Protocol):
+    """Pure ``(query, pipeline_params) → seconds`` — the same two arguments :class:`WireAdapter`
+    shapes a request from, because what one cell may spend is decided by the same pair. The NUMBER
+    only; the bound it puts in force is ``application/scoring/cell_envelope.py::CellEnvelope``."""
+
+    def __call__(
+        self,
+        query: str,
+        pipeline_params: dict[str, Any] | None,
+    ) -> float: ...
 
 
 class SessionProtocol(Protocol):

@@ -205,7 +205,7 @@ export function roundCandidates(dash: DashboardSnapshot | null): ElectedRow[] {
 }
 
 // Round-grouped view of an already-computed candidate list. Pure regrouping —
-// takes the rows so the caller (`useRoundCandidates`) computes the spine once
+// takes the rows so the caller (`useRoundRows`) computes the spine once
 // per snapshot and groups the same array, rather than running the full merge
 // twice. Round 0 holds the origin row when it exists.
 export function groupByRound(rows: ElectedRow[]): RoundCandidates {

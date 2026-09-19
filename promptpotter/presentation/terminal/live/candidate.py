@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from promptpotter.application.views.render.optimizer_prompt_text import fmt_pct
 from promptpotter.config.settings import POBB_DEFAULT_EPSILON
 from promptpotter.domain.candidate_diff import flatten_sp_summary
 from promptpotter.domain.connector import MeasuredUnit, unit_count
@@ -90,7 +91,7 @@ def individual_summary_from_dict(
     # The served composite interval, not a Wilson band re-derived here: this row draws
     # the candidate's own numbers, and the CI must bracket one of them.
     ci = fmt_ci(scores.get("mean_fitness_ci_lo"), scores.get("mean_fitness_ci_hi"), spec="{:.1%}")
-    tag = f"{acc:.1%} {ci}"
+    tag = f"{fmt_pct(acc)} {ci}"
 
     aborted = bool(scores.get("escalation_aborted"))
     status: Literal["ok", "aborted", "eliminated"]

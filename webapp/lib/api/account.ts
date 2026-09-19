@@ -3,6 +3,7 @@
 // campaign is doing, and so carry no idempotency key and no cycle to write a `CommandRecord` to.
 
 import { API } from "./client";
+import { throwApiError } from "./errors";
 import type { UserSettings } from "./types";
 
 // Account → Preferences write. A user-account mutation (not a campaign
@@ -14,7 +15,7 @@ export async function patchUserSettings(settings: UserSettings): Promise<UserSet
     body: JSON.stringify(settings),
     cache: "no-store",
   });
-  if (!r.ok) throw new Error(`user-settings PATCH failed (${r.status})`);
+  if (!r.ok) await throwApiError(r);
   return (await r.json()) as UserSettings;
 }
 // Record consent to the current Terms — the provable artifact behind the
@@ -29,7 +30,7 @@ export async function acceptTerms(version: string): Promise<void> {
     body: JSON.stringify({ version }),
     cache: "no-store",
   });
-  if (!r.ok) throw new Error(`accept-terms failed (${r.status})`);
+  if (!r.ok) await throwApiError(r);
 }
 // Security pane sign-out. Not a command-highway POST (logout is
 // auth-router-owned); writes the session-cookie clear via the server-side
@@ -39,5 +40,5 @@ export async function postLogout(): Promise<void> {
     method: "POST",
     cache: "no-store",
   });
-  if (!r.ok) throw new Error(`${r.status} POST /auth/logout`);
+  if (!r.ok) await throwApiError(r);
 }

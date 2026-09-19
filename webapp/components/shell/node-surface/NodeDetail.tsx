@@ -169,7 +169,8 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
             {node?.label ?? id}
             <code className="opt-detail-id">{id}</code>
           </span>
-          <span className="setup-preview-side">
+          {/* A div: `CopyButton`'s choices menu opens a `Popover`, which is flow content. */}
+          <div className="setup-preview-side">
             <span className={cx("opt-detail-status", isLiveNow && "live")}>
               ● {isLiveNow ? `live · round ${liveRound ?? "—"}` : scopeLabel(isOptimizer)}
             </span>
@@ -192,7 +193,7 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
             >
               ×
             </button>
-          </span>
+          </div>
         </header>
 
         <p className="bnode-role">{kindInfo.role}</p>

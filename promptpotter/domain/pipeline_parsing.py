@@ -378,6 +378,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             "param_types": _infer_param_types(opt, nc),
             "current_config": dict(nc),
             "tunes_llm": kind in THINKING_KINDS and bool(pk),
+            "spend_bound": node.get("spend_bound"),
         }
 
         # Observation mappings
