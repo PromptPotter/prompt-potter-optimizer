@@ -427,7 +427,7 @@ def test_lives_resume_fold_matches_live_observe() -> None:
     ``improved`` sequence (``EscalationFSM.fold``) must equal the live in-run count
     (``observe_round``). A mismatch is silent — a resumed run would grant a different
     round budget than the un-interrupted run, quietly changing how long it optimizes."""
-    from promptpotter.application.campaign_config import LivesConfig
+    from promptpotter.application.campaign_config import EscalationLadder, LivesConfig
     from promptpotter.application.optimization.escalation.state import EscalationFSM, NextAction
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.run_records import PhaseRecord
@@ -450,6 +450,7 @@ def test_lives_resume_fold_matches_live_observe() -> None:
             separable=None,
             current_objective=0.5,
             l1_patience=99,
+            escalation_ladder=EscalationLadder.FULL,
             lives=cfg,
         )
         live_trace.append(live.lives)
@@ -496,6 +497,7 @@ def test_lives_resume_fold_matches_live_observe() -> None:
         separable=None,
         current_objective=0.5,
         l1_patience=99,
+        escalation_ladder=EscalationLadder.FULL,
         lives=cfg,
     )
     exhaust = replay.observe_round(
@@ -504,6 +506,7 @@ def test_lives_resume_fold_matches_live_observe() -> None:
         separable=None,
         current_objective=0.5,
         l1_patience=99,
+        escalation_ladder=EscalationLadder.FULL,
         lives=cfg,
     )
     assert replay.lives == 0
@@ -519,6 +522,7 @@ def test_unresolved_round_stalls_and_replays_as_one() -> None:
     whole budget re-asking a question the panel could not answer, with no error anywhere. If the
     replay disagrees with the live run, a resumed cycle escalates on a different round than the
     one it interrupted, which silently changes what the campaign measured."""
+    from promptpotter.application.campaign_config import EscalationLadder
     from promptpotter.application.optimization.escalation.state import EscalationFSM
     from promptpotter.domain.run_records import PhaseRecord
 
@@ -533,6 +537,7 @@ def test_unresolved_round_stalls_and_replays_as_one() -> None:
             separable=separable,
             current_objective=0.5,
             l1_patience=99,
+            escalation_ladder=EscalationLadder.FULL,
         )
     # Two unresolved rounds banked as stalls despite `improved` — at l1_patience 2 this is the
     # fire the loop was missing.
@@ -582,6 +587,7 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
     the resumed run a fresh escalation budget and re-firing layers it had already spent. Silent
     in the resume sense: nothing raises, the counters just read zero.
     """
+    from promptpotter.application.campaign_config import EscalationLadder
     from promptpotter.application.optimization.escalation.state import EscalationFSM
     from promptpotter.application.views.view_models import L2RefineExitView, PlanExitView
     from promptpotter.domain.phases import CampaignPhase
@@ -603,7 +609,12 @@ def test_l2_l3_escalation_state_survives_resume() -> None:
     live.record_l2_fired(best_composite_fitness=0.60)
     live_trace.append(snapshot(live))
     # A second request at an unimproved fitness bumps the L2 stall before the fire banks it.
-    live.observe_l2_escalation(current_composite_fitness=0.60, l2_patience=3, l3_patience=2)
+    live.observe_l2_escalation(
+        current_composite_fitness=0.60,
+        escalation_ladder=EscalationLadder.FULL,
+        l2_patience=3,
+        l3_patience=2,
+    )
     live.record_l2_fired(best_composite_fitness=0.60)
     live_trace.append(snapshot(live))
     # L3 firing wipes L2's progress — a new plan invalidates it. Checked BEFORE the wipe above,
@@ -1152,3 +1163,67 @@ def test_an_applied_scenario_forks_at_its_round_and_carries_the_criterion(
             steered_by="tester",
             keep_rounds=True,
         )
+
+
+def test_a_resumed_cycle_clocks_only_its_own_launch(tmp_path: Path) -> None:
+    """The runner's endpoints are the LAST launch's while the ledger keeps every launch, so a fold
+    over all of it summed more phase time than the run had and stamped each round an earlier
+    launch closed at 0.0 — every resumed campaign reported its first separable round as instant."""
+    import json
+
+    from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+        scan_ledger_wall_clock,
+    )
+
+    def rec(ts: str, phase: str, event: str, rnd: int) -> str:
+        row = {"record_type": "phase", "phase": phase, "event": event, "round": rnd}
+        return json.dumps({**row, "timestamp": f"2026-09-0{ts}Z"})
+
+    ledger = tmp_path / "ledger.jsonl"
+    ledger.write_text(
+        "\n".join(
+            [
+                rec("1T10:00:00", "l1_score", "enter", 1),
+                rec("1T11:00:00", "l1_score", "exit", 1),
+                rec("1T11:00:01", "round", "complete", 1),
+                rec("2T10:00:00", "l1_score", "enter", 2),
+                rec("2T10:20:00", "l1_score", "exit", 2),
+                rec("2T10:20:01", "round", "complete", 2),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    clock = scan_ledger_wall_clock(
+        ledger, started_at="2026-09-02T09:59:00Z", finished_at="2026-09-02T10:30:00Z"
+    )
+    assert clock.elapsed_s is not None and sum(clock.phase_s.values()) <= clock.elapsed_s
+    assert "1" not in clock.round_ended_s, "a round an earlier launch closed read as instant"
+    assert clock.round_ended_s["2"] == pytest.approx(21 * 60 + 1)
+
+
+def test_a_halted_cell_is_not_a_hole_a_resume_can_plug() -> None:
+    """A cell a declared bound CUT is settled, not incomplete — the same declaration cuts the next
+    attempt at the same place. Counted as a hole, every resume branches the cycle, re-buys the cell
+    at full price and lands the identical row, so the fork and the spend repeat without bound.
+    """
+    from promptpotter.application.optimization.resume_and_fork.repair import repair_cut
+    from promptpotter.shared.errors import ErrorCategory
+    from tests.factories import measurement, round_result
+
+    def _rows(category: ErrorCategory) -> list[dict[str, Any]]:
+        return [
+            measurement(0, 1.0),
+            measurement(1, None, error="no verdict", error_category=category),
+        ]
+
+    halted = round_result(
+        1, candidates_scored=1, all_candidate_results={"c0": _rows(ErrorCategory.HALTED)}
+    )
+    assert repair_cut([halted]).rounds == []
+
+    # The other unscoreable arm is unchanged: the cell ran to its own end, so a re-measure can
+    # answer differently and the round genuinely does not re-derive until it does.
+    holed = round_result(
+        1, candidates_scored=1, all_candidate_results={"c0": _rows(ErrorCategory.UNSCOREABLE)}
+    )
+    assert repair_cut([holed]).rounds == [1]

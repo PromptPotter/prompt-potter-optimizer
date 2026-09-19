@@ -41,6 +41,8 @@ WorkspaceScopedKind = Literal[
     # Workspace-scoped because a queued MINT has no cycle to address — the campaign it will
     # create does not exist yet, which is also why `pause-cycle` cannot serve one.
     "cancel-queued-run",
+    # Account-scoped: a limit on how many cycles this account holds, which no one cycle owns.
+    "set-concurrent-cycles",
 ]
 CheckinScopedKind = Literal["edit-draft-campaign", "resolve-origin", "start-checkin"]
 # Campaign-scoped IN-PLACE manifest edits (the campaign persists — distinct from

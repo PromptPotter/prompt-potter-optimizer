@@ -22,12 +22,20 @@ from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     read_campaign_config_file,
 )
-from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring
+from promptpotter.application.initialization.loop_start import (
+    arm_diagnostic_scoring,
+    diagnostic_stop_as,
+)
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.optimization.task_context import committed_task_context
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.scoring.search_point_scorer import score_search_point
-from promptpotter.domain.scoring import is_hit, is_verifier_graded, modal_answer_share
+from promptpotter.domain.scoring import (
+    all_verifier_graded,
+    is_hit,
+    is_verifier_graded,
+    modal_answer_share,
+)
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.shared.clock import utcnow_iso
 
@@ -53,7 +61,10 @@ class SeedReading:
 
     seed: int
     n: int
-    class_floor: float
+    # ``None`` where the bank carries no labels: the LEVEL half of a reading (accuracy, spread,
+    # latency, cost) is what a verifier-graded instrument is screened on, and the collapse half
+    # is reported absent rather than costing the operator the half that does answer.
+    class_floor: float | None
     origin_reads: tuple[float, ...]
     # What the passes above COST to take, in the two axes an operator ranks before quality
     # when choosing a target model. Both are already on every row this screen scored
@@ -115,21 +126,22 @@ class SeedReading:
         return float((p * (1 - p) / self.n) ** 0.5 / (k**0.5))
 
     @property
-    def verdict_settled(self) -> bool:
+    def verdict_settled(self) -> bool | None:
         """Is the collapse verdict further from the line than its own error bar (2 SE)?"""
-        return abs(self.reasoning_margin) > 2 * self.margin_se
+        margin = self.reasoning_margin
+        return None if margin is None else abs(margin) > 2 * self.margin_se
 
     @property
-    def rewards_collapse(self) -> bool:
+    def rewards_collapse(self) -> bool | None:
         """A bool, not a number to weigh: below the origin a skewed bank only distorts how hard it
         LOOKS and that cancels, while above it a candidate that gives up outscores the parent."""
-        return self.class_floor > self.origin_accuracy
+        return None if self.class_floor is None else self.class_floor > self.origin_accuracy
 
     @property
-    def reasoning_margin(self) -> float:
+    def reasoning_margin(self) -> float | None:
         """Raw accuracy conflates "this bank is easy" with "this bank's majority class is large".
         Compare banks on this, never on accuracy."""
-        return self.origin_accuracy - self.class_floor
+        return None if self.class_floor is None else self.origin_accuracy - self.class_floor
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -158,22 +170,20 @@ class SeedScreenOutcome:
     artifact_path: str
 
 
-def class_floor(bank: list[Sample]) -> float:
+def class_floor(bank: list[Sample]) -> float | None:
     """What answering ONE label to every row would score. Free — the only screen axis needing no
     measurement, which is why a candidate sweep filters on it before spending a call.
 
-    Refuses a verifier-graded bank rather than returning a number for it: ``reasoning_margin``,
-    ``rewards_collapse`` and ``verdict_settled`` all derive from this, so with no labels the
-    screen's whole verdict is undefined — not merely unknown, which is what a ``None`` would say.
-    """
+    A wholly verifier-graded bank has no constant answer to score, so the collapse half of a
+    reading is ABSENT; a bank that mixes the two has a floor that is WRONG rather than absent,
+    and raises."""
     labels = [s.ground_truth for s in bank]
-    # ANY missing label, not all of them: one unlabelled row already makes the constant-answer
-    # score undefined, so this is the ``any`` arity of the same predicate the round-level readers
-    # ask at ``all``.
+    if all_verifier_graded(labels):
+        return None
     if any(is_verifier_graded(gt) for gt in labels):
         raise SeedScreenError(
-            "this bank is verifier-graded (Sample.ground_truth is None), so no constant answer "
-            "has a score and the collapse verdict cannot be read."
+            "this bank mixes labelled and verifier-graded rows, so a constant answer's score "
+            "would be taken over the labelled part alone and read as the whole bank's floor."
         )
     counts = collections.Counter(str(gt) for gt in labels)
     return max(counts.values()) / len(bank) if bank else 0.0
@@ -269,32 +279,37 @@ async def screen_inner_seeds(
     readings: list[SeedReading] = []
     for seed in seeds:
         bank = draw_bank(all_samples, n_samples, seed)
+        # Read where the bank is DRAWN, not where the reading is built: this is the only axis that
+        # can refuse a bank, and evaluated as a constructor argument it did so downstream of the
+        # scoring loop — so the refusal arrived having already bought `repeat` passes over it.
+        bank_floor = class_floor(bank)
         reads: list[float] = []
         latencies: list[float] = []
         all_rows: list[Mapping[str, Any]] = []
         cost_usd: float | None = None
         n_scored = 0
         for i in range(max(1, repeat)):
-            rows, _scores, _signal = await score_search_point(
-                origin_sp,
-                bank,
-                session,
-                # Distinct per pass: `force_fresh` truncates its run's detail log first, so a
-                # shared label would have each pass overwrite the last.
-                label=f"seed{seed}_origin_{i}",
-                # A screen measures the BANK, not an individual's own report, so every seed sits
-                # on the same vacuous fallback — otherwise the readings would partly carry
-                # prompt length rather than the bank (`score_search_point`'s contract for
-                # `opt_sp`).
-                opt_sp=None,
-                measured=None,
-                # No per-sample callbacks, declared rather than defaulted: a screen has no live
-                # display to report a row to.
-                on_sample_scored=None,
-                on_sample_starting=None,
-                source=f"seed_screen:{dataset_name}:seed{seed}:{i}",
-                force_fresh=repeat > 1,
-            )
+            with diagnostic_stop_as(SeedScreenError):
+                rows, _scores, _signal = await score_search_point(
+                    origin_sp,
+                    bank,
+                    session,
+                    # Distinct per pass: `force_fresh` truncates its run's detail log first, so a
+                    # shared label would have each pass overwrite the last.
+                    label=f"seed{seed}_origin_{i}",
+                    # A screen measures the BANK, not an individual's own report, so every seed
+                    # sits on the same vacuous fallback — otherwise the readings would partly
+                    # carry prompt length rather than the bank (`score_search_point`'s contract
+                    # for `opt_sp`).
+                    opt_sp=None,
+                    measured=None,
+                    # No per-sample callbacks, declared rather than defaulted: a screen has no
+                    # live display to report a row to.
+                    on_sample_scored=None,
+                    on_sample_starting=None,
+                    source=f"seed_screen:{dataset_name}:seed{seed}:{i}",
+                    force_fresh=repeat > 1,
+                )
             # `is_hit` is the ONE definition of "this configuration solved the row" — re-deriving
             # it from predicted-vs-ground_truth would be a second answer to a question the scorer
             # owns, and the two would disagree the moment a dataset grades non-binary.
@@ -314,7 +329,7 @@ async def screen_inner_seeds(
         reading = SeedReading(
             seed=seed,
             n=n_scored,
-            class_floor=class_floor(bank),
+            class_floor=bank_floor,
             origin_reads=tuple(reads),
             latencies=tuple(latencies),
             cost_usd=cost_usd,
@@ -323,10 +338,13 @@ async def screen_inner_seeds(
             answer_modal_share=modal_answer_share(all_rows),
         )
         readings.append(reading)
+        margin = reading.reasoning_margin
         log_fn(
-            f"seed {seed}: floor {reading.class_floor:.3f} origin {reading.origin_accuracy:.3f} "
+            f"seed {seed}: floor "
+            f"{'--' if reading.class_floor is None else f'{reading.class_floor:.3f}'} "
+            f"origin {reading.origin_accuracy:.3f} "
             f"(spread {reading.origin_spread:.3f} over {len(reads)}) "
-            f"margin {reading.reasoning_margin:+.3f} +/-{reading.margin_se:.3f} "
+            f"margin {'--' if margin is None else f'{margin:+.3f}'} +/-{reading.margin_se:.3f} "
             f"lat {'--' if reading.latency_median is None else f'{reading.latency_median:.1f}s'}"
             f"/{'--' if reading.latency_mean is None else f'{reading.latency_mean:.1f}s'} "
             f"{'--' if reading.cost_per_pass is None else f'${reading.cost_per_pass:.4f}'}/pass"

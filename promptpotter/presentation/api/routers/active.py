@@ -15,6 +15,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     optimizer_manifest,
 )
 from promptpotter.application.optimization.dispatch.schemas import L2_NODE_AXES
+from promptpotter.config.settings import settings
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_schema import (
     ModelCapability,
@@ -220,6 +221,10 @@ class MachineStatusResponse(StrictModel):
         "rule a launch is admitted on, and lowered from the operator's ceiling while the shared "
         "provider throttle is saturated."
     )
+    ceiling: int = Field(
+        description="The operator's `MACHINE_RUN_CAPACITY` — set in the server environment and "
+        "writable nowhere else. `capacity` never exceeds it, and neither may an account's limit."
+    )
     running: int = Field(description="Campaigns currently live on the machine.")
     queued: int = Field(
         description="Launches waiting for a slot, machine-wide — an occupancy figure like "
@@ -279,6 +284,7 @@ def get_machine_status(identity: IdentityDep, jobs: JobRegistryDep) -> MachineSt
     mine = str(identity.user_id)
     return MachineStatusResponse(
         capacity=capacity,
+        ceiling=settings.MACHINE_RUN_CAPACITY,
         running=live,
         queued=len(order),
         busy=live >= capacity,

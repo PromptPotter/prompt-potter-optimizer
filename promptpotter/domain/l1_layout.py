@@ -87,13 +87,15 @@ template itself — instruction, thinking_style, answer_format — is re-billed 
 round, for a panel that had to be re-sent anyway."""
 
 PREFIX_STABLE_PANELS: frozenset[str] = frozenset({"task_context"})
-"""Panels that may sit ahead of :data:`VOLATILE_SLOT` for free, because their text cannot change
-within a run — so the shared prefix survives them.
+"""Panels that may sit ahead of :data:`VOLATILE_SLOT` for free, because their text does not change
+from round to round — so the shared prefix survives them.
 
 **Membership is a claim about a WRITER, not about a renderer**, and there is exactly one today:
-`_r_task_context` renders only `FRAMING_FIELDS`, and `TaskDecomposition.merge` raises rather than
-overwrite any of the five ("frozen for the run"). Every other panel is derived from measurement
-and moves whenever the measurement does.
+`_r_task_context` renders `FRAMING_FIELDS`, which `TaskDecomposition.merge` refuses to overwrite
+("frozen for the run"), plus the upstream/downstream splice pair. That pair moves only when an
+L2 merge or an adopted winner rewrites it, and each such move costs one prefix-cache miss — the
+price of showing L1 the framing outside the text it replaces. Every other panel is derived from
+measurement and moves whenever the measurement does.
 
 This list is what keeps :func:`validate_l1_layout`'s prefix check silent on the floors while still
 catching an EDIT that walks a live panel forward — L2 addresses any of the four slots
@@ -185,9 +187,8 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
         mandatory=L1_MANDATORY,
         floor=L1Layout(
             # The one floor placement ahead of `VOLATILE_SLOT`, and it is free: `task_context` is
-            # in `PREFIX_STABLE_PANELS` because its five rendered fields are `FRAMING_FIELDS`,
-            # which `TaskDecomposition.merge` refuses to overwrite. Measured on a live round pair,
-            # the shared prefix survives all 1,788 chars of this slot and breaks inside
+            # in `PREFIX_STABLE_PANELS`, whose docstring names the one way it moves. Measured on a
+            # live round pair, the shared prefix survives all 1,788 chars of this slot and breaks inside
             # `problem_description`. Anything NOT on that list belongs behind the boundary.
             task_intent=["task_context"],
             problem_description=[

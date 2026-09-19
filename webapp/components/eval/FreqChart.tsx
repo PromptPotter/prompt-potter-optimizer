@@ -11,7 +11,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useEffectiveRound } from "@/lib/hooks/useEffectiveRound";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
-import { CardFrame } from "@/components/ui";
+import { CardFrame, Term } from "@/components/ui";
 import type { RawResultRow } from "@/lib/types";
 
 ensureChartRegistered();
@@ -83,7 +83,7 @@ export function FreqChart() {
 
   return (
     <CardFrame
-      title={<span title={TERMS.stub_score_freq}>Score Frequency</span>}
+      title={<Term content={TERMS.stub_score_freq}>Score Frequency</Term>}
       actions={
         <span className="badge">
           {isLiveView ? "live" : `R${effectiveRound}`}

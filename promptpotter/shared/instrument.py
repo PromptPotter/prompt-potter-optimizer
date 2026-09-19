@@ -1,5 +1,5 @@
 """Instrument mode — this task's cycle is a MEASUREMENT, not a campaign. The ONE declared mode
-binding the three subtractions; re-split it and forgetting one still looks like a measurement."""
+binding the two subtractions; re-split it and forgetting one still looks like a measurement."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import contextvars
 import enum
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated
 
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -37,14 +37,13 @@ MAX_INSTRUMENT_DEPTH = 2
 @dataclass(frozen=True)
 class InstrumentMode:
     """``evidence_epoch`` keeps the archive a shared CACHE while withholding it as cross-run MEMORY:
-    an instrument must not depend on how often it has been used. ``temperature`` and ``seed`` clamp only together.
+    an instrument must not depend on how often it has been used.
 
-    ``ruler`` is the δ scale the SPAWNER fixed — the third subtraction: without it a cell fits its
+    ``ruler`` is the δ scale the SPAWNER fixed — the second subtraction: without it a cell fits its
     own from whatever the epoch leaves visible, which is the arms under test."""
 
     depth: int
     evidence_epoch: frozenset[str]
-    optimizer_clamp: dict[str, Any] | None
     ruler: DeltaRuler | None
 
 
@@ -52,8 +51,8 @@ class InstrumentMode:
 # never fuse them into one settings object. All eight were traced; the one genuine defect
 # (`_ABORT_CHECK` chaining a predicate per rebase, `infrastructure/llm/rate_limit.py`) is fixed, and
 # every remaining non-reset is load-bearing. This one is the clearest case: `_MODE` must cover
-# FINALIZE, or the archive reads and the optimizer clamp de-hermeticize mid-measurement. Its twin
-# is `_OPTIMIZER_PROMPT_OVERRIDES` (`optimization/dispatch/llm_call/prompts.py`), where clearing
+# FINALIZE, or the archive reads and the ruler de-hermeticize mid-measurement. Its twin is
+# `_OPTIMIZER_PROMPT_OVERRIDES` (`optimization/dispatch/llm_call/prompts.py`), where clearing
 # would wipe the inner mutations `runner/inner/spawn.py` sets before `run_optimization`.
 _MODE: Annotated[contextvars.ContextVar[InstrumentMode | None], shapes_optimizer_prompt] = (
     contextvars.ContextVar("instrument_mode", default=None)
@@ -63,7 +62,6 @@ _MODE: Annotated[contextvars.ContextVar[InstrumentMode | None], shapes_optimizer
 def enter_instrument_mode(
     *,
     evidence_epoch: frozenset[str],
-    optimizer_clamp: dict[str, Any] | None,
     ruler: DeltaRuler | None,
 ) -> InstrumentMode:
     """Declare this task's cycle a measurement instrument. Call once at the spawn site, INSIDE the
@@ -71,7 +69,6 @@ def enter_instrument_mode(
     mode = InstrumentMode(
         depth=instrument_depth() + 1,
         evidence_epoch=evidence_epoch,
-        optimizer_clamp=optimizer_clamp,
         ruler=ruler,
     )
     _MODE.set(mode)

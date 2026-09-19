@@ -614,6 +614,16 @@
             "description": "The campaign's root cycle id — `cycle_<root_content_hash>`, so it IS the campaign's ORIGIN identity. Campaigns on one declaration share it and differ only in the random `campaign_id` suffix, which is what makes them separate RUNS of that origin; the sidebar groups the forest by this key.",
             "title": "Root Cycle Id",
             "type": "string"
+          },
+          "spend_unpriced_tokens": {
+            "description": "Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them. Zero means the dollar figure is complete.",
+            "title": "Spend Unpriced Tokens",
+            "type": "integer"
+          },
+          "spend_used_usd": {
+            "description": "What this campaign has billed over its whole life — every cycle's ledger, forks and forwarded L4 inner spend included, plus spend banked when one of its cycles was deleted. Its share of `QuotaStatus.spend_used_total_usd`. A FLOOR while `spend_unpriced_tokens` is non-zero.",
+            "title": "Spend Used Usd",
+            "type": "number"
           }
         },
         "required": [
@@ -621,6 +631,8 @@
           "dataset_name",
           "created_at",
           "root_cycle_id",
+          "spend_used_usd",
+          "spend_unpriced_tokens",
           "config"
         ],
         "title": "CampaignDetailResponse",
@@ -883,13 +895,25 @@
             "description": "The campaign's root cycle id — `cycle_<root_content_hash>`, so it IS the campaign's ORIGIN identity. Campaigns on one declaration share it and differ only in the random `campaign_id` suffix, which is what makes them separate RUNS of that origin; the sidebar groups the forest by this key.",
             "title": "Root Cycle Id",
             "type": "string"
+          },
+          "spend_unpriced_tokens": {
+            "description": "Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them. Zero means the dollar figure is complete.",
+            "title": "Spend Unpriced Tokens",
+            "type": "integer"
+          },
+          "spend_used_usd": {
+            "description": "What this campaign has billed over its whole life — every cycle's ledger, forks and forwarded L4 inner spend included, plus spend banked when one of its cycles was deleted. Its share of `QuotaStatus.spend_used_total_usd`. A FLOOR while `spend_unpriced_tokens` is non-zero.",
+            "title": "Spend Used Usd",
+            "type": "number"
           }
         },
         "required": [
           "campaign_id",
           "dataset_name",
           "created_at",
-          "root_cycle_id"
+          "root_cycle_id",
+          "spend_used_usd",
+          "spend_unpriced_tokens"
         ],
         "title": "CampaignSummary",
         "type": "object"
@@ -1811,6 +1835,18 @@
             "title": "Dataset",
             "type": "string"
           },
+          "held": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Did the verdict HOLD on the wider set — `workspace_accuracy` at or above `source_campaign_accuracy`, under this layer's float tolerance. `None` where the source carries no rate to compare against. Stored rather than left to each reader: the tolerance is a decision about when two measured rates count as equal, and a surface picking its own epsilon is a surface that can disagree with this one about whether a candidate survived.",
+            "title": "Held"
+          },
           "noise_floor_ci_hi": {
             "anyOf": [
               {
@@ -1944,7 +1980,8 @@
           "workspace_composite",
           "source_campaign_accuracy",
           "source_campaign_composite",
-          "source_campaign_n"
+          "source_campaign_n",
+          "held"
         ],
         "title": "DiagnosticRunRecord",
         "type": "object"
@@ -2578,6 +2615,50 @@
         "title": "ForkDirection",
         "type": "string"
       },
+      "ForkPreviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "pipeline_overlay": {
+            "additionalProperties": true,
+            "description": "The `nodes.*.config` overlay the fork would carry, as `OperatorForkOverride` sends it",
+            "title": "Pipeline Overlay",
+            "type": "object"
+          }
+        },
+        "required": [
+          "pipeline_overlay"
+        ],
+        "title": "ForkPreviewRequest",
+        "type": "object"
+      },
+      "ForkPreviewResponse": {
+        "additionalProperties": false,
+        "description": "What `POST /commands/fork-cycle` would decide about this steer, asked without forking.",
+        "properties": {
+          "permitted_models": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "description": "What the verdict above was compared AGAINST, per node — this campaign's frozen `optimizer_narrowing[node].param_allowed_values.model`. Served beside the verdict so a surface naming the permitted models cannot name a different set than the one that decided. A node absent from it sanctions nothing, which is why any model steer there counts.",
+            "title": "Permitted Models",
+            "type": "object"
+          },
+          "steers_disallowed_model": {
+            "description": "The overlay picks a responder the campaign's frozen `optimizer_narrowing` never sanctioned, or touches a cost lever, which no permitted set can sanction. True means the fork is the ADR-0005 babysit act: it needs `campaign.babysit` (404 without it) and stamps the branch grade C.",
+            "title": "Steers Disallowed Model",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "steers_disallowed_model",
+          "permitted_models"
+        ],
+        "title": "ForkPreviewResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -3155,6 +3236,11 @@
             "title": "Capacity",
             "type": "integer"
           },
+          "ceiling": {
+            "description": "The operator's `MACHINE_RUN_CAPACITY` — set in the server environment and writable nowhere else. `capacity` never exceeds it, and neither may an account's limit.",
+            "title": "Ceiling",
+            "type": "integer"
+          },
           "holder": {
             "anyOf": [
               {
@@ -3187,6 +3273,7 @@
         },
         "required": [
           "capacity",
+          "ceiling",
           "running",
           "queued",
           "busy"
@@ -4307,10 +4394,15 @@
       },
       "QuotaStatus": {
         "additionalProperties": false,
-        "description": "Live snapshot of the abuse-limit knobs vs. usage.\n\nDrives the Security pane's quota card. ``*_max`` mirrors `user.json`\nso the operator can hand-edit limits; ``*_used`` is the live count\nthat ``check_launch_quotas`` would gate against on the next launch.\nThe spend and token pairs are LIFETIME — used-ever against the account's\ntotal ceilings — while the campaign pair stays per-day, because one is an\nallowance and the other an abuse limit. ``spend_unpriced_tokens`` is what\nthe USD pair CANNOT see: billed tokens with no resolvable rate, which make\n``spend_used_total_usd`` a floor and leave the token pair as the binding one.",
+        "description": "Live snapshot of the abuse-limit knobs vs. usage.\n\nDrives the Account → Usage & limits pane. ``*_max`` mirrors `user.json`\nso the operator can hand-edit limits; ``*_used`` is the live count\nthat ``check_launch_quotas`` would gate against on the next launch.\nThe spend and token pairs are LIFETIME — used-ever against the account's\ntotal ceilings — while the campaign pair stays per-day, because one is an\nallowance and the other an abuse limit. ``spend_unpriced_tokens`` is what\nthe USD pair CANNOT see: billed tokens with no resolvable rate, which make\n``spend_used_total_usd`` a floor and leave the token pair as the binding one.",
         "properties": {
           "campaigns_today": {
             "title": "Campaigns Today",
+            "type": "integer"
+          },
+          "concurrent_queued": {
+            "description": "This account's launches waiting for a machine slot. They count against `max_concurrent_cycles` exactly as running ones do.",
+            "title": "Concurrent Queued",
             "type": "integer"
           },
           "concurrent_running": {
@@ -4324,6 +4416,11 @@
           "max_concurrent_cycles": {
             "title": "Max Concurrent Cycles",
             "type": "integer"
+          },
+          "max_concurrent_cycles_writable": {
+            "description": "Whether this caller may move `max_concurrent_cycles` through `set-concurrent-cycles`. False on the host's key, where the host sets it.",
+            "title": "Max Concurrent Cycles Writable",
+            "type": "boolean"
           },
           "spend_budget_usd_total": {
             "anyOf": [
@@ -4367,7 +4464,9 @@
           "tokens_used_total",
           "token_budget_total",
           "concurrent_running",
+          "concurrent_queued",
           "max_concurrent_cycles",
+          "max_concurrent_cycles_writable",
           "campaigns_today",
           "max_campaigns_per_day"
         ],
@@ -4376,11 +4475,15 @@
       },
       "RankedEdit": {
         "additionalProperties": false,
-        "description": "One unique candidate state — a ``pipeline_overlay`` — aggregated across every\noccurrence in the selection. An L1 target-prompt edit on an ordinary campaign, an\noptimizer-prompt edit on the recursion; the arithmetic does not care which.\n\nIt pools by EDIT IDENTITY, so it earns its keep where the same edit recurs across campaigns.\nThat is routine on the recursion and rarer elsewhere, where most rows will carry one campaign's\ncells and an interval to match.",
+        "description": "One SEARCHPOINT measured against its own campaign's origin — a prompt edit, a node-config\nedit, an optimizer-prompt edit on the recursion; the arithmetic does not care which.\n\n**The identity is ``sp_hash``**, the archive join already stamped on every candidate row, so a\nprose-only edit ranks like any other. Keying the sparse ``pipeline_overlay`` instead cannot see\none at all: that overlay is empty for a prompt-only candidate, which is the whole of what L1\nproposes on a campaign optimizing prompts.\n\n**Rows POOL WITHIN ONE CAMPAIGN and never across two.** ``_config_of`` states why: a\nsearchpoint is read through a delta against its parent, and two campaigns share no parent to\ntake one against — so a cross-campaign pool is a number lined up on nothing, and that is a\nclaim withdrawn rather than a capability lost. Do not re-add it as an improvement. Within one\ncampaign the pool is real: a repair re-measures a searchpoint without re-minting it.",
         "properties": {
           "anchor_effect": {
             "title": "Anchor Effect",
             "type": "number"
+          },
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "string"
           },
           "ci_hi": {
             "anyOf": [
@@ -4423,13 +4526,14 @@
             "title": "Provenance",
             "type": "array"
           },
-          "state_hash": {
-            "title": "State Hash",
+          "sp_hash": {
+            "title": "Sp Hash",
             "type": "string"
           }
         },
         "required": [
-          "state_hash",
+          "sp_hash",
+          "campaign_id",
           "label",
           "provenance",
           "anchor_effect",
@@ -4795,6 +4899,21 @@
             ],
             "title": "Arm Id"
           },
+          "authorship": {
+            "title": "Authorship",
+            "type": "string"
+          },
+          "cached_samples": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cached Samples"
+          },
           "campaign_id": {
             "title": "Campaign Id",
             "type": "string"
@@ -4880,6 +4999,10 @@
           "dataset_name": {
             "title": "Dataset Name",
             "type": "string"
+          },
+          "human_intervened": {
+            "title": "Human Intervened",
+            "type": "boolean"
           },
           "inside": {
             "items": {
@@ -5015,6 +5138,9 @@
           "winner_chain",
           "config",
           "arm_id",
+          "authorship",
+          "human_intervened",
+          "cached_samples",
           "instrument_id",
           "ability",
           "round",
@@ -5558,7 +5684,7 @@
     },
     "/api/v1/auth/quota-status": {
       "get": {
-        "description": "Live quota snapshot for the Security pane.\n\nSpend and tokens sum ``TokenUsageRecord`` across the account's WHOLE ledger via\n``sum_user_spend`` — uncapped, so an over-budget account shows the true\noverage rather than clamping the display to the cap; concurrent + daily\ncounts ride the `JobRegistry`. The served ceilings are the RESOLVED ones\n(``lifetime_ceilings``), never the raw nullable overrides, so the browser\nis not left joining a null against an install default to learn its own caps.",
+        "description": "Live quota snapshot for the Account → Usage & limits pane.\n\nSpend and tokens sum ``TokenUsageRecord`` across the account's WHOLE ledger via\n``sum_user_spend`` — uncapped, so an over-budget account shows the true\noverage rather than clamping the display to the cap; concurrent + daily\ncounts ride the `JobRegistry`. The served ceilings are the RESOLVED ones\n(``lifetime_ceilings``), never the raw nullable overrides, so the browser\nis not left joining a null against an install default to learn its own caps.",
         "operationId": "quota_status_api_v1_auth_quota_status_get",
         "responses": {
           "200": {
@@ -6440,6 +6566,59 @@
           }
         },
         "summary": "Get Lineage Tree",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/fork-preview": {
+      "post": {
+        "description": "Would this steer take the babysit path? — the fork gate's own verdict, asked without forking.\n\nA READ despite the POST: the subject is an overlay that exists nowhere on disk yet, so it\ncannot be a query string. Nothing is written — no `CommandRecord`, no ack — which is why this\nis its own endpoint rather than a `dry_run` flag on `fork-cycle`. Capability-free: it reports\nwhat the gate WOULD say, and `campaign.babysit` is what decides whether the fork lands.",
+        "operationId": "preview_fork_steer_api_v1_campaigns__campaign_id__fork_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForkPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForkPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Fork Steer",
         "tags": [
           "Campaigns"
         ]
@@ -7687,13 +7866,13 @@
             }
           },
           {
-            "description": "Also rank the candidate edits measured across the selection's CAMPAIGN subjects. OFF by default because it is the widest walk here: the roster half reads one document per subject, while this opens EVERY round of every campaign selected. Edits are scored on the SELECTED metric, in its units.",
+            "description": "Also rank every SEARCHPOINT measured in the selection's CAMPAIGN subjects against its own campaign's origin, keyed on `sp_hash` so a prompt-only edit ranks like a config one. Rows pool within ONE campaign and never across two — they share no anchor to be compared through. OFF by default because it is the widest walk here: the roster half reads one document per subject, while this opens EVERY round of every campaign selected. Scored on the SELECTED metric, in its units.",
             "in": "query",
             "name": "ranking",
             "required": false,
             "schema": {
               "default": false,
-              "description": "Also rank the candidate edits measured across the selection's CAMPAIGN subjects. OFF by default because it is the widest walk here: the roster half reads one document per subject, while this opens EVERY round of every campaign selected. Edits are scored on the SELECTED metric, in its units.",
+              "description": "Also rank every SEARCHPOINT measured in the selection's CAMPAIGN subjects against its own campaign's origin, keyed on `sp_hash` so a prompt-only edit ranks like a config one. Rows pool within ONE campaign and never across two — they share no anchor to be compared through. OFF by default because it is the widest walk here: the roster half reads one document per subject, while this opens EVERY round of every campaign selected. Scored on the SELECTED metric, in its units.",
               "title": "Ranking",
               "type": "boolean"
             }

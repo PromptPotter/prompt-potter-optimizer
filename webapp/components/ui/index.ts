@@ -17,5 +17,6 @@ export * from "./Popover";
 export * from "./SegmentedControl";
 export * from "./states";
 export * from "./Switch";
+export * from "./Term";
 export * from "./Toolbar";
 export * from "./ValueList";

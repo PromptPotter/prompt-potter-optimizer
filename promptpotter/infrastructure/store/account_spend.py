@@ -4,7 +4,6 @@ block is cumulative-from-seed, so summing those snapshots double-counts a fork's
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -16,6 +15,7 @@ from promptpotter.infrastructure.llm.pricing import compute_usd
 from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import iter_jsonl
+from promptpotter.shared.clock import epoch_seconds
 
 if TYPE_CHECKING:
     # Type-only: the campaign store imports THIS module to bank a spend before it destroys the
@@ -40,10 +40,8 @@ def _iter_dated_records(
     malformed CONTENT is skipped."""
     for ledger_path in ledgers:
         for rec in iter_jsonl(ledger_path):
-            ts_str = rec.get("timestamp", "")
-            try:
-                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).timestamp()
-            except (ValueError, TypeError, AttributeError):
+            ts = epoch_seconds(rec.get("timestamp"))
+            if ts is None:
                 continue
             if since <= ts < until:
                 yield {**rec, "ts": ts}
@@ -181,16 +179,85 @@ def _billed_of(rec: dict[str, Any]) -> BilledSpend:
     return BilledSpend(usd, inp, out, 0, cache_read, cache_write, reasoning)
 
 
+_TOKEN_USAGE = frozenset({"token_usage"})
+_TOMBSTONE = frozenset({"spend_tombstone"})
+_BILLED_BY_LEDGER: dict[Path, tuple[tuple[int, int], BilledSpend]] = {}
+_BANKED_BY_LEDGER: dict[Path, tuple[tuple[int, int], dict[str, UserSpend]]] = {}
+
+
+def _stat_key(path: Path) -> tuple[int, int] | None:
+    try:
+        st = path.stat()
+    except FileNotFoundError:
+        return None
+    return st.st_size, st.st_mtime_ns
+
+
+def _ledger_billed(ledger: Path) -> BilledSpend:
+    """One ledger's whole-life billed spend, re-read only when the file's size or mtime moved — the
+    campaign list is polled, and a ledger is append-only between the rewinds that restat it."""
+    key = _stat_key(ledger)
+    if key is None:
+        return ZERO_SPEND
+    hit = _BILLED_BY_LEDGER.get(ledger)
+    if hit is not None and hit[0] == key:
+        return hit[1]
+    total = ZERO_SPEND
+    for rec in iter_jsonl(ledger, record_types=_TOKEN_USAGE):
+        if (
+            rec.get("record_type") == "token_usage"
+            and not rec.get("cached")
+            and epoch_seconds(rec.get("timestamp")) is not None
+        ):
+            total = total.plus(_billed_of(rec))
+    _BILLED_BY_LEDGER[ledger] = (key, total)
+    return total
+
+
 def billed_spend(ledgers: Iterable[Path]) -> BilledSpend:
     """What these ledgers' own rows say was spent, over their whole life. Token usage only — a
     tombstone is appended to the WORKSPACE ledger, never a cycle's, so no cycle ledger can carry
     one to double-count."""
     total = ZERO_SPEND
-    for rec in _iter_dated_records(ledgers, since=0.0, until=float("inf")):
-        if rec.get("record_type") != "token_usage" or rec.get("cached"):
-            continue
-        total = total.plus(_billed_of(rec))
+    for ledger in ledgers:
+        total = total.plus(_ledger_billed(ledger))
     return total
+
+
+def _banked_by_campaign(workspace_ledger: Path) -> dict[str, UserSpend]:
+    key = _stat_key(workspace_ledger)
+    if key is None:
+        return {}
+    hit = _BANKED_BY_LEDGER.get(workspace_ledger)
+    if hit is not None and hit[0] == key:
+        return hit[1]
+    banked: dict[str, UserSpend] = {}
+    for rec in iter_jsonl(workspace_ledger, record_types=_TOMBSTONE):
+        if rec.get("record_type") != "spend_tombstone":
+            continue
+        campaign_id = str(rec.get("campaign_id", ""))
+        prior = banked.get(campaign_id, UserSpend(0.0, 0, 0))
+        banked[campaign_id] = UserSpend(
+            prior.used_usd + float(rec.get("used_usd", 0.0)),
+            prior.used_tokens + int(rec.get("used_tokens", 0)),
+            prior.unpriced_tokens + int(rec.get("unpriced_tokens", 0)),
+        )
+    _BANKED_BY_LEDGER[workspace_ledger] = (key, banked)
+    return banked
+
+
+def campaign_spend(campaigns: CampaignStore, campaign_id: str) -> UserSpend:
+    """One campaign's share of :func:`sum_user_spend`'s lifetime total: its cycle ledgers plus the
+    tombstones banked under its id (a deleted stub fork, a reaped inner sandbox's residue)."""
+    held = billed_spend(campaigns.campaign_cycle_ledgers(campaign_id)).as_user_spend()
+    banked = _banked_by_campaign(CycleEventLog.workspace_path(campaigns.workspace)).get(
+        campaign_id, UserSpend(0.0, 0, 0)
+    )
+    return UserSpend(
+        held.used_usd + banked.used_usd,
+        held.used_tokens + banked.used_tokens,
+        held.unpriced_tokens + banked.unpriced_tokens,
+    )
 
 
 def forwarded_mark(cycle_dir: Path) -> BilledSpend:
@@ -298,6 +365,7 @@ __all__ = [
     "account_ledgers",
     "bank_spend",
     "billed_spend",
+    "campaign_spend",
     "forwarded_mark",
     "iter_user_token_usage",
     "record_cost_usd",

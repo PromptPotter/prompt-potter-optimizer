@@ -218,24 +218,25 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
         ), f"selection at budget {budget} left a fence open"
 
 
-async def test_outer_sample_deadline_cancels_the_inner_campaign(
-    tmp_path: Path, monkeypatch: Any
-) -> None:
-    """An inner campaign that outlives its deadline is a SILENT spend leak.
+async def test_cell_envelope_cancels_the_inner_campaign(tmp_path: Path, monkeypatch: Any) -> None:
+    """A cell that outlives its envelope is a SILENT spend leak.
 
-    The deadline only bounds spend because the inner campaign is awaited directly,
+    The envelope only bounds spend because the work is awaited directly all the way down,
     making it the awaiting coroutine's ``_fut_waiter`` so the timeout's cancellation
     reaches it. Detach that await — ``asyncio.shield``, ``asyncio.wait``, a ``gather``
     — and the timed-out campaign keeps running, keeps calling the optimizer, and keeps
     billing tokens against a sample nobody will read. Nothing errors; the run just
-    costs more and ends later. So this pins the PROPERTY (the campaign stops), not the
+    costs more and ends later. So this pins the PROPERTY (the work stops), not the
     shape of the code that achieves it.
     """
     from promptpotter.application.optimization.dispatch.llm_call import heartbeat as heartbeat_mod
     from promptpotter.application.runner.inner import spawn, spawn_context
+    from promptpotter.application.runner.inner.tasks import load_inner_tasks
+    from promptpotter.application.scoring.cell_envelope import CellEnvelope
     from promptpotter.domain.results import CycleResult
     from promptpotter.infrastructure.llm import telemetry as llm_telemetry
     from promptpotter.infrastructure.store.io import write_json
+    from promptpotter.shared.errors import CellUnscoreableError
 
     class _RecordingLedger:
         def __init__(self) -> None:
@@ -259,7 +260,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
         spawned_by: dict[str, Any],
         spawn_role: Any,
     ) -> CycleResult:
-        """Models the campaign as it BEHAVED, not as it should: it outlives the deadline and
+        """Models the campaign as it BEHAVED, not as it should: it outlives the envelope and
         then SWALLOWS the cancellation, returning a normal result.
 
         That is what the real inner chain did for months — three seams answered
@@ -271,7 +272,7 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
         """
         started.set()
         try:
-            await asyncio.sleep(30)  # far past the deadline
+            await asyncio.sleep(30)  # far past the envelope
         except asyncio.CancelledError:
             cancelled.set()
         return CycleResult(
@@ -287,8 +288,9 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
         )
 
     monkeypatch.setattr(spawn, "_run_inner_campaign", _hanging_inner)
-    # `_resolve_inner_task` has no default ladder — the benchmark, its sample count,
-    # round cap and target score are declared, or the spawn raises.
+    # `resolve_inner_task` has no default ladder — the benchmark, its sample count,
+    # round cap and target score are declared, or the spawn raises. Written, then loaded
+    # through the real validator, because the run resolves its panel ONCE and carries it.
     write_json(
         tmp_path / "inner_tasks.yaml",
         {
@@ -309,15 +311,22 @@ async def test_outer_sample_deadline_cancels_the_inner_campaign(
             spawn_campaign_id="ppself__aaaaaa",
             spawn_cycle_id="cycle_deadbeef0000",
             asking_cycle_id="cycle_deadbeef0000",
+            panel=load_inner_tasks(tmp_path / "inner_tasks.yaml"),
         )
     )
     llm_telemetry._CYCLE_LEDGER.set(_RecordingLedger())  # type: ignore[arg-type]
 
-    with pytest.raises(spawn.InnerCycleUnscoreableError, match="wall-clock deadline"):
-        await spawn.run_inner_cycle("justlogic-d234/seed-0", {})
+    # The connector DECLARES the seconds and the scoring seam PUTS THEM IN FORCE — driven apart
+    # here exactly as `measure_sample` drives them, so a cell keeping its own timeout would pass
+    # this while the seam bounded nothing.
+    query = "justlogic-d234/seed-0"
+    envelope = CellEnvelope(spawn.inner_cell_envelope_s(query, {}), label=query)
+    with pytest.raises(CellUnscoreableError, match="wall-clock envelope"):
+        async with envelope:
+            await spawn.run_inner_cycle(query, {})
 
-    assert started.is_set(), "the inner campaign never started — the deadline proved nothing"
-    assert cancelled.is_set(), "the inner campaign outlived its deadline and kept spending"
+    assert started.is_set(), "the inner campaign never started — the envelope proved nothing"
+    assert cancelled.is_set(), "the inner campaign outlived its envelope and kept spending"
 
 
 def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path: Path) -> None:
@@ -510,6 +519,51 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
             job_id="job-a",
         ).usd
         == 1.0
+    )
+
+
+def test_a_steer_the_campaign_never_sanctioned_cannot_pass_as_a_clean_fork() -> None:
+    """The ADR-0005 babysit trigger, which decides both whether `fork-cycle` demands
+    `campaign.babysit` and whether the branch is stamped grade C. A false NEGATIVE is silent and
+    unrecoverable in one step: the fork is admitted without the cap AND enters clean comparison,
+    origin reuse and the L4 rollup as untainted, so every number still renders and the pollution is
+    banked. The restrictive boundaries are the point — a node the campaign never narrowed sanctions
+    NOTHING, and a cost lever has no permitted set that could sanction it at all.
+
+    The set SERVED beside the verdict is asserted to be the set the verdict compares against: two
+    sources for one sentence is what let a browser name models that decided nothing.
+    """
+    from promptpotter.domain.pipeline_overlay import (
+        permitted_models_for_campaign,
+        steers_disallowed_model,
+    )
+
+    config = {
+        "optimizer_narrowing": {
+            "l1_generate": {"param_allowed_values": {"model": ["openai/gpt-oss-120b"]}}
+        }
+    }
+    assert permitted_models_for_campaign(config) == {"l1_generate": ["openai/gpt-oss-120b"]}, (
+        "the set served beside the verdict is not the set the verdict compares against"
+    )
+
+    permitted_steer = {"model": "openai/gpt-oss-120b"}
+    assert not steers_disallowed_model(config, {"l1_generate": permitted_steer}), (
+        "a sanctioned responder was graded a babysit act, which taints a clean branch"
+    )
+    assert not steers_disallowed_model(config, {"l1_generate": {"temperature": 0.9}}), (
+        "an ordinary axis edit was read as a steer of WHO ANSWERS"
+    )
+    assert not steers_disallowed_model(None, {}), "an empty steer is not a babysit act"
+
+    assert steers_disallowed_model(config, {"l1_generate": {"model": "deepseek/deepseek-v4"}}), (
+        "an unsanctioned responder passed as a clean fork"
+    )
+    assert steers_disallowed_model(config, {"l2_context": permitted_steer}), (
+        "a node the campaign never narrowed sanctioned a model — the default must be restrictive"
+    )
+    assert steers_disallowed_model(config, {"l1_generate": {"route_order": ["a", "b"]}}), (
+        "a cost lever passed as clean; no permitted set can sanction one"
     )
 
 

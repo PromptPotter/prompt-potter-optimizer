@@ -22,8 +22,8 @@ import type { ThetaCaveat as Caveat } from "@/lib/types";
 // the per-arm one) and this only puts it into words, so the screen and the optimizer's own
 // `confounds` panel cannot disagree about whether a number means anything. `Record<Caveat, …>` is
 // total, so adding a member to the Python enum fails the build here rather than rendering blank.
-// One copy, read by the inline notice and the explainer both.
-const CAVEAT_COPY: Record<Caveat, { head: string; body: string }> = {
+// One copy, read by the inline notice, the explainer and the sidebar row card.
+export const CAVEAT_COPY: Record<Caveat, { head: string; body: string }> = {
   cold_ruler: {
     head: "θ is not ability yet",
     body: "No difficulty ruler has been fitted, so θ is plain accuracy on the logit scale, read on each candidate's own cells. These θ compare to each other and to nothing else.",

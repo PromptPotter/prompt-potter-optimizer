@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import re
 import uuid
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Self
 
 from pydantic import ConfigDict, Field, field_validator
@@ -111,9 +112,8 @@ class PromptTemplate(SearchPoint):
     ahead of the boundary (`l1_layout_voids_prefix`) rather than the order alone guaranteeing it.
 
     A constant ahead of the boundary is free, and the exemption is declared rather than assumed —
-    `PREFIX_STABLE_PANELS`. `task_context` is the only member: its five rendered fields are
-    `FRAMING_FIELDS`, which `TaskDecomposition.merge` refuses to overwrite, so the shared prefix
-    measurably survives all of `task_intent`."""
+    `PREFIX_STABLE_PANELS`, whose one member is `task_context`; the shared prefix measurably
+    survives all of `task_intent`."""
 
     persona: str = ""
     task_intent: str = ""
@@ -132,11 +132,21 @@ class PromptTemplate(SearchPoint):
     )
 
     @shapes_optimizer_prompt
-    def render_fields(self) -> list[tuple[str, str]]:
-        pairs = [(f, v) for f in type(self).RENDER_ORDER if (v := self._field_value(f))]
+    def _ordered_pairs(self, value_of: Callable[[str], str]) -> list[tuple[str, str]]:
+        pairs = [(f, v) for f in type(self).RENDER_ORDER if (v := value_of(f))]
         if block := self._render_few_shot_block():
             pairs.append(("few_shot_examples", block))
         return pairs
+
+    @shapes_optimizer_prompt
+    def render_fields(self) -> list[tuple[str, str]]:
+        return self._ordered_pairs(self._field_value)
+
+    @shapes_optimizer_prompt
+    def stored_fields(self) -> list[tuple[str, str]]:
+        """Each field's OWN value, on the walk ``render()`` joins — for a surface offering the
+        fields for replacement, where a spliced value is text the replacement would absorb."""
+        return self._ordered_pairs(lambda name: getattr(self, name))
 
     @shapes_optimizer_prompt
     def render(self) -> str:
@@ -230,11 +240,12 @@ class IndividualLineage(StrictModel):
 
 
 class L2L3Memory(StrictModel):
-    """L2/L3-authored state that travels with the candidate.
+    """The candidate's persistent frame — the three surfaces the escalation layers author
+    plus the operator's framing they work inside.
 
-    Bundled together because all four are authored by the escalation layers
+    Bundled together because the first three are written by those layers
     (L2 writes most; L3 writes ``wounds.l3_note`` + ``wounds.l3_guard_breaches``)
-    and consumed by the dispatch-hub injections that compose the four
+    and all four are consumed by the dispatch-hub injections that compose the four
     optimizer prompts. ``OptSearchPoint.copy_memory_to`` deep-copies the
     whole bundle on L2/L3 adopt; ``OptSearchPoint.mutate`` (L1 child)
     inherits ``task_context`` + ``l1_overrides`` and resets the other two
@@ -268,10 +279,11 @@ class L2L3Memory(StrictModel):
     task_context: TaskDecomposition = Field(
         default_factory=TaskDecomposition,
         description=(
-            "Persistent task-framing dict refined by ``l2_context`` and "
-            "spliced around ``problem_description`` at render time. "
-            "Accumulative: each L2 fire merges deltas rather than "
-            "rewriting wholesale."
+            "Operator-authored task framing, spliced around "
+            "``problem_description`` at render time. The five ``FRAMING_FIELDS`` "
+            "are frozen for the run — ``TaskDecomposition.merge`` refuses them "
+            "and the L2 wire schema declares none of them; only "
+            "``upstream_context`` / ``downstream_context`` are mutable."
         ),
     )
 

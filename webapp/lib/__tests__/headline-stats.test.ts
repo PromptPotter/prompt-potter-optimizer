@@ -11,6 +11,7 @@ const round = (r: number, accuracy: number, composite_fitness: number): RoundSum
     improved: null,
     electable_count: null,
     verdict_reason: null,
+    separable: null,
     overlap: null,
     panel_precision: null,
     candidates: [],

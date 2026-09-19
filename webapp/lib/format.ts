@@ -69,9 +69,10 @@ export function fmtGap(seconds: number): string {
   return `${Math.round(seconds / 86_400)}d`;
 }
 
-// USD spend — 4dp under a cent, else 2dp. "$0.0042" / "$1.30".
+// USD spend — 4dp below a dollar, zero included, else 2dp: "$0.0000" / "$0.0042" / "$0.2386" /
+// "$1.30". Development campaigns cost fractions of a cent, so a column of them stays aligned.
 export function fmtUsd(n: number): string {
-  return n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
+  return n < 1 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
 }
 
 // Compact bare number — "3.4M" / "12.0k" / "840". For headline counts where

@@ -24,8 +24,13 @@ from promptpotter.infrastructure.store.account_spend import (
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import User
-from promptpotter.shared.errors import PotterError
-from promptpotter.shared.identity import TERMINAL_IDENTITY_ID
+from promptpotter.shared.errors import PayloadInvalidError, PotterError
+from promptpotter.shared.identity import (
+    CAMPAIGN_BUDGET_CAP,
+    TERMINAL_IDENTITY_ID,
+    claim_email,
+    has_capability,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -442,6 +447,37 @@ def is_host_tenant_dir(user_id: str) -> bool:
     return _is_host(terminal=user_id == TERMINAL_IDENTITY_ID, user_id=user_id)
 
 
+def concurrent_cycles_writable(stores: Stores) -> bool:
+    """On the host's key an account's concurrency is the host's bound on that person, written in
+    ``user.json`` alone; only an account spending its own key moves its own, at ``campaign.budget``."""
+    return spends_the_hosts_own_key(stores) and has_capability(stores.identity, CAMPAIGN_BUDGET_CAP)
+
+
+def set_concurrent_cycles(*, stores: Stores, limit: int) -> User:
+    """Refused rather than clamped: a limit written lower than asked is a ceiling nobody chose."""
+    if not spends_the_hosts_own_key(stores):
+        raise PayloadInvalidError(
+            "This account's concurrent-cycles limit is set by whoever runs this box.",
+            code="concurrency_set_by_host",
+        )
+    ceiling = settings.MACHINE_RUN_CAPACITY
+    if limit > ceiling:
+        raise PayloadInvalidError(
+            f"This machine runs at most {ceiling} campaigns at once, so an account limit of "
+            f"{limit} could never bind.",
+            code="concurrency_above_machine",
+            details={"requested": limit, "machine_ceiling": ceiling},
+        )
+    user = stores.users.get_or_create(
+        user_id=str(stores.identity.user_id),
+        tenant_id=str(stores.identity.tenant_id),
+        email=claim_email(stores.identity),
+    )
+    updated = user.model_copy(update={"max_concurrent_cycles": limit})
+    stores.users.save(updated)
+    return updated
+
+
 def _launch_step(user: User, wallet: AccountWallet, delegated: float | None) -> float | None:
     """The most ONE run on the ANONYMOUS grant may declare, whatever its headroom. The offer is
     denominated in runs, and a single run declaring the rest of the grant leaves the others
@@ -472,10 +508,12 @@ __all__ = [
     "admit_llm_turn",
     "check_launch_quotas",
     "clamp_budget_change",
+    "concurrent_cycles_writable",
     "hold_ceiling",
     "is_host_tenant_dir",
     "lifetime_ceilings",
     "overrun",
     "read_account_wallet",
+    "set_concurrent_cycles",
     "spends_the_hosts_own_key",
 ]

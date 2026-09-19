@@ -43,6 +43,7 @@ from promptpotter.application.evidence.subjects import (
     SubjectReading,
     SubjectSpec,
     WinnerChainPoint,
+    authorship_of,
 )
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.scenario import scenario_spine
@@ -53,7 +54,10 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.inner_origin import instrument_of
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_elections
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    scan_ledger_candidates,
+    scan_ledger_elections,
+)
 from promptpotter.infrastructure.store.io import read_json_tolerant
 from promptpotter.infrastructure.store.layout import ROUND_GLOB, CycleLayout, campaign_cycles_dir
 from promptpotter.infrastructure.store.stores import descend_store
@@ -64,8 +68,6 @@ from promptpotter.shared.statistics import exact_paired_reading, paired_diff_pos
 if TYPE_CHECKING:
     from promptpotter.application.scoring.formula.compiler import CompiledExpression
     from promptpotter.infrastructure.store.stores import Stores
-
-_ORIGIN_HASH = "origin"
 
 
 class CellEffect(NamedTuple):
@@ -87,20 +89,31 @@ class EffectProvenance(StrictModel):
 
 
 class RankedEdit(StrictModel):
-    """One unique candidate state — a ``pipeline_overlay`` — aggregated across every
-    occurrence in the selection. An L1 target-prompt edit on an ordinary campaign, an
-    optimizer-prompt edit on the recursion; the arithmetic does not care which.
+    """One SEARCHPOINT measured against its own campaign's origin — a prompt edit, a node-config
+    edit, an optimizer-prompt edit on the recursion; the arithmetic does not care which.
 
-    It pools by EDIT IDENTITY, so it earns its keep where the same edit recurs across campaigns.
-    That is routine on the recursion and rarer elsewhere, where most rows will carry one campaign's
-    cells and an interval to match.
+    **The identity is ``sp_hash``**, the archive join already stamped on every candidate row, so a
+    prose-only edit ranks like any other. Keying the sparse ``pipeline_overlay`` instead cannot see
+    one at all: that overlay is empty for a prompt-only candidate, which is the whole of what L1
+    proposes on a campaign optimizing prompts.
+
+    **Rows POOL WITHIN ONE CAMPAIGN and never across two.** ``_config_of`` states why: a
+    searchpoint is read through a delta against its parent, and two campaigns share no parent to
+    take one against — so a cross-campaign pool is a number lined up on nothing, and that is a
+    claim withdrawn rather than a capability lost. Do not re-add it as an improvement. Within one
+    campaign the pool is real: a repair re-measures a searchpoint without re-minting it.
     """
 
-    state_hash: str
+    sp_hash: str
+    # The other half of the identity. Two campaigns that ran the same searchpoint hold the same
+    # `sp_hash` and are two rows here, so a table keyed on the hash alone collides them — and the
+    # anchor each is measured against is its own campaign's origin, which is what makes them two
+    # readings rather than one pooled.
+    campaign_id: str
     label: str
     # Neither the edit's own text nor its per-cell breakdown rides here: a {node: {field: prose}}
     # map per ranked edit is the largest thing this read can put on the wire, and no surface opens
-    # it. `state_hash` names the edit and `provenance` says where to read it.
+    # it. `sp_hash` names the searchpoint and `provenance` says where to read it.
     provenance: list[EffectProvenance]
     anchor_effect: float  # mean of the PER-CELL paired diffs — one point per cell, not per
     # occurrence, so an over-measured cell cannot outweigh uniform goodness (see _finalize)
@@ -159,17 +172,15 @@ class Evidence(StrictModel):
     spread: EditSpread = Field(default_factory=EditSpread)
 
 
-def _state_hash(prompt_state: dict[str, dict[str, str]]) -> str:
-    """Stable short hash of a candidate state; empty state ⇒ the origin sentinel."""
-    if not prompt_state:
-        return _ORIGIN_HASH
-    canonical = json.dumps(prompt_state, sort_keys=True, ensure_ascii=False)
+def _arm_hash(optimizer_prompt_hashes: dict[str, Any]) -> str:
+    """The CONFIGURATION identity two campaigns are replicates of one another under. Recomputed
+    per read, so nothing on disk keys on the value."""
+    canonical = json.dumps(optimizer_prompt_hashes, sort_keys=True, ensure_ascii=False)
     return hashlib.sha1(canonical.encode("utf-8")).hexdigest()[:12]
 
 
 class _Accum:
-    def __init__(self, prompt_state: dict[str, dict[str, str]], label: str) -> None:
-        self.prompt_state = prompt_state
+    def __init__(self, label: str) -> None:
         self.label = label
         self.provenance: list[EffectProvenance] = []
         # cell -> paired (candidate_fit, origin_fit) lists across occurrences
@@ -223,6 +234,8 @@ class _Head(NamedTuple):
     dataset_name: str
     created_at: str
     point: _ChainPoint
+    authorship: str
+    human_intervened: bool
     scenario: ScenarioReading | None = None
     chain: list[_ChainPoint] | None = None
 
@@ -305,21 +318,28 @@ def subject_evidence(
 
     # Campaign subjects only: an edit is ranked against its own campaign's ORIGIN, which is the
     # anchor a course or a candidate does not define — both sit inside a campaign whose origin is
-    # already a subject the operator can tick.
-    accums: dict[str, _Accum] = {}
+    # already a subject the operator can tick. The key carries that campaign, so nothing pools
+    # across two of them: there is no shared parent for either delta to be taken against.
+    accums: dict[tuple[str, str], _Accum] = {}
     if include_ranking:
         for row in (r for r in rows if r.kind == "campaign"):
-            cycle_dir = heads[row.key].cycle_dir
-            hop = CycleHop(campaign_id=row.campaign_id, cycle_id=cycle_dir.name)
-            for round_file in sorted(CycleLayout(cycle_dir).rounds.glob(ROUND_GLOB)):
-                if round_file.name == "round_0000.json":
-                    continue
+            head = heads[row.key]
+            hop = CycleHop(campaign_id=row.campaign_id, cycle_id=head.cycle_dir.name)
+            # A campaign subject resolves to round 0's origin, so its own `sp_hash` IS the anchor —
+            # no document is opened to find it, and every round is walked including round 0.
+            anchor = str(head.point.scores.get("sp_hash") or "")
+            for round_file in sorted(CycleLayout(head.cycle_dir).rounds.glob(ROUND_GLOB)):
                 _accumulate_round(
-                    read_json_tolerant(round_file, {}), row.values, hop, accums, compiled
+                    read_json_tolerant(round_file, {}),
+                    row.values,
+                    hop,
+                    accums,
+                    compiled,
+                    anchor_hash=anchor,
                 )
 
     edits = sorted(
-        (_finalize(state_hash, acc) for state_hash, acc in accums.items()),
+        (_finalize(campaign, sp_hash, acc) for (campaign, sp_hash), acc in accums.items()),
         key=lambda r: r.anchor_effect,
         reverse=True,
     )
@@ -381,12 +401,16 @@ def _resolve_head(stores: Stores, spec: SubjectSpec, campaign_dir: Path) -> _Hea
         origin = _point_at(cycle_dir, 0, label="")
         if origin is None:
             return None
+        c0 = _masked(origin, spec.samples)
+        c0_index = read_json_tolerant(CycleLayout(cycle_dir).manifest, {})
         return _Head(
             cycle_dir=cycle_dir,
             label=spec.campaign_id,
             dataset_name=dataset_name,
             created_at=str(manifest.get("created_at", "")),
-            point=_masked(origin, spec.samples),
+            point=c0,
+            authorship=_authorship(cycle_dir, c0, c0_index),
+            human_intervened=bool(c0_index.get("human_intervened", False)),
         )
 
     cycle_dir = campaign_cycles_dir(campaign_dir) / spec.cycle_id
@@ -411,6 +435,7 @@ def _resolve_head(stores: Stores, spec: SubjectSpec, campaign_dir: Path) -> _Hea
         )
     if point is None:
         return None
+    masked = _masked(point, spec.samples)
     return _Head(
         cycle_dir=cycle_dir,
         # The cycle names the branch; the candidate names itself. A course's own `cycle_id` rather
@@ -418,10 +443,28 @@ def _resolve_head(stores: Stores, spec: SubjectSpec, campaign_dir: Path) -> _Hea
         label=spec.cycle_id if spec.kind == "course" else point.label,
         dataset_name=dataset_name,
         created_at=str(index.get("created_at", "")),
-        point=_masked(point, spec.samples),
+        point=masked,
+        authorship=_authorship(cycle_dir, masked, index),
+        human_intervened=bool(index.get("human_intervened", False)),
         scenario=scenario,
         chain=chain,
     )
+
+
+def _authorship(cycle_dir: Path, point: _ChainPoint, index: dict[str, Any]) -> str:
+    """Joined on ``(round, label)``, never on ``candidate_id``: a resume re-mints every id while the
+    round document already on disk keeps the old one, so an id join answers for nobody."""
+    source = next(
+        (
+            c.source
+            for c in scan_ledger_candidates(CycleLayout(cycle_dir).ledger)
+            if c.round == point.round and c.label == point.label
+        ),
+        "",
+    )
+    fork = index.get("fork")
+    fork = fork if isinstance(fork, dict) else {}
+    return authorship_of(source, str(fork.get("issued_by") or ""))
 
 
 def _masked(point: _ChainPoint, samples: frozenset[int] | None) -> _ChainPoint:
@@ -704,6 +747,10 @@ def _reading_row(
     # so the arm alone is the whole grouping there.
     instrument = instrument_of(doc.get("pipeline_params"))
     raw = doc.get("ability")
+    # Straight off the point's own report, and left ABSENT where it carries none: a 0 here is the
+    # measurement "every cell was earned", which is the opposite claim (`evidence/CLAUDE.md`).
+    banked = head.point.scores.get("cached_samples")
+    replayed = banked if isinstance(banked, int) and not isinstance(banked, bool) else None
     value, ci_lo, ci_hi, n_cells = merge_cells(values)
     return SubjectReading(
         key=spec.key,
@@ -738,7 +785,10 @@ def _reading_row(
         # An UNSTAMPED round is not the origin arm — it is an UNKNOWN one, which groups with
         # nothing. Collapsing the two onto one hash makes `replicates` report every unstamped
         # campaign as a replicate of the rest, spread and all, over a shared absence.
-        arm_id=_state_hash({"": dict(hashes)}) if isinstance(hashes, dict) and hashes else None,
+        arm_id=_arm_hash(dict(hashes)) if isinstance(hashes, dict) and hashes else None,
+        authorship=head.authorship,
+        human_intervened=head.human_intervened,
+        cached_samples=replayed,
         instrument_id=str(instrument) if isinstance(instrument, str) else None,
         ability=(AbilityReading.model_validate(raw) if isinstance(raw, dict) else None),
         round=head.point.round,
@@ -762,31 +812,38 @@ def _accumulate_round(
     doc: dict[str, Any],
     origin_values: dict[str, float],
     hop: CycleHop,
-    accums: dict[str, _Accum],
+    accums: dict[tuple[str, str], _Accum],
     compiled: CompiledExpression,
+    *,
+    anchor_hash: str,
 ) -> None:
     """An edit is worth whatever the SELECTED metric says it is — seconds, dollars, rounds, lift.
     A candidate row is a cell like any other (on the recursion, its own inner campaign), so every
-    channel the roster can answer, the ranking can answer too."""
+    channel the roster can answer, the ranking can answer too.
+
+    Keyed ``(campaign, sp_hash)``, and the ANCHOR is excluded by equality with round 0's own hash —
+    which searchpoint a row IS, rather than a guess off an empty overlay that reads every
+    prompt-only candidate as the origin. No round is skipped, round 0 included.
+    """
     round_num = int(doc.get("round", 0) or 0)
     for cand in doc.get("candidate_scores") or []:
         cand_id = str(cand.get("candidate_id", ""))
-        if not cand_id:
+        sp_hash = str(cand.get("sp_hash") or "")
+        # An unstamped row names no searchpoint, so it groups with NOTHING — pooling every one of
+        # them under `""` would rank the absence itself, the way an unstamped `arm_id` would.
+        if not cand_id or not sp_hash or sp_hash == anchor_hash:
             continue
-        prompt_state = _coerce_state(cand.get("pipeline_overlay"))
-        state_hash = _state_hash(prompt_state)
-        if state_hash == _ORIGIN_HASH:
-            continue  # the no-op arm anchors others; it is not itself a ranked candidate
         cand_cells, _ = _score_cells(
             compiled, cell_channels((doc.get("all_candidate_results") or {}).get(cand_id) or [])
         )
         paired = {c: cand_cells[c] for c in cand_cells if c in origin_values}
         if not paired:
             continue
-        acc = accums.get(state_hash)
+        key = (hop.campaign_id, sp_hash)
+        acc = accums.get(key)
         if acc is None:
-            acc = _Accum(prompt_state, str(cand.get("label") or state_hash))
-            accums[state_hash] = acc
+            acc = _Accum(str(cand.get("label") or sp_hash))
+            accums[key] = acc
         acc.provenance.append(
             EffectProvenance(
                 campaign_id=hop.campaign_id,
@@ -800,17 +857,7 @@ def _accumulate_round(
             acc.orig_by_cell.setdefault(cell, []).append(origin_values[cell])
 
 
-def _coerce_state(raw: Any) -> dict[str, dict[str, str]]:
-    if not isinstance(raw, dict):
-        return {}
-    out: dict[str, dict[str, str]] = {}
-    for node, fields in raw.items():
-        if isinstance(fields, dict):
-            out[str(node)] = {str(k): str(v) for k, v in fields.items()}
-    return out
-
-
-def _finalize(state_hash: str, acc: _Accum) -> RankedEdit:
+def _finalize(campaign_id: str, sp_hash: str, acc: _Accum) -> RankedEdit:
     """Aggregate one edit into its ranked row — **per cell, then across cells**, so the SE comes from
     n = CELLS and a cell measured five times cannot outweigh five cells measured once."""
     per_cell: list[CellEffect] = []
@@ -833,7 +880,8 @@ def _finalize(state_hash: str, acc: _Accum) -> RankedEdit:
     # edit to different standards — and a single wild cell cannot carry an edit up the ranking.
     anchor, ci_lo, ci_hi, _p, _n = exact_paired_reading(cell_cand, cell_orig)
     return RankedEdit(
-        state_hash=state_hash,
+        sp_hash=sp_hash,
+        campaign_id=campaign_id,
         label=acc.label,
         provenance=acc.provenance,
         anchor_effect=anchor,

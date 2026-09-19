@@ -11,6 +11,7 @@ import {
   Chip,
   ChipGroup,
   CopyButton,
+  HoverCard,
   Menu,
   MenuCheck,
   MenuRadioGroup,
@@ -578,25 +579,24 @@ export function CandidatesCard() {
                   }}
                 />
                 <MenuSep />
-                <MenuCheck
-                  on={maskOpen}
-                  onClick={() => setScoringMask({ open: !maskOpen })}
-                  title="Pick evaluators and reweight them to recompute every score under a criterion you choose."
-                >
-                  Scoring mask
-                </MenuCheck>
+                <HoverCard content="Pick evaluators and reweight them to recompute every score under a criterion you choose.">
+                  <MenuCheck on={maskOpen} onClick={() => setScoringMask({ open: !maskOpen })}>
+                    Scoring mask
+                  </MenuCheck>
+                </HoverCard>
                 {/* Never disabled — the origin is normally the cached one, so greying out
                     when only C0 was replayed hides the case this is opened for. */}
-                <MenuCheck
-                  on={showCache}
-                  onClick={() => setCandidatesState({ showCache: !showCache })}
-                  title={TERMS.cache_replayed}
-                >
-                  {/* "Replayed", never "cache": the word `cache` names the PROVIDER's prefix
-                      discount everywhere else in this app (the `c39%` badge), and one word cannot
-                      mean both. The count is CANDIDATES carrying a replayed sample, not samples. */}
-                  Replayed{cacheHitCount > 0 ? ` · ${cacheHitCount} of ${views.length}` : ""}
-                </MenuCheck>
+                <HoverCard content={TERMS.cache_replayed}>
+                  <MenuCheck
+                    on={showCache}
+                    onClick={() => setCandidatesState({ showCache: !showCache })}
+                  >
+                    {/* "Replayed", never "cache": the word `cache` names the PROVIDER's prefix
+                        discount everywhere else in this app (the `c39%` badge), and one word cannot
+                        mean both. The count is CANDIDATES carrying a replayed sample, not samples. */}
+                    Replayed{cacheHitCount > 0 ? ` · ${cacheHitCount} of ${views.length}` : ""}
+                  </MenuCheck>
+                </HoverCard>
                 <MenuSep />
                 {/* A searchpoint is picked where it is being LOOKED AT — the lit bar, the
                     dendrogram node and the forest stub all write one selection slot, so the

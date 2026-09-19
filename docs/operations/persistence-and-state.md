@@ -23,7 +23,7 @@ Your work lives in `.promptpotter/`, in two trees:
 - **`new`** mints a fresh campaign + session + root cycle and overwrites the pointer. Re-running `new` on an unchanged declaration reuses the content-addressed root-cycle id and origin score (cache-served), then diverges from round 1.
 - **`resume`** reads the pointer and picks up that cycle. No re-`new` needed.
 - **fork** mints a new cycle in the same session and retargets the pointer.
-- **`--session <id>`** overrides the pointer for one command; **`--tenant <id>`** (default `"default"`) selects the partition under `projects/`.
+- **`--campaign <id>` / `--cycle <id>`** override the pointer for one command, on `resume` as on every run-control verb; the session is the one the named cycle was minted under (`index.json::parent_session_id`), never picked separately. **`--tenant <id>`** (default `"default"`) selects the partition under `projects/`.
 
 Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [options]`. **Loop-mint:** `new`, `resume`. **Lifecycle:** `archive`, `delete`, `unarchive`, `reset`. **Manifest-edit:** `rename` (display name only; `campaign_id` still addresses it), `replace-dataset`. **Run-control:** `pause` (stops a running cycle at its next checkpoint, resumable), `set-budget` (raises or lowers a live cycle's ceiling — how a budget-halted cycle is continued), `cancel-queued` (withdraws a launch still waiting for a machine slot; `pause` cannot serve one, since a queued mint has no cycle to write a flag into), `skip-searchpoint`, `step-cycle`. **Diagnostic:** `verify`, `ab`, `noise-floor`, `seed-screen`, `evidence`. **Maintenance** — the three that REWRITE stored artifacts rather than reading them, all dry-run by default and all refusing while a producer could still be appending: `reindex`, `restamp`, `compact-archive`.
 
@@ -56,6 +56,11 @@ Reads happen by opening the on-disk artifact tree. `evidence` is the one read VE
         index.json                     # phase, rounds, final block, parent_cycle_id (forks)
         export.json                    # the winner + its provenance, for a program that is not us
         pipeline.resolved.yaml         # the declaration this cycle RUNS — backend under dataset overlay
+        experiment.resolved.yaml       # the CELLS it measures — the connector's panel, every name it
+                                       #   only pointed at resolved. Write-once where the line above
+                                       #   is rewritten each resume
+        optimized.md                   # which of those values the optimizer MOVES, and whether the
+                                       #   model can see each one (`PipelineSchema.value_tree`)
         log.md  review.md              # per-cycle digests (derived — safe to recompute)
         rounds/round_NNNN.json         # serialized RoundResult; its opt_search_point is the resume SoT
         langfuse/  prompts/            # trace shadow; rendered optimizer prompts
@@ -63,7 +68,9 @@ Reads happen by opening the on-disk artifact tree. `evidence` is the one read VE
           ledger.jsonl                 # append-only Decision/Phase/Snapshot/LLMCall/TokenUsage spine
           streams/round_NNNN_p_best.jsonl   # PoBB telemetry (sparkline in log.md)
           cache/rounds|candidates/     # per-round node I/O + pre-scoring checkpoint
-    measurements/                       # PAID — measurements. Cross-cycle/session/tenant, peer of campaigns/
+    measurements/                       # PAID — measurements. Cross-cycle/session/campaign and into an
+                                        #   L4 sandbox, but WITHIN this tenant: `build_stores` roots it at
+                                        #   `shared_root / tenant_id`. Peer of campaigns/
       index.jsonl                  # append-only, last-wins by run_id; `reindex` rebuilds it from runs/
       runs/{run_id}.jsonl          # one append-only log per run: a `k:"run"` header row + a `k:"m:{sample_id}"` row each
       derived/                     # read models folded FROM the runs (regenerable)
@@ -94,6 +101,8 @@ Reads happen by opening the on-disk artifact tree. `evidence` is the one read VE
 | `index.json` | per cycle | `pipeline_params`, `cycle_id`, `parent_cycle_id` (branches), `rounds[]`, `final` block (winner + stop_reason). A branch's KIND is not stored — `layout.py::sibling_kind` parses it from the id. |
 | `export.json` | per cycle | The winning prompt by field name, the node config it ran under, and the provenance a consumer needs to trust the number (fitness under its named formula, n, lift + CI, θ, the rows' hash, the optimizer manifest). Written from the same call that stamps `index.json::final`; absent when no round ever closed. Contract: `domain/export.py`. |
 | `pipeline.resolved.yaml` | per cycle | The declaration this cycle RUNS — the live backend's, under the dataset overlay, as `wiring::_resolve_pipeline_schema` merged it. Written at `init_cycle` and REWRITTEN on every resume, because what the operator is owed is the space the next round will search. It exists because a campaign's committed dataset file deliberately snapshots values and not the backend's `param_keys` (`draft_campaign::merge_pipeline_overlay`), so the served read had every node's settings and none of its axes. Absent until a cycle starts, and the dataset file answers then — which is honest, since no backend has spoken to that campaign yet. |
+| `experiment.resolved.yaml` | per cycle | The panel this cycle MEASURED — the connector's `experiment_file` with everything it only NAMES resolved to what it named, so a Harbor campaign carries the task roster its rounds actually ran rather than a pointer into a registry that can be re-pinned under the same version. Beside the declaration because the two answer one question about different halves: that file is the search SPACE, this is the set of CELLS. **Write-once, the opposite cadence to its neighbour** — a declaration owes the operator what the next round will search, a roster owes what every round already measured, and re-pinning it mid-campaign would change what was measured without changing the campaign's name. A later resolution that disagrees is logged, never written. Read in preference to a live re-resolve wherever a campaign's identity is recomputed (`pipeline_resolve.py::resolve_pipeline_for_campaign`). Absent for a connector that owns no panel. |
+| `optimized.md` | per cycle | Which of the resolved values the optimizer MOVES, and the channel each reaches the model by — the reading of the declaration beside it that the declaration cannot give, since it names a key and never whether the model will ever see the value. Markdown: its only reader is a person. Same cadence as the declaration. |
 | `log.md` / `review.md` (cycle) | per cycle | Per-cycle digests. Derived views — safe to delete and recompute. |
 | `rounds/round_NNNN.json` | per cycle | Serialized `RoundResult` — the model IS the document (`save_round_file` persists `model_dump()`, `load_round_file` validates it back). Its `opt_search_point` field is the resume source of truth. |
 | `.runtime/ledger.jsonl` | per cycle | Append-only fact stream. Escalation firings ride a `PhaseRecord(phase="escalation", event="rule_fired")` — no separate signals stream. **It is also the only surface that says which optimizer node actually RAN, and what each dispatch panel cost it**: the `llm_call` record carries `prompt_chars` plus `injection_chars` / `injection_dropped` / `injection_silent` (`dispatch/facade.py`). The round document cannot answer either — its `optimizer_prompt_hashes` names every node on every round by construction. |
@@ -137,7 +146,7 @@ Two different facts, and conflating them is the costliest mistake here. **`decla
 | `running` | A process is attached and driving | producer is fresh |
 | `detached` | Active lifecycle, **no live producer** | producer is stale — the one phase using the freshness heuristic |
 
-**Three ways into `paused`** — the pause button (writes the flag), Ctrl+C, and an `asyncio.CancelledError` (typically an L4 outer sample deadline cancelling its inner campaign). Only the first writes a flag; the other two are derived off the runner's declaration at the finalize seam. Leaving that to each raise site is what once let a deliberately-cancelled inner cycle read `detached` and get stamped `producer_vanished`.
+**Three ways into `paused`** — the pause button (writes the flag), Ctrl+C, and an `asyncio.CancelledError` (typically a cell envelope cancelling the backend work it bounds). Only the first writes a flag; the other two are derived off the runner's declaration at the finalize seam. Leaving that to each raise site is what once let a deliberately-cancelled inner cycle read `detached` and get stamped `producer_vanished`.
 
 **`detached` ≠ `paused` ≠ wedged.** `paused` is a clean, deliberate, resumable exit; `detached` means nobody is driving; **wedged** is a producer attached and heartbeating but no longer *progressing* — `run_phase` cannot express that one, and it is derived separately from non-heartbeat ledger appends ([`../specs/frontend-surface-contract.md`](../specs/frontend-surface-contract.md)).
 
@@ -163,7 +172,7 @@ A fresh launch clears every polled run-control flag: a flag surviving the gestur
 
 ### Where the error text is
 
-Error prefixes — `[CLIENT]` / `[SERVER]` / `[CONNECTION]` / `[PIPELINE]` — land in the latest `rounds/round_NNNN.json`, alongside the mirrored `logs/latest.log`. The optimizer-call path carries a hard wall-clock (`_chat_under_deadline` → `OPTIMIZER_TIMEOUT`), so a hung optimizer call terminates itself. **An overnight death with no terminal record is machine-sleep or session-end class, not a code fault** — do not go looking for a bug in the loop.
+A failed cell's typed `error_category` (`shared/errors.py::ErrorCategory`) and its message land in the latest `rounds/round_NNNN.json`, alongside the mirrored `logs/latest.log`. The optimizer-call path carries a hard wall-clock (`_chat_under_deadline` → `OPTIMIZER_TIMEOUT`), so a hung optimizer call terminates itself. **An overnight death with no terminal record is machine-sleep or session-end class, not a code fault** — do not go looking for a bug in the loop.
 
 ## Recovery: resume, rewind, fork
 

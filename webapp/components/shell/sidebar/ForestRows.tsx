@@ -15,8 +15,18 @@ import type { ReactNode } from "react";
 import { cx } from "@/lib/cx";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
 import { campaignDisplayName } from "@/lib/names";
-import { fmtPct0 } from "@/lib/format";
-import { runPhaseLabel } from "@/lib/run-phase";
+import {
+  effectTone,
+  fmtAgo,
+  fmtDateTime,
+  fmtPct0,
+  fmtSigned,
+  fmtTokens,
+  fmtUsd,
+  shortId,
+} from "@/lib/format";
+import { runPhaseLabel, runPhaseMark, type RunPhaseMark } from "@/lib/run-phase";
+import { CAVEAT_COPY } from "@/components/candidates/AbilityInfo";
 import {
   candidatesOf,
   childCourses,
@@ -36,7 +46,56 @@ import type { NodeKind } from "./grouping";
 import type { OriginGroup, RunGroup } from "./grouping";
 import { CampaignMenu } from "./CampaignMenu";
 import { CompareToggle } from "./CompareToggle";
-import { RowHoverCard } from "./RowHoverCard";
+import { RowHoverCard, type RowStat } from "./RowHoverCard";
+
+// A campaign's served lifetime spend. A price-less model makes it a FLOOR, and the `≥` says so
+// on the row itself rather than only inside the card.
+function spendLabel(c: CampaignSummary): string {
+  return `${c.spend_unpriced_tokens > 0 ? "≥" : ""}${fmtUsd(c.spend_used_usd)}`;
+}
+
+interface RowStatus {
+  mark: RunPhaseMark;
+  word: string;
+}
+
+const ARCHIVED_MARK: RunPhaseMark = { glyph: "▫", tone: "quiet" };
+
+// The glyph stands in for a word the column cannot fit whole; the word is its accessible name.
+function PhaseMark({ status }: { status: RowStatus }) {
+  return (
+    <span
+      className={`unit-library-mark tone-${status.mark.tone}`}
+      role="img"
+      aria-label={status.word}
+    >
+      {status.mark.glyph}
+    </span>
+  );
+}
+
+// Ten runs of one dataset share a display name, so a campaign row keeps its id's `__suffix`
+// whole and lets the name before it truncate — the tail is what tells the rows apart.
+function RowName({ label, campaign }: { label: string; campaign?: CampaignSummary }) {
+  const tail = campaign ? shortId(campaign.campaign_id) : null;
+  return (
+    <>
+      <span className="unit-library-name-head">{label}</span>
+      {campaign && tail !== campaign.campaign_id && (
+        <span className="unit-library-name-tail">__{tail}</span>
+      )}
+    </>
+  );
+}
+
+function accuracyStat(origin: number | null, best: number | null): RowStat {
+  const lifted = origin != null && best != null && best !== origin;
+  return {
+    label: "Accuracy",
+    value: lifted ? `${fmtPct0(origin)} → ${fmtPct0(best)}` : fmtPct0(origin ?? best),
+    sub: `${lifted ? "origin → best" : origin != null ? "origin" : "best"} · rounds are won on θ`,
+  };
+}
 
 // What every row needs to render itself and answer clicks. Threaded down rather than
 // context'd so the tree stays a pure function of its props.
@@ -173,7 +232,7 @@ function RunRow({ run, ctx }: { run: RunGroup; ctx: TreeCtx }) {
       tree={tree}
       ctx={ctx}
       label={campaignDisplayName(campaign)}
-      campaign={campaign}
+      run={run}
       chrome={
         <>
           <CompareToggle
@@ -183,9 +242,6 @@ function RunRow({ run, ctx }: { run: RunGroup; ctx: TreeCtx }) {
           <CampaignMenu campaign={campaign} />
         </>
       }
-      // The campaign row answers for its whole family: the winner often lives in a fork,
-      // and `/cycles` already knows the max across it.
-      bestAccuracy={run.bestAccuracy}
       // Run-state for the campaign row comes from `/cycles`, ALWAYS — never from the
       // tree node, which the row only has while it is expanded. A phase that appeared
       // on expand was the tell: a running campaign showed no ● until you opened it,
@@ -209,9 +265,8 @@ function CourseRow({
   tree,
   ctx,
   label,
-  campaign,
+  run,
   chrome,
-  bestAccuracy,
   phase,
   phaseReason,
 }: {
@@ -220,11 +275,11 @@ function CourseRow({
   tree: CampaignTree;
   ctx: TreeCtx;
   label: string;
-  // Only a top-level root has one — it drives the ⋯ menu and the archived state. An inner
-  // run is machine-minted into a sandbox and an operator never archives one.
-  campaign?: CampaignSummary;
+  // Only a top-level root has one — it carries the campaign (the ⋯ menu, the archived state,
+  // the served spend) and answers for the whole family, whose winner often lives in a fork. An
+  // inner run is machine-minted into a sandbox and an operator never archives one.
+  run?: RunGroup;
   chrome?: React.ReactNode;
-  bestAccuracy?: number | null;
   // This row's run-state and the reason word beside it, from the ONE surface that
   // answers for this row: `/cycles` for a campaign's root row, the tree node for a
   // nested course. The row is handed its phase rather than picking a source, which
@@ -241,8 +296,9 @@ function CourseRow({
   // read as a round of six.
   const { live: liveRows, retired: retiredGroups } = splitRetired(rows);
 
+  const campaign = run?.campaign;
   const originAccuracy = node?.origin_accuracy ?? null;
-  const best = bestAccuracy ?? node?.best_accuracy ?? null;
+  const best = run?.bestAccuracy ?? node?.best_accuracy ?? null;
   const lifted = originAccuracy != null && best != null && best !== originAccuracy;
 
   const archived = campaign?.lifecycle_status === "archived";
@@ -255,26 +311,83 @@ function CourseRow({
     ctx.viewedPath != null &&
     encodeCyclePath(ctx.viewedPath) === encodeCyclePath(path) &&
     ctx.viewedCandidateId == null;
-  // The ● pointer. `run_phase` is the ONE server-owned run-state (I6), handed in above.
-  // The ● means running and only running; every other phase reaches the row as the WORD
-  // beside it, through the total `runPhaseLabel` map — a marker that tested `=== "running"`
-  // and rendered nothing else left a run held AT THE ORIGIN GATE, blocked on the operator
-  // and top of the dock's priority, looking exactly like an idle row.
-  const live = phase === "running";
+  // `run_phase` is the ONE server-owned run-state (I6), handed in above. Every phase reaches
+  // the row as a MARK from the total `runPhaseMark` map, its word in `aria-label` and the card:
+  // a marker that tested `=== "running"` left a run held at the origin gate looking idle.
   const active =
     campaign?.campaign_id === ctx.activeCampaignId &&
     path[path.length - 1]?.cycleId === ctx.activeCycleId &&
     phase !== "checkin";
-  // The word carries every non-running phase, so the marker is never colour alone.
-  const statusLabel = !live && phase ? runPhaseLabel(phase, phaseReason) : null;
+  const status: RowStatus | null = archived
+    ? { mark: ARCHIVED_MARK, word: "Archived" }
+    : phase
+      ? { mark: runPhaseMark(phase, phaseReason), word: runPhaseLabel(phase, phaseReason) }
+      : null;
 
-  // The one-line "what is this row" copy, shown in the hover card (it used to be a
-  // native `title=` that floated over the storage card).
-  const description = archived
-    ? "Archived — restore it from the ⋯ menu to open"
-    : node?.task
-      ? `Ran to measure a candidate of the course above (${node.task}).`
-      : "The campaign, and the course it ran. Its origin is the C0 row inside it.";
+  const cycleId = path[path.length - 1]!.cycleId;
+  const answering = run?.answering;
+  const facts: [string, string][] = [];
+  const dataset = campaign?.dataset_name ?? node?.dataset_name;
+  if (dataset) facts.push(["Dataset", dataset]);
+  if (node?.task) facts.push(["Task", node.task]);
+  if (run) facts.push(["Last activity", fmtAgo(run.updatedAt) || fmtDateTime(run.updatedAt)]);
+  if (campaign) {
+    const ago = fmtAgo(campaign.created_at);
+    facts.push(["Created", `${fmtDateTime(campaign.created_at)}${ago ? ` · ${ago}` : ""}`]);
+    facts.push(["Campaign", campaign.campaign_id]);
+  }
+  facts.push(["Cycle", cycleId]);
+  if (answering && answering.cycle_id !== cycleId) facts.push(["Answering", answering.cycle_id]);
+
+  const stats: RowStat[] = [];
+  if (campaign) {
+    stats.push({
+      label: "Spend",
+      value: spendLabel(campaign),
+      sub:
+        campaign.spend_unpriced_tokens > 0
+          ? `floor — ${fmtTokens(campaign.spend_unpriced_tokens)} unpriced`
+          : "lifetime, every cycle",
+      className: campaign.spend_unpriced_tokens > 0 ? "rowhover-tone-warn" : undefined,
+    });
+  }
+  if (answering) stats.push({ label: "Rounds", value: String(answering.n_rounds) });
+  stats.push(accuracyStat(originAccuracy, best));
+  if (node?.hearts != null && node.lives_cap != null) {
+    stats.push({ label: "Lives", value: `${node.hearts} / ${node.lives_cap}` });
+  }
+
+  const card = {
+    title: label,
+    state: status?.word,
+    tags: answering?.human_intervened ? ["babysat"] : undefined,
+    lede: archived
+      ? "Archived — restore it from the ⋯ menu to open it."
+      : node?.task
+        ? "An inner run: it measured one candidate of the course above on one panel cell."
+        : "The campaign and the course it ran. Its origin is the C0 row inside it.",
+    stats,
+    facts,
+    campaignId: campaign?.campaign_id,
+  };
+
+  // A campaign reads in dollars, archived or not; its accuracy sits in the card beside the θ
+  // that decides. An inner run keeps its accuracy.
+  const reading = campaign ? (
+    <span className="unit-library-spend">{spendLabel(campaign)}</span>
+  ) : archived ? null : (
+    <span>
+      {fmtPct0(originAccuracy ?? best ?? null)}
+      {lifted && (
+        <>
+          <span className="unit-library-arrow" aria-label="improved to">
+            →
+          </span>
+          {fmtPct0(best)}
+        </>
+      )}
+    </span>
+  );
 
   const row = (
     <div className={cx("unit-library-family", selected && "selected", archived && "archived")}>
@@ -296,43 +409,17 @@ function CourseRow({
         disabled={archived}
       >
         <span className="unit-library-row">
-          <span className="unit-library-name">
-            {label}
-            {live ? (
-              <span className="unit-library-live" title="Status is running">
+          <span className="unit-library-name unit-library-name-split">
+            <RowName label={label} campaign={campaign} />
+            {active && (
+              <span className="unit-library-live active" aria-label="Dashboard follows this run">
                 ●
               </span>
-            ) : active ? (
-              <span className="unit-library-live active" title="Dashboard follows this run">
-                ●
-              </span>
-            ) : null}
-          </span>
-          <span className="unit-library-meta">
-            {archived ? (
-              <span className="unit-library-status">Archived</span>
-            ) : (
-              <>
-                {statusLabel && (
-                  <>
-                    <span className="unit-library-status">{statusLabel}</span>
-                    {" · "}
-                  </>
-                )}
-                {/* Origin first, and when the course has moved off it, origin → best —
-                    the best is what an operator scans a sidebar for. Equal (or unknown)
-                    reads as one number rather than saying it twice. */}
-                {fmtPct0(originAccuracy ?? best ?? null)}
-                {lifted && (
-                  <>
-                    <span className="unit-library-arrow" aria-label="improved to">
-                      →
-                    </span>
-                    {fmtPct0(best)}
-                  </>
-                )}
-              </>
             )}
+          </span>
+          <span className="unit-library-meta unit-library-meta-marked">
+            {status && <PhaseMark status={status} />}
+            {reading}
           </span>
         </span>
       </button>
@@ -342,15 +429,7 @@ function CourseRow({
 
   return (
     <>
-      <RowHoverCard
-        cycleId={path[path.length - 1]!.cycleId}
-        description={description}
-        datasetName={campaign?.dataset_name ?? node?.dataset_name ?? null}
-        createdAt={campaign?.created_at ?? null}
-        campaignId={campaign?.campaign_id}
-      >
-        {row}
-      </RowHoverCard>
+      <RowHoverCard card={card}>{row}</RowHoverCard>
       {open && (
         <ul className="unit-library-children">
           {!tree.loaded && !tree.failed && <li className="inner-library-empty">Loading…</li>}
@@ -469,17 +548,82 @@ function CandidateRow({
   const { isPicked, pick } = useSelectNode(ctx.selectCyclePath);
   const selected = isPicked(cand);
 
-  const description = retiredBy
-    ? `${cand.label} — retired: the run branched to ${shortFamilyTail(retiredBy)} and continued there. It stays as the record of what ran; nothing after it is on the line.`
+  const lede = retiredBy
+    ? `Retired: the run branched to ${shortFamilyTail(retiredBy)} and continued there. It stays as the record of what ran; nothing after it is on the line.`
     : isOrigin
-      ? "C0 — this course's ORIGIN: the specification it started from, measured. Selects it; the ▶ twist expands what measured it."
+      ? "This course's ORIGIN: the specification it started from, measured. Click selects it; ▶ expands what measured it."
       : cand.course_kind
-        ? `${cand.label} — an attempt you cut as a fork (${shortFamilyTail(cycleId)}), on this campaign's one timeline. Selects it; the dashboard follows that fork.`
-        : `${cand.label} — a candidate this course proposed and measured. Selects it; the ▶ twist expands what measured it.`;
+        ? `An attempt cut as a fork (${shortFamilyTail(cycleId)}), on this campaign's one timeline. Click selects it; the dashboard follows that fork.`
+        : "A candidate this course proposed and measured. Click selects it; ▶ expands what measured it.";
+
+  // The verdict WORD. `is_winner: false` alone cannot tell a lost round from one still scoring,
+  // so `election_held` decides which of the two it says.
+  const verdict = retiredBy
+    ? "retired"
+    : cand.status === "invalid"
+      ? "invalid — never measured"
+      : isOrigin
+        ? "origin"
+        : elected
+          ? "won its round"
+          : cand.election_held
+            ? "not elected"
+            : cand.status === "minted"
+              ? "not measured yet"
+              : "awaiting election";
+
+  const caveat = cand.theta_caveat;
+  const lift = cand.matched_parent_lift;
+  const liftLo = cand.matched_parent_lift_ci_lo;
+  const liftHi = cand.matched_parent_lift_ci_hi;
+  const stats: RowStat[] = [
+    {
+      label: "Ability θ",
+      value:
+        cand.theta == null
+          ? "—"
+          : `${cand.theta.toFixed(2)}${cand.theta_se != null ? ` ± ${cand.theta_se.toFixed(2)}` : ""}`,
+      sub: caveat ? "not ability — see below" : "what the round elects on",
+      className: caveat ? "rowhover-tone-warn" : undefined,
+    },
+    {
+      label: "Accuracy",
+      value: fmtPct0(cand.accuracy),
+      sub:
+        cand.scored_samples != null
+          ? `${cand.scored_samples}${cand.expected_samples != null ? ` of ${cand.expected_samples}` : ""} scored`
+          : undefined,
+    },
+  ];
+  if (lift != null) {
+    stats.push({
+      label: "Lift vs parent",
+      value: fmtSigned(lift),
+      sub: liftLo != null && liftHi != null ? `[${fmtSigned(liftLo)}, ${fmtSigned(liftHi)}]` : "no interval",
+      className: effectTone(liftLo, liftHi),
+    });
+  }
+  const facts: [string, string][] = [["Round", String(cand.round ?? 0)], ["Cycle", cycleId]];
+  if (cand.sp_hash) facts.push(["Searchpoint", cand.sp_hash]);
+  if (cand.steered_by) facts.push(["Steered by", cand.steered_by]);
+
+  const card = {
+    title: cand.label,
+    state: verdict,
+    tags: cand.course_kind ? [`⑂${cutFrom ? ` from ${cutFrom}` : " fork"}`] : undefined,
+    lede,
+    stats,
+    caveat: caveat ? (
+      <>
+        <strong>{CAVEAT_COPY[caveat].head}.</strong> {CAVEAT_COPY[caveat].body}
+      </>
+    ) : undefined,
+    facts,
+  };
 
   return (
     <>
-      <RowHoverCard cycleId={cycleId} description={description}>
+      <RowHoverCard card={card}>
         <div className={cx("unit-library-family", selected && "selected", retiredBy && "retired")}>
           <button
             type="button"
@@ -530,9 +674,12 @@ function CandidateRow({
                 {/* A cut that broke before measuring anything has no number, and must not
                     borrow the origin's — that would report a fitness nothing measured. */}
                 {cand.accuracy == null && cand.course_kind ? (
-                  <span className="unit-library-status">
-                    {runPhaseLabel("terminal", cand.status)}
-                  </span>
+                  <PhaseMark
+                    status={{
+                      mark: runPhaseMark("terminal", cand.status),
+                      word: runPhaseLabel("terminal", cand.status),
+                    }}
+                  />
                 ) : (
                   fmtPct0(cand.accuracy)
                 )}

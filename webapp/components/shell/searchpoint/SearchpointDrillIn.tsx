@@ -19,6 +19,8 @@ import type { ElectedRow, PipelineStatus, SampleRow } from "@/lib/types";
 import type { DraftPatch, NodeConfigParam, NodeOutputSchema } from "@/lib/api";
 import { cacheShare, prefixReading, type ObserveConfig } from "@/lib/derivations";
 import { TERMS } from "@/lib/terms";
+import { NOT_SEPARABLE, liftSeparates } from "@/lib/fitness";
+import { Term } from "@/components/ui";
 import { fmtPct1, fmtSigned, fmtTokens } from "@/lib/format";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 import { SampleRowItem, SAMPLE_RENDER_CAP } from "@/components/shell/samples/SampleRowItem";
@@ -107,7 +109,7 @@ export function SearchpointDrillIn({
               <Fact
                 k="vs parent"
                 v={fmtPct1(row.matchedParentAccuracy)}
-                title="The candidate's PARENT — the origin at round 0, the prior round's winner after — re-scored on the samples THIS candidate measured, and the floor the promotion gate compared it against. Under elimination a candidate may run only part of the round's samples, so the parent's full-set rate is the wrong comparison and would read as a phantom lift."
+                hint="The candidate's PARENT — the origin at round 0, the prior round's winner after — re-scored on the samples THIS candidate measured, and the floor the promotion gate compared it against. Under elimination a candidate may run only part of the round's samples, so the parent's full-set rate is the wrong comparison and would read as a phantom lift."
               />
             )}
             {/* The SERVED lift and its interval. A difference of two accuracies would be a number
@@ -119,15 +121,15 @@ export function SearchpointDrillIn({
               typeof row.matchedParentLiftCiHi === "number" && (
                 <Fact
                   k="lift vs parent"
-                  title="Mean per-cell (candidate − parent) across the cells both measured, Student-t bracketed. Pairing removes the parent's cell-to-cell variation, so this is sharper than the candidate's own mean band."
+                  hint="Mean per-cell (candidate − parent) across the cells both measured, Student-t bracketed. Pairing removes the parent's cell-to-cell variation, so this is sharper than the candidate's own mean band."
                   v={
                     <>
                       {fmtSigned(row.matchedParentLift)} [{fmtSigned(row.matchedParentLiftCiLo)},{" "}
                       {fmtSigned(row.matchedParentLiftCiHi)}]
-                      {row.matchedParentLiftCiLo <= 0 && row.matchedParentLiftCiHi >= 0 ? (
-                        <span className="l4-eff-flat"> spans 0 — not separable</span>
-                      ) : (
+                      {liftSeparates(row.matchedParentLiftCiLo, row.matchedParentLiftCiHi) ? (
                         " clears 0"
+                      ) : (
+                        <span className="l4-eff-flat"> — {NOT_SEPARABLE}</span>
                       )}
                     </>
                   }
@@ -136,7 +138,7 @@ export function SearchpointDrillIn({
             {typeof row.theta === "number" && (
               <Fact
                 k="ability θ"
-                title="Difficulty-adjusted Rasch ability — the metric the round winner is elected on. Clearing harder samples is worth more than more wins on easy ones, so a higher θ can beat a higher accuracy."
+                hint="Difficulty-adjusted Rasch ability — the metric the round winner is elected on. Clearing harder samples is worth more than more wins on easy ones, so a higher θ can beat a higher accuracy."
                 v={`${row.theta.toFixed(2)}${
                   typeof row.theta_se === "number" ? ` ± ${row.theta_se.toFixed(2)}` : ""
                 }`}
@@ -163,7 +165,7 @@ export function SearchpointDrillIn({
                 v={`${fmtTokens(row.input_tokens)} in · ${fmtTokens(row.output_tokens ?? 0)} out${
                   row.cached_samples ? ` · ${row.cached_samples} replayed` : ""
                 }`}
-                title={TERMS.cache_replayed}
+                hint={TERMS.cache_replayed}
               />
             )}
             {typeof row.input_tokens === "number" && (
@@ -173,7 +175,7 @@ export function SearchpointDrillIn({
                   cacheShare(row.cache_read_tokens, row.input_tokens, false),
                   false,
                 ).label}
-                title={TERMS.cache_prefix}
+                hint={TERMS.cache_prefix}
               />
             )}
           </>
@@ -211,21 +213,17 @@ export function SearchpointDrillIn({
 
 // One key/value line of the stats block. `.inspector-row` is `display:contents`, so the pair lands
 // on the grid the body owns rather than nesting a second one.
-function Fact({
-  k,
-  v,
-  title,
-}: {
-  k: string;
-  v: React.ReactNode;
-  title?: string;
-}) {
+function Fact({ k, v, hint }: { k: string; v: React.ReactNode; hint?: string }) {
   return (
     <div className="inspector-row">
       <span className="inspector-key">{k}</span>
-      <span className="inspector-val" title={title}>
-        {v}
-      </span>
+      {hint ? (
+        <Term className="inspector-val" content={hint}>
+          {v}
+        </Term>
+      ) : (
+        <span className="inspector-val">{v}</span>
+      )}
     </div>
   );
 }

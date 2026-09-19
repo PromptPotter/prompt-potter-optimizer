@@ -207,10 +207,11 @@ class ResolveOriginPayload(_CheckinPayload):
 
 
 class StartCheckinPayload(_CheckinPayload, LaunchLimits):
-    """The draft is canonical for everything the campaign IS; the limits are what THIS launch may
-    spend, which no draft field holds. Carrying neither is what made the web Start launch under a
-    bare ``LaunchLimits()`` while CLI ``new <file>`` — the same three seams, one argv away — passed
-    a halt target and both budgets."""
+    """The draft says what the campaign IS; these limits bound what THIS launch spends.
+
+    No draft field holds them. Carrying neither is what made the web Start launch under a bare
+    ``LaunchLimits()`` while CLI ``new <file>`` — the same three seams, one argv away — passed a
+    halt target and both budgets."""
 
     campaign_id: str = Field(min_length=8, max_length=128)
 
@@ -224,6 +225,10 @@ CheckinPayload = EditDraftCampaignPayload | ResolveOriginPayload | StartCheckinP
 
 class CancelQueuedRunPayload(CommandPayload):
     job_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class SetConcurrentCyclesPayload(CommandPayload):
+    max_concurrent_cycles: WireInt = Field(ge=1)
 
 
 class MintCampaignPayload(CommandPayload, LaunchLimits):
@@ -260,6 +265,7 @@ PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {
     "register-backend": RegisterBackendPayload,
     "mint-campaign": MintCampaignPayload,
     "cancel-queued-run": CancelQueuedRunPayload,
+    "set-concurrent-cycles": SetConcurrentCyclesPayload,
     "replace-dataset": ReplaceDatasetPayload,
     "compact-archive": CompactArchivePayload,
     "edit-draft-campaign": EditDraftCampaignPayload,

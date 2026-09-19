@@ -23,7 +23,8 @@ nodes:
     runtime: backend
     description: >-
       One Harbor episode. The rendered prompt becomes `SKILL.md` in the container and `terminus-2`
-      discovers it before acting; the question, the haystack and the answer path arrive from the
+      discovers it before acting — or, under `config.skill_delivery: system_prompt`, it heads the
+      agent's own prompt; the question, the haystack and the answer path arrive from the
       task's own instruction. So what evolves is HOW to read conflicting documents, never which
       documents are shown.
     config:
@@ -52,7 +53,7 @@ nodes:
       # None. The skill is standalone prose the agent reads; the question and its documents arrive
       # from the task instruction, so there is no placeholder for us to substitute into.
       template_variables: []
-      description: The Agent Skill injected into the trial container as SKILL.md
+      description: The Agent Skill, as SKILL.md in the trial container or in the agent's prompt
     optimizer:
       param_keys:
         - persona

@@ -12,6 +12,7 @@ from promptpotter.judges.call import absent, bind_cache
 from promptpotter.judges.grounding import ANSWER_GROUNDING, EVIDENCE_RETRIEVAL
 from promptpotter.judges.protocol import Judge, JudgeSpec
 from promptpotter.judges.simpleqa import SEALQA, SIMPLEQA
+from promptpotter.shared.errors import CellCreditExhaustedError
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +137,7 @@ async def _compute(
     try:
         with bind_cache(cache):
             verdict = await judge.grade(spec, result)
-    except (KeyboardInterrupt, asyncio.CancelledError):
+    except (KeyboardInterrupt, asyncio.CancelledError, CellCreditExhaustedError):
         raise
     except Exception as exc:
         # A judge that RAISES must not cost the cell it was grading. Uncaught, this reaches

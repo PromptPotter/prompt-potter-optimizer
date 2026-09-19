@@ -66,10 +66,12 @@ def get_evidence(
         bool,
         Query(
             description=(
-                "Also rank the candidate edits measured across the selection's CAMPAIGN subjects. "
-                "OFF by default because it is the widest walk here: the roster half reads one "
-                "document per subject, while this opens EVERY round of every campaign selected. "
-                "Edits are scored on the SELECTED metric, in its units."
+                "Also rank every SEARCHPOINT measured in the selection's CAMPAIGN subjects against "
+                "its own campaign's origin, keyed on `sp_hash` so a prompt-only edit ranks like a "
+                "config one. Rows pool within ONE campaign and never across two — they share no "
+                "anchor to be compared through. OFF by default because it is the widest walk here: "
+                "the roster half reads one document per subject, while this opens EVERY round of "
+                "every campaign selected. Scored on the SELECTED metric, in its units."
             )
         ),
     ] = False,

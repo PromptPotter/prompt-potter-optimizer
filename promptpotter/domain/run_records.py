@@ -36,6 +36,7 @@ __all__ = [
     "RoundWarningRecord",
     "SnapshotRecord",
     "TokenUsageRecord",
+    "WallClock",
     "view_fields",
 ]
 
@@ -581,6 +582,45 @@ class LedgerRoundClose(StrictModel):
     round: int
     ability: AbilityReading | None = None
     abilities: dict[str, LedgerAbility] = Field(default_factory=dict)
+
+
+class WallClock(StrictModel):
+    """Where a cycle's wall clock went. Folded from the ledger's own chronology at finalize and
+    BANKED, because the records it is read from are compactable and the clock is not re-derivable
+    from the round documents — none of them carries a timestamp.
+
+    Two denominators, and confusing them is the whole trap. ``phase_s`` is CLOCK: the brackets do
+    not nest, so they sum, and a leg over ``elapsed_s`` is impossible. ``worked_s`` is summed CALL
+    time, which exceeds the clock whenever cells run concurrently and understates it whenever they
+    replay — it says what the search WORKED, never what share of the run a bucket held."""
+
+    model_config = ConfigDict(frozen=True)
+
+    # ``None`` where either endpoint is unparseable; every share below is then unanswerable too.
+    elapsed_s: float | None
+    # Keyed by ``CampaignPhase`` value — a phase that never fired, or whose exit never landed, is
+    # ABSENT rather than 0.0: an unclosed bracket measured nothing.
+    phase_s: dict[str, float] = Field(default_factory=dict)
+    # Keyed by ``TOKEN_KIND_BUCKET``'s bucket. Cached calls are excluded, as they are from the
+    # BILL: a replay occupied no clock.
+    worked_s: dict[str, float] = Field(default_factory=dict)
+    # Round number (as a JSON key) → seconds from ``started_at`` to that round's FIRST close. This
+    # is what puts a wall clock beside ``RoundClocks``'s round counts, and it takes the first close
+    # rather than the last because the last is round 0's ruler restamp and a rewind's re-run —
+    # neither is when the campaign first reached the round.
+    round_ended_s: dict[str, float] = Field(default_factory=dict)
+    # Time held at the origin gate — HUMAN, so it is never folded into a machine leg. An abandoned
+    # gate closes at ``finished_at``, since the operator held it until the cycle ended.
+    gate_s: float = 0.0
+    # ``elapsed_s`` minus every leg above. What it holds is real and unbracketed: the round's tail
+    # (the overlap series, the election, the critique call, the persist) and run init before the
+    # ledger exists. It is the number to drive DOWN, and never the one to explain away.
+    unattributed_s: float | None = None
+    # Seconds cells were not ALLOWED to spend — machine suspend plus the shared limiter's queue,
+    # summed off the cells' own envelopes. ``None`` = no cell was measured under one, so nothing
+    # observed a wait; 0.0 = enveloped cells waited for nothing. A headline counting a suspended
+    # box as work is not publishable, which is why the two silences stay apart.
+    unworked_s: float | None = None
 
 
 class ElectionRecord(StrictModel):

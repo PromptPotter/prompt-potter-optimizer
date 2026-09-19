@@ -7,7 +7,13 @@ import asyncio
 import time
 from datetime import UTC, datetime
 
-__all__ = ["SUSPEND_GRACE_S", "iso_z", "sleep_measuring_suspend", "utcnow_iso"]
+__all__ = [
+    "SUSPEND_GRACE_S",
+    "epoch_seconds",
+    "iso_z",
+    "sleep_measuring_suspend",
+    "utcnow_iso",
+]
 
 
 SUSPEND_GRACE_S = 60.0
@@ -26,6 +32,22 @@ def iso_z(dt: datetime) -> str:
 def utcnow_iso() -> str:
     """Current UTC instant as an RFC 3339 string, e.g. ``2026-06-04T12:00:00Z``."""
     return iso_z(datetime.now(UTC))
+
+
+def epoch_seconds(value: object) -> float | None:
+    """:func:`iso_z`'s inverse — a stamp as a sortable instant, ``None`` where it will not parse.
+    Parsed, never string-compared: ``utcnow_iso`` omits the fractional part at exactly zero
+    microseconds, which sorts AFTER ``...T12:00:00.5Z``.
+
+    ``OSError``/``OverflowError`` are caught beside ``ValueError`` because ``.timestamp()`` raises
+    those, not ``ValueError``, for an out-of-range datetime on Windows — one corrupt line must
+    not take down the scan reading it."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value).timestamp()
+    except (ValueError, OSError, OverflowError):
+        return None
 
 
 async def sleep_measuring_suspend(seconds: float) -> float:

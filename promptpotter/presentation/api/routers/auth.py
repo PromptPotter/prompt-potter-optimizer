@@ -13,7 +13,11 @@ from fastapi import APIRouter, BackgroundTasks, Path, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import Field
 
-from promptpotter.application.jobs.quota import lifetime_ceilings, spends_the_hosts_own_key
+from promptpotter.application.jobs.quota import (
+    concurrent_cycles_writable,
+    lifetime_ceilings,
+    spends_the_hosts_own_key,
+)
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import TERMS_VERSION, settings
@@ -71,7 +75,7 @@ class ConnectedAccount(StrictModel):
 class QuotaStatus(StrictModel):
     """Live snapshot of the abuse-limit knobs vs. usage.
 
-    Drives the Security pane's quota card. ``*_max`` mirrors `user.json`
+    Drives the Account → Usage & limits pane. ``*_max`` mirrors `user.json`
     so the operator can hand-edit limits; ``*_used`` is the live count
     that ``check_launch_quotas`` would gate against on the next launch.
     The spend and token pairs are LIFETIME — used-ever against the account's
@@ -87,7 +91,15 @@ class QuotaStatus(StrictModel):
     tokens_used_total: int
     token_budget_total: int | None
     concurrent_running: int
+    concurrent_queued: int = Field(
+        description="This account's launches waiting for a machine slot. They count against "
+        "`max_concurrent_cycles` exactly as running ones do."
+    )
     max_concurrent_cycles: int
+    max_concurrent_cycles_writable: bool = Field(
+        description="Whether this caller may move `max_concurrent_cycles` through "
+        "`set-concurrent-cycles`. False on the host's key, where the host sets it."
+    )
     campaigns_today: int
     max_campaigns_per_day: int
 
@@ -473,7 +485,7 @@ _N_BUCKETS = 30
 
 @auth_router.get("/quota-status", response_model=QuotaStatus)
 def quota_status(request: Request, stores: StoresDep) -> QuotaStatus:
-    """Live quota snapshot for the Security pane.
+    """Live quota snapshot for the Account → Usage & limits pane.
 
     Spend and tokens sum ``TokenUsageRecord`` across the account's WHOLE ledger via
     ``sum_user_spend`` — uncapped, so an over-budget account shows the true
@@ -493,6 +505,7 @@ def quota_status(request: Request, stores: StoresDep) -> QuotaStatus:
             "job registry not initialised", code="job_registry_unavailable"
         )
     running = job_registry.list_running(user_id=user.user_id)
+    queued = job_registry.list_queued(user_id=user.user_id)
     today = job_registry.list_created_today(user_id=user.user_id)
 
     # Lifetime usage straight from the ledger — uncapped on purpose, so an over-budget
@@ -510,7 +523,9 @@ def quota_status(request: Request, stores: StoresDep) -> QuotaStatus:
         tokens_used_total=spent.used_tokens,
         token_budget_total=ceilings.tokens,
         concurrent_running=len(running),
+        concurrent_queued=len(queued),
         max_concurrent_cycles=user.max_concurrent_cycles,
+        max_concurrent_cycles_writable=concurrent_cycles_writable(stores),
         campaigns_today=len(today),
         max_campaigns_per_day=user.max_campaigns_per_day,
     )

@@ -11,13 +11,21 @@ from typing import TYPE_CHECKING
 from promptpotter.application.campaign_config import (
     load_campaign_config as validate_campaign_config,
 )
-from promptpotter.application.initialization.loop_start import arm_diagnostic_scoring
+from promptpotter.application.initialization.loop_start import (
+    arm_diagnostic_scoring,
+    diagnostic_stop_as,
+)
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.results import DiagnosticRunRecord, candidate_label, resolved_fitness
+from promptpotter.domain.results import (
+    DiagnosticRunRecord,
+    candidate_label,
+    diagnostic_held,
+    resolved_fitness,
+)
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.statistics import mean_ci
 
@@ -114,24 +122,28 @@ async def measure_noise_floor(
     composites: list[float] = []
     accuracies: list[float] = []
     for i in range(k):
-        _results, scores, _signal = await score_search_point(
-            jsp,
-            scoring_set,
-            session,
-            label=f"noise_floor_{i}",
-            # ONE fixed config re-scored k times: the spread between runs IS the measurement,
-            # and an opt_sp-aware term is identical across all k, so it can only add a
-            # constant offset to a band that exists to isolate backend noise.
-            opt_sp=None,
-            measured=None,
-            on_sample_scored=lambda *_a, **_k: None,
-            on_sample_starting=lambda *_a, **_k: None,
-            source=f"noise_floor:{hop.campaign_id}:C0:{i}",
-            force_fresh=True,
-        )
-        # `scores["accuracy"]` — never `.get(..., 0.0)`. A rescore that measured nothing must
-        # not enter the noise band as a 0% run; the KeyError says so.
-        accuracy = float(scores["accuracy"])
+        with diagnostic_stop_as(NoiseFloorError):
+            _results, scores, _signal = await score_search_point(
+                jsp,
+                scoring_set,
+                session,
+                label=f"noise_floor_{i}",
+                # ONE fixed config re-scored k times: the spread between runs IS the measurement,
+                # and an opt_sp-aware term is identical across all k, so it can only add a
+                # constant offset to a band that exists to isolate backend noise.
+                opt_sp=None,
+                measured=None,
+                on_sample_scored=lambda *_a, **_k: None,
+                on_sample_starting=lambda *_a, **_k: None,
+                source=f"noise_floor:{hop.campaign_id}:C0:{i}",
+                force_fresh=True,
+            )
+        if (measured := scores.get("accuracy")) is None:
+            raise NoiseFloorError(
+                f"noise-floor rescore {i + 1}/{k} of {hop.campaign_id}/{hop.cycle_id} measured no "
+                f"cell — the band would describe the outage, not the backend."
+            )
+        accuracy = float(measured)
         composites.append(resolved_fitness(scores.get("composite_fitness"), accuracy))
         accuracies.append(accuracy)
         log_fn(f"noise-floor rescore {i + 1}/{k}: composite={composites[-1]:.4f}")
@@ -139,6 +151,7 @@ async def measure_noise_floor(
     mean_composite, ci_lo, ci_hi = mean_ci(composites)
 
     source_accuracy = round_file.accuracy
+    workspace_accuracy = sum(accuracies) / len(accuracies)
 
     record = DiagnosticRunRecord(
         ts=utcnow_iso(),
@@ -151,11 +164,12 @@ async def measure_noise_floor(
         samples_requested=len(scoring_set),
         samples_added=0,
         workspace_n=len(scoring_set),
-        workspace_accuracy=sum(accuracies) / len(accuracies),
+        workspace_accuracy=workspace_accuracy,
         workspace_composite=mean_composite,
         source_campaign_accuracy=source_accuracy,
         source_campaign_composite=round_file.composite_fitness,
         source_campaign_n=round_file.total,
+        held=diagnostic_held(workspace_accuracy, source_accuracy),
         noise_floor_k=k,
         noise_floor_mean=mean_composite,
         noise_floor_ci_lo=ci_lo,

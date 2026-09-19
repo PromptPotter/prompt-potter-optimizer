@@ -45,14 +45,15 @@ def main(argv: list[str]) -> int:
     # The SAME frozen snapshot the live renderer reads (``cycle.config``). Fails loud
     # when the cycle dir sits outside a campaign tree — that input is unsupported.
     manifest = json.loads((cycle_dir.parent.parent / "campaign.json").read_text(encoding="utf-8"))
-    l1_patience = load_campaign_config(manifest["config"]).optimization.l1_patience
+    config = load_campaign_config(manifest["config"])
 
     content = render_review_md(
         index,
         rounds,
         round_audits=audits,
         context_object=context_object,
-        l1_patience=l1_patience,
+        accuracy_ceiling=config.accuracy_ceiling,
+        l1_patience=config.optimization.l1_patience,
     )
     out_path = cycle_dir / "review.md"
     out_path.write_text(content, encoding="utf-8")

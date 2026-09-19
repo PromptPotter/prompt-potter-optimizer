@@ -28,11 +28,7 @@ from promptpotter.application.datasets.authored import (
     load_dataset_campaign_config,
 )
 from promptpotter.application.datasets.loaders import samples_from_dicts
-from promptpotter.application.embedded_run import (
-    mint_and_score_origin,
-    open_session,
-    run_campaign,
-)
+from promptpotter.application.embedded_run import open_session, run_campaign
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.runner.entry import RunMode
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
@@ -189,16 +185,11 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
             # No overrides: the file this compile just wrote IS the projection of `loop` and
             # `nodes`, so passing them again would be a second path to the same values.
             config = load_dataset_campaign_config(self._campaign_path())
-            pipeline_params = configure_and_apply_pipeline(session, config)
-            observers, dataset, origin = await mint_and_score_origin(
-                session, rows, config, pipeline_params=pipeline_params
-            )
+            configure_and_apply_pipeline(session, config)
             result = await run_campaign(
-                observers,
-                dataset,
-                origin,
+                session,
+                rows,
                 config,
-                session=session,
                 limits=LaunchLimits(
                     spend_budget_usd=self.loop.spend_budget_usd,
                     token_budget=self.loop.token_budget,

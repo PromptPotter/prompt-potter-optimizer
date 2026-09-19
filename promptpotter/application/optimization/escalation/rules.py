@@ -8,8 +8,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.escalation.state import EscalationEvent, NextAction
+
+if TYPE_CHECKING:
+    from promptpotter.application.campaign_config import EscalationLadder
 
 
 @dataclass(frozen=True)
@@ -23,6 +27,9 @@ class EscalationInputs:
     current_objective: float | None
     l1_stall_count: int
     l1_patience: int
+    # How deep the ladder runs. Undefaulted: it decides whether a fire is even reachable, and a
+    # caller that omitted it would have that decision live in an absent argument.
+    escalation_ladder: EscalationLadder
     # Could this round's arms be told apart? ``None`` is "unreadable either way", which is not
     # "read and told nothing apart".
     separable: bool | None = None
@@ -69,6 +76,9 @@ class EscalationRule:
 # l1_evidence_starved preempts patience — a node starved across ~all samples is accumulated
 #   evidence of a systemic fault no L1 param move can fix; bring L2 in to diagnose (it never stops);
 # l2_axis_yield_drought preempts patience when AxisIndex shows no productive axes;
+# l1_only_ladder preempts every FIRE_L2 rule below it — the L1-only ablation arm, where a stall
+#   is simply another L1 round. It sits UNDER objective_exhausted because an arm that spent the
+#   objective still has nothing left to search;
 # l1_patience=0 collapses "fire L2 every round" via the l1_to_l2 fall-through.
 DEFAULT_ESCALATION_RULES: list[EscalationRule] = [
     EscalationRule(
@@ -78,6 +88,12 @@ DEFAULT_ESCALATION_RULES: list[EscalationRule] = [
         ),
         fire=NextAction.STOP_PERFECT,
         priority=100,
+    ),
+    EscalationRule(
+        name="l1_only_ladder",
+        when=lambda s: not s.escalation_ladder.fires_l2,
+        fire=NextAction.CONTINUE,
+        priority=90,
     ),
     EscalationRule(
         name="l1_generate_unusable",

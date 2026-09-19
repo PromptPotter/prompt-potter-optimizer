@@ -31,7 +31,9 @@ __all__ = [
     "node_config_items",
     "overlay_is_locked_axis_only",
     "overlay_sets_model_outside_allowed",
+    "permitted_models_for_campaign",
     "permitted_models_from_narrowing",
+    "steers_disallowed_model",
 ]
 
 
@@ -116,6 +118,28 @@ def overlay_sets_model_outside_allowed(
         if model is not None and model not in set((permitted or {}).get(node, ())):
             return True
     return False
+
+
+def permitted_models_for_campaign(
+    campaign_config: Mapping[str, Any] | None,
+) -> dict[str, list[str]]:
+    """Which responders THIS CAMPAIGN sanctions, per node — where the babysit verdict's own
+    comparison set comes from. One hop above :func:`permitted_models_from_narrowing`, which reads a
+    narrowing block already in hand; this knows where in the frozen manifest that block lives."""
+    return permitted_models_from_narrowing((campaign_config or {}).get("optimizer_narrowing"))
+
+
+def steers_disallowed_model(
+    campaign_config: Mapping[str, Any] | None, overlay: dict[str, Any] | None
+) -> bool:
+    """The babysit verdict a fork draws, from the campaign manifest the gate reads it off.
+
+    The two steps below are one question, and splitting them is what let the browser answer it
+    against a different list than ``fork-cycle`` dispatch did — so a surface NAMING that list must
+    serve :func:`permitted_models_for_campaign`, never re-derive one beside the verdict."""
+    return overlay_sets_model_outside_allowed(
+        overlay, permitted_models_for_campaign(campaign_config)
+    )
 
 
 def fold_output_contract(pp: dict[str, Any] | None, schema: PipelineSchema) -> None:

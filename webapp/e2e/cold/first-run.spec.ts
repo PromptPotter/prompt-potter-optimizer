@@ -100,7 +100,7 @@ test.describe("cold start", () => {
   });
 
   test("the account modal works with no history behind it", async ({ page }) => {
-    for (const pane of ["profile", "security", "activity", "storage", "preferences", "about"]) {
+    for (const pane of ["profile", "usage", "activity", "storage", "preferences", "about"]) {
       await open(page, `#/account/${pane}`);
       await passConsent(page);
       await expect(page.getByRole("dialog", { name: "Account" })).toBeVisible();

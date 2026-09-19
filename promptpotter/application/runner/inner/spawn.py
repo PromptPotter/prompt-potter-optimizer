@@ -7,8 +7,6 @@ import asyncio
 import contextlib
 import logging
 import time
-from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -41,7 +39,6 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.proxies import (
     INNER_RESULT_KEY,
     PARENT_LEVEL_SE_KEY,
-    InnerCycleUnscoreableError,
     compute_outer_proxies,
     floor_reason,
     inner_cell_facts,
@@ -49,11 +46,9 @@ from promptpotter.domain.l4.proxies import (
     parent_level_series,
 )
 from promptpotter.domain.launch_limits import LaunchLimits
-from promptpotter.domain.phases import RunPhase
+from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.results import candidate_label
-from promptpotter.domain.scoring import all_verifier_graded
-from promptpotter.infrastructure.llm.rate_limit import set_throttle_stall_sink
 from promptpotter.infrastructure.llm.telemetry import (
     _CURRENT_ROUND,
     _CYCLE_LEDGER,
@@ -76,7 +71,7 @@ from promptpotter.infrastructure.store.layout import (
 )
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import build_stores
-from promptpotter.shared.errors import graceful
+from promptpotter.shared.errors import CellCreditExhaustedError, CellUnscoreableError, graceful
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.instrument import (
     MAX_INSTRUMENT_DEPTH,
@@ -100,19 +95,11 @@ logger = logging.getLogger(__name__)
 # truncated trajectory indistinguishable from "this optimizer prompt found nothing". The cost
 # ceiling is the OUTER campaign's spend budget, which every inner dollar rolls up onto.
 
-# Per-round wall-clock allowance for ONE outer sample. Every await inside an inner campaign is
-# bounded but their SUM was not, so a 429 storm could stretch one sample across tens of minutes
-# and silently truncate how many outer rounds completed. It only ever EXCLUDES a stuck sample.
-# True only because `_give_back_unworked_time` hands back suspend + throttle stall, leaving the
-# cell's OWN work. Never make it depth-dependent: an outcome that moves with what else was in
-# flight is the one thing the concurrency control promises it never does.
+# Per-round wall-clock allowance for ONE inner cell — the rate `inner_cell_envelope_s` multiplies
+# out, enforced at the measure seam (`application/scoring/cell_envelope.py`). Never make it
+# INSTRUMENT-depth-dependent: an outcome that moves with what else was in flight is the one thing
+# the concurrency control promises it never does.
 OUTER_SAMPLE_WALL_S_PER_ROUND = 600.0
-
-
-@dataclass
-class _UnworkedTime:
-    total: float = 0.0
-    announced: bool = False
 
 
 def _spawn_provenance(ctx: InnerSpawnContext, round_num: int | None, query: str) -> dict[str, Any]:
@@ -297,13 +284,31 @@ def inner_campaign_id(
 
 
 def _banked_inner_rounds(ctx: InnerSpawnContext, campaign_id: str) -> int:
-    """Read in the OUTER task before the inner campaign is spawned — the wall-clock deadline is the
-    outer's to set, and a continued cell must be budgeted over the rounds that REMAIN."""
     indexes = ctx.inner_sandbox_root.glob(f"*/campaigns/{campaign_id}/cycles/*/index.json")
     return max(
         (len((read_json_optional(p) or {}).get("rounds") or []) for p in indexes),
         default=0,
     )
+
+
+def inner_cell_envelope_s(query: str, payload: dict[str, Any]) -> float:
+    """What the `promptpotter` connector DECLARES one cell may spend — budgeted over the rounds
+    that REMAIN, since charging a continued cell the full budget leaves the wall bounding almost
+    nothing. ``max(1, …)`` grants a fully-banked cycle the round it needs to replay and finalize.
+
+    Resolved in the OUTER task, before the inner campaign exists, which is the only place the
+    banked count can be read: the seam enforcing it is one layer up and knows none of this."""
+    ctx = inner_spawn_context()
+    if ctx is None:
+        raise RuntimeError(
+            "promptpotter connector: no inner-spawn context published — "
+            "run_optimization must call publish_inner_spawn_context first."
+        )
+    spec = resolve_inner_task(ctx, query)
+    role = cand.role if (cand := measured_candidate()) else MeasurementRole.PANEL
+    campaign_id = inner_campaign_id(spec, payload.get("optimizer_prompt_overrides") or {}, role)
+    banked = _banked_inner_rounds(ctx, campaign_id)
+    return OUTER_SAMPLE_WALL_S_PER_ROUND * max(1, (spec.n_rounds + 1) - banked)
 
 
 def _forward_inner_spend(
@@ -373,15 +378,19 @@ def _open_inner_campaign(
         is_terminal=bool(existing.get("finished_at")),
     )
     if phase in (RunPhase.RUNNING, RunPhase.GATE, RunPhase.CHECKIN):
-        raise InnerCycleUnscoreableError(
+        raise CellUnscoreableError(
             f"its campaign {campaign_id}/{plan.cycle_id} reads {phase} — another producer "
-            "owns it, and two runs writing one cycle is not a measurement"
+            "owns it, and two runs writing one cycle is not a measurement",
+            spent={},
+            step_timings={},
         )
     session_id = str(existing.get("parent_session_id") or "")
     if not session_id:
-        raise InnerCycleUnscoreableError(
+        raise CellUnscoreableError(
             f"its campaign {campaign_id}/{plan.cycle_id} names no parent session, so there "
-            "is no session record to continue under"
+            "is no session record to continue under",
+            spent={},
+            step_timings={},
         )
 
     session.session_id = session_id
@@ -440,18 +449,11 @@ async def _run_inner_campaign(
 
     # THE declaration: this cycle is a measurement instrument, not a campaign. ONE call binds
     # every hermetic property in this task's context copy, so none can be forgotten piecemeal by
-    # a future code path. The clamp's seed is the cell's, matching the target model's, so every
-    # candidate for a cell shares one random stream (CRN).
-    clamp = (
-        None
-        if spec.inner_optimizer_temperature is None
-        else {"temperature": spec.inner_optimizer_temperature, "seed": spec.seed}
-    )
+    # a future code path.
     # THE scale, not a scale: the outer round fixed one, so every candidate measured against this
     # cell reads its origin at the same θ.
     enter_instrument_mode(
         evidence_epoch=capture_evidence_epoch(store),
-        optimizer_clamp=clamp,
         ruler=ctx.rulers.get(spec.inner_dataset),
     )
 
@@ -473,16 +475,7 @@ async def _run_inner_campaign(
     train_data = draw_bank(all_samples, n, spec.seed)
     # Computed here because this is the first moment the drawn rows exist. `seed-screen` owns
     # the disqualifier but is hand-run, so nothing recomputes it for the seats actually seated.
-    #
-    # ``None`` on a verifier-graded bank, and that is a different fact from a floor of 0.0: with no
-    # labels there is no constant answer to score, so the collapse question is undefined rather
-    # than answered cheaply. `class_floor` RAISES on such a bank — correctly, since the screen owns
-    # that verdict — and this is not the screen: an inner benchmark graded by its own verifier
-    # (`pp-self` over a harbor panel, which is the point of the recursion) would otherwise die
-    # mid-spawn quoting a collapse verdict from a path that was only ever reporting one.
-    bank_floor = (
-        None if all_verifier_graded(s.ground_truth for s in train_data) else class_floor(train_data)
-    )
+    bank_floor = class_floor(train_data)
 
     file_config: dict[str, Any] = {}
     if session.dataset_config_dir is not None:
@@ -639,57 +632,11 @@ async def _measure_inner_cell(
             lift = "best —"
         return f"inner r{rnd if rnd is not None else '?'}/{max_rounds or '?'} · {lift}"
 
-    # The ONE bound on this sample's total wall clock. Awaiting `inner_task` DIRECTLY makes it
-    # this coroutine's `_fut_waiter`, so the cancellation propagates and the campaign really
-    # stops: never wrap it in `asyncio.shield` or `asyncio.wait`, both of which orphan it to
-    # keep calling the optimizer and billing tokens against a sample nobody will read.
-    # Budget the rounds that REMAIN — charging a continued cell the full budget for its tail
-    # leaves the wall bounding almost nothing. `max(1, …)` grants a fully-banked cycle the one
-    # round it needs to replay its priors and finalize.
-    banked = _banked_inner_rounds(ctx, campaign_id)
-    deadline_s = OUTER_SAMPLE_WALL_S_PER_ROUND * max(1, (spec.n_rounds + 1) - banked)
-    # Constructed before the task, not inline in the `async with`, so the give-back below can close
-    # over it AND be bound for the task to inherit: `asyncio.timeout` fixes its `when` at CALL time.
-    deadline = asyncio.timeout(deadline_s)
-    unworked = _UnworkedTime()
-
-    def _give_back_unworked_time(seconds: float, *, cause: str) -> None:
-        """The deadline bounds how long this cell may SPEND; a suspended machine and a queue behind
-        the shared limiter are both time it was not allowed to spend."""
-        when = deadline.when()
-        if when is None:  # pragma: no cover — only for `timeout(None)`, never used here
-            return
-        try:
-            deadline.reschedule(when + seconds)
-        except RuntimeError:
-            # The `async with` has not started or already exited; nothing to extend.
-            return
-        unworked.total += seconds
-        logger.debug(
-            "inner cell %s: +%.1fs deadline (%s); %.0fs given back of a %.0fs budget",
-            query,
-            seconds,
-            cause,
-            unworked.total,
-            deadline_s,
-        )
-        # Past its whole budget in waiting, the wall is no longer measuring this cell. Said once:
-        # the give-back is working as intended, the volume is not.
-        if not unworked.announced and unworked.total > deadline_s:
-            unworked.announced = True
-            logger.warning(
-                "inner cell %s has now spent longer waiting (%.0fs) than its entire %.0fs "
-                "wall-clock budget — the box is oversubscribed, not the cell slow",
-                query,
-                unworked.total,
-                deadline_s,
-            )
-
-    # Bound BEFORE the task so its context copy carries it — a ContextVar set inside a task never
-    # reaches siblings, which is what stops two cells crediting each other's stalls.
-    set_throttle_stall_sink(
-        partial(_give_back_unworked_time, cause="queued behind the shared rate limiter")
-    )
+    # Awaiting `inner_task` DIRECTLY makes it this coroutine's `_fut_waiter`, so the envelope's
+    # cancellation propagates and the campaign really stops: never wrap it in `asyncio.shield` or
+    # `asyncio.wait`, both of which orphan it to keep calling the optimizer and billing tokens
+    # against a sample nobody will read. The bound itself is the measure seam's
+    # (`application/scoring/cell_envelope.py`), off what this module declares per cell.
     inner_task = asyncio.create_task(
         _run_inner_campaign(ctx, spec, overrides, cycle_dir_box, spawned_by, spawn_role)
     )
@@ -699,8 +646,6 @@ async def _measure_inner_cell(
         # charges that node with the entire wall clock and a healthy run reads as a hang. The
         # `step_timings`/`step_tokens` keying below answers a different question (spend
         # attribution) — do not re-align this display label to it.
-        # Created UNCONDITIONALLY, even with no ledger to append to: this task also carries the
-        # deadline's suspend guard, and gating it on a telemetry sink would disarm that guard.
         heartbeat(
             outer_ledger,
             call_id=f"inner:{query}",
@@ -708,56 +653,42 @@ async def _measure_inner_cell(
             round_num=_CURRENT_ROUND.get(),
             start_monotonic=start,
             detail_fn=_inner_detail,
-            on_suspend=partial(_give_back_unworked_time, cause="the machine suspended"),
         )
     )
-    # ``None`` once the deadline has bitten — the one state both exits below funnel into, so
-    # the guard has a single answer to "is there a measurement here" and a single raise.
-    result: CycleResult | None = None
     try:
-        try:
-            async with deadline:
-                result = await inner_task
-            # ``asyncio.timeout`` raises only if a CancelledError comes back up, so anything in
-            # the inner chain answering a cancellation with a normal return makes the guard
-            # vanish and an over-deadline campaign scores as a real measurement. Ask the clock.
-            if deadline.expired():
-                result = None
-        except TimeoutError:
-            result = None
-    finally:
-        # A campaign that outlived its deadline without answering the cancellation is still
-        # billing tokens against a sample nobody will read. Insist.
-        if result is None and not inner_task.done():
+        result = await inner_task
+    except asyncio.CancelledError:
+        # Name where the banked rounds are: the outer row carries only the cell id, so otherwise
+        # the abandoned campaign is unfindable from either surface.
+        logger.warning(
+            "inner cell %s abandoned; its partial campaign is at %s",
+            query,
+            cycle_dir_box.get("dir", "<not yet minted>"),
+        )
+        if not inner_task.done():
             inner_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await inner_task
+        raise
+    finally:
         # Whether the inner run returned or raised — an in-flight heartbeat would otherwise keep
         # appending against a finished sample.
         heartbeat_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await heartbeat_task
-    if result is None:
-        # The outer ERROR row names only the cell, so without this the abandoned campaign —
-        # holding real banked rounds — is unfindable from either surface.
-        logger.warning(
-            "inner cell %s abandoned at its %.0fs wall-clock deadline; its partial campaign "
-            "is at %s",
-            query,
-            deadline_s,
-            cycle_dir_box.get("dir", "<not yet minted>"),
-        )
-        raise InnerCycleUnscoreableError(
-            f"it ran past its {deadline_s:.0f}s wall-clock deadline "
-            f"({max(1, (spec.n_rounds + 1) - banked)} round(s) still to run of "
-            f"{spec.n_rounds} + origin, {banked} already banked, at "
-            f"{OUTER_SAMPLE_WALL_S_PER_ROUND:.0f}s each) and was cancelled"
-        )
     elapsed = time.monotonic() - start
-    # No exclusion decision here: `compute_outer_proxies` raises `InnerCycleUnscoreableError`,
-    # which `measure_sample`'s catch-all turns into this sample's EXCLUDED row.
+    if result.stop_reason is StopReason.PROVIDER_CREDIT:
+        # The inner run spends the outer run's provider key, so the refusal is every later cell's:
+        # a hole that halts the walk, never an excluded cell the walk steps past.
+        raise CellCreditExhaustedError(
+            f"its inner campaign {campaign_id} ran out of provider credit",
+            spent={},
+            step_timings={},
+        )
+    # Every other no-evidence shape is the law's: `compute_outer_proxies` raises
+    # `CellUnscoreableError`, which `measure_sample` resolves to this cell's UNSCOREABLE row.
     proxies = compute_outer_proxies(result)
-    facts = inner_cell_facts(result, campaign_id, unworked_s=unworked.total)
+    facts = inner_cell_facts(result, campaign_id)
 
     data: dict[str, Any] = {
         # A summary line for the reader, not an answer to be matched: this cell carries no label
@@ -790,4 +721,4 @@ async def _measure_inner_cell(
     return {"data": data}
 
 
-__all__ = ["run_inner_cycle"]
+__all__ = ["inner_cell_envelope_s", "run_inner_cycle"]

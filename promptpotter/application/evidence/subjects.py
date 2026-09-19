@@ -12,9 +12,16 @@ from promptpotter.domain.cycle_paths import (
     encode_cycle_path,
 )
 from promptpotter.domain.ruler import AbilityReading
+from promptpotter.domain.run_records import UNATTRIBUTED_OPERATOR
 from promptpotter.domain.strict_model import StrictModel
 
 SubjectKind = Literal["campaign", "course", "candidate"]
+
+# The two `IndividualLineage.source` stamps a HUMAN authors — an operator-steered fork's C0 and a
+# campaign minted from a chosen prior origin. Every other source names the LAYER that proposed the
+# point and passes through verbatim, so a source added later reads as itself rather than joining
+# the operator's arm in silence.
+_OPERATOR_SOURCES = frozenset({"fork_seed", "campaign_origin"})
 
 # How many path segments each kind addresses. The parse is arity-checked off this, so a kind added
 # here without a resolver fails at the door rather than resolving to the wrong depth.
@@ -120,6 +127,14 @@ def parse_subject(spec: str) -> SubjectSpec:
         )
     ids = [*parts, "", ""]
     return SubjectSpec(kind, ids[0], ids[1], ids[2], inside=inside, lens=lens, samples=samples)
+
+
+def authorship_of(source: str, issued_by: str) -> str:
+    """``SubjectReading.arm_id`` cannot answer this: it hashes round 0's optimizer prompts, so two
+    forks of one campaign share an arm however differently their origins were authored."""
+    if source not in _OPERATOR_SOURCES:
+        return source
+    return f"operator:{issued_by or UNATTRIBUTED_OPERATOR}"
 
 
 class SubjectMask(StrictModel):
@@ -244,6 +259,21 @@ class SubjectReading(StrictModel):
     # carries no hashes: the arm is UNKNOWN, which groups with nothing — least of all with every
     # other unstamped campaign.
     arm_id: str | None
+    # WHO proposed the configuration this subject reads at — `l1_generate` / `l2_context` /
+    # `l3_plan` for a layer, `operator:<id>` where a human wrote it, `origin` for the dataset's own.
+    # The arm above groups by optimizer CONFIG, which two forks of one campaign share whoever
+    # authored the edit, so this is the key a human-against-loop comparison groups on. `""` = the
+    # ledger names no source for this point, which groups with nothing.
+    authorship: str
+    # Whether an operator intervened in this subject's CYCLE mid-flight. A fact about the RUN, so a
+    # loop-authored arm carries it too — and such a cycle is no longer purely reproducible, which
+    # is what stops it pairing against one nobody touched.
+    human_intervened: bool
+    # Of the cells this point scored, how many REPLAYED from the archive. `None` where the round
+    # document carries no report for the point at all — never 0, which is the measurement "it
+    # earned every cell". A rewind fork inherits its parent's rows, so collapsing the two reads
+    # that evidence as independently bought and the pairing is not matched on effort at all.
+    cached_samples: int | None
     # The connector's measurement-identity fingerprint — the RULER the arm was read against, moved
     # by any inner prompt, panel prose, layout or estimator edit. Two campaigns sharing an arm but
     # not this are NOT replicates: their spread is code drift wearing a noise label.
@@ -290,5 +320,6 @@ __all__ = [
     "SubjectReading",
     "SubjectSpec",
     "WinnerChainPoint",
+    "authorship_of",
     "parse_subject",
 ]

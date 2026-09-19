@@ -1,4 +1,6 @@
-// Read endpoints — thin GET wrappers over the FastAPI surface.
+// Read endpoints — thin wrappers over the FastAPI surface. GET, except where the SUBJECT is
+// client-held state too big for a URL (`fetchForkPreview`): the verb is POST, the operation is
+// still a read, and a write module is not where it belongs.
 //
 // **The response shapes are GENERATED, not declared here.** A hand-mirrored interface bypasses
 // `scripts/build_ts_types.py` and drifts behind its model silently. Everything below imports from
@@ -11,7 +13,7 @@
 //     response model to generate from. It must MATCH that tuple member for member.
 //   - the three narrow aliases below are DERIVED from generated interfaces, not re-declared.
 
-import { API, jget, jgetIfModified, jgetIfNoneMatch, type Conditional } from "./client";
+import { API, jget, jgetIfModified, jgetIfNoneMatch, jpost, type Conditional } from "./client";
 import { encodeCyclePath, encodeDescend, pathRoot, type CyclePath } from "../ids";
 import type {
   ActiveSessionResponse,
@@ -33,6 +35,7 @@ import type {
   DiagnosticRunListResponse,
   FileContentResponse,
   FilesResponse,
+  ForkPreviewResponse,
   HardSamplesScope,
   LineageNode,
   MachineStatusResponse,
@@ -390,6 +393,22 @@ export function fetchConfigMap(
 ): Promise<ConfigMapResponse> {
   return jget<ConfigMapResponse>(
     `${API}/campaigns/${encodeURIComponent(campaignId)}/config-map`,
+    signal,
+  );
+}
+
+// Would this steer take the babysit path? — the verdict `fork-cycle` reaches inside its own
+// dispatch, where it 404s rather than answers. POSTed because the subject is an overlay that
+// exists nowhere on disk yet; it writes nothing, so it is a read like the rest of this file.
+// The browser must not re-derive this (`frontend-surface-contract.md::I9`).
+export function fetchForkPreview(
+  campaignId: string,
+  pipelineOverlay: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<ForkPreviewResponse> {
+  return jpost<ForkPreviewResponse>(
+    `${API}/campaigns/${encodeURIComponent(campaignId)}/fork-preview`,
+    { pipeline_overlay: pipelineOverlay },
     signal,
   );
 }

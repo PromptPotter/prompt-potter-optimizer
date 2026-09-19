@@ -6,7 +6,7 @@ import { test, expect, open, ready } from "../harness";
 
 const PANES = [
   ["profile", "Profile"],
-  ["security", "Security"],
+  ["usage", "Usage & limits"],
   ["activity", "Activity"],
   ["storage", "Storage"],
   ["preferences", "Preferences"],

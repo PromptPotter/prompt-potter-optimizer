@@ -9,7 +9,6 @@ import {
   nodeOverlayPatch,
   nodeSchemaPatch,
   overlayEdits,
-  overlaySetsModelOutsideAllowed,
   permittedModels,
   seedOverlayFromRows,
   type ConfigRow,
@@ -25,7 +24,8 @@ function row(over: Partial<ConfigRow> & { key: string; kind: string }): ConfigRo
     locked: false,
     allowed: [],
     stated: false,
-    fromCandidate: false,
+    inSeed: false,
+    source: "unset",
     neverAxis: "",
     movableBy: [],
     held: false,
@@ -289,8 +289,10 @@ describe("configRows (values mode)", () => {
     const rows = configRows(schema, { llm_only: { reasoning_effort: "high" } }, "values");
     const re = rows.find((r) => r.key === "reasoning_effort")!;
     expect(re.value).toBe("high");
-    expect(re.fromCandidate).toBe(true);
-    expect(rows.find((r) => r.key === "temperature")!.fromCandidate).toBe(false);
+    expect(re.inSeed).toBe(true);
+    expect(rows.find((r) => r.key === "temperature")!.inSeed).toBe(false);
+    // Carried by the seed is not provenance: the badge reads what the server stamped.
+    expect(re.source).toBe("dataset");
   });
 
   it("returns no rows without a schema", () => {
@@ -475,35 +477,9 @@ describe("overlayEdits + applyFlatEdits", () => {
   });
 });
 
-// Mirrors the Python truth table (`domain/pipeline_overlay.py`): the client warning and the server
-// babysit gate must agree. The permitted set is per NODE now — one campaign-wide list was the
-// second spelling of what `param_allowed_values["model"]` already said.
-describe("overlaySetsModelOutsideAllowed", () => {
-  const permitted = { l1_generate: ["openai/gpt-oss-120b"] };
-  const ds = { l1_generate: { model: "deepseek/deepseek-v4-flash:nitro" } };
-  const oss = { l1_generate: { model: "openai/gpt-oss-120b" } };
-  const out = overlaySetsModelOutsideAllowed;
-
-  it("taints a model the node does not permit", () => expect(out(ds, permitted)).toBe(true));
-  it("is clean for a permitted model", () => expect(out(oss, permitted)).toBe(false));
-  it("is restrictive when nothing is declared", () => expect(out(ds, {})).toBe(true));
-  it("treats an absent map as nothing permitted", () => expect(out(ds, null)).toBe(true));
-  it("is per NODE — another node's grant does not carry", () =>
-    expect(out(oss, { l2_context: ["openai/gpt-oss-120b"] })).toBe(true));
-  it("ignores a non-model edit", () =>
-    expect(out({ l1_generate: { temperature: 0.9 } }, permitted)).toBe(false));
-  it("always taints a provider edit", () =>
-    expect(out({ l1_generate: { provider: "openrouter" } }, permitted)).toBe(true));
-  it("always taints a route edit — the SET of cost levers, not one member of it", () =>
-    expect(out({ l1_generate: { route_order: ["a", "b"] } }, permitted)).toBe(true));
-  it("is clean for an empty overlay", () => expect(out({}, permitted)).toBe(false));
-  it("handles a null overlay", () => expect(out(null, permitted)).toBe(false));
-  it("skips non-object node entries", () =>
-    expect(out({ steps: ["a", "b"], l1_generate: oss.l1_generate }, permitted)).toBe(false));
-});
-
-// Feeds the predicate above, so its `null`-is-not-`[]` reading is what decides whether an
-// un-narrowed node taints every steer or none.
+// What the babysit warning NAMES as permitted. The verdict itself is served
+// (`POST /campaigns/{id}/fork-preview`), so `null`-is-not-`[]` decides only what the sentence
+// lists, never whether the steer taints.
 describe("permittedModels", () => {
   const modelRow = (over: Partial<NodeConfigParam>): NodeConfigParam[] => [
     {

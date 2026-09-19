@@ -22,7 +22,7 @@ from promptpotter.application.scoring.sample_measurement import (
     execute_stale_data_protocol as _execute_stale_data_protocol,
 )
 from promptpotter.domain.escalation_signals import EscalationSignal
-from promptpotter.domain.phases import RunPhase, StopLoop
+from promptpotter.domain.phases import STOP_REASON_INFO, RunPhase, StopLoop, StopReason
 from promptpotter.domain.scoring import CellScorer, QueryMeasurement, is_hit
 from promptpotter.domain.spend import StepTokenUsage
 from promptpotter.domain.validators import StopRule
@@ -50,6 +50,12 @@ __all__ = ["QueryLoopResult", "run_query_loop"]
 MAX_CONSECUTIVE_ERRORS: int = 3
 """Abort the per-sample loop after this many consecutive client/pipeline
 errors — a runaway backend shouldn't burn the round's compute budget."""
+
+# The cell categories whose cause every later cell shares, so one halts the walk.
+_WALK_STOPS: dict[ErrorCategory | None, StopReason] = {
+    ErrorCategory.CONNECTION: StopReason.BACKEND_UNREACHABLE,
+    ErrorCategory.PROVIDER_CREDIT: StopReason.PROVIDER_CREDIT,
+}
 
 # How many samples a walk may hold in flight is the BACKEND's to declare
 # (`Connector.max_cells_in_flight`), not a constant here. It was a fixed 2 while the depth was
@@ -280,6 +286,13 @@ async def _absorb(
 
     state.results.append(acq.result)
     running = ctx.persist_fresh(state.results) if acq.fresh else ctx.running_scores(state.results)
+
+    # Asked of every row, not only fresh ones: a replay never carries an error, but the stale-data
+    # protocol re-measures a replayed cell. The backend already spent its own bounded retries, so
+    # the next cell meets the same outage — halt, and the unreached cell stays a hole for `resume`.
+    if (stop := _WALK_STOPS.get(error_category(acq.result))) is not None:
+        logger.warning("%s: %s", STOP_REASON_INFO[stop].label, acq.result.get("error"))
+        raise StopLoop(stop, unmeasured=dataset_len - len(state.results) + 1)
 
     if acq.fresh:
         if is_error_result(acq.result):

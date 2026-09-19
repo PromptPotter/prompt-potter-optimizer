@@ -2,11 +2,13 @@
 
 import { useRef, useState } from "react";
 import {
+  fetchForkPreview,
   postForkCycle,
   postPauseCycle,
   type RunLimitOverrides,
   type OperatorForkOverride,
 } from "@/lib/api";
+import { useFetch } from "@/lib/hooks/useFetch";
 import type { NodeConfigParam, NodeOutputSchema, NodeSearchNarrowing } from "@/lib/api/types";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { useRoundSource } from "@/lib/hooks/useRoundSource";
@@ -18,7 +20,6 @@ import {
   liveCandidateSearchPoint,
   forkReconcileDefaults,
   configOverridesFromDefaults,
-  overlaySetsModelOutsideAllowed,
   permittedModels as permittedModelsOf,
   searchPoint,
 } from "@/lib/derivations";
@@ -95,33 +96,40 @@ export function SteerForkPanel({
     : candidateSearchPoint(doc, candidate.candidate_id);
   const seedPrompt = seed?.origin_prompt_fields ?? {};
   const overlay = seed?.pipeline_overlay ?? {};
-  // The per-node permitted model sets, off the SAME served rows this panel edits. A node absent
-  // from them permits nothing, the restrictive default, so ANY model steer there taints —
-  // matching the server gate (`overlay_sets_model_outside_allowed`).
+  // What the EDITOR may offer un-tainted, per node, off the same served rows it edits. Handed to
+  // `NodeSurface` and nowhere else: the VERDICT and the list it NAMES both come off the preview
+  // below, because these rows move with a cycle seed and the gate reads the campaign's frozen
+  // narrowing. Two questions, two sources, and reading either off the other is the drift.
   const permittedModels = permittedModelsOf(schema);
   // Whether the acting operator may steer to an un-permitted model at all. That is the
   // ADR-0005 babysit act, gated server-side on
   // `campaign.babysit` (404 without); the client reflects it so a principal who lacks
   // the cap sees the row read-only rather than a 404 on confirm. Owners hold every cap.
   const canBabysit = !!me?.capabilities?.includes("campaign.babysit");
-  // Live-reactive copy of the picked overlay (the ref below is read at confirm; this
-  // drives the warning, which must react to the picked model AND the async allow-list).
+  // Live-reactive copy of the picked overlay (the ref below is read at confirm; this is what the
+  // preview read below is keyed on, so the warning re-asks the server on every commit).
   // `null` = untouched → fall back to the seed overlay as it loads.
   const [pickedOverlay, setPickedOverlay] = useState<Record<
     string,
     Record<string, unknown>
   > | null>(null);
-  // Warn only when the picked model is OUTSIDE what the node permits — a clean steer to a
-  // permitted model shows nothing (the shipped permitted-set gate, not the old "any locked
-  // axis exists" blanket).
-  // What THIS steer's nodes permit, flattened for the warning's own sentence.
-  const permittedList = [
-    ...new Set(Object.values(permittedModels).flatMap((m) => [...m])),
-  ];
-  const steersDisallowedModel = overlaySetsModelOutsideAllowed(
-    pickedOverlay ?? overlay,
-    permittedModels,
+  // The VERDICT is the server's, and it is the same call `fork-cycle` dispatch makes — asked here
+  // before the confirm instead of enforced as a 404 after it. The browser re-derived it for as
+  // long as nothing served it, which is exactly the drift `frontend-surface-contract.md::I9`
+  // forbids. Keyed on the picked overlay, so a commit re-asks and a stale answer cannot render.
+  const steerOverlay = pickedOverlay ?? overlay;
+  const preview = useFetch(
+    campaignId ? (signal) => fetchForkPreview(campaignId, steerOverlay, signal) : null,
+    [campaignId, JSON.stringify(steerOverlay)],
   );
+  const steersDisallowedModel = preview.data?.steers_disallowed_model ?? false;
+  // The list the warning NAMES comes off the same response as the verdict, flattened for its one
+  // sentence. Off `permittedModels(schema)` it was a second answer: the rows move with a cycle
+  // seed and the gate reads the campaign's frozen narrowing, so the sentence could name models
+  // that had nothing to do with the verdict beside it — and say nothing about the difference.
+  const permittedList = [
+    ...new Set(Object.values(preview.data?.permitted_models ?? {}).flat()),
+  ];
 
   // Captured working copies, read at confirm. Refs (not state) so a textarea
   // blur that fires immediately before the Confirm click is already reflected
@@ -189,6 +197,16 @@ export function SteerForkPanel({
           (they seed the fork&apos;s origin prompt).
         </p>
       )}
+
+      {/* A verdict that never arrived is not a clean steer. Silence here would let the operator
+          confirm into grade C with nothing on screen — the failure mode the served verdict
+          exists to close, reappearing as an unresolved read. */}
+      {preview.error && canBabysit ? (
+        <p className="steer-fork-note" role="alert">
+          Couldn&apos;t check this steer against what the campaign permits. Confirming may mark
+          the branch operator-babysat (grade C).
+        </p>
+      ) : null}
 
       {/* Babysit warning. Shown only when the picked model/provider is OUTSIDE what the node
           permits (a permitted model is a clean steer) and the operator holds the cap. Steering

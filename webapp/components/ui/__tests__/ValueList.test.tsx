@@ -190,6 +190,17 @@ describe("ValueList", () => {
     expect(screen.getAllByRole("checkbox")).toHaveLength(2);
   });
 
+  // Neither channel is a READING, not a permissions host with nothing ticked — its closed line is
+  // the value the point runs, never an empty permitted set.
+  it("a host with neither channel prints the value the point runs", () => {
+    render(<ValueList name="model" values={["a", "b"]} />);
+    expect(trigger().textContent).toContain("a");
+    expect(trigger().textContent).not.toContain("(none)");
+    open();
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+  });
+
   it("readOnly disables every control but still renders the whole menu", () => {
     render(
       <ValueList

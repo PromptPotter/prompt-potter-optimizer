@@ -131,7 +131,7 @@ off a doc.
 
 Constants moved out of `campaign.yaml` (they live next to their consumer): L1 candidate-generation temperature (the `creativity` arg in `l1/generate.py`, driven by `l1_overrides.creativity`, defaulting to the `l1_generate` node temperature), L2/L3 transition temperatures (the `l2_context`/`l3_plan` node temperatures), runaway-loop ceiling (`runner/loop.py::HARD_CAP`), stale-data recovery ladder (`scoring/sample_measurement.py`). PoBB lock-in went the other way and stayed campaign config — `pobb_lock_in` / `pobb_lock_in_n_min` / `mechanisms.elimination.leader_lock_in`.
 
-The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no opt-in flag. L2 and L3 are always-on architecture.
+The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no opt-in flag. Which LAYERS the loop may reach is `optimization.escalation_ladder` (`full` / `l1_l2` / `l1`), the ablation switch; the individual rules are not separately toggleable.
 
 ### Other files
 
@@ -183,7 +183,7 @@ which is both where `pip` deletes on upgrade and where the HuggingFace `datasets
 
 Two behaviours a fork may rely on, neither of them readable off `--help`:
 
-- Every `new` mints a fresh root cycle; on content-hash collision with an existing root the `cycle_id` gains a `_r2` / `_r3` discriminator so the new run lands in its own directory tree. The prior campaign is preserved.
+- Every `new` mints a fresh `campaign_id`, but two `new` calls on an unchanged declaration SHARE their content-addressed root `cycle_id` and its origin score, then diverge from round 1 (`runner/campaign_ids.py::mint_campaign_id`). The prior campaign is preserved.
 - A launch flag may only lower a budget. `set-budget` is the verb that raises one.
 
 The maintenance and diagnostic verbs are not part of v1.
@@ -196,9 +196,7 @@ one campaign inside its own event loop:
 ```python
 session = await open_session(dataset_name, *, backend_url=…, backend_id=…, on_status=None,
                              identity=None, stores=None, program=None)
-observers, dataset, origin = await mint_and_score_origin(
-    session, train_data, campaign_config, *, pipeline_params=None, display=None, on_status=None)
-result = await run_campaign(observers, dataset, origin, campaign_config, *, session,
+result = await run_campaign(session, train_data, campaign_config, *, display=None,
                             langfuse_session_id=None, limits, mode)
 ```
 
@@ -207,11 +205,13 @@ spend_budget_usd=…, token_budget=…)`, the model the CLI flags and the `start
 budget it declares may only lower the campaign's own, and `LaunchLimits()` declares none. `mode`
 is `runner/entry.py::RunMode`, and `RunMode()` is a plain run.
 
-Three steps rather than one because every caller does its own work between them. It mints through
-the same `prepare_fresh_cycle` prologue `new` and the web mint run, so the cycle it produces is
-resumable, forkable and diagnosable by the §5 verbs — that is what this seam buys over a private
-loop. `identity` / `stores` pass through to `init_services`; without them a host writes into the
-anonymous `projects/default/` tenant. `program` rides the backend client as
+Two steps rather than one because every caller does its own work between them. It mints through
+the same `prepare_fresh_cycle` prologue `new` and the web mint run, and scores the origin inside
+`run_optimization` like every other entry point, so the cycle it produces is resumable, forkable
+and diagnosable by the §5 verbs and a stop during origin scoring closes it — that is what this seam
+buys over a private loop. The origin's accuracy is `result.origin_accuracy`. `identity` /
+`stores` pass through to `init_services`; without them a host writes into the anonymous
+`projects/default/` tenant. `program` rides the backend client as
 `InProcessWorkload.program` (§1) — the host's own code, for an in-process backend with no service.
 **`origin_gate` defaults to `strict` and a host has no TTY**, so `run_campaign` blocks at round 0
 until something answers — call

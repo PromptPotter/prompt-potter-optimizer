@@ -29,6 +29,7 @@ from promptpotter.infrastructure.llm.rate_limit import (
 )
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.shared import truncate
+from promptpotter.shared.errors import ProviderCreditExhaustedError, is_provider_credit_refusal
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -305,12 +306,12 @@ class OpenAICompatibleClient(LLMClientBase):
             # first attempts returned 27,939 / 32 / 28,778 chars had repairs come back at
             # 18 / 0 / 0 — the retry was likelier to fail than the call it was repairing.
             #
-            # So a size- or emptiness-driven failure gets a CLEAN RE-ASK: the identical
-            # request, once more. No optimizer node pins a seed and all run at temperature
-            # 0.3-0.5, so that is a second independent sample — which both stands a real
-            # chance of succeeding AND answers the question the classifier would otherwise
-            # have to guess at. Fails the same way twice ⇒ a property of the prompt. Fails
-            # differently, or succeeds ⇒ the moment, not the prompt (`.reproduced`).
+            # So a size- or emptiness-driven failure gets a CLEAN RE-ASK: the same request
+            # with any pinned seed ADVANCED, so it stays a second independent sample at every
+            # temperature above 0 — which both stands a real chance of succeeding AND answers
+            # the question the classifier would otherwise have to guess at. Fails the same way
+            # twice ⇒ a property of the prompt. Fails differently, or succeeds ⇒ the moment,
+            # not the prompt (`.reproduced`).
             #
             # Genuine schema-noncompliance — substantial content that parsed but did not
             # bind — keeps the repair: there, showing the model its own error is the
@@ -346,12 +347,17 @@ class OpenAICompatibleClient(LLMClientBase):
             # also gives this branch a `reproduced` reading, which is what separates a bad
             # prompt from a bad moment. A size- or emptiness-driven failure still gets the clean
             # re-ask alone: the repair is the move that cannot help there.
+            # The clamp's pin is ADVANCED rather than dropped: dropping it would take the rescue
+            # measurement off the route the campaign declared, which is the validity the pin buys.
+            reask_params = dict(request_params)
+            if (pinned_seed := reask_params.get("seed")) is not None:
+                reask_params["seed"] = pinned_seed + 1
             ladder = (
-                [(RETRY_CLEAN_REASK, dict(request_params))]
+                [(RETRY_CLEAN_REASK, reask_params)]
                 if clean_reask
                 else [
                     (RETRY_SCHEMA_REPAIR, repair_params),
-                    (RETRY_CLEAN_REASK, dict(request_params)),
+                    (RETRY_CLEAN_REASK, reask_params),
                 ]
             )
             for attempt_no, (retry_kind, retry_params) in enumerate(ladder, start=1):
@@ -491,9 +497,15 @@ class OpenAICompatibleClient(LLMClientBase):
         request_params: dict[str, Any],
         response_model: type[BaseModel] | None,
     ) -> LLMResponse | None:
-        """Known-error translation: too-large + 404 raise clearer, Groq json_validate_failed salvages, else ``None`` ⇒ re-raise."""
+        """Known-error translation: too-large, 404 and a spent account raise clearer, Groq
+        json_validate_failed salvages, else ``None`` ⇒ re-raise."""
         raise_if_request_too_large(exc, self._provider_name)
-        if getattr(exc, "status_code", None) == 404:
+        status = getattr(exc, "status_code", None)
+        if status in (402, 403) and is_provider_credit_refusal(str(exc)):
+            raise ProviderCreditExhaustedError(
+                f"{self._provider_name} refused the call for lack of credit: {str(exc)[:300]}"
+            ) from exc
+        if status == 404:
             model_name = request_params.get("model", "unknown")
             raise ValueError(
                 f"Model '{model_name}' not found on {self._provider_name}. "

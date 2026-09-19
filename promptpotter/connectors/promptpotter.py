@@ -13,7 +13,7 @@ from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     optimizer_resolved_schemas,
 )
 from promptpotter.application.runner.inner import ruler
-from promptpotter.application.runner.inner.spawn import run_inner_cycle
+from promptpotter.application.runner.inner.spawn import inner_cell_envelope_s, run_inner_cycle
 from promptpotter.application.scoring import metrics, selection
 from promptpotter.config.prompt_blocks import block_library
 from promptpotter.connectors.protocol import Connector, InProcessWorkload
@@ -236,6 +236,12 @@ async def _in_process_run(
     return await run_inner_cycle(query, payload)
 
 
+def _cell_envelope_s(query: str, pipeline_params: dict[str, Any] | None) -> float:
+    """Through this connector's OWN adapter, so the envelope and the run that spends it read one
+    payload — the cell's identity, and therefore its banked depth, is in the overrides."""
+    return inner_cell_envelope_s(query, promptpotter_wire_adapter(query, pipeline_params))
+
+
 CONNECTOR = Connector(
     name="promptpotter",
     execution="in_process",
@@ -246,6 +252,9 @@ CONNECTOR = Connector(
     # One sample is a whole inner campaign — tens of minutes, almost all of it waiting on the
     # provider — so the ceiling here is what bounds a press, and it is the only thing that does.
     max_cells_in_flight=MAX_CELLS_IN_FLIGHT,
+    # A whole campaign runs per cell, so the awaits inside one are unbounded in sum: without this
+    # a throttle storm stretches one cell across the round that was measuring it.
+    cell_envelope_s=_cell_envelope_s,
     measured_unit="cell",
     # Every key `run_inner_cycle` puts on the wire that the outer formula reads. Verified against
     # the dataset's declared observation_mappings at init.

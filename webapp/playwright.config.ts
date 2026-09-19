@@ -41,7 +41,9 @@ function server(port: string, env: Record<string, string>, reusable: boolean) {
     timeout: 120_000,
     stdout: "pipe" as const,
     stderr: "pipe" as const,
-    env: { PP_E2E_PORT: port, ...env },
+    // `PROMPTPOTTER_AUTH: off` on BOTH, and stated here rather than inside `serve.mjs`: the only
+    // harness that wants auth CLOSED (`e2e/fake_issuer.ts`) spawns the same script with it unset.
+    env: { PP_E2E_PORT: port, PROMPTPOTTER_AUTH: "off", ...env },
   };
 }
 

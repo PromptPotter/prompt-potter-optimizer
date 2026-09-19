@@ -74,9 +74,10 @@ collects everything else.
 
 - **A filler name whose PACKAGE PATH resolves it is not a collision.** `session.py` ×3,
   `state.py` ×2, `base.py` ×2 and `shared/identity.py` keep their names, and the refusal was
-  bought by the verification it asked for: a genuine clash produces a disambiguating
-  `import … as`, and there is **not one in the tree** — no module imports a colliding pair
-  together. Re-open only for a name whose own package cannot resolve it. The two failures that ARE
+  bought by the verification it asked for: a genuine clash produces an `import … as` between two
+  COLLIDING modules, and the tree holds none. **Re-run that check rather than trusting this line** —
+  the `import … as` forms the tree does hold rename a generic name away from a local binding, which
+  is the opposite evidence. Re-open only for a name whose own package cannot resolve it. The two failures that ARE
   renames — a second word for something the repo already names, and a name that stopped describing
   its contents — are owned by root [`CLAUDE.md`](../../CLAUDE.md) § STOP.
 - **Four banned words**, in identifiers and prose alike. **node** — never
@@ -101,7 +102,7 @@ collects everything else.
   § Conventions.
 - **Schema field order IS generation order.** A response model's fields are
   emitted left-to-right, each becoming context for the next; a `description=`
-  is prompt, not documentation (root `CLAUDE.md` forbids trimming them).
+  is prompt, not documentation, so it is never trimmed as prose.
   Put reasoning/evidence fields *above* the fields they justify — below, they
   are structurally post-hoc. Which levers are free and which are wire contract:
   `docs/concepts/structured-output.md`.
@@ -129,11 +130,11 @@ collects everything else.
   fast CLI; a real startup fix is `-X importtime`, not scattered deferrals.
   *Extras gating* ([`ADR-0006`](../adr/0006-embeddable-core-and-extras.md)) is
   real but lives on the **third-party** import inside the function, never on a
-  `promptpotter` → `promptpotter` one — of 330 own-package deferrals, zero were
-  gated by an extra. *A cycle* is a layer boundary in the wrong place, so the fix
-  is to move the shared piece down (root `CLAUDE.md` § `<entry-point-parity>`),
-  and only 7 of the 330 were forced by one. All therefore count against
-  `complexity_ledger::deferred_imports`; `# extras: <name>` on the import line
+  `promptpotter` → `promptpotter` one. *A cycle* is a layer boundary in the wrong
+  place, so the fix is to move the shared piece down (root `CLAUDE.md`
+  § `<entry-point-parity>`). All therefore count against
+  `complexity_ledger::deferred_imports` — read how many survive off that
+  baseline, never off this page; `# extras: <name>` on the import line
   exempts one that earns it. **The defect the rule ends is the ambiguity** — an
   unmarked deferral cannot be told from a load-bearing one, so nobody can hoist
   safely or add one knowingly.
@@ -229,7 +230,7 @@ When an LLM call is slow, costly, or timeout-prone because it emits a large numb
 <surface-ledger>
 **The AI blind spot this guards against:** told to "simplify", an AI reaches for *additive-but-safe* moves — extract a helper, fold two copies into a `shared/` util, split a big file — each of which adds a module + an import line per call site, so the **total grows** while every commit says "refactor". The genuinely shrinking moves (delete a mechanism, re-inline a single-use module, drop a dead knob) are riskier, so they get skipped. Four rules counter the drift:
 
-1. **Lower the ledger.** Run `python -m promptpotter.complexity_ledger`. A pass *labelled* simplification/unification MUST move the total **down**. A pass that raises it isn't blocked — it just isn't a "refactor": justify it as a feature or as a shape that makes the codebase quicker to develop, and edit the baseline up with the reason in a comment **beside the raised number**, naming what the surface buys and why it folds into no neighbour — `git log -p tests/test_complexity_ledger.py` is the precedent. The reason rides the file rather than the commit body because the number is re-read every time the next raise is argued, and a body is not where anyone looks. **The TOTAL is comparable only across commits counting the same dimensions** — adding one jumps it by that dimension's whole magnitude with no surface moved, so read the rows, not the sum.
+1. **The ledger prices DECLARED SURFACE — read the rows, and know what they cannot see.** Run `python -m promptpotter.complexity_ledger`. Every dimension counts something a reader must learn the NAME of — a module, a config leaf, a model field, an injection, an escalation rule, a test — beside three anti-pattern counters. There is **no dimension for a free function or a module-private helper, deliberately**: folding three helpers into one moves no name, and a counter that FELL when you inlined a helper into a 200-line function would reward precisely what rule 2 refuses. Three readings follow, and only the first is a refusal. A pass that **adds** declared surface while calling itself a simplification is refused — that is the ratchet's whole job. A pass leaving the total **flat** is not thereby falsified; say what it consolidated that the ledger cannot see, and let the diff carry it. A pass that **raises** it isn't blocked — it just isn't a "refactor": justify it as a feature or as a shape that makes the codebase quicker to develop, and edit the baseline up with the reason in a comment **beside the raised number**, naming what the surface buys and why it folds into no neighbour — `git log -p tests/test_complexity_ledger.py` is the precedent. The reason rides the file rather than the commit body because the number is re-read every time the next raise is argued, and a body is not where anyone looks. **The TOTAL is comparable only across commits counting the same dimensions** — adding one jumps it by that dimension's whole magnitude with no surface moved, so read the rows, not the sum. **Line count is the separate, weaker signal**: it moves where the ledger cannot, and it also moves with a comment, so it never settles an argument on its own.
 2. **Subtract a concept, don't relocate one.** Every simplification commit removes ≥1 *named* thing (module, class, public symbol, config field, code path). Moving code between files counts as zero.
 3. **Extraction threshold.** Default: a shared helper earns its place at **≥3 call sites**, or when it removes a concept; at ≤2 callers inline is usually right. A default, not a bar — extract below it when the shared thing is an invariant callers must not diverge from, and say that's why. (The subtractive counterpart to the pre-flight "Reuse before adding" gate.)
 4. **Lock the wins** — enforced, not advised. The ratchet asserts EQUALITY, so a deletion that lowers a dimension goes red until you lower the baseline in the same commit. Asserting only `<=` re-pins on raises alone: an unrecorded drop becomes silent headroom for the next raise, the baselines drift loose from the package they claim to measure, and the pass that earned the win has no number to show for it. The baseline records where the surface stands — it isn't a target to reach and halt at. When no dimension can fall further without losing a load-bearing concept, the unification *phase* is done; that says nothing about whether the next change may add.

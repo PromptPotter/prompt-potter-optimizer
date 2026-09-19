@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from enum import StrEnum
 from typing import Any, Literal, NamedTuple, NotRequired, TypedDict, overload
 
@@ -28,6 +28,7 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 __all__ = [
     "ABORT_LENS_LABELS",
+    "CEILING_FRACTION",
     "L1_PARSE_FAILURE_MALFORMED",
     "L1_PARSE_FAILURE_TOOLING",
     "L1_PARSE_FAILURE_WRONG_TYPE",
@@ -43,6 +44,7 @@ __all__ = [
     "OverlapMember",
     "OverlapReading",
     "ParentStep",
+    "RoundClocks",
     "RoundParent",
     "RoundResult",
     "ScoreboardRankKey",
@@ -51,6 +53,7 @@ __all__ = [
     "WarningDict",
     "best_round_on_shared_cells",
     "candidate_label",
+    "diagnostic_held",
     "is_electable",
     "is_floor_pinned",
     "is_leader_eligible",
@@ -64,6 +67,7 @@ __all__ = [
     "parent_line",
     "parse_candidate_label",
     "resolved_fitness",
+    "round_clocks",
     "scoreboard_rank_key",
     "unscoreable_cells",
 ]
@@ -597,6 +601,16 @@ def is_floor_pinned(rows: Sequence[Mapping[str, Any]]) -> bool:
     simply an arm getting everything wrong, which is measurable, electable, and still not a θ.
     Errored cells are excluded: they are absence, and ``graded_response`` raises on an unstamped
     row rather than reading it as a zero, so a 0.0 reaching here was really scored 0.0.
+
+    **It reads ``objective``, so it inherits one property of the per-cell formula: that the
+    composite is zero exactly where ``fitness`` is.** Every shipped ``per_cell`` SCALES
+    (``fitness * anchor / (anchor + penalty)``), so the product is zero iff the fitness is and this
+    reads the arm. A formula that instead SUBTRACTS a cost would clamp an expensive-but-correct
+    cell to 0.0 (``formula/compiler.py::clamp_unit_score``, which gates per-cell as well as
+    per-sample), and this would report an arm that answered everything right as having got
+    everything wrong; one that ADDS an unconditional bonus term breaks it the other way, staying
+    positive on a cell the arm failed and suppressing a caveat that should fire. Keep the composite
+    multiplicative in ``fitness``, or give this its own ``fitness``-keyed read.
     """
     graded = [r for r in rows if not is_error_result(r) and "objective" in r]
     return bool(graded) and all(float(r["objective"] or 0.0) <= 0.0 for r in graded)
@@ -696,6 +710,49 @@ def origin_panel(
     no longer buy, or a member could be short a cell with no way to be topped up.
     """
     return sorted(set(origin_cells) & set(poolable))[:size]
+
+
+# The share of a dataset's declared accuracy ceiling that counts as having reached it.
+CEILING_FRACTION = 0.95
+
+
+class RoundClocks(NamedTuple):
+    """When the campaign reached each of three marks, in ROUNDS, plus the ceiling the third was
+    read against. The wall-clock beside them is ``WallClock.round_ended_s`` keyed by the same
+    round number — banked in the same ``index.json::final`` block, so the seconds are a join a
+    reader makes and never a second copy this record carries.
+
+    ``rounds_to_improved`` says when the loop ADOPTED an arm, on ``lift > 0.0`` with no interval
+    and no multiplicity correction, so ``rounds_to_separable`` beside it is the one a result
+    quotes."""
+
+    rounds_to_separable: int | None
+    rounds_to_improved: int | None
+    rounds_to_ceiling: int | None
+    accuracy_ceiling: float | None
+
+
+def round_clocks(rounds: Sequence[RoundResult], *, accuracy_ceiling: float | None) -> RoundClocks:
+    """Every round clock a cycle reports, from this one function: finalize banks it, and
+    ``review.md``, which renders at every round close before any banked block exists, calls it
+    against the cycle's own ceiling.
+
+    An undeclared ceiling leaves ``rounds_to_ceiling`` unset rather than reading
+    ``CEILING_FRACTION`` as an absolute bar — that would be a target no dataset owner chose."""
+
+    def first(holds: Callable[[RoundResult], bool]) -> int | None:
+        return next((r.round for r in rounds if holds(r)), None)
+
+    to_ceiling: int | None = None
+    if accuracy_ceiling is not None:
+        target = CEILING_FRACTION * accuracy_ceiling
+        to_ceiling = first(lambda r: r.accuracy is not None and r.accuracy >= target)
+    return RoundClocks(
+        rounds_to_separable=first(lambda r: r.separable is True),
+        rounds_to_improved=first(lambda r: r.improved),
+        rounds_to_ceiling=to_ceiling,
+        accuracy_ceiling=accuracy_ceiling,
+    )
 
 
 # The reasons `RoundResult.l1_parse_failure` can carry. Opposite kinds of evidence, so no
@@ -1038,12 +1095,31 @@ class DiagnosticRunRecord(StrictModel):
     source_campaign_accuracy: float | None
     source_campaign_composite: float
     source_campaign_n: int
+    held: bool | None = Field(
+        description="Did the verdict HOLD on the wider set — `workspace_accuracy` at or above "
+        "`source_campaign_accuracy`, under this layer's float tolerance. `None` where the source "
+        "carries no rate to compare against. Stored rather than left to each reader: the "
+        "tolerance is a decision about when two measured rates count as equal, and a surface "
+        "picking its own epsilon is a surface that can disagree with this one about whether a "
+        "candidate survived."
+    )
     # ``noise-floor`` only: the backend's own run-to-run noise, not a comparison to history.
     noise_floor_k: int | None = None
     noise_floor_mean: float | None = None
     noise_floor_ci_lo: float | None = None
     noise_floor_ci_hi: float | None = None
     noise_floor_raw: list[float] | None = None
+
+
+def diagnostic_held(
+    workspace_accuracy: float, source_campaign_accuracy: float | None
+) -> bool | None:
+    """:attr:`DiagnosticRunRecord.held`, from the two rates it compares — ``None`` where the source
+    carries no rate. The tolerance absorbs the float error of two means taken over different row
+    counts; a strict ``>=`` calls an unchanged candidate dropped once in a while."""
+    if source_campaign_accuracy is None:
+        return None
+    return workspace_accuracy + 1e-9 >= source_campaign_accuracy
 
 
 class WarningDict(TypedDict):
@@ -1067,7 +1143,6 @@ HealthCause = Literal[
     # The origin measured SOME of its cells — distinct from `origin_unmeasured` (none) and `holed`
     # (a rate, any round): the baseline every later round reads against is permanently short.
     "origin_incomplete",
-    "backend_unreachable",
     "structural",
     "unscoreable",
     "holed",

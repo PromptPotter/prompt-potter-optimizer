@@ -138,7 +138,7 @@ export interface RoundSummaryCandidate {
 /** Context-aware degradation verdict for a round (origin included), computed */
 export interface DegradationHealth {
   grade: 'healthy' | 'degraded' | 'critical';
-  cause: 'origin_unmeasured' | 'origin_incomplete' | 'backend_unreachable' | 'structural' | 'unscoreable' | 'holed' | 'evidence_starved' | 'structural_untested' | 'persistent' | 'degraded' | null;
+  cause: 'origin_unmeasured' | 'origin_incomplete' | 'structural' | 'unscoreable' | 'holed' | 'evidence_starved' | 'structural_untested' | 'persistent' | 'degraded' | null;
   samples: number;
   structural_count: number;
   transient_count: number;
@@ -189,6 +189,7 @@ export interface RoundSummary {
   improved: boolean | null;
   electable_count: number | null;
   verdict_reason: string | null;
+  separable: boolean | null;
   candidates: RoundSummaryCandidate[];
   selection: number[];
   health: DegradationHealth | null;
@@ -213,6 +214,13 @@ export interface DiagnosticRunRecord {
   source_campaign_accuracy: number | null;
   source_campaign_composite: number;
   source_campaign_n: number;
+  /** Did the verdict HOLD on the wider set — `workspace_accuracy` at or above
+   * `source_campaign_accuracy`, under this layer's float tolerance. `None`
+   * where the source carries no rate to compare against. Stored rather than
+   * left to each reader: the tolerance is a decision about when two measured
+   * rates count as equal, and a surface picking its own epsilon is a surface
+   * that can disagree with this one about whether a candidate survived. */
+  held: boolean | null;
   noise_floor_k: number | null;
   noise_floor_mean: number | null;
   noise_floor_ci_lo: number | null;
@@ -395,7 +403,7 @@ export interface L1Layout {
   problem_description: string[];
 }
 
-/** L2/L3-authored state that travels with the candidate. */
+/** The candidate's persistent frame — the three surfaces the escalation layers author */
 export interface L2L3Memory {
   /** Four wound streams (validation/runtime/l2-guard/l3-guard) + sticky L3 note.
    * Rendered by dispatch-hub injections; absorbed by L2 next round. */
@@ -408,9 +416,11 @@ export interface L2L3Memory {
    * (``persona``, ``instruction``, …). L2 writes here to nudge L1 without
    * rewriting the shared optimizer prompt. */
   l1_overrides: Record<string, unknown>;
-  /** Persistent task-framing dict refined by ``l2_context`` and spliced around
-   * ``problem_description`` at render time. Accumulative: each L2 fire merges
-   * deltas rather than rewriting wholesale. */
+  /** Operator-authored task framing, spliced around ``problem_description`` at
+   * render time. The five ``FRAMING_FIELDS`` are frozen for the run —
+   * ``TaskDecomposition.merge`` refuses them and the L2 wire schema declares
+   * none of them; only ``upstream_context`` / ``downstream_context`` are
+   * mutable. */
   task_context: unknown;
 }
 
@@ -924,6 +934,14 @@ export interface CommandAcceptedBody {
   ledger_sequence: number;
 }
 
+/** The draft says what the campaign IS; these limits bound what THIS launch spends. */
+export interface StartCheckinPayload {
+  halt_at_accuracy: number | null;
+  spend_budget_usd: number | null;
+  token_budget: number | null;
+  campaign_id: string;
+}
+
 export interface CampaignSummary {
   /** Campaign id ({dataset}__{rand6}) — one RUN of an origin */
   campaign_id: string;
@@ -957,6 +975,15 @@ export interface CampaignSummary {
   lifecycle_changed_at: string;
   /** Optional operator-supplied reason for the last lifecycle transition */
   lifecycle_reason: string;
+  /** What this campaign has billed over its whole life — every cycle's ledger,
+   * forks and forwarded L4 inner spend included, plus spend banked when one
+   * of its cycles was deleted. Its share of
+   * `QuotaStatus.spend_used_total_usd`. A FLOOR while `spend_unpriced_tokens`
+   * is non-zero. */
+  spend_used_usd: number;
+  /** Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them.
+   * Zero means the dollar figure is complete. */
+  spend_unpriced_tokens: number;
 }
 
 export interface CampaignListResponse {
@@ -986,6 +1013,21 @@ export interface CampaignPipelineResponse {
   is_single_node: boolean;
 }
 
+/** What `POST /commands/fork-cycle` would decide about this steer, asked without forking. */
+export interface ForkPreviewResponse {
+  /** The overlay picks a responder the campaign's frozen `optimizer_narrowing`
+   * never sanctioned, or touches a cost lever, which no permitted set can
+   * sanction. True means the fork is the ADR-0005 babysit act: it needs
+   * `campaign.babysit` (404 without it) and stamps the branch grade C. */
+  steers_disallowed_model: boolean;
+  /** What the verdict above was compared AGAINST, per node — this campaign's frozen
+   * `optimizer_narrowing[node].param_allowed_values.model`. Served beside the
+   * verdict so a surface naming the permitted models cannot name a different
+   * set than the one that decided. A node absent from it sanctions nothing,
+   * which is why any model steer there counts. */
+  permitted_models: Record<string, string[]>;
+}
+
 /** Where one occurrence of an edit was measured on disk. */
 export interface EffectProvenance {
   campaign_id: string;
@@ -1000,9 +1042,10 @@ export interface EditSpread {
   n_edits: number;
 }
 
-/** One unique candidate state — a ``pipeline_overlay`` — aggregated across every */
+/** One SEARCHPOINT measured against its own campaign's origin — a prompt edit, a node-config */
 export interface RankedEdit {
-  state_hash: string;
+  sp_hash: string;
+  campaign_id: string;
   label: string;
   provenance: EffectProvenance[];
   anchor_effect: number;
@@ -1161,6 +1204,9 @@ export interface SubjectReading {
   winner_chain: WinnerChainPoint[] | null;
   config: Record<string, string> | null;
   arm_id: string | null;
+  authorship: string;
+  human_intervened: boolean;
+  cached_samples: number | null;
   instrument_id: string | null;
   ability: AbilityReading | null;
   round: number;
@@ -1513,7 +1559,13 @@ export interface QuotaStatus {
   tokens_used_total: number;
   token_budget_total: number | null;
   concurrent_running: number;
+  /** This account's launches waiting for a machine slot. They count against
+   * `max_concurrent_cycles` exactly as running ones do. */
+  concurrent_queued: number;
   max_concurrent_cycles: number;
+  /** Whether this caller may move `max_concurrent_cycles` through `set-concurrent-
+   * cycles`. False on the host's key, where the host sets it. */
+  max_concurrent_cycles_writable: boolean;
   campaigns_today: number;
   max_campaigns_per_day: number;
 }
@@ -1597,6 +1649,10 @@ export interface MachineStatusResponse {
    * rule a launch is admitted on, and lowered from the operator's ceiling
    * while the shared provider throttle is saturated. */
   capacity: number;
+  /** The operator's `MACHINE_RUN_CAPACITY` — set in the server environment and
+   * writable nowhere else. `capacity` never exceeds it, and neither may an
+   * account's limit. */
+  ceiling: number;
   /** Campaigns currently live on the machine. */
   running: number;
   /** Launches waiting for a slot, machine-wide — an occupancy figure like
@@ -1782,6 +1838,15 @@ export interface CampaignDetailResponse {
   lifecycle_changed_at: string;
   /** Optional operator-supplied reason for the last lifecycle transition */
   lifecycle_reason: string;
+  /** What this campaign has billed over its whole life — every cycle's ledger,
+   * forks and forwarded L4 inner spend included, plus spend banked when one
+   * of its cycles was deleted. Its share of
+   * `QuotaStatus.spend_used_total_usd`. A FLOOR while `spend_unpriced_tokens`
+   * is non-zero. */
+  spend_used_usd: number;
+  /** Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them.
+   * Zero means the dollar figure is complete. */
+  spend_unpriced_tokens: number;
   /** Content hash of the origin search point — the campaign identity */
   root_content_hash: string;
   /** Frozen CampaignConfig snapshot for this campaign */
@@ -1911,7 +1976,7 @@ export type RunPhase = 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 
 export type DashboardState = 'init' | 'origin' | 'scoring' | 'between_samples' | 'between_candidates' | 'l1_generate' | 'l2_refining' | 'l3_replanning' | 'escalation' | 'stopped';
 
 // Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).
-export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-spend-budget' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-campaign-label' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign' | 'verify-candidate';
+export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-spend-budget' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-campaign-label' | 'set-concurrent-cycles' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign' | 'verify-candidate';
 
 // Kinds no activity item is ever made of — the ray drops them and the translator
 // returns null. Complement of domain/projection_envelope.py::RENDERS_AS_ACTIVITY.
@@ -1929,11 +1994,13 @@ export const STOP_REASON_LABELS: Record<string, string> = {
   'l3_patience_exhausted': 'Converged (L3 patience)',
   'rebased_to_fork': 'Rebased to fork',
   'paused': 'Paused',
+  'panel_cut': 'Panel cut by a declared bound',
   'escalation_abort': 'Escalation abort',
   'spend_budget': 'Spend budget reached',
   'token_budget': 'Token budget reached',
   'origin_gate': 'Origin gate (unhealthy origin)',
   'backend_unreachable': 'Backend unreachable',
+  'provider_credit_exhausted': 'Provider out of credit',
   'crashed': 'Crashed',
   'producer_vanished': 'Producer vanished',
   'render_error': 'Render error',
@@ -1948,8 +2015,11 @@ export const STOP_REASON_NEXT_STEPS: Record<string, string> = {
   'perfect_score': "`verify` the winner on more cells — this is one round's panel, not the dataset.",
   'max_rounds': 'Raise `max_rounds` and `resume` if the curve was still moving; else read `review.md`.',
   'paused': '`resume` picks it up at the next checkpoint.',
+  'panel_cut': 'Give the cut cells room (`Connector.cell_envelope_s`) before `resume`, or `optimization.panel_gate: off` to elect on the holed panel.',
   'spend_budget': '`set-budget --max-usd <above what is already spent>` then `resume`.',
   'token_budget': '`set-budget --max-tokens <above what is already spent>` then `resume`.',
+  'backend_unreachable': 'The unreached cell is a hole, not a score: restore the backend or the network it needs, then `resume` re-measures it.',
+  'provider_credit_exhausted': "Raise the provider key's limit or top up its credit, then `resume`; a refused cell is a hole it re-measures.",
   'diverged': '`resume --fork-on-divergence` to branch here, or revert the config edit to continue.',
 };
 
@@ -1957,7 +2027,8 @@ export const STOP_REASON_NEXT_STEPS: Record<string, string> = {
 // `StopOutcome`, where `paused` is the one non-terminal member. TOTAL over the reasons,
 // so ask it rather than matching names: a hand-listed set of crash names rots in both
 // directions, missing the reason added yesterday and keeping one that was renamed.
-export const STOP_REASON_OUTCOMES: Record<string, string> = {
+export type StopOutcome = 'success' | 'halted' | 'failed' | 'paused';
+export const STOP_REASON_OUTCOMES: Record<string, StopOutcome> = {
   'perfect_score': 'success',
   'max_rounds': 'success',
   'target_hit': 'success',
@@ -1967,11 +2038,13 @@ export const STOP_REASON_OUTCOMES: Record<string, string> = {
   'l3_patience_exhausted': 'success',
   'rebased_to_fork': 'success',
   'paused': 'paused',
+  'panel_cut': 'paused',
   'escalation_abort': 'halted',
   'spend_budget': 'halted',
   'token_budget': 'halted',
   'origin_gate': 'halted',
   'backend_unreachable': 'halted',
+  'provider_credit_exhausted': 'halted',
   'crashed': 'failed',
   'producer_vanished': 'failed',
   'render_error': 'failed',
@@ -2009,6 +2082,11 @@ export const EVALUATOR_META: EvaluatorMeta[] = [
   { name: 'retrieval_shortfall', scope: 'per_sample', direction: 'high', node_type: null, from_rows: false, description: 'Per-sample min(observed/target, 1.0) across nodes with max_*/num_* limits on list-valued outputs. 1.0 = target met or exceeded.' },
   { name: 'mean_retrieval_shortfall', scope: 'per_round', direction: 'high', node_type: null, from_rows: false, description: "Mean of retrieval_shortfall across the round's results." },
 ];
+
+// Seconds of silence after which a cycle's producer is treated as vanished. Mirror of
+// infrastructure/runtime_flags.py::RUN_FRESH_S, which owns it and derives `run_phase`
+// from it. Don't hand-copy this threshold.
+export const RUN_FRESH_S = 30.0;
 
 // The cycle-address grammar. Mirror of domain/cycle_paths.py, which owns it and
 // asserts at import that no separator matches the id charset — the precondition that

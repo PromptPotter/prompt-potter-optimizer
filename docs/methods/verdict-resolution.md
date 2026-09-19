@@ -176,7 +176,8 @@ provisional, and say so rather than passing it on.
   multiplicity correction — and `winner.py` sets `improved = bool(winner_id)`. With three arms,
   P(at least one positive | every arm identical to the parent) is **0.875 per round**.
 - **Almost nothing separates.** `separable=True` in 6 of 508 banked rounds; `round_not_separable`
-  fired 362 times. `separable` gates the L1 patience reset — it does NOT gate adoption.
+  fired 362 times. `separable` gates the L1 patience reset and is the clock a result quotes
+  (`index.json::final.rounds_to_separable`) — it does NOT gate adoption, which stays `improved`.
 - **The posterior did no work, and that half is FIXED.** The quasi-likelihood dispersion φ was
   floored at a constant, which caught 8 of 9 outer arms (raw median 0.0127) and left θ_se not
   varying with the arm at all — `p_exceeds` reduced to a monotone map of the raw gap, so
@@ -319,8 +320,9 @@ because the grade is a three-state fact:
   most discriminating first, since there is no evidence either way and neither end of the scale is
   the useful one. Drained after the misses — a measured opportunity outranks an untried one.
 
-Every 4th position takes the next HIT-stratum sample (the regression probe); otherwise misses, then
-unknowns; when a stratum runs dry the remainder follows.
+Every 4th position takes the next HIT-stratum sample (the regression probe) **while a miss or an
+unknown is still unplaced**; otherwise misses, then unknowns; when a stratum runs dry the remainder
+follows. The guard is what stops a tail of pure hits from being read as probes.
 
 **Why unknown is not a miss.** `is_hit` returns False for a miss and for `None` alike. Under
 `per_round_resubset` round 1's panel shares no cell with the parent, so filing unknowns as
@@ -333,18 +335,18 @@ interleave spreads the misses so thin that a futility kill lands at the very end
 pure-tie kill a handful of extra samples and buys a regression probe inside the first
 `elimination_n_min` window, plus steady loss accrual for regressors.
 
-It is a **pure function** of (seed grades, ruler, sample ids), so a resumed round re-derives the
+It is a **pure function** of (parent grades, ruler, sample ids), so a resumed round re-derives the
 identical order with no recorded sidecar. The hard-samples artifact's `pick_score.sample_order` is
-this same order seeded by the best candidate — the order the engine will actually execute next round.
+this same order built from the best candidate — the order the engine will actually execute next round.
 
 **Why static beats adaptive here:** an ability re-fit after every measurement empirically front-loads
-the seed's hit set — the zero-information region, where every early paired comparison TIES, `p_best`
+the parent's hit set — the zero-information region, where every early paired comparison TIES, `p_best`
 pins at 0.5, and the elimination gates go blind until the tail. The round's actual decision is "can
-this candidate NET the adoption margin against the seed", and that evidence lives only in
+this candidate NET the adoption margin against the parent", and that evidence lives only in
 discordance-potential samples.
 
 **The static order reaches that same region by the other door, and there the symptom INVERTS — which
-is what hides it.** Where the seed's base rate is low enough that the candidate misses its
+is what hides it.** Where the parent's base rate is low enough that the candidate misses its
 MISS stratum too, miss-first also buys cells that cannot discriminate; but they near-tie rather than
 tie, and the k=4 probe above is then the entire discordant width — one cell. Ties narrow both SEs, so
 `p_best` reads DECISIVE rather than undecided and the gate fires on every arm (`sealqa-longseal-12`:

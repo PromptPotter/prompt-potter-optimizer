@@ -67,6 +67,7 @@ import type {
   RayItem,
   ValidationFailure,
 } from "./api/types";
+import { RUN_FRESH_S } from "./api/types.generated";
 import { usePoll } from "./hooks/usePoll";
 import { bumpRevalidation, useRevalidation } from "./revalidate";
 import { hasLiveProducer } from "./run-phase";
@@ -370,7 +371,10 @@ export function ageBucket(ageS: number | null): BucketResult {
       termKey: "status_nowall",
     };
   }
-  if (ageS < 30) {
+  // The GENERATED `RUN_FRESH_S` — the same window the server splits `running` from `detached` on,
+  // so the banner and `run_phase` cannot disagree about whether a producer is still there. The 5 m
+  // below is this banner's own, dividing two flavours of stale that the server does not name.
+  if (ageS < RUN_FRESH_S) {
     return {
       status: "live",
       statusText: `Live · last write ${ageS.toFixed(0)}s ago`,

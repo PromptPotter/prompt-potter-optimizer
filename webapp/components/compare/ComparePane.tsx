@@ -625,15 +625,17 @@ function Ranking({ evidence, nSubjects }: { evidence: Evidence; nSubjects: numbe
       <p className="l4-lede">
         Not computed. Everything above reads one searchpoint per channel; this walks every round
         document of all {nSubjects} — the widest read here, which is why it waits for a press. It
-        ranks edits against their own campaign&rsquo;s origin, so only campaign channels feed it.
+        ranks each SEARCHPOINT against its own campaign&rsquo;s origin, so only campaign channels
+        feed it and nothing pools across two of them.
       </p>
     );
   }
   if (evidence.edits.length === 0) {
     return (
       <p className="l4-empty">
-        No scored edits in this selection. One needs its campaign&rsquo;s round-0 origin plus at
-        least one later round to compare against — and a campaign channel to be ticked at all.
+        No scored edits in this selection. One needs its campaign&rsquo;s round-0 origin plus a
+        second searchpoint measured on cells that origin also scored — and a campaign channel to
+        be ticked at all.
       </p>
     );
   }
@@ -650,11 +652,14 @@ function Ranking({ evidence, nSubjects }: { evidence: Evidence; nSubjects: numbe
           </tr>
         </thead>
         <tbody>
+          {/* Keyed on the served IDENTITY, BOTH halves: rows pool within one campaign, so two
+              campaigns that ran the same searchpoint are two rows carrying one `sp_hash`. */}
           {evidence.edits.map((row, i) => (
-            <tr className="l4-row" key={row.state_hash}>
+            <tr className="l4-row" key={`${row.campaign_id}/${row.sp_hash}`}>
               <td className="l4-rank">{i + 1}</td>
-              <td className="l4-label" title={row.label}>
-                <code>{row.state_hash}</code> {row.label}
+              <td className="l4-label" title={`${row.label} · ${row.campaign_id}`}>
+                <code>{row.sp_hash}</code> {row.label}
+                <span className="l4-dim"> {shortId(row.campaign_id)}</span>
               </td>
               <td className={cx("l4-effect", effectTone(row.ci_lo, row.ci_hi))}>
                 <span className="l4-effect-mean">

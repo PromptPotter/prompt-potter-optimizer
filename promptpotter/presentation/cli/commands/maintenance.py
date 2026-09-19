@@ -1,9 +1,13 @@
-"""``compact-archive`` — move the unread fields of candidate measurement rows into a gzip cold
-store, put them back, or delete the store.
+"""``compact-archive`` — count what the measurement archive holds, move the unread fields of
+candidate rows into a gzip cold store, put them back, or delete the store.
 
 A thin shell, like every verb here: it picks a mode and renders counts. The passes themselves are
-``application/maintenance/archive_maintenance.py``, which is what lets the same three modes reach
+``application/maintenance/archive_maintenance.py``, which is what lets the three WRITE modes reach
 the REST API, the webapp and an embedded host rather than the terminal alone.
+
+``inventory`` is the read, and its absence from that highway is the boundary: `/commands/{kind}`
+is the control-plane WRITE path, so recording a census as a `CommandRecord` would bill an act that
+changed nothing. Its peers are `reindex` and `restamp`, terminal verbs over a quiescent store.
 
 Dry-run by default. ``--apply`` writes, and ``purge-cold --apply`` is the one step that destroys —
 the rows it drops are paid LLM spend and nothing puts them back."""
@@ -13,8 +17,10 @@ from __future__ import annotations
 import argparse
 
 from promptpotter.application.maintenance.archive_maintenance import (
+    ArchiveInventory,
     ArchiveReport,
     compact_measurement_archive,
+    inventory_measurement_archive,
     purge_cold_store,
     restore_measurement_archive,
 )
@@ -25,12 +31,6 @@ from promptpotter.presentation.cli.commands._shared import CommandResult, identi
 __all__ = ["cmd_compact_archive"]
 
 _MB = 1024 * 1024
-
-_MODES = {
-    "compact": compact_measurement_archive,
-    "restore": restore_measurement_archive,
-    "purge-cold": purge_cold_store,
-}
 
 
 def _render(mode: str, report: ArchiveReport, *, dataset: str | None) -> str:
@@ -70,11 +70,57 @@ def _render(mode: str, report: ArchiveReport, *, dataset: str | None) -> str:
     return "\n".join(lines)
 
 
+def _render_inventory(inv: ArchiveInventory, *, dataset: str | None) -> str:
+    scope = dataset or "every dataset"
+    megabytes = (inv.total.hot_bytes + inv.total.cold_bytes) / _MB
+    lines = [
+        f"compact-archive[inventory] over {scope}: {inv.total.runs} run(s), "
+        f"{inv.total.cells} cell(s), {megabytes:.2f} MB.",
+    ]
+    for axis, rows in (("dataset", inv.by_dataset), ("label", inv.by_label), ("age", inv.by_age)):
+        lines.append("")
+        lines.append(
+            f"  {axis:<24}{'runs':>6}{'cells':>8}{'hot MB':>10}{'cold MB':>10}{'replay':>9}"
+        )
+        for row in rows:
+            replay = "-" if row.replay_rate is None else f"{row.replay_rate:.1%}"
+            lines.append(
+                f"  {row.key[:23]:<24}{row.runs:>6}{row.cells:>8}"
+                f"{row.hot_bytes / _MB:>10.2f}{row.cold_bytes / _MB:>10.2f}{replay:>9}"
+            )
+    if inv.orphan_index_rows:
+        lines.append(
+            f"\n{inv.orphan_index_rows} index row(s) carry no detail file — a claim rather than a "
+            "measurement, so every count above is an UPPER BOUND until `reindex` runs."
+        )
+    if inv.archive_writers:
+        lines.append(
+            f"\n{inv.archive_writers} cycle(s) can still append, so this is a snapshot of a store "
+            "that is moving. Nothing was written."
+        )
+    return "\n".join(lines)
+
+
 async def cmd_compact_archive(args: argparse.Namespace) -> CommandResult:
     stores = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
     mode = str(args.mode)
     dataset = getattr(args, "dataset", None)
-    report = _MODES[mode](stores, dataset=dataset, apply=bool(args.apply))
+    apply = bool(args.apply)
+    match mode:
+        case "inventory":
+            inventory = inventory_measurement_archive(stores, dataset=dataset)
+            return CommandResult(
+                data=inventory.model_dump(mode="json"),
+                human=_render_inventory(inventory, dataset=dataset),
+            )
+        case "compact":
+            report = compact_measurement_archive(stores, dataset=dataset, apply=apply)
+        case "restore":
+            report = restore_measurement_archive(stores, dataset=dataset, apply=apply)
+        case "purge-cold":
+            report = purge_cold_store(stores, dataset=dataset, apply=apply)
+        case _:
+            raise ValueError(f"compact-archive: no such mode {mode!r}")
     return CommandResult(
         data=report.model_dump(mode="json"), human=_render(mode, report, dataset=dataset)
     )

@@ -63,8 +63,10 @@ def _r_l3_to_l2_note(b: InjectionBundle) -> list[Item]:
 
 _TARGET_PROMPT_HEADER = (
     "CURRENT PROMPT — the text an override REPLACES, field by field. These sections "
-    "concatenate VERBATIM in this order to form the prompt; a field you do not name is "
-    "carried forward unchanged, so restating one field's text inside another ships it twice."
+    "concatenate VERBATIM in this order to form the prompt, with the operator's upstream and "
+    "downstream framing spliced around problem_description; a field you do not name is carried "
+    "forward unchanged, so restating one field's text — or that framing — inside another ships "
+    "it twice."
 )
 
 
@@ -96,12 +98,12 @@ def _r_rendered_prompt(b: InjectionBundle) -> list[Item]:
     """The artifact under edit — a target prompt, inner optimizer prompts, or both; each half empty where
     it is not the mutation surface. An L4 outer point is INERT: its levers ride ``pipeline_params``."""
     sections: list[str] = []
-    # Field by field, like the optimizer-prompt half below. Rendered as one blob, the
-    # boundaries the override schema keys on were simply absent, so a generator asked to
-    # replace `instruction` swept in the neighbouring paragraphs it could not attribute —
-    # and since the fields concatenate verbatim, they shipped twice. 26% of banked
-    # candidates carried a duplicated paragraph; the worst ran 2.13x its parent's length.
-    if fields := b.opt_sp.render_fields():
+    # Field by field, and each field's OWN value — the two boundaries the override schema keys
+    # on, and a generator cannot attribute what it cannot see. Shown as one blob it swept in
+    # neighbouring fields (26% of banked candidates carried a duplicated paragraph, the worst
+    # 2.13x its parent); shown SPLICED, a replacement absorbs the operator's framing as prose,
+    # which the next render splices around again.
+    if fields := b.opt_sp.stored_fields():
         # A HELD field still renders — the fields you replace must fit around it — but is named as
         # the operator's; the override slot has no key for it.
         schema = b.pipeline_schema
@@ -172,7 +174,7 @@ def _r_task_context(b: InjectionBundle) -> list[Item]:
     tc = b.opt_sp.memory.task_context
     if not tc:
         return []
-    skip = {"raw_description", "upstream_context", "downstream_context"}
+    skip = {"raw_description"}
     pairs = [(k, v) for k, v in tc.to_dict().items() if v and k not in skip]
     if not pairs:
         return []

@@ -34,6 +34,10 @@ tasks_include:
   - "120-24"
   - "12307"
 
+# Every task's verifier installs LibreOffice over apt, so its downloads go through the machine's
+# package cache (`docs/operations/package-cache.md`). Verifier only, which is why identity ignores it.
+package_cache: verifier
+
 # Which key of `VerifierResult.rewards` the campaign formula grades. Harbor parses a task's bare
 # `reward.txt` into `{"reward": x}`, which is what these write.
 reward_key: reward

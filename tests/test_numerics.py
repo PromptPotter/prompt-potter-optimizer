@@ -440,40 +440,34 @@ def test_a_labelless_round_reports_absence_not_zero() -> None:
 
 
 def test_the_constant_answer_floor_is_undefined_without_labels() -> None:
-    """A verifier-graded bank has no constant answer, so it has no floor — and the two readers of
-    that fact must not conflate "undefined" with "0.0".
+    """A verifier-graded bank has no constant answer, so it has no floor — ABSENT, never 0.0, and
+    never a refusal of the whole reading either: the level half (accuracy, spread, latency, cost)
+    is exactly what such an instrument is screened on, and every M13 benchmark is one.
 
-    `class_floor` REFUSES such a bank rather than returning a number: `reasoning_margin`,
-    `rewards_collapse` and `verdict_settled` all derive from it, so the screen's whole verdict is
-    undefined, which is what a `None` would fail to say.
+    A bank that MIXES the two is the case that still raises. Its floor would be the labelled part's
+    majority share reported as the whole bank's, which is a wrong number rather than a missing one.
 
-    Its second caller is the one that made this worth pinning. `runner/inner/spawn.py` computes the
-    floor for every seat it seats, then REPORTS collapse risk — it is not the screen and owns no
-    verdict. Unguarded it would take the refusal and die mid-spawn on the arrangement the recursion
-    exists for (`pp-self` over a verifier-graded inner benchmark), with a message about a collapse
-    reading from a path that was only ever logging one.
-    """
-    import inspect
-
-    from promptpotter.application.diagnostics.seed_screen import SeedScreenError, class_floor
-    from promptpotter.application.runner.inner import spawn
+    Silent harm: each of the three verdicts derived from the floor has a false reading available at
+    0.0 — a margin equal to accuracy, `rewards_collapse` False, `verdict_settled` decided — so the
+    screen would condemn or clear a bank on a line it never had."""
+    from promptpotter.application.diagnostics.seed_screen import (
+        SeedReading,
+        SeedScreenError,
+        class_floor,
+    )
 
     labelled = [Sample(id=i, query=f"q{i}", ground_truth="A" if i else "B") for i in range(4)]
     assert class_floor(labelled) == 0.75
+    assert class_floor([Sample(id=i, query=f"q{i}", ground_truth=None) for i in range(4)]) is None
 
-    with pytest.raises(SeedScreenError, match="verifier-graded"):
-        class_floor([Sample(id=i, query=f"q{i}", ground_truth=None) for i in range(4)])
+    with pytest.raises(SeedScreenError, match="mixes"):
+        class_floor([*labelled, Sample(id=9, query="q9", ground_truth=None)])
 
-    # The guard at the caller, asserted on the source rather than by driving a whole inner spawn:
-    # reaching that call needs a container backend, an inner campaign and real spend, and what is
-    # actually load-bearing is that the refusal is not entered and its result is not compared.
-    src = inspect.getsource(spawn._run_inner_campaign)
-    assert "all_verifier_graded" in src, (
-        "the class_floor call must not be reached on a labelless bank"
-    )
-    assert "bank_floor is not None and bank_floor >=" in src, (
-        "a None floor must SKIP the collapse comparison, never compare as 0.0"
-    )
+    floorless = SeedReading(seed=1, n=4, class_floor=None, origin_reads=(0.5, 0.75))
+    assert floorless.origin_accuracy == 0.625, "the level half still reads"
+    assert floorless.reasoning_margin is None
+    assert floorless.rewards_collapse is None
+    assert floorless.verdict_settled is None
 
 
 def test_terminal_ranking_sources_the_prediction():
@@ -949,7 +943,7 @@ def test_an_instrument_reads_on_the_scale_its_spawner_fixed(tmp_path: Path) -> N
     assert _given_ruler(session) is None
 
     def _inside_instrument() -> Any:
-        enter_instrument_mode(evidence_epoch=frozenset(), optimizer_clamp=None, ruler=given)
+        enter_instrument_mode(evidence_epoch=frozenset(), ruler=given)
         return _given_ruler(session)
 
     # Its own context, as a real spawn binds it — so the scale cannot leak back to the spawner.
@@ -1309,17 +1303,15 @@ def test_leader_eligibility_bars_invalid_measurement_not_stops():
 
 
 def test_a_round_that_measured_nothing_usable_names_which_way_it_broke():
-    """Three ways a round produces no usable measurement. Each must NAME itself, because the
-    next move differs completely between them — and every one of the three used to grade
-    ``healthy`` or abstain.
+    """Two ways a round produces no usable measurement. Each must NAME itself, because the
+    next move differs completely between them — and both used to grade ``healthy`` or abstain.
 
     ``unscoreable`` (JustLogic): the pipeline RUNS — every ``step_status`` success, no warning —
     and emits no extractable label. The backend calls that a success, so the structural/transient
     channel is blind, and the loop spent rounds optimizing a prompt whose every output was
     unreadable. ``origin_unmeasured`` (L4): round-0 scoring produced ZERO rows, and graded
     healthy or abstained, candidates are then elected against NO baseline — the irreversible
-    one. ``backend_unreachable``: every row errored, and since ``total`` counts only evidence
-    rows, a round that ATTEMPTED work must not slip out as "nothing measured".
+    one.
 
     Only the ORIGIN halts, and only on a real break: a non-origin round that measured nothing
     abstains rather than fabricating a verdict, and a wrong-but-extractable round IS a
@@ -1357,20 +1349,9 @@ def test_a_round_that_measured_nothing_usable_names_which_way_it_broke():
     assert unmeasured is not None
     assert (unmeasured.grade, unmeasured.cause) == ("critical", "origin_unmeasured")
 
-    dead = compute_round_health(
-        results=[
-            {"error": "connect timeout", "error_category": "CONNECTION", "pipeline_data": None}
-            for _ in range(10)
-        ],
-        prior_healths=[],
-    )
-    assert dead is not None
-    assert (dead.grade, dead.cause) == ("critical", "backend_unreachable")
-    assert dead.samples == 10 and dead.suggested_action is not None
-
-    # Every one halts even in the LEAST-strict armed mode — that is the guarantee that a broken
+    # Both halt even in the LEAST-strict armed mode — that is the guarantee that a broken
     # origin never silently enters L1.
-    for broken in (unscoreable, unmeasured, dead):
+    for broken in (unscoreable, unmeasured):
         assert origin_gate_tripped(broken, "critical_only") == StopReason.ORIGIN_GATE
 
     # A hard task emitting REAL labels is a measurement, not a broken floor.
@@ -1658,6 +1639,46 @@ def test_a_collapse_cut_is_never_reported_as_an_epsilon_cut() -> None:
     assert "NOT a verdict" in epsilon_cut
     assert "NOT a verdict" not in collapsed and "VERDICT" in collapsed
     assert "ε" not in collapsed and "P(best)" not in collapsed
+
+
+def test_the_collapse_gate_reads_the_answer_not_the_labels() -> None:
+    """A verifier-graded round carries no ground truths, and the gate that cuts a constant answerer
+    at `n_min` keyed on a truth SET — so on every benchmark the preprint runs it was permanently
+    False, and an arm that had stopped answering measured its whole budget before `l1_score`
+    dropped it anyway.
+
+    Labels only ever PROVED that one answer to every cell must be wrong. A verifier proves the same
+    thing by leaving a cell unsolved — which is why an arm answering alike and solving every cell
+    is NOT collapsed: that one is degenerate and correct, and cutting it would cost the round its
+    best arm.
+
+    Silent harm: nothing errors in either direction. The cut never fires, the θ posterior spends
+    the arm's full budget establishing what six cells had shown, and the L1 panel that renders a
+    COLLAPSED cut as a verdict on the idea (rather than as a stopped measurement) has none to
+    render, so the idea comes back next round."""
+    from promptpotter.domain.results import EliminationGate
+    from promptpotter.shared.errors import ErrorCategory
+
+    def rows(fitness: list[float], **over: Any) -> list[Any]:
+        return [
+            {"sample_id": i, "ground_truth": "", "predicted": "done", "fitness": f, **over}
+            for i, f in enumerate(fitness)
+        ]
+
+    def cut(rs: list[Any]) -> Any:
+        return PoBBCheck(PoBBConfig(), n_samples=28, ruler=None).check(rs, 0, 1)
+
+    signal = cut(rows([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]))
+    assert signal is not None, "a constant answerer must be cut at n_min with no labels to read"
+    assert signal.check_result["gate"] == EliminationGate.COLLAPSED
+
+    assert cut(rows([1.0] * 6)) is None, "one answer that solves every cell is not a collapse"
+    assert cut(rows([1.0, 0.0, 0.0, 1.0, 0.0, 0.0], predicted="NO_RESULT")) is None, (
+        "an agent that wrote no answer file answered nothing, which is not one answer"
+    )
+    assert cut(rows([0.0] * 6, error_category=ErrorCategory.PIPELINE)) is None, (
+        "a backend that broke on every cell is not a verdict on the idea"
+    )
 
 
 def test_only_an_epsilon_cut_banks_an_idea_as_measured_and_lost() -> None:
@@ -2328,6 +2349,34 @@ def test_a_scenario_chain_stops_where_the_record_parts() -> None:
     ]
 
 
+def test_a_human_authored_arm_never_pools_with_the_loop_that_proposed_one() -> None:
+    """The human-in-the-loop comparison rests on grouping by AUTHOR, and the only key that looked
+    like one cannot do it: `arm_id` hashes round 0's optimizer prompts, so an operator-steered fork
+    and an L1 mutation of the same campaign share it exactly. Pooled on that, the two arms read as
+    replicates of one — `ArmReplicate.level_spread` reports their real difference as this
+    instrument's noise, and the paired test the claim is published from compares the arm against
+    itself. Nothing raises: every number renders, and the spread is plausible.
+
+    Two operators steering one campaign is the same failure one level down, which is why the fork's
+    `issued_by` is in the key and an unattributed cut does not silently join a named one.
+    """
+    from promptpotter.application.evidence.subjects import authorship_of
+
+    human = authorship_of("fork_seed", "nieena")
+    loop = authorship_of("l1_generate", "nieena")
+    assert human != loop
+    # The layer passes through as ITSELF, so a source added later is its own arm rather than one
+    # that quietly joins the operator's.
+    assert loop == "l1_generate"
+    assert authorship_of("l2_context", "") != loop
+    # Two humans on one campaign are two authors; the fork record is the only thing that says so.
+    assert human != authorship_of("fork_seed", "someone-else")
+    # An unattributed cut is not the named operator's, and two unattributed ones ARE each other's:
+    # nothing on disk distinguishes them, and inventing a per-cut identity would claim it does.
+    assert human != authorship_of("fork_seed", "")
+    assert authorship_of("fork_seed", "") == authorship_of("campaign_origin", "")
+
+
 # 8. The L4 outer proxy — what one finished inner cycle says
 
 
@@ -2538,11 +2587,12 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
     # unexercised optimizer prompt reported as flawless, and a *high* outer fitness. Nothing errors.
     # The exclusion predicate must ask "produced evidence?", not "failed?" — the two answers
     # differ on every row below.
-    from promptpotter.domain.l4.proxies import InnerCycleUnscoreableError, compute_outer_proxies
+    from promptpotter.domain.l4.proxies import compute_outer_proxies
+    from promptpotter.shared.errors import CellUnscoreableError
 
     # Zero L1 rounds, on a cycle that DID end on its own terms.
     empty = cycle_result([], 0.30, [], stop_reason=StopReason.TARGET_HIT)
-    with pytest.raises(InnerCycleUnscoreableError):
+    with pytest.raises(CellUnscoreableError):
         compute_outer_proxies(empty)
 
     # ONLY A SUCCESS OUTCOME IS A MEASUREMENT. The dangerous rows are the ones with rounds on
@@ -2560,7 +2610,7 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
         [round_result(1), round_result(2)],
         stop_reason=StopReason.TOKEN_BUDGET,
     )
-    with pytest.raises(InnerCycleUnscoreableError):
+    with pytest.raises(CellUnscoreableError):
         compute_outer_proxies(truncated)
 
     # ...and it is EXCLUDED, never floored: the floor is `after_N_rounds_delta = -1`, which zeroes
@@ -2573,14 +2623,14 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
         [round_result(1, parse_failure="l1_provider_empty_response")],
         stop_reason=StopReason.TOKEN_BUDGET,
     )
-    with pytest.raises(InnerCycleUnscoreableError):
+    with pytest.raises(CellUnscoreableError):
         compute_outer_proxies(railed_and_empty)
 
     # Rounds ran, but the trajectory is empty → nothing to difference against origin. Without
     # the guard `first`/`after_N_rounds_delta` would both read a flat 0.0: "no lift" is a
     # plausible-looking number for "no measurement", which is what makes it dangerous.
     levelless = cycle_result([], 0.30, [round_result(1)])
-    with pytest.raises(InnerCycleUnscoreableError):
+    with pytest.raises(CellUnscoreableError):
         compute_outer_proxies(levelless)
 
     # Rounds AND levels, but the origin was never scored. Every delta here is measured against
@@ -2588,7 +2638,7 @@ def test_compute_proxies_excludes_cycles_that_produced_no_evidence() -> None:
     # was scored) reports the whole trajectory as an enormous lift over nothing — and it does so
     # for the CHEAPEST rows, since a crash at round 0 is what leaves the origin unscored.
     floorless = cycle_result([0.40, 0.55], None, [round_result(1), round_result(2)])
-    with pytest.raises(InnerCycleUnscoreableError):
+    with pytest.raises(CellUnscoreableError):
         compute_outer_proxies(floorless)
 
     # ...and a cycle that DID produce evidence still scores, on the same predicate.
@@ -2996,6 +3046,7 @@ def test_a_theta_stall_verdict_must_clear_its_own_error() -> None:
 
     Silent harm: nothing distinguishes "L2 keeps firing because it is working" from "L2 keeps
     firing because noise keeps clearing its stall counter"."""
+    from promptpotter.application.campaign_config import EscalationLadder
     from promptpotter.application.optimization.escalation.state import EscalationFSM, NextAction
 
     # (composite, θ, θ_se) per round, from the live run: composite frozen from round 2 on, θ
@@ -3014,6 +3065,7 @@ def test_a_theta_stall_verdict_must_clear_its_own_error() -> None:
                 current_composite_fitness=comp,
                 current_theta=theta,
                 current_theta_se=se if with_se else None,
+                escalation_ladder=EscalationLadder.FULL,
                 l2_patience=2,
                 l3_patience=1,
             )
@@ -3045,6 +3097,7 @@ def test_the_campaign_ends_only_where_the_objective_is_spent_and_the_round_resol
     cells at p=0.33, `separable: false`, ended at 27% of budget, `index.json` then naming round 8
     its best. Silent by construction: `perfect_score` is a SUCCESS outcome and every number
     renders."""
+    from promptpotter.application.campaign_config import EscalationLadder
     from promptpotter.application.optimization.escalation.state import EscalationFSM, NextAction
 
     def outcome(objective: float, separable: bool | None) -> NextAction:
@@ -3056,6 +3109,7 @@ def test_the_campaign_ends_only_where_the_objective_is_spent_and_the_round_resol
                 separable=separable,
                 current_objective=objective,
                 l1_patience=3,
+                escalation_ladder=EscalationLadder.FULL,
             )
             .next_action
         )
@@ -3302,3 +3356,100 @@ def test_mcts_backprop_does_not_double_count_a_fork_inherited_prefix():
     # Nothing above round 0 — the caller must NOT fork, or a rewind to nowhere mints a
     # duplicate cycle and burns a whole run.
     assert select_rewind_round(collapsed, cycle_id="root", current_round=0) is None
+
+
+def test_the_l1_only_arm_can_reach_no_layer_above_it() -> None:
+    """The ablation switch, and why it is a switch rather than a large ``l1_patience``: a deferral
+    that never fires *in this run* is not a suppression, and the arm it produces is only as clean
+    as the round budget that happened to bound it. The L1 / L1+L2 / full comparison is the
+    sharpest result the preprint carries, so an arm that escalates once measured a different
+    thing under the arm's name.
+
+    Silent by construction: every arm completes, every round file renders, and an L2 fire that
+    should not have happened reads exactly like one that should. Unrecoverable because the number
+    is what gets published — a re-run does not un-report it.
+
+    Proved over the WHOLE predicate space rather than a sample, because the harm is one rule
+    nobody thought about."""
+    from itertools import product
+
+    from promptpotter.application.campaign_config import EscalationLadder
+    from promptpotter.application.optimization.escalation.rules import (
+        EscalationInputs,
+        decide_escalation,
+    )
+    from promptpotter.application.optimization.escalation.state import NextAction
+
+    grid = list(
+        product(
+            [None, 0.5, 1.0],  # current_objective
+            [0, 1, 5],  # l1_stall_count
+            [0, 3],  # l1_patience
+            [None, True, False],  # separable
+            [None, 0, 2],  # axes_with_positive_yield
+            [False, True],  # l1_mandatory_breach
+            [False, True],  # l1_zero_candidates
+            [False, True],  # evidence_starved
+        )
+    )
+
+    def actions(ladder: EscalationLadder) -> set[NextAction]:
+        return {
+            decide_escalation(
+                EscalationInputs(
+                    current_objective=objective,
+                    l1_stall_count=stall,
+                    l1_patience=patience,
+                    escalation_ladder=ladder,
+                    separable=separable,
+                    axes_with_positive_yield=yield_axes,
+                    l1_mandatory_breach=mandatory,
+                    l1_zero_candidates=zero,
+                    evidence_starved=starved,
+                )
+            ).next_action
+            for objective, stall, patience, separable, yield_axes, mandatory, zero, starved in grid
+        }
+
+    # The arm's whole claim. `escalate_l2` has one caller and it is gated on FIRE_L2, so no
+    # `l2_context` / `l3_plan` prompt is composable from any state in this space. A stall is
+    # simply another L1 round; the objective ceiling still ends a resolved run.
+    assert actions(EscalationLadder.L1) == {NextAction.CONTINUE, NextAction.STOP_PERFECT}
+    # Not vacuous: the same states fire L2 on the full ladder, so this passes because the rule
+    # preempts and not because the grid missed every firing shape.
+    assert NextAction.FIRE_L2 in actions(EscalationLadder.FULL)
+
+
+def test_a_panel_holed_by_a_declared_bound_is_not_advised_to_resume() -> None:
+    """Both halts are resumable; only one is PLUGGED by resuming. A cell a declared bound cut
+    comes back cut on the re-run, so the round is re-bought at full price and holed again — and
+    the operator is told to resume by every surface that reads the stop, on every attempt.
+
+    Silent: the round is discarded rather than persisted partial, the run reads `paused`, and each
+    resume renders a clean round-in-progress. The tell is the same fork-and-re-buy loop
+    `repair_cut` refuses one layer down — this is the live path into it."""
+    from promptpotter.application.runner.termination import panel_gate_tripped
+    from promptpotter.domain.phases import STOP_REASON_INFO, StopOutcome, StopReason
+    from promptpotter.shared.errors import ErrorCategory
+    from tests.factories import measurement
+
+    def _hole(category: ErrorCategory) -> dict[str, Any]:
+        return measurement(1, None, error="no verdict", error_category=category)
+
+    backend = [_hole(ErrorCategory.UNSCOREABLE)]
+    cut = [_hole(ErrorCategory.HALTED)]
+
+    assert panel_gate_tripped([], "strict") is None
+    assert panel_gate_tripped(cut, "off") is None
+    # The backend answered with nothing: a re-measure can answer differently, so resume IS the verb.
+    assert panel_gate_tripped(backend, "strict") is StopReason.PAUSED
+    # ONE cut cell decides it — the panel cannot complete while the declaration stands, however
+    # many of its siblings a resume would plug.
+    assert panel_gate_tripped(cut, "strict") is StopReason.PANEL_CUT
+    assert panel_gate_tripped([*backend, *cut], "strict") is StopReason.PANEL_CUT
+
+    # And it stays NON-TERMINAL: what changes is the advice, not whether the cycle is over. Read as
+    # a terminal outcome, the cycle banks `finished_at` and resume has nothing to pick up.
+    info = STOP_REASON_INFO[StopReason.PANEL_CUT]
+    assert info.outcome is StopOutcome.PAUSED
+    assert info.next_step != STOP_REASON_INFO[StopReason.PAUSED].next_step

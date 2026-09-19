@@ -1,7 +1,7 @@
 "use client";
 import { useMemo, useState, type ReactNode } from "react";
 import { postSkipSearchpoint, postSetSampleLookahead, IngestApiError } from "@/lib/api";
-import { SegmentedControl } from "@/components/ui";
+import { SegmentedControl, Term } from "@/components/ui";
 import { bumpRevalidation } from "@/lib/revalidate";
 import { runPhaseLabel } from "@/lib/run-phase";
 import { cx } from "@/lib/cx";
@@ -288,26 +288,26 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
             {unpricedTokens > 0 ? (
               <div className="row">
                 <span className="lbl">USD cap</span>
-                <span className="val remote-spend-warn" title="USD cost couldn't be resolved for some calls (e.g. Groq returns no wire cost and the model isn't in the rate table). The $ figure undercounts real spend and the USD cap can't see it — the token cap is the backstop.">
+                <Term className="val remote-spend-warn" content="USD cost couldn't be resolved for some calls (e.g. Groq returns no wire cost and the model isn't in the rate table). The $ figure undercounts real spend and the USD cap can't see it — the token cap is the backstop.">
                   <span aria-hidden="true">⚠</span> inactive
-                </span>
+                </Term>
               </div>
             ) : null}
             <div className="section-title">Outcome</div>
             {!terminal && (
-              <div className="row" title={TERMS.remote_eta}>
+              <Term className="row" content={TERMS.remote_eta}>
                 <span className="lbl">ETA</span><span className="val">{etaChip}</span>
-              </div>
+              </Term>
             )}
-            <div className="row" title={TERMS.remote_eff}>
+            <Term className="row" content={TERMS.remote_eff}>
               <span className="lbl">Δ/$</span><span className="val">{effChip}</span>
-            </div>
+            </Term>
             {babysat ? (
               <div className="row">
                 <span className="lbl">Provenance</span>
-                <span className="val remote-babysat" title="An operator manually intervened (skip) — this cycle is no longer purely reproducible.">
+                <Term className="val remote-babysat" content="An operator manually intervened (skip) — this cycle is no longer purely reproducible.">
                   <span aria-hidden="true">✎</span> babysat
-                </span>
+                </Term>
               </div>
             ) : null}
           </div>
@@ -395,12 +395,12 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
         </button>
       )}
       {offline ? (
-        <span
+        <Term
           className="remote-offline"
-          title="Connection to the server was lost — showing the last known state."
+          content="Connection to the server was lost — showing the last known state."
         >
           <span aria-hidden="true">⭘</span> reconnecting
-        </span>
+        </Term>
       ) : null}
       <RunControlButton disabledReason={innerReason} />
       <button
@@ -433,21 +433,31 @@ export function RemoteControl({ onFollowed, cycleStartedAt = null }: Props) {
           paragraph. It reads as decoration mid-run and as the answer once the run stops,
           which is why the strip survives `terminal` rather than unmounting exactly when
           these numbers start mattering. */}
-      <button
-        type="button"
+      {/* A div, not a `<button>`: the chip inside carries its own HoverCard trigger, and a
+          button forbids a focusable descendant. `role="button"` + the key handler below
+          restore the native activation this trades away. */}
+      <div
+        role="button"
+        tabIndex={0}
         className="remote-readout"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setOpen((v) => !v);
+          }
+        }}
         aria-label="Job status and configuration"
       >
-        <span className="chip" title={TERMS.remote_best}>
+        <Term className="chip" content={TERMS.remote_best}>
           <span className="chip-lbl">Lift</span> <strong>{deltaTheta}</strong>
           {best != null && <span className="chip-origin"> · best {fmtPct0(best)}</span>}
-        </span>
+        </Term>
         <svg className="chev" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="m3 4.5 3 3 3-3" />
         </svg>
-      </button>
+      </div>
       {err ? (
         <span className="remote-err" role="alert">
           {err}

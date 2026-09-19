@@ -98,6 +98,7 @@ export type {
   DatasetIndexResponse,
   DatasetStorageEntry,
   DatasetStorageResponse,
+  ForkPreviewResponse,
   MachineHolder,
   MachineStatusResponse,
   MechanismGroup,

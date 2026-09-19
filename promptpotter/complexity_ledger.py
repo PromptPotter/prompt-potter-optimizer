@@ -76,25 +76,31 @@ def _unwrap_optional(annotation: object) -> object:
     return annotation
 
 
-def _count_leaves(model: type[BaseModel], _seen: set[type[BaseModel]] | None = None) -> int:
-    """A ``list[Model]`` or ``dict[str, Model]`` field is a whole nested surface, not one leaf —
-    counting it as one is how a model grows unwatched under a ratcheted row."""
-    seen = _seen if _seen is not None else set()
-    if model in seen:
+def _count_leaves(model: type[BaseModel], _path: tuple[type[BaseModel], ...] = ()) -> int:
+    """A ``list[Model]`` or ``dict[str, Model]`` field is a whole nested surface, not one leaf.
+    The guard is the PATH, never a seen-set: one model at two sibling fields is two surfaces.
+
+    REBUILD FIRST, or the count is a reading of what happened to be imported. Pydantic resolves a
+    forward reference lazily, on first validation — so an unresolved annotation is no ``BaseModel``
+    yet and prices as ONE leaf, and the same model prices its whole subtree once anything in the
+    process has built one. ``RoundResult.health`` hid ``DegradationHealth``'s 17 leaves that way,
+    visible or not depending on which test file ran first. A resolved model rebuilds to a no-op."""
+    if model in _path:
         return 0
-    seen.add(model)
+    model.model_rebuild()
+    path = (*_path, model)
     total = 0
     for field in model.model_fields.values():
         inner = _unwrap_optional(field.annotation)
         if isinstance(inner, type) and issubclass(inner, BaseModel):
-            total += _count_leaves(inner, seen)
+            total += _count_leaves(inner, path)
             continue
         nested = [
             arg
             for arg in typing.get_args(inner)
             if isinstance(arg, type) and issubclass(arg, BaseModel)
         ]
-        total += sum(_count_leaves(n, seen) for n in nested) if nested else 1
+        total += sum(_count_leaves(n, path) for n in nested) if nested else 1
     return total
 
 
