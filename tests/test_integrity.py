@@ -3854,6 +3854,58 @@ def test_a_stage_no_judge_asks_is_refused_before_a_cell_is_bought() -> None:
         build_evaluators({"answer_correct": JudgeSpec(name="sealqa", stages=chain)})
 
 
+def test_the_container_sweep_spares_a_run_that_is_still_measuring(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A harbor cell holds a container for minutes, and the machine's pool is shared by every run
+    on the box. So the sweep that removes what a KILLED run left is one `docker rm --force` away
+    from killing a sibling's episode mid-flight — minutes of agent time and its whole bill, banked
+    as nothing and read as an infrastructure failure.
+
+    Liveness is the producer's lock, never its mtime: a cell that is merely thinking writes
+    nothing for minutes, and an age bound would reap it. The lock is held for the process's life
+    and dropped by the kernel when it dies, so the two are distinguishable with no heartbeat."""
+    from filelock import FileLock
+
+    removed: list[tuple[str, ...]] = []
+    overlay = str(harbor._DOCKER_OVERLAY)
+    listing = "\n".join(
+        (
+            f"cid_live|alive|/tmp/a.json,{overlay}",
+            f"cid_gone|dead|/tmp/b.json,{overlay}",
+            # No token, ours: started before the label existed, so nothing alive can claim it.
+            f"cid_prelabel||/tmp/c.json,{overlay}",
+            # No token, NOT ours: another tenant of this Docker host.
+            "cid_foreign||/tmp/somebody-else/docker-compose.yaml",
+        )
+    )
+
+    async def fake_docker(*args: str, **_k: Any) -> tuple[int, str]:
+        if args[0] == "ps":
+            return 0, listing
+        removed.append(args)
+        return 0, ""
+
+    monkeypatch.setattr(harbor, "_TRIALS_HOME", tmp_path)
+    monkeypatch.setattr(harbor, "_docker", fake_docker)
+    for token in ("alive", "dead"):
+        (tmp_path / token).mkdir()
+    held = FileLock(str(tmp_path / "alive" / harbor._PRODUCER_LOCK), timeout=0)
+    held.acquire()
+    try:
+        asyncio.run(harbor._reap_dead_producers())
+    finally:
+        held.release()
+
+    assert (tmp_path / "alive").is_dir(), "swept the scratch of a run that is still measuring"
+    assert not (tmp_path / "dead").exists(), "left a killed run's scratch on the machine"
+    ((verb, force, *ids),) = removed
+    assert (verb, force) == ("rm", "--force")
+    assert sorted(ids) == ["cid_gone", "cid_prelabel"], (
+        "swept a live cell or another tenant's container, or left an unclaimable one running"
+    )
+
+
 # 8. Where the package reads and writes
 
 # Bare scalars YAML 1.1 resolves to a non-string: the write-side hazard `write_yaml` must quote.

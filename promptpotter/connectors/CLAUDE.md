@@ -136,8 +136,13 @@ and moves every round.
   Nothing durable lives there — reward, digest and token counts are projected into the measurement
   archive, which is where a fact belongs. **The one thing a cell leaves on the Docker host is its
   task image**, tagged `hb__<content hash>` by `resources/harbor-docker-compose.yaml` — one per
-  distinct task environment, never one per cell. **A trial that measured the machine is never a
-  cell**: `_infrastructure_failure` retries it and then raises `CellInfrastructureError`, which
+  distinct task environment, never one per cell. **A hard kill runs no teardown at all**, so it
+  leaves one idle container per in-flight cell and the trial scratch beside them; the next run
+  sweeps both off the producer token each carries, asked of the lock that token holds for its
+  process's life (`harbor.py::_reap_dead_producers`). **Never swept: the task images and the
+  package cache**, which are what a resume is cheap on, **nor any container that does not name our
+  compose overlay**, because this Docker host has other tenants. **A trial that measured the
+  machine is never a cell**: `_infrastructure_failure` retries it and then raises `CellInfrastructureError`, which
   halts the walk — at once and as `CellSendRefusedError` when the provider account is out of
   credit. **Nor is one its model provider throttled**: `CellThrottledError` hands it to the run's
   backpressure (`BackendClient.run_query`), since the agent's own calls reach no client of ours.

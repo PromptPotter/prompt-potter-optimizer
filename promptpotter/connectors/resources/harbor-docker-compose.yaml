@@ -10,3 +10,7 @@ services:
     # Desktop resolves the name already; Linux needs the mapping.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Which process started this container (`harbor.py::_PRODUCER`), so the next run can tell a
+    # sibling's live cell from what a killed one left behind.
+    labels:
+      com.promptpotter.producer: "${PROMPTPOTTER_HARBOR_PRODUCER:-}"

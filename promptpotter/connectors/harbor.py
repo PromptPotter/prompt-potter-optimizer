@@ -16,14 +16,18 @@ import contextlib
 import functools
 import json
 import logging
+import os
 import re
+import shutil
 import sys
 import tempfile
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast, get_args
+from uuid import uuid4
 
 import httpx
+from filelock import FileLock, Timeout
 
 from promptpotter.config.settings import non_utf8_encoding
 from promptpotter.connectors.protocol import Connector, InProcessWorkload
@@ -119,7 +123,23 @@ AGENT_KWARG_KEYS = frozenset(
 # Trial scratch, NOT under the workspace: Harbor nests `<trials_dir>/<trial>/<role>/…` and a
 # workspace path is already deep — the MAX_PATH wall that forced L4's `.inner` registry flat.
 # Nothing durable lives here; reward, digest and token counts land in the measurement archive.
-_TRIALS_ROOT = Path(tempfile.gettempdir()) / "promptpotter-harbor"
+_TRIALS_HOME = Path(tempfile.gettempdir()) / "promptpotter-harbor"
+
+# What one process leaves on this machine under one token: its scratch directory, and the label
+# every container it starts carries. Harbor stops an environment in a `finally` (`trial/trial.py::
+# run`), so a HARD KILL is the only way either outlives its run — and the token's lock is how the
+# next run tells that from a live sibling, the kernel dropping it with its holder exactly as
+# machine slots rely on (`infrastructure/backend.py::MachineSlots`).
+_PRODUCER = f"{os.getpid():x}{uuid4().hex[:4]}"
+_PRODUCER_LABEL = "com.promptpotter.producer"
+# Compose's own record of the files a container was built from, which names our overlay — the one
+# marker on a container started before the producer label existed.
+_COMPOSE_FILES_LABEL = "com.docker.compose.project.config_files"
+# Read by the compose overlay, which interpolates it into that label.
+_PRODUCER_ENV = "PROMPTPOTTER_HARBOR_PRODUCER"
+_PRODUCER_LOCK = ".producer.lock"
+_TRIALS_ROOT = _TRIALS_HOME / _PRODUCER
+_MACHINE_CLAIMED: list[FileLock] = []
 
 # Keeps a task's image across cells and stops the container without a grace period. It reads
 # Harbor's compose infra variables, which task-authored compose files reference too.
@@ -680,6 +700,73 @@ async def _ensure_package_cache() -> None:
             f"{PACKAGE_CACHE} is not running: {state[-300:]}", spent={}, step_timings={}
         )
     _PACKAGE_CACHE_RUNNING.add(PACKAGE_CACHE)
+
+
+def _producer_is_dead(token: str) -> bool:
+    """Whether the process behind *token* is gone. Asked of the lock it holds for its own life,
+    never of an mtime: a cell runs for minutes writing nothing, and a sibling's live containers are
+    not this run's to remove."""
+    home = _TRIALS_HOME / token
+    if not home.is_dir():
+        return True
+    lock = FileLock(str(home / _PRODUCER_LOCK), timeout=0)
+    try:
+        lock.acquire()
+    except Timeout:
+        return False
+    lock.release()
+    return True
+
+
+async def _reap_dead_producers() -> None:
+    """Remove the containers and scratch of every producer that is no longer running.
+
+    Two ways a container is nobody's: a token whose lock is free, or NO token while naming our
+    overlay — which a container this code started never is, so nothing alive can claim it. The
+    second is the only route to what a kill left before the label existed."""
+    code, out = await _docker(
+        "ps", "-a", "--format",
+        f'{{{{.ID}}}}|{{{{.Label "{_PRODUCER_LABEL}"}}}}|{{{{.Label "{_COMPOSE_FILES_LABEL}"}}}}',
+    )  # fmt: skip
+    ours = str(_DOCKER_OVERLAY).lower()
+    by_token: dict[str, list[str]] = {}
+    gone: list[str] = []
+    for line in out.splitlines() if code == 0 else []:
+        cid, _, rest = line.partition("|")
+        token, _, compose_files = rest.partition("|")
+        if not cid:
+            continue
+        if token.strip():
+            by_token.setdefault(token.strip(), []).append(cid)
+        elif ours in compose_files.lower():
+            gone.append(cid)
+    for token in by_token.keys() | {d.name for d in _TRIALS_HOME.iterdir() if d.is_dir()}:
+        if token == _PRODUCER or not await asyncio.to_thread(_producer_is_dead, token):
+            continue
+        gone += by_token.get(token, [])
+        await asyncio.to_thread(shutil.rmtree, _TRIALS_HOME / token, ignore_errors=True)
+    if gone:
+        await _docker("rm", "--force", *gone, timeout=120)
+        logger.info("harbor: removed %d container(s) left by a run that is gone", len(gone))
+
+
+async def _claim_machine() -> None:
+    """This process's scratch directory and the lock naming it live, then one sweep of what dead
+    producers left. At the FIRST CELL rather than in ``Connector.preflight``, for the same reason
+    the package cache starts there: the diagnostics and the embedded launch measure cells without
+    ever running preflight."""
+    if _MACHINE_CLAIMED:
+        return
+    os.environ[_PRODUCER_ENV] = _PRODUCER
+    _TRIALS_ROOT.mkdir(parents=True, exist_ok=True)
+    lock = FileLock(str(_TRIALS_ROOT / _PRODUCER_LOCK), timeout=0)
+    lock.acquire()
+    _MACHINE_CLAIMED.append(lock)
+    try:
+        await _reap_dead_producers()
+    except (OSError, TimeoutError) as exc:
+        # Not re-raised into `_machine_step`: a failed sweep leaves junk, never a failed cell.
+        logger.debug("harbor: could not reap what earlier runs left: %s", exc)
 
 
 def _agent_install_script(tools: tuple[tuple[str, str], ...]) -> str:
@@ -1380,7 +1467,8 @@ async def _in_process_run(
                     admission.settle(billed)
             return result, time.monotonic() - start
 
-    _TRIALS_ROOT.mkdir(parents=True, exist_ok=True)
+    with _machine_step():
+        await _claim_machine()
     # Every attempt's spend, discarded ones included: a retried episode still ran the agent.
     attempts: list[dict[str, StepTokenUsage]] = []
     spent_s = 0.0

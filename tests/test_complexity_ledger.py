@@ -426,7 +426,10 @@ LEDGER_BASELINE = {
     # +1: a backend retry served without the backend's own reason — every surface then reports a
     # stop whose cause exists in one console, and a run hosted by the API server writes no
     # terminal mirror at all, so the diagnosis is the operator's to paste (test_integrity § 8).
-    "test_functions": 198,
+    # +1: the sweep that removes what a killed run left reaching a SIBLING's live container — the
+    # machine's cells are one pool, so the wrong liveness test forces an episode mid-flight and
+    # banks it as an infrastructure failure, minutes and its whole bill (test_integrity § 7).
+    "test_functions": 199,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

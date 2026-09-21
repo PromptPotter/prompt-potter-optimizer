@@ -174,6 +174,8 @@ A fresh launch clears every polled run-control flag: a flag surviving the gestur
 
 A failed cell's typed `error_category` (`shared/errors.py::ErrorCategory`) and its message land in the latest `rounds/round_NNNN.json`, alongside the mirrored `logs/latest.log`. The optimizer-call path carries a hard wall-clock (`_chat_under_deadline` → `OPTIMIZER_TIMEOUT`), so a hung optimizer call terminates itself. **An overnight death with no terminal record is machine-sleep or session-end class, not a code fault** — do not go looking for a bug in the loop.
 
+**A killed run outlives itself in its containers.** A containerized cell is torn down by the process that started it — on cancellation and on failure alike — so only a hard kill leaves one idle container per in-flight cell, holding a trial nobody will collect. The next run on that backend sweeps them, and its trial scratch, off the lock each carries (`connectors/harbor.py::_reap_dead_producers`); what the sweep keeps is the task images and the package cache, which are what make the resume cheap.
+
 ## Recovery: resume, rewind, fork
 
 Three workflows over one fork primitive.
@@ -253,7 +255,7 @@ A hole is plugged with a **real measurement, never an archive row** — a cached
 - **First Ctrl+C** — cancels the in-flight call, banks completed work, declares the cycle `paused` (resumable), exits **130**.
 - **Second Ctrl+C** — force-quits immediately.
 
-After an interrupted run, check for orphan processes. An interrupt mid-round leaves ledger events but no closing `round:complete` — see **Partial rounds** under Rewind for which `--from N` offsets are then admissible.
+An interrupt mid-round leaves ledger events but no closing `round:complete` — see **Partial rounds** under Rewind for which `--from N` offsets are then admissible. Nothing is left running to hunt for: a cancelled cell is torn down by the process it belongs to, and only a hard kill leaves anything, which § Where the error text is covers.
 
 ## Will a config change re-score? — the measurement cache
 
