@@ -73,11 +73,14 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   and `OPTIMIZER_RESPONSE_MODELS`, and `application/optimization/CLAUDE.md` already splits the
   conceptual family from the structural one, which leaves only L4 outside, at the connector seam.
   So the question is not whether three strangers should converge; it is whether the recursion
-  belongs inside the ladder it recurses on. **Asked and DEFERRED by the operator**, on the ground
-  that it is structural while what M13 still needs is empirical — so this is held by decision, not
-  by nobody having looked. **Rides with nothing, deliberately** — it is the one item here that must
-  not be picked up on the way. **Re-test:** the preprint ships (`.scratch/m13-preprint.md` carries
-  the stage state); until then, do not open it and do not re-file it as unasked.
+  belongs inside the ladder it recurses on. **Asked and DEFERRED by the operator** — held by
+  decision, not by nobody having looked. **The ground it was deferred on is gone**: it was
+  "structural while what the milestone needs is empirical", and the new M13 is itself structural.
+  What replaces it is stronger — [`roadmap.md`](roadmap.md) § The optimizer plug point answers the
+  same question in the same direction, since a plugged-in proposer takes L1's *seat* and nesting
+  stays re-entrancy at a seam rather than a new rung. **Rides with nothing, deliberately.**
+  **Re-test:** read that section; if it settles the question for the operator too, this item is
+  deletable rather than deferred, and deleting it is how it ships.
 
 - **Optimizer model repair-rate on heavy L2/L3 structured output — unmeasured.** What is owed is the
   measurement: a live cycle reaching L3, read under the model
@@ -301,8 +304,10 @@ an untyped dict.
   `key_source: host|user` lands (declared on `TokenUsagePayload` in the asyncapi), replace the
   fake-slug derivation with the real dimension. Blocker: the coupon build adds the field.
 
-**Needs a capability M13 does not open** — the no-new-features clause is retired, so the bar is no
-longer "is a feature allowed" but "does the preprint need it", and these do not:
+**Needs a capability neither the bench nor the preprint opens** — the no-new-features clause is
+retired, so the bar is no longer "is a feature allowed" but "does M13 or M14 need it", and these do
+not. The bench does not rescue the first one in particular: a third party ships an optimizer through
+an entry point, in-process, so it never touches the inbound credential.
 - **The REST API has no inbound credential** — owned by
   [`../developer/stable-api.md`](../developer/stable-api.md) § 8. What is NOT stable. Owed HERE: the
   credential itself, plus the worked `submit → poll → fetch` examples and per-endpoint guarantees

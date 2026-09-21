@@ -53,6 +53,20 @@ they drift, the peers and PromptPotter silently measure different things, which 
 split diverged before. `bbeh_dspy.ipynb` has a flags cell to toggle `RUN_GEPA` / `RUN_MIPRO` /
 `RUN_BOOTSTRAP`.
 
+> ⚠️ **The rule is already broken, and nothing caught it.** Both notebooks do
+> `from shared_config import (… exact_match, export_results)`, and this directory's
+> `shared_config.py` defines **no `exact_match` at all** — it exists only inside each notebook's
+> own `%%writefile` cell, where it compares whole strings. `matchers.py::_exact_match` runs
+> `extract_last_bold` on both sides, so on a chain-of-thought benchmark the two graders differ in a
+> direction that favours us. The drift is not the finding; **the rule being unenforceable is** —
+> it is asserted in prose against a cell no check reads, so it will drift again. Recount before
+> quoting any number produced by these notebooks.
+
+**What replaces this protocol for the controlled arm — owned by
+[`../../specs/roadmap.md`](../../specs/roadmap.md) § The optimizer plug point.** Owed HERE: the
+notebooks are kept, not deleted, as the *uncontrolled reference arm* — what a peer scores when it
+runs its own way is the number that shows what holding the harness constant was worth.
+
 ## How to run
 
 **CAPO / DSPy (Colab):** open in Colab → add `GROQ_API_KEY` to Colab Secrets → toggle optimizer flags

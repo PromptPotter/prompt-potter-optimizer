@@ -443,7 +443,7 @@ def test_a_labelless_round_reports_absence_not_zero() -> None:
 def test_the_constant_answer_floor_is_undefined_without_labels() -> None:
     """A verifier-graded bank has no constant answer, so it has no floor — ABSENT, never 0.0, and
     never a refusal of the whole reading either: the level half (accuracy, spread, latency, cost)
-    is exactly what such an instrument is screened on, and every M13 benchmark is one.
+    is exactly what such an instrument is screened on, and every preprint benchmark is one.
 
     A bank that MIXES the two is the case that still raises. Its floor would be the labelled part's
     majority share reported as the whole bank's, which is a wrong number rather than a missing one.

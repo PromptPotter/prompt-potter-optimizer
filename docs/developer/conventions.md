@@ -73,11 +73,10 @@ collects everything else.
 ## Naming
 
 - **A filler name whose PACKAGE PATH resolves it is not a collision.** `session.py` ×3,
-  `state.py` ×2, `base.py` ×2 and `shared/identity.py` keep their names, and the refusal was
-  bought by the verification it asked for: a genuine clash produces an `import … as` between two
-  COLLIDING modules, and the tree holds none. **Re-run that check rather than trusting this line** —
-  the `import … as` forms the tree does hold rename a generic name away from a local binding, which
-  is the opposite evidence. Re-open only for a name whose own package cannot resolve it. The two failures that ARE
+  `state.py` ×2, `base.py` ×2 and `shared/identity.py` keep their names. **Verify rather than
+  trust this line:** a genuine clash produces an `import … as` between two COLLIDING modules, and
+  the `import … as` forms that do exist rename a generic name away from a local binding — the
+  opposite evidence. Re-open only for a name whose own package cannot resolve it. The two failures that ARE
   renames — a second word for something the repo already names, and a name that stopped describing
   its contents — are owned by root [`CLAUDE.md`](../../CLAUDE.md) § STOP.
 - **Four banned words**, in identifiers and prose alike. **node** — never
@@ -111,9 +110,7 @@ collects everything else.
   typecheck, so there is no standing test to keep). The bug class: the decision then
   lives in an *absent* argument, and reading the call site tells you nothing — you must
   notice the absence, jump to a distant default, and find a docstring clause naming the
-  intended callers. `open_walk` / `compute_composite_fitness` take `opt_sp` this
-  way, having spent time on exactly that three-hop trail; the same function's per-sample
-  callbacks were already required for the weaker reason of display honesty.
+  intended callers. `open_walk` / `compute_composite_fitness` take `opt_sp` this way.
   A default is fine when it is a *derivation* every caller would repeat identically
   (`round_scorer=None` → the schema's own default formula), not when the right value
   genuinely differs per call site.
@@ -152,7 +149,7 @@ Productive patterns:
 - **Single-caller indirection with no architectural reason** — no own test, no layer boundary. Skip splits across a load-bearing layer.
 - **Dead exception paths / enum variants** — handler arms outliving the raising path. Grep every variant for a construction site.
 - **Speculative API surface** — params never read, an `X | None` always non-None, fields declared and written but never read.
-- **Absent collapsed into zero** — a `float = 0.0` default or an `or 0.0` coercion on a field carrying a MEASUREMENT. The tell is a `| None` sibling in the same model: the rule and its violation have twice appeared in one constructor call. Counts, rates and money are honest zeros; reporting-only models default by written rule ([`../../promptpotter/domain/CLAUDE.md`](../../promptpotter/domain/CLAUDE.md) § Tolerance is scoped by what a payload is FOR). Enforcement is per-site — [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md) forbids a repo-wide scan — which is why this is a hunt pattern and not a task.
+- **Absent collapsed into zero** — a `float = 0.0` default or an `or 0.0` coercion on a field carrying a MEASUREMENT. The tell is a `| None` sibling in the same model — the rule and its violation sitting in one constructor call. Counts, rates and money are honest zeros; reporting-only models default by written rule ([`../../promptpotter/domain/CLAUDE.md`](../../promptpotter/domain/CLAUDE.md) § Tolerance is scoped by what a payload is FOR). Enforcement is per-site — [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md) forbids a repo-wide scan — which is why this is a hunt pattern and not a task.
 - **Vibe-coded scaffolding** — `NotImplementedError` branches, comments about work the project does not plan. Check the roadmap before believing the "future".
 
 **NOT debt — skip on sight:** intentional UI placeholders (each names itself in its own component
@@ -182,7 +179,7 @@ helpers used by one caller **in the same file**.
 - **Commit messages: aim 900 chars** total (incl. trailer), 950 tolerated; title <70.
   Terse bullets — no motivation essays. Past 950 → rewrite, do not
   commit-and-fix-later.
-- **Hand-written work carries `Hand-authored-by: operator`** in the trailer block. Provenance is metadata, not area, so it never takes the `type(scope)` slot — that keeps saying *where*. Grep it with `git log --grep='Hand-authored-by'`. Two pre-convention commits marked it in the subject instead (`docs: manual edit…`, `docs: maunal pass`); don't copy that — `manual` collides with `docs/manual/`, with the `docs(manual,…)` area scope, and with prose about the install manual, so it cannot be searched for.
+- **Hand-written work carries `Hand-authored-by: operator`** in the trailer block. Provenance is metadata, not area, so it never takes the `type(scope)` slot — that keeps saying *where*. Grep it with `git log --grep='Hand-authored-by'`. **Never spell it in the subject as `manual`** — the word collides with `docs/manual/`, with the `docs(manual,…)` area scope, and with prose about the install manual, so it cannot be searched for.
 
 ## Paid corrections
 
@@ -210,7 +207,7 @@ only in the specific situation named before it.
 **When the operator bounds any budget axis → `<one-budget>`:**
 
 <one-budget>
-**The AI blind spot this guards against:** told "this must not exceed X", an AI treats every axis it was *not* handed a number for as free, and proposes an increase there — priced in the cheap axis and presented as costless. A run capped by patience came back with "only ~$0.50 more"; a per-cell measurement came back as "only ~12 extra calls, +3%". Both are budget increases the operator never agreed to, wearing the units they care least about.
+**The AI blind spot this guards against:** told "this must not exceed X", an AI treats every axis it was *not* handed a number for as free, and proposes an increase there — priced in the cheap axis and presented as costless. It is a budget increase the operator never agreed to, wearing the units they care least about.
 
 **A limit stated on ONE axis binds ALL of them by default — wall-clock, dollars, tokens, calls, rounds, cells, samples — and the implication runs in every direction.** "Don't spend more" bounds the clock; "we don't have five hours" bounds the dollars. This is the ground assumption, not a reading to be argued out of, and it does not need restating per request.
 
@@ -222,7 +219,7 @@ So: **price a proposal in the axis the operator named AND in the ones they didn'
 <simplify-the-problem>
 When an LLM call is slow, costly, or timeout-prone because it emits a large number of tokens, treat the token volume as a **prompt-quality symptom, not a capacity problem**. A tightly-scoped prompt poses a *simpler* problem, so the model reasons less and answers shorter. The first move is to tighten the input — constrain the ask, cut open-ended or redundant injections (don't re-dump raw evidence a downstream node was already handed pre-digested), bound the output shape, lower reasoning effort to match the real difficulty — **not** to reach for a faster/bigger provider or raise the timeout/token cap. Simplify the problem so the model doesn't *need* the tokens; the deadline, the token cap, and the provider are safety rails, not the fix. (A specialization of <root-fix>: the cause is upstream in how we posed the problem.)
 
-**Input length is a QUALITY tax, not only a bill — which is why this fires before anything is slow.** Every LLM degrades as its input grows: attention spreads, the middle is recalled worst, instructions compete. A block harmless at 200 chars is not harmless at 4000, so adding one obliges you to say what it displaces. And **attribute before you diagnose** — a prompt's weight is never where it feels like it is, and reasoning about the code cannot find it: dump ONE real payload from a ledger `llm_call` record and account for every character by block, counting the template fields, the dispatch panels inside them, and **the response JSON Schema, which is prompt text and is the one nobody counts** (`l1_generate` ran ~17.8k chars for months — 40% panels, 32% static prose, 23% wire schema, over half of that Python class docstrings Pydantic had hoisted into `description`).
+**Input length is a QUALITY tax, not only a bill — which is why this fires before anything is slow.** Every LLM degrades as its input grows: attention spreads, the middle is recalled worst, instructions compete. A block harmless at 200 chars is not harmless at 4000, so adding one obliges you to say what it displaces. And **attribute before you diagnose** — a prompt's weight is never where it feels like it is, and reasoning about the code cannot find it: dump ONE real payload from a ledger `llm_call` record and account for every character by block, counting the template fields, the dispatch panels inside them, and **the response JSON Schema, which is prompt text and is the one nobody counts** — on a measured `l1_generate` payload the schema was ~23% of the characters, behind only the panels and the static prose.
 </simplify-the-problem>
 
 **When simplifying / labelling a change "refactor" / doing LOC work → `<surface-ledger>`:**
@@ -243,7 +240,7 @@ When an LLM call is slow, costly, or timeout-prone because it emits a large numb
 
 1. **Parity is part of done.** A change to what the engine *decides* owes every entry point a legible surface in the same breath — or, where that cannot land now, a **written plan** (spec + memory) rather than nothing. "Done" asks whether the human who relies on this can *see* it from where they actually work. UX is a first-class axis, not a footnote.
 2. **Teach, don't dump — and never force jargon.** A new internal value (a θ, a statistic, a mode) reaches the operator *taught*: a plain-language explainer on an **existing** surfacing channel (the lens/formula seam, not a new toggle), **operator-selectable** so it is never forced on someone who doesn't speak that vocabulary. The engine may *decide* on the expert metric; the human *reads* the one they chose. Teach from **one corpus** serving operator and AI reader alike.
-3. **The reverse case is the urgent one — periphery instead of parity.** Rule 1 is about a capability you are ADDING; this is one that already exists on one adapter and got written a second time on another. It is the more expensive shape because nothing announces it: both copies work. **Treat a divergence the moment you see it, ahead of whatever else is queued.** The tell is one rule spelled twice, and the cause is **a LAYER boundary: the shared piece sits where one adapter cannot import it** — orchestration parked in a `routers/` module, which a CLI verb can only reach by dragging FastAPI in — so the second adapter writes its own narrower copy. Fixing the copy leaves the cause in place and the next adapter writes a third. The cure is one-directional, and the layering guard states it in its own allow-list comment (`scripts/gate.py::_LAYERING_ALLOW`): **move the shared piece down into `application/`, leave a thin shell at each entry point.** The cost is not hypothetical — `edit-draft-campaign` lived in a router, so the CLI's `--set` reached a quarter of the fields the patch model declared, judged a model steer against a different list than the web did, and wrote the draft with no `CommandRecord` at all: an operator's origin edit was recorded nowhere and re-billed on every retry. **Where the second copy is a deliberate inversion, the ABSENCE is the boundary and must be stated as one** (`set-sample-lookahead`, root [`../../CLAUDE.md`](../../CLAUDE.md) § Conventions) — otherwise a later reader reads a deliberate hole as this bug and "fixes" it.
+3. **The reverse case is the urgent one — periphery instead of parity.** Rule 1 is about a capability you are ADDING; this is one that already exists on one adapter and got written a second time on another. It is the more expensive shape because nothing announces it: both copies work. **Treat a divergence the moment you see it, ahead of whatever else is queued.** The tell is one rule spelled twice, and the cause is **a LAYER boundary: the shared piece sits where one adapter cannot import it** — orchestration parked in a `routers/` module, which a CLI verb can only reach by dragging FastAPI in — so the second adapter writes its own narrower copy. Fixing the copy leaves the cause in place and the next adapter writes a third. The cure is one-directional, and the layering guard states it in its own allow-list comment (`scripts/gate.py::_LAYERING_ALLOW`): **move the shared piece down into `application/`, leave a thin shell at each entry point.** **Where the second copy is a deliberate inversion, the ABSENCE is the boundary and must be stated as one** (`set-sample-lookahead`, root [`../../CLAUDE.md`](../../CLAUDE.md) § Conventions) — otherwise a later reader reads a deliberate hole as this bug and "fixes" it.
 </entry-point-parity>
 
 **When you are about to open a file you will WORK in, or run a search spanning more than three files → `<read-once>`:**
@@ -251,7 +248,7 @@ When an LLM call is slow, costly, or timeout-prone because it emits a large numb
 <read-once>
 **The AI blind spot this guards against:** a narrow read *feels* frugal. It returns twenty lines instead of eight hundred, so it reads as the disciplined move — and the context window keeps every one of them, so twenty pokes cost twenty times. The AI optimizes the visible number (lines returned now) against the invisible one (lines resident for the rest of the session), and picks wrong every time. Measured across 133 session transcripts: **tool results are 83% of all content**, and **69% of the reading bill is RE-reading** — the same files, in the same session, a few lines at a time. On the ten hottest files, **265 of 276 reads were ranged**.
 
-1. **Read whole, once, when you expect four or more touches.** A ranged read averages ~600 tokens and a whole one ~2,600, so the break-even is between four and five pokes — and `store.py` was poked thirty times in one session, for six times what reading it once would have cost. Open it, read it, work from what you have. The exception is a file read for *reference* rather than for work — `tests/` (the suite is fixed at six files by [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md), so they grow unboundedly by charter) and the hand-authored contract YAMLs under `docs/specs/` — where you genuinely want one clause and will not return.
+1. **Read whole, once, when you expect four or more touches.** A ranged read averages ~600 tokens and a whole one ~2,600, so the break-even is between four and five pokes. Open it, read it, work from what you have. The exception is a file read for *reference* rather than for work — `tests/` (the suite is fixed at six files by [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md), so they grow unboundedly by charter) and the hand-authored contract YAMLs under `docs/specs/` — where you genuinely want one clause and will not return.
 2. **Never read file CONTENT through `sed` / `cat` / `head`.** An identical `Read` is deduplicated by the harness; shell output never is, so the same bytes are billed in full every time — and it *looks* cheaper because it prints fewer lines. Use the file tools; keep the shell for things that are not file content.
 3. **Delegate any search spanning more than three files.** A sub-agent reads in a window that is thrown away and hands back a conclusion; direct searching leaves every hit resident. This is measured, not stylistic: sub-agents were 3.3% of spend while direct `Grep` + shell `grep` was ten times that. Ask for the verdict and the paths, never the excerpts.
 4. **Make a command assert, not display.** Header scaffolding and unconditional dumps around a check are pure cost — print on failure, and let success be silent. Same rule as rule 3 in miniature: return the conclusion, not the evidence for it.
@@ -266,7 +263,7 @@ When an LLM call is slow, costly, or timeout-prone because it emits a large numb
 
 1. **A shell call carries a fixed toll the file tools do not** — `Bash` runs a median 2.4s and a mean 9.4s against ~0.1–0.4s for the file tools. This is the same conclusion <read-once> rule 2 reaches from the token side, and the two agree: the shell is for things that are not file content. When you do need it, put the whole errand in ONE call rather than five.
 2. **Delegation is cheap in tokens and expensive in wall-clock.** A sub-agent is ~5 minutes. <read-once> rule 3 prices it at 3.3% of spend and is right about tokens, but **75 of 75 launches in that corpus went out alone**, so N searches cost N × 5 minutes when they could have cost one. Send them in a single message, or do the search yourself.
-3. **Never `sleep`-poll in a shell.** Two polling loops in one recorded session burned seven minutes producing nothing. Run the thing in the background and let the notification arrive; a wait implemented as a loop is a wait nobody can interrupt.
+3. **Never `sleep`-poll in a shell.** Run the thing in the background and let the notification arrive; a wait implemented as a loop is a wait nobody can interrupt.
 4. **Iterate on the targeted check; run the gate once.** Gate commands were over half of all shell time. While editing, run the one tool — or the one test file — that owns what you touched; `scripts/gate.py` is the thing you run before you hand the work over, not between edits.
 
 **And be honest about the context effect rather than reaching for it.** Turn latency does rise with the window — a median 1.4s at 50k against 4.4s at 700k — but that is seconds, and it is the whole of it: shell latency measured flat across a session, so nothing is degrading. It does not justify a five-minute delegation to save twenty thousand tokens.

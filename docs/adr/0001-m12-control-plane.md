@@ -25,7 +25,7 @@ How do we constrain the M12 interactivity envelope so that the wire surface is a
 * **§0 backbone is already CQRS + event-sourcing.** The per-cycle `.runtime/ledger.jsonl` ledger is the spine; projections are the read side; the §0 I/O kinds taxonomy names the seams. The wire surface must ride existing infrastructure, not add a sidecar.
 * **Identity seam is already shipped.** Stage-0 `IdentityContext` (`shared/identity.py`) carries the trust boundary through to `Stores`; M12 commands consume the same seam.
 * **Drift detection must be CI-checkable.** A contract that humans-only review is not a contract.
-* **The contract must outlive M12.** Subsequent milestones (M13 chat-first user web, M14+ multi-user) inherit the wire surface unchanged.
+* **The contract must outlive M12.** Every lane after it — the chat-first user web (roadmap `C1`), multi-user (ADR-0002 Stage 2) — inherits the wire surface unchanged. Named by lane rather than by milestone number, because the numbers are re-used and the lanes are not.
 * **Whitelabel ready.** Every brand / auth / capability element must be per-tenant; the contract must be Stage-1-friendly without grandfather clauses.
 
 ## Considered Options
@@ -232,7 +232,7 @@ Profile A (outbound highway) certified its wire contract into [`../developer/eve
 - `JobRegistry` internal data model — Profile D names the constraints; implementation lives elsewhere.
 - Webapp redesign (component-level) — design surface in `promptpotter-web/BRAND.md`.
 - Multi-user merge / CRDT operations — identity-foundation Stage 2+.
-- Per-tenant rate limiting / quotas — M13+ backlog.
+- Per-tenant rate limiting / quotas — roadmap `C6`, public-service hardening.
 - L4 inner-cycle execution path — [`roadmap.md`](../specs/roadmap.md) Track 1.5.
 
 ### Cross-refs

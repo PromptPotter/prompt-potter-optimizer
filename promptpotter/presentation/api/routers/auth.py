@@ -65,7 +65,7 @@ class ConnectedAccount(StrictModel):
 
     Stage-1 beta is single-account-per-user — the list is always length 1.
     The Clerk-style "connected accounts" surface in the webapp displays this
-    list; multi-account linking ships post-M13.
+    list; multi-account linking ships with ADR-0002 Stage 2.
     """
 
     provider: str

@@ -13,7 +13,7 @@ import type {
 } from "./types";
 import type { PipelineView } from "@/components/workflow";
 
-// M13 chat-first dataset ingest: upload + mint a durable `checkin` campaign (`draft_id` IS the
+// Chat-first dataset ingest (roadmap `C1`): upload + mint a durable `checkin` campaign (`draft_id` IS the
 // `campaign_id`), sparse-patch the draft, then gate + commit + spawn. Wire contract pinned in
 // `docs/specs/api-openapi.yaml`.
 

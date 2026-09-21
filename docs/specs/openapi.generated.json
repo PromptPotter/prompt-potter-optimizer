@@ -1235,7 +1235,7 @@
       },
       "ConnectedAccount": {
         "additionalProperties": false,
-        "description": "One OIDC provider currently bound to the active session.\n\nStage-1 beta is single-account-per-user — the list is always length 1.\nThe Clerk-style \"connected accounts\" surface in the webapp displays this\nlist; multi-account linking ships post-M13.",
+        "description": "One OIDC provider currently bound to the active session.\n\nStage-1 beta is single-account-per-user — the list is always length 1.\nThe Clerk-style \"connected accounts\" surface in the webapp displays this\nlist; multi-account linking ships with ADR-0002 Stage 2.",
         "properties": {
           "email": {
             "anyOf": [

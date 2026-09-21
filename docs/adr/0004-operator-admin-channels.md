@@ -150,7 +150,7 @@ in `.env`, run `deploy-linux/install-admin-bot.sh`, then message the bot
 * **Other admin actions** (secret rotation, restart, health) — the channel pattern
   generalizes to them, but each is its own change that amends §0 when added.
 * **Authorization model** — the operator is the single deployment admin; per-admin RBAC
-  is post-M13 (rides ADR-0002's `capabilities`).
+  rides ADR-0002 Stage 2 and its `capabilities`.
 * **A webapp admin surface** — managing the blocklist from the webapp would be a *human*
   OIDC-gated surface; possible later, orthogonal to this out-of-band channel.
 
