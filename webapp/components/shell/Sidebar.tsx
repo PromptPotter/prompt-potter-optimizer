@@ -13,6 +13,7 @@ import { Term } from "@/components/ui";
 import { PotterMark } from "@/components/brand/PotterMark";
 import { encodeCyclePath, rootCycleId, type CyclePath } from "@/lib/ids";
 import { useNodeToggle } from "@/lib/view-memory";
+import { useShowCandidates } from "@/lib/tree-prefs";
 import { applyTheme, readStoredTheme } from "@/lib/theme";
 import { buildForest, nodeKey } from "@/lib/derivations";
 import type { TreeCtx } from "./sidebar/ForestRows";
@@ -82,6 +83,8 @@ export function Sidebar({
   // Expand/collapse, remembered PER CAMPAIGN (`lib/view-memory.tsx`) — the campaign a node
   // belongs to is read off its own address, so nothing here has to carry one.
   const nodes = useNodeToggle();
+  // Per-device, not per campaign — so it does not ride view memory's TTL and LRU.
+  const [showCandidates] = useShowCandidates();
   // Dataset filter — null = all datasets. Not persisted; resets per visit.
   const [datasetFilter, setDatasetFilter] = useState<string | null>(null);
 
@@ -150,8 +153,9 @@ export function Sidebar({
       viewedPath,
       viewedCandidateId,
       selectCyclePath: onSelectPath,
+      showCandidates,
     }),
-    [nodes, viewedPath, viewedCandidateId, onSelectPath],
+    [nodes, viewedPath, viewedCandidateId, onSelectPath, showCandidates],
   );
 
   // Wait for BOTH the cycle list and the campaign list for the CURRENT

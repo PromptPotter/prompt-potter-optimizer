@@ -444,6 +444,16 @@ CHECKS: tuple[Check, ...] = (
         _generated("build_ts_types.py", "webapp/lib/api/types.generated.ts"),
         staged=True,
     ),
+    # "web", not "py" like its siblings: this one reads `simple-icons` out of `webapp/node_modules`,
+    # so it cannot run on a machine that has not installed the webapp's deps. A brand mark is an
+    # asset rather than a schema — the check is here so a mark can never change shape without
+    # showing up in a diff someone reads.
+    Check(
+        "vendor-marks",
+        "web",
+        _generated("build_vendor_marks.py", "webapp/components/ui/vendor-marks.generated.ts"),
+        staged=True,
+    ),
     Check(
         "optimizer-schemas",
         "py",

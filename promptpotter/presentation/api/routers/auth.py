@@ -695,7 +695,12 @@ def activity(
 
 def _provider_from_model(model: str) -> str:
     """Derive the API-key axis from a model string, by the ``<provider>/<model>`` convention. A string with no slash falls
-    back to ``unknown``."""
+    back to ``unknown``.
+
+    The browser draws the same axis as a vendor MARK beside a model, off its own twin of this rule
+    (``webapp/lib/format.ts::vendorOf``) — the surfaces that need it there hold a raw model string
+    off ``CampaignSummary.runs_with`` rather than anything this serves, so the rule lives at both
+    ends and the coupling is commented at both."""
     if "/" in model:
         return model.split("/", 1)[0]
     if ":" in model:  # e.g. "groq:openai/gpt-oss-120b"

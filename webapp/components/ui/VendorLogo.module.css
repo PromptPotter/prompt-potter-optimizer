@@ -1,0 +1,36 @@
+/* Vendor mark — the ink is the signal, so the box is fixed-width: a column of these has to line
+   up down a sidebar to be countable. Sized in `em` off the type token rather than a literal, so
+   it contracts with the row. */
+
+@layer ui {
+.logo {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 1.2em;
+  block-size: 1.2em;
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--vendor-tint);
+}
+
+/* `currentColor` inside the `<symbol>` resolves against THIS element, so one shared path
+   definition still paints in each vendor's own ink. */
+.glyph {
+  inline-size: 100%;
+  block-size: 100%;
+  fill: currentColor;
+}
+
+/* The symbol definitions. Not `display:none` — that has historically kept `<use>` from
+   resolving in some engines; zero-size + hidden overflow is the pattern that does not. */
+.sprite {
+  position: absolute;
+  inline-size: 0;
+  block-size: 0;
+  overflow: hidden;
+}
+}

@@ -29,9 +29,13 @@
 /* Hard right, not simply after the title: the id is a copy-paste fact about the thing the title
    names, sharing its baseline rather than taking a line of its own. */
 .run-id{flex:0 0 auto;margin-left:auto;display:inline-flex;align-items:center;gap:var(--space-4);white-space:nowrap;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-tertiary)}
-/* What this campaign RUNS WITH — models, the settings it chose, how far it got, when it last
-   moved (lib/derivations/campaign-summary.ts::campaignLineParts). */
+/* What this campaign RUNS WITH — its models, how far it got, when it last moved. No resolved
+   setting: `campaignLineParts` says why (lib/derivations/campaign-summary.ts). */
 .run-setup{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--text-xs);color:var(--color-text-tertiary)}
+/* The vendor marks lead the setup line, as they lead the sidebar row — same reading, so the
+   same order. `baseline`, not `center`: the line is one run of text with marks in it. */
+.run-setup-vendors{display:inline-flex;align-items:baseline;gap:2px;margin-inline-end:var(--space-6)}
+.run-setup-vendors:empty{display:none}
 /* The reading row. It SCROLLS rather than clipping: four chips do not fit a phone, and a
    wrapper that hides its overflow deletes what runs past it with nothing on screen to say so. */
 .run-chips{display:flex;align-items:center;gap:var(--space-8);margin-top:var(--space-4);overflow-x:auto;scrollbar-width:thin}

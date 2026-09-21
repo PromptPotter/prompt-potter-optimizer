@@ -165,16 +165,27 @@
 .unit-library-mark.tone-danger{color:var(--color-danger)}
 /* A campaign's served dollars, never truncated. */
 .unit-library-spend{flex:0 0 auto;font-family:var(--font-mono);font-variant-numeric:tabular-nums;color:var(--color-text-secondary)}
-/* The name gives way, the id's `__suffix` does not: it is what separates runs of one dataset. */
-/* The row's second line — what a campaign runs with. `flex:1 1 100%` makes the wrapping row
-   break before it, so it takes a line of its own under the name and the reading. */
-/* Two lines, not one: at the resting 200px sidebar a single line ends after the model, and
+/* The row's second line — the campaign's id and what it runs with. `flex:1 1 100%` makes the
+   wrapping row break before it, so it takes a line of its own under the name and the reading. */
+/* Two lines of clamp, not one: at the resting 200px sidebar the id alone fills the first, and
    the settings after it are what tell one run of a dataset from the next. The title carries
    the whole line for the third. */
 .unit-library-sub{flex:1 1 100%;min-width:0;font-size:var(--text-xs);color:var(--color-text-tertiary);font-family:var(--font-mono);overflow:hidden;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
 .unit-library-name-split{display:flex;align-items:baseline}
+/* The vendor column. `font-size` is set HERE, not inherited from the row, so `min-inline-size`
+   resolves in the mark's own scale and a single-vendor row reserves exactly one mark's width —
+   that reservation is what makes the column line up down a stack of campaigns. A campaign on
+   two brands grows past it rather than truncating a brand away. */
+.unit-library-vendors{flex:0 0 auto;display:inline-flex;align-items:center;gap:2px;font-size:var(--text-xs);min-inline-size:1.2em;margin-inline-end:var(--space-6)}
 .unit-library-name-head{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.unit-library-name-tail{flex:0 0 auto;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-tertiary)}
+/* The second line sits under the NAME rather than under the marks, so the column above it
+   reads as a column. One mark's width, in the sub's own scale — both are --text-xs, so the
+   two ems are the same em. */
+.unit-library-sub-indent{padding-inline-start:calc(1.2em + var(--space-6))}
+/* The campaign's id, leading the second line. It is already in the sub's mono / xs / tertiary
+   register, so it only has to refuse the `overflow-wrap:anywhere` around it: an id broken
+   mid-hash across two lines is not an id anyone can match against a directory. */
+.unit-library-id{white-space:nowrap}
 /* Unit-kind badge on a non-root unit row (fork / diag). Small,
    uppercase, low-contrast — a qualifier, not a focal point. The root unit
    gets no badge. */
@@ -204,8 +215,7 @@
 .unit-library-family.archived > .unit-library-item:hover,
 .unit-library-family.retired > .unit-library-item:hover{opacity:1}
 .unit-library-twist{flex:0 0 18px;background:transparent;border:0;color:var(--color-text-secondary);cursor:pointer;font-size:var(--text-xs);padding:0;line-height:1;display:flex;align-items:center;justify-content:center;border-radius:4px}
-.unit-library-twist:hover:not(:disabled){background:var(--color-background-hover);color:var(--color-text-primary)}
-.unit-library-twist:disabled{cursor:default;visibility:hidden}
+.unit-library-twist:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
 /* The Compare tick. It lives in the row's chrome rather than on the Compare tab, so the campaign
    library is the one place campaigns are picked — for viewing and for comparing alike. Quiet until
    hovered or ticked: every row carries one, and a column of loud boxes would read as the point of

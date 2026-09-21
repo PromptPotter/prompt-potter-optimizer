@@ -81,6 +81,23 @@ export function shortModel(id: string): string {
   return id.slice(id.lastIndexOf("/") + 1);
 }
 
+// A model id's VENDOR — the org that TRAINED it, which is what its namespace names:
+// "openai/gpt-oss-120b" → "openai". Two colons to tell apart, and only their POSITION does it:
+// a colon LEFT of the slash is a gateway naming who served the call ("groq:openai/gpt-oss-120b"),
+// a colon right of it is the `:nitro` routing suffix on the model's own name. Lowercased; an id
+// carrying no namespace answers with its own name, so a caller always has something to draw.
+//
+// The browser twin of `presentation/api/routers/auth.py::_provider_from_model`, which already
+// backs the Account → Activity "Color by → Provider" axis — one rule, two runtimes, and the
+// coupling is commented at both ends. Derived here rather than served because the surfaces that
+// need it hold a raw model STRING off `CampaignSummary.runs_with`, never a `ModelCapability`.
+export function vendorOf(id: string): string {
+  const slash = id.indexOf("/");
+  const colon = id.indexOf(":");
+  if (slash === -1) return (colon === -1 ? id : id.slice(0, colon)).toLowerCase();
+  return id.slice(colon !== -1 && colon < slash ? colon + 1 : 0, slash).toLowerCase();
+}
+
 // Compact bare number — "3.4M" / "12.0k" / "840". For headline counts where
 // the unit is named elsewhere (a "Tokens" chart title); use fmtTokens when the
 // "tok" suffix belongs on the number itself.

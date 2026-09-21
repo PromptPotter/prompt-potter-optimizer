@@ -15,6 +15,7 @@ import { decodeCyclePath, encodeCyclePath, type CyclePath } from "@/lib/ids";
 import { applyChartDefaults } from "@/lib/theme";
 import { cx } from "@/lib/cx";
 import type { Tab } from "@/lib/view-tab";
+import { VendorSprite } from "@/components/ui";
 import { AccountModal } from "@/components/account/AccountModal";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { SidebarResizer } from "@/components/shell/SidebarResizer";
@@ -496,6 +497,10 @@ function AppShellInner() {
       {/* A `.shell` child, not a sidebar one: the phone hides the sidebar off its list
           screen, and a deep link to `#/account/<pane>` must open wherever it lands. */}
       <AccountModal open={accountPane != null} onClose={closeAccount} />
+      {/* The vendor-mark symbol definitions, mounted ONCE here because `<use href="#id">`
+          resolves within the document — every `VendorLogo` on any surface points at these.
+          Draws nothing; a `.shell` child so it outlives every pane that references it. */}
+      <VendorSprite />
     </div>
     </HardSamplesProvider>
     </LineageProvider>

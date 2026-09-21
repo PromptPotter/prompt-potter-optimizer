@@ -1,17 +1,19 @@
 "use client";
 import { useMemo } from "react";
-import { Badge, CopyButton } from "@/components/ui";
+import { Badge, CopyButton, VendorLogo } from "@/components/ui";
 import { CampaignSwitcher } from "@/components/shell/CampaignSwitcher";
 import { ViewTabs } from "@/components/shell/ViewTabs";
 import {
   buildForest,
   campaignLineParts,
+  campaignModels,
   campaignTitle,
+  campaignVendors,
   fitnessTrend,
   headlineStats,
   readSpend,
 } from "@/lib/derivations";
-import { fmtPct0, fmtUsdCents } from "@/lib/format";
+import { fmtPct0, fmtUsdCents, shortModel } from "@/lib/format";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 import { pathLeaf } from "@/lib/ids";
 import { cx } from "@/lib/cx";
@@ -120,7 +122,19 @@ export function RunMasthead({
             </span>
           )}
         </div>
-        {run && <div className="run-setup">{campaignLineParts(run).join(" · ")}</div>}
+        {/* The masthead OWNS "what does this run run with", and it has the room the sidebar row
+            does not — so the model reads here in FULL beside its mark, where the row lets the
+            mark stand in for it. Same two derivations either way; only the density differs. */}
+        {run && (
+          <div className="run-setup">
+            <span className="run-setup-vendors">
+              {campaignVendors(run).map((v) => (
+                <VendorLogo key={v.vendor} vendor={v.vendor} models={v.models} />
+              ))}
+            </span>
+            {[...campaignModels(run).map(shortModel), ...campaignLineParts(run)].join(" · ")}
+          </div>
+        )}
         {/* Every chip reads `dash` for the VIEWED LEAF, the one per-cycle source. */}
         <div className="run-chips">
           {following ? (

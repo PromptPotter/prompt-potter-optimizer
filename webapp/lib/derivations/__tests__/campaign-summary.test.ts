@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { campaignLineParts } from "../campaign-summary";
+import {
+  campaignLineParts,
+  campaignModels,
+  campaignTitle,
+  campaignVendors,
+} from "../campaign-summary";
+import { vendorOf } from "@/lib/format";
 import type { RunGroup } from "../campaign-forest";
 import type { CampaignRunsWith, CampaignSummary, CycleListEntry } from "@/lib/api";
 
@@ -7,6 +13,10 @@ import type { CampaignRunsWith, CampaignSummary, CycleListEntry } from "@/lib/ap
 // which is what `max_rounds` bounds. Every other state of that part (a campaign still at its
 // check-in, a declared origin-only run, a fork holding the line) renders a different sentence
 // off the same two numbers, and each was a different wrong reading before.
+//
+// The row is a NAME and a reading, not a config dump, and three of the tests below are the
+// whole of that rule: the models leave the line for the vendor mark, the ROUTING levers leave
+// it for the hover card, and a named campaign drops its id tail.
 
 function cycle(over: Partial<CycleListEntry> = {}): CycleListEntry {
   return {
@@ -24,13 +34,14 @@ function run(over: {
   runsWith?: CampaignRunsWith | null;
   root?: CycleListEntry;
   answering?: CycleListEntry;
+  label?: string;
 }): RunGroup {
   const root = over.root ?? cycle();
   return {
     campaign: {
       campaign_id: root.campaign_id,
       dataset_name: "spreadsheetbench-s10",
-      label: "",
+      label: over.label ?? "",
       runs_with: over.runsWith === undefined ? null : over.runsWith,
     } as CampaignSummary,
     root,
@@ -47,38 +58,26 @@ const runsWith = (
 ): CampaignRunsWith => ({ params, max_rounds });
 
 describe("campaignLineParts", () => {
-  it("leads with the models, de-duplicated and cut to their own name", () => {
+  // No served SETTING reaches the row, whatever key it is and whichever layer won it — the
+  // models ride the vendor mark, and every other param rides the hover card whole. The row wore
+  // the campaign-sourced ones once, which put `temperature 0` on the campaigns that declare it
+  // and nothing on the rest: a difference on screen where there is none in the run.
+  it("carries no resolved setting at all — the card is where a setup is read", () => {
     const parts = campaignLineParts(
       run({
         runsWith: runsWith(
           [
             { node: "solve", key: "model", value: "openai/gpt-oss-20b:nitro", source: "campaign" },
-            { node: "judge", key: "model", value: "openai/gpt-oss-20b:nitro", source: "dataset" },
-          ],
-          6,
-        ),
-      }),
-    );
-    expect(parts[0]).toBe("gpt-oss-20b:nitro");
-    expect(parts.filter((p) => p === "gpt-oss-20b:nitro")).toHaveLength(1);
-  });
-
-  it("prints the settings this run chose, never the ones every sibling shares", () => {
-    const parts = campaignLineParts(
-      run({
-        runsWith: runsWith(
-          [
+            { node: "solve", key: "temperature", value: 0, source: "campaign" },
+            { node: "solve", key: "reasoning_effort", value: "high", source: "seed" },
             { node: "solve", key: "route_order", value: ["inception"], source: "campaign" },
             { node: "solve", key: "max_turns", value: 20, source: "dataset" },
-            { node: "solve", key: "reasoning_effort", value: "high", source: "seed" },
           ],
           6,
         ),
       }),
     );
-    expect(parts).toContain("route_order inception");
-    expect(parts).toContain("reasoning_effort high");
-    expect(parts.some((p) => p.startsWith("max_turns"))).toBe(false);
+    expect(parts).toEqual(["R3/6", expect.stringContaining("ago")]);
   });
 
   it("counts rounds against the declared cap while the root answers", () => {
@@ -86,11 +85,13 @@ describe("campaignLineParts", () => {
     expect(parts).toContain("R3/6");
   });
 
-  it("says origin only when the cap declares no round after C0", () => {
+  // One word, and it is the repo's own. `R0` is the reading this refuses — that reads as a run
+  // that went nowhere, rather than one declared never to leave its origin.
+  it("says origin when the cap declares no round after C0", () => {
     const parts = campaignLineParts(
       run({ runsWith: runsWith([], 0), root: cycle({ rounds_closed: 0 }) }),
     );
-    expect(parts).toContain("origin only");
+    expect(parts).toContain("origin");
   });
 
   it("drops the cap when a FORK answers — the cap on screen would be the root's", () => {
@@ -101,17 +102,83 @@ describe("campaignLineParts", () => {
       }),
     );
     expect(parts).toContain("R2");
-    expect(parts).not.toContain("origin only");
+    expect(parts).not.toContain("origin");
   });
 
   it("says nothing about rounds while the campaign is still at its check-in", () => {
     const parts = campaignLineParts(
       run({ runsWith: runsWith([], 6), root: cycle({ run_phase: "checkin", rounds_closed: 0 }) }),
     );
-    expect(parts.some((p) => p.startsWith("R") || p === "origin only")).toBe(false);
+    expect(parts.some((p) => p.startsWith("R") || p === "origin")).toBe(false);
   });
 
   it("says the pipeline is unreadable rather than printing an empty setup", () => {
     expect(campaignLineParts(run({ runsWith: null }))[0]).toBe("pipeline unreadable");
+  });
+});
+
+describe("vendorOf", () => {
+  it("reads the namespace, which is who TRAINED the model", () => {
+    expect(vendorOf("openai/gpt-oss-120b")).toBe("openai");
+    expect(vendorOf("meta-llama/llama-4-70b")).toBe("meta-llama");
+  });
+
+  // Two colons, told apart only by POSITION: a gateway sits left of the slash and names who
+  // SERVED the call, the `:nitro` routing suffix sits right of it on the model's own name.
+  it("looks past a gateway prefix and through a routing suffix", () => {
+    expect(vendorOf("groq:openai/gpt-oss-120b")).toBe("openai");
+    expect(vendorOf("qwen/qwen3.7-flash:nitro")).toBe("qwen");
+  });
+
+  it("answers with the id itself when it carries no namespace", () => {
+    expect(vendorOf("GPT-4")).toBe("gpt-4");
+    expect(vendorOf("gpt-4:nitro")).toBe("gpt-4");
+  });
+});
+
+describe("campaignModels / campaignVendors", () => {
+  const twoVendors = run({
+    runsWith: runsWith(
+      [
+        { node: "solve", key: "model", value: "openai/gpt-oss-20b:nitro", source: "campaign" },
+        { node: "judge", key: "model", value: "openai/gpt-oss-120b", source: "dataset" },
+        { node: "l1_generate", key: "model", value: "deepseek/deepseek-v4-flash", source: "backend" },
+        { node: "l1_critique", key: "model", value: "openai/gpt-oss-20b:nitro", source: "backend" },
+      ],
+      6,
+    ),
+  });
+
+  it("lists every model whole, de-duplicated — the suffix routes and bills, so it stays", () => {
+    expect(campaignModels(twoVendors)).toEqual([
+      "openai/gpt-oss-20b:nitro",
+      "openai/gpt-oss-120b",
+      "deepseek/deepseek-v4-flash",
+    ]);
+  });
+
+  // Three OpenAI models are ONE brand to count. A column of repeated marks would say otherwise,
+  // which is the whole reason the mark is worth drawing.
+  it("collapses models to their vendors, each keeping the ids it stands for", () => {
+    expect(campaignVendors(twoVendors)).toEqual([
+      { vendor: "openai", models: ["openai/gpt-oss-20b:nitro", "openai/gpt-oss-120b"] },
+      { vendor: "deepseek", models: ["deepseek/deepseek-v4-flash"] },
+    ]);
+  });
+
+  it("has nothing to draw when the pipeline did not resolve", () => {
+    expect(campaignVendors(run({ runsWith: null }))).toEqual([]);
+  });
+});
+
+describe("campaignTitle", () => {
+  // The tail is an id. It renders exactly while it is the only thing telling ten runs of one
+  // dataset apart — so naming a campaign is what buys it away, and an unnamed one keeps it.
+  it("keeps the id tail while nothing human distinguishes the campaign", () => {
+    expect(campaignTitle(run({}).campaign).suffix).toBe("00b7d7");
+  });
+
+  it("drops the id tail once the campaign carries a label", () => {
+    expect(campaignTitle(run({ label: "Sheets agent, alibaba pin" }).campaign).suffix).toBeNull();
   });
 });

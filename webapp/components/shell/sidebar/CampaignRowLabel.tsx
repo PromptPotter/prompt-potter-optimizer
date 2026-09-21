@@ -1,4 +1,6 @@
 "use client";
+import { VendorLogo } from "@/components/ui";
+import { cx } from "@/lib/cx";
 import type { RowStatus } from "@/lib/derivations";
 
 // ONE campaign row, wherever a campaign is offered — the sidebar tree and the masthead
@@ -18,36 +20,60 @@ export function PhaseMark({ status }: { status: RowStatus }) {
   );
 }
 
-// Ten runs of one dataset share a display name, so the row keeps its id's `__suffix` whole and
-// lets the name before it truncate — the tail is what tells the rows apart. The second line
-// carries what the tail cannot say: what this run runs with, how far it got, when it last moved.
+// The row is a NAME and a reading, never a config dump. Two lines, and the split is by KIND:
+// line one is what the campaign IS, line two is everything about it that is a value.
+//
+// Line one leads with the VENDOR marks, and they lead deliberately: fixed-width, at a fixed
+// offset, so a stack of campaigns is countable by brand straight down the column — which is the
+// whole reason the model moved out of the text. After them the name gets the rest of the line.
+//
+// The campaign's `__id` is NOT here at all — not beside the name, not on the second line. It is
+// an id, it made the row read as an attribute rather than a thing, and at the resting sidebar
+// width it cost so much room that `spreadsheetbench-s20` truncated to `spr…`. The hover card
+// already carries it whole under "Campaign", which is the same call the routing levers get: the
+// row is the SCAN surface, the card is the AUDIT one. What tells two runs of one dataset apart
+// here is the vendor mark, the settings, the rounds and the spend.
+//
+// Line two is line-clamped, so `title` repeating it whole is the one job `title=` keeps
+// (webapp/CLAUDE.md § Component conventions).
 export function CampaignRowLabel({
   name,
-  suffix,
   status,
   spend,
   parts,
+  vendors,
 }: {
   name: string;
-  suffix: string | null;
   status: RowStatus | null;
   spend: string;
   parts: string[];
+  vendors: readonly { vendor: string; models: string[] }[];
 }) {
   const line = parts.join(" · ");
   return (
     <span className="unit-library-row">
       <span className="unit-library-name unit-library-name-split">
+        {vendors.length > 0 && (
+          <span className="unit-library-vendors">
+            {vendors.map((v) => (
+              <VendorLogo key={v.vendor} vendor={v.vendor} models={v.models} />
+            ))}
+          </span>
+        )}
         <span className="unit-library-name-head">{name}</span>
-        {suffix && <span className="unit-library-name-tail">__{suffix}</span>}
       </span>
       <span className="unit-library-meta unit-library-meta-marked">
         {status && <PhaseMark status={status} />}
         <span className="unit-library-spend">{spend}</span>
       </span>
-      <span className="unit-library-sub" title={line}>
-        {line}
-      </span>
+      {line && (
+        <span
+          className={cx("unit-library-sub", vendors.length > 0 && "unit-library-sub-indent")}
+          title={line}
+        >
+          {line}
+        </span>
+      )}
     </span>
   );
 }

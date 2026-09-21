@@ -23,7 +23,7 @@ import {
   campaignCard,
   campaignLineParts,
   campaignStatus,
-  campaignTitle,
+  campaignVendors,
   candidatesOf,
   childCourses,
   cutFromLabel,
@@ -65,10 +65,18 @@ export interface TreeCtx {
   viewedPath: CyclePath | null;
   viewedCandidateId: string | null;
   selectCyclePath: (path: CyclePath, candidateId?: string | null) => void;
+  // Does a course open into its candidates at all? A per-device preference
+  // (`lib/tree-prefs.ts`, set in Account → Preferences), threaded rather than read here so the
+  // tree stays a pure function of its props. Off — the default — a campaign is the LAST row of
+  // its branch: it wears no ▶, and `courseOpen` below answers false whatever view memory holds,
+  // so the `/tree` read that fills the candidates never fires either.
+  showCandidates: boolean;
 }
 
+// One gate for both readers — the row that draws the children and the fetch that supplies them.
+// Splitting it was how a campaign came to be listed as closed while still paying for its tree.
 function courseOpen(ctx: TreeCtx, path: CyclePath): boolean {
-  return ctx.isNodeOpen("course", encodeCyclePath(path));
+  return ctx.showCandidates && ctx.isNodeOpen("course", encodeCyclePath(path));
 }
 
 export function ForestRows({ origins, ctx }: { origins: OriginGroup[]; ctx: TreeCtx }) {
@@ -285,16 +293,21 @@ function CourseRow({
 
   const row = (
     <div className={cx("unit-library-family", selected && "selected", archived && "archived")}>
-      <button
-        type="button"
-        className="unit-library-twist"
-        onClick={() => ctx.toggleNode("course", addr)}
-        aria-label={open ? "Collapse" : "Expand"}
-        aria-expanded={open}
-        tabIndex={-1}
-      >
-        {open ? "▼" : "▶"}
-      </button>
+      {/* No twist unless the operator asked for candidates: with the preference off this row
+          has nothing to expand into, so an inert ▶ would be an affordance that lies
+          (frontend-surface-contract § I3), and the 18px goes back to the name. */}
+      {ctx.showCandidates ? (
+        <button
+          type="button"
+          className="unit-library-twist"
+          onClick={() => ctx.toggleNode("course", addr)}
+          aria-label={open ? "Collapse" : "Expand"}
+          aria-expanded={open}
+          tabIndex={-1}
+        >
+          {open ? "▼" : "▶"}
+        </button>
+      ) : null}
       <button
         type="button"
         className="unit-library-item"
@@ -305,10 +318,10 @@ function CourseRow({
         {run ? (
           <CampaignRowLabel
             name={label}
-            suffix={campaignTitle(run.campaign).suffix}
             status={status}
             spend={spendLabel(run.campaign)}
             parts={campaignLineParts(run)}
+            vendors={campaignVendors(run)}
           />
         ) : (
           <span className="unit-library-row">
@@ -550,17 +563,21 @@ function CandidateRow({
     <>
       <RowHoverCard card={card}>
         <div className={cx("unit-library-family", selected && "selected", retiredBy && "retired")}>
-          <button
-            type="button"
-            className="unit-library-twist"
-            onClick={() => ctx.toggleNode("cand", addr)}
-            aria-label={open ? "Collapse" : "Expand"}
-            aria-expanded={open}
-            disabled={!hasChildren}
-            tabIndex={-1}
-          >
-            {!hasChildren ? "" : open ? "▼" : "▶"}
-          </button>
+          {/* A candidate with nothing inside it is a LEAF — at L3 that is every one of them,
+              since only an L4 candidate contains a course. No twist rather than a hidden
+              disabled one: the label closes up and the row reclaims the width. */}
+          {hasChildren ? (
+            <button
+              type="button"
+              className="unit-library-twist"
+              onClick={() => ctx.toggleNode("cand", addr)}
+              aria-label={open ? "Collapse" : "Expand"}
+              aria-expanded={open}
+              tabIndex={-1}
+            >
+              {open ? "▼" : "▶"}
+            </button>
+          ) : null}
           <button
             type="button"
             className="unit-library-item candidate-label"

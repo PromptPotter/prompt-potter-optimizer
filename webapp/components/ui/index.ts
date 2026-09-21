@@ -22,3 +22,4 @@ export * from "./Switch";
 export * from "./Term";
 export * from "./Toolbar";
 export * from "./ValueList";
+export * from "./VendorLogo";

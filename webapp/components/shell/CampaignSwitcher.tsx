@@ -5,7 +5,7 @@ import { useAuth } from "@/lib/auth-context";
 import {
   campaignLineParts,
   campaignStatus,
-  campaignTitle,
+  campaignVendors,
   spendLabel,
   type OriginGroup,
   type RunGroup,
@@ -88,10 +88,10 @@ export function CampaignSwitcher({ origins }: { origins: OriginGroup[] }) {
                     <span className="run-switch-row">
                       <CampaignRowLabel
                         name={campaignDisplayName(run.campaign)}
-                        suffix={campaignTitle(run.campaign).suffix}
                         status={campaignStatus(run)}
                         spend={spendLabel(run.campaign)}
                         parts={campaignLineParts(run)}
+                        vendors={campaignVendors(run)}
                       />
                     </span>
                   </MenuItem>

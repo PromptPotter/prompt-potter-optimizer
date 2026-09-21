@@ -22,7 +22,7 @@ import {
   fmtUsdCents,
   fmtValue,
   shortId,
-  shortModel,
+  vendorOf,
 } from "@/lib/format";
 import type { RunGroup } from "./campaign-forest";
 
@@ -61,21 +61,8 @@ export interface RowCardFacts {
   campaignId?: string;
 }
 
-// Which provenance layers a ROW prints. A campaign or seed value is what the operator chose for
-// this run; a backend or dataset one is shared by every sibling, so printing it tells two rows
-// apart not at all. Exhaustive over the served union, so a new layer is a compile error here.
-const SHOWN_SOURCE: Record<RunsWithParam["source"], boolean> = {
-  backend: false,
-  dataset: false,
-  campaign: true,
-  seed: true,
-  evolved: false,
-  identity: false,
-  unset: false,
-};
-
-// A served param value as one line — a list joins on its own separator so `route_order` reads
-// as a route, not as JSON.
+// A served param value as one line — a list joins on its own separator so a route reads as a
+// route, not as JSON.
 function settingValue(v: unknown): string {
   return Array.isArray(v) ? v.map((x) => fmtValue(x)).join(",") : fmtValue(v);
 }
@@ -100,8 +87,13 @@ export function accuracyStat(origin: number | null, best: number | null): RowSta
 }
 
 // The three parts of a campaign's name, for a surface that renders them apart. `label` is the
-// operator's alone and is empty when they set none; `suffix` is the `__xxxxxx` tail that tells
-// ten runs of one dataset apart, absent only where the id carries none.
+// operator's alone and is empty when they set none.
+//
+// `suffix` is the `__xxxxxx` tail, and it is present exactly while it is the only thing telling
+// ten runs of one dataset apart — so a NAMED campaign drops it. The tail is an id, and a row
+// wearing `spreadsheetbench-s20__94f842` and nothing else reads as an attribute rather than a
+// thing; but dropping it from an unnamed row would leave nine siblings identical, which is
+// worse. Naming a campaign (⋯ → Rename, which writes `label`) is what buys the tail away.
 export function campaignTitle(c: CampaignSummary): {
   dataset: string;
   label: string;
@@ -111,7 +103,7 @@ export function campaignTitle(c: CampaignSummary): {
   return {
     dataset: c.dataset_name,
     label: c.label,
-    suffix: tail === c.campaign_id ? null : tail,
+    suffix: c.label || tail === c.campaign_id ? null : tail,
   };
 }
 
@@ -143,30 +135,59 @@ function rootAnswers(run: RunGroup): boolean {
 // is what `max_rounds` bounds.
 function roundsPart(run: RunGroup, cap: number | null): string {
   if (!rootAnswers(run)) return `R${run.answering.rounds_closed}`;
-  if (cap === 0) return "origin only";
+  // One word, and it is the repo's own — a campaign capped at zero rounds measured its origin
+  // and stopped. `R0` is the reading this refuses: that reads as a run that went nowhere.
+  if (cap === 0) return "origin";
   return cap == null
     ? `R${run.answering.rounds_closed}`
     : `R${run.answering.rounds_closed}/${cap}`;
 }
 
-// What tells one campaign row from the next, in reading order: what it runs (models, then the
-// settings this run chose), how far it got, and when it last moved. Parts, not a string, so a
-// caller picks its own separator.
+// Every model this campaign runs, de-duplicated, in the order its params declare them. Full
+// ids: this is what names the vendor mark, and `gpt-oss-20b` versus `gpt-oss-120b` is exactly
+// the distinction a mark on its own cannot draw.
+export function campaignModels(run: RunGroup): string[] {
+  const runsWith = run.campaign.runs_with;
+  if (runsWith == null) return [];
+  const seen = new Set<string>();
+  for (const p of runsWith.params) {
+    if (p.key === "model" && p.value != null) seen.add(settingValue(p.value));
+  }
+  return [...seen];
+}
+
+// The VENDORS behind those models, de-duplicated a SECOND time: a campaign running three OpenAI
+// models is one brand to count, and a column of repeated marks would say otherwise. Each keeps
+// the ids it stands for, because the mark is named by them.
+export function campaignVendors(run: RunGroup): { vendor: string; models: string[] }[] {
+  const byVendor = new Map<string, string[]>();
+  for (const model of campaignModels(run)) {
+    const arr = byVendor.get(vendorOf(model));
+    if (arr) arr.push(model);
+    else byVendor.set(vendorOf(model), [model]);
+  }
+  return [...byVendor].map(([vendor, models]) => ({ vendor, models }));
+}
+
+// What tells one campaign row from the next, in reading order: how far it got, and when it last
+// moved. Parts, not a string, so a caller picks its own separator.
+//
+// **No resolved SETTING rides this line, and the reason is that no predicate can pick the ones
+// worth the space.** `source: campaign | seed` was that predicate — it reads as "the operator
+// chose this" — and it is not one: every harbor campaign declares `temperature: 0`, so the row
+// wore `temperature 0` on some campaigns and nothing on others, which reads as a difference
+// between them and is not. Interestingness is not a served fact, and a client-side guess at it
+// is the browser deciding what a number means. So the row carries none and the hover card
+// carries them ALL, whole and wearing the layer that won each (`campaignCard::settings`) — one
+// hover away, where an audit is answered instead of scanned. The MODELS left the same way
+// earlier, to the vendor mark (`campaignVendors`), which reads as a column where a slug reads
+// as more text.
 export function campaignLineParts(run: RunGroup): string[] {
   const runsWith = run.campaign.runs_with;
   const parts: string[] = [];
-  if (runsWith == null) {
-    parts.push("pipeline unreadable");
-  } else {
-    const models = new Set<string>();
-    for (const p of runsWith.params) {
-      if (p.key === "model" && p.value != null) models.add(shortModel(settingValue(p.value)));
-    }
-    parts.push(...models);
-    for (const p of runsWith.params) {
-      if (p.key !== "model" && SHOWN_SOURCE[p.source]) parts.push(`${p.key} ${settingValue(p.value)}`);
-    }
-  }
+  // The one setup fact a row still states, because it is a FAILURE to resolve rather than a
+  // value: nothing below can be trusted to describe what this campaign runs.
+  if (runsWith == null) parts.push("pipeline unreadable");
   // A campaign still at its origin check-in has run no rounds, and "R0" would read as one that
   // ran and got nowhere.
   if (run.answering.run_phase !== "checkin") {
