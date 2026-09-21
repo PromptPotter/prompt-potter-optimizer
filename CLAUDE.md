@@ -42,6 +42,7 @@ What this file owns, and where each rule is stated. Names only — the section i
 - A campaign does not own its measurements → § The archive is not scoped by campaign
 - Answer every question before adding a concept → § Pre-flight gate
 - Say which column a measured number is in → § The closing directive
+- Print every operations command you invoke → § Commands
 - Per-layer contracts — load only yours → § Pointers
 
 ## The archive is not scoped by campaign
@@ -95,8 +96,12 @@ python -m promptpotter new <file.csv> --set task_description=…  # fresh from R
 python -m promptpotter resume                                # resume active cycle; Ctrl+C: 1st pauses (resumable, exit 130), 2nd force-quits
 python -m promptpotter resume --from N                       # rewind in place
 python -m promptpotter resume --fork-on-divergence           # sibling cycle at divergence point
-python -m uvicorn promptpotter.main:app --port 8001          # API + webapp control plane at the root (http://localhost:8001/)
+python -X utf8 -m uvicorn promptpotter.main:app --port 8001  # API + webapp control plane at the root (http://localhost:8001/)
 ```
+
+**`-X utf8` on the server is load-bearing, not a nicety.** A cp1252 process serves every read and refuses every container-backed launch — the connector probe will not let Harbor read task files under a locale encoding — so the box looks healthy until the operator presses Play. The boot banner says so when the posture is wrong.
+
+**Print every operations command you invoke, verbatim, in the reply that reports it.** The operator reads the verb, the dataset and the flags — a number with no command behind it cannot be checked, re-run or corrected mid-flight. This covers `python -m promptpotter …` and the maintenance verbs; container and shell plumbing (`docker`, `curl`, `ls`) is noise and stays out. **Showing the command is not handing it over** — a verb that is yours to run stays yours, printed beside its result; quoting one for the operator to type is for the cases that genuinely need their hands (an interactive login, a spend decision).
 
 `new` and `resume` are the loop-mint verbs. Beside them sit lifecycle, run-control (`pause`, `set-budget`, `cancel-queued`, `skip-searchpoint`, `step-cycle`), manifest-edit, diagnostic (`verify`/`ab`/`noise-floor`/`seed-screen`/`evidence`) and maintenance (`reindex`/`restamp`/`compact-archive`) verbs. **Two facts about the set matter here; everything else is [`persistence-and-state.md`](docs/operations/persistence-and-state.md)'s:** `evidence` is the one read VERB, because a comparison ACROSS subjects is in no single file — every other read is opening the tree. And `compact-archive purge-cold --apply` is the only verb that destroys paid measurement.
 

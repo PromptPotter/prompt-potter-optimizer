@@ -1,5 +1,5 @@
 "use client";
-import { prefixReading } from "@/lib/derivations";
+import { prefixReading, shownSeconds } from "@/lib/derivations";
 import type { SampleRow } from "@/lib/types";
 
 // How many of a candidate's rows are put in the DOM before the rest become a count. A rendering
@@ -23,6 +23,9 @@ export function SampleRowItem({ row }: { row: SampleRow }) {
   const tag =
     row.status === "HIT" ? "tag-hit" : row.status === "ERR" ? "tag-err" : "tag-miss";
   const pred = row.predicted ? row.predicted : "∅";
+  // Which of the row's two clocks this column shows is `lib/derivations`', not a renderer's; the
+  // 📖 badge beside it already says which one the reader is looking at.
+  const shown = shownSeconds(row);
   const prefix = prefixReading(row.cache_share, row.cached);
   return (
     <details className="rsv-row">
@@ -31,9 +34,7 @@ export function SampleRowItem({ row }: { row: SampleRow }) {
         <span className="idx">
           #{String(row.sample_id ?? "").padStart(3, "0")}
         </span>
-        {row.elapsed_s != null && (
-          <span className="elapsed">{row.elapsed_s.toFixed(1)}s</span>
-        )}
+        {shown != null && <span className="elapsed">{shown.toFixed(1)}s</span>}
         {row.terminal_node && <span className="scorer">{row.terminal_node}</span>}
         {row.cached && (
           <span

@@ -2982,9 +2982,10 @@ components:
               caller's own place in line.
             * `backend_unreachable` (503 on any command that needs the
               backend reachable) — `backend_type` (connector name) and
-              `backend_url` (configured URL). Used by the frontend to
-              compose the "Start the backend and try again" message
-              without re-parsing the `message` field.
+              `backend_url` (configured URL) — the IDENTITY of what refused.
+              The REMEDY is the connector probe's own and rides `message`: a
+              surface renders that, never a sentence rebuilt from these two,
+              which cannot say why.
             * `ingest_failed` (422 on `/datasets/ingest`) — `reason`
               ∈ `bad_csv` | `bad_json` | `empty` | `too_large` | `bad_slug` |
               `unsupported_format` | `hardened_blocked`. (Ingest is

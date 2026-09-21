@@ -631,6 +631,11 @@
             "title": "Spend Unpriced Tokens",
             "type": "integer"
           },
+          "spend_unreported_usd": {
+            "description": "The most that this campaign's sends which ended with no bill may have cost, at the bounds they were admitted on — unknown, never spent. Its share of `QuotaStatus.spend_unreported_usd`.",
+            "title": "Spend Unreported Usd",
+            "type": "number"
+          },
           "spend_used_usd": {
             "description": "What this campaign has billed over its whole life — every cycle's ledger, forks and forwarded L4 inner spend included, plus spend banked when one of its cycles was deleted. Its share of `QuotaStatus.spend_used_total_usd`. A FLOOR while `spend_unpriced_tokens` is non-zero.",
             "title": "Spend Used Usd",
@@ -644,6 +649,7 @@
           "root_cycle_id",
           "spend_used_usd",
           "spend_unpriced_tokens",
+          "spend_unreported_usd",
           "runs_with",
           "config"
         ],
@@ -956,6 +962,11 @@
             "title": "Spend Unpriced Tokens",
             "type": "integer"
           },
+          "spend_unreported_usd": {
+            "description": "The most that this campaign's sends which ended with no bill may have cost, at the bounds they were admitted on — unknown, never spent. Its share of `QuotaStatus.spend_unreported_usd`.",
+            "title": "Spend Unreported Usd",
+            "type": "number"
+          },
           "spend_used_usd": {
             "description": "What this campaign has billed over its whole life — every cycle's ledger, forks and forwarded L4 inner spend included, plus spend banked when one of its cycles was deleted. Its share of `QuotaStatus.spend_used_total_usd`. A FLOOR while `spend_unpriced_tokens` is non-zero.",
             "title": "Spend Used Usd",
@@ -969,6 +980,7 @@
           "root_cycle_id",
           "spend_used_usd",
           "spend_unpriced_tokens",
+          "spend_unreported_usd",
           "runs_with"
         ],
         "title": "CampaignSummary",
@@ -4494,7 +4506,13 @@
             "title": "Spend Unpriced Tokens",
             "type": "integer"
           },
+          "spend_unreported_usd": {
+            "description": "The most that sends which ended with no bill (cancelled, timed out, killed with a run) may have cost, at the bounds they were admitted on. Not spent — unknown. It binds the ceiling beside `spend_used_total_usd`.",
+            "title": "Spend Unreported Usd",
+            "type": "number"
+          },
           "spend_used_total_usd": {
+            "description": "What the providers BILLED this account, over its whole life. Never an estimate: a send whose bill never came is `spend_unreported_usd`, not this.",
             "title": "Spend Used Total Usd",
             "type": "number"
           },
@@ -4518,6 +4536,7 @@
           "spend_used_total_usd",
           "spend_budget_usd_total",
           "spend_unpriced_tokens",
+          "spend_unreported_usd",
           "tokens_used_total",
           "token_budget_total",
           "concurrent_running",

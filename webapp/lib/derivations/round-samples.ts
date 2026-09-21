@@ -25,6 +25,7 @@ import { isHit } from "@/lib/fitness";
 // barrel from inside it is a cycle. It resolved only because both names are hoisted `function`
 // declarations — turning either into a `const` arrow would have left them in the TDZ at module
 // evaluation, which is a blank cache column with no error anywhere.
+import { foldStepTimings } from "./sample-clock";
 import { cacheShare, foldStepTokens } from "./token-account";
 
 // Live-mode samples for one candidate in the in-flight round. Reads
@@ -54,6 +55,7 @@ function liveSamplesFor(
       ground_truth: s.ground_truth,
       terminal_node: s.terminal_node,
       elapsed_s: s.time_s,
+      cost_s: s.cost_s ?? null,
       cache_share: cacheShare(s.cache_read_tokens, s.input_tokens, s.cached),
     });
   });
@@ -70,9 +72,13 @@ interface RawHistoricalSample {
   // No `input_tokens` twin here, and that is the point: `step_tokens` is per-NODE and its entries
   // are the ONLY place a row's counts live. This type declared one for a while and read `undefined`
   // on every row, which is what silently disabled the cache column on the historical half.
-  pipeline_data?: { terminal_node?: unknown; step_tokens?: unknown };
-  elapsed_s?: number;
-  time_s?: number;
+  // Both clocks are in here, and neither has a top-level twin on any round document.
+  pipeline_data?: {
+    terminal_node?: unknown;
+    step_tokens?: unknown;
+    step_timings?: unknown;
+    total_time?: unknown;
+  };
   error?: unknown;
   error_category?: unknown;
 }
@@ -131,12 +137,9 @@ export function historicalSamplesFor(
             ? "HIT"
             : "MISS"
           : null;
-    const elapsed =
-      typeof s.elapsed_s === "number"
-        ? s.elapsed_s
-        : typeof s.time_s === "number"
-          ? s.time_s
-          : null;
+    // The row's own elapsed reading, which is a true 0.0 on a replay — `cost_s` beside it is what
+    // that cell took when it was measured, and `SampleRowItem` picks between them.
+    const elapsed = typeof s.pipeline_data?.total_time === "number" ? s.pipeline_data.total_time : null;
     return {
       key: `${round}|${candidate_id}|${sid ?? `o${ord}`}`,
       round,
@@ -152,6 +155,7 @@ export function historicalSamplesFor(
       terminal_node:
         typeof s.pipeline_data?.terminal_node === "string" ? s.pipeline_data.terminal_node : "",
       elapsed_s: elapsed,
+      cost_s: foldStepTimings(s.pipeline_data?.step_timings),
       // Both sides of the ratio out of ONE fold. Taking the numerator from `step_tokens` and the
       // denominator from a top-level twin is what produced a served cache count with no input to
       // divide it by, on every historical row.

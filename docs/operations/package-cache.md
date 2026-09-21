@@ -17,15 +17,16 @@ Three mechanisms close this, and none of them changes measurement identity:
 1. **Fetch once per machine.** One cache container serves every opted-in cell's downloads.
 2. **An infrastructure failure is never a measurement.** A cell whose trial shows a
    registry/mirror/DNS failure, or whose setup or verifier ran out of clock, is retried by the
-   connector with bounded backoff. The same applies to an episode that a model provider's throttle
-   ended, or that ran out of clock after one. A throttle the episode outlived is only latency, and
-   its grade stands. If the retries still fail, the cell is banked as `ErrorCategory.CONNECTION`
-   (`shared/errors.py::CellInfrastructureError`), carrying what every attempt spent so the one catch
-   in `measure_sample` bills it, and the walk halts with `StopReason.BACKEND_UNREACHABLE`. A
-   provider account out of credit is not retried: it is banked as `ErrorCategory.PROVIDER_CREDIT`
-   (`CellWalletExhaustedError`) on the first attempt and halts with `StopReason.PROVIDER_CREDIT`.
-   Either cell stays a hole that `resume` re-measures. There is no fallback to direct downloads: in
-   an outage it fails the same way, one path later.
+   connector with bounded backoff. If the retries still fail, the cell is banked as
+   `ErrorCategory.CONNECTION` (`shared/errors.py::CellInfrastructureError`), carrying what every
+   attempt spent so the one catch in `measure_sample` bills it, and the walk halts with
+   `StopReason.BACKEND_UNREACHABLE`. A provider account out of credit is not retried: it is banked
+   as `ErrorCategory.PROVIDER_CREDIT` (`CellSendRefusedError`) on the first attempt and halts with
+   `StopReason.PROVIDER_CREDIT`. Either cell stays a hole that `resume` re-measures. There is no
+   fallback to direct downloads: in an outage it fails the same way, one path later. An episode a
+   model provider's throttle ended — or that ran out of clock after one — measured the provider,
+   not the machine, and is the run's backpressure's to re-send (`infrastructure/llm/rate_limit.py::
+   Backpressure`); a throttle the episode outlived is only latency, and its grade stands.
 3. **No registry call once a task image exists.** A kept `hb__<hash>` tag starts as a prebuilt
    image, so a cell no longer resolves the task's `FROM` against its registry.
 

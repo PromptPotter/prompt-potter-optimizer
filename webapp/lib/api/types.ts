@@ -49,6 +49,7 @@ export type {
   FilesResponse,
   BackendWarning,
   BackfillLogEntry,
+  BackpressureReading,
   DashboardError,
   LineageDivergence,
   LineageNode,

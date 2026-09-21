@@ -25,6 +25,7 @@ export * from "./round-candidates";
 export * from "./round-health";
 export * from "./round-samples";
 export * from "./round-timeline";
+export * from "./sample-clock";
 export * from "./run-summary";
 export * from "./sample-trajectory";
 export * from "./sample-walk";

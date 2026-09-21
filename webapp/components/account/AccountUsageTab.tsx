@@ -97,6 +97,12 @@ function SpendSection({ quota }: { quota: QuotaStatus }) {
               resolvable rate, so this figure undercounts. The token ceiling is the one holding.
             </span>
           ) : null}
+          {quota.spend_unreported_usd > 0 ? (
+            <span className="account-warn">
+              + up to {fmtUsd(quota.spend_unreported_usd)} unreported — sends that ended with no
+              bill. Not spent, unknown; the ceiling holds it beside what was billed.
+            </span>
+          ) : null}
         </div>
         <div className="account-wallet-cell">
           <span className="account-kicker">Tokens</span>

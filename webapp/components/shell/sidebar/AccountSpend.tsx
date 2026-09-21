@@ -69,6 +69,12 @@ export function AccountSpend() {
           the dollar figure undercounts and the token allowance is the one holding.
         </p>
       ) : null}
+      {data.spend_unreported_usd > 0 ? (
+        <p>
+          Up to {fmtUsd(data.spend_unreported_usd)} more is unreported — sends that ended with no
+          bill (cancelled, timed out, killed). Not spent, unknown; the allowance holds it anyway.
+        </p>
+      ) : null}
     </div>
   );
 

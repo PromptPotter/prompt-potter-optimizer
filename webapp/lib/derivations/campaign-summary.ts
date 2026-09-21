@@ -209,8 +209,13 @@ export function campaignCard(
       sub:
         campaign.spend_unpriced_tokens > 0
           ? `floor — ${fmtTokens(campaign.spend_unpriced_tokens)} unpriced`
-          : "lifetime, every cycle",
-      className: campaign.spend_unpriced_tokens > 0 ? "rowhover-tone-warn" : undefined,
+          : campaign.spend_unreported_usd > 0
+            ? `billed · up to ${fmtUsd(campaign.spend_unreported_usd)} more unreported`
+            : "lifetime, every cycle",
+      className:
+        campaign.spend_unpriced_tokens > 0 || campaign.spend_unreported_usd > 0
+          ? "rowhover-tone-warn"
+          : undefined,
     },
     {
       label: "Rounds",

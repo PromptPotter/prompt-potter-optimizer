@@ -4,14 +4,15 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 ---
 
-## Groq returns 429 "rate limit"
+## A provider returns 429 "rate limit"
 
-**What you see:** Campaign halts or crawls. Logs mention `429` errors from Groq.
+**What you see:** Campaign crawls — the log says `the provider is throttling`, and the run controls' *Samples in flight* panel shows a `Provider` row. Or it stops as **Provider rate-limited**.
 
-**Why:** Groq's free-tier rate limit. PromptPotter honors `Retry-After`, but a tight limit makes the campaign crawl.
+**Why:** The model provider is refusing sends — your key's tier (Groq's free tier), or an upstream host's shared pool on OpenRouter (`… is temporarily rate-limited upstream`). PromptPotter holds every send for one shared cooldown, sends fewer at once, and probes with one; it stops only on a per-hour or per-day quota, or once the provider has refused everything for half an hour.
 
 **What to try:**
-- Wait a few minutes and resume: `python -m promptpotter resume`. No re-mint needed.
+- Use your own key for that provider (OpenRouter BYOK), which gets its own rate limit, or route to another host (`route_order` in the node's config), then `python -m promptpotter resume`. No re-mint needed.
+- On a shared upstream pool, waiting is the only other cure: resume later.
 - Switch the optimizer to a smaller model in `promptpotter/assets/optimizer/pipeline.yaml` (each optimizer node's `config.model`), e.g. `"meta-llama/llama-4-scout-17b-16e-instruct"` — install-global, applies to every campaign.
 - Upgrade to a paid tier.
 

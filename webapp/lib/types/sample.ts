@@ -33,8 +33,12 @@ export interface SampleRow {
   ground_truth: string;
   // Pipeline node the row terminated at. Empty when the historical dict omits it.
   terminal_node: string;
-  // Wall-clock duration in seconds; null when the source omits it.
+  // Wall-clock duration in seconds; null when the source omits it. A REPLAY occupied no clock, so
+  // this is its true 0.0 and `cost_s` beside it is what the cell took when it was measured.
   elapsed_s: number | null;
+  // Seconds producing the row COST, summed off the per-node timings the cache stamp leaves intact.
+  // Null where the source recorded none.
+  cost_s: number | null;
   // Share of this row's INPUT tokens the provider served off its own prompt-prefix cache. A
   // different fact from `cached` above: that one says no provider was reached at all, this one
   // says one was and discounted part of the call. Null where the backend reports no breakdown —

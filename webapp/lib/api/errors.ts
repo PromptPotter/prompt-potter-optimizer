@@ -25,8 +25,6 @@ export type IngestErrorDetail = {
   // The chat offers "use existing {slug}" / "save as new {suggested_slug}".
   slug?: string;
   suggested_slug?: string;
-  backend_type?: string;
-  backend_url?: string;
   draft_id?: string;
   gaps?: OriginGap[];
 };
@@ -37,8 +35,6 @@ export class IngestApiError extends ApiError {
   // `slug_collision` (409): the existing dataset name + a free suggestion.
   readonly existingSlug?: string;
   readonly suggestedSlug?: string;
-  readonly backendType?: string;
-  readonly backendUrl?: string;
   readonly draftId?: string;
   // Populated on `origin_incomplete` (422) — the deterministic checklist's
   // still-open fields. Consumers surface these inline rather than collapse
@@ -59,8 +55,6 @@ export class IngestApiError extends ApiError {
     this.reason = detail?.reason;
     this.existingSlug = detail?.slug;
     this.suggestedSlug = detail?.suggested_slug;
-    this.backendType = detail?.backend_type;
-    this.backendUrl = detail?.backend_url;
     this.draftId = detail?.draft_id;
     this.gaps = detail?.gaps;
   }
@@ -77,14 +71,11 @@ const KIND_SENTENCE: Record<FailureKind, string> = {
 };
 
 // The one operator sentence for a failed write: the server's own where the envelope carried one,
-// else the kind's. Never a raw status line or the browser's network text.
+// else the kind's. Never a raw status line, the browser's network text, or a sentence rebuilt here
+// from the envelope's details — a refusal's REMEDY is known only where it was decided, so an
+// ingress renders what the server said.
 export function operatorMessage(e: unknown, kind: FailureKind): string {
   if (!(e instanceof IngestApiError) || e.serverMessage === null) return KIND_SENTENCE[kind];
-  if (e.code === "backend_unreachable") {
-    const where = e.backendUrl ? ` at ${e.backendUrl}` : "";
-    const what = e.backendType ? ` ‘${e.backendType}’` : "";
-    return `Backend${what}${where} is not running. Start the backend and try again.`;
-  }
   if (e.suggestedSlug) return `${e.serverMessage} Suggested slug: ${e.suggestedSlug}.`;
   return e.serverMessage;
 }

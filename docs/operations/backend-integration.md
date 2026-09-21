@@ -35,17 +35,21 @@ Every key is ABSENT when the backend reported nothing, and PromptPotter reads ab
 
 A ceiling is enforced before a cell is SENT, at the most the cell may cost, so the backend has to
 say what that is and hold to it. Without these, a campaign with no ceiling runs as before, and one
-under a ceiling has every cell refused before it leaves.
+under a ceiling has every cell refused before it leaves. A backend whose limits are all ones we
+send it serves nothing — its connector derives the bound from what it sends
+(`Connector.sent_spend_bound`; harbor's is `_sent_spend_bound`).
 
 - **`/pipeline` serves `spend_bound` on every node that can bill** — for an LLM node
-  `{kind: "llm", attempts, input_bytes, max_tokens}`, for a web search
+  `{kind: "llm", attempts, input_bytes, max_tokens}` — plus `hosts` where the node may be served
+  by no other (`allow_fallbacks: false`), which prices it at the dearest of those — for a web search
   `{kind: "web", queries, usd_per_query}` (`domain/pipeline_schema.py::NodeSpendBound`). They are
   COUNTS the backend enforces, never prices: PromptPotter prices them at the dearest host the
   node's model routes to (`infrastructure/llm/pricing.py::rate_ceiling`).
 - **The backend enforces them.** No request reads more than `input_bytes`, no retry lifts
   `max_tokens`, no run of a node sends more than `attempts` requests.
 - **Every billed attempt is reported**, in `step_tokens`, on a failed request too — an error
-  envelope carries `data.step_tokens`. A reply reporting none is charged the whole bound.
+  envelope carries `data.step_tokens`. A reply reporting none leaves the cell unreported at its
+  whole bound: it binds the ceiling, and no surface shows it as spent.
 - **Search spend is reported in dollars**, as `data.web_cost.usd`.
 
 **Deploying the pair.** The Linux box co-hosts both — `deploy.config::BACKEND_DIR` / `BACKEND_SERVICE` — and `deploy-linux/update.sh` already syncs the backend checkout, reinstalls its requirements and restarts its unit alongside the optimizer. A backend-side change therefore reaches production through the ordinary update, provided it is pushed first; there is no separate download step to add.
@@ -57,7 +61,7 @@ The client talks to each backend over HTTP(S) with optional bearer-token auth. F
 - **Transport** — `https://` verifies the server cert; `http://` is cleartext. Pick the scheme in the registered `base_url`.
 - **Auth** — set `TERMNORM_TOKEN` and every request carries `Authorization: Bearer …`; empty token → no header.
 - **Backend gate** — the backend decides whether to *require* a token (`TERMNORM_REQUIRE_AUTH=1`). Mismatch → 401.
-- **Resilience** — the session handshake auto-recovers; 429 honors `Retry-After`; a 5xx and a connection never made back off 1→2→4→8 s; a read timeout is never sent again, because the backend is still working — and billing — the first request.
+- **Resilience** — the session handshake auto-recovers; a 429 is the run's backpressure's (`infrastructure/llm/rate_limit.py::Backpressure` — one cooldown every cell shares, fewer sent at once, a stop only once no wait clears it); a 5xx and a connection never made back off 1→2→4→8 s; a read timeout is never sent again, because the backend is still working — and billing — the first request.
 
 **Remote:** set `TERMNORM_REQUIRE_AUTH=1` + matching `TERMNORM_TOKEN` on both hosts, register with the `https://` URL, verify `curl https://…/status` returns 200. **Local:** same machine → `http://127.0.0.1:8000`; token optional for bare dev. The Linux deploy (`deploy-linux/bootstrap.sh`) auto-provisions a shared `TERMNORM_TOKEN` and sets `TERMNORM_REQUIRE_AUTH=true` on both sides **even on loopback** — defense-in-depth against a co-located compromised process. Nothing leaves loopback either way.
 

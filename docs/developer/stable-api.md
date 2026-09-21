@@ -17,12 +17,13 @@ class Connector:
     extract_experiment: Callable[[dict], tuple[list[dict], list[str]]]  # → (queries, index_terms)
     execution: ConnectorExecution = "remote_http"                   # "remote_http" | "in_process" (no HTTP; TRANSPORT only)
     in_process_run: InProcessRun | None = None                      # async (workload, query, payload) -> {"data": …}; required iff in_process
-    holds_own_sends: bool = False                                   # True: every paid call goes through PP's own clients, so a cell holds nothing
+    holds_own_sends: bool = False                                   # True: every paid send is billed where it is made, so a cell only RESERVES its bound
+    sent_spend_bound: SentSpendBound | None = None                  # (node, config) -> what one cell bills as DECLARED, read off the payload actually sent; None leaves the cell unbounded, and an unbounded cell cannot run under a ceiling
     cancel_stops_billing: bool = False                              # True: cancelling a sent cell stops what it bills; else it is left to land
     required_observation_keys: tuple[str, ...] = ()                 # keys the payload ALWAYS carries; init RAISES if the dataset declares no mapping
     experiment_file: str = ""                                       # on-disk experiment doc read from the dataset dir in place of a sample table
     resolve_experiment: ExperimentResolver | None = None            # parsed experiment_file -> the document every read sees (a named roster pinned)
-    identity_config: Callable[[Path, Mapping | None], dict] | None = None  # (dataset dir, resolved experiment) -> MEASUREMENT IDENTITY, not the wire
+    identity_config: Callable[[Path, Mapping | None], dict] | None = None  # (dataset dir, resolved experiment) -> what EVERY cell is measured with, not the wire
     measured_unit: MeasuredUnit = "sample"                          # what ONE row is CALLED — "sample" | "cell"
     expected_revision: str | None = None                            # backend rev this PP rev expects (paired w/ version_check)
     version_check: VersionCheck | None = None                       # async (http, base_url) -> str | None; init WARNs on drift
@@ -33,10 +34,11 @@ class Connector:
 
 Plus the first-tenant draft seeds (`default_pipeline`, `default_node_config`, `default_optimization`, `default_exclude_nodes`, `node_types`) and `max_cells_in_flight`, which shape the ingest UI and the scoring walk rather than the measurement. **The dataclass is the roster** — read the field notes there, which say what each one costs to get wrong.
 
-Three of the fields above are on this page because omitting them produced WRONG NUMBERS rather than a missing feature, silently:
+Four of the fields above are on this page because omitting them produced WRONG NUMBERS rather than a missing feature, silently:
 
 - **`required_observation_keys`** — an undeclared key is dropped at `sample_measurement.py::measure_sample` and never reaches `pipeline_data`, so the formula grades a measurement it never received. `wiring.py::_verify_required_observation_keys` raises at init instead.
-- **`identity_config`** — what the cell was measured ON, when that is not in the wire payload (a Harbor task's git pins, the inner optimizer's effective revision). Without it, banked rows are silently replayed against bytes nobody read.
+- **`identity_config`** — what every cell is measured WITH, when that is not in the wire payload (a Harbor agent, the inner optimizer's effective revision). Without it, banked rows are silently replayed against bytes nobody read. What ONE cell is measured on — a Harbor task's git pins — rides that cell's row from `extract_experiment` as `source_pin` instead, so a panel that grows re-keys none of its cells.
+- **`sent_spend_bound`** — what one cell bills when it runs as DECLARED, read off the payload the wire adapter actually sends, so the hold cannot count on a limit the agent was never given. Without one the cell is unbounded, and an unbounded cell cannot run under a ceiling at all. Declare the run it declares, never every retry it might need at once: the ceiling admits what the reservation does not cover, so an over-large bound buys nothing and silently holds the walk to one cell in flight.
 - **The answer shape** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § The answer shape — a query yielding `ground_truth: None` declares it, and `extract_experiment` is the only place a connector may.
 
 `SessionProtocol` (`promptpotter/domain/connector.py`): `async set_terms(http, base_url, terms)` (backend handshake; noop ok) · `async recover(http, base_url)` (re-establish after transport error).

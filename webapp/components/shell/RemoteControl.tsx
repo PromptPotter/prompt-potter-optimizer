@@ -1,6 +1,6 @@
 "use client";
 import { useMemo, useState, type ReactNode } from "react";
-import { postSkipSearchpoint, postSetSampleLookahead } from "@/lib/api";
+import { postSkipSearchpoint, postSetSampleLookahead, type BackpressureReading } from "@/lib/api";
 import { SegmentedControl, Switch, Term } from "@/components/ui";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { cx } from "@/lib/cx";
@@ -67,6 +67,17 @@ function heldBy(waitingOn: string | null, waitingSince: number | null): string |
   if (waitingOn === null || waitingSince === null) return null;
   const waited = Date.now() / 1000 - waitingSince;
   return waited >= 10 ? `waiting on ${waitingOn} · ${fmtDuration(waited)}` : null;
+}
+
+// The model provider holding calls that are out but not yet sent — module-level for the same
+// wallclock reason. Served only while it holds something, so its presence alone is the signal.
+function providerHold(held: BackpressureReading): string {
+  const now = Date.now() / 1000;
+  const pace = held.at_once === null ? "" : ` · ${held.at_once} at once`;
+  if (held.since === null) return `answering again${pace}`;
+  const cooling = held.resumes_at === null ? 0 : held.resumes_at - now;
+  const next = cooling > 0 ? `next send in ${fmtDuration(cooling)}` : "probing";
+  return `rate-limited ${fmtDuration(now - held.since)} · ${next}${pace}`;
 }
 
 // One bucket's prefix-cache discount, appended to that bucket's own spend figure. A bucket holds
@@ -204,7 +215,16 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
   const allowed = dash?.lookahead_allowed ?? 0;
   const most = dash?.lookahead_most ?? 0;
   const scoringNow = inFlight > 0 || allowed > 0;
+  // SERVED, and the fourth bound on this one depth: a cell RESERVES its worst case against the
+  // spend ceiling, so a ceiling only a few of those wide holds the walk at one call while the
+  // depth reads armed and the stop rules read generous. Nothing on this panel could say so.
+  const affordable = dash?.lookahead_affordable ?? null;
+  const cellReserve = dash?.cell_reserve_usd ?? null;
+  const moneyPinned = affordable !== null && inFlight + affordable < Math.min(lookahead, allowed);
   const waitNote = heldBy(dash?.waiting_on ?? null, dash?.waiting_since ?? null);
+  // Guarded, not annotated: `dashboard.json` is served verbatim, and a file an earlier build
+  // wrote carries no such key.
+  const providerHeld = dash?.backpressure ?? null;
   // The deepest press worth making: what the backend takes, and no more than the round can hold.
   const pickMax = most > 0 ? Math.max(1, Math.min(maxCells, most)) : maxCells;
   // Unlike Skip, this one follows the VIEWED path: the ceiling on screen and the cycle the press
@@ -331,6 +351,27 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
               <div className="row">
                 <span className="lbl">Held by</span>
                 <span className="val remote-spend-warn">{waitNote}</span>
+              </div>
+            ) : null}
+            {moneyPinned ? (
+              <div className="row">
+                <span className="lbl">Ceiling</span>
+                <Term
+                  className="val remote-spend-warn"
+                  content={`A cell is admitted on the MOST it could bill${
+                    cellReserve != null ? `, ${fmtUsd(cellReserve)} here` : ""
+                  }, so once the ceiling cannot hold another of those the walk runs one at a time — whatever depth is armed. Raise the budget below to widen it.`}
+                >
+                  {affordable === 0 ? "holds no further cell" : `${affordable} more affordable`}
+                </Term>
+              </div>
+            ) : null}
+            {providerHeld ? (
+              <div className="row">
+                <span className="lbl">Provider</span>
+                <Term className="val remote-spend-warn" content={providerHeld.detail}>
+                  {providerHold(providerHeld)}
+                </Term>
               </div>
             ) : null}
             <span className="remote-cells-group" title={concurrencyTitle}>

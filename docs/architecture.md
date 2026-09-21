@@ -852,8 +852,9 @@ the PR description.
   - **Only the cycle tier halts a run, and it halts one BEFORE a call is sent**:
     its spend book (`infrastructure/llm/spend_book.py`) admits every paid call
     at the most it may cost, in both units, beside everything still out, and a
-    call that ends without reporting is charged that whole bound. A ceiling
-    read after the fact is a guess about the calls in flight.
+    call that ends without reporting stays UNREPORTED at that bound — binding
+    the ceiling, never counted as spent, since only a provider's bill is. A
+    ceiling read after the fact is a guess about the calls in flight.
     `termination.py::BudgetGate` reads the same book at the round boundary; the
     account tier admits or refuses and never interrupts a campaign in flight.
   - **An L4 inner cycle needs no fourth source** — it spends under its ROOT's

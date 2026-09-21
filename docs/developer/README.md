@@ -101,7 +101,7 @@ measurements/                       MeasurementArchive
                                        (per sample)    (folds both axes)
 ```
 
-Both files are append-only logs folded last-wins (`store/read_model.py`). The index keys on `content_hash`; a run's log keys on `k` — one `"run"` header row (rewritten whole per save; it is the commit marker) and one `"m:{sample_id}"` row per measurement.
+Both files are append-only logs folded last-wins (`store/read_model.py`). The index keys on `run_id`; a run's log keys on `k` — one `"run"` header row (rewritten whole per save; it is the commit marker) and one `"m:{sample_id}"` row per measurement.
 
 **Write path:** a taken cell (`Walk.take`) → `build_dataset_run_data()` (`application/datasets/loaders.py`) → `archive.append_run(run_id, data, new_measurements)` — the rows already on disk are never rewritten, so a walk of S samples costs O(S) bytes, not O(S²) — → `AxisIndex.refresh()` (`application/intelligence/indexes/axis.py`) pulls via `archive.load_since()`. `compact_run` drops superseded rows at the walk boundary; `reset_run` truncates (a `force_fresh` pass REPLACES its rows, and append-only does not overwrite); `reindex` rebuilds `index.jsonl` from `runs/`.
 
