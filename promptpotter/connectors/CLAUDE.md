@@ -138,8 +138,10 @@ and moves every round.
   task image**, tagged `hb__<content hash>` by `resources/harbor-docker-compose.yaml` — one per
   distinct task environment, never one per cell. **A trial that measured the machine is never a
   cell**: `_infrastructure_failure` retries it and then raises `CellInfrastructureError`, which
-  halts the walk — at once and as `CellWalletExhaustedError` when the provider account is out of
-  credit. The rule, and the package cache that keeps downloads out of a cell, are
+  halts the walk — at once and as `CellSendRefusedError` when the provider account is out of
+  credit. **Nor is one its model provider throttled**: `CellThrottledError` hands it to the run's
+  backpressure (`BackendClient.run_query`), since the agent's own calls reach no client of ours.
+  The rule, and the package cache that keeps downloads out of a cell, are
   [`../../docs/operations/package-cache.md`](../../docs/operations/package-cache.md).
 
 ## The answer shape — declared in `extract_experiment`, never inferred
@@ -266,7 +268,9 @@ backend ([`../../docs/methods/verdict-resolution.md`](../../docs/methods/verdict
 
 **And `cell` implies NOTHING about the run's CONTROL LOOP — a flag reasoning "a cell is expensive,
 therefore…" is the one to refuse.** A connector declares what a row costs (`max_cells_in_flight`,
-the ceiling it may be run at; `cell_envelope_s`, the wall clock ONE of them may spend); how long an
+the ceiling it may be run at; `cells_hold_the_machine`, whether that ceiling is the MACHINE's —
+every run on it drawing one pool — because a cell holds a container here; `cell_envelope_s`, the
+wall clock ONE of them may spend); how long an
 operator's look-ahead arming lasts is the round's and the operator's to decide, and no connector
 can see the round it is inside. The shape to watch for is a second flag that ships beside `measured_unit` and is set by
 RESEMBLING the recursion rather than by any fact about the run — which is how a declaration reaches

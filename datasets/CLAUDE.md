@@ -42,7 +42,7 @@ The roster is the directory listing; each dataset's connector is read off its ow
 
 ## Re-cutting a dataset needs a NEW name
 
-**A `sample_id` identifies a sample only *within* a `dataset_name` — the row's text is not in the key.** So changing which rows a dataset holds, or what a row says, while keeping the name serves the OLD measurement for the new sample, silently and with no error anywhere. Cut the new version under a new `datasets/{name}/` and leave the old directory in place for as long as anything is still keyed to it. Key + the requirement that scopes it: `infrastructure/store/archive_queries.py::reusable_results`.
+**A measurement replays by CONTENT; per-sample history is kept by POSITION.** Replay matches a cell on its `sample_key` — the sample's query, label, question and connector-resolved `source_pin` — under the same instrument configuration, in every dataset at once: a sample carried into a wider panel or under a new name replays every cell already measured on it (`infrastructure/store/measurement_archive.py::load_reusable_results`). What a `sample_id` still keys is the history — δ, hit rates, hard samples — scoped `(dataset_name, sample_id)`. So a change that puts different content at an existing position (editing, replacing or reordering rows) needs a new `datasets/{name}/`, while one that leaves every existing sample in its slot, like appending tasks to a panel, does not. Re-running a measured configuration on a re-cut name refuses with `DatasetIdentityError` rather than pooling two questions in one slot (`application/scoring/search_point_scorer.py::_replayable_on`).
 
 ## L4 — `promptpotter-self`
 
@@ -50,7 +50,7 @@ The roster is the directory listing; each dataset's connector is read off its ow
 
 L4 is **not** a 4th `LayerStrategy` — it is the same PromptPotter applied to itself via the `promptpotter` connector, a recursion, not a new layer driver (full statement: [`../promptpotter/application/optimization/CLAUDE.md`](../promptpotter/application/optimization/CLAUDE.md)).
 
-**The inner instrument is `justlogic-d234`, and a cut switch is never advice.** Each depth cut is a separate `dataset_name`, so a measurement taken on one cut shares no cache key with another's — comparing "bands" across cuts reads a keying difference as a capability difference. A new cut is a new directory and nothing else — `justlogic_depths` reads the depths off the name — so widening difficulty means adding `justlogic-dNNN/`, never re-cutting this one.
+**The inner instrument is `justlogic-d234`, and a cut switch is never advice.** Each depth cut is a separate `dataset_name` with its own δ scale, so comparing "bands" across cuts reads a difference of rulers as a capability difference. A new cut is a new directory and nothing else — `justlogic_depths` reads the depths off the name — so widening difficulty means adding `justlogic-dNNN/`, never re-cutting this one.
 
 The remaining work lives in ONE place — [`../docs/specs/l4-outer-loop.md`](../docs/specs/l4-outer-loop.md) § Open (don't restate it here; it re-goes-stale every slice).
 

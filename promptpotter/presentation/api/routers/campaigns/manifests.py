@@ -100,6 +100,13 @@ class CampaignSummary(StrictModel):
             "means the dollar figure is complete."
         )
     )
+    spend_unreported_usd: float = Field(
+        description=(
+            "The most that this campaign's sends which ended with no bill may have cost, at the "
+            "bounds they were admitted on — unknown, never spent. Its share of "
+            "`QuotaStatus.spend_unreported_usd`."
+        )
+    )
     runs_with: CampaignRunsWith | None = Field(
         description=(
             "What the ROOT course runs with — a second transport of the answer "
@@ -138,6 +145,7 @@ def _campaign_summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
         lifecycle_reason=campaign.lifecycle_reason,
         spend_used_usd=round(spent.used_usd, 6),
         spend_unpriced_tokens=spent.unpriced_tokens,
+        spend_unreported_usd=round(spent.unreported_usd, 6),
         runs_with=campaign_runs_with(stores, campaign),
     )
 

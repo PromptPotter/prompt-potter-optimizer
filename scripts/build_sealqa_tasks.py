@@ -27,8 +27,8 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATASETS_DIR = REPO_ROOT / "datasets"
 
-# Pinned, not a branch: `sample_id` is scoped by dataset name and the row text is outside the key,
-# so a moving roster would re-serve old measurements for new rows.
+# Pinned, not a branch: per-sample history is kept by `sample_id` within a dataset name, so a
+# moving roster would hand new rows the history of the ones they displaced.
 HF_DATASET = "vtllms/sealqa"
 HF_CONFIG = "longseal"
 HF_SPLIT = "test"

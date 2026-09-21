@@ -20,9 +20,11 @@ class ErrorCategory(enum.StrEnum):
     CLIENT = "CLIENT"
     SERVER = "SERVER"
     CONNECTION = "CONNECTION"
-    # A wallet refused the cell's calls — the provider account's credit, or the run's spend or token
-    # ceiling. A hole, like CONNECTION: every later cell meets the same refusal.
+    # A send refused by what no retry clears — the provider account's credit, the provider's
+    # throttle outlasting every wait, or the run's spend or token ceiling. A hole, like CONNECTION:
+    # every later cell meets the same refusal.
     PROVIDER_CREDIT = "PROVIDER_CREDIT"
+    PROVIDER_THROTTLED = "PROVIDER_THROTTLED"
     SPEND_CEILING = "SPEND_CEILING"
     TOKEN_CEILING = "TOKEN_CEILING"
     PIPELINE = "PIPELINE"
@@ -70,9 +72,19 @@ class CellInfrastructureError(CellUnscoreableError):
     category = ErrorCategory.CONNECTION
 
 
-class CellWalletExhaustedError(CellInfrastructureError):
-    """A wallet behind the cell refused it — the provider account's credit, or a ceiling the run
-    holds; ``category`` names which. No backoff refills either, so it is raised on the first
+class CellThrottledError(CellUnscoreableError):
+    """The model provider throttled the cell's own calls, where no client of ours sends them (an
+    in-process agent), so the cell measured the provider's load and nothing else. The message is
+    the provider's. ``BackendClient.run_query`` catches it and re-sends the cell under the run's
+    ``Backpressure``, so it is never a row; one reaching ``measure_sample`` would bank as a hole
+    halting the walk, the same stop the backpressure itself ends a run on."""
+
+    category = ErrorCategory.PROVIDER_THROTTLED
+
+
+class CellSendRefusedError(CellInfrastructureError):
+    """A refusal no retry clears reached the cell — the provider account's credit, the provider's
+    throttle, or a ceiling the run holds; ``category`` names which. It is raised on the first
     refusal and the walk halts on the hole."""
 
     def __init__(
@@ -98,11 +110,12 @@ def is_provider_credit_refusal(detail: str) -> bool:
     return _PROVIDER_CREDIT_REFUSAL.search(detail) is not None
 
 
-class WalletExhaustedError(RuntimeError):
-    """A wallet refused one of our paid calls — the provider account's credit, or a ceiling the run
-    holds (``infrastructure/llm/spend_book.py``), which refuses BEFORE sending. Nothing but the
-    operator refills either, so a run ends on the stop ``category`` maps to
-    (``domain/phases.py::WALLET_STOPS``) rather than crashing."""
+class SendRefusedError(RuntimeError):
+    """One of our paid sends was refused by what no retry clears — the provider account's credit, a
+    ceiling the run holds (``infrastructure/llm/spend_book.py``, which refuses BEFORE sending), or
+    the provider's throttle outlasting every wait (``infrastructure/llm/rate_limit.py::
+    Backpressure``). Only the operator clears any of them, so a run ends on the stop ``category``
+    maps to (``domain/phases.py::REFUSAL_STOPS``) rather than crashing."""
 
     def __init__(self, message: str, *, category: ErrorCategory) -> None:
         super().__init__(message)
@@ -324,9 +337,10 @@ class ResumeDivergenceError(RuntimeError):
 
 
 class DatasetIdentityError(RuntimeError):
-    """The rows under this dataset name changed. ``sample_id`` is a POSITION within a name, so the
-    archive can only answer "what was measured at slot N" — replaying it would attribute a score to a
-    question that did not produce it, with no error anywhere. Re-cut rows need a new name."""
+    """The rows under this dataset name changed. Replay matches a sample by content and cannot be
+    fooled, but ``sample_id`` is a POSITION within a name, and the readers keyed on it — the δ
+    ruler, the sample index, hard samples — would pool two questions' history in one slot with no
+    error anywhere. Re-cut rows need a new name."""
 
     _PREVIEW = 160
 
@@ -352,10 +366,10 @@ class DatasetIdentityError(RuntimeError):
                 lines.append(f"  {field} measured: {was[: self._PREVIEW]!r}")
                 lines.append(f"  {field} now:      {now[: self._PREVIEW]!r}")
         lines.append(
-            "The measurement cache keys on (dataset_name, node_configs, sample_id) — the query "
-            "text is not in the key, so serving these priors would carry a score for one question "
-            "onto another. Cut the changed rows under a NEW dataset name; the old name keeps its "
-            "measurements and stays replayable."
+            "Per-sample history (difficulty, hit rates, hard samples) is keyed on (dataset_name, "
+            "sample_id), so continuing under this name would pool two questions in one slot. Cut "
+            "the changed rows under a NEW dataset name: every sample it shares with this one "
+            "still replays, because replay matches on content."
         )
         super().__init__("\n".join(lines))
 
@@ -377,10 +391,10 @@ def has_pipeline_warnings(result: Mapping[str, Any]) -> bool:
 @contextmanager
 def graceful(msg: str) -> Iterator[None]:
     """Suppress non-interrupt exceptions with a log message. ``KeyboardInterrupt``,
-    ``asyncio.CancelledError`` and a spent provider account re-raise: each ends the run."""
+    ``asyncio.CancelledError`` and a refused send re-raise: each ends the run."""
     try:
         yield
-    except (KeyboardInterrupt, asyncio.CancelledError, WalletExhaustedError):
+    except (KeyboardInterrupt, asyncio.CancelledError, SendRefusedError):
         raise
     except Exception:
         logger.warning(msg, exc_info=True)
@@ -411,8 +425,9 @@ __all__ = [
     "BadRequestError",
     "CellHaltedError",
     "CellInfrastructureError",
+    "CellSendRefusedError",
+    "CellThrottledError",
     "CellUnscoreableError",
-    "CellWalletExhaustedError",
     "ConflictError",
     "ContentTooLargeError",
     "DatasetIdentityError",
@@ -425,10 +440,10 @@ __all__ = [
     "ResumeDivergenceError",
     "RulerCoverageError",
     "RulerUnpersistedError",
+    "SendRefusedError",
     "ServiceUnavailableError",
     "StoredConfigInvalidError",
     "UnauthorizedError",
-    "WalletExhaustedError",
     "error_category",
     "graceful",
     "has_pipeline_warnings",

@@ -8,8 +8,8 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from promptpotter.domain.phases import WALLET_STOPS, StopLoop, StopReason
-from promptpotter.shared.errors import WalletExhaustedError, is_repairable_hole
+from promptpotter.domain.phases import REFUSAL_STOPS, StopLoop, StopReason
+from promptpotter.shared.errors import SendRefusedError, is_repairable_hole
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -23,13 +23,13 @@ OriginGateMode = Literal["strict", "critical_only", "off"]
 PanelGateMode = Literal["strict", "off"]
 
 # What ends a run on a named reason wherever it is raised — prep, init or the round loop.
-RUN_STOPS = (StopLoop, WalletExhaustedError)
+RUN_STOPS = (StopLoop, SendRefusedError)
 
 
-def run_stop_reason(stop: StopLoop | WalletExhaustedError) -> StopReason:
-    if isinstance(stop, WalletExhaustedError):
+def run_stop_reason(stop: StopLoop | SendRefusedError) -> StopReason:
+    if isinstance(stop, SendRefusedError):
         logger.warning("Run halted: %s", stop)
-        return WALLET_STOPS[stop.category]
+        return REFUSAL_STOPS[stop.category]
     return stop.reason
 
 
@@ -42,7 +42,7 @@ class BudgetGate:
 
     def tripped(self) -> StopReason | None:
         refused = self.book.exhausted()
-        return None if refused is None else WALLET_STOPS[refused]
+        return None if refused is None else REFUSAL_STOPS[refused]
 
 
 def origin_gate_tripped(

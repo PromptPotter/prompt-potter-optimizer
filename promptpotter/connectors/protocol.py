@@ -14,7 +14,7 @@ from promptpotter.domain.connector import (
     SessionProtocol,
     WireAdapter,
 )
-from promptpotter.domain.pipeline_schema import NodeType
+from promptpotter.domain.pipeline_schema import NodeSpendBound, NodeType
 from promptpotter.domain.value_tree import Delivery
 
 if TYPE_CHECKING:
@@ -59,6 +59,10 @@ PreflightFn = Callable[[str], Awaitable[None]]
 # so an env change lands without a reimport). ``None`` return = send no auth header.
 AuthTokenFn = Callable[[], str | None]
 
+# ``(node name, node config) → bound``: what one run of that node can bill, derived from the
+# config this process sends it.
+SentSpendBound = Callable[[str, Mapping[str, Any]], NodeSpendBound | None]
+
 # ``pipeline_params → Delivery``: where a backend offers more than one channel, which one carries
 # the prompt is the campaign's instrument choice, so it is resolved from the params a run hashes.
 PromptDelivery = Callable[[dict[str, Any] | None], Delivery]
@@ -81,7 +85,9 @@ class Connector:
     """Fresh session instance per ``BackendClient`` — sessions hold per-client state."""
 
     extract_experiment: Callable[[dict[str, Any]], tuple[list[dict[str, Any]], list[str]]]
-    """Backend experiment data → ``(queries, index_terms)``, each a ``{"query", "ground_truth"}``.
+    """Backend experiment data → ``(queries, index_terms)``, each a ``{"query", "ground_truth"}``,
+    plus ``source_pin`` where the query text does not say everything the cell was measured on (a
+    task's resolved commit) — it is part of the sample's content address, ``Sample.key``.
 
     **The answer shape — owned by** ``connectors/CLAUDE.md`` § The answer shape: a query yielding
     ``ground_truth: None`` declares it here, and never a second time anywhere else."""
@@ -114,13 +120,30 @@ class Connector:
     every press, and a screen declares its depth at launch instead
     (``application/diagnostics/seed_screen.py``)."""
 
+    cells_hold_the_machine: bool = False
+    """Whether one cell holds a resource of THIS machine for its life — a container. Then
+    :attr:`max_cells_in_flight` bounds the machine, not one run: every run on it takes from one pool
+    of that many slots (``infrastructure/backend.py::MachineSlots``), so two runs each at their own
+    depth cannot together outrun the box. ``False`` (default): a cell's cost is the provider's or
+    the backend's, and each run answers for its own depth."""
+
     holds_own_sends: bool = False
-    """Whether every paid call this backend makes passes through this process's own LLM clients,
-    which admit each send against the run's spend book (``infrastructure/llm/spend_book.py``) — so
-    a cell holds nothing itself. ``False`` (default): the cell is held whole, at the bound the
-    backend serves per node (``PipelineNode.spend_bound``), and a backend serving none cannot run
-    under a spend ceiling. Only the recursion is ``True``; ``dspy`` runs in this process but pays
-    through litellm, which no admission sees."""
+    """Whether every paid send a cell makes is admitted and billed on its own, where it is made —
+    by this process's LLM clients, by the litellm meter (``infrastructure/llm/litellm_sends.py``),
+    or by the connector around a send it cannot see into (``infrastructure/llm/spend_book.py``) —
+    so the cell is no send of its own. Where :attr:`sent_spend_bound` bounds the cell, it RESERVES
+    that bound: it starts only where its worst case fits, and its sends draw on the reservation.
+    ``False`` (default): the cell is held whole as ONE send, at the bound the backend serves per
+    node (``PipelineNode.spend_bound``) or the one :attr:`sent_spend_bound` derives, and billed off
+    its reply; a backend with neither cannot run under a spend ceiling. ``True`` for the recursion
+    and ``harbor``; ``dspy`` pays through litellm outside the meter, so it is billed per cell."""
+
+    sent_spend_bound: SentSpendBound | None = None
+    """For a backend whose limits are the ones THIS process sends it, the bound one run of a node
+    can bill, derived from the node config the wire adapter sends — so the hold and what the
+    backend enforces are one set of numbers. ``None`` (default): the backend serves its own
+    (``PipelineNode.spend_bound``). The function answering ``None``: that config sends no limit,
+    and the cell cannot run under a spend ceiling."""
 
     cancel_stops_billing: bool = False
     """Whether cancelling a cell that is already sent stops what it bills. ``False`` (default): a
@@ -203,12 +226,16 @@ class Connector:
     dir and the resolved experiment, so a connector can fold dataset-scoped inner
     behavior into the fingerprint. The canonical user is the in-process ``promptpotter``
     connector: its backend IS the inner optimizer (optimizer prompt origin +
-    layouts + engine + the dataset's ``inner_tasks.yaml`` inner-run config), so
+    layouts + engine + the inner benchmark's config), so
     without this an origin edit silently reuses stale measurements recorded
     under the old behavior. The connector's ``wire_adapter`` must strip these
     reserved keys from the outbound payload. ``None`` = the backend's revision
     is not part of identity (remote backends use the advisory ``version_check``
-    instead)."""
+    instead).
+
+    **What the whole panel is measured WITH, never which cells it holds.** A cell's own identity
+    rides its row from :attr:`extract_experiment` as ``source_pin`` (``Sample.source_pin``);
+    folding the task list in here re-keys every cell a panel already had the moment it grows."""
 
     default_pipeline: tuple[str, ...] = ()
     """First-tenant default pipeline step list — the launcher's chat-first

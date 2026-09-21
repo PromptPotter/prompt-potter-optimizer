@@ -73,6 +73,13 @@ class DashboardSample(StrictModel):
         description="Recorded elapsed seconds. Null where the row never reached the pipeline — "
         "distinct from a cached replay's real 0.0.",
     )
+    cost_s: float | None = Field(
+        default=None,
+        description="Seconds producing this row COST, summed off `step_timings` — the half that "
+        "survives the cache stamp. A replay occupies no clock, so `time_s` is 0.0 and this is what "
+        "the cell took when it was measured; on a fresh row the two agree. Null where the row "
+        "recorded no per-node timing.",
+    )
     predicted: str = Field(
         default="",
         description="Prediction, trimmed for display. EMPTY on a verifier-graded row (see "
@@ -96,6 +103,12 @@ class DashboardSample(StrictModel):
         "Null where no breakdown was reported; 0 where one was and there was no hit. Read it as a "
         "share through `cache_share`.",
     )
+
+    @property
+    def shown_s(self) -> float | None:
+        """This shape's mirror of `scoring.py::shown_seconds` — which of the two seconds above a
+        clock column shows. A property for the same reason `cache_share` is one."""
+        return self.cost_s if self.cached else self.time_s
 
     @property
     def cache_share(self) -> float | None:

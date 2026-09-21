@@ -7,6 +7,7 @@ from typing import Any, ClassVar
 
 from pydantic import ConfigDict, Field
 
+from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import DashboardCandidate, RoundSummary
@@ -58,7 +59,9 @@ class BackfillLogEntry(StrictModel):
 
 
 class BackendWarning(StrictModel):
-    """One entry in ``recent_backend_warnings`` — backend transport retry / 429 / 5xx surface."""
+    """One entry in ``recent_backend_warnings`` — a backend transport or 5xx retry, never a 429.
+
+    That one is the provider's pushback rather than a fault, and is served as ``backpressure``."""
 
     ts: str
     kind: str
@@ -69,6 +72,10 @@ class BackendWarning(StrictModel):
     status_code: int | None = None
     final: bool = False
     query: str | None = None
+    # The backend's OWN words about what went wrong. The kind says a cell could not be measured;
+    # only this says why — and why is the half that decides whether the operator restarts a daemon,
+    # clears a cache or changes nothing. Absent on a wire retry, which has a status code instead.
+    detail: str | None = None
 
 
 class LoopWarning(StrictModel):
@@ -263,10 +270,19 @@ class LiveDashboardState(StrictModel):
     in_flight: int = 0
     lookahead_allowed: int = 0
     lookahead_most: int = 0
+    # How many MORE cells the SPEND ceiling admits, and what one reserves — the fourth bound on the
+    # same depth, and the only one nothing else implies. A cell reserves its worst case, so a
+    # ceiling a few of those wide pins the walk at one call while the depth reads armed and the
+    # stop rules read generous. ``None`` where no book bounds the cells.
+    lookahead_affordable: int | None = None
+    cell_reserve_usd: float | None = None
     # The call the round's next decision waits on — calls are taken in walk order, so one slow cell
     # at a candidate's head holds every call behind it — and when it was launched (epoch seconds).
     waiting_on: str | None = None
     waiting_since: float | None = None
+    # The model provider holding calls out but unsent (`rate_limit.py::Backpressure`); None while
+    # it holds nothing.
+    backpressure: BackpressureReading | None = None
     # The connector's own declarations, stamped at INIT:exit. SERVED rather than inferred: the
     # browser's only available guess — "is this self-optimization?" — is not the question. `1`
     # says the control does not apply, and went unserved before, so the button took dead presses.

@@ -59,8 +59,8 @@ async def run_generation_only_round(
                     opt_sp=cycle.opt_sp,
                 ),
             )
-        hard_samples_artifact = write_hard_samples_artifacts(session, cycle)
-        write_log_md(session, hard_samples_artifact=hard_samples_artifact)
+        write_hard_samples_artifacts(session, cycle)
+        write_log_md(session)
         write_review_md(session, cycle)
 
     if (ledger := session.state.ledger) is not None:

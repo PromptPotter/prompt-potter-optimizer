@@ -45,6 +45,7 @@ __all__ = [
     "elect_round_winner",
     "elimination_p_best",
     "elimination_p_best_bounds",
+    "lift_over_bar",
     "matched_parent_lift",
     "mean_fitness_ci",
     "paired_fitness",
@@ -188,6 +189,24 @@ def parent_selection_bias(rounds: Sequence[RoundResult]) -> float:
     return 0.0
 
 
+def lift_over_bar(
+    abilities: RaschPosterior, candidate_id: str, parent_bias: float
+) -> tuple[float, float] | None:
+    """What ADMISSION reads, as its two halves: θ over the parent's, and the share of the parent's
+    selection bias this arm has earned back. Split so a verdict can state both — a round won at
+    zero θ over the parent is won on the second. ``None`` where either arm was never fit.
+
+    The credit is EARNED, not granted: it corrects a bar read at the parent's SE, so an arm read
+    less precisely carries a wider draw of its own and a flat credit would be worth most to the
+    noisiest arm in the round — the one that needs it least."""
+    lift = theta_lift_over_parent(abilities, candidate_id)
+    if lift is None:
+        return None
+    se_parent = abilities.theta_se.get(PARENT_ABILITY_ID) or 0.0
+    se_cand = abilities.theta_se.get(candidate_id) or 0.0
+    return lift, parent_bias * (min(1.0, se_parent / se_cand) if se_parent and se_cand else 1.0)
+
+
 def elect_round_winner(
     candidate_ids: list[str],
     results_by_id: Mapping[str, list[QueryMeasurement]],
@@ -228,15 +247,8 @@ def elect_round_winner(
             continue
         # ADMISSION is the bare point lift, no SE margin — subtracting one shrinks the estimate
         # itself, turning a wide-posterior gain negative. Uncertainty belongs in the RANK below.
-        lift = theta_lift_over_parent(abilities, cid)
-        if lift is None:
-            continue
-        # The credit is EARNED, not granted: it corrects a bar read at `se_parent`, so an arm read
-        # less precisely carries a wider draw of its own and a flat credit would be worth most to
-        # the noisiest arm in the round — the one that needs it least.
-        se_cand = abilities.theta_se.get(cid) or 0.0
-        lift += parent_bias * (min(1.0, se_parent / se_cand) if se_parent and se_cand else 1.0)
-        if lift <= 0.0:
+        read = lift_over_bar(abilities, cid, parent_bias)
+        if read is None or sum(read) <= 0.0:
             continue
         # RANK: the lift over the noise it cleared, because a bare gap cannot say whether the
         # round could TELL the arms apart — a thin arm out-points a full panel on a margin

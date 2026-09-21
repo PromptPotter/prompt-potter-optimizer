@@ -13,7 +13,7 @@ Per-call telemetry firing from deep inside the dispatch chain uses the `emit_*` 
 **The ledger is a CHRONOLOGY, and a payload earns its place only by needing one.** It answers
 which round, which candidate, in what order, against which rival — nothing else can. So the test
 for a field is not "is it useful?" but *is the ordering what makes it findable?* A value the
-archive holds keyed `(dataset_name, node_configs, sample_id)`, or that `rounds/round_NNNN.json`
+archive holds addressed by `(node_configs, sample_key)`, or that `rounds/round_NNNN.json`
 carries per candidate, is already addressable without it. Two shapes are declared, not optional:
 the projection at the writer (`RunCallbacks` → `domain/scoring.py::ledger_sample_view`,
 `ViewContext.ledger_anchors`) keeps a record to the union of what its subscribers RENDER, and a
@@ -210,11 +210,17 @@ on purpose is not.
 as instances (no subclasses) parameterized by a `ProviderSpec` registry.
 `llm/anthropic.py::AnthropicClient` is its peer.
 
-**No paid request is sent unadmitted.** `LLMClientBase._admitted_send` holds each attempt's worst
-case against the run's spend book (`llm/spend_book.py`), sends, and settles it with the usage record
-it writes itself; `BackendClient.run_query` does the same for a whole cell. SDK retries are off —
-only a 429, a 5xx and a connection never made are sent again, each admitted anew — and a send that
-ends unreported is charged its whole bound. A caller meters only a cache replay.
+**No paid request is sent unadmitted, and a usage record is only ever a BILL.** `LLMClientBase._admitted_send`
+holds each attempt's worst case against the run's spend book (`llm/spend_book.py`), sends, and
+closes it with the bill the provider reported; Harbor's in-process agent is billed the same way,
+send by send, where litellm makes the send (`llm/litellm_sends.py`), so its cell only RESERVES its
+bound; `BackendClient.run_query` holds a remote cell whole and closes it off the reply. SDK retries
+are off — a 5xx and a connection never made are sent again a bounded number of times, a 429
+whenever the sender's `Backpressure` lets it (`llm/rate_limit.py`), each admitted anew. **A send
+that ends with no bill writes NOTHING** — its hold stays open, UNREPORTED: it binds every ceiling
+at its bound and no surface sums it as spent. Writing that bound as a bill once put $1.87 of four
+cancelled cells into a campaign's "spent" beside the $0.235 the provider billed. A caller meters
+only a cache replay; a diagnostic verb binds its ledger through `loop_start.py::diagnostic_trace`.
 
 **Provider selection is always EXPLICIT** — the caller passes it to
 `registry.get_llm_client`, sourced from the optimizer node's `config.provider`. No

@@ -19,7 +19,7 @@ from promptpotter.application.jobs.launcher.admission import (
     release_slot,
     request_launch,
 )
-from promptpotter.application.jobs.registry import JobRegistry, default_jobs_dir
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimization.resume_and_fork.decisions import (
     RESUME_CHECKPOINT_GATING,
     GatingMode,
@@ -27,6 +27,7 @@ from promptpotter.application.optimization.resume_and_fork.decisions import (
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.config.logging import setup_logging
+from promptpotter.config.paths import default_jobs_dir
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,

@@ -14,6 +14,7 @@ from promptpotter.domain.run_records import (
     CommandRecord,
     CycleRecord,
     ErrorRecord,
+    PhaseRecord,
     RoundWarningKind,
     RoundWarningRecord,
     SpendHoldRecord,
@@ -84,6 +85,21 @@ def _append_record(record: CycleRecord) -> int | None:
         return None
 
 
+def bill_usd(
+    usage: TokenAccount, *, model: str | None, provider: str | None, cost_usd: float | None
+) -> float | None:
+    """What one bill cost: the provider's own figure, else the rate table's price now."""
+    return compute_usd(
+        model,
+        usage.input,
+        usage.output,
+        override_usd=cost_usd,
+        provider=provider,
+        cache_read_tokens=usage.cache_read or 0,
+        cache_write_tokens=usage.cache_write,
+    )
+
+
 def emit_token_usage(
     *,
     node: str,
@@ -95,7 +111,6 @@ def emit_token_usage(
     served_by: str | None = None,
     cost_usd: float | None = None,
     cached: bool = False,
-    unsettled: bool = False,
     hold_id: str | None = None,
     mirrored: bool = False,
 ) -> TokenUsageRecord | None:
@@ -122,22 +137,53 @@ def emit_token_usage(
         cache_read_tokens=usage.cache_read or 0,
         cache_write_tokens=usage.cache_write,
         duration_s=float(duration_s),
-        cost_usd=compute_usd(
-            model,
-            usage.input,
-            usage.output,
-            override_usd=cost_usd,
-            provider=provider,
-            cache_read_tokens=usage.cache_read or 0,
-            cache_write_tokens=usage.cache_write,
-        ),
-        unsettled=unsettled,
+        cost_usd=bill_usd(usage, model=model, provider=provider, cost_usd=cost_usd),
         hold_id=hold_id,
         mirrored=mirrored,
         cached=cached,
         round=_CURRENT_ROUND.get(),
     )
     return record if _append_record(record) is not None else None
+
+
+def emit_backend_warning(
+    *,
+    kind: str,
+    attempt: int,
+    max_attempts: int,
+    wait_s: float,
+    query: str,
+    detail: str = "",
+    error_class: str | None = None,
+    status_code: int | None = None,
+    final: bool = False,
+) -> None:
+    """A backend attempt that failed and will be tried again — the ONE producer of the channel
+    ``dashboard.json::recent_backend_warnings`` serves.
+
+    ``detail`` is load-bearing: the category alone says a cell could not be measured, and only the
+    backend's own words say WHY (a corrupt package index, a stopped daemon, a lost session). It
+    rode Python ``logging`` alone, so a run hosted by the API server left it in a console nobody
+    but the operator at that terminal could read, and every surface downstream — the dashboard, a
+    headless reader, the next session picking the run up — saw an unexplained
+    ``backend_unreachable``."""
+    _append_record(
+        PhaseRecord(
+            phase="backend",
+            event="warning",
+            payload={
+                "kind": kind,
+                "attempt": attempt,
+                "max_attempts": max_attempts,
+                "wait_s": float(wait_s),
+                "error_class": error_class,
+                "status_code": status_code,
+                "final": final,
+                "detail": detail[:400],
+                "query": query[:80],
+            },
+        )
+    )
 
 
 def emit_spend_hold(
@@ -248,6 +294,7 @@ def emit_round_warning(
 
 __all__ = [
     "active_cycle_ledger",
+    "bill_usd",
     "diagnostic_spend",
     "emit_command",
     "emit_command_ack",

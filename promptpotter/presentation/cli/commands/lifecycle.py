@@ -31,8 +31,8 @@ from promptpotter.application.commands.payloads import (
     UnarchiveCampaignPayload,
 )
 from promptpotter.application.jobs.capacity import resolve_run_capacity
-from promptpotter.application.jobs.registry import JobRegistry, default_jobs_dir
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, default_jobs_dir
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,

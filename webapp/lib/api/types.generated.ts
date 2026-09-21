@@ -83,6 +83,11 @@ export interface DashboardSample {
   /** Recorded elapsed seconds. Null where the row never reached the pipeline —
    * distinct from a cached replay's real 0.0. */
   time_s: number | null;
+  /** Seconds producing this row COST, summed off `step_timings` — the half that
+   * survives the cache stamp. A replay occupies no clock, so `time_s` is 0.0
+   * and this is what the cell took when it was measured; on a fresh row the
+   * two agree. Null where the row recorded no per-node timing. */
+  cost_s: number | null;
   /** Prediction, trimmed for display. EMPTY on a verifier-graded row (see
    * ground_truth) — the pair is both halves of a comparison nobody made
    * there. */
@@ -527,7 +532,21 @@ export interface SpendRollup {
   unpriced_tokens: number;
 }
 
-/** One entry in ``recent_backend_warnings`` — backend transport retry / 429 / 5xx surface. */
+/** A provider holding a sender's sends (`infrastructure/llm/rate_limit.py::Backpressure`). */
+export interface BackpressureReading {
+  sender: string;
+  /** Sends that may be out at once; None: uncapped. */
+  at_once: number | null;
+  /** Epoch seconds the provider began throttling; None once it answers again and
+   * only the cap, climbing back, still holds sends. */
+  since: number | null;
+  /** Epoch seconds the episode's cooldown ends; past it, one send probes. */
+  resumes_at: number | null;
+  /** The provider's own words, from the throttle that opened it. */
+  detail: string;
+}
+
+/** One entry in ``recent_backend_warnings`` — a backend transport or 5xx retry, never a 429. */
 export interface BackendWarning {
   ts: string;
   kind: string;
@@ -538,6 +557,7 @@ export interface BackendWarning {
   status_code: number | null;
   final: boolean;
   query: string | null;
+  detail: string | null;
 }
 
 /** One entry in ``recent_loop_warnings`` — an optimizer-loop degradation the */
@@ -638,8 +658,11 @@ export interface LiveDashboardState {
   in_flight: number;
   lookahead_allowed: number;
   lookahead_most: number;
+  lookahead_affordable: number | null;
+  cell_reserve_usd: number | null;
   waiting_on: string | null;
   waiting_since: number | null;
+  backpressure: BackpressureReading | null;
   max_cells_in_flight: number;
   measured_unit: 'sample' | 'cell';
   last_query_elapsed_s: number | null;
@@ -1008,6 +1031,10 @@ export interface CampaignSummary {
   /** Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them.
    * Zero means the dollar figure is complete. */
   spend_unpriced_tokens: number;
+  /** The most that this campaign's sends which ended with no bill may have cost, at
+   * the bounds they were admitted on — unknown, never spent. Its share of
+   * `QuotaStatus.spend_unreported_usd`. */
+  spend_unreported_usd: number;
   /** What the ROOT course runs with — a second transport of the answer `GET
    * /campaigns/{id}/pipeline` gives at the root, never a second source. Null
    * when the root pipeline did not resolve. `max_rounds` is the DECLARED
@@ -1582,9 +1609,16 @@ export interface MeResponse {
 
 /** Live snapshot of the abuse-limit knobs vs. usage. */
 export interface QuotaStatus {
+  /** What the providers BILLED this account, over its whole life. Never an
+   * estimate: a send whose bill never came is `spend_unreported_usd`, not
+   * this. */
   spend_used_total_usd: number;
   spend_budget_usd_total: number | null;
   spend_unpriced_tokens: number;
+  /** The most that sends which ended with no bill (cancelled, timed out, killed
+   * with a run) may have cost, at the bounds they were admitted on. Not spent
+   * — unknown. It binds the ceiling beside `spend_used_total_usd`. */
+  spend_unreported_usd: number;
   tokens_used_total: number;
   token_budget_total: number | null;
   concurrent_running: number;
@@ -1876,6 +1910,10 @@ export interface CampaignDetailResponse {
   /** Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them.
    * Zero means the dollar figure is complete. */
   spend_unpriced_tokens: number;
+  /** The most that this campaign's sends which ended with no bill may have cost, at
+   * the bounds they were admitted on — unknown, never spent. Its share of
+   * `QuotaStatus.spend_unreported_usd`. */
+  spend_unreported_usd: number;
   /** What the ROOT course runs with — a second transport of the answer `GET
    * /campaigns/{id}/pipeline` gives at the root, never a second source. Null
    * when the root pipeline did not resolve. `max_rounds` is the DECLARED
@@ -2035,6 +2073,7 @@ export const STOP_REASON_LABELS: Record<string, string> = {
   'origin_gate': 'Origin gate (unhealthy origin)',
   'backend_unreachable': 'Backend unreachable',
   'provider_credit_exhausted': 'Provider out of credit',
+  'provider_throttled': 'Provider rate-limited',
   'crashed': 'Crashed',
   'producer_vanished': 'Producer vanished',
   'render_error': 'Render error',
@@ -2054,6 +2093,7 @@ export const STOP_REASON_NEXT_STEPS: Record<string, string> = {
   'token_budget': '`set-budget --max-tokens <above what is already spent>` then `resume`.',
   'backend_unreachable': 'The unreached cell is a hole, not a score: restore the backend or the network it needs, then `resume` re-measures it.',
   'provider_credit_exhausted': "Raise the provider key's limit or top up its credit, then `resume`; a refused cell is a hole it re-measures.",
+  'provider_throttled': 'Use your own key for that provider (OpenRouter BYOK) or route to another host (`route_order`), or wait out its quota, then `resume`; the refused cell is a hole it re-measures.',
   'diverged': '`resume --fork-on-divergence` to branch here, or revert the config edit to continue.',
 };
 
@@ -2079,6 +2119,7 @@ export const STOP_REASON_OUTCOMES: Record<string, StopOutcome> = {
   'origin_gate': 'halted',
   'backend_unreachable': 'halted',
   'provider_credit_exhausted': 'halted',
+  'provider_throttled': 'halted',
   'crashed': 'failed',
   'producer_vanished': 'failed',
   'render_error': 'failed',

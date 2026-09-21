@@ -125,8 +125,10 @@ class SnapshotRecord(StrictModel):
 
 
 class TokenUsageRecord(StrictModel):
-    """EVERY call emits one, wire or cache — ``cached`` splits the BILL from what the search
-    would cost cold. Collapsing them lets a replayed L4 arm read as infinitely efficient."""
+    """ONE BILL: what a provider reported one response cost — or a replay, ``cached``, which
+    splits the bill from what the search would cost cold (collapsing them lets a replayed L4 arm
+    read as infinitely efficient). Never an estimate: a send that ended without a bill writes no
+    record, and its :class:`SpendHoldRecord` stays open instead."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -169,10 +171,6 @@ class TokenUsageRecord(StrictModel):
     cost_usd: float | None = None
     """The call's price, stamped once when it is recorded (``telemetry.py::emit_token_usage``) and
     only ever summed after — ``None`` is unpriced. A cached call carries what it WOULD have cost."""
-    unsettled: bool = False
-    """The call never reported what it used — cancelled, timed out, failed after it was sent — so
-    the counts and the price are the bound it was ADMITTED on (``infrastructure/llm/spend_book.py``),
-    the most the provider may have billed, never a measurement."""
     hold_id: str | None = None
     """The :class:`SpendHoldRecord` this call settles; ``None`` for a call nothing held (a replay)."""
     mirrored: bool = False
@@ -185,10 +183,10 @@ class TokenUsageRecord(StrictModel):
 
 
 class SpendHoldRecord(StrictModel):
-    """A paid call ADMITTED, written before it is sent at the most it may cost. The usage record
-    carrying its ``hold_id`` settles it; a hold nothing settled belongs to a run killed with the
-    call out, and is charged in full (``spend_book.py::charge_open_holds``) — so a hard exit never
-    leaves a billed call off the ledger."""
+    """A paid send ADMITTED, written before it leaves at the most it may cost. The bill carrying
+    its ``hold_id`` closes it. One no bill closed is UNREPORTED once its run is not live — the
+    request left and nobody learned what it cost (cancelled, timed out, killed): it binds every
+    ceiling at this bound and is never summed as spent (``infrastructure/llm/spend_book.py``)."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -220,6 +218,9 @@ class SpendTombstoneRecord(StrictModel):
     used_usd: float
     used_tokens: int
     unpriced_tokens: int
+    # What its unreported sends may have cost (`SpendHoldRecord`) — banked apart, as it is read.
+    unreported_usd: float = 0.0
+    unreported_tokens: int = 0
     timestamp: str = Field(default_factory=utcnow_iso)
 
 

@@ -27,8 +27,8 @@ from promptpotter.infrastructure.llm.rate_limit import set_rate_tenant
 from promptpotter.infrastructure.llm.spend_book import (
     SpendBook,
     bind_spend_book,
-    charge_open_holds,
     reset_spend_book,
+    unreported_on,
 )
 from promptpotter.infrastructure.llm.telemetry import (
     reset_current_round,
@@ -418,9 +418,9 @@ class RunCallbacks:
         )
 
     def on_flight(self, flight: Flight) -> None:
-        """The scoring phase's calls in flight, what its stop rules allow, the most it could hold, and
-        the call a decision waits on — the whole round's, so it names no candidate
-        (``scoring/query_loop.py::FlightGauge``)."""
+        """The scoring phase's calls in flight, what its stop rules allow, what the spend ceiling
+        affords, the most it could hold, and the call a decision waits on — the whole round's, so
+        it names no candidate (``scoring/query_loop.py::FlightGauge``)."""
         waiting = (
             None
             if flight.waiting is None
@@ -434,7 +434,13 @@ class RunCallbacks:
                 "out": int(flight.out),
                 "allowed": int(flight.allowed),
                 "most": int(flight.most),
+                # What the SPEND ceiling admits beside them, which no other reading here implies.
+                "affordable": None if flight.affordable is None else int(flight.affordable),
+                "cell_usd": None if flight.cell_usd is None else float(flight.cell_usd),
                 "waiting": waiting,
+                "backpressure": (
+                    None if flight.backpressure is None else flight.backpressure.model_dump()
+                ),
             },
         )
 
@@ -531,8 +537,9 @@ class RunObservers:
 
     def arm_spend_book(self, book: SpendBook) -> None:
         """Count this run's ledger into ``book`` and admit every send the run makes against it,
-        replacing a book armed before — the ceilings are re-armed once the origin is scored. A
-        call a killed run left out is charged here, before this run sends anything.
+        replacing a book armed before — the ceilings are re-armed once the origin is scored. Every
+        send the ledger left unreported — a killed run's calls out included — is held from here,
+        before this run sends anything, and never counted as spent.
 
         A run nested inside another (an L4 inner cell) admits nothing against its own book: its
         sends stay on the ROOT's, the one ceiling every level of the recursion spends under, and
@@ -545,11 +552,14 @@ class RunObservers:
             if self._book_tokens:
                 reset_spend_book(self._book_tokens.pop())
             self._book_tokens.append(bind_spend_book(book))
-        if charged := charge_open_holds(ledger):
+        unreported = unreported_on(ledger)
+        book.usd_unreported, book.tokens_unreported = unreported.usd, unreported.tokens
+        if unreported.sends:
             logger.warning(
-                "A stopped run left %d paid call(s) unreported; each is charged the most it "
-                "could have cost.",
-                charged,
+                "%d paid send(s) on this run ended without a bill; the ceiling holds up to $%.4f "
+                "for them, and no surface counts it as spent.",
+                unreported.sends,
+                unreported.usd,
             )
 
     def drain_all(self) -> None:

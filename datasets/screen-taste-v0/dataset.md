@@ -45,8 +45,8 @@ slate reordered, against a running TermNorm backend.
 - **The liked pool is thin (30).** Every title appears in many of the 20 rows, so the rows overlap
   heavily and the effective sample is smaller than the row count suggests — widen it before reading
   a small lift as real.
-- **Re-cutting needs a new directory, or a wipe.** A `sample_id` is unique only within a
-  `dataset_name`, so new rows under this name are served the old measurements silently. Copy to
+- **Re-cutting needs a new directory, or a wipe.** Per-sample history is kept by `sample_id`
+  within a `dataset_name`, so new rows under this name inherit the old rows' history. Copy to
   `screen-taste-vN`, or delete what this name measured — the second is right while the campaign is
   scratch and wrong once a result is worth keeping (`datasets/CLAUDE.md` § Re-cutting a dataset
   needs a NEW name).

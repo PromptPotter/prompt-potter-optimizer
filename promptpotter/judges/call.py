@@ -37,7 +37,10 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
-from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
+from promptpotter.application.optimization.dispatch.llm_call.heartbeat import (
+    heartbeat,
+    waiting_on,
+)
 from promptpotter.config.settings import NO_RESULT
 from promptpotter.infrastructure.llm.registry import get_llm_client
 from promptpotter.infrastructure.llm.response import LLMResponse
@@ -49,7 +52,7 @@ from promptpotter.infrastructure.llm.telemetry import (
 )
 from promptpotter.infrastructure.store.stores import LLMReuseCache, hash_call
 from promptpotter.judges.protocol import JudgeStage, JudgeVerdict
-from promptpotter.shared.errors import CellWalletExhaustedError, WalletExhaustedError
+from promptpotter.shared.errors import CellSendRefusedError, SendRefusedError
 
 logger = logging.getLogger(__name__)
 
@@ -74,9 +77,9 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
     """Run one judge stage. Returns ``(reply, error)`` — exactly one is non-empty.
 
     **Never raises**, which every caller relies on: a grading failure must stay a failed grading,
-    not kill the measurement of a cell the backend already paid for. The one exception is a wallet
-    that refused the call — a spent provider account or the run's ceiling — which is no grading at
-    all: it raises ``CellWalletExhaustedError``."""
+    not kill the measurement of a cell the backend already paid for. The one exception is a refused
+    send — a spent provider account, a provider throttling past every wait, or the run's ceiling —
+    which is no grading at all: it raises ``CellSendRefusedError``."""
     started = time.monotonic()
     cache = _CACHE.get()
     key: str | None = None
@@ -97,10 +100,10 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
     else:
         try:
             response = await _sample(stage, prompt, judge=judge, started=started)
-        except WalletExhaustedError as exc:
+        except SendRefusedError as exc:
             # `spent` is empty because `measure_sample` bills the cell's backend spend before any
             # judge runs; its catch banks the hole and the walk halts on it.
-            raise CellWalletExhaustedError(
+            raise CellSendRefusedError(
                 str(exc), category=exc.category, spent={}, step_timings={}
             ) from exc
         except Exception as exc:
@@ -212,7 +215,7 @@ async def _sample(stage: JudgeStage, prompt: str, *, judge: str, started: float)
             node=label,
             round_num=_CURRENT_ROUND.get(),
             start_monotonic=started,
-            detail_fn=lambda: f"grader {stage.model} has not answered",
+            detail_fn=lambda: waiting_on(client, stage.model, role="grader"),
         )
     )
     try:

@@ -7,8 +7,7 @@ from __future__ import annotations
 
 import logging
 import random
-from collections.abc import Callable, Iterator, Sequence
-from contextlib import contextmanager
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
@@ -18,6 +17,7 @@ from promptpotter.application.campaign_config import (
 from promptpotter.application.initialization.loop_start import (
     arm_diagnostic_scoring,
     diagnostic_pass,
+    diagnostic_trace,
 )
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.optimization.l1.population import merge_pipeline_params
@@ -27,21 +27,13 @@ from promptpotter.application.runner.termination import BudgetGate
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.search_point_scorer import score_search_point
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import (
     DiagnosticRunRecord,
     diagnostic_held,
     parse_candidate_label,
     resolved_fitness,
-)
-from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.spend_book import bound_spend_book
-from promptpotter.infrastructure.llm.telemetry import (
-    active_cycle_ledger,
-    diagnostic_spend,
-    reset_cycle_ledger,
-    set_cycle_ledger,
 )
 from promptpotter.infrastructure.store import archive_queries
 from promptpotter.shared.clock import utcnow_iso
@@ -93,34 +85,6 @@ def rounds_since_verified(
         if r.source_cycle == cycle_id and r.source_label
     ]
     return round_num - max(verified_at) if verified_at else round_num
-
-
-@contextmanager
-def _diagnostic_trace(stores: Stores, hop: CycleHop) -> Iterator[None]:
-    """A verify's spend joins the campaign's OWN trace, in the ``diagnostic`` bucket.
-
-    Inside every ceiling, always: the bucket is folded into ``SpendRollup``'s totals like any other
-    (``TOKEN_KIND_BUCKET``), so the budget gate sees this money. It is banked APART because it
-    answers a question about the search rather than advancing it — folded into ``backend``, an
-    operator reads re-measuring a candidate as the cost of finding one.
-
-    The ledger is opened only when none is bound. In the loop and behind the API one already is
-    (the round's, and the dispatcher's), and a second handle on one file is a second appender."""
-    if active_cycle_ledger() is not None:
-        with diagnostic_spend():
-            yield
-        return
-    ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
-    # The verb's own book files here too, so what an L4 cell spends beneath it lands on this
-    # ledger rather than only on the sandbox's.
-    if (book := bound_spend_book()) is not None and book.ledger is None:
-        book.ledger = ledger
-    token = set_cycle_ledger(ledger)
-    try:
-        with diagnostic_spend():
-            yield
-    finally:
-        reset_cycle_ledger(token)
 
 
 class VerifyError(ConflictError):
@@ -296,7 +260,7 @@ async def verify_candidate(
         n_to_pick,
         len(measured_ids),
     )
-    with _diagnostic_trace(stores, hop):
+    with diagnostic_trace(stores, hop):
         await diagnostic_pass(
             VerifyError,
             score_search_point(

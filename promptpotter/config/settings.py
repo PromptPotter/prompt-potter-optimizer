@@ -1,6 +1,8 @@
 """Application settings + global constants. The module-level constants are the single source for prompt field lists,
 persistence versioning and service-level defaults."""
 
+import codecs
+import locale
 import math
 import tomllib
 from importlib.metadata import version
@@ -91,9 +93,9 @@ WELL_KNOWN_PARAM_TYPES: Annotated[dict[str, str], shapes_optimizer_prompt] = {
 
 # Wall-clock ceiling on one optimizer round-trip. The provider SDK's own timeout is a
 # per-read-gap timeout, not a total one, so a reasoning model streaming slowly never trips it
-# and the call hangs indefinitely. Sized for the worst case — the initial round-trip PLUS one
-# schema-repair retry — or a healthy-but-slow call false-halts. One transient timeout is
-# retried; a second halts the loop with ``StopReason.OPTIMIZER_TIMEOUT``.
+# and the call hangs indefinitely. Per round trip: the logical call's wall multiplies it by the
+# round trips its parse ladder may take (`llm_call/call.py::_MAX_ROUND_TRIPS_PER_CALL`). A call past
+# that wall halts the loop with ``StopReason.OPTIMIZER_TIMEOUT`` — it is never sent again.
 OPTIMIZER_CALL_DEADLINE_S: float = 180.0
 
 # PoBB elimination — a candidate stops when its P(best) drops below ε. The runtime value is
@@ -247,6 +249,16 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
+def non_utf8_encoding() -> str | None:
+    """This interpreter's text encoding when it is NOT UTF-8, else ``None`` — one reading of a
+    posture two surfaces act on. A container-backed connector REFUSES a launch under it, because
+    the agent reads its task files without naming an encoding and any byte outside the locale's
+    raises before a container is built; the API server's boot banner warns that it can therefore
+    run none. Written twice, the two could disagree about what counts as UTF-8."""
+    name = codecs.lookup(locale.getpreferredencoding(False)).name
+    return None if "utf-8" in name else name
+
+
 __all__ = [
     "ANSWER_SPACE_CAP",
     "APP_VERSION",
@@ -263,5 +275,6 @@ __all__ = [
     "TERMS_VERSION",
     "WELL_KNOWN_PARAM_TYPES",
     "Settings",
+    "non_utf8_encoding",
     "settings",
 ]

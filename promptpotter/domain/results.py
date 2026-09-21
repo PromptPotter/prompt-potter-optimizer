@@ -19,7 +19,7 @@ from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.run_records import ErrorRecord
-from promptpotter.domain.scoring import is_answer_collapsed
+from promptpotter.domain.scoring import is_answer_collapsed, is_hit
 from promptpotter.domain.search_point import strip_rendered_prompt
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
@@ -33,6 +33,7 @@ __all__ = [
     "L1_PARSE_FAILURE_TOOLING",
     "L1_PARSE_FAILURE_WRONG_TYPE",
     "CandidateProposal",
+    "CellDelta",
     "CritiqueReadout",
     "CycleResult",
     "DegradationContext",
@@ -520,6 +521,15 @@ class OverlapMember(StrictModel):
     total: int
 
 
+class CellDelta(NamedTuple):
+    """ONE edit against its parent, cell by cell, on the cells both were scored on this round.
+    ``kept`` are the parent's hits the edit hit too; a cell both missed is none of the three."""
+
+    gained: tuple[int, ...]
+    lost: tuple[int, ...]
+    kept: tuple[int, ...]
+
+
 class OverlapReading(StrictModel):
     """The cells EVERY parent has answered, and each one's rate over them.
 
@@ -989,6 +999,31 @@ class RoundResult(StrictModel):
             )
             for i, c in enumerate(ranked, start=1)
         ]
+
+    def cell_delta(self, candidate_id: str) -> CellDelta:
+        """What one edit did to its parent's cells, paired: the cells it GAINED and the ones it
+        LOST. An accuracy nets the two into one number, so an edit that cracks a cell its parent
+        cannot solve and breaks one it could reads as a tie — and on a small near-deterministic
+        panel those two cells are the round's whole signal. An errored row on either side pairs
+        nothing, since a failed measurement is not an outcome; empty where no parent was banked."""
+        parent_hit = {
+            sid: is_hit(r.get("fitness"))
+            for r in self.parent_results
+            if (sid := r.get("sample_id")) is not None and not is_error_result(r)
+        }
+        gained: list[int] = []
+        lost: list[int] = []
+        kept: list[int] = []
+        for r in self.all_candidate_results.get(candidate_id) or []:
+            sid = r.get("sample_id")
+            if not isinstance(sid, int) or sid not in parent_hit or is_error_result(r):
+                continue
+            hit = is_hit(r.get("fitness"))
+            if hit and not parent_hit[sid]:
+                gained.append(sid)
+            elif parent_hit[sid]:
+                (kept if hit else lost).append(sid)
+        return CellDelta(tuple(gained), tuple(lost), tuple(kept))
 
     @property
     def winner_id(self) -> str:

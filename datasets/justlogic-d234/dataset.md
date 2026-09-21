@@ -14,7 +14,7 @@ from the dataset NAME by `_load_justlogic` / `justlogic_depths`
 
 **Each cut is a separate dataset name, never a re-cut of another** — owned by
 [`../CLAUDE.md`](../CLAUDE.md) § Re-cutting a dataset needs a NEW name; here that means a
-cross-cut comparison reads the keying difference, not the capability.
+cross-cut comparison reads a difference of δ scales, not of capability.
 
 Two things no other file carries:
 

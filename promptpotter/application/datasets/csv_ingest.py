@@ -264,10 +264,10 @@ def materialize_samples(
     round-subset ranker ties across never-measured samples and breaks that tie on ascending id — so
     a label-ordered id sequence hands each round a disjoint single-label panel and cross-round
     accuracy stops being a series. Seeded rather than random: ids are minted ONCE here and read back
-    from the committed ``cache.json`` forever after, and ``sample_id`` is part of the measurement
-    cache key, so the permutation must be reproducible from what is on disk. Re-seeding an EXISTING
-    dataset is therefore a re-cut, not an edit — it repoints every cached row at a different
-    question, so it belongs on a new dataset rather than in place.
+    from the committed ``cache.json`` forever after, and ``sample_id`` keys every per-sample history
+    (δ, hit rates, hard samples), so the permutation must be reproducible from what is on disk.
+    Re-seeding an EXISTING dataset is therefore a re-cut, not an edit — it repoints every slot's
+    history at a different question, so it belongs on a new dataset rather than in place.
     """
     for label, col in (("query", query_col), ("ground_truth", ground_truth_col)):
         if col not in table.headers:

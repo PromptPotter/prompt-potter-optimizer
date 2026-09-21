@@ -26,10 +26,11 @@ from promptpotter.application.scoring.sample_measurement import (
 from promptpotter.application.scoring.sample_measurement import (
     execute_stale_data_protocol as _execute_stale_data_protocol,
 )
+from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.escalation_signals import EscalationSignal
 from promptpotter.domain.phases import (
+    REFUSAL_STOPS,
     STOP_REASON_INFO,
-    WALLET_STOPS,
     RunPhase,
     StopLoop,
     StopReason,
@@ -41,7 +42,7 @@ from promptpotter.infrastructure.llm.spend_book import SendBound, bound_spend_bo
 from promptpotter.infrastructure.runtime_flags import effective_lookahead
 from promptpotter.shared.errors import (
     ErrorCategory,
-    WalletExhaustedError,
+    SendRefusedError,
     error_category,
     graceful,
     is_error_result,
@@ -63,7 +64,7 @@ __all__ = ["CatchUps", "Flight", "FlightGauge", "QueryLoopResult", "Walk", "run_
 
 # The stops that still wait out the calls already sent — see :func:`run_walks`.
 _BUDGET_STOPS = frozenset({StopReason.SPEND_BUDGET, StopReason.TOKEN_BUDGET})
-_CEILINGS = frozenset(category for category, stop in WALLET_STOPS.items() if stop in _BUDGET_STOPS)
+_CEILINGS = frozenset(category for category, stop in REFUSAL_STOPS.items() if stop in _BUDGET_STOPS)
 
 
 def _dearest(bounds: Sequence[SendBound | None]) -> SendBound | None:
@@ -88,7 +89,7 @@ runaway backend shouldn't burn the round's compute budget."""
 # The cell categories whose cause every later cell shares, so one halts the walk.
 _WALK_STOPS: dict[ErrorCategory, StopReason] = {
     ErrorCategory.CONNECTION: StopReason.BACKEND_UNREACHABLE,
-    **WALLET_STOPS,
+    **REFUSAL_STOPS,
 }
 
 # How many calls a round may hold in flight is the BACKEND's to declare
@@ -119,12 +120,21 @@ class CatchUps(Protocol):
 class Flight:
     """Calls out, calls the stop rules allow out now, and the most that could ever be out.
     ``waiting`` is the call a DECISION is held on — ``(sample_id, launched_at)`` — because in-order
-    absorption lets one slow call stall a round whose other calls are all back."""
+    absorption lets one slow call stall a round whose other calls are all back. ``backpressure`` is
+    the provider holding calls that are out but not yet sent."""
 
     out: int = 0
     allowed: int = 0
     most: int = 0
     waiting: tuple[int, float] | None = None
+    backpressure: BackpressureReading | None = None
+    # How many MORE cells the spend ceiling admits beside those out, and what one cell reserves.
+    # ``None`` where no book bounds the cells. The depth can be armed, the stop rules can allow a
+    # dozen, and this can still be 0: a cell reserves its WORST case, so a ceiling only a few of
+    # those wide holds the walk at one call with every other reading saying otherwise — which is
+    # what it did, unreported, for a whole campaign.
+    affordable: int | None = None
+    cell_usd: float | None = None
 
 
 class FlightGauge:
@@ -323,8 +333,6 @@ async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState) -> _Acquired:
         cached_r = _materialize_cached(cached, ctx.scorer)
         # Can re-measure for real, so a hit gets a slot like anything else.
         cached_r = await _maybe_recover_degraded(cached_r, sample, ctx)
-        # Overlay current-run sample_id — archived traces may predate the field.
-        cached_r["sample_id"] = sample.id
         return _Acquired(sample=sample, idx=idx, result=cached_r, fresh=False)
 
     deprecated_display: QueryMeasurement | None = None
@@ -693,7 +701,15 @@ async def run_walks(
                 waiting = (holder.settling.id, holder.launched_at[taken])
             elif (head := len(holder.results)) in holder.running:
                 waiting = (holder.dataset[head].id, holder.launched_at[head])
-        return Flight(out_now, allowed, most, waiting)
+        return Flight(
+            out_now,
+            allowed,
+            most,
+            waiting,
+            session.backend_client.backpressure.reading(),
+            affordable=None if book is None or cell is None else max(0, affordable()),
+            cell_usd=None if cell is None else cell.usd,
+        )
 
     def outstanding() -> set[asyncio.Future[Any]]:
         calls = {call for call in draining if not call.done()}
@@ -840,12 +856,12 @@ async def run_walks(
             await land()
     except BaseException as stop:
         # A pause or a spent ceiling first waits out the calls already sent, which bill anyway; an
-        # unreachable backend or a spent provider account lands nothing more, and a cancellation
-        # aimed at this phase is answered at once.
+        # unreachable backend or a provider's refusal lands nothing more, and a cancellation aimed
+        # at this phase is answered at once.
         if not cancels and (
             isinstance(stop, KeyboardInterrupt)
             or (isinstance(stop, StopLoop) and stop.reason in _BUDGET_STOPS)
-            or (isinstance(stop, WalletExhaustedError) and stop.category in _CEILINGS)
+            or (isinstance(stop, SendRefusedError) and stop.category in _CEILINGS)
         ):
             await land()
         # The phase stops rather than decides, so its walks resume later: keep what came back that

@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
+    from promptpotter.infrastructure.store.measurement_archive import ReplayableRow
 
 logger = logging.getLogger(__name__)
 
@@ -132,30 +133,35 @@ def _split_off_deprecated_samples(
     return kept, deprecated
 
 
-def _assert_measured_content_matches(
-    cached: dict[int, QueryMeasurement],
+def _replayable_on(
     dataset: list[Sample],
-    dataset_name: str,
-) -> None:
-    """The one gate on positional sample identity. Every stored row carries the content it was
-    measured against, so this needs nothing on disk that is not already there — and it catches a
-    single edited row, which a whole-dataset fingerprint would only catch in aggregate."""
-    for sample in dataset:
-        prior = cached.get(sample.id)
-        if prior is None:
+    reusable: dict[str, ReplayableRow],
+    dataset_name: str | None,
+) -> dict[int, QueryMeasurement]:
+    """The banked rows this dataset replays, each moved to the position its sample holds HERE.
+
+    Replay itself cannot go wrong on content — it matches ``sample_key``. What can is every reader
+    that stays positional (the δ ruler, the sample index, hard samples), which keys a sample by
+    ``(dataset_name, sample_id)``. So a row this dataset measured earlier must still find its own
+    sample at its own slot; one that does not means the rows were re-cut under a name already used."""
+    here = {s.id: s for s in dataset}
+    for prior in reusable.values():
+        if not dataset_name or prior.dataset_name != dataset_name:
             continue
-        stored = (prior.get("query", ""), prior.get("ground_truth", ""))
-        # A labelless cell stores `""`, so the live side normalizes the same way `measure_sample`
-        # did when it wrote the row — comparing `None` against `""` would fail every cached row
-        # on a verifier-graded backend and read a working cache as an edited dataset.
-        current = (sample.query, sample.ground_truth or "")
-        if stored != current:
+        slot = prior.row["sample_id"]
+        sample = here.get(slot)
+        if sample is not None and sample.key != prior.row["sample_key"]:
             raise DatasetIdentityError(
                 dataset_name=dataset_name,
-                sample_id=sample.id,
-                stored=stored,
-                current=current,
+                sample_id=slot,
+                stored=(prior.row["query"], prior.row["ground_truth"]),
+                current=(sample.query, sample.ground_truth or ""),
             )
+    return {
+        s.id: cast(QueryMeasurement, {**banked.row, "sample_id": s.id})
+        for s in dataset
+        if (banked := reusable.get(s.key)) is not None
+    }
 
 
 def _resolve_prior_cache(
@@ -168,25 +174,18 @@ def _resolve_prior_cache(
     label: str,
 ) -> tuple[dict[int, QueryMeasurement], dict[int, QueryMeasurement], set[int]]:
     """Load-side cache resolution — reusable-archive lookup, deprecated-row split, preamble log.
-    ``force_fresh`` skips reuse, and so does a session with no dataset: ``sample_id`` needs one."""
+    ``force_fresh`` skips reuse."""
     store = session.store
     backend_id = session.backend_id
     dataset_name = session.dataset_name
     cached_sample_results: dict[int, QueryMeasurement] = {}
-    if store and backend_id and dataset_name and not force_fresh:
+    if store and backend_id and not force_fresh:
         node_configs = pipeline_schema.node_configs(search_point.pipeline_params)
-        cached_sample_results = cast(
-            "dict[int, QueryMeasurement]",
-            archive_queries.reusable_results(
-                store,
-                node_configs,
-                is_fatal=is_deprecated,
-                dataset_name=dataset_name,
-            ),
+        cached_sample_results = _replayable_on(
+            dataset,
+            archive_queries.reusable_results(store, node_configs, is_fatal=is_deprecated),
+            dataset_name,
         )
-
-    if cached_sample_results and dataset_name:
-        _assert_measured_content_matches(cached_sample_results, dataset, dataset_name)
 
     cached_sample_results, deprecated_samples = _split_off_deprecated_samples(cached_sample_results)
     if deprecated_samples:

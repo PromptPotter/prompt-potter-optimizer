@@ -62,6 +62,12 @@ def user_data_root() -> Path:
     return _os_app_data_dir()
 
 
+def default_jobs_dir() -> Path:
+    """The machine's jobs dir, beside ``projects/`` in the user-data tree — machine-global, so every
+    process on the box reads one run registry and takes from one pool of machine slots."""
+    return user_data_root() / "jobs"
+
+
 def optimizer_assets_root() -> Path:
     """Install content: the optimizer's own pipeline + optimizer prompt sets. Install-global by
     contract (``stable-api.md`` §3), so they ship in the wheel and are not the operator's tier."""
@@ -107,6 +113,7 @@ __all__ = [
     "DEFAULT_PROJECTS_ROOT",
     "PACKAGE_ROOT",
     "benchmark_datasets_root",
+    "default_jobs_dir",
     "env_file_path",
     "optimizer_assets_root",
     "optimizer_pipeline_path",

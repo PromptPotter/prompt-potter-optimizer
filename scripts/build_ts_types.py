@@ -57,6 +57,7 @@ from promptpotter.application.pipeline_resolve import (
     CampaignRunsWith,
     RunsWithParam,
 )
+from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import (
     DashboardCandidate,
@@ -207,6 +208,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     SpendRollup,
     # --- dashboard.json IS `LiveDashboardState` (the webapp polls it every 2s). It was
     # hand-declared webapp-side with an index signature that typechecked anything. ---
+    BackpressureReading,
     BackendWarning,
     LoopWarning,
     DashboardError,

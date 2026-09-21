@@ -27,18 +27,16 @@ from promptpotter.domain.l4.proxies import (
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_schema import WebSpendBound
 from promptpotter.domain.results_health import classify_result, terminal_node
-from promptpotter.domain.run_records import PhaseRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import QueryMeasurement, extract_item_label, is_hit, turn_scalars
 from promptpotter.domain.spend import StepTokenUsage, TokenAccount
 from promptpotter.infrastructure.llm.pricing import rate_ceiling
-from promptpotter.infrastructure.llm.rate_limit import is_quota_rate_limit
 from promptpotter.infrastructure.llm.spend_book import FRAMING_TOKENS, Billed, SendBound
 from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, emit_token_usage
 from promptpotter.shared.errors import (
     CellUnscoreableError,
     ErrorCategory,
-    WalletExhaustedError,
+    SendRefusedError,
     has_pipeline_warnings,
 )
 
@@ -261,16 +259,20 @@ def cell_billing(
 async def cell_bound(session: Session, wire_params: Mapping[str, Any]) -> SendBound | None:
     """The most one cell can bill: the bound each node's backend serves, priced at the dearest the
     model this configuration runs it on can charge. ``None`` for a backend whose own sends are
-    each admitted. A backend bounding nothing, or an LLM node it serves no bound for, leaves the
-    cell unbounded — and an unbounded cell cannot run under a ceiling."""
-    if session.backend_client.holds_own_sends:
+    each admitted and that derives no bound for the cell they make up. A backend bounding nothing,
+    or an LLM node it serves no bound for, leaves the cell unbounded — and an unbounded cell
+    cannot run under a ceiling."""
+    client = session.backend_client
+    if client.holds_own_sends and not client.derives_spend_bounds:
         return None
     usd = 0.0
     input_tokens = output_tokens = 0
     bounded = priced = True
     served = False
     for node in session.pipeline_schema.nodes:
-        spend = node.spend_bound
+        raw_cfg = wire_params.get(node.name)
+        cfg = raw_cfg if isinstance(raw_cfg, Mapping) else {}
+        spend = client.node_spend_bound(node, cfg)
         if spend is None:
             bounded = bounded and not node.is_llm
             continue
@@ -278,15 +280,13 @@ async def cell_bound(session: Session, wire_params: Mapping[str, Any]) -> SendBo
         if isinstance(spend, WebSpendBound):
             usd += spend.queries * spend.usd_per_query
             continue
-        raw_cfg = wire_params.get(node.name)
-        cfg = raw_cfg if isinstance(raw_cfg, Mapping) else {}
         reply = int(cfg.get("max_tokens") or spend.max_tokens)
         reads = spend.input_bytes + FRAMING_TOKENS
         input_tokens += spend.attempts * reads
         output_tokens += spend.attempts * reply
         model, provider = cfg.get("model"), cfg.get("provider")
         ceiling = (
-            await rate_ceiling(model, provider)
+            await rate_ceiling(model, provider, hosts=spend.hosts)
             if isinstance(model, str) and isinstance(provider, str)
             else None
         )
@@ -401,6 +401,7 @@ def _error_result(
     message. Error rows carry no ``hit``/``score`` — those belong to ``rescore_results`` alone."""
     return QueryMeasurement(
         sample_id=sample.id,
+        sample_key=sample.key,
         query=sample.query,
         ground_truth=sample.ground_truth or "",
         predicted="ERROR",
@@ -437,26 +438,11 @@ def _extract_upstream_detail(exc: httpx.HTTPStatusError) -> str:
 
 
 def _classify_http_error(exc: httpx.HTTPStatusError) -> tuple[ErrorCategory, str]:
+    """Never a 429: ``BackendClient.run_query`` answers every one with the run's backpressure, which
+    re-sends the cell or refuses the run. A throttle is the provider's load, never a row charged to
+    the candidate."""
     code = exc.response.status_code
     upstream = _extract_upstream_detail(exc)
-    if code == 429:
-        # A throttle is only the CALLER's fault when it is a quota no retry can outlast. A
-        # per-minute window that just closed is transient, and CLIENT is read by two consumers that
-        # both punish the candidate for the provider's load: ``query_loop.Walk._abort_reason`` voided
-        # the whole panel on the first occurrence, and ``results_health.py::classify_result`` adds
-        # ``backend:client_error`` to ``fatal_codes``, which PoBB fast-eliminates on one sighting.
-        # A quota still reaches both — that one IS the operator's to act on.
-        quota = is_quota_rate_limit(exc.response.headers, exc.response.text)
-        # Says only what this site knows. Its predecessor hardcoded "attempts exhausted" onto every
-        # 429 — including the ones that had spent no attempt at all, because the provider sent no
-        # `Retry-After` and the backoff read that absence as a refusal. The text sent diagnosis the
-        # wrong way for as long as it stood.
-        retry_after = exc.response.headers.get("Retry-After")
-        window = f"Retry-After={retry_after}s" if retry_after else "no Retry-After"
-        return (
-            ErrorCategory.CLIENT if quota else ErrorCategory.SERVER,
-            f"HTTP 429 rate-limited ({'quota' if quota else 'window'}, {window}): {upstream!r}",
-        )
     if 400 <= code < 500:
         tail = f" :: {upstream}" if upstream else ""
         return ErrorCategory.CLIENT, f"HTTP {code} — caller config rejected by backend{tail}"
@@ -479,24 +465,6 @@ async def measure_sample(
 
     try:
         wire_params = interpolate_pipeline_params(pipeline_params or {}, sample.model_dump())
-
-        def _emit_backend_warning(payload: dict[str, Any]) -> None:
-            # Pure visibility — the retry itself is unchanged. The dashboard projection bumps
-            # its backend-retry counter off this record.
-            ledger = session.state.ledger
-            if ledger is None:
-                return
-
-            try:
-                ledger.append(
-                    PhaseRecord(
-                        phase="backend",
-                        event="warning",
-                        payload={**payload, "query": query[:80]},
-                    )
-                )
-            except Exception:
-                logger.exception("backend warning ledger emit failed; continuing")
 
         client = session.backend_client
         bound = await cell_bound(session, wire_params)
@@ -522,7 +490,6 @@ async def measure_sample(
                     pipeline_params=wire_params,
                     bound=bound,
                     billed=cell_billing(pipeline_schema, wire_params),
-                    on_warning=_emit_backend_warning,
                 )
         finally:
             # Cancel whether the query succeeded or raised — an in-flight task survives and
@@ -600,6 +567,7 @@ async def measure_sample(
 
         result: dict[str, Any] = {
             "sample_id": sample.id,
+            "sample_key": sample.key,
             "query": query,
             "predicted": predicted,
             "ground_truth": ground_truth,
@@ -651,8 +619,8 @@ async def measure_sample(
         error_msg = f"{exc} — Backend may be down or unreachable."
         logger.warning("measure_sample CONNECTION for %s: %s", query[:60], error_msg)
         return _error_result(sample, error_msg, category=ErrorCategory.CONNECTION)
-    except (KeyboardInterrupt, asyncio.CancelledError, WalletExhaustedError):
-        # A wallet that refused the cell refused it before it was sent: a stop, never a row.
+    except (KeyboardInterrupt, asyncio.CancelledError, SendRefusedError):
+        # A refused send is refused for every cell after it: a stop, never a row.
         raise
     except CellUnscoreableError as exc:
         # The cell RAN and there is nothing to grade. The exception's own category says WHICH of the
@@ -661,8 +629,11 @@ async def measure_sample(
         logger.warning("measure_sample %s for %s: %s", exc.category.value, query[:60], exc)
         return _error_result(sample, str(exc), category=exc.category)
     except Exception as exc:
-        logger.warning("measure_sample failed for %s: %s", query[:60], exc)
-        return _error_result(sample, str(exc), category=ErrorCategory.UNKNOWN)
+        # Named by TYPE: a bare `TimeoutError()` has no message, and banked as its `str` it read
+        # "unknown error" on every surface while the cause sat one attribute away.
+        failure = f"{type(exc).__name__}: {exc}"
+        logger.warning("measure_sample failed for %s: %s", query[:60], failure, exc_info=True)
+        return _error_result(sample, failure, category=ErrorCategory.UNKNOWN)
 
 
 def find_gt_rank(result: Mapping[str, Any]) -> int | None:

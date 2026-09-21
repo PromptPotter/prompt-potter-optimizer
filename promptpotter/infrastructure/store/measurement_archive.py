@@ -10,7 +10,7 @@ import logging
 import os
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from promptpotter.domain.measurement_provenance import (
     REUSABLE_MIN_GRADE,
@@ -121,6 +121,15 @@ def _entry_matches_dataset(entry: dict[str, Any], dataset_name: str | None) -> b
     """``None`` ⇒ everything (forensic/admin). An entry carrying no ``dataset_name`` belongs to no
     dataset, so it matches no concrete name."""
     return dataset_name is None or _entry_dataset(entry) == dataset_name
+
+
+class ReplayableRow(NamedTuple):
+    """A banked row a configuration may replay, and the dataset that measured it. Replay matches on
+    the row's ``sample_key`` alone; the dataset is what a POSITIONAL reader still needs, since its
+    ``sample_id`` names a slot in that dataset and nowhere else."""
+
+    dataset_name: str | None
+    row: dict[str, Any]
 
 
 class MeasurementArchive:
@@ -349,7 +358,7 @@ class MeasurementArchive:
         dataset_name: str | None = None,
     ) -> list[dict[str, Any]]:
         """Index entries (summaries), one fold of ``index.jsonl`` (last-wins by
-        ``content_hash``). *dataset_name* scopes to one dataset (None = forensic/admin)."""
+        ``run_id``). *dataset_name* scopes to one dataset (None = forensic/admin)."""
         entries = list(self._live_rows().values())
         if dataset_name is None:
             return entries
@@ -395,17 +404,15 @@ class MeasurementArchive:
     def find_by_node_configs(
         self,
         node_configs: list[tuple[str, dict[str, Any]]],
-        *,
-        dataset_name: str | None = None,
     ) -> list[tuple[dict[str, Any], int]]:
-        """Position-by-position prefix-equal match. `(entry, match_length)` sorted by match_length
-        desc then item_count desc.
+        """Position-by-position prefix-equal match over EVERY dataset. `(entry, match_length)`
+        sorted by match_length desc then item_count desc.
         """
         if not node_configs:
             return []
 
         scored: list[tuple[dict[str, Any], int]] = []
-        for entry in self.list_all(dataset_name=dataset_name):
+        for entry in self.list_all():
             stored = entry.get("node_configs")
             if not stored:
                 continue
@@ -494,25 +501,20 @@ class MeasurementArchive:
         self,
         node_configs: list[tuple[str, dict[str, Any]]],
         is_fatal: Callable[[dict[str, Any]], bool] | None = None,
-        *,
-        dataset_name: str,
-    ) -> dict[int, dict[str, Any]]:
-        """*dataset_name* is REQUIRED — ``sample_id`` identifies a sample WITHIN a dataset, so a pooled
-        slice serves one dataset's measurement under another's. A config change at node N re-measures past N.
+    ) -> dict[str, ReplayableRow]:
+        """Every banked row this configuration may replay, keyed by ``sample_key`` and drawn from
+        EVERY dataset: a cell is the sample's content under the instrument's configuration, never
+        the panel it sat in, so widening a panel or renaming a dataset re-measures nothing already
+        measured. A config change at node N re-measures past N.
 
         The grade floor is `REUSABLE_MIN_GRADE`, not a caller's argument: replay is the fourth consumer
         of the grade and a per-call floor is what let it be the one that excluded nothing."""
-        if not dataset_name:
-            raise ValueError("load_reusable_results requires a dataset_name — see the docstring")
         if not node_configs:
             return {}
         chain_len = len(node_configs)
-        cache: dict[int, dict[str, Any]] = {}
+        cache: dict[str, ReplayableRow] = {}
 
-        for entry, match_length in self.find_by_node_configs(
-            node_configs,
-            dataset_name=dataset_name,
-        ):
+        for entry, match_length in self.find_by_node_configs(node_configs):
             if not meets_grade(entry_grade(entry), REUSABLE_MIN_GRADE):
                 continue
             detail = self.load_by_id(entry["run_id"])
@@ -523,22 +525,28 @@ class MeasurementArchive:
                 set() if is_full_match else {node_configs[i][0] for i in range(match_length)}
             )
             for item in detail.get("measurements", []):
-                sid = item.get("sample_id")
-                if not isinstance(sid, int) or item.get("predicted") == "ERROR":
+                if item.get("predicted") == "ERROR":
                     continue
                 if not is_full_match:
                     terminal_node = (item.get("pipeline_data") or {}).get("terminal_node", "")
                     if not (terminal_node and terminal_node in trusted_nodes):
                         continue
+                key = item.get("sample_key")
+                if not key:
+                    raise ValueError(
+                        f"run {entry['run_id']!r} banks a row with no `sample_key`, so nothing can "
+                        "say which sample it measured. Every row the scoring walk writes carries "
+                        "one; this archive holds rows written before it did."
+                    )
                 # FIRST wins: `find_by_node_configs` sorted best-first, so assigning
                 # unconditionally would serve the row matching the FEWEST nodes. The one upgrade
                 # allowed is replacing a fatal row, which is not an answer, with a live one.
-                existing = cache.get(sid)
+                existing = cache.get(key)
                 if existing is not None and not (
-                    is_fatal is not None and is_fatal(existing) and not is_fatal(item)
+                    is_fatal is not None and is_fatal(existing.row) and not is_fatal(item)
                 ):
                     continue
-                cache[sid] = item
+                cache[key] = ReplayableRow(_entry_dataset(entry), item)
         return cache
 
 
@@ -582,4 +590,4 @@ def _to_measurement(
     )
 
 
-__all__ = ["MeasurementArchive"]
+__all__ = ["MeasurementArchive", "ReplayableRow"]

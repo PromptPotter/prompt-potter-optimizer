@@ -12,10 +12,9 @@ comparison is against their object rather than against something merely analogou
 from __future__ import annotations
 
 import asyncio
-import codecs
+import contextlib
 import functools
 import json
-import locale
 import logging
 import re
 import sys
@@ -26,21 +25,31 @@ from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 
 import httpx
 
+from promptpotter.config.settings import non_utf8_encoding
 from promptpotter.connectors.protocol import Connector, InProcessWorkload
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.pipeline_schema import stable_hash
-from promptpotter.domain.spend import StepTokenUsage
+from promptpotter.domain.pipeline_schema import LLMSpendBound, stable_hash
+from promptpotter.domain.spend import StepTokenUsage, TokenAccount
+from promptpotter.infrastructure.llm.litellm_sends import litellm_route, litellm_sends_billed_as
+from promptpotter.infrastructure.llm.spend_book import (
+    Billed,
+    CallLabel,
+    admitted,
+    reservation_left,
+)
+from promptpotter.infrastructure.llm.telemetry import emit_backend_warning
 from promptpotter.shared.errors import (
     CellInfrastructureError,
+    CellSendRefusedError,
+    CellThrottledError,
     CellUnscoreableError,
-    CellWalletExhaustedError,
     ErrorCategory,
     is_provider_credit_refusal,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterator, Mapping
     from types import ModuleType
 
     from harbor.environments.docker.docker import DockerEnvironment
@@ -54,6 +63,8 @@ logger = logging.getLogger(__name__)
 # The one node a harbor dataset declares. ONE, because an episode is a single call from here —
 # the agent's turns are its own loop, not a chain we route a query through node by node.
 AGENT_NODE = "agent"
+# Whose bill every model send of an episode is, however many turns it takes.
+_AGENT_SEND = CallLabel(AGENT_NODE, "backend")
 
 # What the campaign formula scores: the verifier's own number. `VerifierResult.rewards` is a
 # NAMED dict, so this is a key lookup rather than a scalar read — a task writing a bare
@@ -145,6 +156,11 @@ _PACKAGE_MANAGERS = ("apt-get", "dnf", "yum", "apk", "pacman", "brew", "pkg", "z
 # Attempts at a cell whose trial measured the infrastructure, and the wait before the next one.
 _INFRA_ATTEMPTS = 3
 _INFRA_BACKOFF_S = 45.0
+
+# The calls one terminus-2 turn bills when nothing goes wrong: the turn itself, plus a summarize
+# pass of three calls (`_summarize`) unless `enable_summarize` is off. Its RETRIES are deliberately
+# not counted here — see `_sent_spend_bound`.
+_TERMINUS_SUMMARY_CALLS = 3
 # The same for Harbor's registry fetch, which blocks whichever caller resolves a panel first.
 _REGISTRY_ATTEMPTS = 3
 _REGISTRY_BACKOFF_S = 2.0
@@ -168,7 +184,8 @@ _HARNESS_TIMEOUTS = frozenset(
     {"EnvironmentStartTimeoutError", "AgentSetupTimeoutError", "VerifierTimeoutError"}
 )
 # A model provider's throttle as litellm names it. terminus-2 retries it inside the turn, so it
-# spends the agent's clock (logged to `trial.log`) and ends the episode once the retries run out.
+# spends the agent's clock (logged to `trial.log`) and ends the episode once the retries run out —
+# a cell measuring the provider, which `CellThrottledError` hands to the run's backpressure.
 _PROVIDER_THROTTLE = re.compile(r"\bRateLimitError\b")
 
 # FIXED, never a search axis. The agent sees only name + description eagerly and must open the
@@ -231,9 +248,9 @@ def _registry_tasks(dataset: str, version: str) -> list[dict[str, Any]]:
     """The roster of a PUBLISHED Harbor dataset, resolved from Harbor's own registry.
 
     The task list is not ours to copy: a dataset here commits the NAME and the VERSION, and a
-    second owner of upstream's list would drift the moment it repinned. Safe only because the
-    resolved pins fold into the instrument fingerprint (:func:`_identity_config`), so a moved
-    commit lands as a new measurement identity. The version is required for the same reason.
+    second owner of upstream's list would drift the moment it repinned. Safe only because each
+    resolved pin folds into its own sample's content address (:func:`_task_pin`), so a moved commit
+    lands as a new measurement identity. The version is required for the same reason.
 
     Never served from a copy when the fetch fails: a cached roster would be that second owner."""
     from harbor.constants import DEFAULT_REGISTRY_URL
@@ -255,7 +272,7 @@ def _registry_tasks(dataset: str, version: str) -> list[dict[str, Any]]:
             logger.warning("harbor registry fetch %d/%d failed: %s", n, _REGISTRY_ATTEMPTS, exc)
             time.sleep(_REGISTRY_BACKOFF_S * n)
 
-    # Memoized: a run carries its own resolved document, and identity hashes the pins it used.
+    # Memoized: a run carries its own resolved document, and each sample's key hashes the pins it used.
     specs = {
         spec.version: spec
         for spec in map(DatasetSpec.model_validate, response.json())
@@ -312,8 +329,6 @@ def _resolve_experiment(panel: Mapping[str, Any]) -> dict[str, Any]:
         )
     tasks = _registry_tasks(str(dataset), str(version))
 
-    # A dataset naming one task is a different dataset from one naming ten, so the selection
-    # belongs in measurement identity — `_identity_config` hashes the pins AFTER this filter.
     include = panel.get("tasks_include")
     if not include:
         return {**panel, "tasks": tasks}
@@ -354,6 +369,7 @@ def _extract_experiment(
         row: dict[str, Any] = {
             "query": t["id"],
             "ground_truth": str(t["answer"]).strip() if labelled else None,
+            "source_pin": _task_pin(t),
         }
         # `query` is the TASK ID, so a judge falling back to it would grade against an
         # identifier. A declared `question` rides `Sample.question`, the only channel a judge
@@ -381,8 +397,8 @@ def _current_task(
                 panel.get("agent") or {},
             )
     raise RuntimeError(
-        f"harbor connector: no task declared for {query!r} in {TASKS_FILE}. The panel that "
-        "keyed this campaign is not the one being scored — reuse the name only with the same tasks."
+        f"harbor connector: no task declared for {query!r} in {TASKS_FILE}. The samples being "
+        "scored did not come from this workload's panel."
     )
 
 
@@ -430,49 +446,93 @@ def harbor_wire_adapter(
             # Harbor calls litellm with `drop_params`, and litellm keeps `reasoning_effort` only for
             # OpenRouter models it lists — a `:nitro` name lost the knob with no error.
             extra_body["reasoning"] = {"effort": effort}
-        if extra_body:
-            kwargs["llm_call_kwargs"] = {"extra_body": extra_body}
+        call_kwargs: dict[str, Any] = {"extra_body": extra_body} if extra_body else {}
+        if (reply := cfg.get("max_tokens")) is not None:
+            call_kwargs["max_tokens"] = int(reply)
+        if call_kwargs:
+            kwargs["llm_call_kwargs"] = call_kwargs
+        if (context := cfg.get("max_input_tokens")) is not None:
+            # Unsent, terminus-2 assumes the model's whole window — 1M tokens for one litellm does
+            # not list. Merged into litellm's entry for the model (`register_model`), so its prices
+            # stand.
+            kwargs["model_info"] = {"max_input_tokens": int(context)}
         if kwargs:
             payload["agent_kwargs"] = kwargs
     return payload
 
 
+def _sent_spend_bound(node: str, cfg: Mapping[str, Any]) -> LLMSpendBound | None:
+    """What one episode bills when it RUNS AS DECLARED, read off the payload the wire adapter
+    SENDS, so the hold cannot count on a limit the agent was never given: every turn it may take,
+    each reading the context cap and replying the reply cap. A limit left unsent bounds nothing,
+    so that cell cannot run under a spend ceiling.
+
+    **Its retries are not in here, and that is the whole point.** They are contingent and
+    sequential — terminus retries a turn up to 3 times, litellm retries each of those up to 3, and
+    `_in_process_run` re-runs the whole trial up to `_INFRA_ATTEMPTS` — so multiplying them into
+    ONE simultaneous worst case priced a cell at 540 full-context calls, $4.24, against a campaign
+    whose cells measured $0.00217 apiece. The ceiling then afforded exactly one cell at a time and
+    silently ran every agent panel serially. A retry is still admitted: every send this agent makes
+    goes through litellm in this process at its own real bound (`llm/litellm_sends.py`), and what
+    the reservation cannot cover is held against the ceiling itself, which refuses it only when the
+    campaign genuinely cannot afford the next send."""
+    if node != AGENT_NODE:
+        return None
+    sent = harbor_wire_adapter("", {node: dict(cfg)}).get("agent_kwargs") or {}
+    call = sent.get("llm_call_kwargs") or {}
+    turns = sent.get("max_turns")
+    reply = call.get("max_tokens")
+    context = (sent.get("model_info") or {}).get("max_input_tokens")
+    if turns is None or reply is None or context is None:
+        return None
+    summarized = _TERMINUS_SUMMARY_CALLS if sent.get("enable_summarize", True) else 0
+    route = (call.get("extra_body") or {}).get("provider") or {}
+    return LLMSpendBound(
+        kind="llm",
+        attempts=int(turns) * (1 + summarized),
+        # Priced as a token count (`cell_bound`); the context we send IS that count.
+        input_bytes=context,
+        max_tokens=reply,
+        hosts=None if route.get("allow_fallbacks", True) else tuple(route["order"]),
+    )
+
+
 # NO credential bridge, and that is the boundary rather than an omission. The agent spends
-# against the provider directly, outside our LLM client and its ledger, so its key belongs in the
-# environment Harbor runs in — where litellm already looks — and stays separately revocable.
+# against the provider directly, outside our LLM client — billed on our ledger all the same, send
+# by send (`litellm_sends.py`) — so its key belongs in the environment Harbor runs in, where
+# litellm already looks, and stays separately revocable.
+
+
+def _task_pin(task: Mapping[str, Any]) -> dict[str, Any]:
+    """What ONE cell was measured on, as its sample's ``source_pin``: the RESOLVED pins, never the
+    declaration, which is what lets a dataset commit only a name and a version
+    (:func:`_registry_tasks`). Repoint one and its banked rows describe a task that no longer
+    exists, so that cell alone stops replaying."""
+    return {
+        "id": task.get("id"),
+        "git_url": task.get("git_url"),
+        "git_commit_id": task.get("git_commit_id"),
+        "path": task.get("path"),
+        "name": task.get("name"),
+        "ref": task.get("ref"),
+        # Question and answer are pinned too, though they live in our file: without them a
+        # corrected gold would replay every verdict taken under the old.
+        "question": task.get("question"),
+        "answer": task.get("answer"),
+    }
 
 
 def _identity_config(
     _dataset_dir: Path, experiment: Mapping[str, Any] | None
 ) -> dict[str, dict[str, Any]]:
-    """What the cell was measured ON, folded into measurement identity.
-
-    A task is pinned bytes and the agent driving it is the rest of the instrument; repoint either
-    and the banked rows describe a benchmark that no longer exists. Narrow on purpose — the pins,
-    the agent name and the reward key, so a comment or a retimed timeout voids nothing.
-
-    Hashes the RESOLVED pins, never the declaration, which is what lets a dataset commit only a
-    name and a version (:func:`_registry_tasks`)."""
+    """What every cell of the panel is measured WITH, folded into measurement identity: the agent
+    driving the task and the reward it is graded on. Narrow on purpose, so a comment or a retimed
+    timeout voids nothing. The tasks themselves are not here — each rides its own sample
+    (:func:`_task_pin`), so widening a panel re-keys none of the cells it already had."""
     if experiment is None:
         raise ValueError(f"harbor connector: no {TASKS_FILE} on this machine to fingerprint.")
-    pins = [
-        {
-            "id": (t or {}).get("id"),
-            "git_url": (t or {}).get("git_url"),
-            "git_commit_id": (t or {}).get("git_commit_id"),
-            "path": (t or {}).get("path"),
-            "name": (t or {}).get("name"),
-            "ref": (t or {}).get("ref"),
-            # Question and answer are INSTRUMENT, not pinned bytes: they live in our file, and
-            # without them here a corrected gold would replay every verdict taken under the old.
-            "question": (t or {}).get("question"),
-            "answer": (t or {}).get("answer"),
-        }
-        for t in experiment["tasks"]
-    ]
     fingerprint = stable_hash(
         [
-            sorted(pins, key=lambda p: str(p["id"])),
             experiment.get("agent") or {},
             experiment.get("reward_key") or DEFAULT_TASK_REWARD_KEY,
             # Where an OpenRouter agent's `reasoning_effort` travels: a cell banked while litellm
@@ -530,11 +590,11 @@ async def _preflight(backend_url: str) -> None:
     # Harbor reads `task.toml`, `instruction.md` and the ATIF trajectory with a bare `read_text()`,
     # so the decode falls to the locale encoding and any task carrying a byte outside it raises
     # inside `Task.__init__`. Upstream's to fix; ours is to refuse rather than discover it per cell.
-    if "utf-8" not in codecs.lookup(locale.getpreferredencoding(False)).name:
+    if (encoding := non_utf8_encoding()) is not None:
         raise BackendUnreachableError(
             "harbor",
             backend_url,
-            f"this interpreter decodes files as {locale.getpreferredencoding(False)!r}, not UTF-8, "
+            f"this interpreter decodes files as {encoding!r}, not UTF-8, "
             # ASCII only in this string, deliberately -- an em dash or an ellipsis included. It is
             # printed to the very console whose encoding it is complaining about, so a non-ASCII
             # character here renders as a replacement char, in the one message that cannot afford
@@ -571,8 +631,21 @@ async def _docker(*args: str, stdin: bytes | None = None, timeout: float = 30) -
     except TimeoutError:
         proc.kill()
         await proc.wait()
-        raise
+        raise TimeoutError(
+            f"`docker {' '.join(args[:2])}` did not answer in {timeout:.0f}s"
+        ) from None
     return proc.returncode or 0, (out or b"").decode(errors="replace").strip()
+
+
+@contextlib.contextmanager
+def _machine_step() -> Iterator[None]:
+    """A docker CLI unreachable or silent at CELL time is the machine — a box too loaded to answer
+    `inspect` inside its bound — so the cell it ends measured nothing: retried as an attempt
+    (`_INFRA_ATTEMPTS`), never banked as the candidate's."""
+    try:
+        yield
+    except (OSError, TimeoutError) as exc:
+        raise CellInfrastructureError(str(exc), spent={}, step_timings={}) from exc
 
 
 async def _ensure_package_cache() -> None:
@@ -961,40 +1034,46 @@ def _phase_timings(result: TrialResult, elapsed: float) -> dict[str, float]:
     return out
 
 
+def _trial_failures(result: TrialResult) -> list[tuple[str, str]]:
+    """Every exception the trial recorded, as ``(type, "type: message")``."""
+    return [
+        (exc.exception_type, f"{exc.exception_type}: {exc.exception_message}")
+        for exc in (result.exception_info, *(sr.exception_info for sr in result.step_results or []))
+        if exc is not None
+    ]
+
+
+def _provider_throttle(result: TrialResult) -> str | None:
+    """The throttle that ended this episode, in the provider's words, or ``None``. terminus-2
+    retries one inside the turn and gives up with it; one that only preceded the agent running out
+    of clock ended it too. A throttle the episode outlived is latency, and its grade stands."""
+    failures = _trial_failures(result)
+    for _, detail in failures:
+        if _PROVIDER_THROTTLE.search(detail):
+            return detail
+    if any(kind == "AgentTimeoutError" for kind, _ in failures):
+        return _first_line(_TRIALS_ROOT / result.trial_name / "trial.log", _PROVIDER_THROTTLE)
+    return None
+
+
 def _infrastructure_failure(result: TrialResult) -> tuple[str, ErrorCategory] | None:
     """Why this trial measured the machine rather than the agent, and the category that cell is
     banked as, or ``None``. Only a ``CONNECTION`` one is worth a retry.
 
     Asked whether or not a reward exists: a verifier whose tool download failed still grades — a
     ``set -e`` script does not stop on a failed ``apt-get update && …`` — without the tools it was
-    fetching. Only package-manager, registry and provider-throttle messages count, so an agent's
-    own failed request (a server it should have started) stays its score. A throttle the episode
-    outlived is latency; one that ended it, or preceded its running out of clock, is not a grade."""
-    failures = [result.exception_info, *(sr.exception_info for sr in result.step_results or [])]
-    timed_out = False
-    for exc in failures:
-        if exc is None:
-            continue
-        detail = f"{exc.exception_type}: {exc.exception_message}"
+    fetching. Only package-manager and registry messages count, so an agent's own failed request
+    (a server it should have started) stays its score."""
+    for kind, detail in _trial_failures(result):
         # A litellm `APIError` carrying OpenRouter's body.
         if is_provider_credit_refusal(detail):
             return (
                 f"the provider account is out of credit: {detail[:300]}",
                 ErrorCategory.PROVIDER_CREDIT,
             )
-        if (
-            exc.exception_type in _HARNESS_TIMEOUTS
-            or _HARNESS_NETWORK_FAILURE.search(detail)
-            or _PROVIDER_THROTTLE.search(detail)
-        ):
+        if kind in _HARNESS_TIMEOUTS or _HARNESS_NETWORK_FAILURE.search(detail):
             return detail[:300], ErrorCategory.CONNECTION
-        timed_out = timed_out or exc.exception_type == "AgentTimeoutError"
     root = _TRIALS_ROOT / result.trial_name
-    if timed_out and (line := _first_line(root / "trial.log", _PROVIDER_THROTTLE)):
-        return (
-            f"the provider throttled the agent before it ran out of clock: {line}",
-            ErrorCategory.CONNECTION,
-        )
     for log in root.rglob("test-stdout.txt"):
         if log.parent.name == "verifier" and (line := _first_line(log, _FETCH_FAILURE)):
             return (
@@ -1124,8 +1203,10 @@ def _digest(
 
 
 def _step_tokens(result: TrialResult, model_name: str | None) -> dict[str, StepTokenUsage]:
-    """The agent's spend on the SAME channel a remote backend's rides. Harbor totals it for us
-    (``TrialResult.compute_token_cost_totals``), so this is a projection rather than a count.
+    """The episode's spend on the SAME channel a remote backend's rides — the ROW's account of what
+    the cell cost, never its bill: an agent in this process was billed send by send as it ran
+    (``litellm_sends.py``), and one in a container by :func:`_container_bill`. Harbor totals it for
+    us (``TrialResult.compute_token_cost_totals``), so this is a projection rather than a count.
     ``n_input_tokens`` is total input INCLUDING cache on their side, which is the convention
     ``step_tokens`` already uses.
 
@@ -1147,13 +1228,24 @@ def _step_tokens(result: TrialResult, model_name: str | None) -> dict[str, StepT
     # Truthy, not `is not None`: Harbor reports a call litellm cannot price (any `:nitro` name) as
     # 0.0, and a banked 0.0 is a free cell where the honest answer is an unpriced one.
     if cost:
-        # Harbor prices the call through litellm. Ours is the authority for models it knows, but
-        # an agent CLI's spend never passes through our client at all, so without this the
-        # campaign ceiling would bound the optimizer half of a run and nothing else.
         entry["cost_usd"] = float(cost)
     if model_name:
         entry["model"] = model_name
     return {AGENT_NODE: entry}
+
+
+def _container_bill(result: TrialResult, model_name: str | None) -> Billed | None:
+    """The bill of a trial whose agent ran in its container, where none of its sends passes through
+    this process: what Harbor read off the agent's own logs, the only account there is. ``None``
+    where it read nothing — an unknown, never a zero."""
+    entry = _step_tokens(result, model_name).get(AGENT_NODE)
+    if entry is None:
+        return None
+    model, provider = litellm_route(model_name) if model_name else (None, None)
+    usage = TokenAccount(
+        input=entry["input"], output=entry["output"], cache_read=entry.get("cache_read")
+    )
+    return Billed(usage, entry.get("cost_usd"), model=model, provider=provider)
 
 
 def _sum_spend(parts: list[dict[str, StepTokenUsage]]) -> dict[str, StepTokenUsage]:
@@ -1200,6 +1292,7 @@ async def _in_process_run(
 ) -> dict[str, Any]:
     """Run one episode and project its verdict onto the ``{"data": {…}}`` shape ``measure_sample``
     parses from an HTTP body — so the scorer reads a Harbor result identically to a remote one."""
+    from harbor.agents.installed.base import BaseInstalledAgent
     from harbor.environments.docker.docker import DockerEnvironment
     from harbor.models.trial import config as harbor_config
     from harbor.trial.trial import Trial
@@ -1228,7 +1321,8 @@ async def _in_process_run(
 
     async def attempt() -> tuple[TrialResult, float]:
         if cached:
-            await _ensure_package_cache()
+            with _machine_step():
+                await _ensure_package_cache()
         with tempfile.TemporaryDirectory(prefix="pp-skill-") as skill_root:
             skills = (
                 [str(_write_skill(Path(skill_root), prompt))]
@@ -1269,8 +1363,21 @@ async def _in_process_run(
                     )
                 trial.agent._prompt_template = _system_skill_template(template, prompt)
             if isinstance(trial.agent_environment, DockerEnvironment):
-                await _reuse_task_image(trial.agent_environment, tools, proxied=cached)
-            result = await trial.run()
+                with _machine_step():
+                    await _reuse_task_image(trial.agent_environment, tools, proxied=cached)
+            if not isinstance(trial.agent, BaseInstalledAgent):
+                # Every send it makes goes through litellm in this process, billed as it is made.
+                with litellm_sends_billed_as(_AGENT_SEND):
+                    result = await trial.run()
+                return result, time.monotonic() - start
+            # One in its container sends from there, past this process: the trial is one send from
+            # here, at whatever the cell has left, billed off Harbor's reading of its logs.
+            with admitted(
+                _AGENT_SEND, reservation_left(), model=model_name, provider=None
+            ) as admission:
+                result = await trial.run()
+                if (billed := _container_bill(result, model_name)) is not None:
+                    admission.settle(billed)
             return result, time.monotonic() - start
 
     _TRIALS_ROOT.mkdir(parents=True, exist_ok=True)
@@ -1285,6 +1392,13 @@ async def _in_process_run(
         else:
             attempts.append(_step_tokens(result, model_name))
             spent_s += elapsed
+            if (throttle := _provider_throttle(result)) is not None:
+                # The provider's load, which the run answers for every cell at once.
+                raise CellThrottledError(
+                    f"harbor task {query!r} was throttled by its model provider: {throttle}",
+                    spent=_sum_spend(attempts),
+                    step_timings={AGENT_NODE: spent_s},
+                )
             if (failure := _infrastructure_failure(result)) is None:
                 break
             cause, category = failure
@@ -1298,7 +1412,7 @@ async def _in_process_run(
             timings = {AGENT_NODE: spent_s}
             if category is ErrorCategory.CONNECTION:
                 raise CellInfrastructureError(message, spent=spent, step_timings=timings)
-            raise CellWalletExhaustedError(
+            raise CellSendRefusedError(
                 message, category=category, spent=spent, step_timings=timings
             )
         logger.warning(
@@ -1308,6 +1422,19 @@ async def _in_process_run(
             _INFRA_ATTEMPTS,
             cause,
             _INFRA_BACKOFF_S * n,
+        )
+        # And on the LEDGER, where every surface can read it. A run hosted by the API server writes
+        # no terminal mirror, so a warning that only reaches `logging` exists in one console — and
+        # this one carries the whole diagnosis, while the stop it ends in says only that a backend
+        # was unreachable.
+        emit_backend_warning(
+            kind="infrastructure",
+            attempt=n,
+            max_attempts=_INFRA_ATTEMPTS,
+            wait_s=_INFRA_BACKOFF_S * n,
+            query=query,
+            detail=cause,
+            error_class=category.value,
         )
         await asyncio.sleep(_INFRA_BACKOFF_S * n)
 
@@ -1383,6 +1510,11 @@ CONNECTOR = Connector(
     name="harbor",
     execution="in_process",
     wire_adapter=harbor_wire_adapter,
+    # Harbor sets no limit of its own that we do not send it, so the bound is ours.
+    sent_spend_bound=_sent_spend_bound,
+    # Every send an episode makes is billed where it is made (`_in_process_run`), so a cell is no
+    # send of its own: it RESERVES that bound, and its sends draw on the reservation.
+    holds_own_sends=True,
     session_factory=HarborSession,
     extract_experiment=_extract_experiment,
     in_process_run=_in_process_run,
@@ -1401,9 +1533,13 @@ CONNECTOR = Connector(
     # a required observation beside it, and why this is the one connector where a value can be
     # optimized every round and reach nothing. `skill_delivery: system_prompt` sends it instead.
     prompt_delivery=_prompt_delivery,
-    # Each cell holds a container. Two is the shipped default elsewhere and is the right floor
-    # here too: the ceiling is the operator's machine, not the provider.
-    max_cells_in_flight=2,
+    # Each cell holds a container, so the ceiling is the operator's MACHINE rather than the
+    # provider, and it binds every run on that machine together — two campaigns at this depth hold
+    # twice this many containers, and a verifier that cannot finish inside its timeout measures the
+    # box. The depth actually reached is the lower of this and what the spend ceiling admits: every
+    # cell in flight reserves its whole bound (`_sent_spend_bound`).
+    max_cells_in_flight=5,
+    cells_hold_the_machine=True,
     # The keys always emitted that a formula reads, verified against the dataset's declared
     # mappings at init. Per-step rewards are NOT here — a single-step task emits none, so
     # declaring them would fail init for every task that is not multi-step.

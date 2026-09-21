@@ -14,6 +14,7 @@ from promptpotter.application.campaign_config import (
 from promptpotter.application.initialization.loop_start import (
     arm_diagnostic_scoring,
     diagnostic_pass,
+    diagnostic_trace,
 )
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
@@ -122,24 +123,25 @@ async def measure_noise_floor(
     composites: list[float] = []
     accuracies: list[float] = []
     for i in range(k):
-        scored = await diagnostic_pass(
-            NoiseFloorError,
-            score_search_point(
-                jsp,
-                scoring_set,
-                session,
-                label=f"noise_floor_{i}",
-                # ONE fixed config re-scored k times: the spread between runs IS the measurement,
-                # and an opt_sp-aware term is identical across all k, so it can only add a
-                # constant offset to a band that exists to isolate backend noise.
-                opt_sp=None,
-                measured=None,
-                on_sample_scored=lambda *_a, **_k: None,
-                on_sample_starting=lambda *_a, **_k: None,
-                source=f"noise_floor:{hop.campaign_id}:C0:{i}",
-                force_fresh=True,
-            ),
-        )
+        with diagnostic_trace(stores, hop):
+            scored = await diagnostic_pass(
+                NoiseFloorError,
+                score_search_point(
+                    jsp,
+                    scoring_set,
+                    session,
+                    label=f"noise_floor_{i}",
+                    # ONE fixed config re-scored k times: the spread between runs IS the measurement,
+                    # and an opt_sp-aware term is identical across all k, so it can only add a
+                    # constant offset to a band that exists to isolate backend noise.
+                    opt_sp=None,
+                    measured=None,
+                    on_sample_scored=lambda *_a, **_k: None,
+                    on_sample_starting=lambda *_a, **_k: None,
+                    source=f"noise_floor:{hop.campaign_id}:C0:{i}",
+                    force_fresh=True,
+                ),
+            )
         scores = scored.scores
         if (measured := scores.get("accuracy")) is None:
             raise NoiseFloorError(

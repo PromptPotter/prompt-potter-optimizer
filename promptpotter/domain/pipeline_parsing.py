@@ -475,7 +475,11 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
 
     steps: list[PipelineNode] = [parsed[name] for name in step_order if name in parsed]
 
-    logger.info(
+    # DEBUG, not INFO: this is a pure parse on a READ path, so it fires per request and scales
+    # with polling rather than with anything happening — measured at two per `GET /origins`, one
+    # per dataset. At INFO it printed a line every few seconds into the console an operator
+    # supervises a live run in, which is where the run's own events have to be findable.
+    logger.debug(
         "Parsed pipeline '%s' with %d steps",
         config.get("name", "unknown"),
         len(steps),

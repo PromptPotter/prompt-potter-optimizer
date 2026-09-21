@@ -41,6 +41,7 @@ from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.application.runner.inner.ruler import refresh_inner_rulers
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.runner.loop import run_round_loop
+from promptpotter.application.runner.output import write_log_md
 from promptpotter.application.runner.round import flush_pending_decisions
 from promptpotter.application.runner.termination import RUN_STOPS, BudgetGate, run_stop_reason
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
@@ -154,6 +155,9 @@ def _arm_run_controls(
     cycle_dir = session.store.campaigns.cycle_dir(session.hop) if session.state.cycle_id else Path()
     _bind_run_controls(session, cycle_dir)
     session.flight = FlightGauge(observers.callbacks.on_flight)
+    # A provider's pushback moves inside a cell, where the phase's loop may be blocked on the
+    # cells out — so the backpressure itself says when the reading moved.
+    session.backend_client.backpressure.on_change = session.flight.touch
     gate = _build_budget_gate(
         observers,
         cycle_dir,
@@ -980,6 +984,7 @@ def _finalize_run(
             final=final_block,
             export=_export_artifact(session, cycle_result, winner, formula=round_formula),
         )
+        write_log_md(session)
     # Declared BEFORE the drain, so dashboard.json's stopped state is in place before the audit
     # settles. `_halted_mid_round` threads `"interrupted": true` into a partial round file. The
     # append reaches the projection through the same door every other fact does — it is a

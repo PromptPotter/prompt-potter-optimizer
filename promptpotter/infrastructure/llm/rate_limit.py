@@ -1,6 +1,6 @@
-"""Rolling-window RPM/TPM throttle + 429 ``Retry-After`` handling (RFC 7231 §7.1.3). Blocks before
-sending when a cap would be exceeded; the ``chars//4`` estimate reconciles via the reservation's
-``close()``."""
+"""Rolling-window RPM/TPM throttle (blocks before sending when a cap we set would be exceeded; the
+``chars//4`` estimate reconciles via the reservation's ``close()``) and :class:`Backpressure`, the
+answer to a provider's 429 (``Retry-After``, RFC 7231 §7.1.3)."""
 
 from __future__ import annotations
 
@@ -12,16 +12,20 @@ import sys
 import threading
 import time
 from collections import deque
-from collections.abc import Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping
+from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
-from promptpotter.shared.errors import RequestTooLargeError
+from promptpotter.domain.backend import BackpressureReading
+from promptpotter.shared.errors import ErrorCategory, RequestTooLargeError, SendRefusedError
 
 logger = logging.getLogger(__name__)
 
-MAX_429_ATTEMPTS: int = 5
+# Sends of one call after a 5xx or a connection never made. A 429 spends none of them: it is the
+# provider's pushback, answered by :class:`Backpressure` rather than by a retry count.
+MAX_SEND_ATTEMPTS: int = 5
 _YELLOW = "\033[93m"
 _RESET = "\033[0m"
 
@@ -54,6 +58,27 @@ def set_throttle_stall_sink(sink: Callable[[float], None] | None) -> None:
     _THROTTLE_STALL_SINK.set(sink)
 
 
+@contextmanager
+def throttle_stall_given_to(sink: Callable[[float], None]) -> Iterator[None]:
+    """For the life of the block, also tell *sink* about time this task spends blocked — beside the
+    sink an enclosing scope bound, which keeps hearing every second. Composes where a cell's
+    envelope replaces (:func:`set_throttle_stall_sink`): a cell stalls beside siblings on one wall
+    clock, so passing its stall up would credit the enclosing scope once per sibling, while a call
+    awaited in sequence spends its scope's own time."""
+    outer = _THROTTLE_STALL_SINK.get()
+
+    def both(seconds: float) -> None:
+        sink(seconds)
+        if outer is not None:
+            outer(seconds)
+
+    token = _THROTTLE_STALL_SINK.set(both)
+    try:
+        yield
+    finally:
+        _THROTTLE_STALL_SINK.reset(token)
+
+
 # WHOSE share of the shared provider window this task draws on. Per-task like the two above, and
 # for the same reason: one ``RateLimiter`` per provider serves every concurrent campaign on the box,
 # so an attribute would credit the wrong account. Unset — the CLI, tests, a standalone install —
@@ -72,7 +97,7 @@ def set_rate_tenant(tenant: str) -> None:
 
 
 # The SAME stall seconds, accumulated across every task as a rolling window — the one readable
-# saturation signal this module offers. It rides `_report_throttle_stall` rather than a second
+# saturation signal this module offers. It rides `report_throttle_stall` rather than a second
 # ContextVar sink because a sink is per-task and an L4 cell already binds one (`runner/inner/
 # spawn.py`); a second `set()` would shadow whichever bound last. Module-global on purpose: "is this
 # box oversubscribed" is a question about the machine, not about a cycle. Locked because the reader
@@ -100,7 +125,9 @@ def throttle_stall_seconds(window_s: float = _STALL_WINDOW_S) -> float:
         return sum(seconds for _, seconds in _stall_events)
 
 
-def _report_throttle_stall(seconds: float) -> None:
+def report_throttle_stall(seconds: float) -> None:
+    """Tell the task's sink and the machine's rolling window about *seconds* this task spent held
+    by a shared bound — this module's throttles, or a machine slot another run holds."""
     if seconds <= 0:
         return
     now = time.monotonic()
@@ -160,10 +187,11 @@ _SCOPE_BODY_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("RPH", re.compile(r"requests?\s*per\s*hour|RPH\b", re.IGNORECASE)),
     ("TPM", re.compile(r"tokens?\s*per\s*minute|TPM\b", re.IGNORECASE)),
     ("RPM", re.compile(r"requests?\s*per\s*minute|RPM\b", re.IGNORECASE)),
-    # Generic fallbacks — body specifies window but not tokens/requests.
-    ("daily", re.compile(r"per\s*day|daily\s*(?:limit|quota)", re.IGNORECASE)),
-    ("hourly", re.compile(r"per\s*hour|hourly\s*(?:limit|quota)", re.IGNORECASE)),
-    ("per-minute", re.compile(r"per\s*minute", re.IGNORECASE)),
+    # Generic fallbacks — body specifies window but not tokens/requests. A hyphen joins them too:
+    # OpenRouter names its free tier's daily bucket `free-models-per-day`.
+    ("daily", re.compile(r"per[\s-]*day|daily\s*(?:limit|quota)", re.IGNORECASE)),
+    ("hourly", re.compile(r"per[\s-]*hour|hourly\s*(?:limit|quota)", re.IGNORECASE)),
+    ("per-minute", re.compile(r"per[\s-]*minute", re.IGNORECASE)),
 ]
 
 
@@ -228,11 +256,12 @@ def decide_429_wait(
     body: str | None,
     attempt: int,
     *,
-    max_attempts: int = MAX_429_ATTEMPTS,
+    max_attempts: int,
 ) -> RateLimitWait | None:
     """The pause for one 429 retry, or ``None`` — the budget is spent, or the window is one no retry
-    can outlast — on which the caller surfaces the original failure. Shared by the backend wire and
-    the optimizer."""
+    can outlast — on which the caller surfaces the original failure. For a best-effort caller that
+    may drop what it sends (the Langfuse sink); a run's own sends answer a 429 with
+    :class:`Backpressure` instead."""
     if attempt >= max_attempts - 1:
         return None
     scope = diagnose_rate_limit_scope(headers, body)
@@ -251,11 +280,9 @@ def decide_429_wait(
     return RateLimitWait(seconds=_unheaded_backoff(attempt), scope=scope)
 
 
-# Backoff for a 429 that named no window: 2s, 4s, 8s, 16s, each with up to 25% jitter so concurrent
-# cells do not retry in lockstep. The LAST of ``MAX_429_ATTEMPTS`` buys no pause — ``decide_429_wait``
-# returns ``None`` on it and the caller surfaces the failure — so five attempts are four waits and a
-# throttled cell costs at most ~37s of clock. The cap binds exactly at the last of those four and
-# only flattens the tail if the attempt budget grows.
+# Backoff for a 429 that named no window: 2s, 4s, 8s, 16s, each with up to 25% jitter. The LAST of
+# ``max_attempts`` buys no pause — ``decide_429_wait`` returns ``None`` on it and the caller drops
+# the send — and the cap binds only if the attempt budget grows.
 _UNHEADED_BASE_S: float = 2.0
 _UNHEADED_CAP_S: float = 16.0
 
@@ -265,12 +292,174 @@ def _unheaded_backoff(attempt: int) -> float:
     return base + random.uniform(0.0, base * 0.25)
 
 
-def is_quota_rate_limit(headers: object | None, body: str | None) -> bool:
-    """Is this 429 a QUOTA the operator has to act on (per-day/per-hour), rather than a window that
-    passes on its own? The one question two callers ask of a 429 — ``decide_429_wait`` to choose
-    between waiting and surfacing, and the sample classifier to choose between a caller fault and a
-    transient one — so it is answered here once instead of by two readings of the scope table."""
-    return diagnose_rate_limit_scope(headers, body) in _UNWAITABLE_SCOPES
+# The hold after a throttle that named no `Retry-After`, per consecutive throttled episode: 15s,
+# 30s, 60s … up to five minutes, each with up to 25% jitter. Long on purpose — the sender waiting is
+# a whole run, and on an episodic backend every probe starts a container.
+_COOLDOWN_BASE_S: float = 15.0
+_COOLDOWN_CAP_S: float = 300.0
+# How long a provider may answer nothing but throttles before the run stops asking. Past it the cure
+# is the operator's — their own key, another host — and no wait here can apply it for them.
+_GIVE_UP_S: float = 1800.0
+# How often a send queued on the cap looks for a free slot.
+_SLOT_POLL_S: float = 0.25
+# The provider's own sentence, most telling first. OpenRouter carries an upstream host's in
+# `metadata.raw` — the model, the host and the remedy — where the envelope's `message` says only
+# "Provider returned error"; a quota of its own it names in `message`.
+_PROVIDER_SENTENCES = tuple(
+    re.compile(rf'"{key}"\s*:\s*"((?:[^"\\]|\\.)*)"') for key in ("raw", "message")
+)
+
+
+def _cooldown_s(strikes: int) -> float:
+    base = min(_COOLDOWN_BASE_S * 2.0 ** (strikes - 1), _COOLDOWN_CAP_S)
+    return base + random.uniform(0.0, base * 0.25)
+
+
+def _provider_words(body: str) -> str:
+    said = next((m.group(1) for p in _PROVIDER_SENTENCES if (m := p.search(body))), body)
+    return " ".join(said.split())[:300]
+
+
+class Backpressure:
+    """One provider's pushback on one sender, answered once for every send it has out.
+
+    A 429 asks the SENDER to slow down, so a per-call retry budget answers the wrong party: each
+    call out ran its own clock, retried in step with the others, and gave up alone — as a hole the
+    next cell met again, or as a row charging the candidate for the provider's load. Here the first
+    throttle of an episode opens ONE cooldown every send waits out and halves how many may go at
+    once, never below the one that probes. An unthrottled answer ends the episode, and the cap
+    climbs back one send per such answer while it still binds. Only a send made since the latest
+    cooldown opened speaks for the provider NOW: one already out when it pushed back was answered
+    by that cooldown, and its success may predate the pushback. What no wait clears refuses the RUN
+    (:class:`SendRefusedError`): a per-hour or per-day quota at once, anything else once the
+    provider has answered nothing but throttles for ``_GIVE_UP_S``.
+
+    ``on_change`` is told whenever what :meth:`reading` returns may have moved — the change happens
+    inside a send, where nobody publishing it would otherwise look."""
+
+    def __init__(self, sender: str) -> None:
+        self.sender = sender
+        self.on_change: Callable[[], None] | None = None
+        self._out = 0
+        self._queued = 0
+        self._at_once: int | None = None
+        # Cooldowns ever opened — a send's ticket is the count when it went out.
+        self._opened = 0
+        self._strikes = 0
+        self._resumes_at = 0.0
+        # The episode's clock, and its wall-clock twins for the operator.
+        self._since: float | None = None
+        self._since_epoch: float | None = None
+        self._resumes_at_epoch: float | None = None
+        self._detail = ""
+
+    @asynccontextmanager
+    async def send(self) -> AsyncIterator[int]:
+        """Hold one send until the cooldown has run out and a slot under the cap is free, then yield
+        its ticket for :meth:`throttled` / :meth:`eased`. The wait breaks on a pause, and is
+        reported tick by tick as throttle stall, so a cell's wall-clock envelope gives it back
+        rather than spending itself on the provider's queue."""
+        abort = _ABORT_CHECK.get()
+        self._queued += 1
+        try:
+            if self._hold() > 0:
+                self._changed()
+            while (hold := self._hold()) > 0:
+                if abort is not None and abort():
+                    raise asyncio.CancelledError(f"backpressure wait aborted ({self.sender})")
+                started = time.monotonic()
+                await asyncio.sleep(min(1.0, hold))
+                report_throttle_stall(time.monotonic() - started)
+        finally:
+            self._queued -= 1
+        self._out += 1
+        self._changed()
+        try:
+            yield self._opened
+        finally:
+            self._out -= 1
+
+    def _hold(self) -> float:
+        cooling = self._resumes_at - time.monotonic()
+        if cooling > 0:
+            return cooling
+        if self._at_once is not None and self._out >= self._at_once:
+            return _SLOT_POLL_S
+        return 0.0
+
+    def throttled(self, ticket: int, *, headers: object | None, body: str) -> None:
+        """A send came back throttled; called while it still holds its slot. A quota refuses the
+        run whichever send met it; otherwise only a send made since the latest cooldown opened a
+        new one — every other was already answered."""
+        now = time.monotonic()
+        detail = _provider_words(body)
+        scope = diagnose_rate_limit_scope(headers, body)
+        if scope in _UNWAITABLE_SCOPES:
+            raise SendRefusedError(
+                f"{self.sender} is throttled by a {scope} quota, which no wait outlasts: {detail}",
+                category=ErrorCategory.PROVIDER_THROTTLED,
+            )
+        if ticket != self._opened:
+            return
+        if self._since is None:
+            self._since, self._since_epoch = now, time.time()
+        elif now - self._since >= _GIVE_UP_S:
+            raise SendRefusedError(
+                f"{self.sender} has answered nothing but throttles for "
+                f"{(now - self._since) / 60:.0f} min: {detail}",
+                category=ErrorCategory.PROVIDER_THROTTLED,
+            )
+        self._opened += 1
+        self._strikes += 1
+        self._at_once = max(1, self._out // 2)
+        retry_after = parse_retry_after(headers)
+        wait = retry_after + 1.0 if retry_after else _cooldown_s(self._strikes)
+        self._resumes_at, self._resumes_at_epoch = now + wait, time.time() + wait
+        self._detail = detail
+        logger.warning(
+            "%s: the provider is throttling (%s) — every send held %.0fs, then %d at once: %s",
+            self.sender,
+            scope,
+            wait,
+            self._at_once,
+            detail,
+        )
+        self._changed()
+
+    def eased(self, ticket: int) -> None:
+        """A send came back answered; called while it still holds its slot. Made since the latest
+        cooldown opened, it ends the episode: the provider has taken a send since pushing back."""
+        if ticket != self._opened:
+            return
+        if self._since is not None:
+            logger.warning("%s: the provider answers again", self.sender)
+        self._since = self._since_epoch = self._resumes_at_epoch = None
+        self._resumes_at = 0.0
+        self._strikes = 0
+        # The provider's words belong to the episode that opened them. A reading still renders
+        # while sends sit queued on the cap, so keeping them here served a finished throttle's
+        # message beside a null `since` — a live quota warning for a provider that is answering.
+        self._detail = ""
+        if self._at_once is not None and self._out >= self._at_once:
+            self._at_once += 1
+        self._changed()
+
+    def reading(self) -> BackpressureReading | None:
+        """``None`` unless the pushback is holding something — an episode running, or a send
+        queued on the cap — so a served reading alone says sends are being held."""
+        if self._since_epoch is None and self._queued == 0:
+            return None
+        return BackpressureReading(
+            sender=self.sender,
+            at_once=self._at_once,
+            since=self._since_epoch,
+            resumes_at=self._resumes_at_epoch,
+            detail=self._detail,
+        )
+
+    def _changed(self) -> None:
+        if self.on_change is not None:
+            self.on_change()
 
 
 async def wait_with_countdown(total_sec: float, label: str) -> None:
@@ -302,7 +491,7 @@ async def wait_with_countdown(total_sec: float, label: str) -> None:
         sys.stderr.write(f"\r{_YELLOW}⚠ rate-limit ({label}): resuming.{' ' * 30}{_RESET}\n")
         sys.stderr.flush()
     finally:
-        _report_throttle_stall(time.monotonic() - started)
+        report_throttle_stall(time.monotonic() - started)
 
 
 def estimate_tokens(messages: list[dict[str, str]], max_output: int | None) -> int:
@@ -463,7 +652,7 @@ class RateLimiter:
         finally:
             if waiter in self._waiting:
                 self._waiting.remove(waiter)
-            _report_throttle_stall(time.monotonic() - started)
+            report_throttle_stall(time.monotonic() - started)
 
     def _served(self, tenant: str) -> float:
         """What *tenant* has already taken from the current window, in the axis that BINDS. Derived
@@ -551,21 +740,23 @@ def build_rate_limiter(rpm: int | None, tpm: int | None) -> RateLimiter:
 __all__ = [
     "ANTHROPIC_RPM_HEADER",
     "ANTHROPIC_TPM_HEADER",
-    "MAX_429_ATTEMPTS",
+    "MAX_SEND_ATTEMPTS",
     "OPENAI_RPM_HEADER",
     "OPENAI_TPM_HEADER",
+    "Backpressure",
     "RateLimiter",
     "acquire_reservation",
     "apply_discovered_caps",
     "build_rate_limiter",
     "decide_429_wait",
     "get_abort_check",
-    "is_quota_rate_limit",
     "parse_retry_after",
     "raise_if_request_too_large",
+    "report_throttle_stall",
     "set_abort_check",
     "set_rate_tenant",
     "set_throttle_stall_sink",
+    "throttle_stall_given_to",
     "throttle_stall_seconds",
     "wait_with_countdown",
 ]

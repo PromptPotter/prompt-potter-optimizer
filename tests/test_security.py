@@ -951,9 +951,10 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     the provider with no record at all. Nothing raised; the number was simply higher than the cap.
 
     A burst of concurrent sends through the real client — some answered, some cancelled mid-call,
-    some timed out after the request left — must record no more than the ceiling, and a send that
-    never reported must be on the ledger at the whole bound it was admitted on — even when the
-    process died before it could say so."""
+    some timed out after the request left — must record no more than the ceiling. And a record of
+    spend is only ever a BILL: a send that never reported writes none, and binds the ceiling from
+    its open hold instead — every surface once summed a cancelled cell's whole worst case as
+    money spent ($1.87 on a campaign the provider had billed $0.235)."""
     import contextlib
     import random
     import types
@@ -962,7 +963,7 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     import openai
     from openai.types.chat import ChatCompletion
 
-    from promptpotter.domain.run_records import TokenUsageRecord
+    from promptpotter.domain.run_records import SpendHoldRecord, TokenUsageRecord
     from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
     from promptpotter.infrastructure.llm.pricing import Rate
@@ -971,12 +972,12 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
         CallLabel,
         SendBound,
         SpendBook,
-        charge_open_holds,
         spending_under,
+        unreported_on,
     )
     from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
     from promptpotter.infrastructure.store.account_spend import billed_spend
-    from promptpotter.shared.errors import WalletExhaustedError
+    from promptpotter.shared.errors import SendRefusedError
 
     monkeypatch.setattr(
         "promptpotter.infrastructure.llm.pricing.load_rates",
@@ -984,11 +985,14 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     )
     rng = random.Random(7)
     request = httpx.Request("POST", "https://x")
+    flaky, hang = [True], [False]
 
     async def create(**params: Any) -> Any:
         await asyncio.sleep(rng.random() * 0.02)
-        if rng.random() < 0.2:
+        if flaky[0] and rng.random() < 0.2:
             raise openai.APITimeoutError(request=request)
+        if hang[0]:
+            await asyncio.Event().wait()
         prompt = rng.randint(1, len(params["messages"][0]["content"]))
         completion = rng.randint(0, params["max_tokens"])
         reply = ChatCompletion.model_validate(
@@ -1051,35 +1055,44 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     recorded = sum(r.cost_usd or 0.0 for r in records)
     assert recorded <= 0.05 + 1e-12, f"recorded ${recorded:.6f} past a $0.05 ceiling"
     assert recorded == pytest.approx(book.usd_spent)
-    assert any(isinstance(o, WalletExhaustedError) for o in outcomes), "the ceiling never bound"
+    assert any(isinstance(o, SendRefusedError) for o in outcomes), "the ceiling never bound"
     unreported = sum(
         isinstance(o, asyncio.CancelledError | openai.APITimeoutError) for o in outcomes
     )
-    unsettled = [r for r in records if r.unsettled]
-    assert unreported and len(unsettled) == unreported
-    # Charged at the bound it was admitted on: its input bytes plus framing, and its whole reply.
-    assert all(r.output_tokens == 1500 and r.input_tokens > 512 for r in unsettled)
+    left = unreported_on(ledger)
+    # Never written as a bill: each stays an open hold, at the bound it was admitted on…
+    assert unreported and left.sends == unreported
+    assert len(records) == sum(not isinstance(o, BaseException) for o in outcomes)
+    assert book.usd_unreported == pytest.approx(left.usd)
+    # …and the ceiling binds bills and unknowns together.
+    assert book.usd_spent + book.usd_unreported <= 0.05 + 1e-12
 
     # A hard exit runs no `finally`: the hold written ahead of the call is all that says it left.
-    # The account reads it at its bound before any resume, and the resume charges it once.
-    killed = SendBound(input_tokens=600, output_tokens=1500, usd=0.0036)
-    token = set_cycle_ledger(ledger)
-    try:
-        Admission(book, CallLabel("killed", "optimizer"), killed, model="gpt-x", provider="openai")
-    finally:
-        reset_cycle_ledger(token)
-    assert billed_spend([ledger.path]).used_usd == pytest.approx(recorded + 0.0036)
-    assert (charge_open_holds(ledger), charge_open_holds(ledger)) == (1, 0)
-    assert billed_spend([ledger.path]).used_usd == pytest.approx(recorded + 0.0036)
+    # The account reads it as unreported, never as spent, and a resumed book holds it.
+    ledger.append(
+        SpendHoldRecord(
+            hold_id="killed",
+            kind="optimizer",
+            node="killed",
+            input_tokens=600,
+            output_tokens=1500,
+            cost_usd=0.0036,
+        )
+    )
+    account = billed_spend([ledger.path])
+    assert account.used_usd == pytest.approx(recorded)
+    assert account.unreported_usd == pytest.approx(left.usd + 0.0036)
+    assert unreported_on(ledger).sends == unreported + 1
 
     # A nested run (an L4 cell) spends under its ROOT's book: the call is held on the root ledger
     # and carried there as it settles, while the inner ledger keeps its own view — which no sum of
     # money counts a second time.
+    flaky[0] = False
     book.ledger = ledger
     inner = CycleEventLog(tmp_path / "inner.jsonl")
     token = set_cycle_ledger(inner)
     try:
-        with spending_under(book), contextlib.suppress(openai.APITimeoutError):
+        with spending_under(book):
             asyncio.run(
                 client.chat(
                     [{"role": "user", "content": "nested"}],
@@ -1093,19 +1106,24 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     carried = [r for _, r in ledger.iter() if isinstance(r, TokenUsageRecord)]
     own = [r for _, r in inner.iter() if isinstance(r, TokenUsageRecord)]
     assert [(r.node, r.mirrored) for r in carried[-1:]] == [("inner:inner", False)]
-    assert [r.mirrored for r in own] == [True] and not charge_open_holds(ledger)
+    assert [r.mirrored for r in own] == [True]
+    assert unreported_on(ledger).sends == unreported + 1
     assert billed_spend([inner.path]).used_usd == 0.0
     assert book.usd_spent == pytest.approx(billed_spend([ledger.path]).used_usd)
-    # …and a kill mid-call leaves its hold on the ROOT ledger, where the root's resume charges it.
+    # …and a nested send that ends with no bill leaves its hold on the ROOT ledger, where the
+    # root's ceiling and its account read it.
     token = set_cycle_ledger(inner)
     try:
-        Admission(book, CallLabel("killed", "optimizer"), killed, model="gpt-x", provider="openai")
+        cut = SendBound(input_tokens=600, output_tokens=1500, usd=0.0036)
+        Admission(
+            book, CallLabel("cut", "optimizer"), cut, model="gpt-x", provider="openai"
+        ).unreported()
     finally:
         reset_cycle_ledger(token)
-    assert charge_open_holds(ledger) == 1
+    assert unreported_on(ledger).sends == unreported + 2
 
     # A backend cell: a connection never made is retried free; a 5xx that billed is settled off
-    # its error envelope and retried; a read timeout is charged whole and NEVER sent again — the
+    # its error envelope and retried; a read timeout is left unreported and NEVER sent again — the
     # backend is still working it, and a second POST was a second bill nobody recorded.
     from promptpotter.application.scoring.sample_measurement import cell_billing
     from promptpotter.infrastructure.backend import BackendClient
@@ -1150,11 +1168,65 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
         reset_cycle_ledger(token)
     assert len(posts) == 3, f"{len(posts)} POSTs — a read timeout was sent again"
     after = [r for _, r in ledger.iter() if isinstance(r, TokenUsageRecord)][before:]
-    assert [(r.cost_usd, r.unsettled) for r in after] == [
-        (0.0, False),
-        (0.001, False),
-        (0.01, True),
-    ]
+    assert [r.cost_usd for r in after] == [0.0, 0.001]
+    assert wallet.usd_unreported == pytest.approx(0.01)
+
+    # A cell whose sends are each billed where they are made (Harbor's agent) RESERVES its bound
+    # rather than holding it as one send. Cancelled mid-episode, it has paid for the turns that
+    # answered and leaves only the send it had out unreported — never the whole cell.
+    turns: list[Any] = []
+
+    async def episode(_workload: Any, _query: str, _payload: dict[str, Any]) -> dict[str, Any]:
+        for n in range(4):
+            hang[0] = n == 3
+            turns.append(
+                await client.chat(
+                    [{"role": "user", "content": f"turn {n}"}],
+                    model="gpt-x",
+                    label=CallLabel("agent", "backend"),
+                    max_tokens=100,
+                )
+            )
+        return {"data": {}}
+
+    agent = BackendClient(
+        "",
+        wire_adapter=lambda query, params: {"query": query},
+        session=types.SimpleNamespace(),  # type: ignore[arg-type]
+        execution="in_process",
+        in_process_run=episode,
+        workload=types.SimpleNamespace(),  # type: ignore[arg-type]
+        holds_own_sends=True,
+        prompt_delivery=types.SimpleNamespace(),  # type: ignore[arg-type]
+    )
+    cell_ledger = CycleEventLog(tmp_path / "cell.jsonl")
+    purse = SpendBook(usd_cap=lambda: 1.0, tokens_cap=lambda: None)
+    cell_ledger.bind(purse)
+    whole = SendBound(input_tokens=100_000, output_tokens=50_000, usd=0.5)
+
+    async def cancel_mid_episode() -> None:
+        cell = asyncio.ensure_future(agent.run_query("q", bound=whole, billed=lambda _d: None))
+        while len(turns) < 3:
+            await asyncio.sleep(0.001)
+        await asyncio.sleep(0.05)
+        cell.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cell
+
+    token = set_cycle_ledger(cell_ledger)
+    try:
+        with spending_under(purse):
+            asyncio.run(cancel_mid_episode())
+    finally:
+        reset_cycle_ledger(token)
+    bills = [r for _, r in cell_ledger.iter() if isinstance(r, TokenUsageRecord)]
+    assert [r.node for r in bills] == ["agent"] * 3
+    assert purse.usd_spent == pytest.approx(sum(r.cost_usd or 0.0 for r in bills))
+    out = unreported_on(cell_ledger)
+    assert out.sends == 1 and out.usd < whole.usd / 100, f"a cancel left ${out.usd} unreported"
+    assert purse.usd_unreported == pytest.approx(out.usd)
+    # The reservation is gone with the cell: the whole bound fits again beside what was paid.
+    assert purse.fits(whole) == 1
 
 
 def test_an_operator_raise_survives_relaunch_but_never_escapes_the_wallet() -> None:

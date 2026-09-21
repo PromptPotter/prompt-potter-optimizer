@@ -11,7 +11,7 @@ agent episode is a measurable cell in this loop — not to publish a competitive
   published sample of the 89-task set. Chosen because it is pure text work: the rest of that
   sample builds Cython extensions, boots qemu or compiles SQLite with coverage — minutes of
   container build before a token is spent. **Taking more tasks means a new dataset name**, not an
-  edit here: `sample_id` is scoped by dataset name and the row text is not in the key.
+  edit here: this name says which one task it is.
 - **Where the roster lives:** Harbor's registry, not this directory. `harbor_tasks.yaml` commits
   the dataset name and version; the connector resolves the task list and Harbor fetches the task
   bytes at the commits it pins. Nothing about the benchmark is vendored here, so there is no copy

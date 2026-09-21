@@ -1,5 +1,5 @@
 """Re-score a cached origin *k* times to read the backend's run-to-run noise. A fenced debug diagnostic — no config field, no
-L1 injection, no ledger event; the loop never learns this verb exists."""
+L1 injection, nothing on the ledger but its bills; the loop never learns this verb exists."""
 
 from __future__ import annotations
 

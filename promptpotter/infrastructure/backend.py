@@ -5,16 +5,23 @@ per-connector adapters in `promptpotter.connectors`. API responses stored verbat
 from __future__ import annotations
 
 import asyncio
-import itertools
+import contextlib
 import logging
-from collections.abc import Callable
+import time
+from collections.abc import AsyncIterator, Callable, Mapping
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
+from filelock import BaseFileLock, FileLock, Timeout
 
+from promptpotter.config.paths import default_jobs_dir
 from promptpotter.infrastructure.llm.rate_limit import (
-    MAX_429_ATTEMPTS,
-    decide_429_wait,
+    MAX_SEND_ATTEMPTS,
+    Backpressure,
+    get_abort_check,
+    report_throttle_stall,
     wait_with_countdown,
 )
 from promptpotter.infrastructure.llm.spend_book import (
@@ -25,16 +32,18 @@ from promptpotter.infrastructure.llm.spend_book import (
     admitted,
     may_have_billed,
     never_sent,
+    reserved,
 )
-from promptpotter.shared.errors import CellUnscoreableError
+from promptpotter.infrastructure.llm.telemetry import emit_backend_warning
+from promptpotter.shared.errors import CellThrottledError, CellUnscoreableError
 
 # HTTP timeout for /matches. Longer than the backend's own retries can run — a few provider
 # attempts per LLM node, each on its own timeout — because a read timeout is terminal: the backend
-# is still working and billing, so the cell is charged its whole bound and never sent again.
+# is still working and billing, so the cell is left unreported and never sent again.
 QUERY_TIMEOUT: float = 600.0
 
 # The hold a whole cell is admitted on, and the settle that reads what it billed off the reply —
-# ``None`` where the reply reports nothing, which is charged in full.
+# ``None`` where the reply reports nothing, which leaves the cell unreported.
 CellBilling = Callable[[dict[str, Any]], "list[Billed] | None"]
 _CELL = CallLabel("backend_cell", "backend")
 
@@ -44,6 +53,7 @@ if TYPE_CHECKING:
         InProcessRun,
         InProcessWorkload,
         PromptDelivery,
+        SentSpendBound,
     )
     from promptpotter.domain.connector import (
         CellEnvelopeSeconds,
@@ -52,6 +62,7 @@ if TYPE_CHECKING:
         SessionProtocol,
         WireAdapter,
     )
+    from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode
     from promptpotter.domain.value_tree import Delivery
 
 logger = logging.getLogger(__name__)
@@ -76,12 +87,20 @@ def build_backend_client(
         workload=workload,
         max_cells_in_flight=connector.max_cells_in_flight,
         holds_own_sends=connector.holds_own_sends,
+        sent_spend_bound=connector.sent_spend_bound,
         cancel_stops_billing=connector.cancel_stops_billing,
         cell_envelope=connector.cell_envelope_s,
         measured_unit=connector.measured_unit,
         answer_key=connector.answer_key,
         prompt_delivery=connector.prompt_delivery,
         auth_token=connector.auth_token() if connector.auth_token else None,
+        machine_slots=(
+            MachineSlots(
+                default_jobs_dir() / "machine" / connector.name, connector.max_cells_in_flight
+            )
+            if connector.cells_hold_the_machine
+            else None
+        ),
     )
 
 
@@ -119,9 +138,50 @@ def _spent_data(exc: CellUnscoreableError) -> dict[str, Any]:
 
 def _settle(admission: Admission, reported: list[Billed] | None) -> None:
     if reported is None:
-        admission.charge_in_full()
+        admission.unreported()
     else:
         admission.settle(*reported)
+
+
+# How often a cell waiting on the machine looks for a free slot.
+_MACHINE_POLL_S = 0.5
+
+
+class MachineSlots:
+    """The machine's slots for cells that hold it (``Connector.cells_hold_the_machine``) — ONE pool
+    for every run on the box, one OS lock file per slot in the machine-global jobs dir. The kernel
+    drops a lock with its holder, so a crashed run frees its slots without a heartbeat. A cell
+    waits for one like it waits out the provider's pushback: tick by tick, breaking on a pause,
+    reported as stall so its wall-clock envelope gives the wait back."""
+
+    def __init__(self, root: Path, capacity: int) -> None:
+        self._root = root
+        self._capacity = capacity
+
+    def _take(self) -> BaseFileLock | None:
+        self._root.mkdir(parents=True, exist_ok=True)
+        for i in range(self._capacity):
+            slot = FileLock(str(self._root / f"{i}.lock"), timeout=0)
+            try:
+                slot.acquire()
+            except Timeout:
+                continue
+            return slot
+        return None
+
+    @asynccontextmanager
+    async def hold(self) -> AsyncIterator[None]:
+        abort = get_abort_check()
+        while (slot := self._take()) is None:
+            if abort is not None and abort():
+                raise asyncio.CancelledError("machine-slot wait aborted")
+            started = time.monotonic()
+            await asyncio.sleep(_MACHINE_POLL_S)
+            report_throttle_stall(time.monotonic() - started)
+        try:
+            yield
+        finally:
+            slot.release()
 
 
 class BackendClient:
@@ -138,6 +198,7 @@ class BackendClient:
         workload: InProcessWorkload,
         max_cells_in_flight: int = 2,
         holds_own_sends: bool = False,
+        sent_spend_bound: SentSpendBound | None = None,
         cancel_stops_billing: bool = False,
         cell_envelope: CellEnvelopeSeconds | None = None,
         measured_unit: MeasuredUnit = "sample",
@@ -145,6 +206,7 @@ class BackendClient:
         prompt_delivery: PromptDelivery,
         timeout: float = 30.0,
         auth_token: str | None = None,
+        machine_slots: MachineSlots | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -162,6 +224,7 @@ class BackendClient:
         # connectors want opposite depths.
         self._max_cells_in_flight = max_cells_in_flight
         self.holds_own_sends = holds_own_sends
+        self._sent_spend_bound = sent_spend_bound
         self.cancel_stops_billing = cancel_stops_billing
         self._cell_envelope: CellEnvelopeSeconds | None = cell_envelope
         self._measured_unit: MeasuredUnit = measured_unit
@@ -170,6 +233,23 @@ class BackendClient:
         self._answer_key: str | None = answer_key
         self._auth_token = auth_token or ""
         self._http: httpx.AsyncClient | None = None
+        # Every cell of the run answers one provider pushback together (`run_query`).
+        self.backpressure = Backpressure("cells")
+        # Every run on the machine shares these, where a cell holds the machine itself.
+        self._machine_slots = machine_slots
+
+    @property
+    def derives_spend_bounds(self) -> bool:
+        """Whether what a node run can bill is derived from the config sent to it
+        (``Connector.sent_spend_bound``) rather than served by the backend."""
+        return self._sent_spend_bound is not None
+
+    def node_spend_bound(self, node: PipelineNode, cfg: Mapping[str, Any]) -> NodeSpendBound | None:
+        """What one run of ``node`` can bill: derived from the config sent to it where the
+        connector declares that, else what the backend served."""
+        if self._sent_spend_bound is not None:
+            return self._sent_spend_bound(node.name, cfg)
+        return node.spend_bound
 
     def _get_http(self) -> httpx.AsyncClient:
         if self._http is None or self._http.is_closed:
@@ -273,14 +353,15 @@ class BackendClient:
         *,
         bound: SendBound | None,
         billed: CellBilling,
-        on_warning: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         """One cell — POST /matches, or the in-process arm — held whole at ``bound`` against the
         run's spend book and settled off what the reply says it billed (``billed`` reads a reply's
-        ``data``). ``bound`` is ``None`` only for a backend whose own sends are each admitted
-        (``Connector.holds_own_sends``). A request that may have reached the backend is never sent
-        again: only a 429, a 5xx, a connection never made and a lost session are. *on_warning*
-        fires on each retry for ledger telemetry."""
+        ``data``). Where the backend's own sends are each admitted as they are made
+        (``Connector.holds_own_sends``) the cell only RESERVES ``bound``, and ``bound`` is ``None``
+        where nothing bounds it. A request that may have reached the backend is never sent
+        again: only a throttle, a 5xx, a connection never made and a lost session are — a throttle
+        whenever the run's :attr:`backpressure` lets it, the rest a bounded number of times, each
+        landing on the ledger through :func:`emit_backend_warning`."""
         payload = self._wire_adapter(query, pipeline_params)
 
         if self._execution != "remote_http":
@@ -288,125 +369,146 @@ class BackendClient:
             # The registry guarantees the arm whenever the mode is ``in_process``.
             if self._in_process_run is None:
                 raise RuntimeError(f"execution={self._execution!r} but no in_process_run wired")
-            if bound is None:
-                return await self._in_process_run(self.workload, query, payload)
-            with admitted(_CELL, bound, model=None, provider=None) as admission:
-                try:
-                    result = await self._in_process_run(self.workload, query, payload)
-                except CellUnscoreableError as exc:
-                    # It ran to no verdict, and says what it paid for doing so.
-                    _settle(admission, billed(_spent_data(exc)))
-                    raise
-                _settle(admission, billed(result.get("data") or {}))
-                return result
+            while True:
+                # The provider's admission first: a cell held by its cooldown holds no machine slot
+                # another run could use.
+                machine = (
+                    self._machine_slots.hold()
+                    if self._machine_slots is not None
+                    else contextlib.nullcontext()
+                )
+                async with self.backpressure.send() as ticket, machine:
+                    try:
+                        result = await self._in_process_cell(
+                            self._in_process_run, query, payload, bound=bound, billed=billed
+                        )
+                    except CellThrottledError as exc:
+                        self.backpressure.throttled(ticket, headers=None, body=str(exc))
+                        continue
+                    self.backpressure.eased(ticket)
+                    return result
 
         if bound is None:
             raise RuntimeError("a remote cell is held whole, so it needs the bound its nodes serve")
         client = self._get_http()
 
         def _warn(kind: str, *, attempt: int, wait_s: float, **extra: Any) -> None:
-            if on_warning is None:
-                return
-            try:
-                on_warning(
-                    {
-                        "kind": kind,
-                        "attempt": attempt + 1,
-                        "max_attempts": MAX_429_ATTEMPTS,
-                        "wait_s": float(wait_s),
-                        **extra,
-                    }
-                )
-            except (KeyboardInterrupt, asyncio.CancelledError):
-                raise
-            except Exception:
-                logger.exception("on_warning callback failed; continuing retry loop")
+            # Straight to the ledger's own emitter rather than back up through a callback the
+            # caller threads in: the in-process arm above could not be given one, so its retries —
+            # the ones that carry a whole diagnosis — reached no surface at all.
+            emit_backend_warning(
+                kind=kind,
+                attempt=attempt + 1,
+                max_attempts=MAX_SEND_ATTEMPTS,
+                wait_s=float(wait_s),
+                query=query,
+                **extra,
+            )
 
-        # 429 → Retry-After (RFC 7231); 5xx + a connection never made → exp backoff (1, 2, 4, 8s);
+        # 429 → the run's backpressure; 5xx + a connection never made → exp backoff (1, 2, 4, 8s);
         # a lost session → one recovery; everything else, a read timeout included, exits.
         recovered = False
-        for attempt in itertools.count():
+        attempt = 0
+        while True:
             wait: float | None = None
-            with admitted(_CELL, bound, model=None, provider=None) as admission:
-                try:
-                    resp = await client.post(
-                        f"{self.base_url}/matches",
-                        json=payload,
-                        timeout=QUERY_TIMEOUT,
-                    )
-                except httpx.TransportError as exc:
-                    error_class = exc.__class__.__name__
-                    if never_sent(exc):
-                        admission.release()
-                        if attempt + 1 < MAX_429_ATTEMPTS:
-                            wait = float(2**attempt)
-                    if wait is None:
-                        _warn(
-                            "transport_error",
-                            attempt=attempt,
-                            wait_s=0.0,
-                            error_class=error_class,
-                            final=True,
+            async with self.backpressure.send() as ticket:
+                with admitted(_CELL, bound, model=None, provider=None) as admission:
+                    try:
+                        resp = await client.post(
+                            f"{self.base_url}/matches",
+                            json=payload,
+                            timeout=QUERY_TIMEOUT,
                         )
-                        raise
-                    logger.warning(
-                        "Backend unreachable (attempt %d/%d): %s; waiting %.1fs",
-                        attempt + 1,
-                        MAX_429_ATTEMPTS,
-                        error_class,
-                        wait,
-                    )
-                    _warn("transport_error", attempt=attempt, wait_s=wait, error_class=error_class)
-                else:
-                    code = resp.status_code
-                    reported = billed(_reply_data(resp))
-                    if reported is not None:
-                        admission.settle(*reported)
-                    elif resp.is_success or may_have_billed(code):
-                        admission.charge_in_full()
-                    else:
-                        admission.release()
-                    if code == 429:
-                        decision = decide_429_wait(resp.headers, resp.text, attempt)
-                        if decision is not None:
-                            wait = decision.seconds
-                            logger.warning(
-                                "Backend 429 [%s] (attempt %d/%d); waiting %.1fs",
-                                decision.scope,
-                                attempt + 1,
-                                MAX_429_ATTEMPTS,
-                                wait,
-                            )
+                    except httpx.TransportError as exc:
+                        error_class = exc.__class__.__name__
+                        if never_sent(exc):
+                            admission.release()
+                            if attempt + 1 < MAX_SEND_ATTEMPTS:
+                                wait = float(2**attempt)
+                        if wait is None:
                             _warn(
-                                "rate_limit",
+                                "transport_error",
                                 attempt=attempt,
-                                wait_s=wait,
-                                status_code=429,
-                                scope=decision.scope,
+                                wait_s=0.0,
+                                error_class=error_class,
+                                final=True,
                             )
-                    elif 500 <= code < 600 and attempt + 1 < MAX_429_ATTEMPTS:
-                        wait = float(2**attempt)
+                            raise
                         logger.warning(
-                            "Backend %d (attempt %d/%d); waiting %.1fs",
-                            code,
+                            "Backend unreachable (attempt %d/%d): %s; waiting %.1fs",
                             attempt + 1,
-                            MAX_429_ATTEMPTS,
+                            MAX_SEND_ATTEMPTS,
+                            error_class,
                             wait,
                         )
-                        _warn("server_error", attempt=attempt, wait_s=wait, status_code=code)
-                    elif (
-                        code == 400
-                        and not recovered
-                        and _is_session_error(resp)
-                        and await self._guard.recover(client, self.base_url)
-                    ):
-                        recovered = True
-                        wait = 0.0
+                        _warn(
+                            "transport_error", attempt=attempt, wait_s=wait, error_class=error_class
+                        )
+                    else:
+                        code = resp.status_code
+                        reported = billed(_reply_data(resp))
+                        if reported is not None:
+                            admission.settle(*reported)
+                        elif resp.is_success or may_have_billed(code):
+                            admission.unreported()
+                        else:
+                            admission.release()
+                        if code == 429:
+                            self.backpressure.throttled(
+                                ticket, headers=resp.headers, body=resp.text
+                            )
+                            continue
+                        if resp.is_success:
+                            self.backpressure.eased(ticket)
+                        if 500 <= code < 600 and attempt + 1 < MAX_SEND_ATTEMPTS:
+                            wait = float(2**attempt)
+                            logger.warning(
+                                "Backend %d (attempt %d/%d); waiting %.1fs",
+                                code,
+                                attempt + 1,
+                                MAX_SEND_ATTEMPTS,
+                                wait,
+                            )
+                            _warn("server_error", attempt=attempt, wait_s=wait, status_code=code)
+                        elif (
+                            code == 400
+                            and not recovered
+                            and _is_session_error(resp)
+                            and await self._guard.recover(client, self.base_url)
+                        ):
+                            recovered = True
+                            wait = 0.0
             if wait is None:
                 break
+            attempt += 1
             if wait:
                 await wait_with_countdown(wait, "backend")
 
         resp.raise_for_status()
         match_result: dict[str, Any] = resp.json()
         return match_result
+
+    async def _in_process_cell(
+        self,
+        run: InProcessRun,
+        query: str,
+        payload: dict[str, Any],
+        *,
+        bound: SendBound | None,
+        billed: CellBilling,
+    ) -> dict[str, Any]:
+        if bound is None:
+            return await run(self.workload, query, payload)
+        if self.holds_own_sends:
+            # Every send it makes is billed where it is made, so the cell is no send of its own.
+            with reserved(_CELL, bound):
+                return await run(self.workload, query, payload)
+        with admitted(_CELL, bound, model=None, provider=None) as admission:
+            try:
+                result = await run(self.workload, query, payload)
+            except CellUnscoreableError as exc:
+                # It ran to no verdict — a throttle included — and says what it paid for doing so.
+                _settle(admission, billed(_spent_data(exc)))
+                raise
+            _settle(admission, billed(result.get("data") or {}))
+            return result

@@ -11,7 +11,7 @@ from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ErrorCategory
 
 __all__ = [
-    "WALLET_STOPS",
+    "REFUSAL_STOPS",
     "CampaignPhase",
     "DashboardState",
     "PhaseEvent",
@@ -55,6 +55,7 @@ class StopReason(enum.StrEnum):
     ORIGIN_GATE = "origin_gate"
     BACKEND_UNREACHABLE = "backend_unreachable"
     PROVIDER_CREDIT = "provider_credit_exhausted"
+    PROVIDER_THROTTLED = "provider_throttled"
     RENDER_ERROR = "render_error"
     OPTIMIZER_TIMEOUT = "optimizer_timeout"
     REBASED = "rebased_to_fork"
@@ -156,10 +157,10 @@ class StopReasonInfo(NamedTuple):
 #
 # Mid-round is decided by WHERE the stop is raised, not by how bad it sounds:
 #   - `scoring/query_loop.py::run_walks` raises inside the scoring phase -> SPEND_BUDGET,
-#     TOKEN_BUDGET, BACKEND_UNREACHABLE, PROVIDER_CREDIT.
+#     TOKEN_BUDGET, BACKEND_UNREACHABLE, PROVIDER_CREDIT, PROVIDER_THROTTLED.
 #   - a pause is raised from that same loop between samples -> PAUSED.
 #   - CRASHED / RENDER_ERROR / OPTIMIZER_TIMEOUT are exceptions from anywhere, round included, and
-#     so is PROVIDER_CREDIT when an optimizer call is the one refused.
+#     so are PROVIDER_CREDIT and PROVIDER_THROTTLED when an optimizer call is the one refused.
 #   - everything else fires at a round BOUNDARY: `runner/round.py` raises only after
 #     `close_round`, escalation's ABORT/REBASED ride the post-round transition seam,
 #     ORIGIN_GATE runs once round 0 is scored, and DIVERGED is decided at resume before any
@@ -248,6 +249,17 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         "Raise the provider key's limit or top up its credit, then `resume`; a refused cell is a "
         "hole it re-measures.",
     ),
+    # Not BACKEND_UNREACHABLE: the provider answered, with a refusal the run already waited out
+    # (`rate_limit.py::Backpressure`) — or a quota no wait outlasts. More waiting is not the cure.
+    StopReason.PROVIDER_THROTTLED: StopReasonInfo(
+        "Provider rate-limited",
+        StopOutcome.HALTED,
+        True,
+        False,
+        "Use your own key for that provider (OpenRouter BYOK) or route to another host "
+        "(`route_order`), or wait out its quota, then `resume`; the refused cell is a hole it "
+        "re-measures.",
+    ),
     StopReason.CRASHED: StopReasonInfo("Crashed", StopOutcome.FAILED, True, True, ""),
     # Written by the REAPER straight onto index.json — the producer is already gone, so
     # `_finalize_run` never runs and never reads this row. True is the honest value: a
@@ -280,10 +292,11 @@ def stop_reason_outcome(reason: StopReason | str) -> StopOutcome:
     return STOP_REASON_INFO[StopReason(reason)].outcome
 
 
-# Which stop each wallet's refusal ends a run on — raised before a call (`WalletExhaustedError`) or
-# banked on the hole a refused cell leaves (`CellWalletExhaustedError`), one table for both.
-WALLET_STOPS: dict[ErrorCategory, StopReason] = {
+# Which stop each refusal ends a run on — raised at a send (`SendRefusedError`) or banked on the
+# hole a refused cell leaves (`CellSendRefusedError`), one table for both.
+REFUSAL_STOPS: dict[ErrorCategory, StopReason] = {
     ErrorCategory.PROVIDER_CREDIT: StopReason.PROVIDER_CREDIT,
+    ErrorCategory.PROVIDER_THROTTLED: StopReason.PROVIDER_THROTTLED,
     ErrorCategory.SPEND_CEILING: StopReason.SPEND_BUDGET,
     ErrorCategory.TOKEN_CEILING: StopReason.TOKEN_BUDGET,
 }

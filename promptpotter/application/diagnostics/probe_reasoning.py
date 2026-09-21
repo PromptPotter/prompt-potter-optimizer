@@ -5,15 +5,17 @@ Runs through ``get_llm_client().chat`` rather than a raw request, so what it rep
 repo sends, ``PROVIDER_DEFAULT_EFFORT``'s omission included; a parallel implementation would
 measure a wire nothing uses.
 
-Fenced like ``noise_floor``: no config field, no L1 injection, no ledger event. The loop never
-learns this verb exists — it reads the profiles a human committed after reading the output.
+Fenced like ``noise_floor``: no config field, no L1 injection, nothing on the ledger but its
+bills. The loop never learns this verb exists — it reads the profiles a human committed after
+reading the output.
 """
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
+from promptpotter.application.initialization.loop_start import diagnostic_trace
 from promptpotter.infrastructure.llm.capabilities import STANDARD_EFFORT_LADDER
 from promptpotter.infrastructure.llm.openai_compat import PROVIDER_DEFAULT_EFFORT
 from promptpotter.infrastructure.llm.registry import get_llm_client, normalize_model_id
@@ -23,6 +25,9 @@ from promptpotter.infrastructure.llm.spend_book import (
     reset_spend_book,
     unbounded_spend_book,
 )
+
+if TYPE_CHECKING:
+    from promptpotter.infrastructure.store.stores import Stores
 
 # One terse-answer task. The measurand is the reasoning token COUNT, not the answer, so the prompt
 # only has to be something a reasoning model will think about and a terse one will not.
@@ -73,17 +78,23 @@ async def _one(client: object, model: str, rung: str | None) -> RungReading:
 
 
 async def probe_reasoning(
-    model: str, *, provider: str = "openrouter", rungs: tuple[str, ...] = STANDARD_EFFORT_LADDER
+    model: str,
+    *,
+    stores: Stores,
+    provider: str = "openrouter",
+    rungs: tuple[str, ...] = STANDARD_EFFORT_LADDER,
 ) -> list[RungReading]:
     """Every rung plus an unset baseline, serially — concurrent probes hit one endpoint's rate
-    limit and a 429 would read as a refusal, which is the one answer this must not fabricate."""
+    limit and a 429 would read as a refusal, which is the one answer this must not fabricate.
+    The bills land on the workspace's ledger: the probe answers for no campaign."""
     client = get_llm_client(provider)
     # Bound by `_MAX_TOKENS` per rung, not by a ceiling; the book still admits each send.
     token = bind_spend_book(unbounded_spend_book())
     try:
-        readings = [await _one(client, model, None)]
-        for rung in rungs:
-            readings.append(await _one(client, model, rung))
+        with diagnostic_trace(stores, None):
+            readings = [await _one(client, model, None)]
+            for rung in rungs:
+                readings.append(await _one(client, model, rung))
     finally:
         reset_spend_book(token)
     return readings
@@ -127,10 +138,3 @@ def profile_suggestion(model: str, readings: list[RungReading]) -> str:
 
 
 __all__ = ["RungReading", "probe_reasoning", "profile_suggestion"]
-
-
-if __name__ == "__main__":  # pragma: no cover - operator convenience
-    import sys
-
-    for r in asyncio.run(probe_reasoning(sys.argv[1])):
-        print(r)

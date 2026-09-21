@@ -105,8 +105,8 @@ class LedgerPipelineData(TypedDict, total=False):
 
 class PipelineData(LedgerPipelineData, total=False):
     """What the backend returned BESIDE the ledger half. It is on disk twice already, from the
-    same objects and never from a ledger record: the ``MeasurementArchive`` row keyed
-    ``(dataset_name, node_configs, sample_id)``, and ``rounds/round_NNNN.json::results[]`` +
+    same objects and never from a ledger record: the ``MeasurementArchive`` row addressed by
+    ``(node_configs, sample_key)``, and ``rounds/round_NNNN.json::results[]`` +
     ``::all_candidate_results{}``. The reasoning trace and the resolved params are the bulk of it,
     and the panels that cite them (``dispatch/injections/panels.py``) read the in-memory
     ``InjectionBundle.trajectory_results``, never a ledger record."""
@@ -153,10 +153,12 @@ class PipelineData(LedgerPipelineData, total=False):
 
 class QueryMeasurement(TypedDict):
     """``fitness`` and ``objective`` are the active-scorer projections written only by
-    ``rescore_results`` — a fresh trace has neither. ``sample_id`` is a foreign key to
-    ``Sample.id``, stable across campaigns."""
+    ``rescore_results`` — a fresh trace has neither. ``sample_id`` is the cell's POSITION in the
+    dataset that measured it; ``sample_key`` is what the cell IS (``Sample.key``), and the only one
+    of the two that replay matches on."""
 
     sample_id: int
+    sample_key: str
     query: str
     ground_truth: str
     predicted: str
@@ -355,6 +357,17 @@ def recorded_elapsed_s(result: QueryMeasurement) -> float | None:
     pd = result.get("pipeline_data") or {}
     total = pd.get("total_time")
     return float(total) if isinstance(total, int | float) else None
+
+
+def shown_seconds(result: QueryMeasurement, *, cached: bool) -> float | None:
+    """The seconds a per-row CLOCK COLUMN shows — one rule, so no two readouts of a row disagree.
+
+    A replay occupied no clock, so its elapsed reading is a true ``0.0`` and the number the
+    operator needs is what the cell took when it was MEASURED, which ``step_timings`` carries
+    through the cache stamp. ``DashboardSample.shown_s`` mirrors this on the served shape and
+    ``webapp/lib/derivations/sample-clock.ts`` holds the browser's peer spelling — one per
+    runtime, never one per renderer."""
+    return recorded_cost_s(result) if cached else recorded_elapsed_s(result)
 
 
 def recorded_cost_s(result: QueryMeasurement) -> float | None:

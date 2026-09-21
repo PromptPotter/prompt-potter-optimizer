@@ -42,6 +42,15 @@ nodes:
       model: qwen/qwen3.7-flash:nitro
       temperature: 0.0
       max_turns: 4
+      # With `max_turns`, the limits a cell's spend is bounded by — sent to Harbor, and held
+      # against the ceiling before the cell runs (`connectors/harbor.py::_sent_spend_bound`). The
+      # caps and their evidence are `spreadsheetbench-s10/pipeline.yaml`'s; the context still
+      # clears this whole twelve-document haystack, which one call reads in well under 42k.
+      max_tokens: 4096
+      max_input_tokens: 49152
+      # Off: terminus-2's summarizing never fired in 1,172 banked harbor cells
+      # (`summarization_count=0` in every digest), and on, it quadruples what a turn may bill.
+      enable_summarize: false
     # DECLARED here rather than inherited, and it is load-bearing: a `remote_http` backend serves
     # its own schema over `GET /pipeline`, so a termnorm dataset can leave this out. There is no
     # server here to ask. Without `prompt_info` this node is not prompt-bearing, the candidate's

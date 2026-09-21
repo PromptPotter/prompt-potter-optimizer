@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from promptpotter.domain.sample import Measurement
+    from promptpotter.infrastructure.store.measurement_archive import ReplayableRow
     from promptpotter.infrastructure.store.stores import Stores
 
 __all__ = [
@@ -193,20 +194,13 @@ def reusable_results(
     stores: Stores,
     node_configs: list[tuple[str, dict[str, Any]]],
     is_fatal: Callable[[dict[str, Any]], bool] | None = None,
-    *,
-    dataset_name: str,
-) -> dict[int, dict[str, Any]]:
-    """Per-sample cache reuse from prior runs sharing *node_configs*. *dataset_name* is required:
-    a ``sample_id`` only identifies a sample within one dataset.
+) -> dict[str, ReplayableRow]:
+    """Per-sample cache reuse from prior runs sharing *node_configs*, keyed by ``sample_key``.
 
     The grade floor is the facade's, not the caller's: this is the seam ADR-0005's "every consumer
     excludes ``C``" is enforced at, and a replayed row is re-archived under the reading run, so a
     caller free to lower it could launder a ``C`` cell into the δ ruler."""
-    return stores.archive.load_reusable_results(
-        node_configs,
-        is_fatal=is_fatal,
-        dataset_name=dataset_name,
-    )
+    return stores.archive.load_reusable_results(node_configs, is_fatal=is_fatal)
 
 
 # -- writes -------------------------------------------------------------------

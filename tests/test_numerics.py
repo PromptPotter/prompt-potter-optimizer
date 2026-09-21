@@ -95,7 +95,7 @@ from promptpotter.shared.statistics import (
 )
 from tests.factories import (
     cycle_result,
-    lost_round,
+    lost_history,
     measurement,
     measurements,
     round_result,
@@ -1682,8 +1682,10 @@ def test_only_an_epsilon_cut_banks_an_idea_as_measured_and_lost() -> None:
     from promptpotter.domain.results import EliminationGate
 
     def banked(ctx: dict | None) -> bool:
-        rnd = lost_round(1, "instruction", "count the premises first", elimination_context=ctx)
-        return bool(lost_ideas([rnd]))
+        history = lost_history(
+            1, "instruction", "count the premises first", elimination_context=ctx
+        )
+        return bool(lost_ideas(history))
 
     assert banked({"gate": EliminationGate.EPSILON}), "an ε cut IS the measurement, and it lost"
     assert banked(None), "a plain accuracy loss is still a measured loss"
@@ -2852,7 +2854,7 @@ def test_a_reproposed_idea_is_rejected_even_when_rewritten_into_another_field():
     fires on the failure it was built for.
     """
     parent = _parent()
-    prior = [lost_round(1, "instruction", _DEAD_IDEA)]
+    prior = lost_history(1, "instruction", _DEAD_IDEA)
     proposals = [
         _child(parent, thinking_style=_DEAD_IDEA_REPHRASED),  # same idea, different field
         _child(parent, persona="A terse logician who commits to a label."),  # unrelated
@@ -2890,7 +2892,7 @@ def test_a_reproposed_idea_is_rejected_even_when_rewritten_into_another_field():
     # of evidence rather than a measured defeat.
     assert (
         repeats_caught(
-            [lost_round(1, "instruction", _DEAD_IDEA, total=0, acc=0.0)],
+            lost_history(1, "instruction", _DEAD_IDEA, total=0, acc=0.0),
             _child(parent, thinking_style=_DEAD_IDEA_REPHRASED),
             _child(parent, persona="A terse logician who commits to a label."),
         )
@@ -2900,7 +2902,7 @@ def test_a_reproposed_idea_is_rejected_even_when_rewritten_into_another_field():
     # the search working; only measured LOSSES close a direction off.
     assert (
         repeats_caught(
-            [lost_round(1, "instruction", _DEAD_IDEA, acc=0.9)],
+            lost_history(1, "instruction", _DEAD_IDEA, acc=0.9),
             _child(parent, thinking_style=_DEAD_IDEA_REPHRASED),
             _child(parent, persona="A terse logician who commits to a label."),
         )

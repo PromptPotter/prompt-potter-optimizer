@@ -362,6 +362,9 @@ class LLMSpendBound(StrictModel):
     input_bytes: int = Field(ge=0)
     # The reply cap no retry lifts; a node config's own `max_tokens` replaces it.
     max_tokens: int = Field(ge=1)
+    # The only hosts a gateway may serve the node from, where the sender forbade any other
+    # (`allow_fallbacks: false`) — priced at the dearest of THEM. `None`: any host it lists.
+    hosts: tuple[str, ...] | None = None
 
 
 class WebSpendBound(StrictModel):

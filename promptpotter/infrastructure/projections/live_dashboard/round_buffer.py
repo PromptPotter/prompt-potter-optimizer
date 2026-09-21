@@ -9,7 +9,7 @@ from typing import Any, cast
 
 from promptpotter.domain.results import OverlapReading
 from promptpotter.domain.run_records import LedgerFit
-from promptpotter.domain.scoring import QueryMeasurement, recorded_elapsed_s
+from promptpotter.domain.scoring import QueryMeasurement, recorded_cost_s, recorded_elapsed_s
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.projections.live_state import top_n_p_best
 
@@ -78,6 +78,9 @@ class RoundBuffer:
     ) -> None:
         pd = result.get("pipeline_data") or {}
         query_time = recorded_elapsed_s(cast("QueryMeasurement", result))
+        # Both facts, never one picked here: a replay's elapsed is a true 0.0 and this is what the
+        # cell took when it was measured. Which one a column SHOWS is `DashboardSample.shown_s`.
+        work_time = recorded_cost_s(cast("QueryMeasurement", result))
         # The row's whole token account, from the one place that carries it. This read used to
         # prefer a top-level `input_tokens` twin and fall back to a `pipeline_data` one — neither
         # of which any writer in this tree ever set, so every served row carried `null` and the
@@ -112,6 +115,7 @@ class RoundBuffer:
                 "prediction": result.get("predicted") or "",
                 "ground_truth": result.get("ground_truth") or "",
                 "time_s": None if query_time is None else round(query_time, 2),
+                "cost_s": None if work_time is None else round(work_time, 2),
                 # Two channels, deliberately: `error` is the human message the tape RENDERS,
                 # `error_category` the typed one `is_error_result` ASKS (`shared/errors.py`).
                 "error": result.get("error"),

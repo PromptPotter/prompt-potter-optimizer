@@ -46,7 +46,7 @@ from promptpotter.domain.l4.proxies import (
     parent_level_series,
 )
 from promptpotter.domain.launch_limits import LaunchLimits
-from promptpotter.domain.phases import WALLET_STOPS, RunPhase, StopReason
+from promptpotter.domain.phases import REFUSAL_STOPS, RunPhase, StopReason
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.results import candidate_label
 from promptpotter.infrastructure.llm.telemetry import _CURRENT_ROUND, _CYCLE_LEDGER
@@ -57,8 +57,8 @@ from promptpotter.infrastructure.store.layout import CycleLayout, sandbox_owner_
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.shared.errors import (
+    CellSendRefusedError,
     CellUnscoreableError,
-    CellWalletExhaustedError,
     ErrorCategory,
 )
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -84,9 +84,9 @@ logger = logging.getLogger(__name__)
 # truncated trajectory indistinguishable from "this optimizer prompt found nothing". The cost
 # ceiling is the OUTER campaign's spend budget, which every inner dollar rolls up onto.
 
-# The stop an inner run ends on when a wallet refused it, back to the hole category that says so.
-_WALLET_REFUSALS: dict[StopReason | None, ErrorCategory] = {
-    stop: category for category, stop in WALLET_STOPS.items()
+# The stop an inner run ends on when a send was refused, back to the hole category that says so.
+_REFUSALS: dict[StopReason | None, ErrorCategory] = {
+    stop: category for category, stop in REFUSAL_STOPS.items()
 }
 
 # Per-round wall-clock allowance for ONE inner cell — the rate `inner_cell_envelope_s` multiplies
@@ -621,11 +621,10 @@ async def _measure_inner_cell(
         with contextlib.suppress(asyncio.CancelledError):
             await heartbeat_task
     elapsed = time.monotonic() - start
-    if (refused := _WALLET_REFUSALS.get(result.stop_reason)) is not None:
-        # The inner run spends the outer run's wallets — its provider key and its ceiling — so the
-        # refusal is every later cell's: a hole that halts the walk, never an excluded cell the walk
-        # steps past.
-        raise CellWalletExhaustedError(
+    if (refused := _REFUSALS.get(result.stop_reason)) is not None:
+        # The inner run spends the outer run's provider key and ceiling, so the refusal is every
+        # later cell's: a hole that halts the walk, never an excluded cell the walk steps past.
+        raise CellSendRefusedError(
             f"its inner campaign {campaign_id} stopped on {result.stop_reason}",
             category=refused,
             spent={},

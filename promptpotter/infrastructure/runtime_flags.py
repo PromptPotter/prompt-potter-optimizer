@@ -172,7 +172,9 @@ def overlay_armed_controls(body: dict[str, Any], cycle_dir: Path) -> None:
     # The flight gauge is the one FOLDED value that goes stale the same way: a killed or crashed
     # run never publishes its closing zero, so a dead producer would go on reporting calls out.
     if body.get("run_phase") != RunPhase.RUNNING:
-        body.update(in_flight=0, lookahead_allowed=0, waiting_on=None, waiting_since=None)
+        body.update(
+            in_flight=0, lookahead_allowed=0, waiting_on=None, waiting_since=None, backpressure=None
+        )
 
 
 # dashboard.json untouched for longer than this ⇒ an active cycle's producer is

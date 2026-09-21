@@ -231,7 +231,7 @@ def cycle_result(
     )
 
 
-def lost_round(
+def lost_history(
     round_num: int,
     field: str,
     value: str,
@@ -239,13 +239,14 @@ def lost_round(
     total: int = 20,
     acc: float = 0.3,
     elimination_context: dict[str, Any] | None = None,
-) -> RoundResult:
-    """A prior round holding one candidate that was MEASURED and LOST — the history the
-    repeat detector reads. ``matched_parent_accuracy`` is the bar ``acc`` is judged against.
+) -> list[RoundResult]:
+    """The history the repeat detector reads: the parent's round, then one holding a candidate
+    that was MEASURED and LOST against it — a candidate is read against the round BEFORE its own.
+    ``matched_parent_accuracy`` is the bar ``acc`` is judged against.
 
     Pass ``elimination_context`` to make the loss a CUT instead: the gate inside it decides
     whether the arm was measured at all, and an empty one is a degradation cut, which names none."""
-    return RoundResult(
+    lost = RoundResult(
         round=round_num,
         label=f"round_{round_num}",
         accuracy=acc,
@@ -265,3 +266,5 @@ def lost_round(
             )
         ],
     )
+    parent = round_result(round_num - 1, prompt_fields={}, candidate_scores=[], candidates_scored=0)
+    return [parent, lost]

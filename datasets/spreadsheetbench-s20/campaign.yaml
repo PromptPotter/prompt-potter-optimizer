@@ -1,0 +1,21 @@
+campaign_config:
+  dataset_name: spreadsheetbench-s20
+  exclude_nodes: []
+  # The whole bank for the origin; each candidate is measured on fifteen of the twenty per round,
+  # chosen by `select_round_subset`. Ten cells could not resolve an edit on `spreadsheetbench-s10`:
+  # the unchanged origin scored 7, 7 and 6 of ten across three draws.
+  sp_budget_origin: 20
+  sp_budget_round: 15
+  scoring:
+    # Why both formulas read as they do: `spreadsheetbench-s10/campaign.yaml`. 56844 is s10's C0
+    # median tokens per cell. A campaign scores under ONE composite for its whole life, so this pin
+    # moves on the next cut of the panel or on a fork, never on a run already measuring against it.
+    per_sample: max(0.0, min(1.0, env_reward))
+    per_cell: max(0.0, min(1.0, fitness * 56844.0 / (56844.0 + 0.5 * max(0.0, tokens - 56844.0))))
+  optimization:
+    max_rounds: 6
+    n_variants: 2
+    l1_patience: 3
+    degradation_threshold: 0.4
+    # The ceiling the operator set for the six-round Qwen campaign on s10.
+    spend_budget_usd: 7.50

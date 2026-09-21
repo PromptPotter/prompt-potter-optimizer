@@ -8,11 +8,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.run_records import SpendTombstoneRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.io import stat_key
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.infrastructure.store.read_model import iter_jsonl
+from promptpotter.infrastructure.store.read_model import HOLD_TRAIL, iter_jsonl, open_holds
 from promptpotter.shared.clock import epoch_seconds
 
 if TYPE_CHECKING:
@@ -77,18 +79,33 @@ def record_cost_usd(rec: dict[str, Any]) -> float | None:
 
 
 class UserSpend(NamedTuple):
-    """What an account has spent, in both units plus the residue the first one cannot see. Field
-    names mirror ``SpendBucket`` so the per-cycle and per-account reads name one concept."""
+    """What an account has spent — its BILLS, in both units plus the residue the first one cannot
+    see — and apart from them what its unreported sends may have cost, which is never spent and
+    still binds every ceiling (``infrastructure/llm/spend_book.py``). Field names mirror
+    ``SpendBucket`` so the per-cycle and per-account reads name one concept."""
 
     used_usd: float
     used_tokens: int
     unpriced_tokens: int
+    unreported_usd: float = 0.0
+    unreported_tokens: int = 0
+
+    @property
+    def at_most_usd(self) -> float:
+        """The most that may have left the account: every bill, and every unreported send."""
+        return self.used_usd + self.unreported_usd
+
+    @property
+    def at_most_tokens(self) -> int:
+        return self.used_tokens + self.unreported_tokens
 
     def plus(self, other: UserSpend) -> UserSpend:
         return UserSpend(
             self.used_usd + other.used_usd,
             self.used_tokens + other.used_tokens,
             self.unpriced_tokens + other.unpriced_tokens,
+            self.unreported_usd + other.unreported_usd,
+            self.unreported_tokens + other.unreported_tokens,
         )
 
 
@@ -103,53 +120,77 @@ def _billed_of(rec: dict[str, Any]) -> UserSpend:
     return UserSpend(0.0, tokens, tokens) if usd is None else UserSpend(usd, tokens, 0)
 
 
-def _fold_billed(records: Iterable[dict[str, Any]]) -> UserSpend:
-    """Billed spend over the usage rows — and over every hold no row settled, a call a killed run
-    left out, at the most it could have cost. A nested run's row that was carried onto its outer
-    run's ledger is summed there, never here."""
+def _unreported_of(hold: dict[str, Any]) -> UserSpend:
+    """One hold no bill closed, at the bound it was admitted on. Unpriced lands in the residue for
+    the same reason a bill's does (:func:`_billed_of`): the bound is known in tokens and not in
+    money, so folding it as ``$0.00`` would report an unpriceable send as a free one — and
+    ``at_most_usd``, which bounds the account's own ceiling, would under-read by it."""
+    tokens = int(hold.get("input_tokens", 0)) + int(hold.get("output_tokens", 0))
+    usd = hold.get("cost_usd")
+    if not isinstance(usd, int | float):
+        return UserSpend(0.0, 0, tokens, 0.0, tokens)
+    return UserSpend(0.0, 0, 0, float(usd), tokens)
+
+
+def _fold_billed(records: Iterable[dict[str, Any]]) -> tuple[UserSpend, UserSpend]:
+    """The bills over the usage rows, and apart from them every hold no bill closed, at its bound —
+    whether that is a send still out or one unreported, only the run's liveness says
+    (:func:`_unreported_once_stopped`). A nested run's bill that was carried onto its outer run's
+    ledger is summed there, never here."""
+    rows = list(records)
     total = ZERO_SPEND
-    open_holds: dict[str, dict[str, Any]] = {}
-    for rec in records:
-        if rec.get("record_type") == "spend_hold":
-            open_holds[str(rec.get("hold_id"))] = rec
-        elif rec.get("record_type") == "token_usage":
-            if (hold_id := rec.get("hold_id")) is not None:
-                open_holds.pop(str(hold_id), None)
-            if not rec.get("cached") and not rec.get("mirrored"):
-                total = total.plus(_billed_of(rec))
-    for rec in open_holds.values():
-        total = total.plus(_billed_of(rec))
-    return total
+    for rec in rows:
+        if rec.get("record_type") == "token_usage" and not (
+            rec.get("cached") or rec.get("mirrored")
+        ):
+            total = total.plus(_billed_of(rec))
+    open_ = ZERO_SPEND
+    for rec in open_holds(rows).values():
+        open_ = open_.plus(_unreported_of(rec))
+    return total, open_
 
 
-_BILLED = frozenset({"token_usage", "spend_hold"})
+def _unreported_once_stopped(ledger: Path, open_: UserSpend) -> UserSpend:
+    """A hold no bill closed on a LIVE run is a send still out, and the account wallet already
+    reserves that run's whole ceiling, so counting it too would read a running cell's worst case
+    twice. On a run that is not live (killed, paused, finished) nobody will close it: it is
+    unreported, at its bound."""
+    if open_ == ZERO_SPEND:
+        return open_
+    phase = derive_run_phase(CycleLayout.of_ledger(ledger).cycle_dir)
+    return ZERO_SPEND if phase in (RunPhase.RUNNING, RunPhase.GATE) else open_
+
+
 _TOMBSTONE = frozenset({"spend_tombstone"})
-_BILLED_BY_LEDGER: dict[Path, tuple[tuple[int, int], UserSpend]] = {}
+_BILLED_BY_LEDGER: dict[Path, tuple[tuple[int, int], tuple[UserSpend, UserSpend]]] = {}
 _BANKED_BY_LEDGER: dict[Path, tuple[tuple[int, int], dict[str, UserSpend]]] = {}
 
 
 def _ledger_billed(ledger: Path) -> UserSpend:
-    """One ledger's whole-life billed spend, re-read only when the file's size or mtime moved — the
-    campaign list is polled, and a ledger is append-only between the rewinds that restat it."""
+    """One ledger's whole-life bills and unreported sends, re-read only when the file's size or
+    mtime moved — the campaign list is polled, and a ledger is append-only between the rewinds
+    that restat it. The open holds are cached apart: whether they are unreported moves with the
+    run, not the file."""
     key = stat_key(ledger)
     if key is None:
         return ZERO_SPEND
     hit = _BILLED_BY_LEDGER.get(ledger)
     if hit is not None and hit[0] == key:
-        return hit[1]
-    total = _fold_billed(
-        rec
-        for rec in iter_jsonl(ledger, record_types=_BILLED)
-        if epoch_seconds(rec.get("timestamp")) is not None
-    )
-    _BILLED_BY_LEDGER[ledger] = (key, total)
-    return total
+        billed, open_ = hit[1]
+    else:
+        billed, open_ = _fold_billed(
+            rec
+            for rec in iter_jsonl(ledger, record_types=HOLD_TRAIL)
+            if epoch_seconds(rec.get("timestamp")) is not None
+        )
+        _BILLED_BY_LEDGER[ledger] = (key, (billed, open_))
+    return billed.plus(_unreported_once_stopped(ledger, open_))
 
 
 def billed_spend(ledgers: Iterable[Path]) -> UserSpend:
-    """What these ledgers' own rows say was spent, over their whole life. Token usage only — a
-    tombstone is appended to the WORKSPACE ledger, never a cycle's, so no cycle ledger can carry
-    one to double-count."""
+    """What these ledgers' own rows say was billed, and left unreported, over their whole life.
+    Holds and bills only — a tombstone is appended to the WORKSPACE ledger, never a cycle's, so no
+    cycle ledger can carry one to double-count."""
     total = ZERO_SPEND
     for ledger in ledgers:
         total = total.plus(_ledger_billed(ledger))
@@ -168,24 +209,30 @@ def _banked_by_campaign(workspace_ledger: Path) -> dict[str, UserSpend]:
         if rec.get("record_type") != "spend_tombstone":
             continue
         campaign_id = str(rec.get("campaign_id", ""))
-        prior = banked.get(campaign_id, UserSpend(0.0, 0, 0))
-        banked[campaign_id] = UserSpend(
-            prior.used_usd + float(rec.get("used_usd", 0.0)),
-            prior.used_tokens + int(rec.get("used_tokens", 0)),
-            prior.unpriced_tokens + int(rec.get("unpriced_tokens", 0)),
-        )
+        banked[campaign_id] = banked.get(campaign_id, ZERO_SPEND).plus(_tombstone_of(rec))
     _BANKED_BY_LEDGER[workspace_ledger] = (key, banked)
     return banked
+
+
+def _tombstone_of(rec: dict[str, Any]) -> UserSpend:
+    """A banked subject's spend — whole, never re-priced: its rows are gone."""
+    return UserSpend(
+        float(rec.get("used_usd", 0.0)),
+        int(rec.get("used_tokens", 0)),
+        int(rec.get("unpriced_tokens", 0)),
+        float(rec.get("unreported_usd", 0.0)),
+        int(rec.get("unreported_tokens", 0)),
+    )
 
 
 def campaign_spend(campaigns: CampaignStore, campaign_id: str) -> UserSpend:
     """One campaign's share of :func:`sum_user_spend`'s lifetime total: its cycle ledgers plus the
     tombstones banked under its id (a deleted stub fork, a reaped inner sandbox's residue)."""
-    held = billed_spend(campaigns.campaign_cycle_ledgers(campaign_id))
+    own = billed_spend(campaigns.campaign_cycle_ledgers(campaign_id))
     banked = _banked_by_campaign(CycleEventLog.workspace_path(campaigns.workspace)).get(
         campaign_id, ZERO_SPEND
     )
-    return held.plus(banked)
+    return own.plus(banked)
 
 
 def sandbox_cycle_dirs(sandbox: Path) -> list[Path]:
@@ -196,22 +243,20 @@ def sandbox_cycle_dirs(sandbox: Path) -> list[Path]:
 
 
 def sum_user_spend(*, ledgers: Iterable[Path], since: float, until: float) -> UserSpend:
-    """Both units plus the unpriceable residue, over live usage AND banked tombstones — a tombstone
-    is spend whose rows are gone, so it is added whole rather than re-priced."""
-    banked = ZERO_SPEND
-    billable: list[dict[str, Any]] = []
-    for rec in _iter_dated_records(ledgers, since=since, until=until):
-        if rec.get("record_type") == "spend_tombstone":
-            banked = banked.plus(
-                UserSpend(
-                    float(rec.get("used_usd", 0.0)),
-                    int(rec.get("used_tokens", 0)),
-                    int(rec.get("unpriced_tokens", 0)),
-                )
-            )
-        elif rec.get("record_type") in _BILLED:
-            billable.append(rec)
-    return banked.plus(_fold_billed(billable))
+    """Both units plus the unpriceable residue, and the unreported sends beside them, over live
+    usage AND banked tombstones — a tombstone is spend whose rows are gone, so it is added whole
+    rather than re-priced."""
+    total = ZERO_SPEND
+    for ledger in ledgers:
+        billable: list[dict[str, Any]] = []
+        for rec in _iter_dated_records((ledger,), since=since, until=until):
+            if rec.get("record_type") == "spend_tombstone":
+                total = total.plus(_tombstone_of(rec))
+            elif rec.get("record_type") in HOLD_TRAIL:
+                billable.append(rec)
+        billed, open_ = _fold_billed(billable)
+        total = total.plus(billed).plus(_unreported_once_stopped(ledger, open_))
+    return total
 
 
 def bank_spend(
@@ -244,6 +289,8 @@ def bank_spend(
             used_usd=spent.used_usd,
             used_tokens=spent.used_tokens,
             unpriced_tokens=spent.unpriced_tokens,
+            unreported_usd=spent.unreported_usd,
+            unreported_tokens=spent.unreported_tokens,
         )
     )
     return spent

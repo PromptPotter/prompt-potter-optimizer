@@ -55,6 +55,9 @@ def _validate(c: object, origin: str) -> Connector:
     # none, so a token declared on it is dead config that reads as protection.
     if c.execution == "in_process" and c.auth_token is not None:
         raise RuntimeError(f"{where}: execution='in_process' has no wire — drop auth_token.")
+    # A cell that holds THIS machine runs on it, and a remote one runs on its backend's.
+    if c.cells_hold_the_machine and c.execution != "in_process":
+        raise RuntimeError(f"{where}: cells_hold_the_machine needs execution='in_process'.")
     return c
 
 

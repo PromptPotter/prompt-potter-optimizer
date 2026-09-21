@@ -244,6 +244,11 @@ class CycleLayout:
         """The append-only per-cycle event spine — the persistence SoT."""
         return self.runtime / "ledger.jsonl"
 
+    @classmethod
+    def of_ledger(cls, ledger: Path) -> CycleLayout:
+        """The cycle a :attr:`ledger` path belongs to — its inverse, so the shape has one owner."""
+        return cls(ledger.parent.parent)
+
     @property
     def streams(self) -> Path:
         return self.runtime / "streams"

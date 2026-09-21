@@ -298,13 +298,16 @@ _ROUTE_SORTS = frozenset({"nitro", "floor"})
 _ROUTE_MEMO: dict[str, tuple[float, RateCeiling]] = {}
 
 
-async def rate_ceiling(model: str, provider: str) -> RateCeiling | None:
+async def rate_ceiling(
+    model: str, provider: str, *, hosts: tuple[str, ...] | None = None
+) -> RateCeiling | None:
     """The most one call can be billed, or ``None`` where nothing bounds it. A gateway routes one
-    model to hosts whose prices differ several-fold, so its ceiling is the DEAREST host it lists —
-    whichever answers, the call was admitted on a price none of them passes. A provider that is its
-    own host bills its table rate."""
+    model to hosts whose prices differ several-fold, so its ceiling is the DEAREST host it may
+    use — every host it lists, or only ``hosts`` where the call allows no other. Whichever answers,
+    the call was admitted on a price none of them passes. A provider that is its own host bills
+    its table rate."""
     if provider.lower() == "openrouter":
-        return await _openrouter_ceiling(model)
+        return await _openrouter_ceiling(model, hosts)
     rate = lookup_rate(model, provider)
     if rate is None:
         return None
@@ -321,20 +324,28 @@ def _route_model(model: str) -> str | None:
     return base if not suffix or suffix in _ROUTE_SORTS else None
 
 
-async def _openrouter_ceiling(model: str) -> RateCeiling | None:
+async def _openrouter_ceiling(model: str, pinned: tuple[str, ...] | None) -> RateCeiling | None:
     key = _route_model(model)
     if key is None:
         return None
-    memo = _ROUTE_MEMO.get(key)
+    memo_key = f"{key}@{','.join(pinned)}" if pinned else key
+    memo = _ROUTE_MEMO.get(memo_key)
     if memo is not None and time.time() - memo[0] < _TTL_SECONDS:
         return memo[1]
-    ceiling = await asyncio.to_thread(_fetch_route_ceiling, key)
+    ceiling = await asyncio.to_thread(_fetch_route_ceiling, key, pinned)
     if ceiling is not None:
-        _ROUTE_MEMO[key] = (time.time(), ceiling)
+        _ROUTE_MEMO[memo_key] = (time.time(), ceiling)
     return ceiling
 
 
-def _fetch_route_ceiling(model: str) -> RateCeiling | None:
+def _serves(endpoint: dict[str, Any], pinned: tuple[str, ...]) -> bool:
+    """OpenRouter's own matching: a bare provider slug admits each of its endpoints, a tagged one
+    (``wafer/fast``) only itself."""
+    tag = str(endpoint.get("tag") or "")
+    return any(tag == host or tag.startswith(f"{host}/") for host in pinned)
+
+
+def _fetch_route_ceiling(model: str, pinned: tuple[str, ...] | None) -> RateCeiling | None:
     url = OPENROUTER_ENDPOINTS_URL.format(model=model)
     try:
         with urllib.request.urlopen(url, timeout=_FETCH_TIMEOUT_S) as resp:
@@ -343,9 +354,13 @@ def _fetch_route_ceiling(model: str) -> RateCeiling | None:
         logger.warning("spend: no host price list for %s from %s (%s)", model, url, exc)
         return None
     data = payload.get("data") if isinstance(payload, dict) else None
-    endpoints = [e for e in (data or {}).get("endpoints") or [] if isinstance(e, dict)]
+    endpoints = [
+        e
+        for e in (data or {}).get("endpoints") or []
+        if isinstance(e, dict) and (not pinned or _serves(e, pinned))
+    ]
     if not endpoints:
-        logger.warning("spend: OpenRouter lists no host for %s", model)
+        logger.warning("spend: OpenRouter lists no host for %s among %s", model, pinned or "any")
         return None
     try:
         hosts = [_host_tiers(e.get("pricing") or {}) for e in endpoints]
@@ -386,10 +401,20 @@ def _host_tiers(pricing: dict[str, Any]) -> tuple[list[PriceTier], float]:
             start, rate("prompt", "input_cache_write"), rate("completion", "internal_reasoning")
         )
 
-    tiers = [tier(0, pricing, pricing)]
-    for override in pricing.get("overrides") or ():
-        tiers.append(tier(int(override["min_prompt_tokens"]), override, pricing))
+    overrides = pricing.get("overrides") or ()
+    # An override is a prompt-length tier (`min_prompt_tokens`) or a time-of-day window
+    # (`utc_start`/`utc_end` — Alibaba doubles its price for half the day). A window prices from
+    # token 0 during its hours, so the dearest one is the host's base.
+    base = [tier(0, p, pricing) for p in (pricing, *(o for o in overrides if not _by_length(o)))]
+    tiers = [PriceTier(0, max(t.input for t in base), max(t.output for t in base))]
+    for override in overrides:
+        if _by_length(override):
+            tiers.append(tier(int(override["min_prompt_tokens"]), override, pricing))
     return tiers, float(pricing.get("request") or 0.0)
+
+
+def _by_length(override: dict[str, Any]) -> bool:
+    return "min_prompt_tokens" in override
 
 
 def _host_at(tiers: list[PriceTier], input_tokens: int) -> PriceTier:

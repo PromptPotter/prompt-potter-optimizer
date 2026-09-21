@@ -10,8 +10,8 @@
 #
 # The version is REQUIRED and is the pin that matters: resolving "latest" would put a moving
 # roster behind a fixed dataset name. Upstream moving a commit under this version is not silent
-# either — the resolved pins are folded into the instrument fingerprint, so it lands as a new
-# measurement identity instead of stale rows re-served against bytes nobody read.
+# either — each resolved pin is folded into its own sample's content address, so it lands as a
+# new measurement identity instead of stale rows re-served against bytes nobody read.
 harbor_dataset: terminal-bench-sample
 harbor_dataset_version: "2.0"
 
@@ -21,9 +21,8 @@ harbor_dataset_version: "2.0"
 # can optimize an agent through Harbor at all, on the cheapest episode that is still a real
 # Terminal-Bench task.
 #
-# WIDENING THIS LIST IS A NEW DATASET, never an edit here. A `sample_id` is scoped by dataset
-# name and the row text is not in the key, so adding tasks under this name would serve the old
-# measurements for the new panel (`datasets/CLAUDE.md` § Re-cutting a dataset needs a NEW name).
+# WIDENING THIS LIST IS A NEW DATASET, because the name says which one task this is; the wider
+# cut replays this cell (`datasets/CLAUDE.md` § Re-cutting a dataset needs a NEW name).
 tasks_include:
   - regex-log
 

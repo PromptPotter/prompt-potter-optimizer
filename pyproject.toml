@@ -360,3 +360,7 @@ DEP002 = [
 # Optional features — imported lazily with install-message guards.
 # Declared in extras ([excel], [benchmarks], [observability], [anthropic], [jupyter]).
 DEP001 = ["openpyxl", "datasets", "langfuse", "anthropic", "IPython"]
+# Imported directly and deliberately left transitive: `infrastructure/llm/litellm_sends.py` wraps
+# the entry point HARBOR calls, so it must be the litellm Harbor resolved — a pin of our own could
+# split the two, and the meter would wrap a copy the agent never sends through.
+DEP003 = ["litellm"]

@@ -78,11 +78,11 @@ def _filter_artifact_to_live_candidates(
     return out
 
 
-def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, Any] | None:
+def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> None:
     """Build + persist the heatmap artifacts at cycle and campaign scope. There is no DATASET-scope
     file: that scope is cross-campaign, so no campaign owns it and the route folds it per request."""
     if not session.state.cycle_id or session.store is None:
-        return None
+        return
 
     store = session.store.campaigns
     cycle_id = session.state.cycle_id
@@ -105,7 +105,6 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
         top_k_samples=None,
     )
 
-    opt_cfg = cycle.config.optimization
     # Archive candidates contribute to the joint Rasch fit but stay off the
     # heatmap Y-axis — it's filtered to this cycle's own cand_NNN.
     live_cids = {cid for rr in cycle.rounds for cid in rr.all_candidate_results}
@@ -116,8 +115,6 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> dict[str, An
         write_json(CycleLayout(cycle_dir).hard_samples, cycle_artifact)
     with graceful("campaign hard_samples.json write failed"):
         write_json(campaign_dir / "hard_samples.json", campaign_artifact)
-
-    return campaign_artifact if opt_cfg.seed_heatmap_from_archive else cycle_artifact
 
 
 def _load_p_best_trajectory(
@@ -273,13 +270,16 @@ def _fork_summary_from_index(fork_index: dict[str, Any]) -> ForkSummaryView:
     )
 
 
-def write_log_md(session: Session, *, hard_samples_artifact: dict[str, Any] | None = None) -> None:
-    """Render the per-cycle log.md and refresh the campaign digest."""
+def write_log_md(session: Session) -> None:
+    """Render the per-cycle log.md and refresh the campaign digest — at every round's close, and
+    once more when the run is stamped finished: `mark_finished` writes the stop, the finish time
+    and the winner into `index.json` AFTER the last round rendered, so a digest left there reads
+    `active` for good."""
     if not session.state.cycle_id or session.store is None:
         return
     with graceful("log.md render failed"):
         store = session.store.campaigns
-        _render_cycle_log_md(store, session.hop, hard_samples_artifact)
+        _render_cycle_log_md(store, session.hop)
         _render_campaign_log_md(store, session.campaign_id)
 
 
@@ -301,11 +301,7 @@ def _spend_by_round(layout: CycleLayout) -> dict[str, SpendRollup]:
     return out
 
 
-def _render_cycle_log_md(
-    store: CampaignStore,
-    hop: CycleHop,
-    hard_samples_artifact: dict[str, Any] | None,
-) -> None:
+def _render_cycle_log_md(store: CampaignStore, hop: CycleHop) -> None:
     index = store.load(hop)
     if not index:
         return
@@ -313,20 +309,23 @@ def _render_cycle_log_md(
     rounds = store.load_rounds_range(hop, 0, n_rounds - 1) if n_rounds else []
     layout = CycleLayout(store.cycle_dir(hop))
     campaign = store.load_campaign(hop.campaign_id)
+    # The typed knobs, never a raw-dict key read: the manifest persists only the delta from
+    # defaults, so an unset knob is absent rather than spelled out.
+    config = load_campaign_config(campaign.config) if campaign is not None else None
+    # The heat map `write_hard_samples_artifacts` put on disk, at the scope the campaign reads it.
+    hard_samples = (
+        store.campaign_root_dir(hop.campaign_id) / "hard_samples.json"
+        if config is not None and config.optimization.seed_heatmap_from_archive
+        else layout.hard_samples
+    )
     content = to_markdown(
         from_disk_log(
             index,
             rounds,
-            hard_samples_artifact=hard_samples_artifact,
+            hard_samples_artifact=read_json_tolerant(hard_samples),
             streams_dir=layout.streams,
             fork_indices=None,
-            # The typed knob, never a raw-dict key read: the manifest persists only the delta
-            # from defaults, so an unset `hard_sample_order` is absent rather than spelled out.
-            hard_sample_order=(
-                load_campaign_config(campaign.config).hard_sample_order
-                if campaign is not None
-                else "info_gain"
-            ),
+            hard_sample_order=config.hard_sample_order if config is not None else "info_gain",
             spend_by_round=_spend_by_round(layout),
         )
     )

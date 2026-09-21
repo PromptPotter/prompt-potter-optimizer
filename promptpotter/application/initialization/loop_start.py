@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.initialization.session import Session, open_cycle_ledger
@@ -21,14 +22,21 @@ from promptpotter.application.runner.campaign_ids import cycle_config_identity
 from promptpotter.application.runner.inner.spawn_context import retarget_inner_spawn
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.scoring.formula import compile_scorer, split_scoring_block
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopLoop, emit_phase
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.scoring import all_verifier_graded
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import (
     bind_spend_book,
     bound_spend_book,
     unbounded_spend_book,
+)
+from promptpotter.infrastructure.llm.telemetry import (
+    active_cycle_ledger,
+    diagnostic_spend,
+    reset_cycle_ledger,
+    set_cycle_ledger,
 )
 from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 from promptpotter.judges import build_evaluators
@@ -46,6 +54,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.results import HeadlineMetric
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
+    from promptpotter.infrastructure.store.stores import Stores
     from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
     from promptpotter.judges.protocol import JudgeSpec
 
@@ -214,6 +223,40 @@ async def diagnostic_pass(
             "over part of the pass would describe the stop, not the configuration."
         )
     return scored
+
+
+@contextmanager
+def diagnostic_trace(stores: Stores, hop: CycleHop | None) -> Iterator[None]:
+    """A diagnostic verb's bills join a ledger, in the ``diagnostic`` bucket: the campaign's own
+    where the verb re-scores one, the workspace's where it answers for none (``seed-screen``). A
+    bill that reaches no ledger is money no account, campaign or ceiling ever sees.
+
+    Inside every ceiling, always: the bucket is folded into ``SpendRollup``'s totals like any other
+    (``TOKEN_KIND_BUCKET``), so the budget gate sees this money. It is banked APART because it
+    answers a question about the search rather than advancing it — folded into ``backend``, an
+    operator reads re-measuring a candidate as the cost of finding one.
+
+    The ledger is opened only when none is bound. In the loop and behind the API one already is
+    (the round's, and the dispatcher's), and a second handle on one file is a second appender."""
+    if active_cycle_ledger() is not None:
+        with diagnostic_spend():
+            yield
+        return
+    ledger = (
+        CycleEventLog.open_workspace(stores.campaigns.workspace)
+        if hop is None
+        else CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
+    )
+    # The verb's own book files here too, so what an L4 cell spends beneath it lands on this
+    # ledger rather than only on the sandbox's.
+    if (book := bound_spend_book()) is not None and book.ledger is None:
+        book.ledger = ledger
+    token = set_cycle_ledger(ledger)
+    try:
+        with diagnostic_spend():
+            yield
+    finally:
+        reset_cycle_ledger(token)
 
 
 async def _emit_preflight_and_init_session(

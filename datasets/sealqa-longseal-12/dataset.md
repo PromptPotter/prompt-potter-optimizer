@@ -46,9 +46,8 @@ the `sealqa` judge.
 easiest of the three and the fastest per cell. Deviations, said out loud:
 
 - **Size is part of the identity, not a parameter.** `sealqa-longseal-20` and `-30` are separate
-  dataset directories, each naming its own `{12,20,30}_docs` column. Serving one size's rows under
-  another's name would replay an easier reading for a harder question, silently — `sample_id` is
-  scoped by dataset name and the query text is not in the key.
+  dataset directories, each naming its own `{12,20,30}_docs` column. The haystack is the query
+  text, so no size can replay another's reading.
 - **`urls` and `date` are dropped** when the haystack is written out. A URL is a retrieval artifact
   rather than evidence and `date` is frequently null, so both spend context the answer does not
   depend on. Documents are **numbered**, which is what lets a model cite one and a grounding judge

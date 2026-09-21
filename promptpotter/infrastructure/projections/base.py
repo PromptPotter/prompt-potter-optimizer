@@ -73,8 +73,8 @@ _ROUTES: dict[type, str | None] = {
     # Banked by `store/account_spend.py` before a delete takes the rows it stands for — a fact
     # about a cycle that no longer exists, so no live view of one can hold it.
     SpendTombstoneRecord: None,
-    # A call's admission, paired with the usage record that settles it; money moves on the usage
-    # record, and a hold left open is charged as one (`spend_book.py::charge_open_holds`).
+    # A send's admission, paired with the bill that closes it. Money moves on the bill alone; a
+    # hold no bill closed is unreported, read off the ledger where it is asked (`spend_book.py`).
     SpendHoldRecord: None,
 }
 

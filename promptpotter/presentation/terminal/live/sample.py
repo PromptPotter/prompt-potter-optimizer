@@ -9,7 +9,7 @@ from promptpotter.domain.scoring import (
     is_hit,
     is_unscored,
     is_verifier_graded,
-    recorded_elapsed_s,
+    shown_seconds,
 )
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.presentation.terminal.primitives import (
@@ -120,7 +120,7 @@ def fmt_query_result(
         step_name = next((n for n, t in reversed(list(st.items())) if t is not None), None)
     step = _step_tag(step_name)
 
-    tt = recorded_elapsed_s(cast("QueryMeasurement", r))
+    tt = shown_seconds(cast("QueryMeasurement", r), cached=cached)
 
     if err:
         # Asked FIRST: an errored row carries no ``fitness``, and the MISS ladder below would read

@@ -321,8 +321,8 @@ def restamp_campaign_configs(*, apply: bool) -> dict[str, int]:
 # each drift silently deletes a different field.
 #
 # It is compaction, not deletion. The ledger is the append-only chronology: which round, which
-# candidate, in what order, against which rival. The archive is a last-wins fold keyed
-# (dataset_name, node_configs, sample_id) and cannot answer any of those — so what comes out
+# candidate, in what order, against which rival. The archive is addressed by
+# (node_configs, sample_key) and cannot answer any of those — so what comes out
 # here is only what the archive and ``rounds/round_NNNN.json`` already hold verbatim.
 # --------------------------------------------------------------------------- #
 

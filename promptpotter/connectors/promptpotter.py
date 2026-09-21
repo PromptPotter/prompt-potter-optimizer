@@ -115,7 +115,9 @@ def _identity_config(
     dataset_dir: Path, inner_tasks: Mapping[str, Any] | None
 ) -> dict[str, dict[str, Any]]:
     """The inner optimizer's effective-revision fingerprint: what the inner optimizer nodes resolve
-    to, the per-node layouts, the panel and estimator source, and the inner benchmark's own config."""
+    to, the per-node layouts, the panel and estimator source, and the inner benchmark's own config.
+    Not the task list — each task is its own sample's ``source_pin`` (:func:`_extract_experiment`),
+    so adding one to ``inner_tasks.yaml`` voids none of the cells already banked."""
     inner_optimizer = _inner_optimizer_revision(dataset_dir)
     layouts = {name: spec.model_dump(mode="json") for name, spec in sorted(NODE_LAYOUTS.items())}
     # `layouts` names WHICH panels fill each prompt; this is what those panels SAY. The text
@@ -136,7 +138,6 @@ def _identity_config(
     inner_spec = {
         "benchmark": benchmark,
         "config": inner_tasks.get("inner_benchmark_config") or {},
-        "tasks": inner_tasks.get("tasks") or [],
         "nodes": (
             {name: (node or {}).get("config") for name, node in inner_pipeline["nodes"].items()}
             if inner_pipeline and isinstance(inner_pipeline.get("nodes"), dict)
@@ -225,7 +226,7 @@ def _extract_experiment(
         tid = t.get("id")
         if not tid:
             continue
-        queries.append({"query": tid, "ground_truth": None})
+        queries.append({"query": tid, "ground_truth": None, "source_pin": dict(t)})
     return queries, []
 
 

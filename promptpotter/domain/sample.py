@@ -3,10 +3,12 @@ never duplicated on the model. Mutable because ``run_ids`` accumulates over the 
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, JsonValue
 
 from promptpotter.domain.strict_model import StrictModel
 
@@ -35,8 +37,24 @@ class Sample(StrictModel):
     # verbatim, and this is the strictly smaller thing a grader is entitled to see.
     question: str | None = None
 
+    # What the sample POINTS AT that its text does not carry, as its connector resolved it — a
+    # Harbor task's repository commit, an inner task's treatment. ``None`` wherever the text is the
+    # whole sample. It belongs to the SAMPLE's content address, never to the instrument's: a panel
+    # is a set of these, and a set folded into the instrument re-keyed every shared cell whenever
+    # the panel grew.
+    source_pin: dict[str, JsonValue] | None = None
+
     # Cross-campaign metadata — accumulates via SampleIndex.ingest_run.
     run_ids: list[str] = Field(default_factory=list)
+
+    @property
+    def key(self) -> str:
+        return sample_key(
+            query=self.query,
+            ground_truth=self.ground_truth,
+            question=self.question,
+            source_pin=self.source_pin,
+        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], fallback_id: int | None = None) -> Sample:
@@ -46,6 +64,29 @@ class Sample(StrictModel):
         if "id" not in data and fallback_id is not None:
             data = {**data, "id": fallback_id}
         return cls(**data)
+
+
+def sample_key(
+    *,
+    query: str,
+    ground_truth: str | None,
+    question: str | None,
+    source_pin: dict[str, JsonValue] | None,
+) -> str:
+    """What a sample IS, content-addressed — the archive's replay key beside the instrument's node
+    configs. Its position and its dataset's name are not in it, so a sample carried into a wider
+    panel or under another name replays every cell already measured on it. Normalized the way a
+    measured row stores these fields, so a row and the sample it measured always agree."""
+    blob = json.dumps(
+        {
+            "query": query,
+            "ground_truth": ground_truth or "",
+            "question": question or None,
+            "source_pin": source_pin,
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,4 +105,4 @@ class Measurement:
     created_at: str
 
 
-__all__ = ["Measurement", "Sample"]
+__all__ = ["Measurement", "Sample", "sample_key"]

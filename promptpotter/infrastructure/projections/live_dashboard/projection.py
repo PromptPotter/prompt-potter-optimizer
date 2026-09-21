@@ -5,6 +5,7 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RoundSummary
 from promptpotter.domain.phases import CampaignPhase, DashboardState, PhaseEvent, RunPhase
@@ -243,9 +244,12 @@ class LiveDashboardProjection(Projection):
         # The depth it LAUNCHED at is what separates look-ahead cost from a plain failure.
         self._open_samples: dict[int, tuple[str, int, int, int]] = {}
         # The last `flight` reading (out, allowed, most); all zero while nothing is scoring. And the
-        # call a decision waits on, as (sample_id, launched at).
+        # call a decision waits on, as (sample_id, launched at), and the provider holding calls.
         self._flight: tuple[int, int, int] = (0, 0, 0)
+        self._affordable: int | None = None
+        self._cell_reserve_usd: float | None = None
         self._waiting: tuple[int, float] | None = None
+        self._backpressure: BackpressureReading | None = None
         # Sticky LLM-call mirror for ``current_round.nodes`` — owned here, not on the
         # audit-trail, which records the same event independently into its round flush.
         self._sticky_llm_calls: dict[str, dict[str, Any]] = dict(initial_llm_nodes or {})
@@ -463,6 +467,7 @@ class LiveDashboardProjection(Projection):
                 status_code=payload.get("status_code"),
                 final=bool(payload.get("final", False)),
                 query=payload.get("query"),
+                detail=payload.get("detail"),
             )
             self.state.recent_backend_warnings = [*self.state.recent_backend_warnings, warning][
                 -10:
@@ -674,11 +679,18 @@ class LiveDashboardProjection(Projection):
                 int(payload.get("allowed") or 0),
                 int(payload.get("most") or 0),
             )
+            afford, reserve = payload.get("affordable"), payload.get("cell_usd")
+            self._affordable = None if afford is None else int(afford)
+            self._cell_reserve_usd = None if reserve is None else float(reserve)
             waiting = payload.get("waiting")
             self._waiting = (
                 (int(waiting["sample_id"]), float(waiting["since"]))
                 if isinstance(waiting, dict)
                 else None
+            )
+            held = payload.get("backpressure")
+            self._backpressure = (
+                BackpressureReading.model_validate(held) if isinstance(held, dict) else None
             )
         elif ev == "pobb_backfill":
             self._append_backfill(
@@ -1001,6 +1013,10 @@ class LiveDashboardProjection(Projection):
         s.in_flight, s.lookahead_allowed, s.lookahead_most = (
             self._flight if any(self._flight) else (0, 0, (s.n_variants + 1) * s.sp_budget_round)
         )
+        # Kept whatever the phase state: between rounds these still say what the ceiling would
+        # afford the next one, which is when a press is sized.
+        s.lookahead_affordable = self._affordable
+        s.cell_reserve_usd = self._cell_reserve_usd
         # Named off the launch that opened the cell, the one record that says whose it is.
         opened = self._open_samples.get(self._waiting[0]) if self._waiting else None
         if self._waiting is None or opened is None:
@@ -1010,6 +1026,7 @@ class LiveDashboardProjection(Projection):
             owner = "parent" if ci == NO_ROUND_SLOT else candidate_label(s.round, ci)
             s.waiting_on = f"{owner} · sample {self._waiting[0]}"
             s.waiting_since = self._waiting[1]
+        s.backpressure = self._backpressure
         # Both inputs are already served and already settled by here — the fold is one division,
         # and it is here so that no reader performs it against a different poll of either.
         used = s.spend.total_used_usd

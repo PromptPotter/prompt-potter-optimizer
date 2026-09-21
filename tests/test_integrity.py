@@ -28,9 +28,7 @@ import pytest
 import yaml
 
 from promptpotter.application.scoring import query_loop
-from promptpotter.application.scoring.search_point_scorer import (
-    _assert_measured_content_matches,
-)
+from promptpotter.application.scoring.search_point_scorer import _replayable_on
 from promptpotter.connectors import harbor
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.escalation_signals import EscalationSignal, EscalationTarget
@@ -42,9 +40,8 @@ from promptpotter.domain.pipeline_schema import (
     ParamSource,
     PipelineSchema,
 )
-from promptpotter.domain.run_records import SnapshotRecord
-from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import QueryMeasurement
+from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
+from promptpotter.domain.sample import Sample, sample_key
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.infrastructure.projections.live_dashboard.projection import (
     LiveDashboardProjection,
@@ -599,10 +596,13 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """terminus-2 retries a 429 inside the turn, so the throttle spends the agent's clock and the
-    verifier then grades whatever was left — a 0.0 banked as the model's, and replayed as one. An
-    account out of credit ends every episode at turn 0: banked as holes, the walk spends the panel,
-    and on the optimizer's own call a swallowed refusal runs the round on without its critique. A
-    judge's refused grading banked as absent is a cell that replays ungraded forever.
+    verifier then grades whatever was left — a 0.0 banked as the model's, and replayed as one. The
+    cell it ended is re-sent under the run's backpressure, on either transport: banked as a row, a
+    throttle charged the candidate for the provider's load (a quota voided its panel), and a quota
+    no wait outlasts stops the run instead. An account out of credit ends every episode at turn 0:
+    banked as holes, the walk spends the panel, and on the optimizer's own call a swallowed refusal
+    runs the round on without its critique. A judge's refused grading banked as absent is a cell
+    that replays ungraded forever.
 
     Namespaces stand in for ``TrialResult`` and ``ExceptionInfo`` on the argument
     ``test_whether_the_episode_opened_the_injected_skill_is_measured`` makes: declared fields only.
@@ -627,9 +627,9 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
     from promptpotter.judges.grounding import ANSWER_GROUNDING
     from promptpotter.judges.protocol import JudgeSpec, JudgeStage
     from promptpotter.shared.errors import (
-        CellWalletExhaustedError,
+        CellSendRefusedError,
         ErrorCategory,
-        WalletExhaustedError,
+        SendRefusedError,
         graceful,
     )
 
@@ -653,7 +653,7 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
         trial("clock", throttled, "AgentTimeoutError", timeout),
         trial("ended", "", "RateLimitError", "litellm.RateLimitError: 429"),
     ):
-        assert banked_as(throttle) is ErrorCategory.CONNECTION
+        assert harbor._provider_throttle(throttle) is not None
     # Out of credit halts on the first attempt: no backoff can top the key up.
     bodies = (
         '{"error":{"message":"This request requires more credits","code":402}}',
@@ -669,7 +669,7 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
             response=httpx.Response(code, request=httpx.Request("POST", "https://x")),
             body=None,
         )
-        with pytest.raises(WalletExhaustedError), graceful("best-effort step"):
+        with pytest.raises(SendRefusedError), graceful("best-effort step"):
             client._try_recover_from_chat_error(refused, {}, None)
 
     class _StatusError(Exception):
@@ -693,7 +693,7 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
             [{"role": "user", "content": "q"}], model="m", label=CallLabel("probe", "optimizer")
         )
 
-    with pytest.raises(WalletExhaustedError), graceful("best-effort step"):
+    with pytest.raises(SendRefusedError), graceful("best-effort step"):
         asyncio.run(_refused())
 
     # A judge: a spent account is a hole that halts, any other grader failure stays absent.
@@ -709,13 +709,70 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
         monkeypatch.setattr(judge_call, "get_llm_client", lambda _p: SimpleNamespace(chat=_chat))
         return asyncio.run(_compute(result=row, judge=ANSWER_GROUNDING, spec=spec, term="ground"))
 
-    with pytest.raises(CellWalletExhaustedError) as hole:
-        grade_under(WalletExhaustedError("the spend ceiling", category=ErrorCategory.SPEND_CEILING))
+    with pytest.raises(CellSendRefusedError) as hole:
+        grade_under(SendRefusedError("the spend ceiling", category=ErrorCategory.SPEND_CEILING))
     assert hole.value.category is ErrorCategory.SPEND_CEILING
     assert grade_under(_StatusError(500, "upstream exploded")) is None
     # The agent's own slowness is its score, and a throttle it outlived is only latency.
-    assert harbor._infrastructure_failure(trial("slow", "", "AgentTimeoutError", timeout)) is None
-    assert harbor._infrastructure_failure(trial("outlived", throttled, None)) is None
+    for graded in (
+        trial("slow", "", "AgentTimeoutError", timeout),
+        trial("outlived", throttled, None),
+    ):
+        assert harbor._provider_throttle(graded) is None
+        assert harbor._infrastructure_failure(graded) is None
+
+    from promptpotter.infrastructure.backend import BackendClient
+    from promptpotter.infrastructure.llm import rate_limit
+    from promptpotter.infrastructure.llm.spend_book import SendBound
+    from promptpotter.shared.errors import CellThrottledError
+
+    monkeypatch.setattr(rate_limit, "_COOLDOWN_BASE_S", 0.0)
+    upstream = '{"error":{"code":429,"metadata":{"raw":"m is temporarily rate-limited upstream."}}}'
+    daily = '{"error":{"message":"Rate limit exceeded: free-models-per-day","code":429}}'
+    reward = {"data": {"reward": 1.0}}
+
+    def backend(**transport: Any) -> BackendClient:
+        return BackendClient(
+            "http://b",
+            wire_adapter=lambda query, _params: {"query": query},
+            session=SimpleNamespace(),  # type: ignore[arg-type]
+            workload=SimpleNamespace(),  # type: ignore[arg-type]
+            prompt_delivery=lambda _params: "wire",
+            **transport,
+        )
+
+    def in_process(*throttles: str) -> BackendClient:
+        pending = list(throttles)
+
+        async def run(_workload: Any, _query: str, _payload: Any) -> dict[str, Any]:
+            if pending:
+                raise CellThrottledError(pending.pop(0), spent={}, step_timings={})
+            return reward
+
+        return backend(execution="in_process", in_process_run=run)
+
+    def remote(*throttles: str) -> BackendClient:
+        pending = list(throttles)
+
+        def reply(_request: httpx.Request) -> httpx.Response:
+            if pending:
+                return httpx.Response(429, text=pending.pop(0))
+            return httpx.Response(200, json=reward)
+
+        client = backend()
+        client._http = httpx.AsyncClient(transport=httpx.MockTransport(reply))
+        return client
+
+    async def cell(client: BackendClient) -> dict[str, Any]:
+        bind_spend_book(unbounded_spend_book())
+        bound = SendBound(input_tokens=1, output_tokens=1, usd=0.0)
+        return await client.run_query("q", bound=bound, billed=lambda _data: None)
+
+    for sent in (in_process, remote):
+        assert asyncio.run(cell(sent(upstream, upstream))) == reward
+        with pytest.raises(SendRefusedError) as quota:
+            asyncio.run(cell(sent(daily)))
+        assert quota.value.category is ErrorCategory.PROVIDER_THROTTLED
 
 
 def test_a_skill_in_the_system_prompt_reaches_the_first_request_and_is_measured_there(
@@ -835,8 +892,19 @@ def _archive(archive: MeasurementArchive, run_id: str, data: dict[str, Any]) -> 
     Grade A unless the caller stamps its own: `entry_grade` reads an unstamped row as C, and the
     reuse path excludes C, so an ungraded fixture is not replayable at all — every test here that
     is ABOUT matching would then pass or fail on provenance instead. Production rows always carry
-    one (`loaders.py::build_dataset_run_data` grades every run it banks)."""
+    one (`loaders.py::build_dataset_run_data` grades every run it banks). Every row is keyed off its
+    own content, as `measure_sample` keys every row it writes."""
     data.setdefault("provenance", {"grade": "A", "deliberate_source": True})
+    for row in data["measurements"]:
+        row.setdefault(
+            "sample_key",
+            sample_key(
+                query=row["query"],
+                ground_truth=row["ground_truth"],
+                question=None,
+                source_pin=None,
+            ),
+        )
     archive.append_run(run_id, data, data["measurements"])
 
 
@@ -886,9 +954,8 @@ class _StubSchema:
 def _seed_graded(
     archive: MeasurementArchive, *, run_id: str, grade: str, terminal_node: str, sample_id: int
 ) -> None:
-    """Save one run carrying a provenance grade and a single sample. The two runs measure
-    DIFFERENT samples — the cache keys on ``sample_id``, so they need distinct ones to
-    coexist (they used to be told apart by query text alone, both stamped sample 7)."""
+    """Save one run carrying a provenance grade and a single sample, its query named after the run
+    so the two runs measure DIFFERENT samples and both can be served at once."""
     provenance: dict[str, Any] = {"grade": grade, "deliberate_source": grade != "C"}
     _archive(
         archive,
@@ -961,14 +1028,15 @@ def test_a_grade_C_run_is_never_replayed_from_either_entry(tmp_path: Path) -> No
     )
     node_configs = [("llm_only", {"model": "X"})]
 
-    from_core = archive.load_reusable_results(node_configs, dataset_name="aime")
-    assert set(from_core) == {7}, "the DB core served a grade-C run without being asked to exclude"
-    assert from_core[7]["query"] == "q_clean"
-
-    served = archive_queries.reusable_results(
-        types.SimpleNamespace(archive=archive), node_configs, dataset_name="aime"
+    from_core = archive.load_reusable_results(node_configs)
+    assert [b.row["query"] for b in from_core.values()] == ["q_clean"], (
+        "the DB core served a grade-C run without being asked to exclude"
     )
-    assert set(served) == {7}, "the reuse facade served a grade-C run as a cache hit"
+
+    served = archive_queries.reusable_results(types.SimpleNamespace(archive=archive), node_configs)
+    assert [b.row["query"] for b in served.values()] == ["q_clean"], (
+        "the reuse facade served a grade-C run as a cache hit"
+    )
 
 
 def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
@@ -998,9 +1066,9 @@ def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
                 "measurements": [
                     {
                         "sample_id": 1,
-                        "query": f"q_{run_id}",
+                        "query": "q",
                         "ground_truth": "g",
-                        "predicted": "p",
+                        "predicted": run_id,
                         "hit": True,
                         "fitness": 1.0,
                         "pipeline_data": {"terminal_node": terminal_node},
@@ -1020,69 +1088,54 @@ def test_full_chain_rows_never_replay_on_prefix_match(tmp_path: Path) -> None:
         ("l2_context", {"layout": {"problem_description": ["critique"]}}),
         ("l3_plan", {}),
     ]
-    # Both runs measured the SAME cell (sample 1) — the cache is keyed by sample_id, so
-    # the question is which row wins it, not whether two text-distinct keys coexist.
-    cache = archive.load_reusable_results(query_configs, dataset_name="promptpotter-self")
-    assert cache[1]["query"] == "q_short_circuit", (
-        "a genuine mid-chain short-circuit inside the trusted prefix should still reuse"
-    )
-    assert cache[1]["pipeline_data"]["terminal_node"] == "l1_critique"
-    assert all(r["query"] != "q_full_chain" for r in cache.values()), (
+    # Both runs measured the SAME cell, so the question is which row wins it.
+    cache = archive.load_reusable_results(query_configs)
+    served = [b.row["predicted"] for b in cache.values()]
+    assert "full_chain" not in served, (
         "full-chain row replayed across a later-node config change — fake measurement"
     )
+    assert served == ["short_circuit"], (
+        "a genuine mid-chain short-circuit inside the trusted prefix should still reuse"
+    )
 
 
-def test_hit_cache_respects_dataset(tmp_path: Path) -> None:
-    """``load_reusable_results`` scopes by dataset — identical node-configs and a
-    colliding sample_id across datasets must NOT serve one dataset's cached
-    results under the other.
+def test_a_cell_replays_by_its_content_never_its_dataset_or_slot(tmp_path: Path) -> None:
+    """A cell is the sample's content under the instrument's configuration, so a sample carried
+    into a wider panel under a new name replays what was measured on it. Keyed by dataset and
+    position instead, twenty tasks re-measured the ten they shared with a ten-task panel — paid
+    again for cells already banked, with nothing on screen saying so.
 
-    The cache is keyed by ``sample_id``, so the two datasets' keys COLLIDE by
-    construction (both seed sample 14): the guarantee can only be read off the
-    values. It is `dataset_name` — required, never `None` — that keeps them apart,
-    and each cache must carry its OWN dataset's measurement, hit flag and all.
-    """
+    The other direction is the one that hands a wrong score to a decision: a slot another dataset
+    measured, holding different content here, must not bleed; nor may a task whose upstream pin
+    moved, though its id — the query — is unchanged."""
     archive = MeasurementArchive(tmp_path)
     _seed_run(archive, run_id="aime_cached", dataset_name="aime", hit=True)
     _seed_run(archive, run_id="just_fresh", dataset_name="justlogic", hit=False)
+    reusable = archive.load_reusable_results([("llm_only", {"model": "X"})])
 
-    node_configs = [("llm_only", {"model": "X"})]
-    aime_cache = archive.load_reusable_results(node_configs, dataset_name="aime")
-    just_cache = archive.load_reusable_results(node_configs, dataset_name="justlogic")
+    wider = [
+        Sample(id=0, query="q_aime_14", ground_truth="g"),
+        Sample(id=14, query="q_new", ground_truth="g"),
+        Sample(id=1, query="q_aime_14", ground_truth="g", source_pin={"git_commit_id": "moved"}),
+    ]
+    served = _replayable_on(wider, reusable, "aime-wide")
 
-    assert set(aime_cache) == {14} and set(just_cache) == {14}
-    assert aime_cache[14]["query"] == "q_aime_14"
-    assert just_cache[14]["query"] == "q_justlogic_14"
-    # The bleed this guards: aime's cached HIT must not be served for justlogic's miss.
-    assert aime_cache[14]["hit"] is True
-    assert just_cache[14]["hit"] is False
-
-    # An unscoped slice would pool both datasets under the one colliding id — so it is
-    # refused outright rather than silently serving whichever run sorted last.
-    with pytest.raises(ValueError, match="dataset_name"):
-        archive.load_reusable_results(node_configs, dataset_name="")
+    assert set(served) == {0}, "only the sample aime measured replays, at the slot it holds HERE"
+    assert served[0]["hit"] is True and served[0]["sample_id"] == 0
 
 
 def test_recut_rows_under_a_used_dataset_name_are_refused(tmp_path: Path) -> None:
-    """The archive can answer "what was measured at slot 14", never "what was measured for THIS
-    question" — ``sample_id`` is a position and the query text is not in the cache key.
-
-    So re-cutting rows under a name already used serves every prior against a different question,
-    with no error anywhere: the run completes and each replayed score is attributed to text that
-    did not produce it. The guard reads the content off the stored row itself, which is why it
-    needs nothing on disk that measurement rows do not already carry — and why it catches ONE
-    edited row, where a whole-dataset fingerprint would only report the aggregate.
-    """
+    """Replay matches a sample by content and cannot be fooled; the readers keyed on POSITION can.
+    The δ ruler, the sample index and hard samples key a sample by ``(dataset_name, sample_id)``,
+    so rows re-cut under a name already used would pool two questions' history in one slot with
+    no error anywhere. The guard reads the content off the stored row itself, so it catches ONE
+    edited row, where a whole-dataset fingerprint would only report the aggregate."""
     archive = MeasurementArchive(tmp_path)
     _seed_run(archive, run_id="aime_cached", dataset_name="aime", hit=True)
-    cache = cast(
-        "dict[int, QueryMeasurement]",
-        archive.load_reusable_results([("llm_only", {"model": "X"})], dataset_name="aime"),
-    )
-    assert set(cache) == {14}, "precondition: the prior is reusable at slot 14"
+    reusable = archive.load_reusable_results([("llm_only", {"model": "X"})])
 
     same = [Sample(id=14, query="q_aime_14", ground_truth="g")]
-    _assert_measured_content_matches(cache, same, "aime")
+    assert set(_replayable_on(same, reusable, "aime")) == {14}
 
     # Ground truth alone is enough — a relabelled row is as wrong as a replaced question.
     for recut in (
@@ -1090,7 +1143,7 @@ def test_recut_rows_under_a_used_dataset_name_are_refused(tmp_path: Path) -> Non
         [Sample(id=14, query="q_aime_14", ground_truth="not_g")],
     ):
         with pytest.raises(DatasetIdentityError, match="sample_id 14"):
-            _assert_measured_content_matches(cache, recut, "aime")
+            _replayable_on(recut, reusable, "aime")
 
 
 def test_unscoreable_cells_counts_holes_but_not_stops_or_deprecated_rows() -> None:
@@ -2251,8 +2304,9 @@ def test_composition_selects_round_robin_so_no_panel_starves_the_frame() -> None
     for name in ("measurand", "confounds", "budget_state"):
         assert picked[name] == rendered[name][0].text, f"{name} starved by the panel ahead of it"
 
-    # The composition — not the panel — states what it showed, because only it knows.
-    assert "showed" in picked["sample_transcripts"]
+    # The composition — not the panel — states what it dropped, because only it knows.
+    dropped = coverage["sample_transcripts"].produced - coverage["sample_transcripts"].placed
+    assert f"[{dropped} more did not fit this prompt]" in picked["sample_transcripts"]
     # Its untrusted rows are fenced ONCE, around the surviving run, so the tag cannot be split.
     assert picked["sample_transcripts"].count(FENCE_OPEN_PREFIX) == 1
     assert picked["sample_transcripts"].count(FENCE_CLOSE) == 1
@@ -2383,6 +2437,95 @@ def test_the_l4_generator_is_shown_the_optimizer_prompts_it_rewrites() -> None:
     assert len(rendered["rendered_prompt"]) >= subject_chars
     starved = set(injection_coverage_counts(coverage)) & NODE_LAYOUTS["l1_generate"].mandatory
     assert not starved, f"mandatory panel(s) refused by the budget: {sorted(starved)}"
+
+
+def test_a_solved_cell_the_edits_keep_losing_reaches_the_critique_and_the_generator() -> None:
+    """Six rounds of `spreadsheetbench-s10` measured twelve edits against one 70% draw of the
+    parent. Eleven lost the same solved cell, the same way, and no optimizer prompt ever said so:
+    the transcripts read the parent's MISSES, the memory an edit's NET score — so the edit that
+    cracked a cell the parent never solves while losing another printed as "70% vs parent 70%" —
+    and each memory row quoted a stem of the edited field, the parent's own opening for every
+    edit that kept it. Silent: the loop ran, elected nothing and spent every round on the three
+    cells no edit cracked. Composed through the real layouts, so dropping the panel from either
+    node fails here too."""
+    from factories import measurements, round_result, scored_candidate
+
+    from promptpotter.application.optimization.dispatch.bundle import (
+        CycleSlice,
+        InjectionBundle,
+        RoundDigest,
+    )
+    from promptpotter.application.optimization.dispatch.facade import DispatchHub
+    from promptpotter.application.optimization.dispatch.llm_call.prompts import (
+        load_optimizer_prompt,
+    )
+    from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.round_diagnostics import RoundDiagnostics
+
+    opening = "Inspect before you change anything and open the workbook to read its cells first."
+    parent_fields = {"instruction": opening}
+    # The parent solves #0 and #1 and misses #2.
+    parent_rows = measurements([1.0, 1.0, 0.0])
+
+    def edit(cid: str, added: str) -> Any:
+        return scored_candidate(
+            cid,
+            accuracy=2 / 3,
+            total=3,
+            matched_parent_accuracy=2 / 3,
+            prompt_fields={"instruction": f"{opening} {added}"},
+        )
+
+    origin = round_result(0, prompt_fields=parent_fields, candidate_scores=[], candidates_scored=0)
+    latest = round_result(
+        1,
+        prompt_fields=parent_fields,
+        parent_results=parent_rows,
+        candidate_scores=[
+            edit("C1.1", "Validate every inferred rule against held-out rows."),
+            edit("C1.2", "Confirm that every range passed to COUNTIFS shares one shape."),
+        ],
+        all_candidate_results={
+            "C1.1": measurements([1.0, 0.0, 1.0]),
+            "C1.2": measurements([1.0, 0.0, 0.0]),
+        },
+    )
+    bundle = InjectionBundle(
+        opt_sp=OptSearchPoint(),
+        pipeline_schema=None,
+        cycle_slice=CycleSlice(
+            round_num=1,
+            l1_stall_count=0,
+            l2_round=0,
+            l2_stall_count=0,
+            l3_round=0,
+            l3_stall_count=0,
+            exploration_budget="tight",
+        ),
+        digest=RoundDigest(
+            diagnostics=RoundDiagnostics(n_valid=0, samples=[]),
+            critique=None,
+            latest_sample_ids=frozenset({0, 1, 2}),
+        ),
+        axes=None,
+        trajectory_results=parent_rows,
+        measured_rounds=[origin, latest],
+    )
+
+    for node in ("l1_critique", "l1_generate"):
+        filled, *_ = DispatchHub.fill(load_optimizer_prompt(node), bundle, node=node)
+        prompt = filled.render()
+        assert "#1 in 2 of 2" in prompt, f"{node} was never told the edits keep losing solved #1"
+        assert "gained #2 · lost #1" in prompt, f"{node} read a crack plus a loss as a tie"
+        assert "Validate every inferred rule" in prompt and "COUNTIFS shares one shape" in prompt, (
+            f"{node} was shown the parent's opening instead of what each edit changed"
+        )
+    critique, *_ = DispatchHub.fill(
+        load_optimizer_prompt("l1_critique"), bundle, node="l1_critique"
+    )
+    assert "[#1]" in critique.render(), (
+        "the run that lost the solved cell never reached the critique"
+    )
 
 
 def test_digest_reads_the_ruler_off_the_cycle_not_the_unabsorbed_round() -> None:
@@ -2764,8 +2907,8 @@ def _walk_over(
 
 async def _stopped_by_operator(phase: Any) -> str | None:
     """Run a scoring phase; the reason if a pause or a spend ceiling ended it."""
-    from promptpotter.domain.phases import WALLET_STOPS, StopLoop
-    from promptpotter.shared.errors import WalletExhaustedError
+    from promptpotter.domain.phases import REFUSAL_STOPS, StopLoop
+    from promptpotter.shared.errors import SendRefusedError
 
     try:
         await phase
@@ -2773,8 +2916,8 @@ async def _stopped_by_operator(phase: Any) -> str | None:
         return str(stop)
     except StopLoop as stop:
         return stop.reason.value
-    except WalletExhaustedError as refused:
-        return WALLET_STOPS[refused.category].value
+    except SendRefusedError as refused:
+        return REFUSAL_STOPS[refused.category].value
     return None
 
 
@@ -2850,7 +2993,10 @@ async def _walk(
             spend_used=lambda: book.usd_spent,
             sample_lookahead_check=lambda: armed,
             backend_client=types.SimpleNamespace(
-                max_cells_in_flight=max_cells, cancel_stops_billing=False, holds_own_sends=False
+                max_cells_in_flight=max_cells,
+                cancel_stops_billing=False,
+                holds_own_sends=False,
+                node_spend_bound=lambda node, cfg: node.spend_bound,
             ),
             # One node the backend bounds at the cell's dollar, so the scheduler counts in them.
             pipeline_schema=types.SimpleNamespace(
@@ -2929,7 +3075,10 @@ async def _round(
         spend_used=None,
         sample_lookahead_check=lambda: armed,
         backend_client=types.SimpleNamespace(
-            max_cells_in_flight=armed, cancel_stops_billing=False, holds_own_sends=True
+            max_cells_in_flight=armed,
+            cancel_stops_billing=False,
+            holds_own_sends=True,
+            derives_spend_bounds=False,
         ),
         flight=None,
     )
@@ -3112,7 +3261,7 @@ def test_wire_cost_reaches_the_response_or_nothing_prices_the_optimizer() -> Non
     """
     from openai.types.chat import ChatCompletion
 
-    from promptpotter.infrastructure.llm.openai_compat import _attempt_cost, _billed_cost
+    from promptpotter.infrastructure.llm.openai_compat import _billed_cost, reply_cost
 
     def completion(usage: dict[str, object] | None) -> ChatCompletion:
         return ChatCompletion.model_validate(
@@ -3144,13 +3293,13 @@ def test_wire_cost_reaches_the_response_or_nothing_prices_the_optimizer() -> Non
             "is_byok": False,
         }
     )
-    assert _attempt_cost(priced) == 7.938e-05
+    assert reply_cost(priced) == 7.938e-05
 
     # A provider that reports nothing (Groq, OpenAI) must yield None, not 0.0 — 0.0 is a
     # measurement and would silently satisfy the cap it should have escalated to the table.
     unpriced = {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
-    assert _attempt_cost(completion(unpriced)) is None
-    assert _attempt_cost(completion(None)) is None
+    assert reply_cost(completion(unpriced)) is None
+    assert reply_cost(completion(None)) is None
 
     # A schema-repair retry bills BOTH round-trips, same contract the token sums follow.
     assert _billed_cost(1e-05, 2e-05) == pytest.approx(3e-05)
@@ -3834,6 +3983,50 @@ def test_yaml_emitter_never_reinterprets_a_string_it_wrote(tmp_path: Path) -> No
     payload = {k: k for k in _YAML_1_1_HAZARDS} | {"nested": {"labels": list(_YAML_1_1_HAZARDS)}}
     write_yaml(path, payload)
     assert read_yaml(path) == payload
+
+
+def test_a_backend_retry_is_served_with_the_reason_it_happened(tmp_path: Path) -> None:
+    """A retried cell must say WHY on a surface, not only in the console it happened to run in.
+
+    The category alone — ``backend_unreachable`` — is the same sentence for a stopped daemon, a
+    lost session and a package cache serving a corrupt index; only the backend's own words tell
+    those apart, and only one of them is the operator's to fix. Carried on ``logging`` alone, that
+    sentence reached exactly one terminal: a run hosted by the API server writes no terminal
+    mirror, so every other reader — the dashboard, a headless operator, the next session picking
+    the run up — saw a stop with no cause, and the diagnosis had to be pasted in by hand.
+    """
+    view = LiveDashboardProjection(
+        CycleDir(tmp_path),
+        state_path=None,
+        hop=CycleHop(campaign_id="c", cycle_id="cy"),
+        session_id="s",
+        l1_patience=3,
+        n_variants=2,
+        sp_budget_round=20,
+        headline_metric="composite",
+    )
+    view.on_record(
+        PhaseRecord(
+            phase="backend",
+            event="warning",
+            payload={
+                "kind": "infrastructure",
+                "attempt": 2,
+                "max_attempts": 3,
+                "wait_s": 90.0,
+                "error_class": "connection",
+                "detail": "the verifier could not download what it installs: Err:2 InRelease",
+                "query": "118-50",
+            },
+        ),
+        0,
+    )
+    served = view.state.recent_backend_warnings
+    assert len(served) == 1 and served[0].attempt == 2
+    assert served[0].detail is not None and "could not download" in served[0].detail, (
+        "the retry is served without the backend's own reason, so every surface reading it can "
+        "say only that a cell failed — which is the state this test exists to end"
+    )
 
 
 def test_the_parent_rescore_ticks_the_run_without_minting_a_candidate(tmp_path: Path) -> None:

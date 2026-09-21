@@ -14,9 +14,9 @@ no better than chance did.
 
 The pools are `titles.txt` (theirs) and `distractors.txt` (not theirs), one title per line.
 Replace either and re-run to re-cut — and when you do, **either copy the directory to a new
-`screen-taste-vN` or delete what this name already measured**: a `sample_id` is only unique
-within a dataset name, so re-cutting rows under a name that has already run serves the old
-measurement for the new row, silently (`datasets/CLAUDE.md`). Deleting is the cheaper half
+`screen-taste-vN` or delete what this name already measured**: per-sample history is kept by
+`sample_id` within a dataset name, so re-cutting rows under a name that has already run hands
+each new row the old row's history (`datasets/CLAUDE.md`). Deleting is the cheaper half
 while the measurements are worth less than the fork.
 """
 

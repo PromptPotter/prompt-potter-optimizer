@@ -100,9 +100,8 @@ inner_benchmark_config:
 # before the swap five of six sat at 0.525-0.575 and the sixth held the low end through seven
 # impossible rows. Duplicated difficulty buys nothing, which is why the spread is the target.
 #
-# Changing this list changes `_identity_config`, so every banked outer cell voids: any swap costs
-# a full C0 panel re-measure (~1 h, ~$1.0 — see the cost note at the top). That is why seats move
-# in one batch, never one at a time.
+# Each task is its own sample's content address (`connectors/promptpotter.py::_extract_experiment`),
+# so a swapped or edited seat voids only its own banked cells; every other seat replays.
 tasks:
   - id: justlogic-d234/seed-0
     inner_dataset_seed: 0

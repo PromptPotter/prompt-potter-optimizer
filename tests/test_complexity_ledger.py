@@ -103,7 +103,12 @@ LEDGER_BASELINE = {
     # so each call out when it tripped landed past it ($0.1018 on a $0.10 campaign) and a
     # cancelled call billed with no record. It PAYS for itself: the SDK retries, the two caller
     # 429 loops, the deadline re-send and the three caller emits fold into the one send seam.
-    "modules": 357,
+    # +1: `infrastructure/llm/litellm_sends.py` — Harbor's agent sends through litellm, never our
+    # clients, so its spend reached the ledger only as one per-cell total read off the finished
+    # trial; a cancelled cell lost every bill it had paid and was charged its whole bound in their
+    # place ($1.87 of fiction on a campaign the provider had billed $0.235). The meter puts each
+    # send through the same admission and bill as our own, which folds the per-cell settle away.
+    "modules": 358,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     "init_files": 53,
@@ -416,7 +421,12 @@ LEDGER_BASELINE = {
     # +1: a campaign list row naming a model its root does not run — the shared file's or the
     # frozen delta's instead of the root seed's — and the campaign read without `at` skipping that
     # seed; every row renders, and siblings are told apart by the wrong model (test_integrity § 4).
-    "test_functions": 196,
+    # +1: a solved cell the edits keep losing, shown to neither optimizer node — the loop runs,
+    # elects nothing and spends every round on cells no edit cracks (test_integrity § 5).
+    # +1: a backend retry served without the backend's own reason — every surface then reports a
+    # stop whose cause exists in one console, and a run hosted by the API server writes no
+    # terminal mirror at all, so the diagnosis is the operator's to paste (test_integrity § 8).
+    "test_functions": 198,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.
@@ -497,7 +507,11 @@ LEDGER_BASELINE = {
     # `/pipeline` read is too heavy per row while the frozen `config` is a delta the browser may not
     # merge (I9). A second transport of that resolver's answer, so it folds into no neighbour.
     # (`CycleListEntry.n_rounds` → `rounds_closed` is a rename in the same change and moves nothing.)
-    "served_fields": 600,
+    # +3: `QuotaStatus.spend_unreported_usd` and `CampaignSummary.spend_unreported_usd` (counted
+    # twice through `CampaignDetailResponse`) — what sends that ended with no bill may have cost.
+    # It was folded INTO the spend figure as if billed; served apart, "spent" is the providers'
+    # bills alone, and the ceiling's other input is still on screen rather than hidden in it.
+    "served_fields": 603,
 }
 
 

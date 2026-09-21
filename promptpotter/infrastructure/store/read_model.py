@@ -4,6 +4,7 @@ are the ONLY primitives for derived-index persistence; a second mechanism doing 
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -95,6 +96,27 @@ def append_row(path: Path, row: dict[str, Any]) -> None:
         append_jsonl(path, row)
 
 
+HOLD_TRAIL = frozenset({"spend_hold", "token_usage"})
+"""The record types an open-hold walk reads: a hold opens one, the bill naming it closes it."""
+
+
+def open_holds(records: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Every hold on this trail that no bill closed, by hold id — the ONE fold of it.
+
+    Two readers ask it, and they ask for different reasons: an account sums what its ledgers may
+    still owe, a run's book asks what IT left open. Folded twice, the two could come to disagree
+    about what "still open" means while both keep reporting money. What they may legitimately
+    differ on is the LIVENESS question afterwards — whether an open hold is a send still out or
+    one whose bill will never come — and that one is the caller's, asked at its own scope."""
+    open_: dict[str, dict[str, Any]] = {}
+    for rec in records:
+        if rec.get("record_type") == "spend_hold":
+            open_[str(rec.get("hold_id"))] = rec
+        elif (hold_id := rec.get("hold_id")) is not None:
+            open_.pop(str(hold_id), None)
+    return open_
+
+
 def compact(path: Path, key: str, *, factor: int = 2) -> bool:
     """Rewrite *path* keeping only the live row per *key*, once it has grown past *factor*× the live set;
     no-op when absent or already tight. Under the lock, so a concurrent append cannot be lost."""
@@ -111,4 +133,12 @@ def compact(path: Path, key: str, *, factor: int = 2) -> bool:
         return True
 
 
-__all__ = ["append_row", "compact", "fold_jsonl", "fold_jsonl_from", "iter_jsonl"]
+__all__ = [
+    "HOLD_TRAIL",
+    "append_row",
+    "compact",
+    "fold_jsonl",
+    "fold_jsonl_from",
+    "iter_jsonl",
+    "open_holds",
+]

@@ -31,6 +31,17 @@ nodes:
       model: qwen/qwen3.7-flash:nitro
       temperature: 0.0
       max_turns: 20
+      # With `max_turns`, the limits a cell's spend is bounded by — sent to Harbor, and held
+      # against the ceiling before the cell runs (`connectors/harbor.py::_sent_spend_bound`). Drop
+      # one and no cell can run under a spend ceiling. Measured 2026-09-18 over 2,356 agent calls
+      # in 330 trials: a call reads 42k tokens at most, and replies above 4k only on `:nitro`
+      # routes and deepseek-v4-flash-0731 (8 calls). Each cap sits just above that; the hold
+      # scales with both, so slack here is ceiling a run has to carry.
+      max_tokens: 4096
+      max_input_tokens: 49152
+      # Off: terminus-2's summarizing never fired in 1,172 banked harbor cells
+      # (`summarization_count=0` in every digest), and on, it quadruples what a turn may bill.
+      enable_summarize: false
     # DECLARED here rather than inherited, and it is load-bearing: a `remote_http` backend serves
     # its own schema over `GET /pipeline`, so a termnorm dataset can leave this out. There is no
     # server here to ask. Without `prompt_info` this node is not prompt-bearing, the candidate's

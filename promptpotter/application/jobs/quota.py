@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import NamedTuple
 
 from promptpotter.application.jobs.capacity import resolve_run_capacity
-from promptpotter.application.jobs.registry import JobRegistry, default_jobs_dir
+from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.config.paths import default_jobs_dir
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.launch_limits import LaunchLimits
@@ -147,7 +148,8 @@ def read_account_wallet(
     """A running cycle holds its whole declared ceiling until it finishes: counting only what is on
     the ledger admits two concurrent launches against one remainder and lets the pair spend double
     the ceiling. Its spend-so-far is therefore counted twice, which errs toward refusing — the safe
-    direction for a wallet the account cannot top up."""
+    direction for a wallet the account cannot top up. A stopped run's unreported sends bind the
+    headroom as well, at their bounds: nobody learned what they cost."""
     ceilings = lifetime_ceilings(user=user, spends_own_key=spends_the_hosts_own_key(stores))
     spent = sum_user_spend(ledgers=account_ledgers(stores.campaigns), since=0.0, until=time.time())
     if ceilings.usd is None and ceilings.tokens is None:
@@ -169,10 +171,10 @@ def read_account_wallet(
     headroom = SpendCeilings(
         None
         if ceilings.usd is None
-        else _grace_bounded(max(0.0, ceilings.usd - spent.used_usd - held_usd), spent),
+        else _grace_bounded(max(0.0, ceilings.usd - spent.at_most_usd - held_usd), spent),
         None
         if ceilings.tokens is None
-        else max(0, ceilings.tokens - spent.used_tokens - held_tokens),
+        else max(0, ceilings.tokens - spent.at_most_tokens - held_tokens),
     )
     return AccountWallet(spent, ceilings, headroom)
 
@@ -273,11 +275,17 @@ def admit_spend(*, stores: Stores, bucket: str) -> SpendBook:
     if (headroom.usd is not None and headroom.usd <= 0.0) or (
         headroom.tokens is not None and headroom.tokens <= 0
     ):
+        unreported = (
+            f", up to ${wallet.spent.unreported_usd:.2f} more in sends whose bill never came"
+            if wallet.spent.unreported_usd
+            else ""
+        )
         raise QuotaExceededError(
             code="spend_ceiling_reached",
             message=(
                 f"This account has spent its allowance (${wallet.spent.used_usd:.2f} / "
-                f"{wallet.spent.used_tokens:,} tokens), so nothing further runs on the host's key."
+                f"{wallet.spent.used_tokens:,} tokens billed{unreported}), so nothing further "
+                "runs on the host's key."
             ),
         )
     return SpendBook(usd_cap=lambda: headroom.usd, tokens_cap=lambda: headroom.tokens)

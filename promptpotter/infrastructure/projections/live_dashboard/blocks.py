@@ -38,6 +38,7 @@ def sample_row(s: dict[str, Any]) -> DashboardSample:
     decided, and where the display trim happens."""
     sid = s.get("sample_id")
     time_s = s.get("time_s")
+    cost_s = s.get("cost_s")
     # `ERR` and `UNSC` are both asked BEFORE the grade: neither row was graded, so putting an
     # absent fitness through `is_hit` reports a backend fault — or the FORMULA's own silence — as a
     # candidate answering wrong. Same ladder and same precedence as the CLI tape
@@ -67,6 +68,7 @@ def sample_row(s: dict[str, Any]) -> DashboardSample:
         terminal_node=str(s.get("terminal_node") or ""),
         cached=bool(s.get("cached", False)),
         time_s=float(time_s) if isinstance(time_s, int | float) else None,
+        cost_s=float(cost_s) if isinstance(cost_s, int | float) else None,
         predicted="" if graded_by_verifier else _trim(s.get("prediction") or "", 28),
         ground_truth=ground_truth,
         query=_trim(s.get("query") or "", 42),
@@ -97,9 +99,11 @@ def fmt_sample_line(row: DashboardSample) -> str:
     # this only chooses to stay silent at a real 0.
     if share := row.cache_share:
         tok_seg += f" c{share:.0%}"
-    # Blank rather than `0.0s` where the row recorded no time — a cached replay's real 0.0
-    # must stay distinguishable from a row that never reached the pipeline.
-    time_col = f"{row.time_s:4.1f}s" if row.time_s is not None else "     "
+    # Blank rather than `0.0s` where the row recorded no time — a row that never reached the
+    # pipeline must stay distinguishable from one that did. A replay shows what it cost when it
+    # was measured, never the 0.0 clock it occupied on replay (`DashboardSample.shown_s`).
+    shown = row.shown_s
+    time_col = f"{shown:4.1f}s" if shown is not None else "     "
     head = f"  {time_col} #{row.qi:03d}{sid_seg} {row.status:<4} [{badge}]{cache_icon}{tok_seg}"
     # Nothing to contrast on a verifier-graded row — the status IS the verdict there.
     if is_verifier_graded(row.ground_truth):

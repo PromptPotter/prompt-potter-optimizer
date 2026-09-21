@@ -24,7 +24,6 @@ from promptpotter.application.jobs.interlock import (
     producer_alive,
     this_producer,
 )
-from promptpotter.config.paths import user_data_root
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store.io import read_json, write_json
 from promptpotter.shared.clock import utcnow_iso
@@ -85,11 +84,6 @@ class Job:
         """The cycle this job runs, as the pair that addresses it. Reads :data:`UNRESOLVED_HOP`
         between admission and mint — the slot is held before the cycle it will name exists."""
         return CycleHop(campaign_id=self.campaign_id, cycle_id=self.cycle_id)
-
-
-def default_jobs_dir() -> Path:
-    """Jobs dir beside `projects/` in the user-data tree."""
-    return user_data_root() / "jobs"
 
 
 class JobRegistry:
@@ -463,5 +457,4 @@ __all__ = [
     "Job",
     "JobRegistry",
     "JobStatus",
-    "default_jobs_dir",
 ]
