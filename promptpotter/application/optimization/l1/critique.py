@@ -23,7 +23,7 @@ from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.domain.phases import RunPhase, StopLoop, StopReason
 from promptpotter.domain.results import CritiqueReadout
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
-from promptpotter.shared.errors import graceful
+from promptpotter.shared.errors import SendRefusedError, graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
@@ -39,8 +39,8 @@ __all__ = [
 
 
 CRITIQUE_RESEND_ATTEMPTS = 3
-"""Distillations one round will buy before the cycle halts. Each is a whole call — ``llm_call``'s
-own deadline retry and 429 backoff sit INSIDE one attempt and do not count against this."""
+"""Distillations one round will buy before the cycle halts. Each is a whole call — the client's
+backpressure and 5xx retries sit INSIDE one attempt and do not count against this."""
 
 
 async def ensure_prior_critique(cycle: Cycle) -> None:
@@ -65,7 +65,9 @@ async def ensure_prior_critique(cycle: Cycle) -> None:
                 cycle, prior, round_num=prior.round, ledger=session.state.ledger
             )
             break
-        except (KeyboardInterrupt, asyncio.CancelledError):
+        # A refused send — an empty account, a quota, the ceiling — is decided: re-sent, it is
+        # refused again, and swallowed it halts as a PAUSE that `resume` re-enters forever.
+        except (KeyboardInterrupt, asyncio.CancelledError, SendRefusedError):
             raise
         except Exception as exc:
             last = exc

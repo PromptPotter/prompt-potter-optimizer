@@ -8,6 +8,7 @@ below are the render side of the same delta."""
 
 from __future__ import annotations
 
+import difflib
 import re
 from collections.abc import Iterable
 from typing import Annotated, Any
@@ -26,6 +27,7 @@ __all__ = [
     "build_candidate_flat",
     "candidate_delta",
     "candidate_idea",
+    "changed_words",
     "flatten_sp_summary",
     "group_diff_keys",
     "idea_fingerprint",
@@ -67,6 +69,24 @@ def candidate_delta(
         if v != parent_param_value(parent.get(n) or {}, p)
     }
     return pf, pp
+
+
+@shapes_optimizer_prompt
+def changed_words(parent: str, child: str) -> str:
+    """What an edit to ONE prose field wrote and cut, word by word — ``+"…"`` / ``-"…"`` spans. A
+    stem of the new VALUE names nothing: an edit that keeps the parent's opening renders the
+    parent's own words, so every such attempt reads as the same untouched text."""
+    old, new = parent.split(), child.split()
+    spans: list[str] = []
+    matcher = difflib.SequenceMatcher(None, old, new, autojunk=False)
+    for op, i1, i2, j1, j2 in matcher.get_opcodes():
+        if op == "equal":
+            continue
+        if i2 > i1:
+            spans.append(f'-"{" ".join(old[i1:i2])}"')
+        if j2 > j1:
+            spans.append(f'+"{" ".join(new[j1:j2])}"')
+    return " ".join(spans)
 
 
 def variant_prose_written(variant: dict[str, Any]) -> dict[str, str]:

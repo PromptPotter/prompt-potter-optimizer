@@ -388,7 +388,11 @@ def build_bundle(
         origin_per_sample=origin_per_sample,
         trajectory_results=trajectory_results,
         ruler=cycle.ruler,
-        prior_rounds=list(cycle.rounds),
+        # Every round that MEASURED, the one being critiqued included where there is one. Empty on
+        # the paths that pass none — `l1_generate`, L2 and L3 — would blank the ALREADY TRIED panel
+        # for the life of a cycle while `detect_invariants` went on rejecting a repeat off the same
+        # history: L1 punished for re-proposing an idea it was never shown had been tried.
+        measured_rounds=[*prior, latest_round] if latest_round is not None else prior,
         prompt_block_catalogue=cycle.config.optimization.prompt_block_catalogue,
         earned_blocks=cycle.earned_blocks,
         rebase_capability=cycle.config.optimization.rebase_capability,

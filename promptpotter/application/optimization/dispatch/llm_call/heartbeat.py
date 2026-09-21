@@ -13,10 +13,22 @@ from promptpotter.shared.clock import SUSPEND_GRACE_S, sleep_measuring_suspend
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
+    from promptpotter.infrastructure.llm.base import LLMClientBase
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["HEARTBEAT_INTERVAL_S", "heartbeat"]
+__all__ = ["HEARTBEAT_INTERVAL_S", "heartbeat", "waiting_on"]
+
+
+def waiting_on(client: LLMClientBase, model: str | None, *, role: str) -> str:
+    """WHO an open call's wait belongs to, and WHY: a send the provider's pushback is holding is not
+    a slow answer, and reading one as the other is the misdiagnosis this line exists to prevent.
+    The provider's own words, never a countdown — a duration rides `elapsed_s`, formatted once."""
+    name = model or "(unnamed)"
+    held = client.pushback(model) if model else None
+    if held is not None and held.since is not None:
+        return f"{role} {name} is held by a rate limit: {held.detail}"
+    return f"{role} {name} has not answered"
 
 
 HEARTBEAT_INTERVAL_S = 10.0

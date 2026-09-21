@@ -5,6 +5,7 @@ retries and meters each send."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 import uuid
@@ -13,7 +14,10 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
-from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
+from promptpotter.application.optimization.dispatch.llm_call.heartbeat import (
+    heartbeat,
+    waiting_on,
+)
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     get_optimizer_config_overrides,
     get_optimizer_schema,
@@ -34,6 +38,7 @@ from promptpotter.infrastructure.llm.json_parse import (
     OptimizerPromptParseError,
     extract_parsed_json,
 )
+from promptpotter.infrastructure.llm.rate_limit import throttle_stall_given_to
 from promptpotter.infrastructure.llm.registry import get_llm_client
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.spend_book import CallLabel
@@ -73,10 +78,11 @@ class LLMCallContext:
 _LLM_DEFAULTS: dict[str, Any] = {"temperature": 0.0}
 
 
-# One logical call may fire ONE schema-repair retry inside `chat()`. `OPTIMIZER_CALL_DEADLINE_S`
-# is the per-round-trip ceiling, so the logical-call wall must budget BOTH or a healthy-but-slow
-# reasoning model that needs a repair false-halts with neither round-trip having hung.
-_MAX_ROUND_TRIPS_PER_CALL = 2
+# One logical call may climb the parse ladder inside `chat()` — a schema repair, then a clean re-ask
+# (`openai_compat.py`), each a whole round trip. `OPTIMIZER_CALL_DEADLINE_S` is the per-round-trip
+# ceiling, so the logical-call wall must budget all three or a healthy-but-slow reasoning model that
+# needs the ladder false-halts with no round trip having hung.
+_MAX_ROUND_TRIPS_PER_CALL = 3
 
 # Head-cap on the thinking channel before it rides the ledger: a reasoning model can emit tens
 # of KB per call into every round file, and the head is where the approach is stated. Matches
@@ -93,11 +99,25 @@ async def _chat_under_deadline(
 ) -> LLMResponse:
     """The provider SDK's ``timeout`` is a per-read-gap bound, so a slowly streaming reasoning model
     never trips it; this is the wall clock. A call past it is not sent again — the provider may
-    still be generating the first, and its admission is charged in full — so the run halts on it."""
+    still be generating the first, and its admission is charged in full — so the run halts on it.
+
+    It bounds the provider WORKING: time the call is held — by a throttle's backpressure, the
+    shared rate limiter, a 5xx backoff — is given back, as a cell's envelope does. Counted, a
+    throttled provider halted the run here within minutes, as a deadline, before its own refusal
+    could stop it for what it was."""
     budget_s = OPTIMIZER_CALL_DEADLINE_S * _MAX_ROUND_TRIPS_PER_CALL
     try:
-        async with asyncio.timeout(budget_s):
-            return await llm_client.chat(**chat_kwargs)
+        async with asyncio.timeout(budget_s) as deadline:
+
+            def give_back(seconds: float) -> None:
+                when = deadline.when()
+                if when is None:
+                    return
+                with contextlib.suppress(RuntimeError):  # already expiring: nothing to extend
+                    deadline.reschedule(when + seconds)
+
+            with throttle_stall_given_to(give_back):
+                return await llm_client.chat(**chat_kwargs)
     except TimeoutError:
         logger.error(
             "optimizer call %s exceeded the %.0fs deadline — halting", node_label, budget_s
@@ -266,26 +286,23 @@ async def llm_call(
         )
         # Keeps a live elapsed counter on both surfaces while the SDK call blocks for minutes.
         # Cancelled on every path by the `finally` below.
-        heartbeat_task: asyncio.Task[None] | None = None
-        if context.ledger is not None:
-            heartbeat_task = asyncio.create_task(
-                heartbeat(
-                    context.ledger,
-                    call_id=call_id,
-                    node=label,
-                    round_num=context.round_num,
-                    start_monotonic=_t0,
-                    # WHO the wait belongs to. A bare tick proves the process is alive and
-                    # says nothing about why it is quiet, so a slow provider read as a stalled
-                    # loop on every surface — an operator called a healthy 4-minute call a hang,
-                    # which is the whole reason this argument exists. The model is knowable only
-                    # here. The elapsed is NOT composed in: it rides `elapsed_s` on the same
-                    # record, so no duration formatter is duplicated down into this layer.
-                    detail_fn=lambda: (
-                        f"provider {merged.get('model') or '(unnamed)'} has not answered"
-                    ),
-                )
+        # Created unconditionally: the tick is optional, `on_suspend` and the wall it guards are
+        # not, and a ledger-less call can now be given time back without bound. A guard here is how
+        # a telemetry sink comes to disarm a deadline that has nothing to do with telemetry.
+        heartbeat_task: asyncio.Task[None] = asyncio.create_task(
+            heartbeat(
+                context.ledger,
+                call_id=call_id,
+                node=label,
+                round_num=context.round_num,
+                start_monotonic=_t0,
+                # WHO the wait belongs to. A bare tick proves the process is alive and says
+                # nothing about why it is quiet, so a slow provider read as a stalled loop on
+                # every surface — an operator called a healthy 4-minute call a hang, which is the
+                # whole reason this argument exists. The model is knowable only here.
+                detail_fn=lambda: waiting_on(llm_client, merged.get("model"), role="provider"),
             )
+        )
         # Metered at the send, attempt by attempt (`LLMClientBase._admitted_send`) — a call that
         # failed to parse was billed like one that parsed, and is already on the ledger.
         try:
@@ -314,20 +331,19 @@ async def llm_call(
         finally:
             # Whether the call succeeded or raised — an in-flight task would otherwise survive
             # the function exit and keep appending against a closed call.
-            if heartbeat_task is not None:
-                heartbeat_task.cancel()
-                try:
-                    await heartbeat_task
-                except asyncio.CancelledError:
-                    pass
-                except Exception:
-                    # The cancel is expected; anything else is a real fault (a failed ledger
-                    # append) that would otherwise vanish on this teardown path.
-                    logger.warning(
-                        "heartbeat task for %s raised on teardown",
-                        label,
-                        exc_info=True,
-                    )
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                # The cancel is expected; anything else is a real fault (a failed ledger
+                # append) that would otherwise vanish on this teardown path.
+                logger.warning(
+                    "heartbeat task for %s raised on teardown",
+                    label,
+                    exc_info=True,
+                )
 
         duration_s = round(time.monotonic() - _t0, 2)
 

@@ -222,6 +222,9 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     # shown neither prescribes steers the inner loops have already measured and lost.
     # `failing_samples` carries the BREADTH both lack — the deep panels reach ~5 misses of ~20,
     # and clusters ranked "largest first, share of the misses" cannot be read off a sample.
+    # `mutation_memory` because the round under critique IS a set of edits: which cells the
+    # parent's run hit that they keep missing is a failure no miss panel can carry, and a critique
+    # never shown it spent six rounds of `spreadsheetbench-s10` steering at cells no edit cracked.
     "l1_critique": NodeLayoutSpec(
         editor="l4",
         possible=frozenset(
@@ -233,6 +236,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "confounds",
                 "evidence_health",
                 "diagnostics",
+                "mutation_memory",
                 "sample_transcripts",
                 "failing_samples",
                 "inner_narratives",
@@ -250,6 +254,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "confounds",
                 "evidence_health",
                 "diagnostics",
+                "mutation_memory",
                 "sample_transcripts",
                 "failing_samples",
                 "inner_narratives",

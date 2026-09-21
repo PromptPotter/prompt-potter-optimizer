@@ -13,6 +13,7 @@ import json
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
+from itertools import pairwise
 from typing import Any
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
@@ -55,11 +56,12 @@ class L1YieldStats:
 
 def lost_ideas(prior_rounds: Sequence[Any]) -> list[tuple[int, frozenset[str]]]:
     """Measured losses only: ``accuracy == 0.0`` on an unmeasured candidate is the absence of
-    evidence, not a defeat, and of the three cut gates only ε is a loss."""
+    evidence, not a defeat, and of the three cut gates only ε is a loss. Each idea is read against
+    the parent it was mutated from — the round BEFORE its own, whose ``prompt_fields`` is that
+    round's winner once one promotes."""
     out: list[tuple[int, frozenset[str]]] = []
-    for i, rr in enumerate(prior_rounds):
-        parent = rr.prompt_fields
-        parent_pp = prior_rounds[i - 1].pipeline_params if i > 0 else None
+    for parent_round, rr in pairwise(prior_rounds):
+        parent, parent_pp = parent_round.prompt_fields, parent_round.pipeline_params
         for cand in rr.candidate_scores:
             if not cand.total or not is_leader_eligible(cand):
                 continue

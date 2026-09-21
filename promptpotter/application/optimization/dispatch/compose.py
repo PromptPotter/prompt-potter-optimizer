@@ -82,10 +82,12 @@ def _emit(items: list[Item], *, produced: int) -> str:
         else:
             run.append(item.text)
     flush()
-    if produced - len(items) > 0:
+    if (dropped := produced - len(items)) > 0:
         # A fact about the selection, so the panel cannot state it — it has already returned.
-        # Plainly, so the model reads these rows as a sample rather than the whole story.
-        parts.append(f"[showed {len(items)} of {produced} — the rest did not fit this prompt]")
+        # Plainly, so the model reads these rows as a sample rather than the whole story. What was
+        # DROPPED, not "N of M": a panel's items include its header, so a count of them told the
+        # model it saw three of four entries when it saw two of three.
+        parts.append(f"[{dropped} more did not fit this prompt]")
     return SECTION_SEP.join(parts)
 
 

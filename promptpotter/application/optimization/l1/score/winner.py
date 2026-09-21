@@ -6,10 +6,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.intelligence.exploration import (
-    PARENT_ABILITY_ID,
-    theta_lift_over_parent,
-)
+from promptpotter.application.intelligence.exploration import PARENT_ABILITY_ID
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     compute_optimizer_prompt_hashes,
 )
@@ -32,6 +29,7 @@ from promptpotter.application.scoring.row_diagnostics import count_degraded_samp
 from promptpotter.application.scoring.selection import (
     distinct_valid_cells,
     elect_round_winner,
+    lift_over_bar,
     matched_parent_lift,
     paired_fitness,
     parent_cells,
@@ -68,11 +66,23 @@ def _theta(value: float | None, *, signed: bool = True) -> str:
     return f"{value:+.3f}" if signed else f"{value:.3f}"
 
 
+def _lift(read: tuple[float, float]) -> str:
+    """The lift admission read. With a credit it states both halves, since printing only the first
+    reports a round won on the credit as won on nothing."""
+    over, credit = read
+    if not credit:
+        return f"{over:+.3f}"
+    return (
+        f"{over + credit:+.3f} = {over:+.3f} over the parent + {credit:.3f} parent selection bias"
+    )
+
+
 def _verdict_reason(
     *,
     winner_id: str,
     electable: Sequence[str],
     abilities: RaschPosterior,
+    parent_bias: float,
     labels: Mapping[str, str],
     coverage_floor: int,
     n_scored: int,
@@ -80,45 +90,46 @@ def _verdict_reason(
 ) -> str:
     """This round's outcome stated in the numbers that decided it.
 
-    Written whether the round was won or held. The election ranks θ-lift over the parent, so the
-    sentence names that lift, both abilities and the SE behind them — the operator reading a
-    lower-accuracy winner needs the number it actually won on, and a held round needs to say which
-    arm came closest and how far short. On a COLD ruler it says so: θ there is logit-accuracy on
-    each arm's own subset, which is not the scale the word promises."""
+    Written whether the round was won or held. The election admits on θ-lift over the parent's bar,
+    so the sentence names that lift (`lift_over_bar`, the reading the election took), both
+    abilities and the SE behind them — the operator reading a lower-accuracy winner needs the
+    number it actually won on, and a held round needs to say which arm came closest and how far
+    short. On a COLD ruler it says so: θ there is logit-accuracy on each arm's own subset, which is
+    not the scale the word promises."""
 
     scale = "" if ruler_n else " (cold ruler — θ is logit-accuracy on each arm's own subset)"
     parent = abilities.theta.get(PARENT_ABILITY_ID)
     census = f"{len(electable)} of {n_scored} electable, coverage floor {coverage_floor}"
     ranked = sorted(
         (
-            (lift, cid)
+            (sum(read), read, cid)
             for cid in electable
-            if (lift := theta_lift_over_parent(abilities, cid)) is not None
+            if (read := lift_over_bar(abilities, cid, parent_bias)) is not None
         ),
         reverse=True,
     )
     if not ranked:
         return f"no arm could be read against the parent on the round's δ ruler; {census}{scale}"
     if winner_id:
-        lift = next(x for x, cid in ranked if cid == winner_id)
+        read = next(r for _, r, cid in ranked if cid == winner_id)
         runner = next(
             (
-                f"; runner-up {labels.get(cid, cid[:12])} at {x:+.3f}"
-                for x, cid in ranked
+                f"; runner-up {labels.get(cid, cid[:12])} at {total:+.3f}"
+                for total, _, cid in ranked
                 if cid != winner_id
             ),
             "",
         )
         return (
-            f"{labels.get(winner_id, winner_id[:12])} won on θ lift {lift:+.3f} "
+            f"{labels.get(winner_id, winner_id[:12])} won on θ lift {_lift(read)} "
             f"(θ {_theta(abilities.theta.get(winner_id))} vs parent {_theta(parent)}, "
             f"se {_theta(abilities.theta_se.get(winner_id), signed=False)}){runner}{scale}"
         )
-    best_lift, best = ranked[0]
+    _, read, best = ranked[0]
     return (
         f"no arm cleared the parent: best {labels.get(best, best[:12])} "
         f"θ {_theta(abilities.theta.get(best))} vs parent {_theta(parent)} "
-        f"(lift {best_lift:+.3f}, se {_theta(abilities.theta_se.get(best), signed=False)}); "
+        f"(lift {_lift(read)}, se {_theta(abilities.theta_se.get(best), signed=False)}); "
         f"{census}{scale}"
     )
 
@@ -421,6 +432,7 @@ async def l1_score(
         winner_id=winner_id,
         electable=electable,
         abilities=abilities,
+        parent_bias=parent_bias,
         labels={cs.candidate_id: cs.label for cs in candidate_scores},
         coverage_floor=coverage_floor,
         n_scored=len(scored),

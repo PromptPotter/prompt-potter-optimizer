@@ -103,11 +103,14 @@ MISS_PREDICTED_CAP = 60
 MISS_GT_CAP = 40
 MEMORY_ROUND_CAP = 4
 MEMORY_FIELD_CAP = 2
-# Value-stem chars per changed field. Short by design: the stem exists so the generator
-# RECOGNISES a prior attempt, not to reproduce it, and a small stem is what lets every retained
-# round fit one line inside the panel cap — so the anti-re-proposal record stays COMPLETE
-# rather than dropping recent rounds to truncation.
-MEMORY_VALUE_CAP = 60
+# Chars of each changed field's EDIT — the words it wrote and cut, never a stem of the new value,
+# which for an edit keeping the parent's opening is the parent's own text. Short by design: the
+# row exists so the generator RECOGNISES a prior attempt, not to reproduce it, and a small one is
+# what lets every retained round fit — so the anti-re-proposal record stays COMPLETE.
+MEMORY_VALUE_CAP = 90
+# How many edits must lose one parent-solved cell before it is evidence about EDITING rather than
+# a noisy cell's chance flip — and so earns a line in `mutation_memory` and a transcript.
+LOST_CELL_MIN = 2
 # Worst-N nodes the evidence_health panel lists — enough to show a dead enricher
 # plus a couple of collateral nodes, never a full pipeline dump.
 NODE_FAILURE_RENDER_CAP = 3
@@ -253,17 +256,14 @@ class RoundDigest:
     # The same aggregate the degradation grade reads, computed BEFORE ``health`` is stamped —
     # so the critique cannot read the grade.
     node_failure_rates: dict[str, float] = field(default_factory=dict)
-    # Which samples THIS round scored — the freshness key for ``sample_transcripts``. Read off
-    # ``prior_rounds[-1]`` it was one round stale on the critique, whose own round is deliberately
-    # not in ``prior_rounds``, so the panel ranked by a subset the node was no longer being asked about.
+    # Which samples THIS round scored — the freshness key for ``sample_transcripts``.
     latest_sample_ids: frozenset[Any] = field(default_factory=frozenset)
-    # The round BEFORE this one, for "did the subset move?". Filled in `build_bundle` because
-    # `prior_rounds[-1]` is the just-closed round on generate/L2/L3 and the round-before on
-    # critique — a renderer differencing them itself is right on one path and wrong on the other.
+    # The round BEFORE this one, for "did the subset move?". Filled in `build_bundle`, the one
+    # place that knows which round is under render on each path.
     prev_sample_ids: frozenset[Any] = field(default_factory=frozenset)
-    # THIS round's numbers. They reach the critique no other way: `build_bundle(cycle, latest_round=…)`
-    # runs before `absorb_round` folds the round into `cycle.rounds`, so `prior_rounds[-1]` is the
-    # PREVIOUS round there. Every panel that states an objective or a precision reads these.
+    # THIS round's numbers. `build_bundle(cycle, latest_round=…)` runs before `absorb_round` folds
+    # the round into `cycle`, whose own tracking is therefore a round behind on the critique.
+    # Every panel that states an objective or a precision reads these.
     composite_fitness: float | None = None
     evaluators: dict[str, float] = field(default_factory=dict)
     ability: AbilityReading | None = None
@@ -289,9 +289,11 @@ class InjectionBundle:
     # `hard_samples.json`'s δ is re-fitted and re-anchored on every regeneration, so it moves
     # under the reader. Empty while the ruler is still cold.
     ruler: DeltaRuler | None = None
-    # What `mutation_memory` reads. Each round already carries its parent prompt and every
-    # candidate's evolved one, so "what was tried, and how did it score" is a diff away.
-    prior_rounds: list[RoundResult] = field(default_factory=list)
+    # Every round measured so far, the one under render LAST on every path — the critique's own
+    # round included, which is the round it is asked about. Each carries its parent prompt, every
+    # candidate's evolved one and both sides' rows, so "what was tried, how did it score and which
+    # of the parent's solved cells did it break" is a diff away.
+    measured_rounds: list[RoundResult] = field(default_factory=list)
     # Picks the block-library header (guidance = reuse-or-invent, restrict = library-only) or
     # renders nothing when off.
     prompt_block_catalogue: str = "guidance"
@@ -369,6 +371,7 @@ __all__ = [
     "INNER_NARRATIVE_FULL_CELLS",
     "INNER_NARRATIVE_RENDER_CAP",
     "INNER_NARRATIVE_SUMMARY_CAP",
+    "LOST_CELL_MIN",
     "MEMORY_FIELD_CAP",
     "MEMORY_ROUND_CAP",
     "MEMORY_VALUE_CAP",

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from dataclasses import dataclass
+from itertools import pairwise
 from typing import Any, cast
 
 from promptpotter.application.optimization.dispatch.bundle import (
@@ -11,6 +13,7 @@ from promptpotter.application.optimization.dispatch.bundle import (
     INNER_NARRATIVE_FULL_CELLS,
     INNER_NARRATIVE_RENDER_CAP,
     INNER_NARRATIVE_SUMMARY_CAP,
+    LOST_CELL_MIN,
     MEMORY_FIELD_CAP,
     MEMORY_ROUND_CAP,
     MEMORY_VALUE_CAP,
@@ -37,13 +40,19 @@ from promptpotter.domain.candidate_diff import (
     IDEA_MATCH_MARK,
     candidate_delta,
     candidate_idea,
+    changed_words,
     flatten_sp_summary,
     same_idea,
 )
 from promptpotter.domain.connector import MeasuredUnit, unit_count, unit_plural
 from promptpotter.domain.escalation_signals import ExplorationBudget
 from promptpotter.domain.l4.proxies import OUTER_PROXY_KEYS, PARENT_LEVEL_SE_KEY
-from promptpotter.domain.results import CritiqueReadout, EliminationGate, ScoredCandidate
+from promptpotter.domain.results import (
+    CritiqueReadout,
+    EliminationGate,
+    RoundResult,
+    ScoredCandidate,
+)
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.ruler import ThetaCaveat, theta_caveat
 from promptpotter.domain.scoring import (
@@ -364,8 +373,13 @@ def _r_sample_transcripts(b: InjectionBundle) -> list[Item]:
     silence on both, which is a distiller node handed nothing but two scalars."""
     if _inner_narrated(b):
         return []
-    rows = _misses(b)
-    if not rows:
+    # Cells the parent solves that edits keep LOSING lead: an edit's own damage is the failure a
+    # critique can most directly steer away from, and no miss panel can carry it. Each is shown by
+    # the latest run that lost it.
+    lost = _repeatedly_lost(_edits(b))
+    lost_sids = {sid for sid, _ in lost}
+    rows = [r for r in _misses(b) if r.get("sample_id") not in lost_sids]
+    if not rows and not lost:
         return []
     # Freshest first, then ROTATE. Freshness alone is a boolean over a pool whose insertion order
     # froze at round 0, so a stable sort served the same head for a cycle's whole life: measured
@@ -381,20 +395,33 @@ def _r_sample_transcripts(b: InjectionBundle) -> list[Item]:
     if fresh:
         off = (b.cycle_slice.round_num * TRANSCRIPT_RENDER_CAP) % len(fresh)
         fresh = fresh[off:] + fresh[:off]
-    shown = (fresh + stale)[:TRANSCRIPT_RENDER_CAP]
+    losses = dict(lost)
+    pool = [loss.run for _, loss in lost if loss.run is not None] + fresh + stale
+    unit = unit_plural(b.measured_unit)
+    pools = [
+        text
+        for n, text in (
+            (len(lost), f"{len(lost)} {unit} the parent's run hit that edits keep missing"),
+            (len(rows), f"{len(rows)} {unit} the parent still misses"),
+        )
+        if n
+    ]
     header = (
-        f"SAMPLE TRANSCRIPTS ({len(shown)}/{len(rows)} still-unsolved "
-        f"{unit_plural(b.measured_unit)}, shown complete — "
-        "each trace is the LAST configuration to miss that row, not necessarily the parent, so "
-        "read it as a live failure mode rather than this round's score. Quote the broken reasoning "
-        "step, not just the label):"
+        f"SAMPLE TRANSCRIPTS ({', and '.join(pools)} — each trace is the LAST run to miss that "
+        "row, so read it as a live failure mode rather than this round's score. Quote the broken "
+        "reasoning step, not just the label):"
     )
     sections = [Item(header)]
-    for r in shown:
+    for r in pool[:TRANSCRIPT_RENDER_CAP]:
         sid = r.get("sample_id")
         parts = [
             f"[#{sid}] QUERY:\n{_head_at_line(str(r.get('query') or ''), TRANSCRIPT_QUERY_CAP)}"
         ]
+        if (loss := losses.get(sid)) is not None:
+            parts.append(
+                f"THE PARENT'S RUN HIT THIS — {loss.lost} of {loss.tried} edits missed it; "
+                f"this is {loss.by}'s run."
+            )
         trace = (r.get("pipeline_data") or {}).get("reasoning_trace") or ""
         if trace:
             # head+tail, not head-keep: the wrong CONCLUSION is the quotable step.
@@ -748,15 +775,96 @@ def _r_failing_samples(b: InjectionBundle) -> list[Item]:
 def _candidate_mutation(
     cand: ScoredCandidate, parent: dict[str, Any], parent_pp: dict[str, Any] | None
 ) -> list[tuple[str, str]]:
-    """Values are returned UNCLIPPED — the render clips for the eye, and clipping here starves any
-    reader needing the whole value. The delta rule is the shared ``candidate_delta`` dedup hashes."""
+    """What the candidate EDITED, per field: a prose field as the words it wrote and cut
+    (``changed_words``), a param as its new value. Returned UNCLIPPED — the render clips for the
+    eye. The delta rule is the shared ``candidate_delta`` dedup hashes."""
     pf, pp = candidate_delta(cand.prompt_fields, parent, cand.pipeline_overlay, parent_pp)
     pp_nested: dict[str, Any] = {}
     for (node, param), value in pp.items():
         pp_nested.setdefault(node, {})[param] = value
     pairs = [(key, str(value)) for key, value in flatten_sp_summary(pp_nested).items()]
-    pairs += [(field, str(value)) for field, value in pf.items() if value]
+    pairs += [
+        (field, changed_words(str(parent.get(field) or ""), str(value)))
+        for field, value in pf.items()
+        if value
+    ]
     return pairs[:MEMORY_FIELD_CAP]
+
+
+@dataclass(frozen=True)
+class _Edit:
+    """One candidate that CHANGED something, against the parent it was mutated from — the round
+    BEFORE its own. Its own round's ``prompt_fields`` is that round's WINNER once one promotes,
+    and diffed against it the winner vanishes and every rival reads as an edit of the winner."""
+
+    round: RoundResult
+    candidate: ScoredCandidate
+    changed: list[tuple[str, str]]
+    idea: frozenset[str]
+
+
+def _edits(b: InjectionBundle) -> list[_Edit]:
+    """Every edit of the last ``MEMORY_ROUND_CAP`` rounds that made any, oldest first. Windowed on
+    rounds that EDITED, not rounds that merely have candidates: C0 and a no-op variant both carry
+    a candidate that changed nothing, and a retained slot spent on one renders nothing."""
+    by_round: list[list[_Edit]] = []
+    for parent, rr in pairwise(b.measured_rounds):
+        edits = [
+            _Edit(
+                rr,
+                cand,
+                changed,
+                candidate_idea(
+                    cand.prompt_fields,
+                    parent.prompt_fields,
+                    cand.pipeline_overlay,
+                    parent.pipeline_params,
+                ),
+            )
+            for cand in rr.candidate_scores
+            if (changed := _candidate_mutation(cand, parent.prompt_fields, parent.pipeline_params))
+        ]
+        if edits:
+            by_round.append(edits)
+    return [edit for edits in by_round[-MEMORY_ROUND_CAP:] for edit in edits]
+
+
+@dataclass
+class _Loss:
+    """One cell a parent solved, over the retained edits: how many were scored on it, how many
+    LOST it, and the latest run that did."""
+
+    tried: int = 0
+    lost: int = 0
+    run: dict[str, Any] | None = None
+    by: str = ""
+
+
+def _repeatedly_lost(edits: list[_Edit]) -> list[tuple[Any, _Loss]]:
+    """Cells at least ``LOST_CELL_MIN`` edits lost, most-lost first, off each edit's
+    ``RoundResult.cell_delta``. One loss is chance on any noisy cell; a cell edit after edit loses
+    is the one failure no miss panel can carry — the parent's run hit it, so it is never a miss —
+    and the loop keeps spending candidates on the cells it cannot solve while losing those it
+    could."""
+    cells: dict[Any, _Loss] = {}
+    for edit in edits:
+        delta = edit.round.cell_delta(edit.candidate.candidate_id)
+        for sid in (*delta.kept, *delta.lost):
+            cells.setdefault(sid, _Loss()).tried += 1
+        # `.get`, like the domain's own read (`RoundResult.cell_delta`): a scored candidate need
+        # not have measured rows — a never-measured arm, a skipped searchpoint, a round loaded with
+        # an empty parent — and a subscript here raises inside a floor renderer, taking prompt
+        # composition down for the whole round.
+        rows = edit.round.all_candidate_results.get(edit.candidate.candidate_id) or []
+        for sid in delta.lost:
+            cell = cells[sid]
+            cell.lost += 1
+            cell.run = next(r for r in rows if r.get("sample_id") == sid)
+            cell.by = edit.candidate.label
+    return sorted(
+        ((sid, c) for sid, c in cells.items() if c.lost >= LOST_CELL_MIN),
+        key=lambda item: (-item[1].lost, str(item[0])),
+    )
 
 
 def _candidate_fate(cand: ScoredCandidate, unit: MeasuredUnit) -> str:
@@ -791,69 +899,55 @@ def _candidate_fate(cand: ScoredCandidate, unit: MeasuredUnit) -> str:
     citable=True,
 )
 def _r_mutation_memory(b: InjectionBundle) -> list[Item]:
-    """ONE compact line per prior candidate, NEWEST round first, bounded by the composition
-    here so the cap downstream never has to cut — recognition, not reproduction. A candidate that
-    changed nothing is not an attempt."""
-    prior = list(b.prior_rounds)
-    # Oldest first, and built for EVERY prior round BEFORE the retained window is taken: a
-    # round's row count is not knowable from the round (C0 and a no-op variant both carry a
-    # candidate that changed nothing), so windowing on rounds that merely HAVE candidates
-    # spends a retained slot rendering nothing.
-    by_round: list[tuple[int, list[tuple[str, frozenset[str]]]]] = []
-    for i, rr in enumerate(prior):
-        parent = rr.prompt_fields
-        # The PRIOR round's resolved params — the parent this round mutated from.
-        parent_pp = prior[i - 1].pipeline_params if i > 0 else None
-        attempts: list[tuple[str, frozenset[str]]] = []
-        for cand in rr.candidate_scores:
-            changed = _candidate_mutation(cand, parent, parent_pp)
-            if not changed:
-                continue
-            mutation = [f'{field}: "{value[:MEMORY_VALUE_CAP]}"' for field, value in changed]
-            # `total == 0` is checked BEFORE the paired quote: a never-measured candidate can
-            # still carry a `matched_parent_accuracy` (the parent was scored even though the
-            # candidate was not), and would otherwise render a comparison out of nothing.
-            scored = (
-                f"{cand.accuracy:.0%} vs parent {cand.matched_parent_accuracy:.0%}"
-                if cand.total and cand.matched_parent_accuracy is not None
-                else _candidate_fate(cand, b.measured_unit)
-            )
-            attempts.append(
-                (
-                    f"{scored} · {'; '.join(mutation)}",
-                    candidate_idea(cand.prompt_fields, parent, cand.pipeline_overlay, parent_pp),
-                )
-            )
-        if attempts:
-            by_round.append((rr.round, attempts))
-    if not by_round:
+    """ONE compact line per prior edit, NEWEST round first — the edit itself, its score against
+    the parent, and the parent's cells it GAINED and LOST. Recognition, not reproduction. The
+    cell pair is the part a score cannot carry: an edit that cracks one cell and breaks another
+    reads as a tie, and a cell edit after edit breaks never shows up among the misses."""
+    edits = _edits(b)
+    if not edits:
         return []
     header = (
-        "ALREADY TRIED (this cycle, most recent round first — a mutation measured and lost here "
-        "does not improve by being proposed again; ↺ marks an idea already tried in an earlier "
-        "round, in whatever field it was written into):"
+        "ALREADY TRIED (this cycle, newest round first — each edit, its score against the parent, "
+        "and the parent's cells it gained and lost; a mutation measured and lost here does not "
+        "improve by being proposed again; ↺ marks an idea already tried in an earlier round, in "
+        "whatever field it was written into):"
     )
-    rows = [
-        (round_num, body, fp)
-        for round_num, attempts in by_round[-MEMORY_ROUND_CAP:]
-        for body, fp in attempts
-    ]
-    # Every attempt is offered, newest-first below, so what the ceiling drops is the OLDEST — the
-    # row L1 is least likely to re-propose. The ↺ marker names a ROUND rather than a rendered row,
-    # so it stays true whether or not that row was afforded.
-    kept = list(rows)
-    # (round, fingerprint) per rendered row, oldest first — the pool each later row is matched
-    # against. First match wins, so a marker points at the EARLIEST occurrence rather than the
-    # previous link. Matched only within what SURVIVED, so it never names a round the panel hides.
+    # (round, fingerprint) per row, oldest first — the pool each later row is matched against.
+    # First match wins, so a marker points at the EARLIEST occurrence rather than the previous
+    # link, and it names a ROUND, so it stays true whatever the composition affords.
     lines: list[str] = []
     seen: list[tuple[int, frozenset[str]]] = []
-    for round_num, body, fp in kept:
-        echoes = [r for r, prev in seen if same_idea(fp, prev, threshold=IDEA_MATCH_MARK)]
+    for edit in edits:
+        echoes = [r for r, prev in seen if same_idea(edit.idea, prev, threshold=IDEA_MATCH_MARK)]
         mark = f"  ↺ same idea as r{echoes[0]} (x{len(echoes) + 1})" if echoes else ""
-        seen.append((round_num, fp))
-        lines.append(f"  r{round_num} {body}{mark}")
+        seen.append((edit.round.round, edit.idea))
+        lines.append(f"  r{edit.round.round} {_edit_row(edit, b.measured_unit)}{mark}")
     lines.reverse()
-    return [Item(header), *(Item(ln, trusted=False) for ln in lines)]
+    items = [Item(header), *(Item(ln, trusted=False) for ln in lines)]
+    if lost := _repeatedly_lost(edits):
+        cells = " · ".join(f"#{sid} in {c.lost} of {c.tried}" for sid, c in lost)
+        items.append(Item(f"CELLS THE PARENT'S RUN HIT THAT EDITS KEEP MISSING: {cells} edits"))
+    return items
+
+
+def _edit_row(edit: _Edit, unit: MeasuredUnit) -> str:
+    cand = edit.candidate
+    mutation = "; ".join(f"{field}: {value[:MEMORY_VALUE_CAP]}" for field, value in edit.changed)
+    # `total == 0` is checked BEFORE the paired quote: a never-measured candidate can still carry
+    # a `matched_parent_accuracy` (the parent was scored even though the candidate was not), and
+    # would otherwise render a comparison out of nothing.
+    scored = (
+        f"{cand.accuracy:.0%} vs parent {cand.matched_parent_accuracy:.0%}"
+        if cand.total and cand.matched_parent_accuracy is not None
+        else _candidate_fate(cand, unit)
+    )
+    delta = edit.round.cell_delta(cand.candidate_id)
+    cells = "".join(
+        f" · {verb} {', '.join(f'#{sid}' for sid in sids)}"
+        for verb, sids in (("gained", delta.gained), ("lost", delta.lost))
+        if sids
+    )
+    return f"{cand.label} {scored} · {mutation}{cells}"
 
 
 @signal(
