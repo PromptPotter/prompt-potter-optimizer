@@ -213,8 +213,10 @@ as instances (no subclasses) parameterized by a `ProviderSpec` registry.
 **No paid request is sent unadmitted, and a usage record is only ever a BILL.** `LLMClientBase._admitted_send`
 holds each attempt's worst case against the run's spend book (`llm/spend_book.py`), sends, and
 closes it with the bill the provider reported; Harbor's in-process agent is billed the same way,
-send by send, where litellm makes the send (`llm/litellm_sends.py`), so its cell only RESERVES its
-bound; `BackendClient.run_query` holds a remote cell whole and closes it off the reply. SDK retries
+send by send, where litellm makes the send (`llm/litellm_sends.py`), so its cell only RESERVES the
+run it DECLARES — a send past that reservation is admitted against the ceiling like any other,
+because one covering every retry at once affords a single cell at a time and runs the panel
+serially; `BackendClient.run_query` holds a remote cell whole and closes it off the reply. SDK retries
 are off — a 5xx and a connection never made are sent again a bounded number of times, a 429
 whenever the sender's `Backpressure` lets it (`llm/rate_limit.py`), each admitted anew. **A send
 that ends with no bill writes NOTHING** — its hold stays open, UNREPORTED: it binds every ceiling

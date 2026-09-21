@@ -1,0 +1,142 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="433" viewBox="0 0 760 433"
+     font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif">
+
+  <defs>
+    <marker id="ah" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="9"
+            refX="10.5" refY="4.5" viewBox="0 0 12 9" orient="auto">
+      <path d="M0 0 L12 4.5 L0 9 Z" fill="#14181F"/>
+    </marker>
+    <marker id="ahm" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="7.5"
+            refX="8.5" refY="3.75" viewBox="0 0 10 7.5" orient="auto">
+      <path d="M0 0 L10 3.75 L0 7.5 Z" fill="#5B6472"/>
+    </marker>
+  </defs>
+
+  <style>
+    .lead   { font-size: 15px; font-weight: 700; fill: #14181F; }
+    .cap    { font-size: 12.5px; fill: #5B6472; }
+    .detail { font-size: 12.5px; font-weight: 700; fill: #4A5262; }
+    .cap-s  { font-size: 11.5px; fill: #5B6472; }
+    .eyebrow{ font-size: 11px; font-weight: 700; fill: #8A93A2; letter-spacing: 1.4px; }
+    .note   { font-size: 12px; font-style: italic; fill: #5B6472; }
+    .flow   { fill: none; stroke: #14181F; stroke-width: 2; }
+    .flow-m { fill: none; stroke: #5B6472; stroke-width: 1.8; }
+    .g      { fill: none; stroke: #14181F; stroke-width: 2;
+               stroke-linecap: round; stroke-linejoin: round; }
+    .g-t    { fill: none; stroke: #14181F; stroke-width: 1.5;
+               stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+
+  <rect width="760" height="433" fill="#FFFFFF"/>
+
+  <rect x="248" y="90.9" width="250.0" height="178.3" rx="22"
+        fill="none" stroke="#B9C0CC" stroke-width="2" stroke-dasharray="9 7"/>
+
+  <!-- ══ LEFT · what the operator brings ══════════════════════════════════ -->
+  <g transform="translate(122,30)">
+    <rect class="g" x="4" y="10" width="36" height="44" rx="5" fill="#FFFFFF"/>
+    <rect class="g" x="14" y="2"  width="38" height="44" rx="5" fill="#EDEFF4"/>
+    <rect x="20" y="8" width="26" height="7" rx="2" fill="#090C9B" opacity="0.75"/>
+    <path class="g-t" d="M20 22 H46 M20 30 H46 M20 38 H46 M33 19 V41" stroke="#8A93A2"/>
+  </g>
+  <text class="lead" x="150" y="112" text-anchor="middle">Task + labeled dataset</text>
+  <path class="flow" marker-end="url(#ah)" d="M150 126 V150"/>
+
+  <g transform="translate(122,152)">
+    <ellipse class="g" cx="26" cy="20" rx="22" ry="14" fill="#EDEFF4" stroke-width="2.4"/>
+    <text x="26" y="25" text-anchor="middle" font-size="14" font-weight="700" fill="#14181F">C₀</text>
+    <circle class="g" cx="46" cy="42" r="9.5" fill="#FFFFFF"/>
+    <path class="g-t" d="M42 42 l3 3 l5.5 -6.5" stroke="#090C9B" stroke-width="2.2"/>
+  </g>
+  <text class="lead" x="150" y="242" text-anchor="middle">Optimizer setup</text>
+  <text class="cap"  x="150" y="260" text-anchor="middle">AI-assisted check-in</text>
+
+  <path class="flow" marker-end="url(#ah)" d="M187 180 H246"/>
+
+  <!-- ══ the loop · pinheads on one circle, glyph beside each ═══════════ -->
+  <path class="flow" marker-end="url(#ah)" d="M359.00 148.88 A30 30 0 0 1 401.22 148.88"/>
+  <path class="flow" marker-end="url(#ah)" d="M409.13 162.57 A30 30 0 0 1 406.16 185.07"/>
+  <path class="flow" marker-end="url(#ah)" d="M394.98 196.25 A30 30 0 0 1 351.09 162.57"/>
+
+  <g transform="translate(284.66,113.97) scale(0.78)">
+    <ellipse class="g" cx="28" cy="10" rx="11.5" ry="7.5" fill="#EDEFF4"/>
+    <path class="g-t" d="M28 17.5 L10 33 M28 17.5 V33 M28 17.5 L46 33"/>
+    <ellipse class="g" cx="10" cy="40" rx="9.5" ry="6.8" fill="#FFFFFF"/>
+    <ellipse class="g" cx="28" cy="40" rx="9.5" ry="6.8" fill="#FFFFFF"/>
+    <ellipse class="g" cx="46" cy="40" rx="9.5" ry="6.8" fill="#FFFFFF"/>
+  </g>
+  <text class="lead" x="306.50" y="167.47" text-anchor="middle">Generate</text>
+  <circle cx="354.13" cy="155.19" r="5.5" fill="#090C9B"/>
+
+  <g transform="translate(432.66,110.19) scale(0.78)">
+    <rect class="g" x="1" y="6"  width="52" height="11" rx="5.5" fill="#D8DCF5" stroke-width="1.8"/>
+    <path class="g-t" d="M14 8.5 V14.5 M27 8.5 V14.5 M40 8.5 V14.5" stroke="#090C9B" stroke-width="1.6"/>
+    <rect class="g" x="1" y="24" width="30" height="11" rx="5.5" fill="#FFFFFF" stroke-width="1.8"/>
+    <path class="g-t" d="M14 26.5 V32.5" stroke="#8A93A2"/>
+    <path class="g" d="M37 25 l10 10 M47 25 l-10 10" stroke="#55251D" stroke-width="2.4"/>
+    <rect class="g" x="1" y="42" width="18" height="11" rx="5.5" fill="#FFFFFF" stroke-width="1.8"/>
+    <path class="g" d="M25 43 l10 10 M35 43 l-10 10" stroke="#55251D" stroke-width="2.4"/>
+  </g>
+  <text class="lead" x="453.72" y="168.53" text-anchor="middle">Score</text>
+  <circle cx="406.09" cy="155.19" r="5.5" fill="#090C9B"/>
+
+  <g transform="translate(425.05,205.35) scale(0.78)">
+    <rect class="g" x="1" y="5" width="33" height="33" rx="3" fill="#FFFFFF"/>
+    <rect x="1.9" y="5.9" width="10.2" height="10.2" fill="#EDEFF4"/>
+    <rect x="22.9" y="26.9" width="10.2" height="10.2" fill="#F0DFDB"/>
+    <path d="M12.3 5 V38 M23.3 5 V38 M1 16.3 H34 M1 27.3 H34"
+          stroke="#C8CDD6" stroke-width="1.3" fill="none"/>
+    <circle cx="37" cy="35" r="12.5" fill="#FFFFFF" fill-opacity="0.9"
+            stroke="#14181F" stroke-width="2.4"/>
+    <path class="g" d="M46 44 L53 51" stroke-width="3.2"/>
+  </g>
+  <text class="lead" x="416.83" y="232.69" text-anchor="end">Critique</text>
+  <circle cx="401.32" cy="191.41" r="5.5" fill="#090C9B"/>
+
+  <!-- ══ RIGHT · the exit is a gate, not a winner ══════════════════════ -->
+  <path class="flow" marker-end="url(#ah)" d="M500.0 180 H580"/>
+  <g transform="translate(588,163)">
+    <path class="g" d="M8 34 V6 M36 34 V6"/>
+    <path d="M2 10 H42" stroke="#090C9B" stroke-width="3"
+          stroke-linecap="round" fill="none"/>
+    <path d="M0 34 H44" stroke="#8A93A2" stroke-width="1.5"
+          stroke-linecap="round" fill="none"/>
+  </g>
+  <text class="lead" x="610" y="218" text-anchor="middle">Stopping rule</text>
+  <text class="cap" x="610" y="236" text-anchor="middle">goal · budget · plateau</text>
+
+  <!-- ══ ESCALATION · two columns, no glyphs ════════════════════════════ -->
+  <rect x="60" y="305" width="370" height="102" rx="16"
+        fill="#FFFFFF" stroke="#C9BCB8" stroke-width="2" stroke-dasharray="9 7"/>
+  <text class="eyebrow" x="82" y="331">ESCALATION — LAZY</text>
+
+  <text class="detail" x="82" y="359">L2 · refine context</text>
+  <text class="cap-s" x="82" y="375">fires on an L1 stall;</text>
+  <text class="cap-s" x="82" y="389">rewrites how L1 searches</text>
+
+  <text class="detail" x="262" y="359">L3 · modify plan</text>
+  <text class="cap-s" x="262" y="375">fires on an L2 stall;</text>
+  <text class="cap-s" x="262" y="389">rewrites the strategy</text>
+
+  <path class="flow" marker-end="url(#ah)" d="M300 273 V301"/>
+  <path class="flow" marker-end="url(#ah)" d="M316 301 V273"/>
+  <text class="note" x="288" y="295" text-anchor="end">stalls</text>
+  <text class="note" x="328" y="295">constrains L1</text>
+
+  <!-- ══ MEASUREMENT ARCHIVE ══════════════════════════════════════════════ -->
+  <rect x="490" y="319" width="210" height="80" rx="16"
+        fill="#FFFFFF" stroke="#C2BCA6" stroke-width="2" stroke-dasharray="9 7"/>
+  <g transform="translate(506,325)">
+    <rect class="g" x="2" y="42" width="44" height="12" rx="4" fill="#FFFFFF"/>
+    <rect class="g" x="2" y="28" width="44" height="12" rx="4" fill="#FFFFFF"/>
+    <rect class="g" x="2" y="14" width="44" height="12" rx="4" fill="#E9E5D8"/>
+    <path class="flow-m" marker-end="url(#ahm)" stroke="#696047"
+          d="M50 48 C 63 44, 63 14, 50 10 L45 10"/>
+  </g>
+  <text class="detail" x="584" y="353">Measurement</text>
+  <text class="detail" x="584" y="367">archive</text>
+
+  <path class="flow" marker-end="url(#ah)" d="M620 315 V297 H470 V273"/>
+  <text class="note" x="484" y="286">replay, not re-measure</text>
+
+</svg>

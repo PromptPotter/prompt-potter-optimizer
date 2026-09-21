@@ -45,6 +45,13 @@ Three mechanisms close this, and none of them changes measurement identity:
 - **Operating it:** `docker logs promptpotter-package-cache` shows cache hits. `docker rm -f
   promptpotter-package-cache` stops it, and the next opted-in cell starts it again. `docker volume rm
   promptpotter-package-cache` drops the downloads.
+- **A stale index takes down every cell on the box, and reads as the backend being unreachable.**
+  The cache answers `200` and apt refuses what it got — *OpenPGP signature verification failed …
+  Message has been manipulated* — so `apt-get update` aborts, the verifier measures nothing and
+  every task on the machine burns its infra attempts. Tell it from a real outage by running the
+  same fetch without the proxy. The cure is the INDEX, not the volume: delete `InRelease`,
+  `Release` and `Packages` under the cache and restart it, keeping the `.deb`s that make it worth
+  having.
 
 ## What fits the seam, and what does not
 
