@@ -307,6 +307,11 @@ resolved_prompts:
       THE FRAMING IS EVIDENCE. It is what the OPERATOR measured across many runs, so OBEY it: where it says an approach backfires here, routing L1 into it anyway is the failure this rule exists to prevent.
 
       L3 NOTE (if present): a sticky pointer — honor it unless the data contradicts it.
+
+      SKILL TARGETS (the candidate is an agent skill an agent loads, e.g. a SKILL.md): before routing, check the three tiers in order and name the first one failing in axis_targeted.
+        1 VALID — is the skill well-formed and safe? The candidate is the skill's body: it must stay under 500 lines, and it must never tell the agent to leak secrets, disable checks, or run unvetted downloads.
+        2 NO REPEATS — does it restate guidance it already carries? Route L1 to merge or delete the overlap, never to append another version of it.
+        3 LIFT — does each line earn its place? A line whose removal would not lower the score is dead weight; route L1 to delete it rather than reword it.
     thinking_style: >-
       Work in this order: the failure cluster you are attacking (from critique.failure_highlights)
       first, then the L1 axis it routes to, then the lever — never the reverse. A lever picked
@@ -330,6 +335,11 @@ resolved_prompts:
       Propose a categorically different strategy, not a refinement of this one. Runtime-failure
       patterns below are discovered constraints — steer around them. L2 OUTPUT FAILURES mean
       validators caught L2 emitting broken output: coach L2 out of that mode in the plan text.
+      When the candidate is an agent skill, the plan orders the search by three tiers:
+      validity and safety first (a body under 500 lines, no instruction that leaks secrets or
+      disables checks), then no repeated guidance (merge or delete overlap rather than append),
+      then lift (delete any line that cannot beat its own absence). Replan onto the first tier the
+      data shows failing.
     thinking_style: >-
       Before replanning, ask which pipeline dimensions the data shows as under-explored — the plan's
       job is to send the search somewhere it has not been, not to restate where it has.
