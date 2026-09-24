@@ -11,13 +11,15 @@ here would invert this module's one-way import."""
 
 from __future__ import annotations
 
-from typing import Literal
+from collections.abc import Mapping
+from typing import Any, Literal
 
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.results import DegradationHealth, OverlapReading
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
+from promptpotter.domain.scoring import is_hit, is_unscored
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.domain.strict_model import StrictModel
 
@@ -27,6 +29,7 @@ __all__ = [
     "RoundSummary",
     "RoundSummaryCandidate",
     "SampleStatus",
+    "sample_status",
 ]
 
 #: The tape's four marks. ERR and UNSC are each a state of their OWN, not a bad MISS — neither row
@@ -35,6 +38,19 @@ __all__ = [
 #: formula could not read, which is why it is not an error: the measurement is worth keeping and a
 #: re-grade recovers it (`domain/scoring.py::is_unscored`).
 SampleStatus = Literal["HIT", "MISS", "ERR", "UNSC"]
+
+
+def sample_status(row: Mapping[str, Any]) -> SampleStatus:
+    """The ONE ladder from a measured row to its mark — the live tape (`blocks.py::sample_row`) and
+    the served cells (`infrastructure/store/cell_queries.py`) both ask it, so two readouts of one
+    row cannot disagree about whether it was ever graded. `ERR` and `UNSC` are asked BEFORE the
+    grade: neither row was graded, so an absent fitness through `is_hit` would report a backend
+    fault — or the formula's own silence — as a wrong answer."""
+    if row.get("error"):
+        return "ERR"
+    if is_unscored(row):
+        return "UNSC"
+    return "HIT" if is_hit(row.get("fitness")) else "MISS"
 
 
 class DashboardSample(StrictModel):
@@ -57,9 +73,8 @@ class DashboardSample(StrictModel):
     fitness: float | None = Field(
         default=None,
         description="The graded per-cell score `status` is the verdict OF — the same number "
-        "`MeasurementDot.fitness` carries, so the live round's cells join the served series and "
-        "a heat cell can shade a partial grade `status` rounds to HIT or MISS. Null on an "
-        "errored row, which was never graded.",
+        "`CellRow.fitness` carries, so a live cell shades a partial grade `status` rounds to "
+        "HIT or MISS. Null on an errored row, which was never graded.",
     )
     terminal_node: str = Field(
         default="", description="Pipeline node the row terminated at; the tape badges it."
@@ -138,6 +153,10 @@ class DashboardCandidate(StrictModel):
     # Minted with the searchpoint but only carried on the score report, so a seeded row
     # that has not reached `candidate_scored` has no id to serve yet.
     candidate_id: str | None = None
+    # The archive run the candidate's cells land in (`ScoredCandidate.run_id`) — known from its
+    # FIRST sample, unlike `candidate_id`, because the walk mints it before measuring. With a
+    # sample's `sample_id` it addresses one cell. `None` before any sample and on an invalid row.
+    run_id: str | None = None
     accuracy: float | None = None
     composite_fitness: float | None = None
     # Rejected before it cost a sample (`l1/population.py::INVALID_SCORES`). Served because the

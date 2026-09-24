@@ -60,6 +60,7 @@ export function liveRow(over: Partial<DashboardCandidate> = {}): DashboardCandid
   return {
     label: "C1.1",
     candidate_id: null,
+    run_id: null,
     accuracy: null,
     composite_fitness: null,
     scored_samples: 0,
@@ -93,6 +94,7 @@ export function scored(over: Partial<ScoredCandidate> = {}): ScoredCandidate {
   return {
     candidate_id: "c",
     label: "C1.1",
+    run_id: "",
     changes_description: "",
     accuracy: 0,
     composite_fitness: 0,
@@ -283,6 +285,7 @@ export function summaryCandidate(
   return {
     candidate_id: "c",
     label: "C1.1",
+    run_id: null,
     accuracy: 0,
     composite_fitness: 0,
     scored_samples: 0,

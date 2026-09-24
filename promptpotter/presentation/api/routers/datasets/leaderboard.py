@@ -1,5 +1,6 @@
-"""The hard-sample leaderboard and everything that reads a MEASUREMENT: the scope resolver
-(cycle / campaign / dataset), the paging walk, the preview rows and the per-sample series.
+"""Everything that reads a MEASUREMENT: the scope resolver (cycle / campaign / dataset), the
+paging walk, and the two cell reads — the ranked log (`/cells`, grouped by sample it IS the
+hard-sample leaderboard) and one cell opened (`/cells/{run_id}/{sample_id}`).
 
 Scores are served, never recomputed here — the artifact is read off disk and paged; the ordering
 it carries is the backend's answer (`webapp/CLAUDE.md` § Scoring authority)."""
@@ -22,14 +23,18 @@ from promptpotter.application.intelligence.adaptive_queue_mechanism import margi
 from promptpotter.application.intelligence.hard_sample_archive import (
     build_archive_hard_samples_artifact,
 )
+from promptpotter.application.scoring.cells import open_cell
+from promptpotter.domain.cells import Cell, CellCandidate, CellRow
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.dashboard_rows import SampleStatus
 from promptpotter.domain.results import HardSampleOrder
 from promptpotter.domain.scoring import is_hit
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.archive_queries import (
-    campaign_measurement_series,
-    cycle_measurement_series,
-    measurement_series_for_samples,
+from promptpotter.infrastructure.store.cell_queries import (
+    ScopeCells,
+    campaign_cells,
+    cycle_cells,
+    dataset_cells,
 )
 from promptpotter.infrastructure.store.dataset_access import (
     dataset_panel_rows,
@@ -189,7 +194,8 @@ class _LeaderboardPage:
     delta_se_map: dict[int, float]
     n_obs_map: dict[int, int]
     pick_score_map: dict[int, float]
-    series: dict[int, list[dict[str, Any]]]
+    candidates: list[CellCandidate]
+    cells: list[CellRow]
     order: HardSampleOrder
     ranked: list[int]
     """Page sample_ids in served order; index + 1 IS each row's ``hard_sample_rank``."""
@@ -211,9 +217,9 @@ def _resolve_leaderboard_page(
 
     Selection (δ_s-desc, unmeasured trimmed, then ``limit``) picks WHICH rows the page holds;
     the rank picks the order they are read in. Deliberately different keys: selection cannot
-    depend on the series, which is only fetched for rows already selected.
+    depend on the cells, which are only read for rows already selected.
 
-    *Measured* is dot presence in THIS scope, not a δ entry — the ruler persists across rounds
+    *Measured* is a GRADED cell in THIS scope, not a δ entry — the ruler persists across rounds
     and inherits from parent fits, so a sample carries a δ it never earned here.
     """
     raw, sample_lookup = _load_dataset_rows(stores, name)
@@ -238,13 +244,13 @@ def _resolve_leaderboard_page(
     selection = sorted(sample_lookup.keys(), key=lambda s: (-delta_map.get(s, 0.0), s))
     selected = _trim_unmeasured(selection, fitted, max_unmeasured)[:limit]
 
-    series = _page_series(
+    candidates, cells = _page_cells(
         art_store, scope=scope, name=name, campaign=art_campaign, cycle=art_cycle, page=selected
     )
 
     resolved = order or _dataset_hard_sample_order(stores, name)
     key_map = pick_score_map if resolved == "info_gain" else delta_map
-    measured = {sid for sid in selected if series.get(sid)}
+    measured = {c.sample_id for c in cells if _is_graded(c)}
     # Unmeasured rows carry a prior-fitted key they never earned in this scope, so they trail
     # on sample_id rather than sorting into the measured block on it.
     ranked = sorted(
@@ -259,13 +265,14 @@ def _resolve_leaderboard_page(
         delta_se_map=delta_se_map,
         n_obs_map=n_obs_map,
         pick_score_map=pick_score_map,
-        series=series,
+        candidates=candidates,
+        cells=cells,
         order=resolved,
         ranked=ranked,
     )
 
 
-def _page_series(
+def _page_cells(
     art_store: Stores,
     *,
     scope: HeatmapScope,
@@ -273,21 +280,16 @@ def _page_series(
     campaign: str | None,
     cycle: str | None,
     page: list[int],
-) -> dict[int, list[dict[str, Any]]]:
-    """Three scopes, three sources, ONE dot shape — each producer emits `{ord, fitness,
-    label}` itself, so nothing is re-mapped here."""
+) -> ScopeCells:
+    """Three scopes, three sources, one cell shape — each walk emits `CellRow`s itself, so
+    nothing is re-mapped here."""
     if scope == "cycle":
         assert campaign is not None and cycle is not None  # checked in resolver
-        return cycle_measurement_series(
-            art_store, CycleHop(campaign_id=campaign, cycle_id=cycle), set(page)
-        )
+        return cycle_cells(art_store, CycleHop(campaign_id=campaign, cycle_id=cycle), set(page))
     if scope == "campaign":
         assert campaign is not None  # checked in resolver
-        return campaign_measurement_series(art_store, campaign, set(page))
-    return {
-        sid: [{"ord": m["ord"], "fitness": m["fitness"], "label": m["label"]} for m in ms]
-        for sid, ms in measurement_series_for_samples(art_store, page, dataset_name=name).items()
-    }
+        return campaign_cells(art_store, campaign, set(page))
+    return dataset_cells(art_store, dataset_name=name, wanted=set(page))
 
 
 def _dataset_hard_sample_order(stores: Stores, name: str) -> HardSampleOrder:
@@ -348,47 +350,84 @@ class DatasetItem(StrictModel):
             "near 0/1 = predictable. None when unmeasured."
         ),
     )
+    n_measured: int = Field(
+        default=0,
+        description="GRADED cells of this sample in scope (errored and unscored cells excluded, as "
+        "the Rasch fit excludes them) — the denominator of the two below.",
+    )
+    n_hits: int = Field(
+        default=0,
+        description="Of those, how many maxed out the active scorer (`domain.scoring.is_hit`). "
+        "Structurally 0 on a graded scorer; read `mean_fitness` there.",
+    )
+    mean_fitness: float | None = Field(
+        default=None, description="Mean graded fitness over those cells; null when none."
+    )
 
 
-class DatasetPreviewResponse(StrictModel):
+class CellsResponse(StrictModel):
+    """The measurement log of one scope, in served order: ``samples`` ranked (their
+    ``hard_sample_rank``), ``candidates`` chronological within a cycle, ``cells`` by candidate,
+    then in each candidate's walk order, so the flat list is the run's time series.
+    A client GROUPS these — by sample, by candidate or not at all — by bucketing the served list
+    under a served key order, and never re-sorts: an ordering is a score."""
+
     name: str
+    scope: HeatmapScope
     row_count: int
     split_test: int | None = Field(
         default=None,
         description="Declared held-out test fold size (not materialized). The training-bank "
-        "size is `row_count` above — the bank IS the preview, so a second field restated it.",
+        "size is `row_count` above.",
     )
     order: HardSampleOrder = Field(
-        description="The key `items` are ranked by — the request's `order` when it named one, "
+        description="The key `samples` are ranked by — the request's `order` when it named one, "
         "else the dataset's `CampaignConfig.hard_sample_order`. Echoed so a client that sent "
         "no override can label what it is showing without guessing the default.",
     )
-    items: list[DatasetItem]
+    samples: list[DatasetItem]
+    candidates: list[CellCandidate]
+    cells: list[CellRow]
+    total_measurements: int = Field(
+        description="Graded cells across `samples` — the headline's denominator, served so the "
+        "reader adds nothing up."
+    )
+    total_hits: int
+    mean_fitness: float | None = Field(
+        description="Mean graded fitness across those cells; null when the scope holds none."
+    )
 
 
-@datasets_router.get("/{name}/preview", response_model=DatasetPreviewResponse)
-def get_dataset_preview(
+def _is_graded(c: CellRow) -> bool:
+    return c.fitness is not None and c.status != "ERR"
+
+
+def _graded(cells: list[CellRow]) -> list[float]:
+    return [c.fitness for c in cells if c.fitness is not None and _is_graded(c)]
+
+
+@datasets_router.get("/{name}/cells", response_model=CellsResponse)
+def get_dataset_cells(
     name: str,
     stores: StoresDep,
-    limit: int = Query(default=50, ge=1, le=1000),
+    limit: int = Query(default=50, ge=1, le=1000, description="Samples per page."),
     max_unmeasured: int | None = Query(
         default=None,
         ge=0,
         le=1000,
-        description="Cap on unmeasured rows kept in Rasch-sorted output; None = no trim.",
+        description="Cap on unmeasured samples kept in the ranking; None = no trim.",
     ),
-    scope: Literal["cycle", "campaign", "dataset"] = Query(
-        default="dataset",
-        description="dataset=cross-campaign; campaign=pooled (needs campaign_id); cycle=one cycle (needs both ids).",
-    ),
+    scope: Annotated[
+        HeatmapScope,
+        Query(
+            description="dataset=cross-campaign; campaign=pooled (needs campaign_id); "
+            "cycle=one cycle (needs both ids).",
+        ),
+    ] = "dataset",
     campaign_id: str | None = Query(
-        default=None,
-        description="Required when scope is campaign or cycle.",
+        default=None, description="Required when scope is campaign or cycle."
     ),
-    cycle_id: str | None = Query(
-        default=None,
-        description="Required when scope=cycle; ignored otherwise.",
-    ),
+    cycle_id: str | None = Query(default=None, description="Required when scope=cycle."),
     descend: str | None = Query(
         default=None,
         description=(
@@ -404,14 +443,22 @@ def get_dataset_preview(
             "`CampaignConfig.hard_sample_order`. The resolved value comes back on `order`.",
         ),
     ] = None,
-) -> DatasetPreviewResponse:
-    """Hard-sample leaderboard, served in rank order — `items[i].hard_sample_rank == i + 1`.
-
-    Rows measured in this scope rank first by the `order` key, the rest trail by sample_id.
-    *Measured* is dot presence in the companion `/measurement-series`, not a δ entry: the
-    Rasch ruler persists across rounds and inherits from parent fits, so it overcounts on its
-    own. Both routes resolve the page through one function, so they cannot disagree.
-    """
+    candidate_id: str | None = Query(
+        default=None,
+        description="Keep only this individual's cells (`CellCandidate.candidate_id`). A "
+        "campaign's candidates carry one; dataset-scope runs do not, so there it keeps nothing.",
+    ),
+    round: int | None = Query(
+        default=None,
+        description="Keep only this round's cells. Dataset-scope runs carry no round, so there "
+        "it keeps nothing.",
+    ),
+    status: Annotated[
+        SampleStatus | None, Query(description="Keep only cells with this mark.")
+    ] = None,
+) -> CellsResponse:
+    """The measurement log. Under a filter, ``samples`` and ``candidates`` shrink to the ones
+    holding a kept cell, so a preset (one candidate, one round) serves exactly its own rows."""
     dataset_dir = readable_dataset_dir(stores, name)
     page = _resolve_leaderboard_page(
         stores,
@@ -448,177 +495,81 @@ def get_dataset_preview(
             se_delta_s=page.delta_se_map.get(sid, 0.0),
         )
 
-    items = [
-        DatasetItem(
+    round_of = {c.key: c.round for c in page.candidates}
+    individual_of = {c.key: c.candidate_id for c in page.candidates}
+    kept = [
+        c
+        for c in page.cells
+        if (candidate_id is None or individual_of.get(c.candidate) == candidate_id)
+        and (round is None or round_of.get(c.candidate) == round)
+        and (status is None or c.status == status)
+    ]
+    rank_of = {sid: i for i, sid in enumerate(page.ranked)}
+    cand_pos = {c.key: i for i, c in enumerate(page.candidates)}
+    # CHRONOLOGICAL: candidates in the order they ran, each one's cells in its walk order — so the
+    # flat log is a time series, and a sample group (bucketed under the ranked `samples`) lists
+    # its cells oldest first. A stable sort, so the walk order inside a candidate survives.
+    kept.sort(key=lambda c: cand_pos[c.candidate])
+    by_sample: dict[int, list[CellRow]] = {}
+    for c in kept:
+        by_sample.setdefault(c.sample_id, []).append(c)
+
+    filtered = candidate_id is not None or round is not None or status is not None
+    ranked = [sid for sid in page.ranked if sid in by_sample] if filtered else page.ranked
+    held = {c.candidate for c in kept}
+    candidates = [c for c in page.candidates if c.key in held] if filtered else page.candidates
+
+    def _item(sid: int) -> DatasetItem:
+        graded = _graded(by_sample.get(sid, []))
+        return DatasetItem(
             sample_id=sid,
             query=sample_lookup[sid]["query"],
             ground_truth=sample_lookup[sid].get("ground_truth"),
             task=sample_lookup[sid].get("task"),
-            hard_sample_rank=rank,
+            # The position in the UNFILTERED ranking — a filter narrows the rows, it does not
+            # re-rank them.
+            hard_sample_rank=rank_of[sid] + 1,
             n_obs=page.n_obs_map.get(sid),
             delta=page.delta_map.get(sid),
             delta_se=page.delta_se_map.get(sid),
             p_hat=_p_hat(sid),
             pick_score=page.pick_score_map.get(sid),
+            n_measured=len(graded),
+            n_hits=sum(1 for f in graded if is_hit(f)),
+            mean_fitness=sum(graded) / len(graded) if graded else None,
         )
-        for rank, sid in enumerate(page.ranked, start=1)
-    ]
 
     # Held-out test fold from campaign config — display-only; never materialized. Read off
-    # the typed knob (`CampaignConfig.dataset_split`), not a raw-dict re-parse: one field,
-    # one reader, one shape.
+    # the typed knob (`CampaignConfig.dataset_split`), not a raw-dict re-parse.
     campaign_path = dataset_campaign_path(dataset_dir)
     declared = (
         load_dataset_campaign_config(campaign_path).dataset_split
         if campaign_path.is_file()
         else None
     )
-
-    return DatasetPreviewResponse(
+    graded_all = _graded(kept)
+    return CellsResponse(
         name=page.raw["name"],
+        scope=scope,
         row_count=len(sample_lookup),
         split_test=declared.test if declared else None,
         order=page.order,
-        items=items,
+        samples=[_item(sid) for sid in ranked],
+        candidates=candidates,
+        cells=kept,
+        total_measurements=len(graded_all),
+        total_hits=sum(1 for f in graded_all if is_hit(f)),
+        mean_fitness=sum(graded_all) / len(graded_all) if graded_all else None,
     )
 
 
-class MeasurementDot(StrictModel):
-    ord: str = Field(
-        description="Opaque ordinal for lex sort + uniqueness (encodes ts/run/idx or round/cand).",
-    )
-    fitness: float = Field(
-        description="Graded per-sample score in [0,1] under the active scorer. Binary "
-        "scorers emit exactly 0.0 or 1.0; render a shade, not a HIT/MISS boolean.",
-    )
-    label: str = Field(description="Short human label, e.g. 'R3 cand 2'.")
-
-
-class SampleSeries(StrictModel):
-    sample_id: int
-    measurements: list[MeasurementDot]
-    n_hits: int = Field(
-        description="How many of THIS series' measurements maxed out the active scorer "
-        "(`domain.scoring.is_hit`, the one definition of that threshold). Served rather than "
-        "counted client-side so the tally and the dots it summarises cannot disagree — and so "
-        "a graded scorer, whose ceiling is unreachable, reports 0 against a mean that is not 0.",
-    )
-    mean_fitness: float | None = Field(
-        description="Mean graded fitness over this series; `None` when it holds no measurement. "
-        "The rate to read on a graded scorer, where `n_hits` is structurally 0.",
-    )
-
-
-class MeasurementSeriesResponse(StrictModel):
-    name: str
-    scope: HeatmapScope
-    order: HardSampleOrder = Field(
-        description="The key `items` are ranked by, resolved exactly as `/preview`'s. Echoed on "
-        "BOTH responses because they are one page read twice: a client holding only one of them "
-        "would otherwise have to name the order from the other, or guess the default.",
-    )
-    items: list[SampleSeries]
-    total_measurements: int = Field(
-        description="Measurements across every series in `items` — the denominator of the "
-        "roster's headline, served so the reader adds nothing up.",
-    )
-    total_hits: int = Field(
-        description="`SampleSeries.n_hits` summed across `items`. Structurally 0 on a graded "
-        "scorer; read `mean_fitness` there.",
-    )
-    mean_fitness: float | None = Field(
-        description="Mean graded fitness across every measurement in `items`; `None` when the "
-        "scope holds none. The headline rate on any scorer, graded or binary.",
-    )
-
-
-def _sample_series(sample_id: int, dots: list[dict[str, Any]]) -> SampleSeries:
-    """One sample's dots plus the aggregates over exactly those dots. Every scope builds its dots
-    from a different source, so a second pass anywhere else would be counting a different set."""
-    fitness = [float(d["fitness"]) for d in dots]
-    return SampleSeries(
-        sample_id=sample_id,
-        measurements=[MeasurementDot(**d) for d in dots],
-        n_hits=sum(1 for f in fitness if is_hit(f)),
-        mean_fitness=sum(fitness) / len(fitness) if fitness else None,
-    )
-
-
-@datasets_router.get(
-    "/{name}/measurement-series",
-    response_model=MeasurementSeriesResponse,
-)
-def get_dataset_measurement_series(
-    name: str,
-    stores: StoresDep,
-    limit: int = Query(default=50, ge=1, le=1000),
-    max_unmeasured: int | None = Query(
-        default=None,
-        ge=0,
-        le=1000,
-        description="Must match `/preview`'s value so the two responses align by index.",
-    ),
-    scope: Literal["cycle", "campaign", "dataset"] = Query(
-        default="dataset",
-        description="Same scopes as `/preview` (dataset/campaign/cycle).",
-    ),
-    campaign_id: str | None = Query(
-        default=None,
-        description="Required when scope is campaign or cycle.",
-    ),
-    cycle_id: str | None = Query(
-        default=None,
-        description="Required when scope=cycle; ignored otherwise.",
-    ),
-    descend: str | None = Query(
-        default=None,
-        description="L4 inner-cycle descent tail — same seam as `/preview`'s `descend`.",
-    ),
-    order: Annotated[
-        HardSampleOrder | None,
-        Query(
-            description="Same override as `/preview`'s; send the same value to keep the two "
-            "responses in one order.",
-        ),
-    ] = None,
-) -> MeasurementSeriesResponse:
-    """Chronological per-sample series for the Meas heat-map column. Same page, same order as
-    `/preview` — both resolve it through `_resolve_leaderboard_page`, so alignment is a shared
-    function rather than two matching sort keys. `ord` is opaque (only row alignment).
-    """
-    readable_dataset_dir(stores, name)  # 404s an unknown slug before we answer with an empty bank
-    page = _resolve_leaderboard_page(
-        stores,
-        name=name,
-        scope=scope,
-        campaign_id=campaign_id,
-        cycle_id=cycle_id,
-        descend=descend,
-        limit=limit,
-        max_unmeasured=max_unmeasured,
-        order=order,
-    )
-    items = [_sample_series(sid, page.series.get(sid, [])) for sid in page.ranked]
-    n_meas = sum(len(it.measurements) for it in items)
-    return MeasurementSeriesResponse(
-        name=page.raw["name"],
-        scope=scope,
-        order=page.order,
-        items=items,
-        total_measurements=n_meas,
-        total_hits=sum(it.n_hits for it in items),
-        mean_fitness=(
-            sum(float(d.fitness) for it in items for d in it.measurements) / n_meas
-            if n_meas
-            else None
-        ),
-    )
+@datasets_router.get("/{name}/cells/{run_id}/{sample_id}", response_model=Cell)
+def get_dataset_cell(name: str, run_id: str, sample_id: int, stores: StoresDep) -> Cell:
+    """One cell opened — its row assembled into a trace (`application/scoring/cells.py`)."""
+    return open_cell(stores, name, run_id, sample_id)
 
 
 __all__ = [
+    "CellsResponse",
     "DatasetItem",
-    "DatasetPreviewResponse",
-    "MeasurementDot",
-    "MeasurementSeriesResponse",
-    "SampleSeries",
 ]

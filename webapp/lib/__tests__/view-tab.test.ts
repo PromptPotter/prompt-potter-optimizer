@@ -14,7 +14,7 @@ const ALL: readonly Tab[] = [...PRIMARY_TABS, ...RECORDS_TABS];
 
 describe("view-tab", () => {
   it("groups every view — the strip's top row has exactly three values", () => {
-    expect(ALL.map(groupOf)).toEqual(["chat", "dashboard", "records", "records", "records"]);
+    expect(ALL.map(groupOf)).toEqual(["chat", "dashboard", "records", "records", "records", "records"]);
   });
 
   it("the Records entry is inside Records, so arriving there lights its own segment", () => {

@@ -1,0 +1,240 @@
+/* Measurements — the one measurement log (`shell/measurements/MeasurementsPane`) and the
+   cell it opens (`shell/cell/CellPanel`). Every value is a token. */
+
+.ms-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+  padding: var(--space-12);
+}
+
+.ms-pane.is-stale {
+  opacity: 0.6;
+}
+
+.ms-toolbar {
+  overflow-x: auto;
+  padding-bottom: var(--space-4);
+}
+
+.ms-summary {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.ms-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.ms-group-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.ms-rank {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.ms-sid {
+  font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+}
+
+.ms-query {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-dim,
+.cell-dim {
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+.ms-live {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.ms-fit,
+.cell-fit {
+  display: inline-block;
+  min-width: 3.2em;
+  padding: 0 var(--space-4);
+  border-radius: var(--border-radius-sm);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.ms-status,
+.cell-status {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.ms-status.is-hit,
+.cell-status.is-hit {
+  color: var(--color-success);
+}
+
+.ms-status.is-miss,
+.cell-status.is-miss {
+  color: var(--color-danger);
+}
+
+.ms-status.is-err,
+.cell-status.is-err {
+  color: var(--color-warn);
+}
+
+.ms-status.is-unsc,
+.cell-status.is-unsc {
+  color: var(--color-text-tertiary);
+}
+
+/* ── The cell panel ─────────────────────────────────────────── */
+
+.cell-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.cell-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  font-size: var(--text-sm);
+}
+
+.cell-tag {
+  color: var(--color-cache);
+  font-size: var(--text-xs);
+}
+
+.cell-answer {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  gap: var(--space-8);
+}
+
+.cell-label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-4);
+}
+
+.cell-pre {
+  margin: 0;
+  padding: var(--space-8);
+  border-radius: var(--border-radius-sm);
+  background: var(--color-background-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.cell-query summary {
+  cursor: pointer;
+}
+
+.cell-trace {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(0, 3fr);
+  gap: var(--space-10);
+  min-width: 0;
+}
+
+.cell-spans {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.cell-span {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: var(--space-6) var(--space-8);
+  border: 1px solid var(--color-border);
+  border-radius: var(--border-radius-sm);
+  background: var(--color-background-primary);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: start;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.cell-span.on {
+  border-color: var(--color-accent);
+  background: var(--color-background-tint);
+}
+
+.cell-span.terminal .cell-span-name::after {
+  content: " ■";
+  color: var(--color-text-tertiary);
+}
+
+.cell-span-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.cell-inspect {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.cell-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-4) var(--space-10);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.cell-facts dt {
+  color: var(--color-text-secondary);
+}
+
+.cell-facts dd {
+  margin: 0;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .cell-trace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

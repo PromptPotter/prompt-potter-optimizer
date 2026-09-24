@@ -108,7 +108,12 @@ LEDGER_BASELINE = {
     # trial; a cancelled cell lost every bill it had paid and was charged its whole bound in their
     # place ($1.87 of fiction on a campaign the provider had billed $0.235). The meter puts each
     # send through the same admission and bill as our own, which folds the per-cell settle away.
-    "modules": 358,
+    # +3: the CELL read — `domain/cells.py` (the one served shape of candidate × sample),
+    # `infrastructure/store/cell_queries.py` (the three scope walks, which replace the three
+    # per-sample dot series deleted from `archive_queries.py`) and `application/scoring/cells.py`
+    # (one cell assembled into its trace at read time). A cell had three shapes and an opaque `ord`
+    # string encoding its candidate; the browser rebuilt it per surface, four renderings of a row.
+    "modules": 361,
     # +1: `application/commands/__init__.py`, empty — importers name the submodule.
     # +3: `application/{evidence,diagnostics,maintenance}/__init__.py`, empty for the same reason.
     "init_files": 53,
@@ -196,7 +201,9 @@ LEDGER_BASELINE = {
     # 230 depending only on whether anything in the process had validated a `RoundResult` first,
     # and the gate saw 213 because `test_complexity_ledger` sorts ahead of every file that builds
     # one. The walk rebuilds each model now; nothing was added.
-    "cycle_result_fields": 230,
+    # +1: `ScoredCandidate.run_id` — the archive run a report's rows were filed under, which makes
+    # `(run_id, sample_id)` a cell's address. `sp_hash` names the configuration, not the reading.
+    "cycle_result_fields": 231,
     # +1: `judges/__init__.py::_compute(**_: Any)` — the `Evaluator.compute` a judge becomes. The
     # materializers pass `result` and `schema` to every evaluator, and each one absorbs the kwargs
     # it does not read; every compute fn in `scoring/evaluators.py` has the same tail for the same
@@ -240,7 +247,9 @@ LEDGER_BASELINE = {
     # it. Its return is typed; only the `Campaign.config` snapshot param counts.
     # −2: `EscalationSignal.to_dict` and `ValidatorOutcome.to_dict` — neither had a caller, and the
     # signal's candidate position they would have serialized was read by nothing either.
-    "domain_any_maps": 90,
+    # +1: `CellSpan.config` — a node's config for one run, prompt excepted: the per-node dict every
+    # node config already is, served as the panel's Details tab.
+    "domain_any_maps": 91,
     "models_lax": 3,
     "prompt_string_fields": 6,
     "injections": 32,
@@ -514,7 +523,12 @@ LEDGER_BASELINE = {
     # twice through `CampaignDetailResponse`) — what sends that ended with no bill may have cost.
     # It was folded INTO the spend figure as if billed; served apart, "spent" is the providers'
     # bills alone, and the ceiling's other input is still on screen rather than hidden in it.
-    "served_fields": 603,
+    # +42: the cell read (`GET /datasets/{name}/cells` + `/cells/{run_id}/{sample_id}`) —
+    # `CellsResponse`, `CellCandidate`, `CellRow`, `Cell`, `CellSpan`, `DatasetItem`'s three
+    # per-sample aggregates and `DashboardCandidate.run_id`, NET of the deleted
+    # `DatasetPreviewResponse` / `MeasurementSeriesResponse` / `SampleSeries` / `MeasurementDot`:
+    # two reads that had to be kept aligned by index become one.
+    "served_fields": 645,
 }
 
 

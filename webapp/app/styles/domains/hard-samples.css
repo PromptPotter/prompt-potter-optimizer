@@ -1,9 +1,8 @@
-/* Hard-samples heat-map. Collapsed: a compact resizable badge — one 4 px
-   tile per sample (matching the original badge) in live Rasch difficulty
-   order (green = mostly hit, red = mostly miss, dark = no measurements).
-   Standard layout ~10 tiles across × 3 down; drag the bottom-right corner
-   on either axis to resize — tiles keep their size, the grid reflows how
-   many show. The grip fades in on hover. Click to expand HardSamplesTable. */
+/* Hard-samples heat-map: a compact resizable badge — one 4 px tile per sample in the
+   served ranking (green = mostly hit, red = mostly miss, dark = no measurements).
+   Standard layout ~10 tiles across × 3 down; drag the bottom-right corner on either
+   axis to resize — tiles keep their size, the grid reflows how many show. The grip
+   fades in on hover. Click to unfold the leaderboard in place. */
 .hs-heat-wrap{display:flex;flex-direction:column;align-items:center;gap:var(--space-6);width:100%;margin-top:24px;padding:0 var(--space-8)}
 /* Two-button control row: heat-map mini on the left, sample-trajectory
    mini on the right. Each owns an independent expand state; their
@@ -42,7 +41,7 @@
    `--hs-mini-tile` instead of ever clipping. */
 .hs-mini-tiles{display:grid;grid-template-columns:repeat(auto-fill,var(--hs-mini-tile,4px));grid-auto-rows:var(--hs-mini-tile,4px);gap:1px;align-content:start}
 /* Unmeasured/kept is the base; a measured heat-map cell takes its hue inline
-   from `columns.ts::fitnessStyle`, the same shade the table row wears. */
+   from `lib/derivations/fitness-shade.ts::fitnessStyle`, the shade Measurements wears. */
 .hs-mini-cell{width:var(--hs-mini-tile,4px);height:var(--hs-mini-tile,4px);border-radius:1px;background:var(--color-background-tertiary)}
 .hs-mini-cell.new{background:var(--color-new)}
 .hs-mini-cell.gained{background:var(--color-success)}
@@ -87,114 +86,15 @@
 .st-chip.computed{color:var(--color-success);border-color:var(--color-success-border);background:var(--color-success-bg)}
 .st-chip.current{color:var(--color-new);border-color:var(--color-new-border);background:var(--color-new-bg)}
 .st-chip.planned{color:var(--color-text-tertiary);background:var(--color-background-secondary)}
-/* Expanded wrap — full-bleed breakout from the 980 px hero. Left gutter
-   tracks where a 1280 px centred block would sit (the operator's preferred
-   distance); the right edge runs to a 24 px viewport gutter. */
-.hs-expand-wrap{position:relative;align-self:stretch;width:100vw;margin-left:calc(50% - 50vw);display:flex;justify-content:flex-start;padding-left:max(8px,calc((100vw - 1280px) / 2));padding-right:24px}
-/* --- Expanded view: full HardSamplesTable ---
-   `.hs-block` is the table's root; each embed (`.hs-expand-wrap` here, `.hsp-full`
-   in the chat card) owns its own placement. The table carries none of its own. */
-/* Width tracks the columns' total via --hs-table-w (set inline), so folding
-   or narrowing a column shrinks the whole block instead of leaving dead
-   space; max-width caps it at the available width. resize:both — drag the
-   bottom-right corner on either axis; that writes an inline `width` which
-   overrides the custom property, so a manual size sticks. */
-/* min() not a bare 360px: `max-width:100%` cannot win against a larger
-   min-width, so the block kept claiming 360 inside a ~351px phone content
-   box and pushed the page into horizontal scroll. */
-.hs-block{width:var(--hs-table-w,fit-content);max-width:100%;min-width:min(360px,100%);display:flex;flex-direction:column;align-items:stretch;border:1px solid var(--color-border);border-radius:10px;background:var(--color-background-secondary);overflow:hidden;resize:both;height:calc(30px + 16.5 * 26px + 33px);min-height:200px;max-height:80vh}
+
 /* A drag-to-resize corner is unoperable on touch — no hover, no grip. Both
    resizable surfaces drop the affordance rather than advertise it. */
 @media (pointer:coarse){
-  .hs-block,
   .hs-mini-btn.resizable{resize:none}
 }
-.hs-scroll{flex:1;min-height:0;overflow:auto}
-.hs-grid{display:grid;grid-auto-rows:min-content;background:var(--color-background-secondary);position:relative}
-.hs-header{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:var(--space-4);padding:0 var(--space-8);height:30px;background:var(--color-background-secondary);border-bottom:1px solid var(--color-border);font-size:var(--text-xs);letter-spacing:.10em;text-transform:uppercase;color:var(--color-text-tertiary);font-weight:600;user-select:none;overflow:hidden}
-.hs-header[data-align="right"]{justify-content:flex-end}
-.hs-header[data-align="center"]{justify-content:center}
-.hs-header.folded{padding:0 2px;justify-content:center}
-.hs-header.sorted{color:var(--color-accent)}
-.hs-header-label{background:transparent;border:0;cursor:pointer;font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit;padding:0;display:inline-flex;align-items:center;gap:var(--space-4);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
-.hs-header[data-align="right"] .hs-header-label{justify-content:flex-end}
-.hs-header[data-align="center"] .hs-header-label{justify-content:center}
-.hs-header-label:hover{color:var(--color-text-primary)}
-.hs-header.sorted .hs-header-label{color:var(--color-accent)}
-.hs-sort-mark{font-size:var(--text-xs);opacity:.85}
-.hs-header-tools{display:flex;align-items:center;gap:1px;opacity:0;transition:opacity .12s;flex-shrink:0}
-.hs-header:hover .hs-header-tools{opacity:1}
-.hs-tool{background:transparent;border:0;font-size:var(--text-xs);cursor:pointer;color:var(--color-text-tertiary);padding:2px var(--space-4);border-radius:3px;line-height:1}
-.hs-tool:hover{background:rgba(var(--color-accent-rgb),0.10);color:var(--color-accent)}
-.hs-tool.on{color:var(--color-accent);background:rgba(var(--color-accent-rgb),0.12)}
-.hs-resize{width:6px;align-self:stretch;margin-left:2px;cursor:col-resize;background:transparent;border-right:1px solid var(--color-border);flex-shrink:0;touch-action:none}
-.hs-resize:hover{border-right-color:var(--color-accent);background:rgba(var(--color-accent-rgb),0.10);border-right-width:2px}
-.hs-cell{padding:var(--space-6) var(--space-10);font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-text-primary);border-bottom:1px solid var(--color-border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;content-visibility:auto;contain-intrinsic-size:auto 26px;display:flex;align-items:center;min-width:0}
-.hs-cell[data-align="right"]{justify-content:flex-end;font-variant-numeric:tabular-nums}
-.hs-cell[data-align="center"]{justify-content:center}
-.hs-cell.wrapped{white-space:normal;overflow-wrap:anywhere;align-items:flex-start;padding:var(--space-6) var(--space-10)}
-.hs-cell.folded{padding:0;color:transparent;cursor:pointer}
-.hs-cell.folded:hover{background:rgba(var(--color-accent-rgb),0.08)}
-.hs-cell.rank,.hs-header.rank{color:var(--color-text-tertiary);background:var(--color-background-primary)}
-.hs-cell.rank{font-variant-numeric:tabular-nums}
-.hs-cell.meas{padding:0;overflow:hidden}
-/* flex-wrap so a narrow table (folded columns / shrink-wrapped width)
-   wraps whole controls onto a second row instead of squashing their text. */
-.hs-footer{padding:var(--space-6) var(--space-10);border-top:1px solid var(--color-border);background:var(--color-background-primary);font-size:var(--text-xs);color:var(--color-text-tertiary);letter-spacing:.04em;display:flex;flex-wrap:wrap;justify-content:flex-start;align-items:center;gap:var(--space-8) var(--space-12)}
-.hs-counts{margin-left:32px;font-family:var(--font-mono);color:var(--color-text-secondary);white-space:nowrap;flex-shrink:0}
-/* The reset button rides a HoverCard, so the "push flush right" margin lives on
-   its wrapper (the flex item `.hs-footer` sees) rather than on the button, which
-   is now one layer deeper. */
-.hs-reset-wrap{margin-left:auto;flex-shrink:0}
-.hs-reset{white-space:nowrap;font-family:var(--font-mono);font-size:var(--text-xs);background:transparent;border:1px solid var(--color-border);color:var(--color-text-secondary);padding:3px var(--space-8);border-radius:4px;cursor:pointer}
-.hs-reset:hover{border-color:var(--color-accent);color:var(--color-accent)}
-.hs-header.sort-locked .hs-header-label{color:var(--color-text-tertiary);cursor:default}
-.hs-header.sort-locked .hs-header-label:hover{color:var(--color-text-tertiary)}
-.hs-sync-toggle{display:inline-flex;align-items:center;gap:var(--space-6);flex-shrink:0;white-space:nowrap;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary);letter-spacing:.04em;cursor:pointer;user-select:none}
-.hs-sync-toggle input[type="checkbox"]{accent-color:var(--color-accent);margin:0;cursor:pointer}
-.hs-sync-toggle:hover{color:var(--color-text-primary)}
-.hs-cell[data-running="true"]{animation:hs-soft-blink 1.4s ease-in-out infinite}
-@keyframes hs-soft-blink{0%,100%{background-color:transparent}50%{background-color:rgba(var(--color-accent-rgb),0.18)}}
-.hs-popover{background:var(--color-background-secondary);border:1px solid var(--color-border);border-radius:10px;max-width:80vw;max-height:80vh;min-width:min(320px,100%);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.5)}
-.hs-popover-header{padding:var(--space-10) var(--space-14);border-bottom:1px solid var(--color-border);display:flex;align-items:center;justify-content:space-between;font-size:var(--text-sm);color:var(--color-text-secondary);letter-spacing:.04em}
-.hs-popover-header button{background:transparent;border:0;color:var(--color-text-tertiary);font-size:var(--text-2xl);cursor:pointer;padding:0 var(--space-4);line-height:1}
-.hs-popover-header button:hover{color:var(--color-accent)}
-.hs-popover-body{margin:0;padding:var(--space-14);overflow:auto;font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-text-primary);white-space:pre-wrap;word-break:break-word}
-.hs-heat-empty{color:var(--color-text-tertiary);font-style:italic}
-/* One <canvas> per row — the whole hit/miss history compressed into the
-   column width. See MeasHeatCell.tsx / heat-canvas.ts. */
-.hs-heat-canvas{display:block;width:100%;height:20px;cursor:pointer}
-/* Virtualised body. .hs-header-row holds the sticky headers; .hs-body is
-   the scroll-bar-sizing container that holds the absolutely-positioned
-   .hs-row windows. Both keep the same grid template as the header so cell
-   widths stay aligned across the sticky boundary. */
-.hs-header-row{position:sticky;top:0;z-index:3}
-.hs-body{will-change:transform}
-.hs-row{border-bottom:1px solid var(--color-border)}
-.hs-row > .hs-cell{border-bottom:0}
-/* Selection marker — anchored inside .hs-body, spans the full virtual
-   height (the body's height drives the scroll-bar, so 0..100% covers every
-   virtual row regardless of which ones are mounted right now). */
-.hs-heat-marker{position:absolute;top:0;bottom:0;width:2px;background:var(--color-accent);box-shadow:0 0 4px var(--color-accent-glow);pointer-events:none;z-index:1}
-/* Stale dim — applied while useDatasetPreview is fetching a fresh slice
-   over a prior-unit cache hit. The prior data stays readable but the
-   block dims so the operator knows it's transitional. */
-.hs-block[data-stale="true"]{opacity:.55;transition:opacity .12s}
-/* The PHONE form of the roster (HardSamplesPreview::HardSamplesSheet) — the whole
-   viewport rather than a slot in a chat bubble. The block drops the geometry it
-   wears inline: no preset height, no shrink-wrapped width, no corner grip, no
-   frame of its own, because the sheet IS the frame. Horizontal panning stays in
-   `.hs-scroll`, where it belongs; the page behind it does not move. */
-.hsp-sheet{position:fixed;inset:0;z-index:1000;display:flex;flex-direction:column;background:var(--color-background-primary)}
-.hsp-sheet-head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);padding:var(--space-10) var(--space-12);border-bottom:1px solid var(--color-border)}
-.hsp-sheet-title{font-size:var(--text-md);color:var(--color-text-primary);font-weight:500}
-.hsp-sheet-close{width:44px;height:44px;flex-shrink:0;background:transparent;border:0;color:var(--color-text-secondary);font-size:var(--text-lg);line-height:1;cursor:pointer}
-.hsp-sheet-close:hover{color:var(--color-accent)}
-.hsp-sheet-close:focus-visible{outline:2px solid var(--color-accent);outline-offset:-2px}
-.hsp-sheet-body{flex:1;min-height:0;display:flex}
-.hsp-sheet-body .hs-block{width:100%;min-width:0;max-width:none;height:auto;min-height:0;max-height:none;border:0;border-radius:0;resize:none}
-.hs-heat-tip{position:fixed;z-index:1000;padding:3px var(--space-6);border-radius:4px;background:var(--color-background-primary);border:1px solid var(--color-border);font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-primary);white-space:nowrap;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,0.35)}
-@media (prefers-reduced-motion:reduce){
-  .hs-cell[data-running="true"]{animation:none;background-color:rgba(var(--color-accent-rgb),0.12)}
-}
 
+.hs-heat-empty{color:var(--color-text-tertiary);font-style:italic}
+
+/* The leaderboard unfolded under the strip — the column's full width, never wider: the table
+   scrolls inside itself, so nothing here may push past the chat column's edges. */
+.hs-expand-wrap{align-self:stretch;width:100%;min-width:0}

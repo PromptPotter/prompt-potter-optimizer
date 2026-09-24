@@ -23,3 +23,5 @@ export * from "./Term";
 export * from "./Toolbar";
 export * from "./ValueList";
 export * from "./VendorLogo";
+export * from "./DataTable";
+export * from "./SidePanel";

@@ -10,25 +10,27 @@
 // places and neither can do the other's job: the dashboard holds a live snapshot for the ONE cycle
 // it streams (`webapp/CLAUDE.md` § Polling shape allows exactly one), while a Compare channel may
 // sit on any branch of any campaign and has only that branch's round file. So the host resolves
-// the row, the spec and the samples, and hands them over.
+// the row and the spec, and hands them over. The point's CELLS are not listed here: the host
+// hangs a Measurements preset (`shell/measurements/MeasurementsPane`) in the `measurements` slot,
+// so a searchpoint's samples read exactly like every other list of cells.
 //
 // Every number here is SERVED. Nothing subtracts, ranks or re-scores: the lift is the election's
 // own verdict with its own interval, not a difference of two accuracies computed in the browser.
 
-import type { ElectedRow, PipelineStatus, SampleRow } from "@/lib/types";
+import type { ReactNode } from "react";
+import type { ElectedRow, PipelineStatus } from "@/lib/types";
 import type { NodeConfigParam, NodeOutputSchema } from "@/lib/api";
 import { cacheShare, prefixReading, type ObserveConfig } from "@/lib/derivations";
 import { TERMS } from "@/lib/terms";
 import { NOT_SEPARABLE, liftSeparates } from "@/lib/fitness";
 import { Term } from "@/components/ui";
-import { fmtPct0, fmtPct1, fmtSigned, fmtTokens } from "@/lib/format";
+import { fmtPct1, fmtSigned, fmtTokens } from "@/lib/format";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
-import { SampleRowItem, SAMPLE_RENDER_CAP } from "@/components/shell/samples/SampleRowItem";
 
 export function SearchpointDrillIn({
   row,
   cfg,
-  samples,
+  measurements,
   arms,
   schema,
   schemaStatus,
@@ -44,7 +46,9 @@ export function SearchpointDrillIn({
   row: ElectedRow | null;
   // Its runnable specification, through the one observe join every spec surface reads.
   cfg: ObserveConfig | null;
-  samples: readonly SampleRow[];
+  // The point's cells — a Measurements preset the host configures, since only it knows which
+  // cycle and dataset the point was read from.
+  measurements?: ReactNode;
   // How many arms stood in this point's round. `null` = the host cannot say, which is a different
   // fact from one — a crown over no rivals is not an election.
   arms: number | null;
@@ -178,31 +182,7 @@ export function SearchpointDrillIn({
           </>
         )}
       </div>
-      {samples.length > 0 && (
-        <div className="inspector-samples">
-          <div className="rsv-group-head" aria-hidden>
-            <span className="rsv-cand-label">{row?.label ?? ""} · samples</span>
-            {/* Served numbers, not a tally over the rendered rows: the two disagree whenever this
-                list is capped or still filling. */}
-            {row && typeof row.accuracy === "number" && typeof row.n_samples === "number" && (
-              <span className="rsv-tally">
-                {fmtPct0(row.accuracy)} of {row.n_samples}
-              </span>
-            )}
-          </div>
-          <div className="rsv-rows">
-            {samples.slice(0, SAMPLE_RENDER_CAP).map((s) => (
-              <SampleRowItem key={s.key} row={s} />
-            ))}
-            {samples.length > SAMPLE_RENDER_CAP && (
-              <div className="rsv-empty-row">
-                +{samples.length - SAMPLE_RENDER_CAP} more (rendering capped at{" "}
-                {SAMPLE_RENDER_CAP}).
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {measurements && <div className="inspector-samples">{measurements}</div>}
       {actions && <div className="inspector-actions">{actions}</div>}
     </>
   );

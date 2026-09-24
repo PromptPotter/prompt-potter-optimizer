@@ -102,6 +102,9 @@ class RoundBuffer:
                 "qi": qi,
                 "qt": qt,
                 "sample_id": result.get("sample_id"),
+                # The walk's archive run (`query_loop._with_running`) — the candidate row reads its
+                # cell address off it before the score report carries one.
+                "run_id": result.get("run_id"),
                 "fitness": result.get("fitness"),
                 "cached": bool(result.get("cached", False)),
                 "query": result.get("query") or "",

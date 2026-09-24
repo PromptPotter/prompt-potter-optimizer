@@ -7,26 +7,27 @@
 // governs shapes the API also names, and no route names this one.
 
 export type PrimaryTab = "chat" | "dashboard";
-// The run's written record — the diagnostic runs, the on-disk artifacts, and the
-// cross-campaign read. Real but rare, so they ride one top-level segment together.
-export type RecordsTab = "compare" | "verify" | "files";
+// The run's written record — every measured cell, the cross-campaign read, the diagnostic
+// runs and the on-disk artifacts. They ride one top-level segment together.
+export type RecordsTab = "measurements" | "compare" | "verify" | "files";
 export type Tab = PrimaryTab | RecordsTab;
 
 const TAB_LABEL: Record<Tab, string> = {
   chat: "Chat",
   dashboard: "Dashboard",
+  measurements: "Measurements",
   compare: "Compare",
   verify: "Verify",
   files: "Files",
 };
 
 export const PRIMARY_TABS: readonly PrimaryTab[] = ["chat", "dashboard"];
-export const RECORDS_TABS: readonly RecordsTab[] = ["compare", "verify", "files"];
+export const RECORDS_TABS: readonly RecordsTab[] = ["measurements", "compare", "verify", "files"];
 export const RECORDS_LABEL = "Records";
 // Which member a click on the Records segment opens, arriving from a primary view.
-// The first of the three, named rather than indexed — `RECORDS_TABS[0]` types as
+// The first of them, named rather than indexed — `RECORDS_TABS[0]` types as
 // possibly-undefined and there is no honest default to fall back to.
-export const RECORDS_ENTRY: RecordsTab = "compare";
+export const RECORDS_ENTRY: RecordsTab = "measurements";
 
 export function tabLabel(tab: Tab): string {
   return TAB_LABEL[tab];
@@ -36,7 +37,7 @@ export function isRecordsTab(tab: Tab): tab is RecordsTab {
   return (RECORDS_TABS as readonly string[]).includes(tab);
 }
 
-// What the TOP row of the strip selects. One segment stands for the three Records
+// What the TOP row of the strip selects. One segment stands for the Records
 // views, so the strip's value is the group rather than the tab itself.
 export type ViewGroup = PrimaryTab | "records";
 

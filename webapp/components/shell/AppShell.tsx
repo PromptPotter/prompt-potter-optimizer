@@ -23,6 +23,7 @@ import { JobsDock } from "@/components/shell/JobsDock";
 import { MobileAppBar } from "@/components/shell/MobileAppBar";
 import { DashboardTab } from "@/components/dashboard/layout/DashboardTab";
 import { ComparePane } from "@/components/compare/ComparePane";
+import { MeasurementsPane } from "@/components/shell/measurements/MeasurementsPane";
 import { CompareSelectionProvider } from "@/lib/compare-selection";
 import { SelectionProvider } from "@/lib/SelectionContext";
 import { LineageProvider } from "@/lib/lineage";
@@ -475,6 +476,8 @@ function AppShellInner() {
           />
         ) : tab === "dashboard" ? (
           <DashboardTab />
+        ) : tab === "measurements" ? (
+          <MeasurementsPane claimsAddress />
         ) : tab === "compare" ? (
           <ComparePane />
         ) : tab === "files" ? (

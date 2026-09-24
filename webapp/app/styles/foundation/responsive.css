@@ -114,7 +114,6 @@
    no hover — these controls become permanently invisible. Make them
    always-visible on coarse pointers. */
 @media (pointer:coarse){
-  .hs-header-tools{opacity:1}
   .hs-mini-btn.resizable::after{opacity:1}
 }
 

@@ -28,6 +28,8 @@ const ICONS: Record<Tab, ReactNode> = {
     <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h9A1.5 1.5 0 0 1 14 4.5v5A1.5 1.5 0 0 1 12.5 11H6l-3 2.5V11H3.5A1.5 1.5 0 0 1 2 9.5z" />
   ),
   dashboard: <path d="M2.5 13V6.5M6.5 13V3M10.5 13V8M14 13H2" />,
+  // Rows under a header — the log of every measured cell.
+  measurements: <path d="M2.5 3.5h11M2.5 6.5h11M2.5 9.5h11M2.5 12.5h7" />,
   // Two bars side by side — the comparison, not another chart.
   compare: <path d="M4 13V7M8 13V3M12 13V9M2 13h12" />,
   verify: <path d="M2.5 8.5 6 12l7.5-8" />,

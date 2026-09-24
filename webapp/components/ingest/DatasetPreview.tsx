@@ -4,7 +4,7 @@ import type { DraftCampaignWire } from "@/lib/api";
 import { Toolbar, ToolbarSpacer } from "@/components/ui";
 
 // The data being configured, shown where it is configured. A check-in has no
-// `datasets/{slug}/` yet — that is written at Start — so `/datasets/{name}/preview` cannot
+// `datasets/{slug}/` yet — that is written at Start — so `/datasets/{name}/cells` cannot
 // answer for it and the hard-samples hero above legitimately has nothing to plot. These
 // rows are on the draft the panel already holds, keyed by the RAW upload headers, so they
 // render before any column is mapped: the operator picks the mapping by reading the data,

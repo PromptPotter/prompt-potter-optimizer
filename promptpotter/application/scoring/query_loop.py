@@ -187,11 +187,15 @@ class QueryLoopResult:
 _BOLD_MARKER_RE = re.compile(r"\*\*[^*]+\*\*")
 
 
-def _with_running(result: QueryMeasurement, running: dict[str, Any]) -> QueryMeasurement:
-    """A shallow copy carrying the candidate's running fitness — a transient projection hint for the live dashboard. The
-    persisted results keep the clean result, not this copy."""
+def _with_running(
+    result: QueryMeasurement, running: dict[str, Any], run_id: str
+) -> QueryMeasurement:
+    """A shallow copy carrying the candidate's running fitness and the archive run the row lands in
+    — transient projection hints for the live surfaces. The persisted results keep the clean result,
+    not this copy: an archived row is already filed under its run."""
     out = dict(result)
     out["_running"] = running
+    out["run_id"] = run_id
     return cast(QueryMeasurement, out)
 
 
@@ -244,6 +248,9 @@ class QueryLoopState:
 
     search_point: JobSearchPoint
     session: Session
+    # The archive run this walk's rows land in — half of every cell's address ``(run_id,
+    # sample_id)``, stamped onto the live copy so a surface can open the cell before the round closes.
+    run_id: str
     cached_sample_results: dict[int, QueryMeasurement]
     on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None
     axes: AxisIndex | None
@@ -480,7 +487,7 @@ class Walk:
                 self.consecutive_errors = 0
 
         if ctx.on_sample_scored is not None:
-            ctx.on_sample_scored(_with_running(acq.result, running), acq.idx, n)
+            ctx.on_sample_scored(_with_running(acq.result, running, ctx.run_id), acq.idx, n)
         return None
 
     def _abort_reason(self, result: QueryMeasurement) -> str:

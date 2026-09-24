@@ -29,7 +29,8 @@ import type {
   OptimizerPipelineResponse,
   CyclesResponse,
   DatasetIndexResponse,
-  DatasetPreviewResponse,
+  Cell,
+  CellsResponse,
   DatasetStorageResponse,
   DiagnosticRunListResponse,
   FileContentResponse,
@@ -38,7 +39,6 @@ import type {
   HardSamplesScope,
   LineageNode,
   MachineStatusResponse,
-  MeasurementSeriesResponse,
   MechanismSchemaResponse,
   MeResponse,
   Evidence,
@@ -55,9 +55,11 @@ import type {
 // interface so a member added there arrives here.
 export type ActivityWindow = ActivityResponse["window"];
 export type ActivityGroupBy = ActivityResponse["group_by"];
-// `domain/results.py::HardSampleOrder`, the key the leaderboard ranks by. Both hard-sample
-// responses echo it, so either one can be read back for the alias.
-export type HardSampleOrder = DatasetPreviewResponse["order"];
+// `domain/results.py::HardSampleOrder`, the key the leaderboard ranks by, read back off the
+// cells response that echoes it.
+export type HardSampleOrder = CellsResponse["order"];
+// The cell marks, off the served row rather than restated.
+export type CellStatus = CellsResponse["cells"][number]["status"];
 
 export function fetchActive(signal?: AbortSignal): Promise<ActiveSessionResponse> {
   return jget<ActiveSessionResponse>(`${API}/sessions/active`, signal);
@@ -250,36 +252,46 @@ function hardSamplesParams(
   return params;
 }
 
-export function fetchDatasetPreview(
+// What narrows a cells read to a preset — one individual, one round, one mark. Each is a
+// server-side filter, so a preset's rows and its totals come back already narrowed.
+export interface CellsFilter {
+  candidateId?: string;
+  round?: number;
+  status?: CellStatus;
+}
+
+// The measurement log of one scope — `GET /datasets/{name}/cells`, the one read behind every
+// measurement view (`domain/cells.py`). Served in rank order; a client never re-sorts it.
+export function fetchCells(
   name: string,
-  limit = 25,
-  signal?: AbortSignal,
-  scope: HardSamplesScope = "dataset",
+  signal: AbortSignal | undefined,
+  scope: HardSamplesScope,
   campaignId?: string,
   cycleId?: string,
   descend?: string,
   order?: HardSampleOrder,
-): Promise<DatasetPreviewResponse> {
+  filter: CellsFilter = {},
+  limit = 1000,
+): Promise<CellsResponse> {
   const params = hardSamplesParams(limit, scope, campaignId, cycleId, descend, order);
-  return jget<DatasetPreviewResponse>(
-    `${API}/datasets/${encodeURIComponent(name)}/preview?${params.toString()}`,
+  if (filter.candidateId) params.set("candidate_id", filter.candidateId);
+  if (filter.round != null) params.set("round", String(filter.round));
+  if (filter.status) params.set("status", filter.status);
+  return jget<CellsResponse>(
+    `${API}/datasets/${encodeURIComponent(name)}/cells?${params.toString()}`,
     signal,
   );
 }
 
-export function fetchMeasurementSeries(
+// One cell opened — its archive row assembled into a trace, addressed `(run_id, sample_id)`.
+export function fetchCell(
   name: string,
-  limit = 1000,
+  runId: string,
+  sampleId: number,
   signal?: AbortSignal,
-  scope: HardSamplesScope = "dataset",
-  campaignId?: string,
-  cycleId?: string,
-  descend?: string,
-  order?: HardSampleOrder,
-): Promise<MeasurementSeriesResponse> {
-  const params = hardSamplesParams(limit, scope, campaignId, cycleId, descend, order);
-  return jget<MeasurementSeriesResponse>(
-    `${API}/datasets/${encodeURIComponent(name)}/measurement-series?${params.toString()}`,
+): Promise<Cell> {
+  return jget<Cell>(
+    `${API}/datasets/${encodeURIComponent(name)}/cells/${encodeURIComponent(runId)}/${sampleId}`,
     signal,
   );
 }

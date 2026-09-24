@@ -340,7 +340,7 @@ no wire, so declaring a token on one fails the registry guard.
   list may be empty for connectors with no retrieval index.
 - **A declared `experiment_file` OWNS its dataset's panel, and
   `dataset_access.py::dataset_experiment` is its ONE reader** — `init_services`, and every read
-  outside a run: `GET /datasets`, `/origins`, `/preview`, `/measurement-series` (polled every 8 s)
+  outside a run: `GET /datasets`, `/origins`, `/cells` (polled every 8 s)
   and the campaign pipeline. L4's `runner/inner/` is the exception: it re-reads its typed
   `inner_tasks.yaml` per cell. Ordered before the row ladder, never a
   fallback: rows cached under the same name describe a different instrument, and a resolver that

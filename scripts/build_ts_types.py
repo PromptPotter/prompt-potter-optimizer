@@ -58,6 +58,7 @@ from promptpotter.application.pipeline_resolve import (
     RunsWithParam,
 )
 from promptpotter.domain.backend import BackpressureReading
+from promptpotter.domain.cells import Cell, CellCandidate, CellRow, CellSpan
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import (
     DashboardCandidate,
@@ -168,11 +169,8 @@ from promptpotter.presentation.api.routers.datasets.index import (
     DatasetPipelineResponse,
 )
 from promptpotter.presentation.api.routers.datasets.leaderboard import (
+    CellsResponse,
     DatasetItem,
-    DatasetPreviewResponse,
-    MeasurementDot,
-    MeasurementSeriesResponse,
-    SampleSeries,
 )
 from promptpotter.presentation.api.routers.origins import OriginEntry, OriginListResponse
 from promptpotter.presentation.api.routers.verify import DiagnosticRunListResponse
@@ -219,10 +217,11 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     LiveDashboardState,
     # --- datasets router ---
     DatasetItem,
-    DatasetPreviewResponse,
-    MeasurementDot,
-    SampleSeries,
-    MeasurementSeriesResponse,
+    CellCandidate,
+    CellRow,
+    CellsResponse,
+    CellSpan,
+    Cell,
     ModelCapability,
     NodeConfigParam,
     NodeOutputSchema,

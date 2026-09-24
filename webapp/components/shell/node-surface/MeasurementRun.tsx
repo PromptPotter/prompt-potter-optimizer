@@ -21,10 +21,9 @@ import {
   type ElectedRow,
   type NodeBlock,
   type SampleRow,
-  type SampleStatus,
 } from "@/lib/types";
 import type { CandidateSearchPoint, CandidateVerdict } from "@/lib/derivations";
-import { SampleRowItem, SAMPLE_RENDER_CAP } from "@/components/shell/samples/SampleRowItem";
+import { MeasurementsPane } from "@/components/shell/measurements/MeasurementsPane";
 import { fmtPct0, unitCount, unitPlural } from "@/lib/format";
 import { Badge, CopyButton, SegmentedControl, type Segment } from "@/components/ui";
 import { NodeSurface } from "./NodeSurface";
@@ -42,17 +41,12 @@ import { PanelCellRow } from "./PanelCellRow";
 // Live mode reads `dashboard.json` only; historical mode reads `round_NNNN.json` only — the two
 // paths never merge (`webapp/CLAUDE.md` no-stitch rule). The candidate list comes from the shared
 // spine in both modes, so the groups stay aligned with lineage + fitness.
-
-// Derived from `SampleStatus`, not re-spelled — a hand-written pair naming two marks of three
-// leaves the third reachable only under ALL, which for ERR hides faults from a hunt for faults.
-type StatusFilter = "all" | SampleStatus;
-
-const STATUS_FILTERS: readonly Segment<StatusFilter>[] = [
-  { value: "all", label: "ALL" },
-  { value: "HIT", label: "HIT" },
-  { value: "MISS", label: "MISS" },
-  { value: "ERR", label: "ERR" },
-];
+//
+// The ROWS of a scored round are not listed here: they are the one measurement log
+// (`shell/measurements/MeasurementsPane`) preset to this round, and to one candidate once the
+// strip names one. What stays is what only this node can say — which candidates ran, why a
+// rejected one has no rows, and what the named one ran. An L4 round keeps its own rows: each
+// cell is an inner campaign to drill into, not a scored row to open.
 
 export function MeasurementRun({
   block,
@@ -124,7 +118,6 @@ export function MeasurementRun({
     samples: samplesFor,
   } = useRoundRows(round);
 
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [candFilter, setCandFilter] = useState<string>("all");
 
   // Why a candidate produced what it produced. The FLAG that a candidate was rejected rides the
@@ -147,13 +140,7 @@ export function MeasurementRun({
       // it) — same routing the candidates card's bars use, never a merge. `roundDoc` is null
       // on the live round (the fetch is idled), and an in-flight row reads `dash`, so the
       // source is unambiguous.
-      const raw = samplesFor(c);
-      // An L4 cell has no mark to filter on — it was optimized, not scored, so every
-      // `status` is null. The control is hidden in that mode; skipping the filter here
-      // keeps a stale `HIT` pick from blanking the panel.
-      const filtered = isL4
-        ? raw
-        : raw.filter((s) => statusFilter === "all" || s.status === statusFilter);
+      const filtered = samplesFor(c);
       // WHAT this candidate ran, off the same source its rows came from — the scoring node
       // fires once per candidate, so a panel that lists the rows and not the specification
       // shows the outcome of a program it never names. Same live/historical switch as
@@ -168,7 +155,7 @@ export function MeasurementRun({
       return out.filter((g) => g.candidate.candidate_id === candFilter);
     }
     return out;
-  }, [candidates, candFilter, statusFilter, dash, roundDoc, samplesFor, isL4]);
+  }, [candidates, candFilter, dash, roundDoc, samplesFor]);
 
   const totalRows = useMemo(
     () => groups.reduce((n, g) => n + g.samples.length, 0),
@@ -183,6 +170,11 @@ export function MeasurementRun({
   // round's whole scroll — which is what it is for — and N prompts stacked inside it would
   // bury the rows the operator opened it to read.
   const oneCandidate = candFilter !== "all";
+  // An in-flight row's `candidate_id` is minted client-side (`liveCandidateId`) and names
+  // nothing on the server, so the live round stays unnarrowed — its arm is one fold of the
+  // candidate grouping.
+  const picked = candidates.find((c) => c.candidate_id === candFilter);
+  const narrowTo = picked && picked.source !== "inflight" ? picked.candidate_id : undefined;
 
   if (!isLiveView && roundLoading) {
     return <Region>Loading round {round}…</Region>;
@@ -220,16 +212,7 @@ export function MeasurementRun({
             ariaLabel="Which candidate's rows to show"
           />
         </div>
-        {/* Hidden in panel mode: an L4 cell has no HIT/MISS to filter on. */}
-        {!cells && (
-          <SegmentedControl
-            options={STATUS_FILTERS}
-            value={statusFilter}
-            onChange={setStatusFilter}
-            ariaLabel="Sample status filter"
-          />
-        )}
-        <span className="rsv-count">{unitCount(totalRows, unit)}</span>
+        {cells && <span className="rsv-count">{unitCount(totalRows, unit)}</span>}
       </div>
       <div className="rsv-groups">
         {groups.map((g) => {
@@ -240,7 +223,7 @@ export function MeasurementRun({
             g.candidate.candidate_id,
           );
           const cached = g.samples.reduce((n, s) => n + (s.cached ? 1 : 0), 0);
-          const display = g.samples.slice(0, SAMPLE_RENDER_CAP);
+          const display = g.samples.slice(0, PANEL_RENDER_CAP);
           const truncated = g.samples.length - display.length;
           const verdict = verdicts.get(g.candidate.label);
           return (
@@ -272,11 +255,7 @@ export function MeasurementRun({
                     </Badge>
                   ) : (
                     /* Both numbers are SERVED and share ONE denominator: the
-                       candidate's scored-sample count and the accuracy over it.
-                       `g.samples.length` is the count AFTER the HIT/MISS filter,
-                       so pairing it with an unfiltered rate would caption the
-                       rate with someone else's denominator; the filter's effect
-                       stays legible in the rows and in the roster count above. */
+                       candidate's scored-sample count and the accuracy over it. */
                     <span className="rsv-tally-score">
                       {g.candidate.n_samples ?? g.samples.length} scored
                       {g.candidate.accuracy != null && ` · ${fmtPct0(g.candidate.accuracy)}`}
@@ -347,7 +326,7 @@ export function MeasurementRun({
                   />
                 </div>
               )}
-              {g.samples.length === 0 ? (
+              {!cells ? null : g.samples.length === 0 ? (
                 <div className="rsv-empty-row">
                   {g.candidate.invalid
                     ? `No ${unitPlural(unit)} — it was rejected before it ran.`
@@ -355,22 +334,18 @@ export function MeasurementRun({
                 </div>
               ) : (
                 <div className="rsv-rows">
-                  {display.map((s) =>
-                    cells ? (
-                      <PanelCellRow
-                        key={s.key}
-                        cell={s.query}
-                        run={cells.get(panelCellKey(g.candidate.label, s.query)) ?? null}
-                        cached={s.cached}
-                        onOpen={openRun}
-                      />
-                    ) : (
-                      <SampleRowItem key={s.key} row={s} />
-                    ),
-                  )}
+                  {display.map((s) => (
+                    <PanelCellRow
+                      key={s.key}
+                      cell={s.query}
+                      run={cells.get(panelCellKey(g.candidate.label, s.query)) ?? null}
+                      cached={s.cached}
+                      onOpen={openRun}
+                    />
+                  ))}
                   {truncated > 0 && (
                     <div className="rsv-empty-row">
-                      +{truncated} more (rendering capped at {SAMPLE_RENDER_CAP}).
+                      +{truncated} more (rendering capped at {PANEL_RENDER_CAP}).
                     </div>
                   )}
                 </div>
@@ -379,9 +354,22 @@ export function MeasurementRun({
           );
         })}
       </div>
+      {!cells && (
+        <MeasurementsPane
+          preset={{
+            round,
+            scope: "cycle",
+            candidateId: narrowTo,
+            groupBy: "candidate",
+          }}
+        />
+      )}
     </section>
   );
 }
+
+// An L4 round's inner-campaign rows — each one a drill-in, so they are few and never virtualized.
+const PANEL_RENDER_CAP = 250;
 
 // Every absence wears the same frame the roster does, so the panel does not resize under a
 // reader who switched rounds.

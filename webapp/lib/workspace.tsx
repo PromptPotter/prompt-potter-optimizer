@@ -24,7 +24,13 @@ import {
   pathRoot,
   type CyclePath,
 } from "./ids";
-import { EMPTY_ADDRESS, formatAddress, parseAddress, type Address } from "./address";
+import {
+  EMPTY_ADDRESS,
+  formatAddress,
+  parseAddress,
+  type Address,
+  type CellAddress,
+} from "./address";
 import {
   DEFAULT_ACCOUNT_PANE,
   DEFAULT_TAB,
@@ -78,6 +84,15 @@ interface WorkspaceState {
   // components that render them — a view held locally cannot be linked to.
   tab: Tab;
   setTab: (t: Tab) => void;
+  // The one measured cell open in the detail panel, or null — on the ADDRESS for the same
+  // reason the view is, so a copied link opens on the cell it was copied from. Several
+  // measurement panes can be on screen at once, so the cell names the pane that OWNS it;
+  // null is the address's own, which the pane that claims the address answers.
+  openCell: CellAddress | null;
+  openCellOwner: string | null;
+  setOpenCell: (c: CellAddress | null, owner?: string | null) => void;
+  // Close the cell only if `owner` still holds it — an unmounting pane's cleanup.
+  releaseCell: (owner: string) => void;
   accountPane: AccountPane | null;
   openAccount: (pane?: AccountPane) => void;
   closeAccount: () => void;
@@ -181,6 +196,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // prevent. `AppShell` still owns the ONE call site (`openView`), which also leaves the
   // phone's list screen.
   const [tab, setTab] = useState<Tab>(DEFAULT_TAB);
+  const [cellState, setCellState] = useState<{
+    cell: CellAddress;
+    owner: string | null;
+  } | null>(null);
+  const openCell = cellState?.cell ?? null;
+  const openCellOwner = cellState?.owner ?? null;
   // The account modal's pane, or null for closed — the second view axis, on the same
   // address. The pin is deliberately NOT cleared while it is up: closing returns to
   // whatever was underneath, straight off the state that never moved.
@@ -232,6 +253,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
     setAccountPane(null);
     setTab(a.tab);
+    setCellState(a.cell ? { cell: a.cell, owner: null } : null);
     if (a.kind === "follow") {
       setFollowing(true);
       setPinnedPath(null);
@@ -433,8 +455,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       accountPane != null
         ? { kind: "account", pane: accountPane }
         : following || !pinnedPath
-          ? { kind: "follow", tab }
-          : { kind: "cycle", path: pinnedPath, tab, candidateId: viewedCandidateId },
+          ? { kind: "follow", tab, cell: openCell }
+          : { kind: "cycle", path: pinnedPath, tab, candidateId: viewedCandidateId, cell: openCell },
     );
     // "Following, default view" has nothing to say, so it says nothing: the hash comes
     // OFF rather than sitting there as a bare `#/`. Same discipline the query string had
@@ -449,7 +471,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       "",
       bare ? window.location.pathname + window.location.search : want,
     );
-  }, [initialized, following, pinnedPath, viewedCandidateId, tab, accountPane]);
+  }, [initialized, following, pinnedPath, viewedCandidateId, tab, openCell, accountPane]);
 
   const openAccount = useCallback(
     (pane: AccountPane = DEFAULT_ACCOUNT_PANE) => setAccountPane(pane),
@@ -462,6 +484,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setFollowing(false);
       setPinnedPath(path);
       setViewedCandidateId(candidate);
+      setCellState(null);
     },
     [],
   );
@@ -492,7 +515,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setFollowing(true);
     setPinnedPath(null);
     setViewedCandidateId(null);
+    setCellState(null);
   }, []);
+
+  const setOpenCell = useCallback(
+    (c: CellAddress | null, owner: string | null = null) =>
+      setCellState(c ? { cell: c, owner } : null),
+    [],
+  );
+  const releaseCell = useCallback(
+    (owner: string) => setCellState((prev) => (prev && prev.owner === owner ? null : prev)),
+    [],
+  );
+  // Another view has no pane to answer the cell, so it would ride the address unseen and
+  // pop open on the next visit.
+  const selectTab = useCallback(
+    (t: Tab) => {
+      if (t !== tab) setCellState(null);
+      setTab(t);
+    },
+    [tab],
+  );
 
   // The pin, mirrored into a ref so `reportAddressGone` keeps a STABLE identity.
   // Its callers are poll ticks, and `usePoll` restarts its loop when the tick's
@@ -542,7 +585,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     datasetName,
     following,
     tab,
-    setTab,
+    setTab: selectTab,
+    openCell,
+    openCellOwner,
+    setOpenCell,
+    releaseCell,
     accountPane,
     openAccount,
     closeAccount,

@@ -191,6 +191,9 @@ class QueryMeasurement(TypedDict):
     # The candidate's composite over samples-so-far, attached for the ledger path only
     # (``query_loop._with_running``) so a file-tree or chat reader watches it converge.
     _running: NotRequired[dict[str, Any]]
+    # The archive run the row lands in, attached beside ``_running`` on the ledger copy only — the
+    # archived row is filed under its run already, so it never carries its own address.
+    run_id: NotRequired[str]
     # The stale-data ladder's per-sample verdicts. Each renders one annotation under the
     # HIT/MISS line (``terminal/live/sample.py``) and nothing else reads them, so they are the
     # ladder's only report: a dropped flag makes a re-measurement look like a plain score.

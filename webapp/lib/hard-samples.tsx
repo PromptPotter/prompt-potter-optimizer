@@ -1,6 +1,6 @@
 "use client";
-// The dataset roster for the unit in view, the per-sample measurement history behind
-// it, and the two controls that pick which slice that is — scope and ranking.
+// The dataset roster for the unit in view, the cells measured on it, and the two controls
+// that pick which slice that is — scope and ranking.
 //
 // A CONTEXT because the consumers are not adjacent: the heat-map hangs off the chat
 // hero, the table off the run card four hops further down, and what they must agree on
@@ -9,16 +9,22 @@
 // on `ChatPane` ("Passed to BOTH consumers, so the pane and the run card cannot name
 // different orders") rather than something the shape made true.
 //
-// `useDatasetPreview` stays the lower-level primitive owning the fetch chain; this is
+// `useCells` stays the lower-level primitive owning the fetch chain; this is
 // the facade the consumers actually want — the same split as `useCycleStream` and
 // `useDashboard`.
 //
 // Nothing here computes a ranking (webapp/CLAUDE.md § Scoring authority).
 
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
-import type { DatasetItem, HardSampleOrder, HardSamplesScope, SampleSeries } from "@/lib/api";
+import type {
+  CellCandidate,
+  CellRow,
+  DatasetItem,
+  HardSampleOrder,
+  HardSamplesScope,
+} from "@/lib/api";
 import { useDashboard } from "@/lib/hooks/useDashboard";
-import { useDatasetPreview, type SeriesTotals } from "@/lib/hooks/useDatasetPreview";
+import { useCells, type SeriesTotals } from "@/lib/hooks/useCells";
 import type { CyclePath } from "@/lib/ids";
 
 interface HardSamples {
@@ -27,7 +33,10 @@ interface HardSamples {
   measuredCount: number;
   unmeasuredCount: number;
   splitTest: number | null;
-  archivePerSample: Map<number, SampleSeries>;
+  // Who measured the roster and every cell between them — `CellRow.candidate` joins
+  // `CellCandidate.key`. Served chronologically — by candidate, then walk order; bucket, never re-sort.
+  candidates: CellCandidate[];
+  cells: CellRow[];
   totals: SeriesTotals | null;
   /** The key the SERVER ranked the roster by, off its echo; `null` while a read is in
    *  flight. Not `order` — `sampleOrder` in this tree is the scoring WALK. */
@@ -70,7 +79,7 @@ export function HardSamplesProvider({
   // verdict every other live surface reads, so the panel cannot disagree with the tape
   // above it about whether this cycle is moving.
   const { isLive } = useDashboard();
-  const p = useDatasetPreview(path, datasetName, scope, rankedByPick, isLive);
+  const p = useCells(path, datasetName, scope, rankedByPick, isLive);
   // Keyed on the FIELDS, never on `p`: the hook returns a fresh object every render,
   // so a dep on it would hand every consumer a new value on every poll tick.
   const value = useMemo<HardSamples>(
@@ -80,7 +89,8 @@ export function HardSamplesProvider({
       measuredCount: p.measuredCount,
       unmeasuredCount: p.unmeasuredCount,
       splitTest: p.splitTest,
-      archivePerSample: p.archivePerSample,
+      candidates: p.candidates,
+      cells: p.cells,
       totals: p.totals,
       rankedBy: p.order,
       rankedByPick,
@@ -96,7 +106,8 @@ export function HardSamplesProvider({
       p.measuredCount,
       p.unmeasuredCount,
       p.splitTest,
-      p.archivePerSample,
+      p.candidates,
+      p.cells,
       p.totals,
       p.order,
       p.isStale,

@@ -123,6 +123,7 @@ async def rescore_parent(
             # reaches disk, so a synthesized round name here would name no candidate.
             label=cycle.rounds[-1].label,
             sp_hash=tr.current_sp.sp_hash(session.pipeline_schema),
+            run_id=scored.run_id,
         ),
     )
 
@@ -314,6 +315,7 @@ async def establish_campaign_origin(
                 label=candidate_label(0, 0),
                 # No rows for an id to address.
                 sp_hash="",
+                run_id="",
             ),
             origin_results=None,
         )
@@ -410,6 +412,7 @@ async def establish_campaign_origin(
             scoring_set,
             label=candidate_label(0, 0),
             sp_hash=sp.sp_hash(pipeline_schema),
+            run_id=scored.run_id,
             resolved_pipeline_params=sp.config_params,
         )
         listener.on_candidate_scored(0, 1, report.model_dump())

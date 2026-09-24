@@ -1,96 +1,31 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { fmtPct0 } from "@/lib/format";
-import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
+import { fitnessStyle } from "@/lib/derivations";
 import { useHardSamples } from "@/lib/hard-samples";
 import { useDashboard } from "@/lib/hooks/useDashboard";
-import { HardSamplesTable } from "./HardSamplesTable";
+import { MeasurementsPane } from "@/components/shell/measurements/MeasurementsPane";
 import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory";
-import { fitnessStyle, type HeatDot } from "./columns";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
-// Fold in live mid-round measurements that haven't landed in the archive yet — the served
-// sample rows, already graded. They sit at the right edge of each row.
-function liveMeasurements(
-  dash: DashboardSnapshot | null,
-  dashRound: number | null,
-): Map<number, HeatDot[]> {
-  const out = new Map<number, HeatDot[]>();
-  const round = dashRound ?? 0;
-  liveL1Candidates(dash).forEach((c, ci) => {
-    for (const s of c.samples ?? []) {
-      // The producer already graded the row and marks one it never graded `ERR`, so an ERR
-      // contributes no cell rather than a red one. Only the two endpoints reach a heat cell.
-      if (s.sample_id == null || (s.status !== "HIT" && s.status !== "MISS")) continue;
-      // ``live/…`` prefix sorts after every archive ord (timestamps + 04d
-      // round numbers start with digits) so in-flight cells land at the
-      // right edge of the roster.
-      const ord = `live/${round.toString().padStart(4, "0")}/${ci.toString().padStart(2, "0")}`;
-      if (!out.has(s.sample_id)) out.set(s.sample_id, []);
-      out.get(s.sample_id)!.push({ fitness: s.status === "HIT" ? 1 : 0, ord });
-    }
-  });
-  return out;
-}
-
-// Hard-samples heat-map. Collapsed: a compact resizable badge — one tile
-// per sample in live Rasch difficulty order, green = mostly hit, red =
-// mostly miss, dark = no measurements. Clicking the badge expands the full
-// HardSamplesTable; the bottom-edge grip (hover to reveal) resizes it.
+// Hard-samples heat-map: a compact badge - one tile per sample in the served ranking, shaded
+// by its served mean fitness, dark = no measurements. Clicking it unfolds the leaderboard in
+// place - the one measurement log, preset to group by sample; the round in flight is already
+// in the served rows, merged once on the server.
 export function HardSamplesHeatmap() {
   const {
     datasetName,
-    // The scope toggle re-fetches this map; the heat-map merges live mid-round
-    // samples on top of it.
-    archivePerSample,
     items: datasetItems,
-    // Served roster-wide totals for the scope in view. The headline reads these rather
-    // than folding the strip's dots down: the live tail merged into the strip carries a
-    // VERDICT flattened to 0/1 endpoints here (see `liveMeasurements`), so summing it
-    // would mix endpoints into a graded rate.
+    // Served roster-wide totals for the scope in view - never folded down from the tiles.
     totals: datasetTotals,
     stale: datasetStale,
     error: datasetError,
   } = useHardSamples();
-  // Live snapshot, self-sourced — feeds the live mid-round measurement merge.
-  // The table, run-control, and trajectory children self-source their own
-  // liveness/ids now, so nothing is threaded down from here.
-  const { dash, dashRound } = useDashboard();
+  const { dash } = useDashboard();
   const [heatExpanded, setHeatExpanded] = useState(false);
   const [bankExpanded, setBankExpanded] = useState(false);
 
-  // Merge archive series (scope-aware, server-sourced) with the live
-  // mid-round samples (client-only, current cycle). De-dupe on (ord, fitness)
-  // in case a live measurement has already landed in the archive.
-  const perSample = useMemo(() => {
-    const out = new Map<number, HeatDot[]>();
-    for (const [sid, s] of archivePerSample) {
-      out.set(
-        sid,
-        s.measurements.map((m) => ({ fitness: m.fitness, ord: m.ord })),
-      );
-    }
-    const live = liveMeasurements(dash, dashRound);
-    for (const [sid, ms] of live) {
-      if (!out.has(sid)) out.set(sid, []);
-      out.get(sid)!.push(...ms);
-    }
-    for (const ms of out.values()) {
-      ms.sort((a, b) => (a.ord < b.ord ? -1 : a.ord > b.ord ? 1 : 0));
-      const seen = new Set<string>();
-      let w = 0;
-      for (const m of ms) {
-        const k = `${m.ord}:${m.fitness}`;
-        if (seen.has(k)) continue;
-        seen.add(k);
-        ms[w++] = m;
-      }
-      ms.length = w;
-    }
-    return out;
-  }, [archivePerSample, dash, dashRound]);
-
-  // Tile order is the order `/preview` SERVED — `items[i].hard_sample_rank === i + 1`
+  // Tile order is the order `/cells` SERVED — `items[i].hard_sample_rank === i + 1`
   // (`datasets.py`), so `datasetItems` IS the ranking and nothing here arranges it. Two
   // hand-written comparators lived here and in the table; sorting on the served rank
   // instead only made the re-derivation agree with itself. An ordering is a score: the
@@ -101,7 +36,7 @@ export function HardSamplesHeatmap() {
   // was indistinguishable from a collapsed panel); STILL LOADING came next, because
   // the roster is four `limit=1000` reads and for their whole duration this panel
   // asserted the campaign had no samples. The fourth is a CHECK-IN: `datasets/{slug}/`
-  // is written at Start, so `/preview` 404s by construction, and "no samples yet" reads
+  // is written at Start, so `/cells` 404s by construction, and "no samples yet" reads
   // as a broken dataset when nothing is broken. The rows for that state are on the
   // draft, rendered by the check-in panel below this hero.
   const rosterNote = datasetError
@@ -141,18 +76,16 @@ export function HardSamplesHeatmap() {
             onClick={() => setHeatExpanded((e) => !e)}
             aria-expanded={heatExpanded}
             aria-label={
-              heatExpanded ? "Collapse sample heat-map" : `Expand sample heat-map. ${summary}.`
+              heatExpanded ? "Collapse the sample leaderboard" : `Expand the sample leaderboard. ${summary}.`
             }
-            title={`${summary} — click to ${heatExpanded ? "collapse" : "expand"} · drag to resize`}
+            title={`${summary} - click to ${heatExpanded ? "collapse" : "expand"}`}
           >
             <span className="hs-mini-tiles" aria-hidden="true">
-              {/* The SERVED per-sample mean, shaded by the table's own `fitnessStyle` — one
-                  colour rule for the strip and the row beneath it. It folded `perSample` down
-                  and thresholded at 0.5 instead, which is neither `HIT_THRESHOLD` nor a
-                  gradient: two arms of a graded scorer landed on one flat colour, and the merged
-                  live tail (0/1 endpoints) skewed the mean it was thresholding. */}
+              {/* The SERVED per-sample mean, shaded by the one `fitnessStyle` — the colour the
+                  same sample wears in Measurements. A gradient, never a threshold: two arms of a
+                  graded scorer must not land on one flat colour. */}
               {datasetItems.map((it) => {
-                const mean = archivePerSample.get(it.sample_id)?.mean_fitness ?? null;
+                const mean = it.mean_fitness ?? null;
                 return (
                   <span
                     key={it.sample_id}
@@ -175,7 +108,7 @@ export function HardSamplesHeatmap() {
           {bankExpanded && <SampleTrajectory rounds={dash?.rounds ?? []} />}
           {heatExpanded && !rosterNote && (
             <div className="hs-expand-wrap">
-              <HardSamplesTable perSample={perSample} />
+              <MeasurementsPane preset={{ groupBy: "sample" }} />
             </div>
           )}
         </RotatePrompt>

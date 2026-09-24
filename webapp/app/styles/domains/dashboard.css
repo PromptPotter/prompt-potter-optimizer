@@ -103,11 +103,8 @@
    matches the card framing above it. */
 .inspector-card{max-height:520px;overflow:auto;margin-bottom:14px}
 .inspector-card .scoring-inspector{border-top:0;margin-top:0;padding-top:0}
-/* Per-searchpoint sample stream — the round-wide Samples table sliced to the
-   selected candidate. Reuses the `.rsv-*` row styling; scrolls on its own so a
-   long round doesn't push the composite/hits summary out of view. */
-.inspector-samples{margin-top:12px;border-top:0.5px solid var(--color-border);font-family:var(--font-mono);font-size:var(--text-sm);line-height:1.5}
-.inspector-samples .rsv-rows{max-height:clamp(200px,32vh,420px);overflow-y:auto}
+/* The selected candidate's cells — a Measurements preset, set off from the spec above. */
+.inspector-samples{margin-top:12px;border-top:0.5px solid var(--color-border);padding-top:var(--space-8)}
 
 /* Phone (≤640px): the chart frame shrinks so the dashboard reads in portrait
    without the rotate prompt. */
@@ -137,8 +134,8 @@
    is. Its body picks live vs historical off the same `selection.round`. Per-candidate groups
    with sticky headers; click a header to anchor lineage + fitness on that candidate.
 
-   The `.rsv-row*` half is shared: `SampleRowItem` renders it here and in `.inspector-samples`
-   above, so it stays in this file rather than moving with the component. */
+   The `.rsv-row*` half is the L4 panel row's (`PanelCellRow`); a scored round's cells are the
+   Measurements preset beneath the strip. */
 .rsv-filters{display:flex;align-items:center;gap:var(--space-12);flex-wrap:wrap;padding:var(--space-4) var(--space-4) var(--space-8)}
 /* The candidate toggle. `min-width:0` is what lets it shrink inside the flex row at all, and
    the scroll is what keeps a wide round from squeezing every label into illegibility. */
@@ -174,21 +171,6 @@
 .rsv-empty-row{padding:var(--space-4) var(--space-8);color:var(--color-text-tertiary)}
 .rsv-rows{display:flex;flex-direction:column}
 .rsv-row{padding:2px var(--space-8);display:block;border-bottom:0.5px dotted transparent}
-.rsv-row > summary{list-style:none;cursor:pointer;display:flex;align-items:baseline;gap:var(--space-8)}
-.rsv-row > summary::-webkit-details-marker{display:none}
-.rsv-row > summary:hover{background:var(--color-background-hover)}
-.rsv-row[open]{border-bottom-color:var(--color-border);padding-bottom:8px}
-.rsv-row .idx{color:var(--color-text-tertiary);flex:0 0 auto}
-.rsv-row .elapsed{color:var(--color-text-tertiary);flex:0 0 auto;min-width:42px;text-align:right}
-.rsv-row .scorer{color:var(--color-text-secondary);flex:0 0 auto;min-width:80px}
-.rsv-row .rsv-cached{color:var(--color-text-tertiary);flex:0 0 auto;font-size:var(--text-xs);white-space:nowrap}
-/* The PROVIDER's prefix-cache discount — same weight as the 📖 beside it because they are
-   peer facts about one row, and deliberately not the `elapsed` class it first borrowed: that one
-   is time, and a share reading as a duration is the collision this whole arc is about. */
-.rsv-row .rsv-prefix-cache{color:var(--color-text-tertiary);flex:0 0 auto;font-size:var(--text-xs);white-space:nowrap}
-.rsv-row .body{color:var(--color-text-primary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.rsv-detail{padding:var(--space-6) var(--space-8) var(--space-4) var(--space-72);display:grid;grid-template-columns:minmax(0,max-content) 1fr;gap:var(--space-4) var(--space-12);font-size:var(--text-sm)}
-.rsv-detail .kv-label{color:var(--color-text-tertiary)}
 
 /* An L4 panel cell — a whole inner campaign, not a scored row. It borrows
    `.rsv-row`'s spacing so the two modes sit at the same rhythm, then overrides the
@@ -203,7 +185,6 @@
   font-variant-numeric:tabular-nums}
 .pcr-status{color:var(--color-text-secondary);font-size:var(--text-xs)}
 .pcr-note{flex:0 0 auto;font-size:var(--text-xs);font-style:italic}
-
 
 /* Mechanisms panel — the campaign's pluggable orchestration toggles
    (campaign.json::optimization.mechanisms). Read-only inside the Optimizer

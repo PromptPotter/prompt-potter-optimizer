@@ -37,9 +37,9 @@ class _QuietPolls(logging.Filter):
     _POLLED = re.compile(
         r"^/api/v1/(cycles|campaigns|machine-status|sessions/active|auth/(quota-status|me))(\?|$)"
     )
-    # `/tree` and `/ray` are polled every 5 s for EACH open sidebar course, `/measurement-series`
+    # `/tree` and `/ray` are polled every 5 s for EACH open sidebar course, `/cells`
     # every 8 s — conditional GETs, so a quiet tick is a 304 and nothing more.
-    _SUFFIX = ("/dashboard", "/health", "/tree", "/ray", "/measurement-series")
+    _SUFFIX = ("/dashboard", "/health", "/tree", "/ray", "/cells")
     _QUIET_STATUS = frozenset({200, 304})
 
     def filter(self, record: logging.LogRecord) -> bool:

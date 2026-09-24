@@ -2886,6 +2886,7 @@ def _walk_over(
     ctx = query_loop.QueryLoopState(
         search_point=JobSearchPoint(),
         session=session,
+        run_id="walk_run",
         cached_sample_results=dict(cached or {}),
         on_sample_scored=None,
         axes=None,

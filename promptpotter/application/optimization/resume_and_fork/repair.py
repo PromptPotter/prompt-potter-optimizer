@@ -307,6 +307,7 @@ async def repair_incomplete_rounds(
                 attempted,
                 label=cs.label,
                 sp_hash=sp.sp_hash(session.pipeline_schema),
+                run_id=scored.run_id,
                 resolved_pipeline_params=cs.resolved_pipeline_params,
                 elimination_stopped=cs.elimination_stopped,
             )

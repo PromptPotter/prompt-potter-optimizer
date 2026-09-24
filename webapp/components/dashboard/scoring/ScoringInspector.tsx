@@ -14,6 +14,7 @@ import { useConnector } from "@/lib/hooks/useConnector";
 import { SearchpointDrillIn } from "@/components/shell/searchpoint/SearchpointDrillIn";
 import { SteerForkAction } from "@/components/shell/searchpoint/SteerForkAction";
 import { VerifyAction } from "@/components/shell/searchpoint/VerifyAction";
+import { MeasurementsPane } from "@/components/shell/measurements/MeasurementsPane";
 
 interface Props {
   selected: SelectedCandidate | null;
@@ -79,7 +80,13 @@ export function ScoringInspector({ selected, onClose }: Props) {
       <SearchpointDrillIn
         row={row}
         cfg={cfg}
-        samples={samples}
+        measurements={
+          // This candidate's cells in the cycle it was picked on — the one measurement log,
+          // preset to one individual.
+          <MeasurementsPane
+            preset={{ candidateId: selected.candidate_id, scope: "cycle", groupBy: "none" }}
+          />
+        }
         arms={arms || null}
         schema={cv.nodeConfigSchema}
         schemaStatus={cv.pipelineStatus}

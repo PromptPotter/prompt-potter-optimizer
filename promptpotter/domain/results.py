@@ -259,6 +259,10 @@ class ScoredCandidate(StrictModel):
     # that stripped, so a re-derivation addresses no row and nothing raises. ``""`` where no
     # schema was in scope (the unmeasured origin) or the searchpoint configures no node.
     sp_hash: str = ""
+    # The archive RUN this report's rows were filed under — ``sp_hash`` names the configuration,
+    # this names the one reading of it on this subset, so ``(run_id, sample_id)`` addresses each
+    # of the candidate's cells (``GET /cells/{run_id}/{sample_id}``). ``""`` where nothing was walked.
+    run_id: str = ""
     # Paired with ``pipeline_overlay``, the full searchpoint an operator selects to seed
     # an operator-steered fork.
     prompt_fields: dict[str, Any] = Field(default_factory=dict)

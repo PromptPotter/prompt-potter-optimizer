@@ -36,7 +36,7 @@ archive's own bytes — 102.6 MB of ledger, 56.6% of it duplication.
 **`dashboard.json` is an operator surface, not a cache, and three guarantees hold at the writer.**
 Someone alt-tabbing to the file tree mid-run has to see the truth, so before deferring or skipping
 any write, answer whether they still can — and a SERVED read now rests on the same guarantees:
-`archive_queries::cycle_measurement_series` reads the round in flight off this file, because a round
+`cell_queries::cycle_cells` reads the round in flight off this file, because a round
 file lands only at the close and the round being measured has none. It is **always on disk and always swapped atomically**
 (tmp + rename — never a partial write or a torn read), present after any ledger event in the cycle.
 It **settles within `_DASHBOARD_DEBOUNCE_S` of the last event**: the writer coalesces high-frequency

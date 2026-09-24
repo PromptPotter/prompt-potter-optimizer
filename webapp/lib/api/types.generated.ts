@@ -37,6 +37,7 @@ export interface AbilityReading {
 export interface DashboardCandidate {
   label: string;
   candidate_id: string | null;
+  run_id: string | null;
   accuracy: number | null;
   composite_fitness: number | null;
   invalid: boolean;
@@ -72,9 +73,8 @@ export interface DashboardSample {
   /** The grading verdict. */
   status: 'HIT' | 'MISS' | 'ERR' | 'UNSC';
   /** The graded per-cell score `status` is the verdict OF — the same number
-   * `MeasurementDot.fitness` carries, so the live round's cells join the
-   * served series and a heat cell can shade a partial grade `status` rounds
-   * to HIT or MISS. Null on an errored row, which was never graded. */
+   * `CellRow.fitness` carries, so a live cell shades a partial grade `status`
+   * rounds to HIT or MISS. Null on an errored row, which was never graded. */
   fitness: number | null;
   /** Pipeline node the row terminated at; the tape badges it. */
   terminal_node: string;
@@ -114,6 +114,7 @@ export interface DashboardSample {
 export interface RoundSummaryCandidate {
   label: string;
   candidate_id: string;
+  run_id: string | null;
   accuracy: number | null;
   composite_fitness: number;
   invalid: boolean;
@@ -315,6 +316,7 @@ export interface ScoredCandidate {
   pipeline_overlay: Record<string, unknown> | null;
   resolved_pipeline_params: Record<string, unknown> | null;
   sp_hash: string;
+  run_id: string;
   prompt_fields: Record<string, unknown>;
   escalation_aborted: boolean;
   elimination_stopped: boolean;
@@ -709,65 +711,130 @@ export interface DatasetItem {
    * ``adaptive_queue_mechanism.marginal_hit_probability``. Near 0.5 =
    * contested at seed; near 0/1 = predictable. None when unmeasured. */
   p_hat: number | null;
-}
-
-export interface DatasetPreviewResponse {
-  name: string;
-  row_count: number;
-  /** Declared held-out test fold size (not materialized). The training-bank size is
-   * `row_count` above — the bank IS the preview, so a second field restated
-   * it. */
-  split_test: number | null;
-  /** The key `items` are ranked by — the request's `order` when it named one, else
-   * the dataset's `CampaignConfig.hard_sample_order`. Echoed so a client that
-   * sent no override can label what it is showing without guessing the
-   * default. */
-  order: 'info_gain' | 'difficulty';
-  items: DatasetItem[];
-}
-
-export interface MeasurementDot {
-  /** Opaque ordinal for lex sort + uniqueness (encodes ts/run/idx or round/cand). */
-  ord: string;
-  /** Graded per-sample score in [0,1] under the active scorer. Binary scorers emit
-   * exactly 0.0 or 1.0; render a shade, not a HIT/MISS boolean. */
-  fitness: number;
-  /** Short human label, e.g. 'R3 cand 2'. */
-  label: string;
-}
-
-export interface SampleSeries {
-  sample_id: number;
-  measurements: MeasurementDot[];
-  /** How many of THIS series' measurements maxed out the active scorer
-   * (`domain.scoring.is_hit`, the one definition of that threshold). Served
-   * rather than counted client-side so the tally and the dots it summarises
-   * cannot disagree — and so a graded scorer, whose ceiling is unreachable,
-   * reports 0 against a mean that is not 0. */
+  /** GRADED cells of this sample in scope (errored and unscored cells excluded, as
+   * the Rasch fit excludes them) — the denominator of the two below. */
+  n_measured: number;
+  /** Of those, how many maxed out the active scorer (`domain.scoring.is_hit`).
+   * Structurally 0 on a graded scorer; read `mean_fitness` there. */
   n_hits: number;
-  /** Mean graded fitness over this series; `None` when it holds no measurement. The
-   * rate to read on a graded scorer, where `n_hits` is structurally 0. */
+  /** Mean graded fitness over those cells; null when none. */
   mean_fitness: number | null;
 }
 
-export interface MeasurementSeriesResponse {
+/** Who measured a cell — a round's candidate in cycle and campaign scope, an archive run in */
+export interface CellCandidate {
+  /** What `CellRow.candidate` joins on. Opaque — never parse it; every field it was
+   * built from is served beside it. */
+  key: string;
+  /** `C{round}.{n}` in a campaign; the run's name in dataset scope. */
+  label: string;
+  /** The individual's lineage id. Null in dataset scope. */
+  candidate_id: string | null;
+  /** The archive run its cells were filed under. `""` on a report older than the
+   * stamp — its cells list but do not open. */
+  run_id: string;
+  /** Null in dataset scope. */
+  round: number | null;
+  /** Null in dataset scope. */
+  cycle_id: string | null;
+  /** Read off the round still being measured (`dashboard.json`), whose round file
+   * lands only at its close. */
+  live: boolean;
+  /** When the run was banked — dataset scope only. */
+  created_at: string | null;
+}
+
+/** One cell as a table row — enough to scan, sort by the served order and open. */
+export interface CellRow {
+  sample_id: number;
+  /** With `sample_id`, the cell's address. See `CellCandidate`. */
+  run_id: string;
+  /** `CellCandidate.key` of the candidate that measured it. */
+  candidate: string;
+  status: 'HIT' | 'MISS' | 'ERR' | 'UNSC';
+  /** The graded per-cell score. Null on an ungraded row. */
+  fitness: number | null;
+  cached: boolean;
+  /** Trimmed for display. */
+  predicted: string;
+  /** What producing the cell cost (`recorded_cost_s`) — the half that survives a
+   * cache replay. Null where no timing was recorded. */
+  seconds: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+}
+
+/** The measurement log of one scope, in served order: ``samples`` ranked (their */
+export interface CellsResponse {
   name: string;
   scope: 'cycle' | 'campaign' | 'dataset';
-  /** The key `items` are ranked by, resolved exactly as `/preview`'s. Echoed on
-   * BOTH responses because they are one page read twice: a client holding
-   * only one of them would otherwise have to name the order from the other,
-   * or guess the default. */
+  row_count: number;
+  /** Declared held-out test fold size (not materialized). The training-bank size is
+   * `row_count` above. */
+  split_test: number | null;
+  /** The key `samples` are ranked by — the request's `order` when it named one,
+   * else the dataset's `CampaignConfig.hard_sample_order`. Echoed so a client
+   * that sent no override can label what it is showing without guessing the
+   * default. */
   order: 'info_gain' | 'difficulty';
-  items: SampleSeries[];
-  /** Measurements across every series in `items` — the denominator of the roster's
-   * headline, served so the reader adds nothing up. */
+  samples: DatasetItem[];
+  candidates: CellCandidate[];
+  cells: CellRow[];
+  /** Graded cells across `samples` — the headline's denominator, served so the
+   * reader adds nothing up. */
   total_measurements: number;
-  /** `SampleSeries.n_hits` summed across `items`. Structurally 0 on a graded
-   * scorer; read `mean_fitness` there. */
   total_hits: number;
-  /** Mean graded fitness across every measurement in `items`; `None` when the scope
-   * holds none. The headline rate on any scorer, graded or binary. */
+  /** Mean graded fitness across those cells; null when the scope holds none. */
   mean_fitness: number | null;
+}
+
+/** One pipeline node's part in a cell — the span of the trace. */
+export interface CellSpan {
+  node: string;
+  model: string | null;
+  provider: string | null;
+  /** The prompt this node was sent, RENDERED at read time from the run's own node
+   * config and this sample — exactly the interpolation the measurement made,
+   * so nothing is stored twice. Null on a node configured with no prompt. */
+  input: string | null;
+  /** The node's config for this run, prompt excepted. */
+  config: Record<string, unknown>;
+  /** The observation keys this node emits, as the row banked them. */
+  outputs: Record<string, unknown>;
+  seconds: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_read_tokens: number | null;
+  cost_usd: number | null;
+  /** Token counts from the chars/4 fallback, not the provider. */
+  estimated: boolean;
+}
+
+/** One cell opened — the detail panel's whole read. */
+export interface Cell {
+  run_id: string;
+  sample_id: number;
+  dataset_name: string | null;
+  /** The run's own name (its measuring label). */
+  run_name: string;
+  created_at: string | null;
+  /** The configuration's address (`ScoredCandidate.sp_hash`). */
+  prompt_fields_id: string | null;
+  query: string;
+  ground_truth: string;
+  predicted: string;
+  status: 'HIT' | 'MISS' | 'ERR' | 'UNSC';
+  fitness: number | null;
+  cached: boolean;
+  error: string | null;
+  terminal_node: string | null;
+  seconds: number | null;
+  /** One per pipeline node, in chain order. */
+  spans: CellSpan[];
+  /** Everything else the row banked — rankings, diagnostics, turns, evaluator
+   * values — keyed as stored. Attributed to no node because no node declares
+   * it. */
+  other_outputs: Record<string, unknown>;
 }
 
 /** What ONE model accepts and costs — resolved server-side, served per model id. */

@@ -138,7 +138,7 @@ export function historicalSamplesFor(
             : "MISS"
           : null;
     // The row's own elapsed reading, which is a true 0.0 on a replay — `cost_s` beside it is what
-    // that cell took when it was measured, and `SampleRowItem` picks between them.
+    // that cell took when it was measured.
     const elapsed = typeof s.pipeline_data?.total_time === "number" ? s.pipeline_data.total_time : null;
     return {
       key: `${round}|${candidate_id}|${sid ?? `o${ord}`}`,

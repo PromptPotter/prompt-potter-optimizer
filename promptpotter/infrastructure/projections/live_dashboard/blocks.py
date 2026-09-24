@@ -5,9 +5,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.dashboard_rows import DashboardCandidate, DashboardSample, SampleStatus
+from promptpotter.domain.dashboard_rows import (
+    DashboardCandidate,
+    DashboardSample,
+    SampleStatus,
+    sample_status,
+)
 from promptpotter.domain.results import candidate_label
-from promptpotter.domain.scoring import is_hit, is_unscored, is_verifier_graded
+from promptpotter.domain.scoring import is_verifier_graded
 from promptpotter.infrastructure.projections.live_dashboard.state import PobbBlock
 from promptpotter.shared.composite import inline_short_formula_values
 
@@ -39,18 +44,7 @@ def sample_row(s: dict[str, Any]) -> DashboardSample:
     sid = s.get("sample_id")
     time_s = s.get("time_s")
     cost_s = s.get("cost_s")
-    # `ERR` and `UNSC` are both asked BEFORE the grade: neither row was graded, so putting an
-    # absent fitness through `is_hit` reports a backend fault — or the FORMULA's own silence — as a
-    # candidate answering wrong. Same ladder and same precedence as the CLI tape
-    # (`terminal/live/sample.py`), because two readouts of one row may not disagree about whether
-    # it was ever scored.
-    status: SampleStatus = (
-        "ERR"
-        if s.get("error")
-        else "UNSC"
-        if is_unscored(s)
-        else ("HIT" if is_hit(s.get("fitness")) else "MISS")
-    )
+    status: SampleStatus = sample_status(s)
     # A verifier-graded row has no label, so the answer/truth pair is both halves of a comparison
     # nobody made — and `prediction` there is the `NO_RESULT` sentinel a ranking mechanism that is
     # not in play left behind. Served EMPTY rather than sentinel-and-blank, so a client can still
@@ -136,6 +130,10 @@ def build_candidate_rows(buffer: RoundBuffer) -> list[DashboardCandidate]:
             DashboardCandidate(
                 label=candidate_label(buffer.round_num, idx),
                 candidate_id=served.get("candidate_id"),
+                # The report's once it lands, and until then off the samples, which carry it from
+                # the first one — the walk mints the run before it measures anything.
+                run_id=served.get("run_id")
+                or next((s["run_id"] for s in samples if s.get("run_id")), None),
                 accuracy=served.get("accuracy"),
                 composite_fitness=served.get("composite_fitness"),
                 invalid=bool(served.get("invalid", False)),

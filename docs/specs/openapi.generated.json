@@ -986,6 +986,554 @@
         "title": "CampaignSummary",
         "type": "object"
       },
+      "Cell": {
+        "additionalProperties": false,
+        "description": "One cell opened — the detail panel's whole read.",
+        "properties": {
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "dataset_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Name"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "fitness": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fitness"
+          },
+          "ground_truth": {
+            "title": "Ground Truth",
+            "type": "string"
+          },
+          "other_outputs": {
+            "additionalProperties": true,
+            "description": "Everything else the row banked — rankings, diagnostics, turns, evaluator values — keyed as stored. Attributed to no node because no node declares it.",
+            "title": "Other Outputs",
+            "type": "object"
+          },
+          "predicted": {
+            "title": "Predicted",
+            "type": "string"
+          },
+          "prompt_fields_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The configuration's address (`ScoredCandidate.sp_hash`).",
+            "title": "Prompt Fields Id"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "run_name": {
+            "default": "",
+            "description": "The run's own name (its measuring label).",
+            "title": "Run Name",
+            "type": "string"
+          },
+          "sample_id": {
+            "title": "Sample Id",
+            "type": "integer"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seconds"
+          },
+          "spans": {
+            "description": "One per pipeline node, in chain order.",
+            "items": {
+              "$ref": "#/components/schemas/CellSpan"
+            },
+            "title": "Spans",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "HIT",
+              "MISS",
+              "ERR",
+              "UNSC"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "terminal_node": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal Node"
+          }
+        },
+        "required": [
+          "run_id",
+          "sample_id",
+          "query",
+          "ground_truth",
+          "predicted",
+          "status"
+        ],
+        "title": "Cell",
+        "type": "object"
+      },
+      "CellCandidate": {
+        "additionalProperties": false,
+        "description": "Who measured a cell — a round's candidate in cycle and campaign scope, an archive run in\ndataset scope, where no campaign names one. Served in chronological order, which is the order\na client lists them in.",
+        "properties": {
+          "candidate_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The individual's lineage id. Null in dataset scope.",
+            "title": "Candidate Id"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the run was banked — dataset scope only.",
+            "title": "Created At"
+          },
+          "cycle_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null in dataset scope.",
+            "title": "Cycle Id"
+          },
+          "key": {
+            "description": "What `CellRow.candidate` joins on. Opaque — never parse it; every field it was built from is served beside it.",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "description": "`C{round}.{n}` in a campaign; the run's name in dataset scope.",
+            "title": "Label",
+            "type": "string"
+          },
+          "live": {
+            "default": false,
+            "description": "Read off the round still being measured (`dashboard.json`), whose round file lands only at its close.",
+            "title": "Live",
+            "type": "boolean"
+          },
+          "round": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null in dataset scope.",
+            "title": "Round"
+          },
+          "run_id": {
+            "description": "The archive run its cells were filed under. `\"\"` on a report older than the stamp — its cells list but do not open.",
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "run_id"
+        ],
+        "title": "CellCandidate",
+        "type": "object"
+      },
+      "CellRow": {
+        "additionalProperties": false,
+        "description": "One cell as a table row — enough to scan, sort by the served order and open.",
+        "properties": {
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "candidate": {
+            "description": "`CellCandidate.key` of the candidate that measured it.",
+            "title": "Candidate",
+            "type": "string"
+          },
+          "fitness": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The graded per-cell score. Null on an ungraded row.",
+            "title": "Fitness"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens"
+          },
+          "predicted": {
+            "default": "",
+            "description": "Trimmed for display.",
+            "title": "Predicted",
+            "type": "string"
+          },
+          "run_id": {
+            "description": "With `sample_id`, the cell's address. See `CellCandidate`.",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "sample_id": {
+            "title": "Sample Id",
+            "type": "integer"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What producing the cell cost (`recorded_cost_s`) — the half that survives a cache replay. Null where no timing was recorded.",
+            "title": "Seconds"
+          },
+          "status": {
+            "enum": [
+              "HIT",
+              "MISS",
+              "ERR",
+              "UNSC"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sample_id",
+          "run_id",
+          "candidate",
+          "status"
+        ],
+        "title": "CellRow",
+        "type": "object"
+      },
+      "CellSpan": {
+        "additionalProperties": false,
+        "description": "One pipeline node's part in a cell — the span of the trace.",
+        "properties": {
+          "cache_read_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Tokens"
+          },
+          "config": {
+            "additionalProperties": true,
+            "description": "The node's config for this run, prompt excepted.",
+            "title": "Config",
+            "type": "object"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "estimated": {
+            "default": false,
+            "description": "Token counts from the chars/4 fallback, not the provider.",
+            "title": "Estimated",
+            "type": "boolean"
+          },
+          "input": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The prompt this node was sent, RENDERED at read time from the run's own node config and this sample — exactly the interpolation the measurement made, so nothing is stored twice. Null on a node configured with no prompt.",
+            "title": "Input"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "node": {
+            "title": "Node",
+            "type": "string"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens"
+          },
+          "outputs": {
+            "additionalProperties": true,
+            "description": "The observation keys this node emits, as the row banked them.",
+            "title": "Outputs",
+            "type": "object"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seconds"
+          }
+        },
+        "required": [
+          "node"
+        ],
+        "title": "CellSpan",
+        "type": "object"
+      },
+      "CellsResponse": {
+        "additionalProperties": false,
+        "description": "The measurement log of one scope, in served order: ``samples`` ranked (their\n``hard_sample_rank``), ``candidates`` chronological within a cycle, ``cells`` by candidate,\nthen in each candidate's walk order, so the flat list is the run's time series.\nA client GROUPS these — by sample, by candidate or not at all — by bucketing the served list\nunder a served key order, and never re-sorts: an ordering is a score.",
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/CellCandidate"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "cells": {
+            "items": {
+              "$ref": "#/components/schemas/CellRow"
+            },
+            "title": "Cells",
+            "type": "array"
+          },
+          "mean_fitness": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean graded fitness across those cells; null when the scope holds none.",
+            "title": "Mean Fitness"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "order": {
+            "description": "The key `samples` are ranked by — the request's `order` when it named one, else the dataset's `CampaignConfig.hard_sample_order`. Echoed so a client that sent no override can label what it is showing without guessing the default.",
+            "enum": [
+              "info_gain",
+              "difficulty"
+            ],
+            "title": "Order",
+            "type": "string"
+          },
+          "row_count": {
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "samples": {
+            "items": {
+              "$ref": "#/components/schemas/DatasetItem"
+            },
+            "title": "Samples",
+            "type": "array"
+          },
+          "scope": {
+            "enum": [
+              "cycle",
+              "campaign",
+              "dataset"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "split_test": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Declared held-out test fold size (not materialized). The training-bank size is `row_count` above.",
+            "title": "Split Test"
+          },
+          "total_hits": {
+            "title": "Total Hits",
+            "type": "integer"
+          },
+          "total_measurements": {
+            "description": "Graded cells across `samples` — the headline's denominator, served so the reader adds nothing up.",
+            "title": "Total Measurements",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "scope",
+          "row_count",
+          "order",
+          "samples",
+          "candidates",
+          "cells",
+          "total_measurements",
+          "total_hits",
+          "mean_fitness"
+        ],
+        "title": "CellsResponse",
+        "type": "object"
+      },
       "CommandAcceptedBody": {
         "additionalProperties": false,
         "description": "The 202 response shape declared in ``api-openapi.yaml``.",
@@ -1580,6 +2128,30 @@
             "title": "Hard Sample Rank",
             "type": "integer"
           },
+          "mean_fitness": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean graded fitness over those cells; null when none.",
+            "title": "Mean Fitness"
+          },
+          "n_hits": {
+            "default": 0,
+            "description": "Of those, how many maxed out the active scorer (`domain.scoring.is_hit`). Structurally 0 on a graded scorer; read `mean_fitness` there.",
+            "title": "N Hits",
+            "type": "integer"
+          },
+          "n_measured": {
+            "default": 0,
+            "description": "GRADED cells of this sample in scope (errored and unscored cells excluded, as the Rasch fit excludes them) — the denominator of the two below.",
+            "title": "N Measured",
+            "type": "integer"
+          },
           "n_obs": {
             "anyOf": [
               {
@@ -1744,55 +2316,6 @@
           "model_capabilities"
         ],
         "title": "DatasetPipelineResponse",
-        "type": "object"
-      },
-      "DatasetPreviewResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/DatasetItem"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "order": {
-            "description": "The key `items` are ranked by — the request's `order` when it named one, else the dataset's `CampaignConfig.hard_sample_order`. Echoed so a client that sent no override can label what it is showing without guessing the default.",
-            "enum": [
-              "info_gain",
-              "difficulty"
-            ],
-            "title": "Order",
-            "type": "string"
-          },
-          "row_count": {
-            "title": "Row Count",
-            "type": "integer"
-          },
-          "split_test": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Declared held-out test fold size (not materialized). The training-bank size is `row_count` above — the bank IS the preview, so a second field restated it.",
-            "title": "Split Test"
-          }
-        },
-        "required": [
-          "name",
-          "row_count",
-          "order",
-          "items"
-        ],
-        "title": "DatasetPreviewResponse",
         "type": "object"
       },
       "DatasetStorageEntry": {
@@ -3468,100 +3991,6 @@
         "title": "MeResponse",
         "type": "object"
       },
-      "MeasurementDot": {
-        "additionalProperties": false,
-        "properties": {
-          "fitness": {
-            "description": "Graded per-sample score in [0,1] under the active scorer. Binary scorers emit exactly 0.0 or 1.0; render a shade, not a HIT/MISS boolean.",
-            "title": "Fitness",
-            "type": "number"
-          },
-          "label": {
-            "description": "Short human label, e.g. 'R3 cand 2'.",
-            "title": "Label",
-            "type": "string"
-          },
-          "ord": {
-            "description": "Opaque ordinal for lex sort + uniqueness (encodes ts/run/idx or round/cand).",
-            "title": "Ord",
-            "type": "string"
-          }
-        },
-        "required": [
-          "ord",
-          "fitness",
-          "label"
-        ],
-        "title": "MeasurementDot",
-        "type": "object"
-      },
-      "MeasurementSeriesResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/SampleSeries"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "mean_fitness": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Mean graded fitness across every measurement in `items`; `None` when the scope holds none. The headline rate on any scorer, graded or binary.",
-            "title": "Mean Fitness"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "order": {
-            "description": "The key `items` are ranked by, resolved exactly as `/preview`'s. Echoed on BOTH responses because they are one page read twice: a client holding only one of them would otherwise have to name the order from the other, or guess the default.",
-            "enum": [
-              "info_gain",
-              "difficulty"
-            ],
-            "title": "Order",
-            "type": "string"
-          },
-          "scope": {
-            "enum": [
-              "cycle",
-              "campaign",
-              "dataset"
-            ],
-            "title": "Scope",
-            "type": "string"
-          },
-          "total_hits": {
-            "description": "`SampleSeries.n_hits` summed across `items`. Structurally 0 on a graded scorer; read `mean_fitness` there.",
-            "title": "Total Hits",
-            "type": "integer"
-          },
-          "total_measurements": {
-            "description": "Measurements across every series in `items` — the denominator of the roster's headline, served so the reader adds nothing up.",
-            "title": "Total Measurements",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "name",
-          "scope",
-          "order",
-          "items",
-          "total_measurements",
-          "total_hits",
-          "mean_fitness"
-        ],
-        "title": "MeasurementSeriesResponse",
-        "type": "object"
-      },
       "MechanismGroup": {
         "additionalProperties": false,
         "properties": {
@@ -4763,47 +5192,6 @@
           "source"
         ],
         "title": "RunsWithParam",
-        "type": "object"
-      },
-      "SampleSeries": {
-        "additionalProperties": false,
-        "properties": {
-          "mean_fitness": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Mean graded fitness over this series; `None` when it holds no measurement. The rate to read on a graded scorer, where `n_hits` is structurally 0.",
-            "title": "Mean Fitness"
-          },
-          "measurements": {
-            "items": {
-              "$ref": "#/components/schemas/MeasurementDot"
-            },
-            "title": "Measurements",
-            "type": "array"
-          },
-          "n_hits": {
-            "description": "How many of THIS series' measurements maxed out the active scorer (`domain.scoring.is_hit`, the one definition of that threshold). Served rather than counted client-side so the tally and the dots it summarises cannot disagree — and so a graded scorer, whose ceiling is unreachable, reports 0 against a mean that is not 0.",
-            "title": "N Hits",
-            "type": "integer"
-          },
-          "sample_id": {
-            "title": "Sample Id",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "sample_id",
-          "measurements",
-          "n_hits",
-          "mean_fitness"
-        ],
-        "title": "SampleSeries",
         "type": "object"
       },
       "ScenarioReading": {
@@ -7473,6 +7861,297 @@
         ]
       }
     },
+    "/api/v1/datasets/{name}/cells": {
+      "get": {
+        "description": "The measurement log. Under a filter, ``samples`` and ``candidates`` shrink to the ones\nholding a kept cell, so a preset (one candidate, one round) serves exactly its own rows.",
+        "operationId": "get_dataset_cells_api_v1_datasets__name__cells_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Samples per page.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Samples per page.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Cap on unmeasured samples kept in the ranking; None = no trim.",
+            "in": "query",
+            "name": "max_unmeasured",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 1000,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cap on unmeasured samples kept in the ranking; None = no trim.",
+              "title": "Max Unmeasured"
+            }
+          },
+          {
+            "description": "dataset=cross-campaign; campaign=pooled (needs campaign_id); cycle=one cycle (needs both ids).",
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "dataset",
+              "description": "dataset=cross-campaign; campaign=pooled (needs campaign_id); cycle=one cycle (needs both ids).",
+              "enum": [
+                "cycle",
+                "campaign",
+                "dataset"
+              ],
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Required when scope is campaign or cycle.",
+            "in": "query",
+            "name": "campaign_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Required when scope is campaign or cycle.",
+              "title": "Campaign Id"
+            }
+          },
+          {
+            "description": "Required when scope=cycle.",
+            "in": "query",
+            "name": "cycle_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Required when scope=cycle.",
+              "title": "Cycle Id"
+            }
+          },
+          {
+            "description": "L4 inner-cycle descent tail (`~`-joined `campaign::cycle` hops below the root, mirrors `?descend=` on the dashboard route). Present → read every scope from the inner `.inner/` sandbox; needs campaign_id + cycle_id (the root hop) to walk from.",
+            "in": "query",
+            "name": "descend",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "L4 inner-cycle descent tail (`~`-joined `campaign::cycle` hops below the root, mirrors `?descend=` on the dashboard route). Present → read every scope from the inner `.inner/` sandbox; needs campaign_id + cycle_id (the root hop) to walk from.",
+              "title": "Descend"
+            }
+          },
+          {
+            "description": "Override the ranking key for this read; unset ⇒ the dataset's `CampaignConfig.hard_sample_order`. The resolved value comes back on `order`.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "info_gain",
+                    "difficulty"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override the ranking key for this read; unset ⇒ the dataset's `CampaignConfig.hard_sample_order`. The resolved value comes back on `order`.",
+              "title": "Order"
+            }
+          },
+          {
+            "description": "Keep only this individual's cells (`CellCandidate.candidate_id`). A campaign's candidates carry one; dataset-scope runs do not, so there it keeps nothing.",
+            "in": "query",
+            "name": "candidate_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keep only this individual's cells (`CellCandidate.candidate_id`). A campaign's candidates carry one; dataset-scope runs do not, so there it keeps nothing.",
+              "title": "Candidate Id"
+            }
+          },
+          {
+            "description": "Keep only this round's cells. Dataset-scope runs carry no round, so there it keeps nothing.",
+            "in": "query",
+            "name": "round",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keep only this round's cells. Dataset-scope runs carry no round, so there it keeps nothing.",
+              "title": "Round"
+            }
+          },
+          {
+            "description": "Keep only cells with this mark.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "HIT",
+                    "MISS",
+                    "ERR",
+                    "UNSC"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keep only cells with this mark.",
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CellsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Dataset Cells",
+        "tags": [
+          "Datasets"
+        ]
+      }
+    },
+    "/api/v1/datasets/{name}/cells/{run_id}/{sample_id}": {
+      "get": {
+        "description": "One cell opened — its row assembled into a trace (`application/scoring/cells.py`).",
+        "operationId": "get_dataset_cell_api_v1_datasets__name__cells__run_id___sample_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sample_id",
+            "required": true,
+            "schema": {
+              "title": "Sample Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Cell"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Dataset Cell",
+        "tags": [
+          "Datasets"
+        ]
+      }
+    },
     "/api/v1/datasets/{name}/draft": {
       "post": {
         "description": "Open an authored dataset's files as a durable check-in campaign.\n\nThe direct path behind \"open this dataset in the ingest panel\" — a demo /\nbenchmark / owned Origin becomes a prefilled check-in (``draft_id`` ==\n``campaign_id``) without a browser-side CSV round-trip. Identity-gated through\nthe same resolver as the other dataset reads; nothing runs until the operator\nstarts it via ``/commands/start-checkin``.",
@@ -7518,174 +8197,6 @@
         ]
       }
     },
-    "/api/v1/datasets/{name}/measurement-series": {
-      "get": {
-        "description": "Chronological per-sample series for the Meas heat-map column. Same page, same order as\n`/preview` — both resolve it through `_resolve_leaderboard_page`, so alignment is a shared\nfunction rather than two matching sort keys. `ord` is opaque (only row alignment).",
-        "operationId": "get_dataset_measurement_series_api_v1_datasets__name__measurement_series_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 1000,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Must match `/preview`'s value so the two responses align by index.",
-            "in": "query",
-            "name": "max_unmeasured",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 1000,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Must match `/preview`'s value so the two responses align by index.",
-              "title": "Max Unmeasured"
-            }
-          },
-          {
-            "description": "Same scopes as `/preview` (dataset/campaign/cycle).",
-            "in": "query",
-            "name": "scope",
-            "required": false,
-            "schema": {
-              "default": "dataset",
-              "description": "Same scopes as `/preview` (dataset/campaign/cycle).",
-              "enum": [
-                "cycle",
-                "campaign",
-                "dataset"
-              ],
-              "title": "Scope",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Required when scope is campaign or cycle.",
-            "in": "query",
-            "name": "campaign_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Required when scope is campaign or cycle.",
-              "title": "Campaign Id"
-            }
-          },
-          {
-            "description": "Required when scope=cycle; ignored otherwise.",
-            "in": "query",
-            "name": "cycle_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Required when scope=cycle; ignored otherwise.",
-              "title": "Cycle Id"
-            }
-          },
-          {
-            "description": "L4 inner-cycle descent tail — same seam as `/preview`'s `descend`.",
-            "in": "query",
-            "name": "descend",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "L4 inner-cycle descent tail — same seam as `/preview`'s `descend`.",
-              "title": "Descend"
-            }
-          },
-          {
-            "description": "Same override as `/preview`'s; send the same value to keep the two responses in one order.",
-            "in": "query",
-            "name": "order",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "info_gain",
-                    "difficulty"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Same override as `/preview`'s; send the same value to keep the two responses in one order.",
-              "title": "Order"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MeasurementSeriesResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Dataset Measurement Series",
-        "tags": [
-          "Datasets"
-        ]
-      }
-    },
     "/api/v1/datasets/{name}/pipeline": {
       "get": {
         "description": "Return the dataset overlay's parsed pipeline schema, graph view, and per-node\nconfig + output schema.\n\nIdentity-gated through the same resolver as the other dataset reads — there is\nno unauthenticated path to a benchmark's pipeline/overlay config.",
@@ -7724,174 +8235,6 @@
           }
         },
         "summary": "Get Dataset Pipeline",
-        "tags": [
-          "Datasets"
-        ]
-      }
-    },
-    "/api/v1/datasets/{name}/preview": {
-      "get": {
-        "description": "Hard-sample leaderboard, served in rank order — `items[i].hard_sample_rank == i + 1`.\n\nRows measured in this scope rank first by the `order` key, the rest trail by sample_id.\n*Measured* is dot presence in the companion `/measurement-series`, not a δ entry: the\nRasch ruler persists across rounds and inherits from parent fits, so it overcounts on its\nown. Both routes resolve the page through one function, so they cannot disagree.",
-        "operationId": "get_dataset_preview_api_v1_datasets__name__preview_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 1000,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Cap on unmeasured rows kept in Rasch-sorted output; None = no trim.",
-            "in": "query",
-            "name": "max_unmeasured",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 1000,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Cap on unmeasured rows kept in Rasch-sorted output; None = no trim.",
-              "title": "Max Unmeasured"
-            }
-          },
-          {
-            "description": "dataset=cross-campaign; campaign=pooled (needs campaign_id); cycle=one cycle (needs both ids).",
-            "in": "query",
-            "name": "scope",
-            "required": false,
-            "schema": {
-              "default": "dataset",
-              "description": "dataset=cross-campaign; campaign=pooled (needs campaign_id); cycle=one cycle (needs both ids).",
-              "enum": [
-                "cycle",
-                "campaign",
-                "dataset"
-              ],
-              "title": "Scope",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Required when scope is campaign or cycle.",
-            "in": "query",
-            "name": "campaign_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Required when scope is campaign or cycle.",
-              "title": "Campaign Id"
-            }
-          },
-          {
-            "description": "Required when scope=cycle; ignored otherwise.",
-            "in": "query",
-            "name": "cycle_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Required when scope=cycle; ignored otherwise.",
-              "title": "Cycle Id"
-            }
-          },
-          {
-            "description": "L4 inner-cycle descent tail (`~`-joined `campaign::cycle` hops below the root, mirrors `?descend=` on the dashboard route). Present → read every scope from the inner `.inner/` sandbox; needs campaign_id + cycle_id (the root hop) to walk from.",
-            "in": "query",
-            "name": "descend",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "L4 inner-cycle descent tail (`~`-joined `campaign::cycle` hops below the root, mirrors `?descend=` on the dashboard route). Present → read every scope from the inner `.inner/` sandbox; needs campaign_id + cycle_id (the root hop) to walk from.",
-              "title": "Descend"
-            }
-          },
-          {
-            "description": "Override the ranking key for this read; unset ⇒ the dataset's `CampaignConfig.hard_sample_order`. The resolved value comes back on `order`.",
-            "in": "query",
-            "name": "order",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "info_gain",
-                    "difficulty"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Override the ranking key for this read; unset ⇒ the dataset's `CampaignConfig.hard_sample_order`. The resolved value comes back on `order`.",
-              "title": "Order"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DatasetPreviewResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Dataset Preview",
         "tags": [
           "Datasets"
         ]

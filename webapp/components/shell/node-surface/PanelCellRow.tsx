@@ -1,7 +1,7 @@
 "use client";
 // ONE cell of an L4 panel — rendered as the inner campaign it actually is.
 //
-// The plain `SampleRowItem` cannot say anything true about these: an outer round
+// A scored-cell row cannot say anything true about these: an outer round
 // records `is_hit: null`, no prediction and no ground truth for a cell, because
 // the cell was not scored — it was OPTIMIZED, by a whole campaign. Rendered as a
 // scored row it read as a bare query string that had missed.

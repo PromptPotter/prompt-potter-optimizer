@@ -61,6 +61,9 @@ class ScoredWalk:
     scores: dict[str, Any]
     signal: EscalationSignal | None
     stopped: str | None
+    # The archive run the rows were filed under — what a score report carries so each of its cells
+    # is addressable as ``(run_id, sample_id)``.
+    run_id: str
 
 
 def rescored_prior_tail(
@@ -445,6 +448,7 @@ def open_walk(
     ctx = QueryLoopState(
         search_point=search_point,
         session=session,
+        run_id=run_id,
         cached_sample_results=cached_sample_results,
         on_sample_scored=on_sample_scored,
         axes=axes,
@@ -477,4 +481,6 @@ def close_walk(walk: Walk) -> ScoredWalk:
         scores["partial_reason"] = "skip"
     walk.ctx.record_run(results, scores)
     stopped = None if len(results) == walk.n else outcome.stop_reason
-    return ScoredWalk(results, scores, _resolve_partial_escalation(outcome), stopped)
+    return ScoredWalk(
+        results, scores, _resolve_partial_escalation(outcome), stopped, walk.ctx.run_id
+    )

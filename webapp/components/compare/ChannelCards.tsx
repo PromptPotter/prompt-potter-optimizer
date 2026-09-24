@@ -44,6 +44,7 @@ import {
 } from "@/components/candidates/Forest";
 import { DENSE, type RoundNodePos } from "@/components/candidates/forest-layout";
 import { SearchpointDrillIn } from "@/components/shell/searchpoint/SearchpointDrillIn";
+import { MeasurementsPane } from "@/components/shell/measurements/MeasurementsPane";
 import type { CompareChannel } from "@/lib/compare-selection";
 import {
   applyFlatEdits,
@@ -574,7 +575,22 @@ function ChannelCard({
               <SearchpointDrillIn
                 row={pickedRow}
                 cfg={pickedCfg}
-                samples={pickedSamples}
+                measurements={
+                  pickedPath &&
+                  docId && (
+                    // The point's cells on the branch it was picked on — the one measurement
+                    // log, preset to this individual.
+                    <MeasurementsPane
+                      preset={{
+                        path: pickedPath,
+                        datasetName: reading.dataset_name,
+                        candidateId: docId,
+                        scope: "cycle",
+                        groupBy: "none",
+                      }}
+                    />
+                  )
+                }
                 arms={pickedArms}
                 schema={pipeline?.node_config_schema ?? null}
                 schemaStatus={pipelineStatus}
