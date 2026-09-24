@@ -23,7 +23,7 @@ Each subpackage's `CLAUDE.md` auto-loads by directory proximity and **deepest wi
 
 **A page you add to a layer is paid by everyone who edits there**, not just the reader who wanted it. So a fact belongs in the layer's `CLAUDE.md` only if it is a RULE binding a set of symbols; mechanism belongs at its definition site, in the module's own docstring, where it costs nothing until someone opens the file.
 
-**Every word is ratcheted** — `complexity_ledger::claude_md_words` counts them, so a page that grows costs a baseline edit and a written reason.
+**Every page is capped** — `scripts/gate.py::_CLAUDE_MD_MAX_WORDS`; one that reaches it is trimmed or split.
 
 ## Where L4 lives
 

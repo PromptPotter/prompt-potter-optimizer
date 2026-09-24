@@ -260,6 +260,7 @@ def test_inherit_fork_origin_unmodified_inherits_else_rescores(built_stores: Sto
                 {
                     "candidate_id": "c1",
                     "label": "C1.1",
+                    "run_id": None,
                     "prompt_fields": prompt,
                     "accuracy": 0.2,
                     "composite_fitness": 0.2,

@@ -227,6 +227,23 @@ def _anti_rot(_: Sel) -> Outcome:
     return (1, "liveL1Candidates outside the spine:\n" + "\n".join(hits)) if hits else (0, "")
 
 
+# A CLAUDE.md loads into every session beneath it. A CAP, not a ratchet: prose moves freely under
+# it, and only a page grown past it has to be trimmed or split.
+_CLAUDE_MD_MAX_WORDS = 7000
+
+
+def _claude_md_size(_: Sel) -> Outcome:
+    code, listed = _run(["git", "ls-files", "*CLAUDE.md"], _REPO)
+    if code:
+        return code, listed
+    over = [
+        f"{rel}: {n} words"
+        for rel in listed.splitlines()
+        if (n := len((_REPO / rel).read_text(encoding="utf-8").split())) > _CLAUDE_MD_MAX_WORDS
+    ]
+    return (1, f"over {_CLAUDE_MD_MAX_WORDS} words:\n" + "\n".join(over)) if over else (0, "")
+
+
 # What ruff lints when the run is not scoped to staged files. ``scripts/`` is here for the
 # reason ``_mypy`` states below — a tracked module outside the package is still shipped code —
 # and it was absent, which made the two modes disagree: ``--staged`` passes the staged paths
@@ -435,6 +452,7 @@ CHECKS: tuple[Check, ...] = (
     Check("deptry", "py", lambda _: _run(_py("deptry", "."), _REPO)),
     Check("mypy", "py", _mypy),
     Check("layering", "py", _layering, staged=True),
+    Check("claude-md-size", "py", _claude_md_size, staged=True),
     # "py" so it runs without `webapp/node_modules`, which is routinely absent — a guard that
     # cannot run on the machine that would trip it is not a guard.
     Check("undiffable", "py", _undiffable, staged=True),

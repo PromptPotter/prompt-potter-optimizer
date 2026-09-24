@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import ast
 import json
-import os
 import types
 import typing
 from pathlib import Path
@@ -66,23 +65,6 @@ def _package_files(pattern: str) -> list[Path]:
         "that staged it."
     )
     return [p for p in _PACKAGE_ROOT.rglob(pattern) if _ASSETS_ROOT not in p.parents]
-
-
-_REPO_ROOT = _PACKAGE_ROOT.parent
-_UNWALKED = frozenset(
-    {"node_modules", ".venv", ".git", ".claude", "dist", ".next", "out", "assets"}
-)
-
-
-def _count_claude_md_words() -> int:
-    """Words across every ``CLAUDE.md`` in the repo — each is billed to every session beneath it.
-    Skips vendored, built, staged and worktree dirs (``pp-*``), which nobody here wrote."""
-    total = 0
-    for root, dirs, files in os.walk(_REPO_ROOT):
-        dirs[:] = [d for d in dirs if d not in _UNWALKED and not d.startswith("pp-")]
-        if "CLAUDE.md" in files:
-            total += len((Path(root) / "CLAUDE.md").read_text(encoding="utf-8").split())
-    return total
 
 
 def _unwrap_optional(annotation: object) -> object:
@@ -317,7 +299,6 @@ def compute_ledger() -> dict[str, int]:
         "escalation_rules": len(DEFAULT_ESCALATION_RULES),
         "deferred_imports": _count_deferred_imports(py_files),
         "claude_md": len(_package_files("CLAUDE.md")),
-        "claude_md_words": _count_claude_md_words(),
         "test_files": len(test_files := _test_files()),
         "test_functions": _count_test_functions(test_files),
         "served_fields": _count_served_fields(),
