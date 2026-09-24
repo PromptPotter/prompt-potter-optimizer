@@ -78,7 +78,11 @@ dropped, so it measured a no-skill episode — see § Step schema.
 about the origin prompt rather than a defect: cell `109-21` flipped HIT→MISS once the prompt
 arrived. Cost is bimodal by OUTCOME — every miss is a high-token cell (77k / 113k / 163k) against
 every hit being lower — so an episode that flails is an episode that burns, which is a property a
-prompt moves.
+prompt moves. A skill that hurts is not an anomaly: [SkillsBench](https://arxiv.org/abs/2602.12670)
+found curated skills worsened 16 of 84 tasks and self-generated ones gave zero average benefit, and
+it is the external harness to report a skill result on once one leaves this repo. The candidate is
+a `SKILL.md` body, so the [Agent Skills spec](https://agentskills.io/specification)'s size limit
+binds it.
 
 **Four cells of headroom, and that is still a verdict about the PANEL.** Under the admission bar
 (`../../docs/research/benchmarks.md` § The admission bar), so this cut can carry an instrument

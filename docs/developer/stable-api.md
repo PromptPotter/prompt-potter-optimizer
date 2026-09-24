@@ -256,8 +256,19 @@ back-compat · **JSON and scalars, never pickle**. `tuned_params` carries the no
 ran under, minus each node's rendered prompt — that is `prompt_fields` again, and one artifact does
 not state a fact twice.
 
+That node config names the model the winner was won on, and a reader must treat it as binding: an
+optimized prompt does not carry across models. [Why Prompt Optimization Works, and Why It Sometimes
+Doesn't](https://arxiv.org/abs/2605.26655) found edits that help one benchmark often fail on another
+across four model families, and [Prompting Inversion](https://arxiv.org/abs/2510.22251) reports a
+scaffold that helps GPT-4o and hurts GPT-5. A model swap is a new run, never a copy of the winner.
+
 Absent when no round ever closed: an artifact whose point is a fitness with provenance may not
 carry an unmeasured one.
+
+**Gap:** the provenance carries no optimization spend or tokens, which amortized lifetime cost
+needs ([`../research/external-constraints.md`](../research/external-constraints.md) § Cost
+reporting) — [Databricks](https://www.databricks.com/blog/building-state-art-enterprise-agents-90x-cheaper-automated-prompt-optimization)
+counts optimization cost plus serving cost over 100k requests, and a reader of this file cannot yet.
 
 ## 6. Ledger event types
 

@@ -5,7 +5,7 @@ package** — `pip install promptpotter[dspy]` — for an audience that never cl
 runs a server, or opens the operator webapp. A plain install is already just the engine, so
 the DSPy dependency and this module are the only things the extra adds.
 
-> CAPO ships in [promptolution](https://github.com/finitearth/promptolution), not DSPy —
+> CAPO ships in [promptolution](https://github.com/gepromptet/promptolution), not DSPy —
 > DSPy's own are MIPROv2, COPRO, GEPA and BootstrapFewShot. The swap reads the same either way.
 
 ## What you trade away
@@ -48,6 +48,12 @@ from promptpotter.presentation.teleprompter import PromptPotterOpt
 optimizer = PromptPotterOpt(metric=my_metric, dataset_name="my-task")
 compiled = optimizer.compile(my_program, trainset=trainset)
 ```
+
+The contract, as DSPy's source states it (`dspy/teleprompt/teleprompt.py`), is
+`Teleprompter.compile(self, student: Module, *, trainset, teacher=None, valset=None, **kwargs) -> Module`.
+`dspy.GEPA` ([paper](https://arxiv.org/abs/2507.19457)) sets its budget with `auto` (light / medium /
+heavy), `max_full_evals` or `max_metric_calls`; the last is the knob a budget-matched comparison
+against this optimizer holds equal.
 
 Every field below has a default, so that is a complete run. The rest of this page is what
 you override once you want the search shaped to your task.

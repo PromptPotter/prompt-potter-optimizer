@@ -16,7 +16,7 @@ Every trace gets rescored under the active scorer when crossing from disk to mem
 
 One of the downstream consequences is the system keeps **two costs**, and they answer different questions:
 
-- **The bill** — money that actually left the account. Cache hits contribute nothing to it. This is the headline, and it is what the spend budget caps. It has to stay this way: billing a replay would halt a run that cost nothing to make.
+- **The bill** — money that actually left the account. Cache hits contribute nothing to it. This is the headline, and it is what the spend budget caps; a published or head-to-head figure also carries the raw tokens and the price table's date ([`../research/external-constraints.md`](../research/external-constraints.md) § Cost reporting). A headline never omits the optimization spend: [Databricks](https://www.databricks.com/blog/building-state-art-enterprise-agents-90x-cheaper-automated-prompt-optimization)' 90× cheaper-serving result counts optimization cost plus serving cost over 100k requests, and the bill already meters the first half. It has to stay this way: billing a replay would halt a run that cost nothing to make.
 - **The incurred cost** — what the search would cost to run against a cold cache, with cache hits priced from the tokens they recorded (the cached payloads carry them, so nothing is estimated). This is what a *measurement of a candidate* has to divide by.
 
 On a cold cache the two are equal — which is exactly why this could sit undetected until the archive got deep enough for an arm to start free-riding on it.

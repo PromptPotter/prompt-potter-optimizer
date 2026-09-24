@@ -111,8 +111,9 @@ and moves every round.
   `Trial.create(...).run()`; the container, the verifier and the reward file are all theirs, so
   this connector shapes payloads and reads a number rather than orchestrating anything. What it
   decides, which the next episodic backend will face too: **the candidate prompt ships as an Agent
-  Skill** (`AgentConfig.skills`) whose frontmatter `description` is FIXED and never a search axis
-  (`harbor.py::_SKILL_NAME` says why). **`nodes.agent.config.skill_delivery: system_prompt` is the
+  Skill** (`AgentConfig.skills`) whose frontmatter `description` is FIXED — one skill per episode, not the
+  multi-skill design — and whose body obeys the spec's limits (`harbor.py::_SKILL_NAME`;
+  [`external-constraints.md`](../../docs/research/external-constraints.md) § SKILL). **`nodes.agent.config.skill_delivery: system_prompt` is the
   second channel** — the skill body at the head of terminus-2's prompt template — fixed per
   campaign, never listed in `param_keys`, absent means the Agent Skill; it enters identity as the
   node config it is. **The panel is the workload's `experiment`**, its published roster pinned by

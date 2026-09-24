@@ -140,7 +140,16 @@ Definition only; instance assembly TBD. PromptPotter is the reference solver.
 ## What we report
 
 **Absolute Accuracy** — `correct / total` on test — per (method, model), from `results_*.json`. It is
-the raw performance of the best prompt found, and the standard comparison point.
+the raw performance of the best prompt found, and the standard comparison point. Its interval is
+paired and clustered, exact or bootstrapped, with signal-to-noise per benchmark — never a binomial
+SE ([`external-constraints.md`](external-constraints.md) § M14).
+[Adding Error Bars to Evals](https://arxiv.org/abs/2411.00640) shows clustering can inflate SEs up
+to 3×, so a head-to-head differences the two arms per cell; ["Don't use the CLT…"](https://arxiv.org/abs/2503.01747)
+applies below a few hundred datapoints, which covers most of our panels; and
+[Signal and Noise](https://arxiv.org/abs/2508.13144) down-weights low-SNR subtasks before a delta
+is trusted. The reporting section of the [Agentic Benchmark Checklist](https://arxiv.org/abs/2507.02825),
+which 10 of 10 popular agent benchmarks failed, gets filled in for this bench and published as an
+appendix.
 
 Beside it, two of the round counts a cycle banks in `index.json::final`, which say how *fast* rather
 than how *high*: **`rounds_to_separable`**, the first round whose arms could be told apart at all,
@@ -152,7 +161,12 @@ two are routinely far apart and a claim that does not name which one it rests on
 A query denominator is deliberately absent from all of them. Nearly all of a campaign's wall clock
 and spend is backend scoring, and the optimizer's own calls are a few percent of it, so "per
 optimization query" prices the cheap part and hides the bill the operator actually pays. Price a
-lift in wall clock and dollars.
+lift in wall clock and dollars. That rules out a *denominator*, not the count: a head-to-head
+still holds total calls equal across arms, and reports calls, tokens and dollars (with the price
+table's date) as separate axes beside wall clock ([`external-constraints.md`](external-constraints.md)
+§ Ranked, item 4, and § Cost reporting). That is the template [HAL](https://arxiv.org/abs/2510.11977)
+and [AI Agents That Matter](https://arxiv.org/abs/2407.01502) set: a cost–accuracy Pareto frontier,
+dollars and tokens as separate axes, and a holdout never used for tuning.
 
 ### The winner's own number is biased upward
 
@@ -160,4 +174,4 @@ Accuracy is read off the **selected** candidate, and selection and estimation mu
 
 **Published head-to-head figures are clean** — the split that makes them so is owned by [`bbeh-comparison/README.md`](bbeh-comparison/README.md) § The protocol. **In-campaign figures are not:** the winner's `composite_fitness`, the round banner, the dashboard headline and `export.json`'s fitness are all computed on the rows that selected the winner. The fix is a reserved partition the loop never scores on, tracked in [`../specs/roadmap.md`](../specs/roadmap.md) § Selection-clean reporting.
 
-Named and corrected for in *Correcting the Winner's Curse in Adaptive Benchmarking* ([arXiv:2605.05973](https://arxiv.org/abs/2605.05973)), whose protocol assumes a fixed shortlist and smooth stabilized selection — the assumption PoBB's adaptive stopping strains, so their estimator needs checking against it before it is adopted.
+Named and corrected for in *Correcting the Winner's Curse in Adaptive Benchmarking* ([arXiv:2605.05973](https://arxiv.org/abs/2605.05973)), whose protocol assumes a fixed shortlist and smooth stabilized selection — the assumption PoBB's adaptive stopping strains, so their estimator needs checking against it before it is adopted. The same data-dependent stopping is why PoBB's ε carries no anytime-valid guarantee ([`external-constraints.md`](external-constraints.md) § Ranked, item 3); the form that would carry one is a confidence sequence from test supermartingales ([Hsu & Shekhar](https://arxiv.org/abs/2607.17409)).

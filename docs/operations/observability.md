@@ -47,6 +47,8 @@ Set `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` in `.env`, t
 
 `MLFLOW_ENABLED=true` (default false) logs each round as an MLflow run under `traces/mlruns/`, experiment `{tenant_id}/{cycle_id}`. Installs from `.[observability]` alongside the file + Langfuse sinks, as **`mlflow-skinny`** — the sink calls tracking APIs only, and full `mlflow` caps `cryptography<50`. MLflow 3.15 put that local file tree in maintenance mode, so the sink sets `MLFLOW_ALLOW_FILE_STORE=true`; without it the first round raises, and the migration MLflow points at (`sqlite:///`) needs SQLAlchemy, which skinny omits.
 
+**Both sinks sit downstream of two competing span conventions, and one must be chosen as primary before a third sink is added** ([`../research/external-constraints.md`](../research/external-constraints.md) § TOOL): OpenTelemetry GenAI, whose `gen_ai.*` attributes are all still *Development* (v1.42.0), so a version is pinned rather than head tracked; and Arize's OpenInference, which requires `openinference.span.kind` on every span.
+
 ## Display convention — `⚠ … ↳`
 
 Optimizer findings (validation failures, anomaly flags, elimination, degradation) surface as two lines:

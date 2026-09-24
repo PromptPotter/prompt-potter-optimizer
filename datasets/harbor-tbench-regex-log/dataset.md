@@ -60,4 +60,8 @@ Per `dataset-selection-rationale.md` § Adding a dataset:
 skill that did would be the benchmark leaking into the baseline the lift is read against. What
 varies across arms is the standing operating instruction; what is held fixed is the frontmatter
 that makes the agent open it at all (`connectors/harbor.py`, `_SKILL_DESCRIPTION` — a candidate
-free to write its own could win by hiding its own skill).
+free to write its own could win by hiding its own skill). The candidate body is still bound by the
+[Agent Skills spec](https://agentskills.io/specification)'s size limit (under 500 lines). A skill
+result meant for outside readers is reported on [SkillsBench](https://arxiv.org/abs/2602.12670),
+whose verifiers are deterministic and which found self-generated skills give zero average benefit —
+the reason a skill here is admitted only on measured lift, never on a rewrite alone.

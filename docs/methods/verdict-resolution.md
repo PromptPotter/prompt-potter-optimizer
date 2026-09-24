@@ -66,7 +66,12 @@ leaves a dichotomous campaign unchanged, `φ < 1` returns a graded backend's rea
 widens the SE on an overdispersed one. It is floored — a response with no residual variance carries
 no evidence about its own dispersion, and an unfloored `φ→0` would report infinite confidence.
 
-**1PL today, 2PL when the data earns it.** The current model is difficulty-only. With enough
+**1PL by default; each dataset graduates to 2PL where it wins held-out CV**
+(`enable_2pl_graduation`, on by default). Elsewhere 2PL is the field default —
+[`../research/external-constraints.md`](../research/external-constraints.md) § M14. tinyBenchmarks,
+metabench and [Fluid Benchmarking](https://arxiv.org/abs/2509.11106) all validate IRT ability as
+the comparability tool, which supports θ, but they fit discrimination as well as difficulty, so
+1PL is the choice that needs defending here, not 2PL. With enough
 observations per sample a 2PL fit adds per-sample **discrimination** `aₛ` — how sharply a sample
 separates able from unable candidates, i.e. its signal-to-noise — giving both selection and the gate
 more power. It graduates **per-dataset**, behind the same θ interface, only when it provably beats

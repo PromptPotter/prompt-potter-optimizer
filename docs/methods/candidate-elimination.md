@@ -32,7 +32,7 @@ The fix is one design choice with several call-site consequences: **PoBB priors 
 Individuals are evaluated sequentially on **Q** in the shared round order. The first candidate runs to completion, establishing a reference. Each subsequent candidate is measured query by query; once `elimination_n_min` is reached, after every query:
 
 1. Build the paired comparison set — each prior mapped onto the candidate's exact sample ids. Priors that cannot be caught up are **excluded, never zero-filled**.
-2. One joint 1PL Rasch fit over the candidate + every paired prior yields each arm's ability `θ` and its Laplace `se` on the cycle's fixed δ ruler.
+2. Each arm's ability `θ` and its Laplace `se` are solved separately on the cycle's fixed δ ruler (`fit_theta_given_delta`) — fixed δ decouples the arms, and the ruler is 1PL or, where the dataset graduated, 2PL.
 3. `P(θ_cand > θ_prior) = Φ(Δθ / √(se_c² + se_p²))` — closed-form, no Monte Carlo. `p_best = min` over priors (bounded above by the hardest prior).
 4. Bound it by what the DISCORDANT pairs support — `shared/statistics.py::sign_posterior` over `discordant_counts`, the width `exact_paired_reading` already refuses a verdict below. Concordant cells move θ but cannot say which arm is better, so unbounded a prefix holding one discordant cell reads as decisive. Support is DIRECTIONAL — the posterior's mass on the side θ read — so pairs that CONTRADICT θ collapse the claim to 0.5 rather than widen it; taken as a bare magnitude it did the opposite, licensing 0.9375 for an arm that lost 3 of 3 and firing lock-in on arms every shared cell went against. Sign-preserving and toward 0.5, so it can only ever spare an arm, never cut one.
 5. Stop when `p_best < ε(n)` — ε is graded by depth, not scalar (see `pobb_epsilon_floor`).
@@ -48,7 +48,7 @@ Code: `application/scoring/selection.py::elimination_p_best` (the one θ rule, s
 - **Early — high-signal.** LLM-generated prompts differ a lot; some clearly dominate. The θ posteriors separate fast and `P(cand > prior)` becomes lopsided within 3–5 queries. Wilcoxon needed ≥8 queries at α=0.2 because it is variance-agnostic.
 - **Late — low-signal.** L2/L3 escalation has narrowed the population and true gaps are ≤0.02. The Bayesian *best*-test cannot confidently abort a near-tie (`P(best) ≈ 0.5`), so a tie rides to the sample cap and the winner is picked by the θ election.
 
-PoBB beats LUCB-style pairwise tests by sampling the joint posterior over **all** candidates and asking the actually-relevant question — population-aware, not pairwise.
+PoBB does not sample a joint posterior. `p_best` is a pairwise θ comparison against every prior, minimised — a bound on P(best), not the joint posterior — and since P(best) can only sit below it, a cut on it spares rather than overreaches.
 
 ## Tunable knobs
 
@@ -93,9 +93,9 @@ Recorded booleans from pre-graded decisions coerce to 0.0/1.0 — the identical 
 
 Mid-round abortion is an instance of **best-arm identification** in stochastic multi-armed bandits: given a fixed population of arms and a per-pull noisy reward, identify the highest mean at minimum sample cost. The literature splits on fixed-budget vs fixed-confidence, frequentist vs Bayesian, and pairwise vs population; PoBB sits in one cell, and three design choices put it there.
 
-- **Population-aware over pairwise** — the question is "is this the round winner?", not "is it worse than each prior?", and only the joint posterior across all candidates answers it. This is what rules out LUCB (Kalyanakrishnan 2012), Bayes-UCB (Kaufmann 2012) and Hoeffding Races (Maron & Moore 1993), each of which only ever compares to the current leader.
+- **Every prior, not only the leader** — the question is "is this the round winner?", and the code answers it with a pairwise θ comparison against every prior, minimised: a bound on P(best), not the joint posterior. The comparison is pairwise, so this does not set PoBB apart from LUCB (Kalyanakrishnan 2012), Bayes-UCB (Kaufmann 2012) or Hoeffding Races (Maron & Moore 1993) on structure. What still does: each of those tests against the current leader alone, and they are frequentist bounds rather than the posterior reading below.
 - **Bayesian over frequentist** — `P(c is best)` is one operator-readable number ("c042 73% probability of winning round"); a Holm-corrected p-value or a Hoeffding bound is not.
-- **Fixed-confidence (ε) over fixed-budget** — broken candidates stop as soon as the evidence floor is met, indistinguishable ones run to the cap. Phased fixed-budget algorithms cannot do the first: Successive Rejects (Audibert 2010) and Sequential Halving (Karnin 2013) both run a clearly-broken candidate to the phase boundary.
+- **Fixed-confidence (ε) over fixed-budget** — broken candidates stop as soon as the evidence floor is met, indistinguishable ones run to the cap. Phased fixed-budget algorithms cannot do the first: Successive Rejects (Audibert 2010) and Sequential Halving (Karnin 2013) both run a clearly-broken candidate to the phase boundary. "Fixed-confidence" is loose here: PoBB's ε is a bar on a posterior reading, not an anytime-valid error rate, so under optional stopping it carries no frequentist guarantee ([`../research/external-constraints.md`](../research/external-constraints.md) § Ranked, item 3). The anytime-valid alternative is a confidence sequence built from test supermartingales, which stays valid at any stopping time ([Hsu & Shekhar, *Efficient Sequential Evaluation of LLMs*](https://arxiv.org/abs/2607.17409)); that is the form the stop rule's guarantee would have to take before it is claimed.
 
 **Wilcoxon signed-rank + Holm-Bonferroni is what this replaced**, and it was pairwise with no joint distribution and variance-agnostic by construction. Holm survives in the codebase as a *reporting* correction only (`shared/statistics.py::holm_adjusted`) and reaches nothing in the loop. **OCBA** (Chen 2000) is the closest classical relative — same population-aware Bayesian family, but it addresses budget *allocation* where this is a stop rule; PoBB likewise drops Top-Two Thompson Sampling's allocation half, since the loop iterates candidates deterministically, and keeps the stop rule.
 
@@ -116,7 +116,7 @@ Rollout cost is where we stay deliberately conservative: a "rollout" here is a f
 
 - **Russo, D. (2016).** *Simple Bayesian Algorithms for Best Arm Identification.* COLT. — the PoBB / Top-Two Thompson Sampling family.
 - **Maurer & Pontil (2009).** *Empirical Bernstein bounds and sample-variance penalization.* COLT.
-- **Kalyanakrishnan et al. (2012).** *PAC subset selection in stochastic multi-armed bandits.* ICML. — LUCB; rejected as too pairwise.
+- **Kalyanakrishnan et al. (2012).** *PAC subset selection in stochastic multi-armed bandits.* ICML. — LUCB; rejected for testing against the leader alone.
 - **Audibert, Bubeck, Munos (2010).** *Best arm identification in multi-armed bandits.* COLT. — Successive Rejects; rejected for not adapting within-round.
 - **Chen, C.-H. (2000).** *Optimal Computing Budget Allocation.* Operations Research. — the closest classical relative; allocation rather than a stop rule.
 
