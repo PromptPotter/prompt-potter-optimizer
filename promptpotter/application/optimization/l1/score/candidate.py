@@ -136,7 +136,7 @@ def conclude_candidate(
                 dataset,
                 label=label,
                 sp_hash=sp_hash,
-                run_id="",
+                run_id=None,
                 resolved_pipeline_params=resolved_pipeline_params,
                 invalid=True,
                 l1_diversity=l1_diversity,

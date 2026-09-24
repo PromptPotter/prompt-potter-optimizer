@@ -315,7 +315,7 @@ async def establish_campaign_origin(
                 label=candidate_label(0, 0),
                 # No rows for an id to address.
                 sp_hash="",
-                run_id="",
+                run_id=None,
             ),
             origin_results=None,
         )

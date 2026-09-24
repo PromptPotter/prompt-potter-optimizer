@@ -161,7 +161,7 @@ def build_score_report(
     *,
     label: str,
     sp_hash: str,
-    run_id: str,
+    run_id: str | None,
     resolved_pipeline_params: dict[str, Any] | None = None,
     aborted: bool = False,
     elimination_stopped: bool = False,
@@ -176,7 +176,7 @@ def build_score_report(
     same band the live row already showed. ``sp_hash`` is the scored searchpoint's own
     ``sp_hash(session.pipeline_schema)`` — the call ``build_dataset_run_data`` makes to key the
     rows — so the report and the archive name one identity; ``""`` where nothing was measured.
-    ``run_id`` is the walk's own (``ScoredWalk.run_id``), ``""`` on the same terms."""
+    ``run_id`` is the walk's own (``ScoredWalk.run_id``), ``None`` where nothing was walked."""
     # Lazy: scoring → optimization circular.
 
     evaluators = {**(score_summary.get("evaluators") or {}), "l1_diversity": l1_diversity}

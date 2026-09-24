@@ -316,7 +316,7 @@ export interface ScoredCandidate {
   pipeline_overlay: Record<string, unknown> | null;
   resolved_pipeline_params: Record<string, unknown> | null;
   sp_hash: string;
-  run_id: string;
+  run_id: string | null;
   prompt_fields: Record<string, unknown>;
   escalation_aborted: boolean;
   elimination_stopped: boolean;
@@ -730,9 +730,9 @@ export interface CellCandidate {
   label: string;
   /** The individual's lineage id. Null in dataset scope. */
   candidate_id: string | null;
-  /** The archive run its cells were filed under. `""` on a report older than the
-   * stamp — its cells list but do not open. */
-  run_id: string;
+  /** The archive run its cells were filed under. Null where the candidate was never
+   * walked — rejected before it ran — so it holds no cells. */
+  run_id: string | null;
   /** Null in dataset scope. */
   round: number | null;
   /** Null in dataset scope. */

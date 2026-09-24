@@ -1204,9 +1204,16 @@
             "title": "Round"
           },
           "run_id": {
-            "description": "The archive run its cells were filed under. `\"\"` on a report older than the stamp — its cells list but do not open.",
-            "title": "Run Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The archive run its cells were filed under. Null where the candidate was never walked — rejected before it ran — so it holds no cells.",
+            "title": "Run Id"
           }
         },
         "required": [

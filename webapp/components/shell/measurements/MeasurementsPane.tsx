@@ -95,7 +95,6 @@ function CandidateHeader({ c, n }: { c: CellCandidate; n: number }) {
       {c.round != null && <span className="ms-dim">round {c.round}</span>}
       {c.live && <span className="ms-live">live</span>}
       <span className="ms-dim">{n} cells</span>
-      {!c.run_id && <span className="ms-dim">— measured before cells were addressable</span>}
     </span>
   );
 }
@@ -231,7 +230,7 @@ export function MeasurementsPane({
 
   // Folds ignored, so J/K stepping never skips a cell.
   const walk = useMemo(
-    () => (groups ? groups.flatMap((g) => g.rows) : data.cells).filter((c) => c.run_id),
+    () => (groups ? groups.flatMap((g) => g.rows) : data.cells),
     [groups, data.cells],
   );
   const openIdx =
@@ -241,7 +240,6 @@ export function MeasurementsPane({
   const activeRowId = openIdx >= 0 ? cellId(walk[openIdx]!) : null;
 
   const open = (c: CellRow) => {
-    if (!c.run_id) return;
     const addr: CellAddress = { runId: c.run_id, sampleId: c.sample_id };
     setOpenCell(addr, paneId);
   };

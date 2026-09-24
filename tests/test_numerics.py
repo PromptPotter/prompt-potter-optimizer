@@ -1057,6 +1057,7 @@ def _cs(
     elimination_context: dict | None = None,
 ) -> ScoredCandidate:
     return ScoredCandidate(
+        run_id=None,
         candidate_id=candidate_id,
         label=candidate_id,
         changes_description="",
@@ -2207,7 +2208,7 @@ def test_overlap_set_is_one_every_member_actually_answered() -> None:
 
     def scored(cid: str, label: str) -> ScoredCandidate:
         return ScoredCandidate(
-            candidate_id=cid, label=label, accuracy=0.5, composite_fitness=0.5, total=1
+            run_id=None, candidate_id=cid, label=label, accuracy=0.5, composite_fitness=0.5, total=1
         )
 
     def rnd(

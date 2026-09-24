@@ -163,6 +163,32 @@ Measured 2026-09-16: six rounds, two variants per round, `deepseek/deepseek-v4-f
 - **Time:** 2 h 41 min wall clock, of which 2 h 34 min was cell scoring; each round took 26–38 min.
 - **What comes next.** The ten-cell cut is nearly used up: the winner solves eight cells and leaves two to win, so a further campaign needs a larger cut.
 
+### Optimization: the other arms on the same benchmarks
+
+Measured 2026-09-16 to 2026-09-19; the campaigns were retired on 2026-09-24 and their artifacts
+kept locally in `.scratch/retired-campaigns-2026-09-24/` (`digest.md` is one line per cycle).
+
+| Dataset | Agent model | Rounds | Origin → best | Cost | Reading |
+|---|---|---|---|---|---|
+| `sealqa-longseal-12` (20 cells) | `qwen/qwen3.7-flash:nitro` | 4 | 0.075 → 0.50–0.55 (r2–r3) | $0.20 | **The floor moves.** The winner rewrote `task_intent` and `instruction` toward decomposing the question's constraints and verifying each one, aimed at misread temporal ordinals. No lift interval was stamped, so it is a level, not a separable promotion. A second run of the same arm reached 0.45 in two rounds before diverging. |
+| `spreadsheetbench-s10` | `qwen/qwen3.7-flash`, `none` | 7 | 0.70 → no winner | $0.34 | Six rounds of candidates at 0.0–0.7; nothing beat the origin. Headroom alone was not enough. |
+| `spreadsheetbench-s10` | `inception/mercury-2.5` | 3 | 0.70 → 0.70 | $0.24 | Stopped on provider throttling; lift +0.00 (−0.34 to +0.34). |
+| `spreadsheetbench-s20` (20 cells) | `qwen/qwen3.7-flash`, `none` | 3 | 0.65 → no winner | $0.37 | Candidates 0.40–0.53; stopped when the backend became unreachable. |
+
+**`swiss-invoices-eval`** (a tenant upload, not in `datasets/`; 20 invoices, map each to one of 25
+account codes). Seven campaigns, `llm_only`, all starting at 0.05–0.10:
+
+- **The lever is the code list, then the catch-all.** The origin names a few codes; the first
+  winning edit lists all 25 with one-line descriptions, and the next forces an explicit
+  category match before the `6500` catch-all, whose "last resort" wording the winner removes.
+  Service expenses (cleaning, freight, marketing, travel, bank fees) are where `6500` absorbs errors.
+- **`openai/gpt-oss-20b`, `low`:** 0.65–0.70 after one or two rounds for about $0.03, lift +0.40
+  to +0.55 with every interval clear of zero — the best value arm.
+- **`upstage/solar-pro4`, `low`:** 0.75 by round 2, lift +0.40 (+0.12 to +0.68), $0.07.
+- **`openai/gpt-oss-20b`, `high`:** 1.00 at round 9 (`perfect_score`), $0.08 — but the last step's
+  lift is +0.05 (−0.05 to +0.15), so the final climb is not separable.
+- **`inclusionai/ling-3.0-flash`:** 0.40, lift not separable.
+
 ## Per-sample timings understate wall-clock
 
 The `[ N] XX.Ys` per-sample line reports only the duration of the **successful** backend HTTP call, not cumulative wall-clock including retries — so summing the per-row lines understates true wall-clock whenever retries fire. A UX issue, not a correctness one; the fix belongs in the TermNorm repo.

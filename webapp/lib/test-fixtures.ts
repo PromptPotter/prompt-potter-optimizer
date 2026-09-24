@@ -82,7 +82,7 @@ export function scored(over: Partial<ScoredCandidate> = {}): ScoredCandidate {
   return {
     candidate_id: "c",
     label: "C1.1",
-    run_id: "",
+    run_id: null,
     changes_description: "",
     accuracy: 0,
     composite_fitness: 0,

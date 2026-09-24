@@ -95,6 +95,7 @@ def scored_candidate(
         else []
     )
     return ScoredCandidate(
+        run_id=None,
         candidate_id=candidate_id,
         label=candidate_id,
         accuracy=accuracy,

@@ -6,8 +6,7 @@ and the detail panel one click opens.
 
 **A cell's address is `(run_id, sample_id)`**: the archive run its row was filed under
 (`ScoredCandidate.run_id`) and its position in that run's dataset. Unique in the archive, which
-folds last-wins on `m:{sample_id}`. `run_id` is `""` on a row whose report predates the stamp,
-and such a cell lists but does not open."""
+folds last-wins on `m:{sample_id}`."""
 
 from __future__ import annotations
 
@@ -47,9 +46,9 @@ class CellCandidate(StrictModel):
     candidate_id: str | None = Field(
         default=None, description="The individual's lineage id. Null in dataset scope."
     )
-    run_id: str = Field(
-        description='The archive run its cells were filed under. `""` on a report older than '
-        "the stamp — its cells list but do not open."
+    run_id: str | None = Field(
+        description="The archive run its cells were filed under. Null where the candidate was "
+        "never walked — rejected before it ran — so it holds no cells."
     )
     round: int | None = Field(default=None, description="Null in dataset scope.")
     cycle_id: str | None = Field(default=None, description="Null in dataset scope.")

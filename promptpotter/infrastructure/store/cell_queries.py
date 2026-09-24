@@ -86,7 +86,7 @@ def _live_cells(
             continue
         label = str(cand["label"])
         served = run_of.get(label) or {}
-        run_id = str(served.get("run_id") or "")
+        run_id = served.get("run_id")
         key = f"{cycle_id}/{label}"
         candidates.append(
             CellCandidate(
@@ -99,7 +99,12 @@ def _live_cells(
                 live=True,
             )
         )
-        for s in cand.get("samples") or []:
+        samples = cand.get("samples") or []
+        if run_id is None:
+            if samples:
+                raise ValueError(f"{cycle_id} live candidate {label} holds cells but names no run")
+            continue
+        for s in samples:
             sid = s.get("sample_id") if isinstance(s, dict) else None
             if not isinstance(sid, int) or (wanted is not None and sid not in wanted):
                 continue
@@ -140,7 +145,7 @@ def cycle_cells(stores: Stores, hop: CycleHop, wanted: set[int] | None = None) -
                 continue
             label = str(cs["label"])
             key = f"{hop.cycle_id}/{label}"
-            run_id = str(cs.get("run_id") or "")
+            run_id = cs["run_id"]
             candidates.append(
                 CellCandidate(
                     key=key,
@@ -151,7 +156,12 @@ def cycle_cells(stores: Stores, hop: CycleHop, wanted: set[int] | None = None) -
                     cycle_id=hop.cycle_id,
                 )
             )
-            for item in acr.get(cs["candidate_id"]) or []:
+            rows = acr.get(cs["candidate_id"]) or []
+            if run_id is None:
+                if rows:
+                    raise ValueError(f"{round_path} candidate {label} holds cells but names no run")
+                continue
+            for item in rows:
                 if not isinstance(item, dict):
                     continue
                 if wanted is not None and item.get("sample_id") not in wanted:

@@ -1303,6 +1303,7 @@ def test_earned_blocks_gate_on_credible_lift_and_task_fit() -> None:
 
     def scored(label: str, fields: dict[str, str], comp: float, ci_lo: float) -> dict[str, Any]:
         return ScoredCandidate(
+            run_id=None,
             candidate_id=label,
             label=label,
             accuracy=comp,

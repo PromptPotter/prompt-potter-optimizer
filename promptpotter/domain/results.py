@@ -261,8 +261,9 @@ class ScoredCandidate(StrictModel):
     sp_hash: str = ""
     # The archive RUN this report's rows were filed under — ``sp_hash`` names the configuration,
     # this names the one reading of it on this subset, so ``(run_id, sample_id)`` addresses each
-    # of the candidate's cells (``GET /cells/{run_id}/{sample_id}``). ``""`` where nothing was walked.
-    run_id: str = ""
+    # of the candidate's cells (``GET /cells/{run_id}/{sample_id}``). ``None`` where nothing was
+    # walked — rejected before it ran, or the unmeasured origin.
+    run_id: str | None
     # Paired with ``pipeline_overlay``, the full searchpoint an operator selects to seed
     # an operator-steered fork.
     prompt_fields: dict[str, Any] = Field(default_factory=dict)
