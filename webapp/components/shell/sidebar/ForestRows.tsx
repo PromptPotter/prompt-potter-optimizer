@@ -1,15 +1,6 @@
 "use client";
-// The sidebar tree — ONE recursive renderer over the served tree:
-//
+// The sidebar tree — ONE recursive renderer over the served `/tree`:
 //   ForestRows → OriginRow → RunRow → CourseRow ⇄ CandidateRow → (CourseRow…)
-//
-// A course (a campaign root, an L4 inner run) produces candidates; measuring a candidate at
-// L4 means running a whole course. That closes the recursion — L5+ is the same two
-// components one turn deeper, and nothing here is depth-aware.
-//
-// `/tree` answers a campaign whole in one read; a node's children ARE its children. Nothing
-// here derives genealogy. There is no fork row: a fork is not a node — its candidates sit on
-// this course's timeline wearing the ⑂ stamp and its own `path`.
 
 import type { ReactNode } from "react";
 import { cx } from "@/lib/cx";
@@ -50,31 +41,17 @@ import { CampaignRowLabel, PhaseMark } from "./CampaignRowLabel";
 import { CompareToggle } from "./CompareToggle";
 import { RowHoverCard } from "./RowHoverCard";
 
-// What every row needs to render itself and answer clicks. Threaded down rather than
-// context'd so the tree stays a pure function of its props.
 export interface TreeCtx {
-  // Expand/collapse, resolved per campaign by the view-memory provider. Functions rather
-  // than a Set because the Set had to be GLOBAL to be passed as one value — and that is the
-  // only reason one campaign's toggles ever shared a blob with another's. The campaign is
-  // read off each node's own address.
   isNodeOpen: (kind: NodeKind, path: string) => boolean;
   toggleNode: (kind: NodeKind, path: string) => void;
-  // The viewed address. `viewedPath` names the course; `viewedCandidateId` the node inside
-  // it, or null for the course itself. Both are read off the node that was clicked —
-  // nothing builds an address.
   viewedPath: CyclePath | null;
   viewedCandidateId: string | null;
   selectCyclePath: (path: CyclePath, candidateId?: string | null) => void;
-  // Does a course open into its candidates at all? A per-device preference
-  // (`lib/tree-prefs.ts`, set in Account → Preferences), threaded rather than read here so the
-  // tree stays a pure function of its props. Off — the default — a campaign is the LAST row of
-  // its branch: it wears no ▶, and `courseOpen` below answers false whatever view memory holds,
-  // so the `/tree` read that fills the candidates never fires either.
+  // `lib/tree-prefs.ts`. Off, a campaign is the last row of its branch and its `/tree` never loads.
   showCandidates: boolean;
 }
 
 // One gate for both readers — the row that draws the children and the fetch that supplies them.
-// Splitting it was how a campaign came to be listed as closed while still paying for its tree.
 function courseOpen(ctx: TreeCtx, path: CyclePath): boolean {
   return ctx.showCandidates && ctx.isNodeOpen("course", encodeCyclePath(path));
 }
@@ -89,15 +66,7 @@ export function ForestRows({ origins, ctx }: { origins: OriginGroup[]; ctx: Tree
   );
 }
 
-// A declaration and the runs that measure it. Renders as a tier only when it groups MORE
-// than one run (at L4: mode collapse — two candidates whose optimizer prompts came out
-// identical); a lone run wears its own row.
-//
-// Its address carries NO path — a declaration is not an address inside any one campaign, it
-// is the set of campaigns measuring it — so the origin id is what owns its view memory
-// (`ids.ts::ownerOfNodeAddress`).
-// A GROUPING, not an address: a twist, a label, and children. Nothing here is selectable —
-// the rows inside carry their own addresses — so the row only opens and closes.
+// A grouping, not an address: nothing here is selectable, so the row only opens and closes.
 function GroupRow({
   kind,
   addr,
@@ -169,14 +138,11 @@ function OriginRow({ origin, ctx }: { origin: OriginGroup; ctx: TreeCtx }) {
   );
 }
 
-// `cycle_62839439e429` → `62839439` — the content hash that IS the declaration's id.
 function shortOrigin(originId: string): string {
   return originId.startsWith("cycle_") ? originId.slice(6, 14) : originId.slice(0, 8);
 }
 
-// ONE campaign: its root course, wearing the campaign's name. `/tree` answers that course
-// and everything below it in one conditional round-trip, so it is fetched once here (gated
-// on the course being open) and the whole subtree renders off it — no fetch below this.
+// The one `/tree` fetch for the whole subtree — no fetch below this.
 function RunRow({ run, ctx }: { run: RunGroup; ctx: TreeCtx }) {
   const { campaign, root } = run;
   const rootPath: CyclePath = [{ campaignId: root.campaign_id, cycleId: root.cycle_id }];
@@ -199,23 +165,14 @@ function RunRow({ run, ctx }: { run: RunGroup; ctx: TreeCtx }) {
           <CampaignMenu campaign={campaign} />
         </>
       }
-      // Run-state for the campaign row comes from `/cycles`, ALWAYS — never from the
-      // tree node, which the row only has while it is expanded. A phase that appeared
-      // on expand was the tell: a running campaign showed no ● until you opened it,
-      // and reading whichever source happened to be in hand meant the collapsed and
-      // expanded rows could answer differently. `answering` follows the cut the same
-      // way the tree does, so this is one source rather than the better of two.
+      // Always `/cycles`, never the tree node the row only has while expanded.
       phase={run.answering.run_phase}
       phaseReason={run.answering.status}
     />
   );
 }
 
-// ONE course — a campaign's root or an L4 inner run. Its children are the candidates on its
-// timeline: the ones it minted, plus every attempt its forks contributed.
-//
-// `node` is null only for the ROOT row before its tree lands (the row must render so it can
-// be expanded). Every nested course row already has its node in hand.
+// A campaign's root or an L4 inner run. `node` is null only for the root before its tree lands.
 function CourseRow({
   node,
   path,
@@ -232,25 +189,16 @@ function CourseRow({
   tree: CampaignTree;
   ctx: TreeCtx;
   label: string;
-  // Only a top-level root has one — it carries the campaign (the ⋯ menu, the archived state,
-  // the served spend) and answers for the whole family, whose winner often lives in a fork. An
-  // inner run is machine-minted into a sandbox and an operator never archives one.
+  // Top-level root only; an inner run carries no campaign.
   run?: RunGroup;
   chrome?: React.ReactNode;
-  // This row's run-state and the reason word beside it, from the ONE surface that
-  // answers for this row: `/cycles` for a campaign's root row, the tree node for a
-  // nested course. The row is handed its phase rather than picking a source, which
-  // is what keeps a collapsed row and an expanded one saying the same thing.
+  // Handed in, never picked here: `/cycles` for a root row, the tree node for a nested course.
   phase: string | null | undefined;
   phaseReason: string | null | undefined;
 }) {
   const addr = encodeCyclePath(path);
   const open = courseOpen(ctx, path);
   const rows = candidatesOf(node ?? undefined);
-  // The timeline is the LIVE line; what a correction retired hangs below it in one row per
-  // cut. Both sides carry the same labels by design — a supersede replaces a position rather
-  // than queueing beside it — so keeping them in one flat list is what made a round of three
-  // read as a round of six.
   const { live: liveRows, retired: retiredGroups } = splitRetired(rows);
 
   const originAccuracy = node?.origin_accuracy ?? null;
@@ -258,18 +206,11 @@ function CourseRow({
   const lifted = originAccuracy != null && best != null && best !== originAccuracy;
 
   const archived = run?.campaign.lifecycle_status === "archived";
-  // Compare the WHOLE (campaign, cycle) path, not just the leaf cycleId: `cycle_id` is a
-  // deterministic origin hash, so two campaigns of one origin (a re-`new`) share it. A
-  // cycleId-only match lit BOTH runs when one was selected — the exact "select one, another
-  // lights up" bug. The path carries campaignId at every hop, so encoded equality is the one
-  // unambiguous address (webapp/CLAUDE.md § Viewed identity).
+  // The WHOLE path, not the leaf cycleId: `cycle_id` is an origin hash two campaigns can share.
   const selected =
     ctx.viewedPath != null &&
     encodeCyclePath(ctx.viewedPath) === encodeCyclePath(path) &&
     ctx.viewedCandidateId == null;
-  // `run_phase` is the ONE server-owned run-state (I6), handed in above. Every phase reaches
-  // the row as a MARK from the total `runPhaseMark` map, its word in `aria-label` and the card:
-  // a marker that tested `=== "running"` left a run held at the origin gate looking idle.
   const status: RowStatus | null = run
     ? campaignStatus(run)
     : phase
@@ -277,8 +218,6 @@ function CourseRow({
       : null;
 
   const cycleId = path[path.length - 1]!.cycleId;
-  // A campaign's whole card is one derivation, shared with the masthead; an inner run has no
-  // campaign, no spend and no answering cycle, so it says the three things it does know.
   const card: RowCardFacts = run
     ? campaignCard(run, node, status?.word)
     : {
@@ -293,9 +232,7 @@ function CourseRow({
 
   const row = (
     <div className={cx("unit-library-family", selected && "selected", archived && "archived")}>
-      {/* No twist unless the operator asked for candidates: with the preference off this row
-          has nothing to expand into, so an inert ▶ would be an affordance that lies
-          (frontend-surface-contract § I3), and the 18px goes back to the name. */}
+      {/* No inert ▶ when there is nothing to expand into (frontend-surface-contract § I3). */}
       {ctx.showCandidates ? (
         <button
           type="button"
@@ -384,8 +321,6 @@ function CourseRow({
   );
 }
 
-// An inner run's card. It is machine-minted into a sandbox, so it has no campaign manifest to
-// read spend, a rounds cap or a creation date off — its numbers are the ones on its own node.
 function innerFacts(node: LineageNode | null, cycleId: string): [string, string][] {
   const facts: [string, string][] = [];
   if (node?.dataset_name) facts.push(["Dataset", node.dataset_name]);
@@ -402,9 +337,6 @@ function innerStats(node: LineageNode | null, origin: number | null, best: numbe
   return stats;
 }
 
-// What ONE supersede cut left behind — the record of what ran, collapsed under the live line.
-// The attempts that replaced these are above wearing the SAME labels, so flattening the two
-// makes a round of three read as a round of six.
 function RetiredGroupRow({
   group,
   siblings,
@@ -439,15 +371,7 @@ function RetiredGroupRow({
   );
 }
 
-// ONE candidate on this course's timeline — `C0` (its origin) or `C1.1`, `C1.2`, … A
-// candidate a FORK contributed wears the ⑂ stamp and `from C0`, and carries that fork's own
-// address, so parking on it re-roots the dashboard onto the fork. What's INSIDE it is what
-// measured it: at L4 a whole inner campaign per panel cell.
-//
-// Two gestures, two controls: the TWIST expands the row in place; the LABEL parks the tree
-// on this node — the bars then plot ITS children, and the shared selection axis the
-// inspector and samples panes follow moves with it. Navigating and inspecting are one
-// gesture HERE, in the tree; a bar click only ever does the second.
+// Navigating and inspecting are one gesture here, in the tree; a bar click only ever inspects.
 function CandidateRow({
   cand,
   siblings,
@@ -459,9 +383,7 @@ function CandidateRow({
   siblings: readonly LineageNode[];
   tree: CampaignTree;
   ctx: TreeCtx;
-  // The course whose TIMELINE this row renders on — not necessarily the course that minted
-  // the candidate. They differ for a fork's contribution, and that difference is what
-  // deselecting has to land on (see `pick`).
+  // Not necessarily the minting course: a fork's contribution differs, and deselect lands here.
   timeline: CyclePath;
 }) {
   const inner = childCourses(cand);
@@ -469,19 +391,12 @@ function CandidateRow({
   const addr = nodeKeyOf(cand);
   const open = ctx.isNodeOpen("cand", addr);
   const hasChildren = inner.length > 0;
-  // Keyed on the ROUND, not the label: a fork's C0 is a replay of the candidate it was
-  // cut from, and label-matching handed it this course's origin copy.
+  // Keyed on the ROUND, not the label: a fork's C0 replays the candidate it was cut from.
   const isOrigin = (cand.round ?? 0) === 0;
   const cutFrom = cutFromLabel(cand, siblings);
   const elected = wasElected(cand.is_winner, roundSizes(siblings).get(cand.round ?? 0) ?? 1);
-  // The left-behind side of a supersede cut (served — the client never derives it). It
-  // stays on the timeline holding its position, because it is the record of what ran, but
-  // it is not a peer of the attempt that replaced it and must not read as one.
   const retiredBy = cand.superseded_by;
 
-  // The navigate+inspect pair lives in `useSelectNode` — the time-ray fires the same
-  // gesture on a candidate step, and both have to resolve the measurement off the node
-  // rather than supply one.
   const cycleId = candPath[candPath.length - 1]!.cycleId;
   const { isPicked, pick } = useSelectNode(ctx.selectCyclePath);
   const selected = isPicked(cand);
@@ -494,8 +409,6 @@ function CandidateRow({
         ? `An attempt cut as a fork (${shortFamilyTail(cycleId)}), on this campaign's one timeline. Click selects it; the dashboard follows that fork.`
         : "A candidate this course proposed and measured. Click selects it; ▶ expands what measured it.";
 
-  // The verdict WORD. `is_winner: false` alone cannot tell a lost round from one still scoring,
-  // so `election_held` decides which of the two it says.
   const verdict = retiredBy
     ? "retired"
     : cand.status === "invalid"
@@ -563,9 +476,6 @@ function CandidateRow({
     <>
       <RowHoverCard card={card}>
         <div className={cx("unit-library-family", selected && "selected", retiredBy && "retired")}>
-          {/* A candidate with nothing inside it is a LEAF — at L3 that is every one of them,
-              since only an L4 candidate contains a course. No twist rather than a hidden
-              disabled one: the label closes up and the row reclaims the width. */}
           {hasChildren ? (
             <button
               type="button"
@@ -600,9 +510,6 @@ function CandidateRow({
                     won
                   </span>
                 )}
-                {/* The word, not the dim alone — a state pairs with a label here like
-                    HIT/MISS and live/stale do, and a retired attempt that HAD measured
-                    still shows its number, so the meta cell cannot carry this. */}
                 {retiredBy && (
                   <span
                     className="unit-library-kind"
@@ -613,8 +520,7 @@ function CandidateRow({
                 )}
               </span>
               <span className="unit-library-meta">
-                {/* A cut that broke before measuring anything has no number, and must not
-                    borrow the origin's — that would report a fitness nothing measured. */}
+                {/* A cut that broke before measuring must not borrow the origin's number. */}
                 {cand.accuracy == null && cand.course_kind ? (
                   <PhaseMark
                     status={{
@@ -640,8 +546,7 @@ function CandidateRow({
                 tree={tree}
                 ctx={ctx}
                 label={course.task ? panelCellLabel(course.task) : course.dataset_name}
-                // An inner run answers for ITSELF, off the node — `/cycles` lists
-                // top-level cycles only, so there is no second source to prefer here.
+                // `/cycles` lists top-level cycles only, so an inner run answers off its node.
                 phase={course.run_phase}
                 phaseReason={course.status}
               />

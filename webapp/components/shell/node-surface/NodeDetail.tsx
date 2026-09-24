@@ -24,40 +24,11 @@ import { NodeSurface } from "./NodeSurface";
 import { MeasurementRun } from "./MeasurementRun";
 import { L1Variants, variantsOf } from "./L1Variants";
 
-// THE node detail — one panel, both canvases, every tab.
-//
-// It used to be two components that could not see each other: `OptimizerNodeDetail`
-// (mounted on Dashboard, rendering the round's LLM I/O) and `BackendNodeDetail`
-// (mounted on Chat, rendering the searchpoint's config + prompt). `SelectedNode.scope`
-// was doing two jobs at once — disambiguating the id namespace AND choosing which of
-// the two rendered — so a scope's detail was reachable only from the tab that happened
-// to mount it. Clicking the optimizer rail on the chat hero lit the node and opened
-// nothing at all, because its only renderer lived on the other tab.
-//
-// Scope keeps the first job and loses the second. What a node shows is two halves:
-//
-//   PROGRAM — what it IS: resolved config, the prompt it runs, its output contract.
-//   RUN     — what it DID in the viewed round: rendered input, response, thinking,
-//             cost. Optimizer-scoped only, and that is a boundary rather than an
-//             omission: the audit twin records the OPTIMIZER's calls, and on a
-//             self-optimizing campaign the target pipeline declares the same node
-//             ids, so keying a target node into it would show one layer's trace under
-//             another layer's heading — the exact confusion this panel was merged to
-//             end.
-//
-// The round is READ here, never set: its control belongs beside the picture it scopes
-// (the Optimizer card's toolbar on Dashboard, the hero frame on Chat), so this panel
-// showing a second one would be two controls for one axis.
+// The one node detail for every tab: PROGRAM (what it is) and, optimizer-scoped only, RUN (what it
+// did). The audit twin records the optimizer's calls, and pp-self's target reuses its node ids.
 
-// The origin being AUTHORED — present only while this panel sits on the check-in surface.
-//
-// **Its presence is the MODE, and its fields are documents, never a store.** It used to be the
-// whole `DraftCampaignWire`, and a non-null one both parked the searchpoint fetch AND re-routed
-// where config was read from — so the same panel answered from a different place depending on
-// which call site mounted it, which is the shape `frontend-surface-contract.md::I9` forbids. Both
-// fields below are things the draft OWNS and nothing else holds: the overlay a config patch is
-// merged onto, and the prompt being written. Config ROWS come from `useConnector()` in both
-// modes, because a check-in resolves through the same server resolver a running campaign does.
+// Its presence is the MODE; its fields are documents, never a store — config rows still come from
+// `useConnector()` (`frontend-surface-contract.md::I9`).
 export interface NodeAuthoring {
   overlay: Record<string, unknown>;
   promptFields: Record<string, unknown>;
@@ -65,11 +36,9 @@ export interface NodeAuthoring {
 
 interface Props {
   node: SelectedNode;
-  // Target scope only — the optimizer's own pipeline is one operator-owned file, authored by
-  // hand and never through this panel.
+  // Target scope only.
   authoring?: NodeAuthoring;
   onClose: () => void;
-  // Setup only: makes the target LLM node's prompt editable (persists via this patch).
   onPromptApply?: (patch: DraftPatch) => void;
 }
 
@@ -79,34 +48,24 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
 
   const cv = useConnector();
   const { dash, isLive, dashRound: liveRound } = useDashboard();
-  // Both gated by argument rather than by an early return — a hook may not be
-  // conditional, and the parked side must not spend its round-trip either. Authoring parks the
-  // searchpoint read because an origin still being written has measured nothing to read.
   const { doc: optimizer, loading: pipelineLoading } = useOptimizerPipeline(isOptimizer);
   const observe = useObserveSearchPoint(id, !isOptimizer && !authoring);
 
   const view = isOptimizer ? optimizer?.view : cv.view;
   const node = interiorNodes(view).find((n) => n.id === id) ?? null;
-  // `null` where the served view has not resolved this node — still fetching, or absent from the
-  // manifest. Deliberately NOT defaulted: the run half below DISPATCHES on this, and a default
-  // would render an LLM call's trace for a system step during every fetch. The header is a
-  // caption rather than a decision, so it takes `nodeKind`'s own `tool` fallback — the producer's
-  // (`pipeline_parsing.py::_derive_node_kind`), spelled in one place.
+  // Not defaulted: the run half dispatches on it. The header caption takes `nodeKind`'s fallback,
+  // which mirrors `pipeline_parsing.py::_derive_node_kind`.
   const servedKind = node?.kind ?? null;
   const kindInfo = nodeKind(servedKind ?? undefined);
   const schema = isOptimizer ? (optimizer?.node_config_schema ?? null) : cv.nodeConfigSchema;
-  // Two different fetches back this panel, so the connector's status answers for only one of
-  // them — handing the optimizer scope `cv.pipelineStatus` reports the campaign's fetch under the
-  // manifest's rows.
+  // Two fetches back this panel; `cv.pipelineStatus` answers for the campaign's alone.
   const schemaStatus = isOptimizer
     ? pipelineReadStatus({ bound: true, loading: pipelineLoading, failed: !optimizer })
     : cv.pipelineStatus;
   const outputSchema = isOptimizer
     ? (optimizer?.node_output_schema ?? null)
     : cv.nodeOutputSchema;
-  // Off the SAME read as the rows it qualifies. Fetched separately, a row would draw an effort
-  // rung, a temperature or a price before anything could say the model takes no such parameter —
-  // and a setting the provider silently drops reads exactly like one that is in force.
+  // Off the SAME read as the rows it qualifies, never fetched separately.
   const modelCapabilities = isOptimizer
     ? (optimizer?.model_capabilities ?? {})
     : cv.modelCapabilities;
@@ -119,18 +78,10 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
   } = useRoundNodes();
   const block: NodeBlock | null = isOptimizer ? (roundNodes[id] ?? null) : null;
 
-  // The optimizer manifest's prompt for this node, resolved HERE rather than inside
-  // `OptimizerProgram`: the header's copy needs the same spec the body renders, and computing it
-  // twice is how the two would come to disagree about what this node runs.
+  // Resolved here, not in `OptimizerProgram`: the header's copy and the body must show one prompt.
   const origin = nodeOriginPrompt(optimizer, id);
 
-  // WHAT this panel can hand over, and the two are not one payload. PROGRAM is what the node IS
-  // — the half every scope has. RUN is the audit block, optimizer-scoped and absent until the
-  // node fires, so it is DROPPED rather than offered empty.
-  //
-  // The header used to copy `block ?? {id, scope, label, kind}` alone, and `block` is hard-null
-  // in target scope (above) — so on the panel headed "Searchpoint" the button handed over a
-  // four-key stub and never the searchpoint, which was in scope two frames down.
+  // RUN is dropped rather than offered empty until the node fires.
   const identity = { id, scope, label: node?.label ?? id, kind: servedKind };
   const program = isOptimizer
     ? { ...identity, prompt_fields: origin?.fields ?? {} }
@@ -154,13 +105,9 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
   ];
 
   const livePhaseNode = dash?.current_round.active_node ?? null;
-  // `viewingLive` too: a node inspected on a historical round is not live, even when
-  // that same node happens to be firing in the round currently running.
   const isLiveNow = isLive && viewingLive && livePhaseNode === id && isOptimizer;
 
   return (
-    // The run trace is two columns of payload and needs the band; the program-only
-    // panel is a form and reads better in the hero's own column width.
     <div className={cx("bnode", isOptimizer && "bnode-wide")}>
       <section className="setup-preview">
         <header className="setup-preview-head">
@@ -222,10 +169,7 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
           />
         )}
 
-        {/* `viewedRound == null` is NO CAMPAIGN — the setup surface, where nothing has
-            run yet. Distinct from a resolved round this node is absent from, which is
-            "it did not fire THIS round"; printing that during setup accused a node of
-            never having fired when there was no run to fire in. */}
+        {/* `viewedRound == null` is no campaign (setup), not "did not fire this round". */}
         {isOptimizer && viewedRound != null && (
           <RunSection
             kind={servedKind}
@@ -245,9 +189,7 @@ function scopeLabel(isOptimizer: boolean): string {
   return isOptimizer ? "the optimizer's own loop" : "this campaign's pipeline";
 }
 
-// PROGRAM, optimizer scope. The manifest is one operator-owned file — no draft, no
-// per-campaign overlay — so config and prompt are read-only by construction rather
-// than by a flag someone could flip.
+// Read-only by construction: the optimizer manifest is one operator-owned file with no draft.
 function OptimizerProgram({
   node,
   origin,
@@ -257,7 +199,6 @@ function OptimizerProgram({
   modelCapabilities,
 }: {
   node: Parameters<typeof NodeSurface>[0]["node"];
-  // Resolved by the panel, so the header's copy and this body cannot show two prompts.
   origin: ReturnType<typeof nodeOriginPrompt>;
   schema: Parameters<typeof NodeSurface>[0]["schema"];
   schemaStatus: Parameters<typeof NodeSurface>[0]["schemaStatus"];
@@ -285,10 +226,7 @@ function OptimizerProgram({
   );
 }
 
-// PROGRAM, target scope. Dispatches on LIFECYCLE, not on node-presence: authoring a
-// draft's search space, previewing a draft whole, or observing what a measured
-// searchpoint actually ran. The best / most-recent / selected picker sits above the
-// surface — it picks WHICH searchpoint the box shows; the box renders exactly one.
+// Dispatches on LIFECYCLE: authoring a draft, previewing it whole, or observing a measured searchpoint.
 function TargetProgram({
   node,
   authoring,
@@ -312,9 +250,6 @@ function TargetProgram({
   isLive: boolean;
   onPromptApply?: (patch: DraftPatch) => void;
 }) {
-  // Two authoring lifecycles, one call: a CONCRETE node opens the search-space lock/allow editor
-  // over the draft's overlay; the origin WHOLE has no node to scope to, so it renders its values
-  // read-only — which is what withholding the callback means.
   if (authoring) {
     const scoped = node != null;
     return (
@@ -333,8 +268,6 @@ function TargetProgram({
     );
   }
 
-  // A one-option group is not a choice: `NodeSurface` renders the `label` naming which
-  // searchpoint is on screen, so the group adds nothing until there are two to pick from.
   const options = observeOptions(observe.avail);
 
   return (
@@ -363,10 +296,7 @@ function TargetProgram({
             label={observe.cfg.label}
             mode="values"
           />
-          {/* A per-node optimizer prompt is carried as the optimizer's evolved DELTA,
-              so a node it has not touched yet has nothing here. Six empty boxes under
-              a heading reading "Starting prompt" claimed the node runs on nothing; say
-              which it is instead. */}
+          {/* The prompt is the optimizer's evolved DELTA: empty means untouched, not "runs on nothing". */}
           {Object.keys(observe.cfg.promptFields).length === 0 && (
             <p className="inspector-note">
               The optimizer has not changed this node&apos;s prompt — it still runs the
@@ -375,9 +305,6 @@ function TargetProgram({
           )}
         </>
       ) : (
-        // Three different absences, each said differently. A round file still in flight
-        // is NOT "nothing measured", and on a fresh campaign the empty state is the
-        // whole of round 0 — hours on an L4 run.
         <p className="inspector-note">
           {observe.loading
             ? "Loading the searchpoint…"
@@ -390,17 +317,8 @@ function TargetProgram({
   );
 }
 
-// RUN: what this node did in the viewed round, out of the audit twin.
-//
-// WHICH account that is depends on what the node IS. A measurement node runs a whole pipeline
-// rather than a prompt: it has no rendered input, no response and no token bill, so offering
-// those three for one describes a call it never makes — which is what this panel used to do,
-// printing "No template fields on this block" and "No response on this block" for keys the
-// block never carried, and then bolting the real content on behind a hard-coded node id.
-//
-// Dispatch is on the served `kind` and nothing else. Block SHAPE answers the same question a
-// second way and gets it wrong: an LLM node that has not fired yet is equally missing all three
-// keys, and would take the measurement arm.
+// Dispatch on the served `kind`, never block shape: an unfired LLM node lacks the same keys a
+// measurement node does.
 function RunSection({
   kind,
   block,
@@ -420,8 +338,6 @@ function RunSection({
     <>
       <hr className="setup-preview-divider" />
       {kind == null ? (
-        // Unresolved is its own answer. Without this arm the panel picks a run shape from a
-        // node it has not read yet, and every measurement node flashes an LLM trace first.
         <div className="opt-detail-empty">
           {kindLoading
             ? "Reading the optimizer manifest…"
@@ -435,10 +351,6 @@ function RunSection({
 
       {block && (
         <footer className="opt-detail-footer">
-          {/* ONE fold, over the block WHOLE. It replaces a separate `raw input` and `raw output`
-              that were proper subsets of it — so this shows strictly more (the model, the usage,
-              the timestamp neither of them carried) in half the chrome. Same object the header's
-              copy button hands over, so the two cannot disagree about what this node did. */}
           <details className="opt-detail-disclosure">
             <summary>raw block</summary>
             <pre className="opt-detail-pre">{fmtValue(block, { pretty: true })}</pre>
@@ -449,7 +361,6 @@ function RunSection({
   );
 }
 
-// What an LLM node did: what went in, what came back, and what it cost.
 function CallRun({
   block,
   loading,
@@ -461,9 +372,6 @@ function CallRun({
 }) {
   const templateFields = block?.input?.template_fields as Record<string, unknown> | undefined;
   const response = block?.output?.response;
-  // The model's own thinking channel, when the provider returned one. Its own pane
-  // rather than folded into the response blob: it is prose a human reads to understand
-  // HOW an answer was reached, and nothing in the loop scores or gates on it.
   const reasoning = typeof block?.output?.reasoning === "string" ? block.output.reasoning : null;
   const usage = block?.usage;
   const variants = variantsOf(response);
@@ -472,14 +380,10 @@ function CallRun({
     !!block?.cached,
   );
 
-  // What we ASKED FOR carries the routing suffix; `block.model` is the provider's echo, which
-  // OpenRouter returns bare — so it names a `:nitro` call identically to a normally-routed one.
-  // The ask is absent when the node declares no model and takes the provider default.
+  // The ask carries the routing suffix; OpenRouter echoes `block.model` bare, dropping `:nitro`.
   const asked = block?.config?.["model"];
   const model = (typeof asked === "string" ? asked : block?.model) || "";
 
-  // Filtered BEFORE the wrapper, never inside each chip: a strip where every entry declines to
-  // render must ship no `<div>` at all, or a node that has not fired draws an empty box.
   const chips = [
     { label: "model", value: model },
     { label: "dur", value: block ? fmtSecs(block.duration_s) : "" },
@@ -489,9 +393,7 @@ function CallRun({
         ? `${usage.input ?? "—"}in / ${usage.output ?? "—"}out / ${(usage.input ?? 0) + (usage.output ?? 0)}t`
         : "",
     },
-    // The prefix discount belongs on the prompt pane: it is the number the prompt's FIELD ORDER
-    // moves. Labelled "prefix cached", never "cached" — across this app `cached` is the boolean
-    // "OUR archive answered", the opposite fact and the one `block.cached` excludes this on.
+    // Never labelled "cached": app-wide that means OUR archive answered, the opposite fact.
     {
       label: "prefix cached",
       value:
@@ -526,8 +428,6 @@ function CallRun({
         </div>
       ) : (
         <>
-          {/* The population this round, one candidate at a time — the raw blob is
-              still one disclosure away in the footer. */}
           {variants && variants.length > 0 && <L1Variants variants={variants} />}
 
           <div className="opt-detail-cols">

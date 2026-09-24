@@ -1,19 +1,6 @@
 "use client";
-// The Compare tab — pick any SUBJECTS from any datasets and read what they jointly say.
-//
-// It exists because the question "I ran this four times, now what?" is about a SET, and the only
-// surface that answered it lived inside one campaign's dashboard, gated to the self-optimizing
-// loop. There is no L4 gate here and no dataset scope: an ordinary campaign and a pp-self one
-// take the same path, and a selection that spans datasets is allowed and then reported on.
-//
-// A channel is anchored on a campaign (its root origin), a course (one branch, at the winner its
-// last election crowned) or a single candidate — three kinds, one arithmetic, because the server
-// reduces all three to per-cell values before anything is computed.
-//
-// Cheap reads auto-load on any selection change — including the metric, every interval and every
-// pairwise test, which are arithmetic over values the roster read already had in hand. The edit
-// ranking and the per-channel winner chain are the two walks expensive enough to sit behind a press
-// (see `useEvidence`).
+// The Compare tab: any subjects from any datasets, read jointly — no L4 gate, no dataset scope.
+// Cheap reads auto-load on any selection change; the edit ranking and winner chains sit behind a press.
 
 import { useCallback, useMemo, useState } from "react";
 import type { Evidence, SubjectReading } from "@/lib/api";
@@ -49,15 +36,11 @@ const VIEWS: readonly { value: CompareView; label: string; title: string }[] = [
   },
 ];
 
-// The SENTENCE is served (`Comparability.note`); a per-reason text map here would be a second
-// copy free to drift out of step with the terminal's. Only the tone is a rendering choice, and
-// it reads `verdict`, whose `null` is UNKNOWN and never a yes.
+// The sentence is served (`Comparability.note`); only the tone is chosen here, and `null` is UNKNOWN.
 function comparabilityTone(verdict: boolean | null): string {
   return verdict === true ? "l4-note" : "l4-warn";
 }
 
-// What each channel is called, keyed by the served subject key — built once so the pairwise table
-// names a subject exactly as the legend does.
 function channelNames(subjects: readonly SubjectReading[]): ReadonlyMap<string, string> {
   return new Map(
     subjects.map((s) => [s.key, s.kind === "campaign" ? shortId(s.label) : s.label]),
@@ -65,8 +48,7 @@ function channelNames(subjects: readonly SubjectReading[]): ReadonlyMap<string, 
 }
 
 export function ComparePane() {
-  // The selection is shell-level, not pane-level: a searchpoint is added from the surface it is
-  // being looked at, which is a different tab (`lib/compare-selection.tsx`).
+  // Shell-level: a searchpoint is added from another tab (`lib/compare-selection.tsx`).
   const {
     channels,
     subjects: selected,
@@ -76,27 +58,17 @@ export function ComparePane() {
     remove,
   } = useCompareSelection();
   const [view, setView] = useState<CompareView>("grouped");
-  // Which channel's scoring mask is open — by its BARE address, not its key: applying a mask changes
-  // the key, and holding that would close the form on the edit it just accepted. One at a time,
-  // because the editor is a form and two side by side is a second answer to "which am I editing".
+  // The BARE address, not the key: applying a mask changes the key, which would close the form on
+  // the edit it just accepted.
   const [masking, setMasking] = useState<string | null>(null);
   const [ranking, setRanking] = useState(false);
   const [winnerChain, setWinnerChain] = useState(false);
-  // On by default, unlike the other two: "what are these two things" is the first question asked
-  // of a searchpoint comparison, and it costs no extra document — the head's round file is
-  // already open. It is a toggle only so a wall of prompt text can be put away.
   const [config, setConfig] = useState(true);
-  // Per-channel configuration edits — the OTHER kind of mask, and the one nothing can preview:
-  // no measurement exists at an edited value, so it invalidates rather than re-projects
-  // (`config-edit.tsx`). Held here because it spans the two cards that render it.
+  // Config edits invalidate rather than re-project — nothing ran at an edited value (`config-edit.tsx`).
   const [edits, setEdits] = useState<ScenarioEdits>(NO_EDITS);
-  // ONE opaque selector — a catalogue key or a composed `expr:…`, both the server's spellings.
-  // Empty means "unset": `fetchEvidence` then omits the query param and the SERVER picks its own
-  // default, so the browser never needs a second copy of what that default is.
+  // A catalogue key or an `expr:…`. Empty omits the query param so the SERVER picks its own default.
   const [metric, setMetric] = useState("");
-  // Which two factors the grid crosses, as the server's `row,col`. Empty until the operator picks
-  // a pair — and held HERE rather than inside `FactorGrid` because the cells are pooled
-  // server-side, so an axis change is a refetch, not a regroup.
+  // Server `row,col`, held here because cells pool server-side: an axis change is a refetch.
   const [grid, setGrid] = useState("");
   const { evidence, loading, error, invalidMetric } = useEvidence(
     selected,
@@ -107,18 +79,8 @@ export function ComparePane() {
     grid,
   );
 
-  // Turning the selection over invalidates the ranking press — the walk was for a different
-  // set — and the metric with it: the catalogue is per-selection, so one subject's channel may
-  // not be answerable by the next lot, and holding a stale pick 400s on the very next read. The
-  // edits go too: carried into a new selection they would mark a channel unknown on the strength
-  // of a change made to a different one.
-  //
-  // Keyed on the CAMPAIGNS, and watched rather than wired to a click. Watched, because the
-  // selection is written from three places now — a sidebar tick, the dashboard's "compare this
-  // searchpoint", this pane's own ✕ — and a reset hung off one of them was never run by the other
-  // two. Campaigns rather than subjects, because re-POINTING a channel is not a new selection:
-  // the catalogue is per-selection and the campaign set has not moved, so the operator's metric
-  // survives a walk through a lineage, which is exactly when they are using it.
+  // A new campaign set drops the ranking press, the metric (the catalogue is per-selection; a stale
+  // pick 400s) and the edits. Keyed on CAMPAIGNS, so re-pointing a channel keeps the metric.
   const campaignsKey = useMemo(
     () => [...new Set(channels.map((c) => c.rootCampaignId))].sort().join("~"),
     [channels],
@@ -141,32 +103,20 @@ export function ComparePane() {
   );
 
   const comparability = evidence?.comparability ?? null;
-  // Whether the selected metric read ANYTHING. Everything below the picker describes a number
-  // that then does not exist, so it stays silent rather than restating the same absence four ways.
   const readable = !!evidence?.subjects.some((c) => c.n_cells > 0);
   const names = useMemo(() => channelNames(evidence?.subjects ?? []), [evidence?.subjects]);
-  // The channel the editor is open on, resolved against the LAST GOOD read: a rejected formula
-  // keeps the prior evidence (`useRead` `survive:"invalid"`), and losing the form on a typo is
-  // the failure that rule exists to prevent.
+  // Resolved against the LAST GOOD read (`survive:"invalid"`), so a formula typo keeps the form open.
   const maskTarget =
     evidence?.subjects.find((s) => maskedSubject(s, {}) === masking) ?? null;
-  // A campaign is its origin and nothing precedes it, so the toggle only earns its place once a
-  // branch or a searchpoint is on the board.
   const hasBranch = !!evidence?.subjects.some((s) => s.kind !== "campaign");
 
   return (
     <div className="content" id="content-compare">
         <div className="cmp-main">
-          {/* No picker row. Which campaigns are on the board is ticked in the SIDEBAR, on the
-              rows that already list them — a toolbar menu here was a second copy of that list
-              two inches to its right, and it cost the tab a permanent row. */}
           {selected.length === 0 ? (
             <CardFrame title="Compare" headingTag="h2">
               <p className="l4-lede">
-                {/* "the campaign list", not "the sidebar" — the same component is a
-                    docked sidebar on a desktop and the whole screen behind ← on a phone,
-                    and a phone reader sent to a sidebar that is not there is sent nowhere.
-                    Its own header says CAMPAIGNS at both widths. */}
+                {/* "the campaign list", not "the sidebar": on a phone there is no sidebar. */}
                 Tick <strong>▢</strong> beside two or more campaigns in the campaign list. Each lands on
                 its own winner; open a channel&rsquo;s lineage to walk its cladogram — click any
                 searchpoint to move that channel onto it, or to put it on the board beside the
@@ -184,9 +134,6 @@ export function ComparePane() {
             </CardFrame>
           ) : (
             <>
-              {/* The channels themselves, side by side: each lands on its campaign's winner and
-                  carries the lineage map that moves it. Everything below is what the SET says
-                  jointly — this is what each one of them IS. */}
               <ChannelCards
                 evidence={evidence}
                 channels={channels}
@@ -198,11 +145,6 @@ export function ComparePane() {
                 onRemove={remove}
               />
 
-              {/* WHAT these channels are, before what they scored — the panel the operator
-                  reaches a searchpoint comparison for, and the one they open the tab on. Above
-                  the statistics because a configuration difference is what every number below is
-                  evidence ABOUT; it sat under them for a release, which put the answer before the
-                  question. */}
               {config ? (
                 <SearchpointCards
                   evidence={evidence}
@@ -229,8 +171,6 @@ export function ComparePane() {
                 title="Levels"
                 headingTag="h2"
                 actions={
-                  // Two control groups, one row — the header's own rule. A bare fragment leaves
-                  // the flex to push only the last child right and the pair reads as a pile.
                   <Toolbar>
                     <MetricPicker
                       reading={evidence.metric}
@@ -255,14 +195,10 @@ export function ComparePane() {
                     onMetric={setMetric}
                   />
                 )}
-                {/* A rejection the expression input is not on screen to carry. `useEvidence`
-                    keeps the last good read on an invalid metric, so without this the pane
-                    would go on showing those numbers with nothing said. */}
+                {/* `useEvidence` keeps the last good read on an invalid metric; this says so. */}
                 {invalidMetric && !isCustomMetric(metric) && (
                   <p className="l4-warn">{invalidMetric}</p>
                 )}
-                {/* Selected, and not in anything below. A subject that thins the selection in
-                    silence is the channel-level twin of scoring an unread cell as zero. */}
                 {evidence.unread_subjects.length > 0 && (
                   <p className="l4-note">
                     Selected but not read: {evidence.unread_subjects.join(", ")}. Each has nothing
@@ -287,9 +223,8 @@ export function ComparePane() {
                     />
                     {maskTarget && (
                       <ChannelMask
-                        // KEYED on which channel is open. The editor holds a local draft, and
-                        // switching channels reuses the same position in the tree — unkeyed, the
-                        // next channel opens holding the previous one's criterion.
+                        // Keyed: the editor holds a local draft, and unkeyed the next channel
+                        // would open holding the previous one's criterion.
                         key={masking}
                         subject={maskTarget}
                         invalid={invalidMetric}
@@ -357,9 +292,7 @@ export function ComparePane() {
   );
 }
 
-// What each scoring mask did to its branch. Every field is served — including the caveat, which is a
-// FACT about what a lens can and cannot answer and so has one owner on the server rather than a
-// sentence each surface remembers to restate.
+// Every field is served, the caveat included — it has one owner on the server.
 function Scenarios({ evidence }: { evidence: Evidence }) {
   const masked = evidence.subjects.filter((s) => s.scenario !== null);
   if (masked.length === 0) return null;
@@ -372,8 +305,6 @@ function Scenarios({ evidence }: { evidence: Evidence }) {
           <div key={s.key}>
             <p className={sc.first_divergent_round !== null ? "l4-warn" : "l4-lede"}>
               <strong>{s.label}</strong> under <code>{s.mask?.lens}</code>:{" "}
-              {/* One fact, not two: the chain ends AT the parting, so a branch cannot take a
-                  different route and converge back — there is no route after it to read. */}
               {sc.winner_changed ? (
                 <>
                   parts from the record at round {sc.first_divergent_round}, where it would have
@@ -395,14 +326,8 @@ function Scenarios({ evidence }: { evidence: Evidence }) {
   );
 }
 
-// What the chart above is of, and — the half that matters — what it could not read. A subject
-// with unscorable cells is named rather than left as a shorter bar. Rendered only where the metric
-// read something; the absence case is one block below, not four paragraphs of the same fact.
-//
-// It reads the VIEW because the two chart families answer over different cells: the cell-wise
-// forms plot every cell any subject reached, while Merged brackets each subject over its own.
-// One sentence for both put the shared axis's denominator on a number that never used it — and
-// they differ exactly when a subject came up short, which is when the operator is looking.
+// It reads the VIEW: the cell-wise forms plot every cell any subject reached, while Merged brackets
+// each subject over its own — so the denominator differs exactly when a subject came up short.
 function MetricLede({
   evidence,
   view,
@@ -439,9 +364,7 @@ function MetricLede({
   );
 }
 
-// Which subjects came up short, and on how many cells. Shared by both paths below because they
-// answer the same question — and the FILTER is the point: without it the unavailable path lists a
-// subject as "abc123 (0)" under a heading that says its cells were unreadable.
+// Filtered to subjects that actually came up short; a zero-count row would read as "abc123 (0)".
 function unreadable(
   rows: readonly SubjectReading[],
   names: ReadonlyMap<string, string>,
@@ -452,9 +375,6 @@ function unreadable(
     .join(", ");
 }
 
-// The whole of what a selection this metric cannot read has to say. It replaced a pile — an empty
-// chart, a legend for bars that do not exist, a lede claiming to plot zero cells, and a
-// per-subject tally — each restating one fact in different words.
 function MetricUnavailable({
   evidence,
   names,
@@ -477,9 +397,6 @@ function MetricUnavailable({
   );
 }
 
-// The branch standing behind each channel — the winner chain from its origin to its head, each
-// point read on ITS OWN cells. The rows are drawn by `EvidenceCharts`' Merged view, on one scale
-// with the heads; this card says what the walk costs and what the chain means.
 function WinnerChains({
   evidence,
   shown,
@@ -528,9 +445,7 @@ function Readings({ evidence }: { evidence: Evidence }) {
   const v = evidence.variance;
   const p = evidence.power;
   const oc = evidence.order_confound;
-  // Every number below is a spread or an SD of the SELECTED metric's own cell values, so it
-  // carries that metric's unit — on `usd` the roster table read `$0.4200` while this card read
-  // `+0.420` for the same quantity.
+  // Spreads and SDs of the SELECTED metric's own values, so they carry its unit.
   const unit = evidence.metric.spec.unit;
   return (
     <CardFrame title="What this selection can settle" headingTag="h2">
@@ -558,9 +473,7 @@ function Readings({ evidence }: { evidence: Evidence }) {
         </p>
       ) : (
         <>
-          {/* The three-way split only. `null_subject_scatter` is the INTERPRETATION of the
-              subject row and the lede below states it with its meaning — a second, bare copy in
-              this list showed the operator one number twice in one card. */}
+          {/* The three-way split only: `null_subject_scatter` is stated with its meaning below. */}
           <dl className="l4-readings">
             <div>
               <dt>cell effect</dt>
@@ -652,8 +565,7 @@ function Ranking({ evidence, nSubjects }: { evidence: Evidence; nSubjects: numbe
           </tr>
         </thead>
         <tbody>
-          {/* Keyed on the served IDENTITY, BOTH halves: rows pool within one campaign, so two
-              campaigns that ran the same searchpoint are two rows carrying one `sp_hash`. */}
+          {/* Keyed on BOTH halves of the served identity: two campaigns can share one `sp_hash`. */}
           {evidence.edits.map((row, i) => (
             <tr className="l4-row" key={`${row.campaign_id}/${row.sp_hash}`}>
               <td className="l4-rank">{i + 1}</td>

@@ -1,29 +1,6 @@
 "use client";
-// One card per channel, side by side — the Compare tab's primary surface.
-//
-// A card LANDS on its campaign's winner and says what that point is worth. Behind a fold it
-// carries WHAT that searchpoint is, editable: an edit invalidates rather than re-projects, so the
-// card's own numbers go to `?` (`config-edit.tsx`).
-//
-// Also behind a toggle is the CLADOGRAM the dashboard draws (`candidates/Forest`), used here as an
-// interactive map: click any searchpoint and the card offers the two things worth doing with it —
-// move this channel there, or put it on the board as a channel of its own. That second verb is the
-// whole point of walking historical rounds: the winner stays where it is, and R3.2 joins it.
-//
-// **Selecting is not navigating, and the head picker is a SELECTOR.** Winner / Most recent /
-// Picked move the HIGHLIGHT on that map and nothing else — the drawing's CUT stays on the
-// channel's own point, so walking history never re-cuts the picture under the cursor that clicked
-// it. The two verbs above are the only things that move a channel, and they are presses.
-//
-// The cladogram is reused verbatim rather than re-drawn. Everything surface-specific arrives
-// through `CladogramCtx`, so the compare flavour differs from the dashboard's only in what a
-// click DOES — and in the INK: every channel of the comparison is marked on every card's tree in
-// its own colour, so the drawing answers "where do these two sit relative to each other" without
-// anyone having to hold two pictures in their head. A second lineage renderer here would be a
-// second answer to "what descends from what", and the tree is the one genealogy this app reads.
-//
-// Every number on the card is served (`SubjectReading`); nothing here computes a level, an
-// interval or a verdict.
+// One card per Compare channel: its served reading, a config drill-in, and the campaign's cladogram as a map.
+// Every number is served (`SubjectReading`); a pick on the map moves the highlight, never the channel or the cut.
 
 import { useCallback, useMemo, useState } from "react";
 import type {
@@ -85,16 +62,12 @@ const KIND_WORD: Record<SubjectReading["kind"], string> = {
   candidate: "searchpoint",
 };
 
-// Where each channel LANDS in the served genealogy, and what colour it owns there. The three ids
-// name the leaf and `inside` is the sandbox chain above it, so the two halves together are the
-// same address a tree node publishes as `coursePathKey` + `candidateId` — which is what lets an
-// L4 seed's point be found on the outer campaign's tree at all.
+// `inside` + the three ids are the address a tree node publishes as `coursePathKey` + `candidateId`.
 function channelPoints(subjects: readonly SubjectReading[]): CladogramChannel[] {
   return subjects.map((s, i) => ({
     coursePathKey: encodeCyclePath(readingPath(s)),
     candidateId: s.candidate_id,
-    // The Nth series ink, by the SERVED order — the same index the bars, the legend and the
-    // pairwise table read, so one channel is one colour everywhere it appears.
+    // Served order — the index the bars, legend and pairwise table read, so one channel is one colour.
     ink: seriesVar(i),
   }));
 }
@@ -110,15 +83,10 @@ export function ChannelCards({
   onRemove,
 }: {
   evidence: Evidence;
-  // Which channels the operator has edited the CONFIGURATION of. Nothing ran under an edited
-  // value, so this card stops claiming a level for that channel rather than showing the recorded
-  // one under a changed setup — see `config-edit.tsx`.
+  // Channels whose configuration was edited: their card withdraws its level (`config-edit.tsx`).
   edits: ScenarioEdits;
   onEdits: (next: ScenarioEdits) => void;
-  // The channels ASKED for, in selection order. Read off the request rather than the response
-  // so a channel that answered nothing still gets a card saying so — dropping it silently is
-  // how a three-channel comparison reads as a two-channel one. And each one names its CAMPAIGN
-  // beside the address, which is what lets an unread channel still draw a map to escape by.
+  // Read off the request, not the response, so a channel that answered nothing still gets a card.
   channels: readonly CompareChannel[];
   onReplace: (from: string, to: string) => void;
   onAdd: (channel: CompareChannel) => void;
@@ -129,10 +97,6 @@ export function ChannelCards({
     () => new Map(evidence.subjects.map((s) => [s.key, s])),
     [evidence.subjects],
   );
-  // Every channel's position on the genealogy, computed ONCE for the whole board and handed to
-  // every card: each tree marks all of them, not just its own. That is the comparison — one
-  // drawing, two inked points — and a per-card list would mark each card only where it already
-  // stands, which is the picture the operator can already see in the header.
   const points = useMemo(() => channelPoints(evidence.subjects), [evidence.subjects]);
   return (
     <div className="cmp-channels">
@@ -144,9 +108,7 @@ export function ChannelCards({
             channel={channel}
             reading={reading}
             points={points}
-            // This card's OWN point: the ink of its swatch, and the cut its map is made at. An
-            // unread channel has neither — no series is drawn for it, so a colour here would be
-            // some OTHER channel's ink on a card that plots nothing.
+            // Null for an unread channel: it plots no series, so any ink here would be another channel's.
             own={reading ? points[evidence.subjects.indexOf(reading)] ?? null : null}
             edits={edits}
             onEdits={onEdits}
@@ -192,18 +154,12 @@ function ChannelCard({
 }) {
   const subject = channel.subject;
   const { campaigns, cycles } = useWorkspace();
-  // A card names its CAMPAIGN when the point it addresses answered nothing. It used to render
-  // an em-dash, so two unread cards were indistinguishable from each other and from a card
-  // still loading — and the campaign is the one thing a channel always knows.
   const campaign = campaigns.find(
     (c: CampaignSummary) => c.campaign_id === channel.rootCampaignId,
   );
   const campaignName = campaign?.label || shortId(channel.rootCampaignId);
-  // Any branch of this campaign names its root, and the tree is rooted there whatever the card
-  // reads on. Sourced from the registry rather than parsed back out of the subject: the address
-  // grammar is the server's, and `lib/api/reads.ts` is the one place the browser spells it.
-  // The channel's TOP-LEVEL campaign, which is why an L4 seed maps: the registry lists no inner
-  // campaign, so rooting on the seed's own id found no branch and drew no tree at all.
+  // The TOP-LEVEL campaign (the registry lists no inner one), read off the registry — never parsed from
+  // the subject: `lib/api/reads.ts` is the one place the browser spells the address grammar.
   const anyCycle = cycles.find((c: CycleListEntry) => c.campaign_id === channel.rootCampaignId);
   const rootPath = useMemo<CyclePath>(
     () =>
@@ -213,55 +169,28 @@ function ChannelCard({
     [anyCycle, channel.rootCampaignId],
   );
 
-  // ONE tree subscription per card, lifted out of the map: the head picker needs the genealogy to
-  // name "most recent" before the map is ever opened, and two `useLineageTree` calls on one key
-  // would be one fetch with two refcounts — but also two places deciding what the tree says.
+  // One tree subscription per card: the head picker needs the genealogy before the map ever opens.
   const { root, loaded, failed } = useLineageTree(rootPath, rootPath.length > 0);
   const index = useMemo(() => indexLineage(root), [root]);
-  // WHICH searchpoint of this branch is highlighted. One slot, two writers — the head picker and
-  // a click on the map — and it moves NOTHING but the highlight: re-pointing the channel is the
-  // explicit verb below, and letting a pick do it silently re-cut the drawing under the cursor
-  // that clicked it. The served NODE itself, not a projection of it: every scalar the drill-in
-  // reads is already on the tree, so a middle shape would only be a place for them to go stale.
+  // One slot, two writers (head picker, map click). It moves only the highlight; re-pointing the
+  // channel is the explicit verb in `ArmedActions`.
   const [selected, setSelected] = useState<LineageNode | null>(null);
   const head = useChannelHead(index, reading, selected);
-  // Render-phase seed: the card opens with its OWN head marked, and re-seeds when the channel is
-  // re-pointed elsewhere. A `useEffect` would paint one frame of the previous channel's pick.
+  // Render-phase seed: a `useEffect` would paint one frame of the previous channel's pick.
   const [seededFor, setSeededFor] = useState<string | null>(null);
   if (head.own && seededFor !== subject) {
     setSeededFor(subject);
     setSelected(head.own);
   }
-  // PER CARD, both of them. The map used to be one switch for the whole board on the argument
-  // that two trees are only readable together; in practice one channel is usually the one being
-  // walked, and a shared switch made every card grow and shrink to serve it.
   const [mapOpen, setMapOpen] = useState(false);
-  // The drill-in stays where the operator left it — it must NOT close because the pick moved,
-  // which is the one moment they have just asked to see something.
+  // Must NOT close when the pick moves — that is the moment the operator asked to see something.
   const [setupOpen, setSetupOpen] = useState(true);
 
-  // ── The highlighted point, read at its OWN address ────────────────────────────────────────
-  // One round document, fetched for whatever is picked. No live snapshot: exactly one cycle
-  // streams (`webapp/CLAUDE.md` § Polling shape) and it is whichever the dashboard is parked on,
-  // which a Compare channel has no reason to be — so a round still scoring has nothing to read
-  // and the drill-in says so, rather than claiming a liveness this tab cannot observe.
+  // No live snapshot: exactly one cycle streams (`webapp/CLAUDE.md` § Polling shape), so a round
+  // still scoring has nothing to read here.
   const pickedPath = useMemo(() => (selected ? pathOf(selected) : null), [selected]);
   const { doc, loading: docLoading } = useRoundFile(pickedPath, selected?.round ?? null);
-  // The node schema is per DATASET, and channels span datasets — the app-level connector view is
-  // bound to whichever campaign the dashboard is viewing, so a card that trusted it would draw
-  // another dataset's parameters, or (the usual case) none at all.
-  //
-  // Read off the nearest COURSE at or above the picked point, never off the candidate and never
-  // off the channel: `dataset_name` is a course scalar and blank on a candidate, and an L4 inner
-  // searchpoint runs a different dataset than the outer channel that opened its sandbox — so the
-  // channel's name would seed the editor from the wrong pipeline entirely.
-  // The picked point's own resolved pipeline, addressed as the point — never by dataset name.
-  //
-  // It used to walk up for the nearest course's `dataset_name` and fetch that dataset's file,
-  // which is the defect this arc exists for: one `pipeline.yaml` is shared by every campaign on
-  // the slug, so on a Compare tab holding five channels of one dataset it drew the same config
-  // under all of them. `candidateSubject` carries the sandbox chain in `;in=`, so an L4 inner
-  // searchpoint resolves against its own campaign rather than needing the name walk at all.
+  // Addressed as the point, never by dataset name: one `pipeline.yaml` is shared by every campaign on the slug.
   const at = useMemo(
     () => (pickedPath && selected ? candidateSubject(pickedPath, selected.id) : ""),
     [pickedPath, selected],
@@ -277,14 +206,11 @@ function ChannelCard({
     { surface: "campaign-pipeline" },
   );
   const pipeline = readyData(pipelineRead);
-  // The state of THIS fetch, handed down beside the schema it produced.
   const pipelineStatus = pipelineReadStatus({
     bound: pipelineRead.status !== "idle",
     loading: pipelineRead.status === "loading",
     failed: pipelineRead.status === "failed",
   });
-  // The point's own round, on its own course: how many arms stood, and where this one sat among
-  // them. Both come off the tree, which is the only thing that knows a round's shape.
   const { pickedArms, pickedIdx } = useMemo(() => {
     if (!selected) return { pickedArms: null, pickedIdx: 0 };
     const sibs = (index.get(encodeCyclePath(pathOf(selected)))?.candidates ?? []).filter(
@@ -292,13 +218,8 @@ function ChannelCard({
     );
     return { pickedArms: sibs.length || null, pickedIdx: Math.max(sibs.indexOf(selected), 0) };
   }, [index, selected]);
-  // THE DOCUMENT'S OWN ID for this point, resolved through the served join key and used for every
-  // slice of that document from here down. A tree-sourced id is a DIFFERENT id after a resume —
-  // the run re-mints C0's uuid while `round_0000.json`, written earlier, keeps the old one — so an
-  // id carried across that boundary finds nothing and every panel blanks with no error.
-  //
-  // And the key is `course_label`, never `label`: a fork-contributed attempt is renumbered onto
-  // this course's timeline while its document still speaks the label its MINTING course gave it.
+  // The DOCUMENT's own id, via the served join key: a tree id differs after a resume re-mints C0. Key on
+  // `course_label`, never `label` — a fork-contributed attempt keeps its minting course's label in the doc.
   const docId = selected ? docCandidateId(doc, selected.course_label) : null;
   const pickedRow = selected
     ? scoreboardRow(doc, docId ?? "", selected.label, selected.round ?? 0, pickedIdx)
@@ -310,17 +231,13 @@ function ChannelCard({
     () => (docId && selected ? historicalSamplesFor(doc, selected.round ?? 0, docId) : []),
     [doc, docId, selected],
   );
-  // WHICH searchpoint an edit here is about — the picked one, which is the channel's own until
-  // the operator walks somewhere else.
   const pickedKey = useMemo(
     () => (selected ? candidateSubject(pathOf(selected), selected.id) || subject : subject),
     [selected, subject],
   );
   const pickedIsOwn = !!reading && pickedKey === pointKeyOf(reading);
-  // What the branch had spent by the highlighted round. Served per round and INDEXED here, never
-  // summed — the fold is one cycle's own ledger, so it answers only for a pick on that cycle's
-  // lane; a pick on a fork's lane was billed to a file this read did not open, and the card says
-  // "branch spend" rather than quietly showing the wrong branch's number.
+  // Indexed per round, never summed. The fold is this cycle's ledger only, so it answers only for a pick
+  // on this cycle's lane; a fork's lane was billed to a file this read did not open.
   const spentTo = useMemo(() => {
     if (!reading || !selected || selected.round == null) return null;
     const onOwnCourse =
@@ -332,11 +249,8 @@ function ChannelCard({
     [pickedCfg, edits, pickedKey],
   );
 
-  // ── What an edit took the ground out from under ───────────────────────────────────────────
-  // Which points on THIS tree the operator has changed a setting on, and everything standing on
-  // one. Found by asking each node for its own address rather than by parsing the edit keys back
-  // apart: the subject grammar is the server's and `lib/api/reads.ts` is the one place the
-  // browser spells it (`webapp/CLAUDE.md` § Addressing).
+  // Each node is asked for its own address rather than parsing edit keys apart — the subject grammar is
+  // the server's (`webapp/CLAUDE.md` § Addressing).
   const edited = useMemo(() => {
     const seeds: string[] = [];
     for (const { candidates } of index.values()) {
@@ -380,12 +294,8 @@ function ChannelCard({
         </p>
       ) : (
         <>
-          {/* A config edit does not move this number — it removes the ground under it. Nothing
-              ever ran at the edited value, so the level, its interval, its cell count and every
-              pairwise test that used it describe a searchpoint this channel no longer names. The
-              card says so instead of showing the recorded figure beside a changed setup, which is
-              the one render that would let an operator read a measurement as an answer to a
-              question it was never asked. */}
+          {/* An edit removes the ground under this number: nothing ran at the edited value, so the
+              card withdraws the level rather than show the recorded one beside a changed setup. */}
           {invalidated.has(reading.candidate_id) ? (
             <>
               <p className="cmp-channel-value cmp-channel-unknown">
@@ -409,11 +319,8 @@ function ChannelCard({
             </p>
           )}
           <p className="l4-subtle">{axis}</p>
-          {/* WHICH point of this branch is highlighted on the map — a SELECTOR, not a navigator.
-              Three heads, and an unavailable one is DROPPED rather than disabled: a permanently
-              dead segment is an affordance that lies. Clicking a node on the map lands on
-              "Picked" by itself, because the lit segment is derived from what is selected rather
-              than held beside it. */}
+          {/* A SELECTOR, not a navigator. An unavailable head is dropped, not disabled; a map click
+              lands on "Picked" because the lit segment derives from the selection. */}
           {head.options.length > 1 && (
             <SegmentedControl
               options={head.options}
@@ -423,11 +330,8 @@ function ChannelCard({
             />
           )}
           <dl className="cmp-channel-facts">
-            {/* What it had cost by the point being LOOKED AT — served per round
-                (`spend_to_round`, folded from the ledger's per-call `round`), so walking the
-                branch moves it. Nothing is summed here; the round is an index.
-                Falls back to the cycle's roll-up when the pick is on another lane, whose costs
-                this channel's read did not fold — and says which it is showing either way. */}
+            {/* Served `spend_to_round`, indexed by the looked-at round. A pick on another lane falls
+                back to the cycle's roll-up, and says which it shows. */}
             <div>
               <dt>{spentTo !== null ? `spent to ${selected?.label}` : "branch spend"}</dt>
               <dd>
@@ -438,9 +342,6 @@ function ChannelCard({
                     : "—"}
               </dd>
             </div>
-            {/* The DATASET first, and it is the fact that was missing: on a self-optimizing board
-                every channel is some `justlogic-d234__xxxxxx`, and a card naming only the six
-                hex characters cannot say which of them it is a seed of. */}
             <div>
               <dt>dataset</dt>
               <dd title={reading.dataset_name}>{reading.dataset_name || "—"}</dd>
@@ -449,8 +350,7 @@ function ChannelCard({
               <dt>campaign</dt>
               <dd title={reading.campaign_id}>{shortId(reading.campaign_id)}</dd>
             </div>
-            {/* Where it LIVES, when that is not the top level: an inner searchpoint's own
-                campaign id says nothing about which run opened the sandbox it is in. */}
+            {/* An inner campaign id alone says nothing about which run opened its sandbox. */}
             {reading.inside.length > 0 && (
               <div>
                 <dt>seed of</dt>
@@ -463,46 +363,35 @@ function ChannelCard({
               <dt>branch</dt>
               <dd title={reading.cycle_id}>{shortId(reading.cycle_id)}</dd>
             </div>
-            {/* WHERE on that branch the numbers above were read — the one row here that is about
-                a POINT rather than a cycle, and the row the card was missing. A `course:` or
-                `campaign:` channel names a branch, so without it there was nothing on screen
-                saying which of its searchpoints answered. */}
             <div>
               <dt>reads at</dt>
               <dd title={reading.candidate_id}>
                 {head.own?.label ?? reading.label} · round {reading.round}
               </dd>
             </div>
-            {/* How deep the BRANCH went, which is not how deep that point sits — conflating the
-                two is what made a candidate at round 2 of six report six. */}
+            {/* How deep the BRANCH went, not how deep the point sits. */}
             <div>
               <dt>rounds on branch</dt>
               <dd>{reading.cycle_rounds_scored}</dd>
             </div>
-            {/* WHO proposed this configuration, served (`authorship`). The arm beside it groups by
-                optimizer CONFIG, which two forks of one campaign share whoever wrote the edit — so
-                this is the only row on the card that separates a human's prompt from L1's. */}
+            {/* Served `authorship`: the arm groups by optimizer CONFIG, which forks share, so this is
+                the only row separating a human's prompt from L1's. */}
             <div>
               <dt>authored by</dt>
               <dd title={reading.authorship}>{reading.authorship || "—"}</dd>
             </div>
-            {/* Of the cells behind the number above, how many REPLAYED instead of being measured
-                here. Absent and zero are different facts: `—` is no report for this point, `0` is
-                every cell earned, and a rewind fork's inherited rows are neither. */}
+            {/* Absent and zero differ: `—` is no report for this point, `0` is every cell earned
+                here, and a rewind fork's inherited rows are neither. */}
             <div>
               <dt>replayed cells</dt>
               <dd>{reading.cached_samples ?? "—"}</dd>
             </div>
           </dl>
-          {/* The SENTENCE is served (`comparable_note`). A different ruler and a different
-              dataset are not one fact worded twice, and the copy that lived here said "its cells
-              still pair where they overlap" over a pair that shared no question at all. */}
+          {/* The sentence is served (`comparable_note`); never word it here. */}
           {reading.comparable === false && (
             <p className="l4-warn">{reading.comparable_note}</p>
           )}
-          {/* A fact about the RUN, not about who authored the point — a loop-authored arm carries
-              it too. Served, because a babysat cycle is no longer purely reproducible and pairing
-              it against one nobody touched is a comparison of two different things. */}
+          {/* A fact about the RUN, not the author — a loop-authored arm carries it too. */}
           {reading.human_intervened && (
             <p className="l4-warn">
               An operator intervened mid-run on this cycle, so it is no longer purely
@@ -510,9 +399,6 @@ function ChannelCard({
             </p>
           )}
 
-          {/* The MAP first, then what the point it highlights IS. Walking the cladogram is what
-              chooses the subject of everything below it, so it reads top-down; under the fold the
-              operator had to scroll back up past the drill-in to move the pick that drives it. */}
           <p className="cmp-channel-lineage">
             <button
               type="button"
@@ -543,15 +429,8 @@ function ChannelCard({
             />
           )}
 
-          {/* WHAT the highlighted searchpoint is, what it scored, and the editor for it — the
-              same drill-in the dashboard opens on a candidate click, because it is the same
-              question. It follows the pick: walking to R3.2 reads R3.2's document, which is the
-              whole point of being able to walk at all — so it stays OPEN across a pick. Closing
-              it when the operator walks somewhere would shut the panel at the exact moment they
-              asked to see something. */}
-          {/* The restore and copy controls ride the summary's row as SIBLINGS of the disclosure.
-              `<summary>` is a label: a control inside it is invalid markup, a word in the
-              disclosure's accessible name, and a press that toggles the fold on the way out. */}
+          {/* Follows the pick and stays OPEN across it. The restore and copy controls are SIBLINGS
+              of `<summary>`: inside it they are invalid markup and a press toggles the fold. */}
           <div className="cmp-channel-setup-row">
             <details className="cmp-channel-setup" open={setupOpen}>
               <summary
@@ -578,8 +457,6 @@ function ChannelCard({
                 measurements={
                   pickedPath &&
                   docId && (
-                    // The point's cells on the branch it was picked on — the one measurement
-                    // log, preset to this individual.
                     <MeasurementsPane
                       preset={{
                         path: pickedPath,
@@ -595,9 +472,8 @@ function ChannelCard({
                 schema={pipeline?.node_config_schema ?? null}
                 schemaStatus={pipelineStatus}
                 outputSchema={pipeline?.node_output_schema ?? null}
-                // Seeded with the operator's scenario written back in, not with the bare record:
-                // the editor drops its own draft whenever the seed changes, so a restore puts the
-                // inputs back by itself rather than clearing the record underneath them.
+                // The editor drops its draft whenever the seed changes, so seeding with the scenario
+                // written back makes a restore refill the inputs.
                 overlay={pickedSeed}
                 pending={
                   docLoading
@@ -618,9 +494,7 @@ function ChannelCard({
                     <SteerForkAction
                       candidate={selectedCandidateOf(selected, pickedPath.at(-1)?.cycleId ?? "")}
                       path={pickedPath}
-                      // No stream for this branch — exactly one cycle streams and it is whichever
-                      // the dashboard is parked on. The seed comes from the round file, which is
-                      // the only source this tab could honestly have.
+                      // Exactly one cycle streams — whichever the dashboard is parked on — so no stream here.
                       dash={null}
                       schema={pipeline?.node_config_schema ?? null}
                       schemaStatus={pipelineStatus}
@@ -636,10 +510,8 @@ function ChannelCard({
               />
             </details>
             <ChannelRestore edits={edits} subjectKey={pickedKey} onEdits={onEdits} />
-            {/* Same readings the dashboard's Scoring inspector offers, off the same builder: a
-                point pasted from a Compare channel has to be comparable to one pasted there, and
-                two hosts each deciding what "this searchpoint" means is exactly how that stops
-                being true. */}
+            {/* Same builder as the dashboard's Scoring inspector, so a point pasted from either host
+                compares against the other. */}
             <CopyButton
               choices={searchpointCopyChoices({
                 cfg: pickedCfg,
@@ -656,10 +528,8 @@ function ChannelCard({
   );
 }
 
-// WHICH of the three heads of this branch the map can highlight, as NODES rather than addresses:
-// the picker selects, it does not navigate. The winner is the last candidate an election crowned;
-// the most recent is the last one the highest round minted, crowned or not; the picked one is
-// whatever the map has been clicked on. Nothing here computes a level — it reads the served tree.
+// The three heads as NODES — the picker selects, it does not navigate. Winner is the last crowned
+// candidate; most recent is the last one the highest round minted, crowned or not.
 function useChannelHead(
   index: ReturnType<typeof indexLineage>,
   reading: SubjectReading | null,
@@ -668,9 +538,8 @@ function useChannelHead(
   return useMemo(() => {
     const courseKey = reading ? encodeCyclePath(readingPath(reading)) : null;
     const candidates = (courseKey && index.get(courseKey)?.candidates) || [];
-    // Tree order, so the LAST node tying the max round is the most recent — no re-sort, which
-    // would be an ordering this layer invented. `is_winner` alone says nothing on a round still
-    // scoring, so the crown walk reads `election_held` beside it.
+    // Tree order, so the LAST node at the max round is the most recent (no re-sort). `is_winner`
+    // alone says nothing on a round still scoring, so the crown walk reads `election_held`.
     let newest: LineageNode | null = null;
     let crowned: LineageNode | null = null;
     for (const c of candidates) {
@@ -681,12 +550,10 @@ function useChannelHead(
       }
     }
     const own = candidates.find((c) => c.id === reading?.candidate_id) ?? null;
-    // The crown, or — on a branch whose rounds all held — the point the channel itself reads at,
-    // which is what the server resolved the course to.
+    // On a branch with no crown, the point the server resolved the course to.
     const winner = crowned ?? own;
     const latest = newest;
-    // Two nodes are the same point only when their COURSE agrees too: a fork contributes an
-    // attempt that keeps its own id while sitting on another course's timeline.
+    // Same point only when the COURSE agrees too: a fork-contributed attempt keeps its own id.
     const sameAs = (a: LineageNode | null, b: LineageNode | null) =>
       !!a && !!b && a.id === b.id && encodeCyclePath(pathOf(a)) === encodeCyclePath(pathOf(b));
     const isWinner = sameAs(selected, winner);
@@ -725,12 +592,7 @@ function useChannelHead(
   }, [index, reading, selected]);
 }
 
-// The dashboard's own cladogram, wired to this card.
-//
-// It maps the CAMPAIGN, never the reading. A channel whose point answered nothing has no
-// reading at all, and that is exactly the card that needs a map — refusing to draw one there
-// left the operator with a card saying "pick a point that has run" above a map that would not
-// open.
+// The dashboard's cladogram, mapping the CAMPAIGN, never the reading — an unread channel needs a map most.
 function ChannelMap({
   root,
   index,
@@ -748,28 +610,21 @@ function ChannelMap({
   onAdd,
   hasSubject,
 }: {
-  // The tree, its index, its load state and the highlighted point are the CARD's — the head
-  // picker above needs all of them before this ever opens, and a second subscription (or a
-  // second `indexLineage`) here would be a second reading of one genealogy.
+  // The CARD's: the head picker needs them before this opens; a second subscription is a second reading.
   root: LineageNode | null;
   index: LineageIndex;
   loaded: boolean;
   failed: boolean;
   selected: LineageNode | null;
   setSelected: (next: LineageNode | null) => void;
-  // Points the operator has changed a setting on, plus everything descending from one. The
-  // drawing withdraws their numbers rather than dimming them as counterfactuals — nothing ran at
-  // the edited value, so there is no alternative reading to show, only an absent one.
+  // Edited points plus their descendants: their numbers are withdrawn, not dimmed — nothing ran there.
   invalidated: ReadonlySet<string>;
-  // The campaign's ROOT course, whatever branch the card reads on: the server's recursion
-  // reaches every fork AND every L4 sandbox below it, so a fork channel, an inner seed and their
-  // parent all share one fetch. Same rooting as `LineageProvider`, so a card on the viewed
-  // campaign rides the tree already on screen instead of opening a second read of it.
+  // The ROOT course: the server's recursion reaches every fork and L4 sandbox, and the rooting matches
+  // `LineageProvider`, so a card on the viewed campaign rides the tree already on screen.
   rootPath: CyclePath;
   reading: SubjectReading | null;
-  // Every channel on the board, so this tree marks all of them — not only the one it reads at.
   points: readonly CladogramChannel[];
-  // This card's own, which is where the drawing is CUT.
+  // Where the drawing is CUT.
   own: CladogramChannel | null;
   subject: string;
   onReplace: (from: string, to: string) => void;
@@ -777,27 +632,20 @@ function ChannelMap({
   hasSubject: (subject: string) => boolean;
 }) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
-  // The map is cut at this card's point by default — what came after it is no part of how it
-  // came to be. Lifted for the one thing the cut takes away: the map is also the navigator, and
-  // a channel cannot be moved FORWARD onto a round the drawing has stopped before.
+  // Cut at this card's point by default; lifting it lets a channel move FORWARD past its own round.
   const [whole, setWhole] = useState(false);
 
   const courses = useMemo(() => (root ? walkCourses(root) : []), [root]);
-  // Accuracy, never the composite: the card's own value already rides the selected metric, and a
-  // node painting a second one would put two answers to "what is this worth" in one card.
+  // Accuracy, never the composite: the card's value already rides the selected metric.
   const { valueByKey, thetaByKey } = useMemo(() => nodeOverlays(courses, false), [courses]);
 
-  // The card's own course, in the tree's address vocabulary — the highlighted lane. The served
-  // `inside` chain is what makes this join at any depth: the ids alone name the leaf, and a
-  // depth-1 guess never matched a node inside a sandbox.
+  // The served `inside` chain makes this join at any depth.
   const viewedKey = useMemo(
     () => (reading ? encodeCyclePath(readingPath(reading)) : null),
     [reading],
   );
-  // The LANES to open on — one per channel this tree holds, so both sides of the comparison are
-  // reachable the moment the map opens rather than one being buried in a collapsed lane. Only
-  // the tree can name a lane (`nodeKeyOf`), and a card whose channels are all elsewhere opens on
-  // the ROOT's lane rather than on a wall of dots.
+  // One lane per channel this tree holds; only the tree can name a lane (`nodeKeyOf`), and a card
+  // whose channels are all elsewhere opens on the ROOT's lane.
   const laneKeys = useMemo(() => {
     const keys = [
       ...new Set(
@@ -810,16 +658,14 @@ function ChannelMap({
     if (keys.length > 0) return keys;
     return root ? [nodeKeyOf(root)] : [];
   }, [root, points, index]);
-  // Compared as a STRING, not by identity: `points` is rebuilt on every evidence fetch, and
-  // re-seeding on each would throw away the lanes the operator opened and disarm their click.
+  // Compared as a STRING: `points` is rebuilt every evidence fetch, and re-seeding would drop opened lanes.
   const seed = laneKeys.join("~");
   const [seeded, setSeeded] = useState<string | null>(null);
   if (seed && seed !== seeded) {
     setSeeded(seed);
     setExpanded(new Set(laneKeys));
-    // The SELECTION is not re-seeded here. It belongs to the card, which seeds it from this
-    // channel's own head and re-seeds when the channel is re-pointed; clearing it on a lane
-    // change would leave the picker above lit on nothing.
+    // The selection is NOT re-seeded here — it belongs to the card; clearing it would leave the
+    // picker lit on nothing.
   }
 
   const onLaneActivate = useCallback((key: string) => {
@@ -833,23 +679,16 @@ function ChannelMap({
   const ctx = useMemo<CladogramCtx>(
     () => ({
       viewedKey,
-      // Every channel on the board, each owning its own ink — including this card's own, which is
-      // why `isPicked` no longer marks it: the accent ring and the channel colour on one node
-      // were two marks for one fact, and the accent one hid which channel it was.
       channels: points,
       clip: whole ? null : own,
       invalidated,
-      // The highlighted searchpoint, and nothing else. It never moves the CUT — that stays on
-      // this card's own point, so a walk through history leaves the drawing where it was.
+      // Never moves the CUT, which stays on this card's own point.
       isPicked: (n: RoundNodePos) =>
         !!selected &&
         n.candidateId === selected.id &&
         n.coursePathKey === encodeCyclePath(pathOf(selected)),
-      // The SERVED node the dot was placed from, which is what carries the point's numbers — the
-      // drawing's node is a placed geometry, and re-deriving a searchpoint's scalars from one
-      // would be a second answer to what the tree already says. It rides on the position rather
-      // than being re-found by key: a lane lookup silently finds nothing for a fork-contributed
-      // attempt, which is drawn on the parent's lane and indexed under the fork's.
+      // The SERVED node rides the position: a lane lookup finds nothing for a fork-contributed
+      // attempt, drawn on the parent's lane but indexed under the fork's.
       onPickCandidate: (n: RoundNodePos) => setSelected(n.node === selected ? null : n.node),
     }),
     [viewedKey, selected, setSelected, points, own, whole, invalidated],
@@ -863,11 +702,6 @@ function ChannelMap({
     return <p className="l4-empty">{loaded ? "No rounds on disk yet." : "Reading the lineage…"}</p>;
   }
 
-  // What the drawing IS and what to do with the node clicked on it, both ABOVE it. They are the
-  // map's chrome, and below it they sat between the tree and the drill-in the tree chooses the
-  // subject of — so the reading order ran map → controls → the thing the map is for. The strip
-  // also appears and disappears with the selection, and below the drawing that shoved the whole
-  // fold down on every click.
   return (
     <div className="cmp-channel-map">
       {own && (
@@ -891,9 +725,7 @@ function ChannelMap({
           hasSubject={hasSubject}
         />
       )}
-      {/* DENSE, always: two channels is what the tab is for, so a card is half-width by
-          construction. The labels ride each node's `<title>` and the strip above names what was
-          clicked, so nothing here is unreachable — only unprinted. */}
+      {/* DENSE always: a card is half-width by construction; labels ride each node's `<title>`. */}
       <Forest
         tree={root}
         valueByKey={valueByKey}
@@ -908,8 +740,7 @@ function ChannelMap({
   );
 }
 
-// What can be done with the clicked searchpoint. Both verbs mint the SAME address; they differ
-// only in whether this channel moves onto it or a new one joins beside it.
+// Both verbs mint the SAME address; they differ only in whether this channel moves or a new one joins.
 function ArmedActions({
   armed,
   subject,
@@ -927,17 +758,10 @@ function ArmedActions({
   const leaf = path.at(-1);
   const top = path.at(0);
   if (!leaf || !top) return null;
-  // Any depth. The hops above the leaf are the sandbox chain the point lives in, and the read
-  // descends them — so an L4 inner searchpoint is a channel exactly like a top-level one. It was
-  // refused here for one release, which on a `promptpotter-self` campaign meant refusing almost
-  // the whole tree.
-  //
-  // The ADDRESS is the leaf's; the channel's CAMPAIGN is the top hop's. Two different questions —
-  // which point is this, and which registry campaign owns the tree it is drawn on — and answering
-  // the second with the leaf is what left every inner channel unable to draw one.
+  // Any depth: the hops above the leaf are the sandbox chain. The ADDRESS is the leaf's; the channel's
+  // CAMPAIGN is the top hop's.
   const next = candidateSubject(path, armed.id);
-  // Silent on this channel's OWN point — the card seeds the selection there, and a permanent
-  // strip offering a disabled "move here" beside "already a channel" is two dead buttons.
+  // Silent on this channel's OWN point, where the card seeds the selection.
   if (next === subject) return null;
   const already = hasSubject(next);
   return (
@@ -947,9 +771,8 @@ function ArmedActions({
         {" "}
         R{armed.round ?? 0} · {armed.accuracy === null ? "—" : fmtPct0(armed.accuracy)}
       </span>
-      {/* The tree carries no accuracy for it, so the evidence read will find nothing either.
-          Said here rather than blocking the press: an arm still being scored is worth putting
-          on the board to watch fill in, and a card that reads nothing is not an error. */}
+      {/* No accuracy on the tree, so the read will find nothing — said, not blocked: an arm still
+          scoring is worth putting on the board to watch fill in. */}
       {armed.accuracy === null && (
         <span className="l4-dim">nothing scored here yet — it reads as unmeasured</span>
       )}

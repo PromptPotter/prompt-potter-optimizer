@@ -1,16 +1,5 @@
-// Connector-state inspector — small dot button + hover popover sitting
-// over the Input→LLM arrow. Presentational; receives one `view:
-// ConnectorView` prop. The data join (registered backends + dataset
-// overlay + dashboard live state) is owned by the `ConnectorProvider` so this
-// component never fetches, derives, or matches by string.
-//
-// Mother object on the Python side: `BackendConnection`
-// (`promptpotter/domain/backend.py`) — `{id, name, backend_type,
-// base_url, created_at}`. The popover header surfaces name/type/state,
-// the security row surfaces TLS scheme + auth contract + a link to the
-// canonical setup doc on GitHub, and the "Other backends" section lists
-// registered alternatives (switching is read-only today; the M12
-// control-plane wires the write half).
+// Connector-state inspector: dot button + popover over the Input→LLM arrow. Presentational —
+// `ConnectorProvider` owns the join, so this never fetches, derives or matches by string.
 
 import { cx } from "@/lib/cx";
 import { connectorReachability, interiorNodes, isSelfOptimization } from "@/lib/derivations";
@@ -34,17 +23,13 @@ export function ConnectorInspector({ view }: Props) {
     currentNodes,
     health,
   } = view;
-  // Reachability verdict — shared with the CriticalAlertBanner so the LED and
-  // the top banner can never disagree (lib/derivations/connector-state.ts).
+  // Shared with CriticalAlertBanner (lib/derivations/connector-state.ts), so LED and banner agree.
   const { reachable, stateCls, stateLabel } = connectorReachability(health);
-  // An L4 self-optimization unit has no HTTP backend to probe — its backend is
-  // PromptPotter itself. Say so honestly rather than degrading to the "no backend
-  // selected" / "idle" states built for the TermNorm shape (which read as a
-  // misconfiguration). The real per-node backend lives in the inner run.
+  // An L4 unit's backend is PromptPotter itself, with no HTTP backend to probe; the real one lives
+  // in the inner run.
   const selfOpt = isSelfOptimization(backendType);
-  // No resolved connector (anon preview / no dataset selected) means nothing is
-  // being probed — show a terminal "idle", not a perpetual "probing…" that
-  // never resolves (frontend-surface-contract.md § I1).
+  // No resolved connector means nothing is probed: a terminal "idle", never a perpetual
+  // "probing…" (frontend-surface-contract.md § I1).
   const noBackend = connector == null && !selfOpt;
   const label = selfOpt ? "self-optimization" : noBackend ? "idle" : stateLabel;
   const footText = selfOpt
@@ -107,10 +92,7 @@ export function ConnectorInspector({ view }: Props) {
             docs ↗
           </a>
         </div>
-        {/* No node roster here: this popover answers CONNECTION state — name, type, url,
-            TLS, auth — and the graph is drawn in the same row, from the same `view`.
-            Listing the nodes again needs its own kind fallback and model lookup, which is
-            two more places for one node to be described differently. */}
+        {/* No node roster: the graph in the same row draws them from the same `view`. */}
         {interior.length === 0 && (
           <p className="connector-pop-empty">
             {selfOpt

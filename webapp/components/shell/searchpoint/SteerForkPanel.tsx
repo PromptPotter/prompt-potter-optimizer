@@ -26,27 +26,8 @@ import type { PipelineStatus, SelectedCandidate } from "@/lib/types";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 import { LimitReconcile } from "./LimitReconcile";
 
-// The one operator-steered fork flow (decision H): the operator has selected a
-// searchpoint; this seeds its EVOLVED prompt + node-config, lets them edit the
-// prompt, the node-config VALUES, and reconcile run limits, then mints a fork
-// tagged `operator_steered` (seed present) rooted at that candidate — stamped
-// with the operator who steered it. When the parent is still running, the
-// confirm stops it first (the steer IS a "stop → redirect" act).
-//
-// Seed source follows the no-stitch rule via `useRoundSource`: a *completed*
-// round's candidate seeds from `round_NNNN.json::candidate_scores`; an
-// *in-flight* round's candidate seeds from `dashboard.json`'s live l1_score
-// input (so you can steer-fork a still-running candidate without 404ing on its
-// not-yet-written round file).
-//
-// Opened by `SteerForkAction`, which both hosts of the searchpoint drill-in mount. It owns its
-// source pick and the fork write; everything that varies with WHICH searchpoint is being steered
-// arrives as a prop.
-//
-// **The ADDRESS is the caller's.** Read off the workspace instead, this panel could only ever
-// steer the cycle the browser happened to be viewing — which is exactly the campaign a Compare
-// channel is NOT on. The pipeline SCHEMA is the caller's for the same reason: it is per-dataset,
-// and the app's connector view answers for the viewed one.
+// The operator-steered fork form: seeds the point's evolved prompt + config, then mints an
+// `operator_steered` fork. The ADDRESS and SCHEMA are the caller's — a Compare channel is not the viewed cycle.
 
 export function SteerForkPanel({
   candidate,
@@ -61,23 +42,12 @@ export function SteerForkPanel({
   onCancel,
 }: {
   candidate: SelectedCandidate;
-  // The searchpoint's cycle — which the fork verb addresses AND whose round file seeds the
-  // editors. ONE address, because `SteerForkAction` refuses anything below the top level:
-  // `ForkCyclePayload` carries no `descend`, so a point whose round file lives in an `.inner/`
-  // sandbox is one this command cannot name at all, and the two could only differ there.
   path: CyclePath;
-  // The live snapshot for `pointPath`'s cycle, or `null` where this browser holds no stream for
-  // it — exactly one cycle streams (`webapp/CLAUDE.md` § Polling shape), so a caller reading some
-  // other branch has none and the seed comes from the round file, which is the only honest source.
+  // `null` where this browser holds no stream for the cycle; the seed then comes from the round file.
   dash: DashboardSnapshot | null;
-  // Is the parent CYCLE running — confirm stops it before forking. Distinct from `roundIsLive`
-  // below, which asks whether `candidate.round` is the in-flight one.
+  // The parent CYCLE, distinct from `roundIsLive` below (is `candidate.round` in flight).
   parentIsLive: boolean;
-  // The point's OWN dataset's pipeline. Per-dataset, so it cannot be self-sourced: the app-level
-  // connector view answers for whichever campaign is being VIEWED, which would seed these editors
-  // from the wrong pipeline for any point outside it.
   schema: Record<string, NodeConfigParam[]> | null;
-  // How the read that produced `schema` went, from the same source. See `NodeConfigEditor`.
   schemaStatus: PipelineStatus;
   isSingleNode: boolean;
   outputSchema: Record<string, NodeOutputSchema | null> | null;
@@ -95,27 +65,17 @@ export function SteerForkPanel({
     : candidateSearchPoint(doc, candidate.candidate_id);
   const seedPrompt = seed?.origin_prompt_fields ?? {};
   const overlay = seed?.pipeline_overlay ?? {};
-  // What the EDITOR may offer un-tainted, per node, off the same served rows it edits. Handed to
-  // `NodeSurface` and nowhere else: the VERDICT and the list it NAMES both come off the preview
-  // below, because these rows move with a cycle seed and the gate reads the campaign's frozen
-  // narrowing. Two questions, two sources, and reading either off the other is the drift.
+  // For the EDITOR only; the verdict and the list it names come off the preview below, which reads
+  // the campaign's frozen narrowing rather than these seed-moved rows.
   const permittedModels = permittedModelsOf(schema);
-  // Whether the acting operator may steer to an un-permitted model at all. That is the
-  // ADR-0005 babysit act, gated server-side on
-  // `campaign.babysit` (404 without); the client reflects it so a principal who lacks
-  // the cap sees the row read-only rather than a 404 on confirm. Owners hold every cap.
+  // ADR-0005 babysit act, gated server-side (404 without); reflected here so the row reads read-only.
   const canBabysit = !!me?.capabilities?.includes("campaign.babysit");
-  // Live-reactive copy of the picked overlay (the ref below is read at confirm; this is what the
-  // preview read below is keyed on, so the warning re-asks the server on every commit).
-  // `null` = untouched → fall back to the seed overlay as it loads.
+  // What the preview read is keyed on; the ref below is what confirm reads. `null` = untouched.
   const [pickedOverlay, setPickedOverlay] = useState<Record<
     string,
     Record<string, unknown>
   > | null>(null);
-  // The VERDICT is the server's, and it is the same call `fork-cycle` dispatch makes — asked here
-  // before the confirm instead of enforced as a 404 after it. The browser re-derived it for as
-  // long as nothing served it, which is exactly the drift `frontend-surface-contract.md::I9`
-  // forbids. Keyed on the picked overlay, so a commit re-asks and a stale answer cannot render.
+  // The same verdict `fork-cycle` dispatch computes, asked before confirm rather than 404ing after.
   const steerOverlay = pickedOverlay ?? overlay;
   const preview = useRead(
     campaignId
@@ -128,27 +88,17 @@ export function SteerForkPanel({
   );
   const verdict = readyData(preview);
   const steersDisallowedModel = verdict?.steers_disallowed_model ?? false;
-  // The list the warning NAMES comes off the same response as the verdict, flattened for its one
-  // sentence. Off `permittedModels(schema)` it was a second answer: the rows move with a cycle
-  // seed and the gate reads the campaign's frozen narrowing, so the sentence could name models
-  // that had nothing to do with the verdict beside it — and say nothing about the difference.
   const permittedList = [
     ...new Set(Object.values(verdict?.permitted_models ?? {}).flat()),
   ];
 
-  // Captured working copies, read at confirm. Refs (not state) so a textarea
-  // blur that fires immediately before the Confirm click is already reflected
-  // — no stale-state race. `null` = operator never touched it, so confirm uses
-  // the loaded seed value as-is (handles the async round-file load too).
+  // Refs, not state: a blur firing just before the Confirm click is already reflected.
+  // `null` = untouched, so confirm uses the loaded seed.
   const editedPrompt = useRef<Record<string, unknown> | null>(null);
   const editedOverlay = useRef<Record<string, Record<string, unknown>> | null>(null);
-  // Per-node search-space permission edits, keyed by node. Rides
-  // `OperatorForkOverride.optimizer_narrowing` → the fork seed (cycle-level override of the
-  // campaign's mint-time narrowing). Empty = inherit unchanged.
+  // Empty = inherit the campaign's mint-time narrowing unchanged.
   const editedNarrowing = useRef<Record<string, NodeSearchNarrowing>>({});
-  // Seed with the pre-filled "remaining" defaults so confirming an untouched
-  // reconcile dialog forks with the SHOWN ceilings — not a silent inherit of
-  // the parent's full budget. `LimitReconcile.onChange` overwrites on edit.
+  // Seeded with the SHOWN "remaining" defaults, so an untouched confirm never inherits the full budget.
   const limits = useRef<RunLimitOverrides>(
     configOverridesFromDefaults(forkReconcileDefaults(dash)),
   );
@@ -160,9 +110,6 @@ export function SteerForkPanel({
     if (!campaignId || !cycleId) return;
     const forkSeed: OperatorForkOverride = {
       origin_prompt_fields: editedPrompt.current ?? seedPrompt,
-      // The overlay rides verbatim. A model/provider value in it is a locked-axis
-      // edit: the backend requires `campaign.babysit` (404 without) and stamps the
-      // branch grade C. A non-cap operator can't produce one — the row is read-only.
       pipeline_overlay: editedOverlay.current ?? overlay,
       config_overrides: limits.current,
       ...(Object.keys(editedNarrowing.current).length > 0
@@ -175,8 +122,7 @@ export function SteerForkPanel({
         postSteerFork(campaignId, cycleId, candidate.round, candidate.candidate_id, {
           seed: forkSeed,
           steeredBy: steeredBy(me),
-          // The steer redirects the run — the live parent's worker exits cleanly first, so
-          // the fork launch doesn't race its loop.
+          // The live parent's worker exits first, so the fork launch doesn't race its loop.
           pauseFirst: isLive,
         }),
       onDone,
@@ -197,9 +143,7 @@ export function SteerForkPanel({
         </p>
       )}
 
-      {/* A verdict that never arrived is not a clean steer. Silence here would let the operator
-          confirm into grade C with nothing on screen — the failure mode the served verdict
-          exists to close, reappearing as an unresolved read. */}
+      {/* A verdict that never arrived is not a clean steer. */}
       {preview.status === "failed" && canBabysit ? (
         <p className="steer-fork-note" role="alert">
           Couldn&apos;t check this steer against what the campaign permits. Confirming may mark
@@ -207,9 +151,6 @@ export function SteerForkPanel({
         </p>
       ) : null}
 
-      {/* Babysit warning. Shown only when the picked model/provider is OUTSIDE what the node
-          permits (a permitted model is a clean steer) and the operator holds the cap. Steering
-          outside it marks the branch grade C. */}
       {steersDisallowedModel && canBabysit ? (
         <div className="steer-fork-babysit">
           <p className="steer-fork-babysit-warn" role="note">

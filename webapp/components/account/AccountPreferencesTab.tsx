@@ -1,6 +1,4 @@
 "use client";
-// Preferences pane — try-and-learn demo dataset toggle (server setting) +
-// appearance/theme (client-only, per-device).
 
 import { useEffect, useState } from "react";
 import { AccountSection } from "./AccountSection";
@@ -16,9 +14,7 @@ export function AccountPreferencesTab() {
   const cmd = useCommand<"user-settings">("preferences", { revalidate: false });
   const [readError, setReadError] = useState<string | null>(null);
 
-  // Hand-rolled, not `useRead`: `demo` is mutable local state the toggle below
-  // writes after each PATCH, not a read-only fetch result — the server load
-  // only seeds it.
+  // Hand-rolled, not `useRead`: the load only seeds `demo`, which each PATCH then writes.
   useEffect(() => {
     let cancelled = false;
     fetchUserSettings()
@@ -72,8 +68,7 @@ export function AccountPreferencesTab() {
   );
 }
 
-// How DEEP the sidebar tree goes. Client-only for the same reason the theme is: nothing on the
-// server reads it.
+// Client-only, like the theme: nothing on the server reads it.
 function CampaignTreeSection() {
   const [show, setShow] = useShowCandidates();
   return (
@@ -91,9 +86,7 @@ function CampaignTreeSection() {
   );
 }
 
-// Theme lives in settings (not the navbar) so it's reachable the same way on
-// every device — on phones the standalone navbar toggle is hidden. Client-only
-// state via lib/theme.ts; deliberately not a server-side user setting.
+// Here as well as the navbar because phones hide the navbar toggle.
 function ThemeSection() {
   useThemeVersion();
   const dark = readStoredTheme() === "dark";

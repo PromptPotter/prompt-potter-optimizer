@@ -1,7 +1,3 @@
-/* CopyButton primitive — a compact icon-only affordance that rides a box's
-   `actions` slot. Muted until hover/focus so it never competes with the box's
-   own controls; the accent on hover signals it's live. */
-
 @layer ui {
 .copy {
   padding: 2px var(--space-6);
@@ -15,8 +11,6 @@
   color: var(--color-accent);
 }
 
-/* Text face. `--text-base` exists to seat the 14px glyph; a word set at it shouts
-   over the small print it sits beside, so a label takes the row's own size. */
 .text {
   font-size: var(--text-xs);
   padding: 3px var(--space-8);

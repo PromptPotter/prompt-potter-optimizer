@@ -1,9 +1,6 @@
 "use client";
-// Root render-error boundary. A malformed payload that throws while a panel
-// drills into it would otherwise white-screen the whole dashboard; this
-// catches it and shows a recoverable fallback instead. Boundaries catch
-// render-path errors only — async failures in fetch / interval callbacks
-// are already funnelled into component state by the poll loops.
+// Root render-error boundary; render-path errors only — async failures land in component state
+// through `useRead` / `useCommand`.
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import s from "./ErrorBoundary.module.css";
@@ -12,8 +9,6 @@ interface Props {
   children: ReactNode;
 }
 
-// What the auto-reload did about a stale chunk, so the fallback can say the true one rather than
-// guess at it.
 type ReloadOutcome = "reloading" | "already-tried" | "cannot-track";
 
 interface State {
@@ -21,18 +16,11 @@ interface State {
   reload: ReloadOutcome | null;
 }
 
-// A chunk that 404s is not a render bug — it is THIS tab holding the previous
-// build's manifest. `out/` is served straight off disk (`main.py::StaticFiles`),
-// so any rebuild swaps every chunk hash under every open tab, and the miss
-// surfaces only when a lazy route asks for one. Matched on the error rather
-// than the status because a boundary never sees the response.
+// A chunk 404 is this tab holding the previous build's manifest: `out/` is served off disk, so a
+// rebuild swaps every chunk hash under every open tab.
 const STALE_BUILD = /ChunkLoadError|Failed to load chunk|Loading chunk \S+ failed|dynamically imported module|Importing a module script failed/i;
 
-// Reloading is the fix, so do it — ONCE. The stamp is a time, not a flag: a
-// boolean would need clearing on every good render to let a later rebuild heal
-// itself too, and whoever forgot that would leave the tab stuck for the session.
-// A second failure inside the window means the chunk is genuinely gone, and
-// then the operator sees it rather than a reload loop.
+// Reload ONCE. A time, not a flag, so a later rebuild heals too without anyone clearing it.
 const RELOAD_STAMP = "pp:chunk-reload-at";
 const RELOAD_GUARD_MS = 20_000;
 
@@ -42,10 +30,7 @@ function reloadOnceForStaleBuild(): ReloadOutcome {
     if (Number.isFinite(last) && Date.now() - last < RELOAD_GUARD_MS) return "already-tried";
     sessionStorage.setItem(RELOAD_STAMP, String(Date.now()));
   } catch {
-    // Storage blocked (private mode, site-data off, partitioned storage). The stamp is the ONLY
-    // thing bounding this, so without it a reload is not "once" — the chunk is still missing on
-    // the next pass, which throws, which reloads, for as long as the build takes. Reload nothing
-    // and let the fallback ask; the operator's own reload is bounded by the operator.
+    // Storage blocked: the stamp is the only bound, so reloading here would loop. Ask instead.
     return "cannot-track";
   }
   window.location.reload();
@@ -60,8 +45,6 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
-    // The operator's only signal in a static export — surface it to the
-    // console with the component stack.
     console.error("[dashboard] render error", error, info.componentStack);
     if (STALE_BUILD.test(`${error.name} ${error.message}`)) {
       this.setState({ reload: reloadOnceForStaleBuild() });
@@ -71,8 +54,6 @@ export class ErrorBoundary extends Component<Props, State> {
   render(): ReactNode {
     const { error, reload } = this.state;
     if (!error) return this.props.children;
-    // Reaching here on a stale build means the chunk is not on disk, so say THAT — "render error"
-    // sends the operator hunting a component stack for a file that simply is not there.
     const stale = STALE_BUILD.test(`${error.name} ${error.message}`);
     return (
       <div role="alert" className={s.panel}>

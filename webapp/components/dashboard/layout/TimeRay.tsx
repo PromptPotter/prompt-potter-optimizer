@@ -1,19 +1,6 @@
 "use client";
-// THE TIME-RAY — the absolute linear sequence of what happened, above the optimizer.
-//
-// Every other axis on this page answers a different question and none of them answers this
-// one. `TopStrip` is current scalars with no time in it. `RoundAxis` selects a ROUND; the ray
-// selects an EVENT, and its round steps write the SAME `SelectionContext.round`, so the two
-// visibly agree rather than competing — one axis, two entry points. `DendrogramStrip` is
-// structural genealogy on the bars' x-axis, not temporal at all.
-//
-// Full-bleed on purpose: it is NOT inside `DashSpine`. The spine is a 980px stripe that also
-// translates itself left by half the sidebar width, and a chronology clipped to that reads as
-// a widget rather than an axis.
-//
-// Steps are EVEN — one width per event, regardless of how long it took — with explicit gap
-// markers for the silences. Time is not the x-axis; sequence is. A real time axis would
-// squash a whole night's work into a pixel and stretch one lunch break across the screen.
+// THE TIME-RAY: every event in sequence, one even step each — sequence is the x-axis, not time.
+// Full-bleed, outside `DashSpine`; its round steps write the same `SelectionContext.round` as `RoundAxis`.
 
 import { memo, useEffect, useMemo, useRef } from "react";
 import { cx } from "@/lib/cx";
@@ -39,10 +26,8 @@ export const TimeRay = memo(function TimeRay() {
   const rootKey = viewedPath ? encodeCyclePath(viewedPath) : "";
   const steps = useMemo(() => raySteps(items, rootKey), [items, rootKey]);
 
-  // The newest event is the one you came to read, so the track opens at its RIGHT end and
-  // stays there as events land. It follows only while following the head: once a moment is
-  // picked, the operator owns the scroll and yanking it back would fight the gesture that
-  // set it. Scroll position is not derivable state — nothing but the DOM holds it.
+  // Pinned to the newest event only while following the head; once a moment is picked, the
+  // operator owns the scroll.
   const trackRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const el = trackRef.current;
@@ -50,9 +35,7 @@ export const TimeRay = memo(function TimeRay() {
     el.scrollLeft = el.scrollWidth;
   }, [steps.length, at]);
 
-  // Run-phase comes off the VIEWED cycle's dashboard poll — the one server-owned run state
-  // (I6). The ray adds the other input the server cannot have: whether anything is actually
-  // progressing. Nothing here re-derives "is it running".
+  // Run-phase is the server's (I6); the ray adds only whether anything is progressing.
   const head = useMemo(
     () =>
       rayHead(
@@ -68,26 +51,14 @@ export const TimeRay = memo(function TimeRay() {
 
   if (!viewedPath || (!loaded && steps.length === 0)) return null;
 
-  // A step's click MOVES THE PAGE TO IT. Which axes it moves is read off the step, and every
-  // one of them already exists:
-  //   • the MOMENT — a step on this course names an offset in this course's ledger, so the
-  //     whole dashboard re-folds to it and every panel reports what was true then. A step
-  //     below (a fork, an inner run) counts in another ledger, so it returns this course to
-  //     its head instead of pretending its number means something here.
-  //   • a candidate step → resolve the node off the served tree and fire the shared
-  //     navigate+inspect gesture. Resolved rather than constructed because
-  //     `SelectedCandidate` carries `accuracy`/`is_winner`, which a ray item cannot honestly
-  //     supply and which `ScoringInspector` renders.
-  //   • a round step → the shared round axis, so `RoundAxis` moves with it.
-  //   • anything else in another cycle → re-root the dashboard there (one verb handles a
-  //     fork and an inner run alike, because it takes a whole path).
+  // A step on another course's ledger returns this course to its head — its offset means nothing
+  // here. A candidate resolves off the served tree: a ray item cannot supply `accuracy`/`is_winner`.
   const onStep = (step: RayStep): void => {
     const elsewhere = step.pathKey !== rootKey;
     setAt(elsewhere ? null : step.offset);
     if (step.candidateLabel) {
-      // Join on `course_label`, the MINTING course's private position. `candidate_id` is
-      // re-minted on every re-run, so an id join silently misses — and a fork's contribution
-      // wears a renumbered `label` on this timeline while its own ledger speaks the old one.
+      // Join on `course_label`: `candidate_id` is re-minted per re-run, and a fork's `label` is
+      // renumbered on this timeline.
       const node = index
         .get(step.pathKey)
         ?.candidates.find((c) => c.course_label === step.candidateLabel);
@@ -147,9 +118,7 @@ export const TimeRay = memo(function TimeRay() {
   );
 });
 
-// A silence, not a step: non-interactive, so it never takes a tab stop on the way to the
-// next event. `fmtGap` renders "" below the 90 s threshold, which is what makes a
-// heartbeated 120 s backend query show no marker at all.
+// `fmtGap` renders "" below 90 s, so a heartbeated backend query shows no marker.
 function Gap({ seconds }: { seconds: number }) {
   const label = fmtGap(seconds);
   if (!label) return null;
@@ -175,8 +144,7 @@ function Step({
   onPick: (step: RayStep) => void;
 }) {
   const elsewhere = step.pathKey !== rootKey;
-  // Lit only on this course: an offset from another ledger can coincide numerically with
-  // one of ours and mean nothing at all.
+  // Only on this course: another ledger's offset can coincide numerically with ours.
   const viewing = !elsewhere && viewedOffset === step.offset;
   const when = new Date(step.at).toLocaleString();
   const where = elsewhere ? ` · in ${step.path[step.path.length - 1]?.cycleId ?? ""}` : "";
@@ -206,13 +174,8 @@ function Step({
   );
 }
 
-// The head cap — where the ray points NOW. Sticky at the right edge, because the newest event
-// is the one you came to read.
-//
-// It pairs a word with a shape/hatch and never relies on colour alone. `wedged` is the one
-// state with no `phase-*` peer in the shared stylesheet, and deliberately so: it is NOT a
-// `RunPhase` member, it is a ray-local reading of "the server still says running, and nothing
-// has progressed". Giving it a `phase-` class would imply the server can produce it.
+// `wedged` is ray-local, not a `RunPhase` member — a `phase-` class would imply the server can
+// produce it.
 function HeadCap({
   head,
   onGo,

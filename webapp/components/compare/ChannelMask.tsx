@@ -1,11 +1,6 @@
 "use client";
-// Compare's binding of the shared scoring-mask editor (`components/shell/mask/`) to ONE channel's
-// address. The form is the dashboard's; what is Compare-specific is the ownership — a mask lives
-// on the channel's address, so a board can carry the record and two counterfactuals of it at once,
-// and applying an edit REPLACES that channel in place rather than moving a global state.
-//
-// The grammar itself is spelled by `lib/api/reads.ts::maskedSubject` and parsed by the server.
-// Nothing here splits an address.
+// Compare's binding of the shared scoring-mask editor (`components/shell/mask/`) to one channel's address.
+// Applying REPLACES that channel in place; the grammar is `lib/api/reads.ts::maskedSubject`'s — never split here.
 
 import { useState } from "react";
 import { EVALUATOR_META } from "@/lib/api/types.generated";
@@ -19,15 +14,12 @@ import {
   type ScoringMask,
 } from "@/components/shell/mask/scoring-mask";
 
-// Every registered evaluator, all applicable. Compare has no cycle to narrow against — a board
-// can span campaigns whose pipelines carry different nodes — so it offers the whole registry and
-// lets the server report a term a given channel's rows cannot answer.
+// The whole registry: a board can span pipelines, and the server reports a term a channel cannot answer.
 const ALL_ROWS = buildRows(
   EVALUATOR_META,
   new Set(EVALUATOR_META.map((m) => m.name)),
 );
-// No campaign-wide realized formula on a board that can span several, so no tile is marked as
-// "in the actual formula" rather than one campaign's being shown as if it were everyone's.
+// No campaign-wide formula on a multi-campaign board, so no tile is marked "in the actual formula".
 const NONE: ReadonlySet<string> = new Set();
 
 export function ChannelMask({
@@ -36,19 +28,14 @@ export function ChannelMask({
   onApply,
   onClose,
 }: {
-  // The channel being masked, as served — its `mask` seeds the fields, so re-opening the editor
-  // shows what is actually on screen rather than an empty form.
   subject: SubjectReading;
   invalid: string | null;
-  // Replaces this channel's address with the masked one. A no-op edit is not applied: the key
-  // would be identical and the refetch pointless.
+  // A no-op edit is not applied (identical key, pointless refetch).
   onApply: (from: string, to: string) => void;
   onClose: () => void;
 }) {
-  // A SERVED lens is a string — the wire has already collapsed whatever built it — and
-  // decomposing one back into weights here would be the formula parse this layer does not do.
-  // So a channel that already carries one opens in Expression mode holding it verbatim; switching
-  // to Weights is an explicit "write a new one".
+  // A SERVED lens is a string; decomposing it back into weights is the formula parse this layer does
+  // not do. So it opens in Expression mode, verbatim.
   const served = subject.mask?.lens ?? "";
   const [mask, setMask] = useState<ScoringMask>(() =>
     served ? { kind: "expression", lens: served } : emptyMask(),

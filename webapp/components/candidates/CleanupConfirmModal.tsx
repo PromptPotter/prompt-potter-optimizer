@@ -2,10 +2,6 @@
 
 import { Button, Dialog } from "@/components/ui";
 
-// Confirm dialog for the campaign-wide empty-stub cleanup. Empty-row stubs
-// accumulate because the fork-creation paths mint the cycle dir BEFORE the
-// first round runs — an interrupt between dir-mint and first-round leaves a
-// stub forever.
 export function CleanupConfirmModal({
   stubCount,
   cleaning,

@@ -13,25 +13,8 @@ import { useWorkspace } from "@/lib/workspace";
 import { RunControlButton } from "@/components/dashboard/control/RunControlButton";
 import { SpendBudgetControl } from "@/components/dashboard/control/SpendBudgetControl";
 
-// The global remote control — bottom-fixed and hovering, rendered as shell
-// chrome on every tab while a cycle is live. The name is the one the operator
-// hears (`aria-label` below); it is not named for its shape, because "pill" in
-// this codebase means a border-radius and already belongs to four other things
-// (Badge, the round-axis LIVE marker, the provenance tag, the round strip).
-// It consolidates the run controls that were scattered (play/pause was buried in
-// the Chat-tab heat-map). The STRIP carries only what it ACTS on — play/pause (the
-// reused RunControlButton), Skip, the drill, and the Lift readout that toggles the
-// panel; every other number and control is a row in that panel, because nine slots on
-// one bar is a paragraph, not a remote. WHERE the run is — phase, round, best, spend —
-// is the masthead's chip row, one band per fact and this one not repeating it.
-// Pause is the single interrupt verb — there is no separate Stop;
-// pausing exits the worker cleanly and the play button resumes from the last
-// completed round.
-//
-// `Skip` (skip-searchpoint) is the one net-new control: it cuts the remaining
-// samples of the searchpoint scoring now, accepts the partial, and the cycle
-// continues — and marks the cycle human_intervened. Enabled only while running
-// (skipping only means something mid-scoring).
+// The global remote, bottom-fixed on every tab: the strip carries only what it ACTS on, every
+// other number is a panel row, and WHERE the run is stays RunMasthead's.
 
 const SKIP_ICON = (
   <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">
@@ -40,10 +23,7 @@ const SKIP_ICON = (
   </svg>
 );
 
-// ETA to budget — burn rate = used / cycle_age, ETA = remaining_budget / burn. A plain
-// module-level helper (not a component/hook) so the wallclock read is allowed; returns "—"
-// until spend is wired or when the budget is uncapped. Meaningless once a run is TERMINAL,
-// where the caller shows the stop reason instead: there is no remaining work to project.
+// Module-level, not a hook, so the wallclock read is allowed (as for the two helpers below).
 function etaToBudget(
   usedUsd: number | null,
   budgetUsd: number | null,
@@ -55,22 +35,19 @@ function etaToBudget(
   const ageSec = (Date.now() - startedMs) / 1000;
   if (ageSec <= 0 || usedUsd <= 0) return "—";
   if (usedUsd >= budgetUsd) return "spent";
-  const burn = usedUsd / ageSec; // $/sec
+  const burn = usedUsd / ageSec;
   const remainingSec = (budgetUsd - usedUsd) / burn;
   return fmtDuration(remainingSec);
 }
 
-// The call a round's next decision waits on, once it has outlasted an ordinary call — module-level
-// for the same wallclock reason as `etaToBudget`. Calls are taken in walk order, so one slow call
-// at a candidate's head holds every call behind it, and a stall should say which.
+// Calls are taken in walk order, so one slow call at a candidate's head holds every call behind it.
 function heldBy(waitingOn: string | null, waitingSince: number | null): string | null {
   if (waitingOn === null || waitingSince === null) return null;
   const waited = Date.now() / 1000 - waitingSince;
   return waited >= 10 ? `waiting on ${waitingOn} · ${fmtDuration(waited)}` : null;
 }
 
-// The model provider holding calls that are out but not yet sent — module-level for the same
-// wallclock reason. Served only while it holds something, so its presence alone is the signal.
+// `backpressure` is served only while the provider holds something; its presence is the signal.
 function providerHold(held: BackpressureReading): string {
   const now = Date.now() / 1000;
   const pace = held.at_once === null ? "" : ` · ${held.at_once} at once`;
@@ -80,13 +57,10 @@ function providerHold(held: BackpressureReading): string {
   return `rate-limited ${fmtDuration(now - held.since)} · ${next}${pace}`;
 }
 
-// One bucket's prefix-cache discount, appended to that bucket's own spend figure. A bucket holds
-// billed calls only (`readSpend`), so `replayed` is false by construction — and the row states
-// which of the three it is, since a cold prefix and an unreporting provider cost differently.
+// A bucket holds billed calls only (`readSpend`), so `replayed` is false by construction.
 function cacheTag(share: number | null, write: number): ReactNode {
   const prefix = prefixReading(share, false);
-  // The WRITE beside the read is the economics: a write makes the next read cheap, so writes with
-  // no reads is paying a premium to fill a prefix nothing collects.
+  // Writes with no reads is paying a premium to fill a prefix nothing collects.
   const wrote = write > 0 ? ` ·w${fmtTokens(write)}` : "";
   return (
     <span className="remote-spend-cache" title={prefix.title}>
@@ -96,13 +70,10 @@ function cacheTag(share: number | null, write: number): ReactNode {
 }
 
 interface Props {
-  // The viewed cycle's creation stamp, for the burn-rate ETA. Shell-owned because the
-  // leaf hop's own stamp is what the strip describes.
   cycleStartedAt?: string | null;
 }
 
 export function RemoteControl({ cycleStartedAt = null }: Props) {
-  // Identity from the workspace; live state from the per-cycle dashboard stream.
   const {
     campaignId,
     cycleId,
@@ -117,9 +88,6 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
   const { dash, status } = useDashboard();
   const cmd = useCommand<"skip" | "sample-lookahead">("remote-control");
   const [open, setOpen] = useState(false);
-  // The strip's one lineage read, only to offer the drill into a RUNNING inner
-  // cycle while the OUTER of a self-optimizing campaign is viewed. Rides the
-  // campaign's single tree entry (lib/lineage store) — no second fetch.
   const isOuterView = (viewedPath?.length ?? 1) === 1;
   const { root: lineageRoot } = useLineageTree(
     viewedPath ?? [],
@@ -129,45 +97,27 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
 
   if (!campaignId || !cycleId) return null;
 
-  // The server-declared phase, never a client connection guess. A poll blip no longer
-  // unmounts this bar (frontend-surface-contract I6); connection loss is shown instead
-  // by dimming it (`offline` below), reusing the poll's existing staleness signal rather
-  // than a second liveness channel.
   const runPhase = dash?.run_phase ?? null;
-  // Hidden only for check-in (the ingest panel owns Start there) and a cycle with no phase
-  // yet. It deliberately SURVIVES `terminal` and `detached`: `run-phase.ts::PHASE_ACTION`
-  // maps both to "start", and this is `RunControlButton`'s only mount — gating on
-  // `hasLiveProducer` left both of those arms declared and unreachable, so a budget-halted or
-  // crashed cycle simply lost its play button. Those are also the two states where the
-  // readout below matters most: what the run got, and what it cost.
+  // SURVIVES `terminal` and `detached`: `PHASE_ACTION` maps both to "start", and this is
+  // `RunControlButton`'s only mount.
   if (runPhase === null || runPhase === "checkin") return null;
   const terminal = runPhase === "terminal";
   const offline = status === "offline";
 
-  // The phase above is the LEAF's, and Skip/Pause address the ROOT hop, so firing them
-  // from an inner view sent a command the inner run's `running` had enabled at the outer
-  // cycle. Disabled with the reason as the tooltip, rather than re-targeted
-  // (I3_affordance_honest). Concurrency is the exception and descends — see below.
+  // The phase is the LEAF's but Skip/Pause address the ROOT hop, so an inner view disables
+  // them with the reason rather than re-targeting (I3). Concurrency descends — see below.
   const inner = !isOuterView;
   const innerReason = inner
     ? "Run control reaches the outer campaign only — back out of this inner run to use it."
     : undefined;
-  // The drill toggle's target while the outer is viewed; `pathOf` because an inner
-  // cycle_id repeats across sandboxes — the path is the address.
+  // `pathOf` because an inner cycle_id repeats across sandboxes — the path is the address.
   const innerHop = innerRun ? pathOf(innerRun).at(-1) : undefined;
 
-  // Babysat marker — the canonical flag rides the cycle list
-  // (index.json::human_intervened), permanent once an operator intervenes. Matched
-  // on the hop the CHIP describes, so it can't advertise the outer cycle's history
-  // beside an inner run's phase; an inner cycle is absent from `/cycles`, so it
-  // simply doesn't claim one.
+  // An inner cycle is absent from `/cycles`, so it claims no babysat mark of the outer's.
   const leafEntry = cycles.find(
     (c) => c.campaign_id === leafCampaignId && c.cycle_id === leafCycleId,
   );
   const babysat = Boolean(leafEntry?.human_intervened);
-  // One parser for the whole block, ceilings included — `readSpend` already reads the armed
-  // `run_limits` pair (the gate's own source). This bar used to re-spell the USD ceiling
-  // inline, which is the second spelling that lets two surfaces disagree.
   const {
     backendUsd,
     loopUsd,
@@ -189,46 +139,34 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
     judgeCacheWrite,
   } = readSpend(dash);
 
-  // Headline KPIs. `abilityDelta` is SERVED and is in LOGITS, so it renders as θ and never as
-  // a percent — the two are different bases, not different renderings. The readout carries the
-  // LIFT alone; the absolute best is the masthead's BEST chip, and saying it twice let the two
-  // disagree on screen.
+  // `abilityDelta` is in LOGITS, so it renders as θ and never as a percent.
   const { abilityDelta, abilityDeltaPerUsd } = headlineStats(dash);
   const deltaTheta = fmtTheta(abilityDelta);
   const effChip = abilityDeltaPerUsd != null ? `${abilityDeltaPerUsd.toFixed(2)} θ/$` : "—";
   const etaChip = etaToBudget(usedUsd, budgetUsd, cycleStartedAt);
-  // SERVER state, never a local toggle (I6): the depth clears itself at the round boundary, so a
-  // client-held value would stay lit after the round that spent it. ONE served number — the depth
-  // in force — because the walk re-reads it at every launch: a press applies to a walk already
-  // running, and waits harmlessly for the next one if none is.
+  // SERVER state (I6): the depth clears itself at the round boundary, and the walk re-reads it
+  // at every launch, so a press applies to a walk already running.
   const lookahead = dash?.sample_lookahead ?? 1;
   const autoArmed = dash?.sample_lookahead_auto ?? false;
   const discards = dash?.sample_lookahead_discards ?? 0;
-  // SERVED, because the browser cannot answer either: what one sample costs is the connector's
-  // declaration, not "is this self-optimization?". `1` disables the control WITH ITS REASON —
-  // unserved, it takes presses the engine then silently pins to depth 1.
+  // `1` disables the control WITH ITS REASON; unserved, presses would be silently pinned to 1.
   const maxCells = dash?.max_cells_in_flight ?? 1;
-  // SERVED and summed over every candidate the round is walking plus the PoBB catch-ups — never a
-  // count of `open_sample_ids`, which sees only the candidate whose turn it is. Between rounds
-  // `most` is the next round's, so a press can be sized before it applies.
+  // Summed server-side over every candidate walking plus PoBB catch-ups — never a count of
+  // `open_sample_ids`. Between rounds `most` is the next round's.
   const inFlight = dash?.in_flight ?? 0;
   const allowed = dash?.lookahead_allowed ?? 0;
   const most = dash?.lookahead_most ?? 0;
   const scoringNow = inFlight > 0 || allowed > 0;
-  // SERVED, and the fourth bound on this one depth: a cell RESERVES its worst case against the
-  // spend ceiling, so a ceiling only a few of those wide holds the walk at one call while the
-  // depth reads armed and the stop rules read generous. Nothing on this panel could say so.
+  // A cell RESERVES its worst case against the spend ceiling, so a tight ceiling holds the walk
+  // at one call while the depth reads armed.
   const affordable = dash?.lookahead_affordable ?? null;
   const cellReserve = dash?.cell_reserve_usd ?? null;
   const moneyPinned = affordable !== null && inFlight + affordable < Math.min(lookahead, allowed);
   const waitNote = heldBy(dash?.waiting_on ?? null, dash?.waiting_since ?? null);
-  // Guarded, not annotated: `dashboard.json` is served verbatim, and a file an earlier build
-  // wrote carries no such key.
+  // Guarded, not annotated: `dashboard.json` is served verbatim and may lack the key.
   const providerHeld = dash?.backpressure ?? null;
-  // The deepest press worth making: what the backend takes, and no more than the round can hold.
   const pickMax = most > 0 ? Math.max(1, Math.min(maxCells, most)) : maxCells;
-  // Unlike Skip, this one follows the VIEWED path: the ceiling on screen and the cycle the press
-  // arms are the same run at either depth. The outer's arming is deliberately not inherited
+  // Unlike Skip, this follows the VIEWED path; the outer's arming is not inherited
   // (`runner/entry.py`), so each layer is armed by looking at it.
   const concurrencyReason =
     maxCells <= 1
@@ -251,16 +189,13 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
     void cmd.run("sample-lookahead", () =>
       postSetSampleLookahead(viewedPath ?? [{ campaignId, cycleId }], cells, auto),
     );
-  // Clamped here as well as in the walk: the server records the request UNCLAMPED, so a value
-  // past the ceiling would read back as an arming the run never held.
-  // A press is for this round, so picking a depth while "Every round" stands switches it off.
+  // Clamped here too: the server records the request UNCLAMPED, so a value past the ceiling
+  // would read back as an arming the run never held.
   const armCells = (raw: string) => {
     const cells = Number(raw);
     if (cells === lookahead && !autoArmed) return;
     arm(cells, false);
   };
-  // One segment per depth the backend takes, doubling as the round's gauge: lit as far as calls
-  // are out, tinted as far as the stop rules allow, and off past the most the round could hold.
   const depthSegments = Array.from({ length: maxCells }, (_, i) => {
     const n = i + 1;
     const fill: "full" | "part" | undefined =
@@ -284,9 +219,6 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
       role="group"
       aria-label="Campaign remote control"
     >
-      {/* Opens UPWARD — the strip is bottom-fixed, so the panel stacks above the controls
-          rather than below them. It folds in what was a second, chat-only job bar: one
-          surface answers "what is this run doing and costing", on every tab. */}
       {open && (
         <div className="remote-panel" role="region" aria-label="Job status and configuration">
           <div className="remote-panel-section">
@@ -296,11 +228,8 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
             <div className="row"><span className="lbl">Project</span><span className="val">{fmtText(leafEntry?.dataset_name)}</span></div>
             <div className="row"><span className="lbl">Updated</span><span className="val">{fmtText(dash?.wallclock_serialized_at)}</span></div>
             <div className="section-title">Spend</div>
-            {/* The prefix-cache discount rides its OWN bucket's row rather than a headline of its
-                own: the three buckets prompt different models through different providers, so
-                there is no one share to state — and pooling them hands the backend's ratio to
-                everybody, drowning the judge, whose rubric is a module constant and whose prefix
-                pays best. Silent at a real 0, like every other share on this panel. */}
+            {/* Cache share per bucket, never pooled: the buckets hit different providers, and a
+                pooled ratio would drown the judge's. */}
             <div className="row"><span className="lbl">Backend</span><span className="val">{rateKnown ? fmtUsd(backendUsd) : `${backendTokens} tok`}{cacheTag(backendCacheShare, backendCacheWrite)}</span></div>
             <div className="row"><span className="lbl">Loop</span><span className="val">{rateKnown ? fmtUsd(loopUsd) : `${loopTokens} tok`}{cacheTag(loopCacheShare, loopCacheWrite)}</span></div>
             <div className="row"><span className="lbl">Judge</span><span className="val">{rateKnown ? fmtUsd(judgeUsd) : `${judgeTokens} tok`}{cacheTag(judgeCacheShare, judgeCacheWrite)}</span></div>
@@ -332,11 +261,6 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
               </div>
             ) : null}
           </div>
-          {/* Two forms of one arming, and the depth is never the browser's guess. Every round: no
-              number at all — the round holds what its stop rules allow, up to the backend's
-              ceiling, so the top segment is on and the fill is the round's live amplitude.
-              Otherwise a PRESS for this round's scoring, spent at its boundary. The fill and the
-              readout are both the served gauge. */}
           <div className="remote-panel-section">
             <div className="section-title">Samples in flight</div>
             <Term className="row" content={TERMS.remote_flight}>
@@ -410,10 +334,6 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
           </div>
         </div>
       )}
-      {/* Inner/outer drill — navigation, not a run command. One slot, two forms:
-          viewing the outer of a live self-optimizing run offers the hop INTO the
-          inner cycle currently running; viewing an inner offers the hop back out.
-          The full unit identity lives in the Dashboard masthead, not here. */}
       {inner ? (
         <button
           type="button"
@@ -460,15 +380,8 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
         {SKIP_ICON}
         <span className="remote-btn-label">Skip</span>
       </button>
-      {/* The one headline number, and the panel's own toggle. Everything the strip used to
-          spell out — spend, ETA, Δ/$, look-ahead, the babysat and unpriced tags — is a row
-          in that panel now: a control strip is read at a glance, and nine slots is a
-          paragraph. It reads as decoration mid-run and as the answer once the run stops,
-          which is why the strip survives `terminal` rather than unmounting exactly when
-          these numbers start mattering. */}
-      {/* The chip TEACHES and the chevron ACTS — two things, so two elements. Folded into one
-          control, the chip's HoverCard trigger is a focusable descendant of it, and reading the
-          term presses the control. */}
+      {/* The chip TEACHES and the chevron ACTS: folded into one control, the chip's HoverCard
+          trigger would be a focusable descendant, and reading the term would press it. */}
       <div className={cx("remote-readout", open && "remote-readout-on")}>
         <Term className="chip" content={TERMS.remote_best}>
           <span className="chip-lbl">Lift</span> <strong>{deltaTheta}</strong>

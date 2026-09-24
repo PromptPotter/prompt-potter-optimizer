@@ -6,8 +6,6 @@ import { VendorLogo, VendorSprite, vendorLabel } from "../VendorLogo";
 afterEach(cleanup);
 
 describe("VendorLogo", () => {
-  // `<use href="#id">` resolves within the DOCUMENT, so a mark whose symbol is not mounted
-  // draws NOTHING and says nothing about it. This pins the two ends to one id.
   it("points at a symbol the sprite actually declares", () => {
     const { container } = render(
       <>
@@ -25,13 +23,10 @@ describe("VendorLogo", () => {
     const ids = [...container.querySelectorAll("symbol")].map((s) => s.id);
     expect(ids).toContain("pp-vendor-deepseek");
     expect(ids).toContain("pp-vendor-meta-llama");
-    // Monogram-only vendors must NOT declare an empty symbol — a `<use>` at one would draw a
-    // hole rather than falling through to the initial.
+    // An empty symbol would draw a hole rather than falling through to the initial.
     expect(ids).not.toContain("pp-vendor-inception");
   });
 
-  // The mark REPLACES the model text on a sidebar row, so it carries the reading and has to be
-  // named. An `aria-hidden` mark there would leave the row saying nothing about what it ran.
   it("is named by the models it stands in for, not by decoration", () => {
     render(<VendorLogo vendor="openai" models={["openai/gpt-oss-20b:nitro"]} />);
     expect(screen.getByRole("img").getAttribute("aria-label")).toBe(
@@ -44,8 +39,6 @@ describe("VendorLogo", () => {
     expect(screen.getByRole("img").getAttribute("aria-label")).toBe("DeepSeek");
   });
 
-  // The set of vendors is OPEN — a namespace nobody has drawn a mark for still has to render
-  // something countable, and it must still say which vendor it is.
   it("draws an unknown vendor as its own initial, never as a hole", () => {
     const { container } = render(<VendorLogo vendor="acme-labs" />);
     const mark = screen.getByRole("img");
@@ -54,9 +47,6 @@ describe("VendorLogo", () => {
     expect(container.querySelector("use")).toBeNull();
   });
 
-  // `inception` and `inclusionai` are two live brands sharing the initial `I`. Both are named
-  // in the table now, but the OPEN tail has the same hazard: one shared fallback ink would
-  // collapse two unknown vendors into one mark, which is what the column exists to avoid.
   it("gives two unknown vendors sharing an initial different ink", () => {
     const { container } = render(
       <>

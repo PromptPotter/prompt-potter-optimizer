@@ -27,8 +27,6 @@ describe("CopyButton", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("hello"));
   });
 
-  // A thunk resolves at the click, not at the render — what a payload that stamps its own
-  // capture time depends on.
   it("resolves a thunk payload when clicked", async () => {
     const build = vi.fn(() => "late");
     render(<CopyButton data={build} />);
@@ -56,7 +54,6 @@ describe("CopyButton", () => {
         ]}
       />,
     );
-    // Closed until asked for: the readings are not on screen before the trigger is clicked.
     expect(screen.queryByRole("menuitem")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Copy point" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Spec + scores" }));
@@ -65,8 +62,6 @@ describe("CopyButton", () => {
     );
   });
 
-  // A one-option group is not a choice — the row's payload rides the plain button, and its
-  // label joins the button's name so the one reading is still said out loud.
   it("skips the menu for a single reading", async () => {
     render(<CopyButton title="Copy point" choices={[{ key: "spec", label: "Spec", data: "only" }]} />);
     fireEvent.click(screen.getByRole("button", { name: "Copy point — Spec" }));
@@ -74,8 +69,6 @@ describe("CopyButton", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("only"));
   });
 
-  // Nothing to hand over renders nothing: a trigger onto an empty menu is a control that
-  // looks operable and is not.
   it("renders nothing when no reading is available", () => {
     render(<CopyButton title="Copy point" choices={[]} />);
     expect(screen.queryByRole("button")).toBeNull();

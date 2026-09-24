@@ -1,25 +1,13 @@
 "use client";
-// Every pair of selected subjects, blocked on the cells both scored. Each number here is served;
-// nothing on this side computes a difference, an interval or a p.
-//
-// Two honesty rules the table exists to carry. A raw p read as if it were the only comparison is
-// the error the Holm column corrects — so both are shown, never one. And the correction reaches
-// the PAIRS only: choosing the metric after seeing the intervals is itself a comparison, and no
-// column can price it, so the lede says so instead of implying it away.
+// Every pair of selected subjects, blocked on shared cells; every number served. Raw p and Holm are
+// both shown, never one — and Holm reaches the pairs only, not the choice of metric.
 
 import { CardFrame } from "@/components/ui";
 import type { MetricReading, MetricSpec, PairwiseComparison } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 import { effectTone, fmtMetricInterval, fmtMetricValue, fmtPValue, shortId } from "@/lib/format";
 
-// `nRead` is how many subjects the read actually opened, not how many are ticked in the picker:
-// the empty state has to tell "only one subject" apart from "two subjects that share no cell",
-// and the shared-cell count alone cannot — it is zero in both. Reading it off `scored_cells`
-// blamed the metric for a selection that had simply been measured on different datasets.
-//
-// `names` maps a served subject KEY to what the rest of the pane calls that channel — the pairwise
-// rows refer to subjects by key, and a table that printed the raw address would be the only place
-// on the page naming them differently.
+// `nRead` is subjects the read opened: it tells "only one subject" from "two that share no cell".
 export function PairwisePanel({
   reading,
   nRead,

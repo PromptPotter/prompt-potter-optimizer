@@ -3,11 +3,9 @@ import { VendorLogo } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import type { RowStatus } from "@/lib/derivations";
 
-// ONE campaign row, wherever a campaign is offered — the sidebar tree and the masthead
-// switcher. Presentational: every value arrives already derived (`lib/derivations/
-// campaign-summary.ts`), so the two surfaces cannot word one campaign two ways.
+// ONE campaign row for the sidebar tree and the masthead switcher; values arrive derived
+// (`lib/derivations/campaign-summary.ts`).
 
-// The glyph stands in for a word the column cannot fit whole; the word is its accessible name.
 export function PhaseMark({ status }: { status: RowStatus }) {
   return (
     <span
@@ -20,22 +18,7 @@ export function PhaseMark({ status }: { status: RowStatus }) {
   );
 }
 
-// The row is a NAME and a reading, never a config dump. Two lines, and the split is by KIND:
-// line one is what the campaign IS, line two is everything about it that is a value.
-//
-// Line one leads with the VENDOR marks, and they lead deliberately: fixed-width, at a fixed
-// offset, so a stack of campaigns is countable by brand straight down the column — which is the
-// whole reason the model moved out of the text. After them the name gets the rest of the line.
-//
-// The campaign's `__id` is NOT here at all — not beside the name, not on the second line. It is
-// an id, it made the row read as an attribute rather than a thing, and at the resting sidebar
-// width it cost so much room that `spreadsheetbench-s20` truncated to `spr…`. The hover card
-// already carries it whole under "Campaign", which is the same call the routing levers get: the
-// row is the SCAN surface, the card is the AUDIT one. What tells two runs of one dataset apart
-// here is the vendor mark, the settings, the rounds and the spend.
-//
-// Line two is line-clamped, so `title` repeating it whole is the one job `title=` keeps
-// (webapp/CLAUDE.md § Component conventions).
+// The SCAN surface, never a config dump: no campaign id here — the hover card is the audit one.
 export function CampaignRowLabel({
   name,
   status,

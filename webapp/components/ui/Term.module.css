@@ -1,5 +1,4 @@
-/* Advertises the trigger with a dotted rule, NOT `cursor:help` — the OS glyph
-   reads as an error state. Focus ring comes from the global `:focus-visible`. */
+/* A dotted rule, NOT `cursor:help` — the OS glyph reads as an error state. */
 @layer ui {
 .hint {
   text-decoration: underline dotted var(--color-border);

@@ -1,8 +1,4 @@
-// The dashboard's card shell — a `.card` box with a `.card-title` header.
-// `title` is the heading content, `actions` the right-aligned badge or
-// button group; both sit inside `.card-title` (its flex layout pushes the
-// last child right). With `headingTag="h2"` the title alone is the section
-// heading, so the actions stay out of its content and its accessible name.
+// With `headingTag="h2"` the title alone is the heading, keeping `actions` out of its accessible name.
 
 import type { CSSProperties, ReactNode } from "react";
 import { cx } from "@/lib/cx";

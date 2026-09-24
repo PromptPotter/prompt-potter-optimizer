@@ -1,18 +1,6 @@
 "use client";
-// Where the scoring mask stops being a preview and becomes the run.
-//
-// A scoring criterion is one of exactly two settings that can be previewed at all: it and the
-// sample subset are RE-PROJECTIONS of the record, so the server re-decides every election from
-// rows already measured and can name the round the two readings part. That round is not a
-// coincidence — it IS the round a fork applying the criterion is minted at, because everything
-// before it is a stretch both readings agree on and everything after stood on a parent the run
-// never had. The preview and the action were the same fact computed twice and never connected.
-//
-// Everything else an operator might change mid-run — a node knob, a model, a prompt — has no
-// measurement to be re-read under, so it previews nothing and goes straight to a fork
-// (`SteerForkPanel`). Two settings alone move a RUNNING cycle in place, budget and sample
-// look-ahead, and neither is a scenario. That boundary is stated here, where the operator is
-// choosing, rather than in a document.
+// Where the scoring mask becomes the run: a fork minted at the round the served overlay says the
+// readings part. Only a criterion or subset previews; a knob, model or prompt goes to `SteerForkPanel`.
 
 import { useState } from "react";
 import { postSteerFork } from "@/lib/api";
@@ -23,14 +11,11 @@ export function ApplyScenarioPanel({
   campaignId,
   cycleId,
   isLive,
-  // The bare formula `CampaignConfig.scoring` takes (`scoring-mask.ts::criterionOf`). `null` when the
-  // mask is off, has no terms, or carries a lens in a namespace no config expresses — each of
-  // which is "there is nothing here to apply", so the panel simply is not on screen.
+  // `null` when there is nothing to apply, so the panel is not on screen.
   criterion,
-  // The round the served overlay says the two readings part at, or `null` where they never do.
+  // `null` where the two readings never part.
   divergentRound,
-  // The round the branch would continue at. Used when nothing diverges: applying the criterion
-  // then keeps every measured round and only changes what happens next.
+  // Used when nothing diverges: every measured round is kept.
   nextRound,
 }: {
   campaignId: string | null;
@@ -53,12 +38,10 @@ export function ApplyScenarioPanel({
       "apply-scenario",
       () =>
         postSteerFork(campaignId, cycleId, at, "", {
-          // No `origin_prompt_fields`: rounds 0..at-1 are lifted and their round 0 IS the
-          // origin. The server refuses the pair, so this is the shape rather than a convention.
+          // No `origin_prompt_fields`: the lifted round 0 IS the origin, and the server refuses the pair.
           seed: { config_overrides: { scoring: criterion } },
           steeredBy: steeredBy(me),
           keepRounds: true,
-          // This supersedes the parent: the line moves.
           pauseFirst: isLive,
         }),
       () => setDone(true),

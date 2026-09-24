@@ -1,7 +1,6 @@
 "use client";
-// The affordance for verifying a searchpoint. A candidate's rate is read on the cells that round's
-// acquisition bought, so a headline — 100% most of all — is a claim about a panel, not about the
-// dataset; settling it used to take a terminal, which our deployment tier does not have.
+// The affordance for verifying a searchpoint: a candidate's rate is a claim about the panel its
+// round bought, not about the dataset.
 
 import { useState } from "react";
 import type { SelectedCandidate } from "@/lib/types";
@@ -14,7 +13,6 @@ export function VerifyAction({
   path,
 }: {
   candidate: SelectedCandidate;
-  // The searchpoint's own address, `null` where the host has no address to name.
   path: CyclePath | null;
 }) {
   const cmd = useCommand<"verify-candidate">("verify-candidate");
@@ -23,9 +21,8 @@ export function VerifyAction({
   const [sent, setSent] = useState(false);
 
   const hop = path?.[0] ?? null;
-  // Top level only, exactly like the fork beside it: `VerifyCandidatePayload` extends
-  // `CyclePayload`, so it carries no `descend` and an L4 inner label would match a coincidental id
-  // in the OUTER cycle and score the wrong config. Widening it means widening the command first.
+  // Top level only: `VerifyCandidatePayload` carries no `descend`, so an L4 inner label would
+  // match a coincidental id in the OUTER cycle.
   if (!hop || !candidate.label) return null;
   if (path && path.length > 1) return null;
 

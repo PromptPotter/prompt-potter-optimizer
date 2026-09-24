@@ -1,5 +1,3 @@
-/* Toolbar primitive — a single, non-wrapping row of icon controls. */
-
 @layer ui {
 .bar {
   display: flex;

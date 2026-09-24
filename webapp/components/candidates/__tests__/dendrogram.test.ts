@@ -9,9 +9,7 @@ import {
   type DendroRow,
 } from "../dendrogram";
 
-// Build a spine the way `roundCandidates` does: round asc, idx asc, one entry per
-// candidate. `winners[round]` = the index that won that round, or null for a HELD
-// round (nobody advanced — the round crowns no winner).
+// Built the way `roundCandidates` does. `winners[round]` null = a HELD round.
 function spine(
   rounds: { round: number; n: number; winner: number | null }[],
 ): DendroRow[] {
@@ -31,8 +29,7 @@ function spine(
   return rows;
 }
 
-// Evenly-spaced category centers, as chart.js's `offset:true` category scale
-// produces them: center i = (i + 0.5) / n of the plot width.
+// As chart.js's `offset:true` category scale produces them.
 function centers(n: number): number[] {
   return Array.from({ length: n }, (_, i) => (i + 0.5) / n);
 }
@@ -59,10 +56,7 @@ describe("dendrogram", () => {
   });
 
   it("hangs a held round's successors off the EARLIER winner, and grows a third row", () => {
-    // R2 is held: nobody advanced. R3 must fan from R1's winner, NOT from any R2
-    // candidate — crowning an eliminated candidate is the misdraw this rule
-    // exists to prevent. R2's and R3's brackets then share a left edge and nest,
-    // which is what forces a third depth row.
+    // R2 is held, so R3 fans from R1's winner; the brackets share a left edge and nest.
     const rows = spine([
       { round: 0, n: 1, winner: 0 },
       { round: 1, n: 2, winner: 0 },
@@ -115,8 +109,7 @@ describe("dendrogram", () => {
   });
 
   it("refuses to draw when the spine and the bar categories disagree", () => {
-    // One frame where React has N+1 rows but the chart still has N. Drawing here
-    // would misattribute parentage; a blank fixed-height band is correct.
+    // React has N+1 rows but the chart still has N.
     const rows = spine([
       { round: 0, n: 1, winner: 0 },
       { round: 1, n: 2, winner: 0 },
@@ -150,9 +143,7 @@ describe("dendrogram", () => {
   });
 
   it("mints no bracket for the origin, and lets a winner-less last round hand nothing forward", () => {
-    // Round 0 has no parent (there is nothing before the origin). Round 2 is the
-    // in-flight round: no winner elected yet, so it receives a bracket from R1's
-    // winner but never becomes a parent itself.
+    // Round 2 is in flight: it receives a bracket but never becomes a parent.
     const rows = spine([
       { round: 0, n: 1, winner: 0 },
       { round: 1, n: 2, winner: 0 },
@@ -167,9 +158,7 @@ describe("dendrogram", () => {
   });
 
   it("keeps a fork bar's slot but leaves it out of the round packing", () => {
-    // A fork trails the candidate spine as a sibling COURSE: it gets a node on
-    // its own bar center, joins no band (its descent is cross-cycle), and its
-    // stamped round must not stretch that round's bracket to reach it.
+    // A fork's stamped round must not stretch that round's bracket to reach it.
     const rows = [
       ...spine([
         { round: 0, n: 1, winner: 0 },

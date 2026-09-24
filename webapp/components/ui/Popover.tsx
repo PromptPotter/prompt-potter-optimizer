@@ -16,15 +16,10 @@ type Align = "left" | "right";
 type Side = "bottom" | "top" | "over";
 
 interface Props {
-  /** The clickable anchor. `toggle` opens/closes; `open` drives aria state. */
   renderTrigger: (args: { open: boolean; toggle: () => void }) => ReactNode;
-  /** Floating panel content. Call `close` after an action to dismiss. */
   children: (args: { close: () => void }) => ReactNode;
   align?: Align;
-  /** Where the panel opens relative to the trigger. `bottom` is the default; `top` for a
-      trigger at the bottom of its scrollport (the chat composer), which would otherwise open
-      offscreen; `over` covers the trigger itself — the dropdown-LIST idiom, where the panel
-      replaces the closed line rather than hanging off it, so the current value is shown once. */
+  /** `top` for a trigger at the bottom of its scrollport; `over` covers the trigger (dropdown list). */
   side?: Side;
   className?: string;
 }
@@ -38,13 +33,8 @@ const place = (r: DOMRect, align: Align, side: Side): CSSProperties => {
   return { ...x, top: r.bottom + GAP };
 };
 
-// Anchored popover that owns the open state and the dismiss behaviour every
-// hand-rolled menu re-implements: click-outside and Escape both close, and the
-// listeners are mounted only while open. Markup is the caller's (render props),
-// so triggers and panels keep their own classes/aria.
-//
-// The panel is portaled to <body> and fixed off the trigger's rect, so no ancestor's
-// `overflow` clips it; it follows the trigger through any scroll or resize while open.
+// The one popover: owns open state, click-outside and Escape. Portaled to <body> so no ancestor's
+// `overflow` clips it.
 export function Popover({
   renderTrigger,
   children,
@@ -52,10 +42,9 @@ export function Popover({
   side = "bottom",
   className,
 }: Props) {
-  // State, not a ref: `toggle` reads it and is handed to `renderTrigger` during render.
   const [anchor, setAnchor] = useState<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  // Where the panel sits — `null` IS closed.
+  // `null` IS closed.
   const [at, setAt] = useState<CSSProperties | null>(null);
   const open = at !== null;
   const close = useCallback(() => setAt(null), []);
@@ -66,7 +55,6 @@ export function Popover({
 
   useEffect(() => {
     if (!open) return;
-    // The panel is no DOM descendant of the wrapper, so "inside" asks both.
     const inside = (t: EventTarget | null) =>
       t instanceof Node && !!(anchor?.contains(t) || panelRef.current?.contains(t));
     const onDoc = (e: MouseEvent) => {

@@ -33,11 +33,6 @@ import { CriticalAlertBanner } from "@/components/shell/CriticalAlertBanner";
 import { RemoteControl } from "@/components/shell/RemoteControl";
 import { RunMasthead } from "@/components/shell/RunMasthead";
 
-// The non-landing surfaces load on demand, not on first paint. The operator
-// lands on the dashboard tab; Chat / Files / Verify (and the markdown renderer
-// `marked` that rides inside Files) and the Ingest modal each ship as their own
-// chunk fetched only when the view is opened — `ssr: false` since they're
-// client-only and there's no SSR under `output: export` anyway.
 const ChatPane = dynamic(() => import("@/components/chat/ChatPane").then((m) => m.ChatPane), {
   ssr: false,
   loading: () => <div className="content" aria-busy="true" />,
@@ -53,9 +48,6 @@ const VerifyPane = dynamic(() => import("@/components/verify/VerifyPane").then((
 const IngestPane = dynamic(() => import("@/components/ingest/IngestPane").then((m) => m.IngestPane), {
   ssr: false,
 });
-// How long the "this no longer exists" notice stays up. Long enough to read after
-// glancing back at the tab, short enough that it never becomes furniture — the
-// recovery it describes is already complete, so it owes the operator nothing.
 const GONE_NOTICE_MS = 8000;
 
 const SIDEBAR_DEFAULT = 200;
@@ -63,24 +55,14 @@ const SIDEBAR_MIN = 160;
 const SIDEBAR_MAX = 480;
 
 export function AppShell() {
-  // `campaignId` + `cycleId` are owned by WorkspaceProvider (the single
-  // workspace-identity source of truth) — this only forwards them into the
-  // dashboard's per-cycle data stream.
   const { viewedPath } = useWorkspace();
-  // The dashboard stream re-roots to the viewed path's LEAF hop (an inner loop
-  // when descended). Chat/dataset panels bind to the ROOT hop instead (the
-  // `campaignId`/`cycleId` exports), so the conversation stays on the outer
-  // thread while the dashboard follows an inner cycle.
   return (
-    // The compare selection sits OUTSIDE both the stream and `SelectionProvider`: those are
-    // keyed on the viewed cycle and reset when it changes, while a comparison spans campaigns by
-    // construction — picking a searchpoint, navigating to another run and picking a second is the
-    // whole point, and a cycle-scoped holder would drop the first on the way.
+    // Outside the cycle-keyed providers: a comparison spans campaigns, and a cycle-scoped
+    // holder would drop the first pick on navigating to the second.
     <CompareSelectionProvider>
       <CycleStreamProvider path={viewedPath}>
-        {/* ONE authoring thread for every entry point — the chat tab, the New
-            campaign modal and a re-opened check-in all drive the same draft.
-            Above the shell so the modal cannot hold a second one. */}
+        {/* ONE authoring thread for every entry point; above the shell so the modal cannot
+            hold a second one. */}
         <IngestFlowProvider>
           <AppShellInner />
         </IngestFlowProvider>
@@ -90,9 +72,6 @@ export function AppShell() {
 }
 
 function AppShellInner() {
-  // Workspace identity comes from the shared context — no local cycle
-  // resolution, no independent /sessions/active poll. A `cycle_id` is unique only
-  // within its campaign, so `campaignId` rides alongside `cycleId`.
   const {
     viewedPath,
     campaignId,
@@ -109,22 +88,14 @@ function AppShellInner() {
     dismissGoneNotice,
     tab,
     setTab,
-    // Open-ness is on the ADDRESS (`#/account/<pane>`), so the modal is linkable.
     accountPane,
     closeAccount,
   } = useWorkspace();
 
-  // The banner's escape hatch. A slot rather than a bare call: its failure is otherwise an
-  // unhandled rejection, which reports nothing and re-probes no dead session.
   const pause = useCommand<"pause-cycle">("critical-alert");
 
-  // ── Per-campaign view memory: remember where the operator was, put them back.
   const { viewFor, recordView } = useViewMemory();
 
-  // RECORD. The navigation axis only — ids, no measurement (`lib/view-memory.tsx`).
-  // In an effect because it mirrors React state OUT to an external store, which is what
-  // effects are for; `useLocalStorage` writes through `useSyncExternalStore`, so this is a
-  // store emit rather than a setState cascade.
   useEffect(() => {
     if (!campaignId || !viewedPath) return;
     recordView(campaignId, {
@@ -133,12 +104,8 @@ function AppShellInner() {
     });
   }, [campaignId, viewedPath, viewedCandidateId, recordView]);
 
-  // FORGET + auto-dismiss. Memory is what made the dead address survive a reload —
-  // the operator refreshed and landed right back on it — so the record that names
-  // it has to go with it. Only the NAVIGATION fields are cleared: for a reaped
-  // `.inner/` leaf the root campaign is still alive, and its toggles and lanes are
-  // still worth keeping. Then the notice retires itself; it reports a recovery that
-  // is already done, so it must not need a click.
+  // Memory would restore the dead address on reload, so its record goes. Only NAVIGATION
+  // clears: for a reaped `.inner/` leaf the root campaign is still alive.
   useEffect(() => {
     if (!goneAddress) return;
     const rootCampaign = decodeCyclePath(goneAddress)?.[0]?.campaignId;
@@ -147,25 +114,21 @@ function AppShellInner() {
     return () => window.clearTimeout(t);
   }, [goneAddress, recordView, dismissGoneNotice]);
 
-  // RESTORE. A click on a campaign's ROOT row means "where I left it"; any deeper click is an
-  // explicit address, and memory never overrides a live intent. Guarded on the remembered leaf
-  // still being a cycle the workspace knows, or a deleted fork spins on an address that 404s.
+  // A click on a campaign's ROOT row means "where I left it"; any deeper click is an explicit
+  // address, and memory never overrides a live intent.
   const restoreNavigation = useCallback(
     (path: CyclePath, candidate?: string | null): [CyclePath, string | null] => {
       if (path.length !== 1 || candidate) return [path, candidate ?? null];
       const hop = path[0]!;
-      // Only a campaign SWITCH restores. Clicking the VIEWED campaign's own root row goes
-      // to the root — that click is the escape hatch, and without it there is none: the
-      // RECORD effect above re-records the restored path continuously, so a restore that
-      // also fired in-campaign would re-drill forever.
+      // Only a campaign SWITCH restores: the viewed campaign's root row is the escape hatch,
+      // and restoring there would re-drill forever against the record effect above.
       if (hop.campaignId === campaignId) return [path, null];
       const mem = viewFor(hop.campaignId);
       const remembered = decodeCyclePath(mem.viewedPath ?? "");
       if (!remembered || remembered[0]?.campaignId !== hop.campaignId) return [path, null];
       if (encodeCyclePath(remembered) === encodeCyclePath(path)) return [path, null];
-      // Inner hops live in a sandbox and never appear in `/cycles`; the ROOT hop still
-      // existing is what makes the whole address resolvable — a fork deleted between
-      // visits must open the campaign at its root, not spin on an address that 404s.
+      // Inner hops never appear in `/cycles`, so the ROOT hop's existence is the check; a fork
+      // deleted between visits must open at the root, not spin on a 404.
       const root = remembered[0]!;
       const known = cycles.some(
         (c) => c.campaign_id === root.campaignId && c.cycle_id === root.cycleId,
@@ -174,17 +137,12 @@ function AppShellInner() {
     },
     [campaignId, viewFor, cycles],
   );
-  // The DISPLAY panes follow the VIEWED LEAF hop, so drilling into an L4 inner loop shows that
-  // run's connector and samples; the CHAT THREAD stays on the root hop below. At depth 1 the two
-  // coincide, so the top-level view is unchanged.
   const { datasetName: leafDatasetName, createdAt: leafCreatedAt } = useLeafCycleIndex(
     viewedPath,
     datasetName,
   );
-  // The connector context follows that same VIEWED LEAF, addressed as one served subject. The
-  // sandbox chain is the hops ABOVE the leaf (`subjectKey`'s own rule), so an L4 inner run
-  // resolves its OWN pipeline rather than the outer campaign's — the silent failure
-  // `frontend-surface-contract.md::I9` names at the L4 boundary.
+  // The sandbox chain is the hops ABOVE the leaf, so an L4 inner run resolves its OWN pipeline
+  // rather than the outer campaign's (`frontend-surface-contract.md::I9`).
   const leafHop = viewedPath?.length ? viewedPath[viewedPath.length - 1] : null;
   const connectorAt = useMemo(
     () =>
@@ -193,21 +151,12 @@ function AppShellInner() {
         : null,
     [leafHop, viewedPath],
   );
-  // The per-campaign view is ON THE ADDRESS (`lib/address.ts`), so the workspace holds it and a
-  // reload or copied link restores the pane rather than dropping the operator on Chat.
-  // Which of the two PHONE screens is showing. `false` = the campaign screen, the public landing
-  // surface: an anon visitor booted onto "Sign in to see your campaigns" never reaches what they
-  // came for. Inert above --bp-md — no desktop rule reads the class.
+  // Which PHONE screen shows; `false` = the campaign screen, so an anon visitor lands on the
+  // public surface rather than a sign-in list. Inert above --bp-md.
   const [listScreen, setListScreen] = useState(false);
   const [newCampaignOpen, setNewCampaignOpen] = useState(false);
-  // The one authoring thread. The modal and the chat tab are two doors onto it,
-  // never two of it.
   const { flow: ingestFlow, startNew, mintCount } = useIngest();
   const [cycleStartedAt, setCycleStartedAt] = useState<string | null>(null);
-  // Sidebar collapse — user-driven, persistent across reloads. Default
-  // expanded; once the user collapses it, that sticks until they toggle
-  // again. Tab switches never touch this state — that's the whole point
-  // of the manual control.
   const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorage<boolean>(
     "promptpotter.sidebar.collapsed",
     false,
@@ -217,10 +166,7 @@ function AppShellInner() {
     () => setSidebarCollapsed((prev) => !prev),
     [setSidebarCollapsed],
   );
-  // Sidebar width — operator-adjustable via the drag handle, persistent.
-  // Default matches the CSS base (200px); clamped to [SIDEBAR_MIN, SIDEBAR_MAX].
-  // Applied as an inline --sidebar-width only while expanded, so the collapsed
-  // rail's 36px class rule still wins.
+  // Applied inline only while expanded, so the collapsed rail's class rule still wins.
   const [sidebarWidth, setSidebarWidth] = useLocalStorage<number>(
     "promptpotter.sidebar.width",
     SIDEBAR_DEFAULT,
@@ -232,11 +178,8 @@ function AppShellInner() {
       },
     },
   );
-  // The ONE call site that switches views. Choosing a view means "show me this
-  // campaign", so leaving the phone's list screen rides along here rather than at every
-  // caller — which is also why no render-phase reset is needed: the invariant is
-  // structural, leaving no derived state to correct. The view itself is the workspace's
-  // (it is on the address); `listScreen` is this component's, being phone chrome.
+  // The ONE call site that switches views; leaving the phone's list screen rides here
+  // rather than at every caller.
   const openView = useCallback(
     (t: Tab) => {
       setTab(t);
@@ -245,21 +188,16 @@ function AppShellInner() {
     [setTab],
   );
 
-  // A mint lands the operator ON the thing it just created, which on a phone
-  // means leaving the list screen. Selecting the new cycle is the provider's
-  // job (every entry point shares it); this is the shell's own half, guarded in
-  // render phase so it commits with the same frame.
+  // A mint lands the operator on what it created. Selecting the new cycle is the provider's
+  // job; leaving the phone list screen is the shell's half.
   const [prevMintCount, setPrevMintCount] = useState(mintCount);
   if (mintCount !== prevMintCount) {
     setPrevMintCount(mintCount);
     setListScreen(false);
   }
 
-  // The modal is the ENTRY to the thread, not a second copy of it: the moment a
-  // pick or a drop advances the shared flow past `idle`, hand it to the chat tab
-  // — the surface that can actually hold a conversation — and close. Guarded on
-  // the stage EDGE in render phase, so the handover commits with the frame that
-  // advanced it and the modal never paints over the thread it just started.
+  // The modal is the ENTRY to the thread: once the shared flow leaves `idle`, hand over to the
+  // chat tab and close, in render phase so the modal never paints over the thread.
   const ingestStage = ingestFlow.phase.stage;
   const [prevIngestStage, setPrevIngestStage] = useState(ingestStage);
   if (ingestStage !== prevIngestStage) {
@@ -270,16 +208,10 @@ function AppShellInner() {
     }
   }
 
-  // Single-ingress dashboard read, kept here only for the status-banner
-  // derivation below. Every dashboard surface self-sources its own live state
-  // via `useDashboard()`/`useCycleStream()`, so nothing is threaded from here.
   const dashState = useDashboard();
 
-  // The cycle's start stamp from index.json — the burn-rate denominator behind the remote
-  // strip's ETA. Hand-rolled on purpose: it must KEEP the prior value across a unit switch,
-  // where a keyed read starts empty and the ETA would flash "—" every time.
-  // It used to fan into a second slot for a dataset title; the only reader of that was the
-  // chat job-bar, and the remote strip reads the served `dataset_name` off the cycle list.
+  // Hand-rolled rather than `useRead`: it must KEEP the prior stamp across a unit switch,
+  // where a keyed read starts empty and the remote strip's ETA would flash "—".
   useEffect(() => {
     if (!campaignId || !cycleId) return;
     let cancelled = false;
@@ -299,33 +231,21 @@ function AppShellInner() {
     };
   }, [campaignId, cycleId]);
 
-  // Apply chart defaults once on mount; theme flips re-apply via applyTheme
-  // (lib/theme.ts) and broadcast via useThemeVersion to subscribed canvases.
   useEffect(() => {
     applyChartDefaults();
   }, []);
 
-  // Status banner with no unit in view: a network failure and a genuinely
-  // empty workspace both end with no cycleId — but only one means the
-  // operator should go check the server. Tell them apart. Order matters: a
-  // down server also reports zero cycles, so netDown is subtracted below.
   const noUnit = !cycleId;
   const netDown = Boolean(activeError || cyclesError);
-  // Nothing has ever run here, and the server is fine. Passed to the banner as
-  // its own fact rather than dressed up as a status: the poll's resting state is
-  // already `offline`, so anything short of an explicit signal paints a fresh
-  // account the same red as an outage. What to do about it is the sidebar's
-  // empty state, which points at the `+ New campaign` button already on screen.
+  // Its own fact, not a status: the poll rests at `offline`, which would paint a fresh
+  // account as an outage. A down server also reports zero cycles, hence `!netDown`.
   const emptyWorkspace = noUnit && cyclesLoaded && !netDown && cycles.length === 0;
   let bannerStatus = dashState.status;
   let bannerText = dashState.statusText;
   let bannerHint = dashState.statusHint;
   if (goneAddress) {
-    // Rides the WORKSPACE's verdict, not the poll's, and wins outright. The
-    // recovery already happened — the pin was dropped the moment it was confirmed
-    // dead — so `dashState` has since reset onto a different address and would
-    // otherwise replace this notice within a frame. The announcement has to
-    // outlive the transition it explains, or the view just silently jumps.
+    // The WORKSPACE's verdict wins outright: `dashState` has already reset onto another
+    // address and would replace this notice within a frame.
     bannerStatus = "gone";
     bannerText = "This campaign no longer exists";
     bannerHint = "It was deleted, or its store was reset — returning to the active run.";
@@ -335,9 +255,6 @@ function AppShellInner() {
     bannerHint = activeError ?? cyclesError ?? "";
   }
 
-  // ONE test for "is this cycle still authoring its origin", off the served `run_phase`. It was
-  // spelled twice — here and in the tab-redirect below — and a second spelling of a served field
-  // is how two surfaces come to disagree about which pane a campaign should draw.
   const isCheckin = useCallback(
     (campaign: string, cycle: string | null) =>
       cycles.some(
@@ -346,31 +263,17 @@ function AppShellInner() {
     [cycles],
   );
 
-  // The selected cycle's run phase, read off the cycle list. A `checkin` campaign
-  // has no dashboard.json (it hasn't run), so rendering the dashboard/chat/verify
-  // panes over it would dead-end on "warming". Instead we show the re-open
-  // authoring surface — the honest affordance (frontend-surface-contract.md).
   const selectedCheckin = !!campaignId && isCheckin(campaignId, cycleId);
-  // The check-in authoring surface lives on the CHAT tab — its home. Scoping the
-  // takeover here (rather than overriding every tab) keeps Dashboard/Verify and the
-  // "New campaign" button reachable, so a selected check-in never traps navigation.
+  // Scoped to the chat tab, not every tab, so a selected check-in never traps navigation.
   const showCheckin = selectedCheckin && tab === "chat";
 
   return (
-    // Keyed on the LEAF hop, like the dashboard stream — selection scopes the
-    // inspector / samples / round files, and those read the leaf.
     <SelectionProvider cycleId={leafCycleId}>
     <ConnectorProvider campaignId={leafHop?.campaignId ?? null} at={connectorAt}>
-    {/* THE served lineage — ONE fetch owner for every consumer (the forest, the bars,
-        the sidebar rows, the L4 samples panel). Rooted at the ROOT hop: the tree's own
-        recursion reaches every fork and inner run below it, so drilling in re-addresses
-        rather than re-fetching. Sits inside SelectionProvider, whose `sampleSet` is one
-        of the masks it composes, and inside ConnectorProvider, whose pipeline shape decides
-        which evaluators the scoring mask it seeds can offer. */}
+    {/* ONE lineage fetch owner, rooted at the ROOT hop. Inside both providers above: it
+        composes SelectionProvider's `sampleSet` and ConnectorProvider's evaluators. */}
     <LineageProvider campaignId={campaignId} cycleId={cycleId}>
-    {/* The roster for the unit in view + the scope and ranking that pick it. Here
-        rather than in the chat tab because its consumers sit on two different
-        branches of that tab — the hero's heat-map and the run card's table. */}
+    {/* Here, not in the chat tab: its consumers sit on two different branches of that tab. */}
     <HardSamplesProvider path={viewedPath} datasetName={leafDatasetName}>
     <div
       className={cx(
@@ -384,36 +287,24 @@ function AppShellInner() {
           : ({ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties)
       }
     >
-      {/* First focusable element — lets keyboard users jump the sidebar straight
-          to the main content. Off-screen until focused. */}
       <a className="skip-link" href="#main-content">
         Skip to content
       </a>
       <Sidebar
         onSelectPath={(path, candidate) => {
           selectCyclePath(...restoreNavigation(path, candidate));
-          // Picking a campaign on a phone means "open it" — leave the list screen.
-          // On a desktop nothing reads this.
           setListScreen(false);
-          // The tab is the operator's axis — selecting a unit must NOT hijack it
-          // (picking a campaign while reading the Chat stays on Chat). The one
-          // exception is a check-in: it has no dashboard.json, so Dashboard/Verify
-          // would dead-end — send it to Chat, its authoring home. Only a top-level
-          // cycle can be a check-in (an inner run is machine-minted and always
-          // past authoring), so a descended path never redirects.
+          // Selecting never hijacks the tab, except a check-in (no dashboard.json) goes to Chat.
+          // An inner run is never a check-in, so a descended path never redirects.
           if (path.length > 1) return;
           const hop = path[0]!;
           if (isCheckin(hop.campaignId, hop.cycleId)) openView("chat");
         }}
         onNewCycle={() => {
-          // Two doors onto one thread, picked by the view in front of the operator: already on
-          // the chat tab, the thread resets in place; anywhere else the modal opens as the
-          // entry list and hands over as soon as something is picked. A check-in no longer
-          // needs an exception — it is a stage of the chat surface now, not a takeover.
+          // Two doors onto one thread: on the chat tab it resets in place; elsewhere the modal
+          // opens and hands over once something is picked.
           if (tab === "chat") startNew();
           else setNewCampaignOpen(true);
-          // On a phone the sidebar IS the list screen, so the reset it triggers
-          // happens on the screen behind it — go there.
           setListScreen(false);
         }}
         collapsed={sidebarCollapsed}
@@ -427,24 +318,17 @@ function AppShellInner() {
           max={SIDEBAR_MAX}
         />
       )}
-      {/* The active-run dock, floating on the sidebar's OUTER edge. A `.shell`
-          child, not a sidebar one: the sidebar clips its overflow. Desktop only —
-          see JobsDock. */}
+      {/* A `.shell` child, not a sidebar one: the sidebar clips its overflow. */}
       <JobsDock onPicked={() => openView("dashboard")} />
       <main className="main" id="main-content" tabIndex={-1}>
-        {/* Phone chrome — the back arrow to the list screen and the campaign's
-            verbs. Hidden above --bp-md, where the sidebar carries both. The view
-            axis is NOT here: ViewTabs owns it, at the foot of the screen. */}
+        {/* The view axis is NOT here: ViewTabs owns it. */}
         <MobileAppBar
           listScreen={listScreen}
           onBack={() => setListScreen(true)}
           onNewCycle={() => setNewCampaignOpen(true)}
         />
-        {/* Loud failure surface — sticky, full-width, on every tab. Renders
-            null on a healthy run; not gated on cycleId so a server-down state
-            with no unit in view still screams. It stays mounted on the phone's
-            list screen too: a dead address is exactly what you go to the list
-            to fix. */}
+        {/* Not gated on cycleId, so a server-down state with no unit in view still shows;
+            mounted on the phone list screen too, where a dead address gets fixed. */}
         <CriticalAlertBanner
           bannerStatus={bannerStatus}
           bannerText={bannerText}
@@ -458,8 +342,7 @@ function AppShellInner() {
               : undefined
           }
         />
-        {/* The unit header — what am I looking at, and which view of it. Chrome
-            rather than a pane's first child, so the strip cannot scroll away. */}
+        {/* Chrome rather than a pane's first child, so it cannot scroll away. */}
         <RunMasthead
           tab={tab}
           onSelectTab={openView}
@@ -467,10 +350,6 @@ function AppShellInner() {
         />
         {tab === "chat" ? (
           <ChatPane
-            // A durable check-in has no dashboard.json, so it is authored rather than
-            // watched. It used to swap in a whole second pane for that — losing the
-            // hero, the pipeline and the samples on the way — when it is really one
-            // stage of this surface: hand the campaign over and let the thread reopen it.
             checkinCampaignId={showCheckin ? campaignId : null}
             onOpenDashboard={() => openView("dashboard")}
           />
@@ -486,23 +365,14 @@ function AppShellInner() {
           <VerifyPane />
         )}
       </main>
-      {/* Global remote — a bottom-fixed hovering strip on every tab, and the ONE surface
-          answering "what is this run DOING": play/pause/skip, the inner/outer drill, the
-          Lift readout, and an upward panel with identity, spend and the finishing criteria.
-          What the run IS and how it reads is the masthead's. It deliberately survives
-          `terminal` and `detached` — that is where the restart control and the outcome
-          numbers matter — and renders null only for check-in and a cycle with no phase yet. */}
       <RemoteControl cycleStartedAt={leafCreatedAt ?? cycleStartedAt} />
-      {/* Mounted only while open so its chunk (+ ingest wizard deps) stays off
-          first paint — IngestPane already hard-returns null when closed, so
-          gating the mount is behaviour-identical. */}
+      {/* Mounted only while open so its chunk stays off first paint. */}
       {newCampaignOpen && <IngestPane open onClose={() => setNewCampaignOpen(false)} />}
       {/* A `.shell` child, not a sidebar one: the phone hides the sidebar off its list
           screen, and a deep link to `#/account/<pane>` must open wherever it lands. */}
       <AccountModal open={accountPane != null} onClose={closeAccount} />
-      {/* The vendor-mark symbol definitions, mounted ONCE here because `<use href="#id">`
-          resolves within the document — every `VendorLogo` on any surface points at these.
-          Draws nothing; a `.shell` child so it outlives every pane that references it. */}
+      {/* Mounted ONCE: every `VendorLogo` is a `<use href="#id">` into it, so unmounting it
+          blanks every mark on every surface. */}
       <VendorSprite />
     </div>
     </HardSamplesProvider>

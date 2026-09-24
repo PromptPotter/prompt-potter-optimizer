@@ -5,33 +5,8 @@ import { CommitInput } from "./CommitInput";
 import { Popover } from "./Popover";
 import s from "./ValueList.module.css";
 
-// ONE widget for every axis whose values are enumerable — a model menu, a reasoning ladder, any
-// enum. Domain-free on purpose: the caller names the axis and decides what a tick licenses, so
-// the vocabulary stays in the surface and this stays a primitive.
-//
-// **Closed it is ONE LINE; open, the list drops OVER that line.** The dropdown-LIST idiom rather
-// than the combo box: the panel covers the closed row (`Popover side="over"`), so the current
-// value is on screen exactly once — as the panel's first entry, landing where the closed line
-// sat. A panel hanging BELOW would leave the trigger visible beside it and print the value twice.
-// Inline disclosure was the first shape and is what this replaced: it pushed every row under it
-// down the page each time an axis was opened.
-//
-// **Two facts, and neither needs a marker of its own.**
-//   - WHERE THE AXIS STARTS is position 1. Clicking a value pulls it to the front, and that IS
-//     choosing it. No radio, no filled dot: a second control for a fact the order already carries
-//     is how a list comes to contradict itself.
-//   - WHAT IS PERMITTED is the tick. One tick pins the axis; more than one opens it.
-//
-// **Each fact is present exactly when its channel is** — `onPick` absent makes the values text,
-// not buttons, and `checked` absent drops the tick column. A host that owns only one of the two
-// says so by passing only one, and gets no control it cannot honour. A host passing neither is a
-// READING: position 1 is still the value the point runs, it just cannot be moved from here.
-//
-// State here is one scalar: a remount counter for the free-text input. `values`, `checked` and the
-// order are props end to end, so the caller's store is the single source of truth and every
-// gesture patches it — which is what makes the no-duplicate rule structural rather than a
-// synchronization problem. Open/closed belongs to `Popover`, which already owns click-outside
-// and Escape.
+// The one widget for an enumerable axis: position 1 is the start value, the ticks are the
+// permitted set, each drawn only when its callback/prop is passed (webapp/CLAUDE.md § an AXIS).
 export function ValueList({
   name,
   values,
@@ -45,44 +20,32 @@ export function ValueList({
   onToggle,
   onAdd,
 }: {
-  /** The axis, as the operator reads it — a `snake_case` param key, usually. */
   name: string;
-  /** The full menu, ALREADY ordered current-first by the caller. `values[0]` is where the axis
-   *  starts — except on a permissions-only host, whose sibling surface owns that value. */
+  /** ALREADY ordered current-first by the caller; this component never sorts. */
   values: readonly string[];
-  /** The permitted subset. `undefined` = no tick column at all, rather than a column of empty
-   *  boxes that would read as "nothing permitted". */
+  /** `undefined` = no tick column, never a column of empty boxes reading "nothing permitted". */
   checked?: readonly string[];
-  /** Values something downstream refuses (a picked model that does not take this rung). Disabled
-   *  rather than hidden: the axis still declares them, and they come back when the refusal does
-   *  not apply — dropping them would make that reappearance look like a schema change. */
+  /** Values something downstream refuses; disabled rather than hidden, since the axis still declares them. */
   inert?: readonly string[];
-  /** Values the OPERATOR typed in, which neither the catalogue nor the current selection
-   *  offered. Tagged rather than silently mixed in: a name nothing else vouches for is the one
-   *  most likely to be a typo, and after a round-trip it is otherwise indistinguishable from a
-   *  value the admin declared. */
+  /** Values the operator typed that the catalogue does not offer — tagged, as the likeliest typos. */
   userAdded?: readonly string[];
-  /** One served line: who the ticks license, or why a value is inert. */
   note?: string;
   readOnly?: boolean;
   /** Omit to drop the free-text row — an axis whose values a caller cannot widen. */
   addPlaceholder?: string;
-  /** Omit where the START VALUE is not this list's to set — a reading, or a permissions-only
-   *  host. The rows then render as text: an enabled control that discards the click is the shape
-   *  this absence exists to make unspellable. */
+  /** Omit where the start value is not this list's to set; the rows then render as text. */
   onPick?: (value: string) => void;
   onToggle?: (value: string) => void;
   onAdd?: (value: string) => void;
 }) {
   // The free-text input clears by REMOUNT: `CommitInput` latches what it sent, so a constant ""
-  // prop never re-clears it. Bumping the key is the whole mechanism.
+  // prop never re-clears it.
   const [added, setAdded] = useState(0);
 
   const start = values[0] ?? "";
   const permitted = checked === undefined ? null : values.filter((v) => checked.includes(v));
   const count = permitted === null ? null : `${permitted.length}/${values.length}`;
-  // Closed, the line states the value the point runs, except on a PERMISSIONS-ONLY host (ticks, no
-  // pick): its value belongs to a sibling surface, so there the line is the permitted set.
+  // A permissions-only host (ticks, no pick) shows the permitted set: its value belongs to a sibling surface.
   const summary =
     permitted !== null && !onPick ? permitted.join(", ") || "(none)" : start || "(unset)";
 
@@ -111,23 +74,17 @@ export function ValueList({
         const commitAdd = (raw: string) => {
           const value = raw.trim();
           if (!value) return;
-          // Already on the menu: pick it. Idempotent-and-useful beats a dead no-op — an operator
-          // who typed a name that is already there meant "use this one".
           if (values.includes(value)) onPick?.(value);
           else onAdd?.(value);
           setAdded((n) => n + 1);
         };
         return (
-          // A listbox only where a value can be CHOSEN. Permissions-only, the rows are labels
-          // for their checkboxes and nothing is selectable, so it is a group — announcing
-          // "listbox, option 1 of 5, selected" over text nobody can pick is a lie to a reader
-          // who cannot see that it does not respond.
+          // A listbox only where a value can be CHOSEN; permissions-only, nothing is selectable.
           <div className={s.panel} role={onPick ? "listbox" : "group"} aria-label={name}>
             {values.map((value, i) => {
               const isStart = i === 0 && onPick !== undefined;
               const isInert = inert?.includes(value) ?? false;
               const isOn = checked?.includes(value);
-              // The value the axis starts on cannot be ruled out — nothing would be left to run.
               const lastTick = isOn === true && permitted?.length === 1;
               return (
                 <div
@@ -153,9 +110,7 @@ export function ValueList({
                             ? `${name} starts here`
                             : `Start ${name} on ${value}`
                       }
-                      // Picking is the whole gesture, so the panel closes on it. Ticking does
-                      // not: narrowing a permitted set is several clicks, and a panel that shut
-                      // on each would make the operator re-open it per value.
+                      // Picking closes the panel; ticking does not, since narrowing is several clicks.
                       onClick={() => {
                         onPick(value);
                         close();
@@ -173,9 +128,8 @@ export function ValueList({
                       type="checkbox"
                       className={s.tick}
                       checked={isOn}
-                      // An inert value can be UNticked but not ticked: unticking it is the repair
-                      // for a permitted value something downstream now refuses, and disabling
-                      // that would leave the operator looking at a state they cannot leave.
+                      // An inert value can be UNticked but not ticked: unticking is the repair for a
+                      // permitted value something downstream now refuses.
                       disabled={readOnly || (isInert && !isOn) || lastTick}
                       aria-label={`Permit ${value} for ${name}`}
                       title={
@@ -216,8 +170,6 @@ export function ValueList({
   );
 }
 
-// The value and its provenance, identical whether the row is pickable or not — so the two
-// branches above differ in what they DO, never in what they say.
 function ValueLabel({ value, userAdded }: { value: string; userAdded?: readonly string[] }) {
   return (
     <>

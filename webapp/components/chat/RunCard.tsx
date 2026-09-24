@@ -28,29 +28,11 @@ import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 import { HardSamplesPreview } from "@/components/dashboard/samples/HardSamplesPreview";
 import { TrendChart } from "@/components/eval/TrendChart";
 
-// The run card — what the operator came for, inside the thread rather than in the
-// chrome above it. Boxes on the chat's own background, not one shaded compartment,
-// and none wears a title: a box that has to announce what it is has already failed
-// to show it, and three title rows cost three of the six lines this card gets.
-//
-// The first box is the campaign's Trend in miniature — the chat's only running
-// indicator — and a click on it opens the Dashboard, where it is read at size.
-//
-// Below it the split is by QUESTION, and there are only two. What did the optimizer do and what
-// did it buy — spend, lift, the fields it changed, the rows that changed hands. And
-// where is the run in the data — the walk, and the shape of the roster it walks.
-//
-// Each box leads with a SUMMARY and keeps the full thing one disclosure away. That is
-// the whole design: it says "Task intent, llm_only.model" rather than printing two
-// prompts, and three sample lines rather than a table. Compact by default, complete
-// on click.
-//
-// LIVE the card follows the 2 s poll; stopped it sits in the log. The separate frozen
-// item (`RunSummaryItem`) is what survives a `resume` — see the note there.
+// The run card inside the chat thread: a miniature Trend (click opens the Dashboard) over boxes that
+// each lead with a summary and keep the full thing one disclosure away. `RunSummaryItem` survives a `resume`.
 
 interface Props {
-  // The declared scoring order, from the chat's ONE EventSource. Threaded rather than
-  // subscribed here — a second `useCycleEvents` would open a second stream.
+  // From the chat's ONE EventSource — a second `useCycleEvents` would open a second stream.
   sampleOrder: number[] | null;
   onOpenDashboard: () => void;
 }
@@ -58,25 +40,19 @@ interface Props {
 export function RunCard({ sampleOrder, onOpenDashboard }: Props) {
   const { dash, isLive } = useDashboard();
   const cv = useConnector();
-  // No node is selected here, so this is the WHOLE-pipeline view: the prompt plus
-  // config across every node — the shape a reader means by "my prompt".
+  // No node selected: the WHOLE-pipeline view.
   const observe = useObserveSearchPoint(null);
   const summary = runSummary(dash);
 
-  // ROUND 0, read ONCE for the whole card. Both the "changed vs origin" summary
-  // and the flipped rows are questions about the origin, and two hooks asking for the
-  // same file would be two GETs of one static document.
+  // ROUND 0, read ONCE for the card: the origin diff and the flipped rows both ask about it.
   const origin = useRoundRows(dash ? 0 : null);
   const originCfg = candidateObserveConfig(origin.doc, "C0", "origin · C0", null);
 
-  // Nothing measured, nothing to show. Silence beats an empty frame — the ingest
-  // thread above is the surface at that point.
   if (!summary || (summary.rounds === 0 && !isLive)) return null;
 
   return (
     <section className={cx("run-card", isLive && "is-live")} aria-label="This run" role="region">
-      {/* A div, not a button: the `CardFrame` inside is flow content. `pressable` restores the
-          native activation that trades away. */}
+      {/* A div, not a button: the `CardFrame` inside is flow content; `pressable` restores activation. */}
       <div
         className="run-box run-trend"
         {...pressable(onOpenDashboard)}
@@ -93,10 +69,7 @@ export function RunCard({ sampleOrder, onOpenDashboard }: Props) {
         schemaStatus={cv.pipelineStatus}
         outputSchema={cv.nodeOutputSchema}
       />
-      {/* A pp-self outer cycle has no per-sample roster — its "samples" are inner
-          campaigns. It renders no box at all rather than a pointer at the inner
-          run: the sidebar row and the L4 panel rows already fire that same
-          `drillInto`, and the hero above already says the backend is PromptPotter. */}
+      {/* A pp-self outer cycle has no per-sample roster; the sidebar and L4 rows already `drillInto`. */}
       {!isSelfOptimization(cv.backendType) && (
         <div className="run-box">
           <HardSamplesPreview sampleOrder={sampleOrder} />
@@ -106,28 +79,8 @@ export function RunCard({ sampleOrder, onOpenDashboard }: Props) {
   );
 }
 
-// What the shown searchpoint bought, in the units a reader already owns: its own rate
-// and the origin's on the same rows.
-//
-// θ is the number the engine ELECTS on and it is the honest one — but it is a logit on
-// a difficulty ruler, and `headline-stats.ts` states the rule this follows: θ is
-// jargon, never the forced default. So it moves into the card behind the figure, where
-// it explains the percent instead of competing with it.
-//
-// `theta` arrives only when the picker is on `best`, because `ability_delta` is the
-// PARENT's lift over origin — served per cycle, not per candidate. Showing it beside
-// another candidate's rate would caption one individual with another's number.
-//
-// The pair is subset-matched, which is why it may be read as a before/after at all. The
-// flips line below deliberately names a DIFFERENT floor, and says so.
-// An absent floor prints nothing rather than a zero, and a searchpoint with no measured
-// rate falls back to θ so the lift is never simply missing.
-//
-// `23/28` trails the pair when the panel was CUT SHORT — PoBB stopping a losing arm, or
-// an escalation abort. It is the rate's own basis, so it rides against the rate in the
-// card's quietest weight: a stopped arm is routine, and a badge would shout on most
-// rounds. Not a verdict (`_candidate_fate` states why) and not a progress bar —
-// `expected_samples` lands at round close, so an in-flight candidate shows nothing.
+// The shown searchpoint's rate against the origin's on the same rows. θ only on `best` (`ability_delta` is
+// the PARENT's lift, per cycle) and never the default (`headline-stats.ts`); `23/28` marks a cut-short panel.
 function Lift({
   accuracy,
   parentAccuracy,
@@ -188,15 +141,8 @@ function Lift({
   );
 }
 
-// Box 1 — what the run cost, what it bought, and what it changed to buy it. One box
-// because those are one question: a spend with no lift beside it is a bill, and a
-// lift with no spend beside it is a boast.
-//
-// The headline numbers are all SERVED. The lift is `ability_delta` in logits, never a
-// percent and never `best − origin` (`run-summary.ts` states why); the accuracy pair
-// is the champion's own rate against `matched_parent_accuracy`, the origin restricted
-// to the rows that candidate actually measured — the only honest floor under
-// elimination. Nothing here subtracts, defaults or rounds a number into existence.
+// Spend, lift and changes as one box. All SERVED: the lift is `ability_delta` in logits, never
+// `best − origin` (`run-summary.ts`); the floor is `matched_parent_accuracy`.
 function ConfigBox({
   observe,
   summary,
@@ -217,10 +163,7 @@ function ConfigBox({
   const options = observeOptions(observe.avail);
   const cfg = observe.cfg;
   const diff = useMemo(() => searchPointDiff(originCfg, cfg), [originCfg, cfg]);
-  // ONE subject for the whole box: whichever searchpoint the picker names is what the
-  // rate, the diff and the flipped rows all describe. Splitting it — a run-level rate
-  // over a candidate-level diff — is what made the picker read as half-broken.
-  // Round 0 IS the origin above, so the shown round reads that same one rather than a second copy.
+  // ONE subject for the whole box: rate, diff and flipped rows all describe the picked searchpoint.
   const target = observe.target;
   const shownRound = useRoundRows(target && target.round > 0 ? target.round : null);
   const shown = target?.round === 0 ? origin : shownRound;
@@ -251,10 +194,7 @@ function ConfigBox({
             ariaLabel="Which searchpoint to show"
           />
         ) : null}
-        {/* The same readings the searchpoint drill-in offers, off the same builder — this card
-            used to be the ONLY surface that could copy a searchpoint, and it did so through a
-            serializer only it could use. The text form stays as one choice: it is a prompt a
-            human reads, not a document to grep against a round file. */}
+        {/* Same builder as the searchpoint drill-in; the text form is a prompt a human reads. */}
         <CopyButton
           choices={[
             ...searchpointCopyChoices({ cfg, row: shownRow }),
@@ -303,12 +243,7 @@ function ConfigBox({
   );
 }
 
-// One group of the change summary. The glyph is the KEY — ✎ the prompt, ⚙ a node's
-// config — and the node is written once in front of its params instead of prefixing
-// every one of them. `changed:` is gone with it: the glyph already says that.
-//
-// Plain spans, no icon set: two characters carry the whole vocabulary, and they are
-// decoration over the `aria-label`, never the only carrier.
+// The glyph is the KEY — ✎ prompt, ⚙ node config — decoration over the `aria-label`, never its only carrier.
 function DiffChip({ group }: { group: DiffGroup }) {
   const what = group.kind === "prompt" ? "prompt" : (group.node ?? "pipeline");
   return (
@@ -326,15 +261,8 @@ function DiffChip({ group }: { group: DiffGroup }) {
   );
 }
 
-// Why the best searchpoint is still the origin. Shown ONLY on `best`, and only when
-// the last round elected nobody — the case that otherwise reads as a broken surface:
-// "Best · C0" after two challengers ran looks identical to "nothing has been tried",
-// and those are opposite facts about a run.
-//
-// The verdict is the engine's own (`RoundSummary.improved`), never a re-comparison
-// here. A challenger's accuracy is NOT comparable to the origin's full-set rate — it
-// measured its own subset — which is exactly why this defers to the served flag
-// instead of subtracting two numbers that answer different questions.
+// Why best is still the origin — only on `best`, only when the last round elected nobody. The verdict is
+// the served `RoundSummary.improved`: a challenger's subset rate is not comparable to the origin's.
 function ChallengerVerdict({
   summary,
   state,
@@ -352,13 +280,8 @@ function ChallengerVerdict({
   );
 }
 
-// What the copy button hands over. The prompt FIELDS in canonical order plus the
-// resolved config — both verbatim served values.
-//
-// It is NOT the runnable string the backend sent: that is `PromptTemplate.
-// compile_prompt()`, backend logic which nothing serves to this app, and
-// re-implementing it here would produce a second compiler that drifts silently.
-// A literal runnable prompt has to be SERVED before it can be copied.
+// Prompt fields in canonical order plus resolved config, verbatim. NOT the runnable string: that is
+// backend `PromptTemplate.compile_prompt()`, which nothing serves — never re-implement it here.
 function copyPayload(cfg: {
   promptFields: Record<string, unknown>;
   config: Record<string, unknown>;
@@ -373,26 +296,8 @@ function copyPayload(cfg: {
   return lines.join("\n");
 }
 
-// Which rows this searchpoint turned around, against the origin — the answer a reader
-// trusts when an aggregate leaves them cold, and the last line of the "what did it buy"
-// box. The regressions ride along deliberately: a card that shows only the wins is an
-// advertisement.
-//
-// ONE line, and a partition that CLOSES: rows both sides measured, the two directions,
-// then the remainder. It ran as two lines each ending "of 28 compared" — a reader adding
-// 2 and 2 against 28 read a panel that was lying. The arithmetic was right; the 24 that
-// stayed put was simply never printed, and it is the largest group in every real run.
-//
-// It follows the PICKER. It used to pin itself to the champion whatever the picker
-// showed, on the argument that the question is "what did the optimization buy" rather
-// than "what is the pane pointed at" — but on one surface that made a control which
-// changed the label and the diff and silently not this, which reads as a stuck line
-// rather than a deliberate scope. One subject per box: whatever is named above is what
-// these rows are about.
-//
-// SILENT when the shown searchpoint IS the origin. `ChallengerVerdict` already says so
-// with the round's own served `improved`, and two channels for one fact is the
-// redundancy that made this card long.
+// Rows this searchpoint turned around vs the origin, as a partition that CLOSES (both measured, the two
+// directions, the remainder). Follows the picker; silent on the origin, where `ChallengerVerdict` speaks.
 function Flips({
   origin,
   shown,
@@ -405,7 +310,6 @@ function Flips({
   target: ObserveTarget | null;
 }) {
   const originRow = origin.row(0);
-  // Round 0 = the origin itself; there is nothing to compare it against but itself.
   const comparable = !!target && target.round > 0 && !!originRow && !!shownRow;
 
   const flips = useMemo(() => {
@@ -417,12 +321,7 @@ function Flips({
   const { gained, lost, compared, unchanged } = flips;
   return (
     <div className="run-flips">
-      {/* The reference is NAMED, because it is not the one the percent pair above uses.
-          That pair's floor is the candidate's parent; these rows are the campaign
-          ORIGIN, the only per-sample panel served to this app — a parent's rows on a
-          re-subsetted round are overwritten by the winner's on the round document. Two
-          references in one box is a defect; two references with one of them unlabelled
-          is the defect that files bug reports. */}
+      {/* NAMED: these rows are vs the campaign ORIGIN, not the parent floor of the percent pair above. */}
       <span className="run-flip-ref">vs origin</span>
       <FlipSep />
       <span className="run-flip-total">{compared} both measured</span>
@@ -438,8 +337,7 @@ function Flips({
   );
 }
 
-// The mid-dot, carried by the segment that FOLLOWS it so a segment rendering nothing
-// takes its separator with it. Same grammar as the headline line above.
+// Carried by the segment that FOLLOWS it, so a segment rendering nothing takes its separator along.
 function FlipSep() {
   return (
     <span className="run-flip-sep" aria-hidden="true">
@@ -448,14 +346,6 @@ function FlipSep() {
   );
 }
 
-// One direction of the partition — the count — with the ids and their before→after
-// answers in the hover card behind it.
-//
-// The ids used to print inline, on the argument that a truncated list of what a run
-// fixed would be the one place this card rounded off. Eleven ids run wider than every
-// other line in the box, and the count is what a reader acts on; the ids are what they
-// check afterwards. Nothing is truncated — the card holds all of them, with the
-// evidence the inline version could only fit on `title`.
 function FlipIds({
   label,
   kind,
@@ -492,13 +382,8 @@ function FlipIds({
   );
 }
 
-// The FROZEN thread item: what a finished run leaves behind once a `resume` has moved
-// the live card on to the next one.
-//
-// It renders captured VALUES, never a live read — that is the whole point. A resume
-// re-animates `dashboard.json` and `resume --from N` can rewrite the very round files
-// a live pane would re-read, so anything that kept a pointer would quietly restate
-// itself as the new run. This holds numbers and stops.
+// The FROZEN thread item: captured VALUES, never a live read — a resume or `resume --from N` rewrites
+// the files a live pane would re-read.
 export function RunSummaryItem({ summary }: { summary: RunSummary }) {
   return (
     <div className="chat-msg ai run-summary-item" role="note">
@@ -506,14 +391,10 @@ export function RunSummaryItem({ summary }: { summary: RunSummary }) {
         Run finished
         {summary.stopReason ? ` · ${runPhaseLabel("terminal", summary.stopReason)}` : ""}
       </span>
-      {/* What to do about it, off the served table. A reason owing nothing renders no line. */}
       {stopReasonNextStep(summary.stopReason) ? (
         <p className="run-summary-next">{stopReasonNextStep(summary.stopReason)}</p>
       ) : null}
-      {/* Same vocabulary as the live card it replaces: the percent pair leads and θ
-          does not appear. A log line has no hover to hide jargon behind, so the one
-          number a reader can act on is the only one it prints. `abilityDelta` stays
-          on the record — this is what the line SHOWS, not what it holds. */}
+      {/* θ does not appear: a log line has no hover to hide jargon behind. */}
       <span className="run-summary-line">
         {summary.championLabel ? `${summary.championLabel} · ` : ""}
         {summary.accuracy != null ? fmtPct0(summary.accuracy) : "—"}

@@ -6,8 +6,7 @@ import { Term } from "../Term";
 afterEach(cleanup);
 
 describe("Term", () => {
-  // The whole reason teaching prose left `title=`: a native tooltip cannot be tabbed to. If the
-  // trigger stops being focusable the card is unreachable by keyboard and nothing else says so.
+  // If the trigger stops being focusable, the card is unreachable by keyboard and nothing says so.
   it("makes its trigger focusable, and opens on that focus", () => {
     render(<Term content="the metric the winner is elected on">θ</Term>);
     const trigger = screen.getByText("θ");
@@ -17,7 +16,6 @@ describe("Term", () => {
     expect(screen.getByRole("note").textContent).toContain("elected on");
   });
 
-  // A host's own class rides ALONGSIDE the dotted rule, never instead of it.
   it("keeps the hint decoration when a host passes a class", () => {
     render(
       <Term className="chip" content="lift over origin">

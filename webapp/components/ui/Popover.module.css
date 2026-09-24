@@ -1,7 +1,3 @@
-/* Popover primitive. The panel is portaled to <body> and placed by Popover.tsx off the
-   trigger's rect, so these rules own only its look. Behaviour (click-outside, ESC) lives
-   in Popover.tsx too. */
-
 @layer ui {
 .wrap {
   flex-shrink: 0;

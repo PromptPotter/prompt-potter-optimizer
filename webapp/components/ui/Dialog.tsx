@@ -13,9 +13,7 @@ type Props = Name & {
   /** Absent = undismissable: Escape and the backdrop do nothing, and the host owns the exit. */
   onClose?: () => void;
   children: ReactNode;
-  /** Footer actions (right-aligned). Rightmost is the primary by convention. */
   footer?: ReactNode;
-  /** No card chrome — the host draws its own card, and `title` then only names it. */
   bare?: boolean;
 };
 
@@ -24,8 +22,7 @@ export function Dialog({ open, title, labelledBy, onClose, children, footer, bar
 
   if (!open || typeof document === "undefined") return null;
 
-  // mousedown (not click) on the backdrop avoids closing when a drag started
-  // inside the card and released on the backdrop.
+  // mousedown, not click: a drag started inside the card and released outside must not close it.
   return createPortal(
     <div className={s.backdrop} onMouseDown={onClose}>
       <div

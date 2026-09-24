@@ -1,26 +1,12 @@
 "use client";
-// Auth prompt overlay — opened by both the "Log in" and the "Sign up for free"
-// chips. One surface, one set of copy; both chips drop the visitor at the same
-// canonical entry.
-//
-// This is the *popup-specific layer* around the shared <AuthCore/>: the modal
-// chrome (overlay + focus-trap + header/×), the value headline, the Privacy
-// microcopy, and the legal footer trio — the bits that would crowd the
-// standalone /login page, which renders the bare core instead.
-//
-// Reuses .account-modal + .account-pane-head + .account-pane-body, plus
-// .auth-headline / .auth-note / .auth-link / .auth-legal-row from the auth
-// domain stylesheet.
+// The auth prompt: popup chrome around the shared <AuthCore/>, which /login renders bare.
 
 import { BRAND } from "@/lib/brand";
 import { useAuth } from "@/lib/auth-context";
 import { Button, Dialog, IconClose } from "@/components/ui";
 import { AuthCore } from "@/components/login/AuthCore";
 
-// Props-free on purpose: it is mounted ONCE (app/page.tsx) and every trigger —
-// the sidebar footer chips, the mobile app bar chips, the OIDC `?auth_error=`
-// bounce-back — opens it through `openAuthPrompt()`. Threading `open` down
-// instead would put one modal per chip mount point on screen.
+// Props-free: mounted ONCE (app/page.tsx); every trigger calls `openAuthPrompt()`, never an `open` prop.
 export function WelcomeLockoutModal() {
   const { authPrompt, closeAuthPrompt } = useAuth();
   const { open, code: errorCode, email: errorEmail } = authPrompt;

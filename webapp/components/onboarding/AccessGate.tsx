@@ -1,25 +1,6 @@
 "use client";
-// Post-auth entitlement gate — the state between "has an account" and "may use
-// it".
-//
-// Signing up IS the grant now, so this is no longer a waiting room: it mounts
-// only for an account the operator has BLOCKED (`me.access_state === "blocked"`)
-// and holds the app behind a non-dismissable overlay. Nothing here submits: the
-// server already refuses a blocked account's commands at the dispatcher's
-// capability gate, so this reflects that state rather than enforcing it
-// (webapp/CLAUDE.md § Scoring authority, same posture).
-//
-// It takes precedence over ConsentGate. Consent attaches when someone is about
-// to submit data, and a blocked account cannot — asking them to accept Terms
-// first would collect a consent for something they can't do.
-//
-// Unlike ConsentGate there IS a way out, because there is nothing to agree to:
-// signing out is the only action a blocked user can take, so it is the one
-// affordance. Still no × / ESC / overlay-click (`Dialog` with no `onClose`) —
-// leaving means leaving.
-//
-// Reuses .account-modal / .account-pane-head / .account-pane-body from the
-// account domain stylesheet; .consent-* from the auth one.
+// Overlay for a BLOCKED account. It reflects the dispatcher's capability gate, never enforces
+// it, and takes precedence over ConsentGate: a blocked account cannot submit, so has nothing to consent to.
 
 import { useAuth } from "@/lib/auth-context";
 import { postLogout } from "@/lib/api/account";
@@ -34,8 +15,7 @@ export function AccessGate() {
 
   if (!open) return null;
 
-  // Hard navigation either way — a failed logout still shouldn't strand them on a blocking
-  // overlay with a dead button.
+  // Navigate either way — a failed logout must not strand them on a dead overlay.
   const onSignOut = () =>
     void cmd.run("logout", postLogout).then(() => window.location.assign("/login"));
 

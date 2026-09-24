@@ -1,9 +1,6 @@
 "use client";
-// The disabled controls here are INTENTIONAL placeholders, not scaffolding: attach, the textarea,
-// send, and the thinking / web-search / code-exec toggles preview the chat-first front door
-// (`docs/specs/chat-foundation.md`). Out of scope for any "hide non-functional controls" sweep —
-// that sweep is why this note exists. Milestone text inside them is exempt from the
-// "no M-milestone references on operator surfaces" gate; other operator surfaces are not.
+// The disabled controls are INTENTIONAL placeholders for the chat-first front door (`docs/specs/chat-foundation.md`):
+// exempt from any "hide non-functional controls" sweep and from the no-M-milestone gate.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useHardSamples } from "@/lib/hard-samples";
 import { useDashboard } from "@/lib/hooks/useDashboard";
@@ -24,67 +21,34 @@ import { LiveSegment } from "@/components/chat/LiveSegment";
 import { RunCard } from "@/components/chat/RunCard";
 
 interface Props {
-  // The selected campaign when it is a durable check-in awaiting authoring, else
-  // null. The thread reopens its draft in place — no separate pane, so the hero
-  // and the samples stay where they are.
+  // The selected campaign when it is a durable check-in awaiting authoring, else null.
   checkinCampaignId: string | null;
   onOpenDashboard: () => void;
 }
 
-// The Chat surface. The pipeline hero is display-only; the live interactive path is
-// dataset ingest, rendered by the shared `IngestConversation` (same surface as the
-// "New campaign" modal): drop/pick → ask context if missing → one check-in → Start.
-// Run status lives on the shell's RemoteControl, and what this chat can DO is the
-// composer's Tools popover. Everything above the thread is deliberately MINIATURE —
-// the Dashboard is where these same surfaces are read at size.
+// The Chat surface: a display-only pipeline hero over the shared `IngestConversation` thread. Everything
+// above the thread is deliberately MINIATURE — the Dashboard reads the same surfaces at size.
 export function ChatPane({ checkinCampaignId, onOpenDashboard }: Props) {
-  // Only the name is read here (the pipeline hero labels itself with it); the roster
-  // and its controls go straight to the two panels that draw them.
   const { datasetName } = useHardSamples();
-  // Self-sourced live state — the thread's freeze-on-stop edge and the live feed.
   const { dash } = useDashboard();
-  // The live FEED + its gate-decision control follow the viewed LEAF hop (the same
-  // hop the dashboard shows) — drilling into an L4 inner campaign tails that inner
-  // cycle's own activity, not the outer thread's candidate cards. The gate decision
-  // is derived from `dash` (already leaf), so firing it must target the leaf too.
-  // Root identity (session, ingest compose) stays on the root exports. Both hops
-  // are derived once in the workspace context.
+  // The feed and its gate decision follow the viewed LEAF hop (an L4 inner campaign tails its own cycle);
+  // root identity (session, ingest compose) stays on the root exports.
   const { viewedPath, cycleId, leafCampaignId, leafCycleId } = useWorkspace();
   const [samplesOpen, setSamplesOpen] = useState(false);
   const toggleSamples = () => setSamplesOpen((v) => !v);
 
-  // The one authoring thread, shared with the New campaign modal. `composing` is
-  // its "the operator is authoring, not watching" flag — it suppresses the bound
-  // cycle's live feed so a fresh thread is not drawn over the previous run.
+  // `composing` suppresses the bound cycle's live feed so a fresh thread is not drawn over the last run.
   const { flow: ingest, collection, composing } = useIngest();
 
-  // Reopen a durable check-in's draft straight into the thread. It has no
-  // dashboard.json, so this is the authoring surface for it; `reopenCheckin`
-  // loads the draft and the last resolver turn from disk. Keyed on the campaign
-  // — `ingest` is rebuilt each render but its methods close over stable
-  // setState, so the exhaustive-deps lint would over-add it.
+  // A check-in has no dashboard.json; `reopenCheckin` loads its draft from disk. Keyed on the campaign
+  // alone — `ingest`'s methods close over stable setState.
   useEffect(() => {
     if (checkinCampaignId) ingest.reopenCheckin(checkinCampaignId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkinCampaignId]);
 
-  // Freeze a run into the thread on the live→stopped EDGE, so a later `resume`
-  // leaves the finished one behind as a log entry instead of re-animating it.
-  // Render-phase guarded, and the state being adjusted belongs to a hook this
-  // component owns — the sanctioned "adjust state when an input changes" recipe.
-  //
-  // The identity check is load-bearing, not belt-and-braces: switching from a LIVE
-  // cycle to a stopped one walks the same false→null edge, and by then `dash`
-  // describes the cycle just navigated TO. Without it that click would file the new
-  // cycle's numbers under the old cycle's ending.
-  //
-  // Keyed on `hasLiveProducer`, NOT on `isLive`. They answer different questions and this one
-  // wants the second: `isLive` is "should transient indicators be on", which is false at the
-  // ORIGIN GATE because nothing is being measured — while the runner is very much alive, polling
-  // for a decision every second. Reading it as "the run ended" froze **Run finished** into the
-  // thread directly above a card saying *the run is holding before L1*, and the operator, told the
-  // campaign was over, had no reason to touch the three buttons that would have released it. The
-  // right predicate was already imported and already used one line below, for `listening`.
+  // Freeze a run into the thread on the live→stopped EDGE; the identity check stops a cycle switch filing
+  // the new cycle's numbers under the old one's ending. `hasLiveProducer`, NOT `isLive` (false at the gate).
   const liveCycleKey = cycleId && hasLiveProducer(dash?.run_phase) ? cycleId : null;
   const [prevLiveCycle, setPrevLiveCycle] = useState(liveCycleKey);
   if (liveCycleKey !== prevLiveCycle) {
@@ -95,9 +59,6 @@ export function ChatPane({ checkinCampaignId, onOpenDashboard }: Props) {
     }
   }
 
-  // The chat's curated layer over the cycle event stream (the webapp's first
-  // SSE consumer) + the inline gate-decision merge surface. Both bind to the
-  // viewed (campaign, cycle); the gate decision is raised from `run_phase`.
   const live = useCycleEvents(viewedPath);
   const decision = deriveDecision(dash?.run_phase, dash);
   const liveSegment =
@@ -114,24 +75,19 @@ export function ChatPane({ checkinCampaignId, onOpenDashboard }: Props) {
       />
     ) : null;
 
-  // Shared connector view (one provider-level fetch + health poll).
   const cv = useConnector();
-  // An L4 self-optimization unit has no cache.json roster — its samples ARE the
-  // inner campaigns — so the hard-samples panels point to the inner run instead.
+  // An L4 unit has no cache.json roster — its samples ARE the inner campaigns.
   const selfOpt = isSelfOptimization(cv.backendType);
   const { node: selectedNode, setSelectionForNode } = useSelection();
-  // While a campaign is being set up, the connector preview shows the DRAFT's
-  // searchpoint (not the prior cycle / origin). Carries through awaiting-context
-  // and ready — the two phases that hold a draft — and ONLY for the campaign that
-  // draft is (`draftForCampaign`): the ingest thread outlives a sidebar selection.
+  // A campaign being set up previews the DRAFT's searchpoint, only for the campaign that draft is:
+  // the ingest thread outlives a sidebar selection.
   const previewDraft = draftForCampaign(
     ingest.phase.stage === "ready" || ingest.phase.stage === "awaiting-context"
       ? ingest.phase.draft
       : null,
     leafCampaignId,
   );
-  // The two documents the draft owns. `NodeDetail` takes these rather than the wire itself, so
-  // the panel cannot read config from a place the served resolution did not answer for.
+  // The draft's documents, not the wire, so config is read only where the served resolution answered.
   const authoring = useMemo(
     () =>
       previewDraft
@@ -142,10 +98,7 @@ export function ChatPane({ checkinCampaignId, onOpenDashboard }: Props) {
         : undefined,
     [previewDraft],
   );
-  // Auto-open once per mount as soon as a cycle is bound — saves the operator
-  // one click on page reload. The ref guard means that if the user manually
-  // closes the drawer and the cycle later changes (or a new cycle is bound),
-  // their close preference stays respected instead of being overridden.
+  // Auto-open once per mount; the ref keeps a manual close respected across cycle changes.
   const samplesAutoOpened = useRef(false);
   useEffect(() => {
     if (cycleId && !samplesAutoOpened.current) {
@@ -156,25 +109,15 @@ export function ChatPane({ checkinCampaignId, onOpenDashboard }: Props) {
 
   return (
     <div className="content chat-content" id="content-chat">
-      {/* One anchor on top of the chat: the pipeline hero. The job-bar that used to sit in
-          its header row is gone — cycle picker, KPI chips and the status/spend panel are all
-          on the shell's RemoteControl now, which renders on every tab rather than this one. */}
       <div className="wf-hero">
-        {/* The corner buttons are the zoom axis and belong to the stack, which is the
-            only thing that knows how many levels there are to zoom to. Ingest keeps its
-            node list always-on: there you configure nodes, not watch them. */}
+        {/* The corner zoom buttons belong to the stack, the only thing that knows the level count. */}
         <PipelineStack
           datasetName={datasetName}
           samplesOpen={samplesOpen}
           onToggleSamples={toggleSamples}
         />
-        {/* The round the hero's node detail reads. Its twin scopes the Dashboard's
-            canvas from that card's own toolbar — one control per picture, both
-            writing the single `selection.round` axis, so crossing tabs holds the
-            round. Without one here the chat could only ever inspect live. */}
+        {/* Its twin is on the Dashboard canvas toolbar; both write the one `selection.round` axis. */}
         <RoundAxis />
-        {/* Either scope. The optimizer rail used to light a node and open nothing,
-            because `optimizer`-scoped detail was mounted on the Dashboard alone. */}
         {selectedNode && (
           <NodeDetail
             node={selectedNode}
@@ -182,9 +125,6 @@ export function ChatPane({ checkinCampaignId, onOpenDashboard }: Props) {
             onClose={() => setSelectionForNode(null)}
           />
         )}
-        {/* No pp-self branch: an outer self-optimization cycle has no per-sample
-            roster to plot, and pointing at the inner run here was a third copy of
-            a `drillInto` the sidebar and the L4 panel rows already offer. */}
         {samplesOpen && !selfOpt && <HardSamplesHeatmap />}
       </div>
 
@@ -192,8 +132,6 @@ export function ChatPane({ checkinCampaignId, onOpenDashboard }: Props) {
         <div className="chat-panel">
           <IngestConversation
             flow={ingest}
-            // The entry list, on the landing surface. Withholding it here is what
-            // left a visitor with no file of their own and no way in at all.
             origins={collection.kind === "ready" ? collection.origins : undefined}
             datasets={collection.kind === "ready" ? collection.entries : undefined}
             liveSegment={composing ? undefined : liveSegment}

@@ -3,13 +3,8 @@
 import type { DatasetIndexEntry, OriginEntry } from "@/lib/api";
 import { fmtPct0 } from "@/lib/format";
 
-// New Campaign entry list — two scrollable menus (≤8 rows each), one click:
-//   Origins  → reuse a real, runnable origin (from `GET /origins` — campaign-
-//              backed or prepared). Opens it editable, then Start; skips the
-//              checkin node, graph enters at l1_generate.
-//   Datasets → make a NEW origin from raw material via the check-in assistant.
-// The two are now distinct surfaces: origins are starting points that exist
-// (run or prepared), datasets are raw material that still needs an origin.
+// New Campaign entry list. An origin reuses a runnable starting point and skips the check-in
+// (the graph enters at l1_generate); a dataset is raw material the check-in turns into one.
 export function DatasetPickList({
   origins,
   datasets,
@@ -31,7 +26,6 @@ export function DatasetPickList({
     );
   }
 
-  // "N campaigns · last 42%", or "prepared" for an origin with no campaign yet.
   const originMeta = (o: OriginEntry): string => {
     if (o.n_campaigns === 0) return "prepared";
     const acc = o.origin_accuracy == null ? "" : ` · ${fmtPct0(o.origin_accuracy)}`;
@@ -40,8 +34,6 @@ export function DatasetPickList({
 
   return (
     <div className="chat-msg ai ingest-picklist">
-      {/* No lead line: the fold's summary names what this is, and the composer's own
-          placeholder already offers the drop. */}
       {origins.length > 0 ? (
         <div className="ingest-picklist-group">
           <span className="ingest-picklist-head">Origins</span>

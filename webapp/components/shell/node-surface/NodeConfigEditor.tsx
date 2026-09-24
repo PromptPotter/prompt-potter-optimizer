@@ -18,73 +18,34 @@ import {
 } from "@/lib/derivations";
 import type { PipelineStatus } from "@/lib/types";
 
-// THE node-config editor. One surface, every host — a check-in authoring an origin, a fork being
-// steered, a finished searchpoint being read. `mode` picks how a row is SEEDED and which value
-// transport it emits on (a draft merges a whole `pipeline_overlay`; a fork seeds a sparse
-// `{node:{param:value}}`), and it decides nothing the operator can see.
-//
-// Two rules govern what draws, both owned by `webapp/CLAUDE.md`: an AXIS is one `ui/ValueList` —
-// value set, permitted subset, start value — so an enumerable row carries no padlock, `model`
-// included; and a ROW answers who may SEARCH it and what WIDGET can express it, never a third
-// question about whether the operator may set it.
-//
-// **A CHANNEL THE HOST DOES NOT PASS IS A CONTROL THAT DOES NOT DRAW** — per FACT, not per
-// callback, which is what lets one component serve every host. `onApply` owns both facts at once
-// (its patch carries `config` and `optimizer`), `onChange` the value alone, `onNarrowing` the
-// permission alone; none of the three and the rows are text. Test the FACT (`canSetValue`,
-// `narrowChannel`), never one callback: reading the tick column off `onNarrowing` would take it
-// from the check-in surface, which narrows through `onApply`. `readOnly` is the separate case of a
-// host that owns a channel and has it withheld.
-//
-// The PICKED MODEL qualifies the reasoning ladder on the MENU — a node's list is a default
-// authored before anyone knew which model would run there. On the MENU only: the ticks stay the
-// campaign's own declaration, because the editor emits those back.
+// The one node-config editor for every host; `mode` picks only the value transport. Governed by
+// `webapp/CLAUDE.md` § Component conventions (an axis is a `ValueList`; gate on the fact, not a callback).
 export function NodeConfigEditor(props: {
   mode: ConfigMode;
   schema: Record<string, NodeConfigParam[]> | null;
-  // How the read that produced `schema` WENT — required, and travelling beside it, because a null
-  // schema is four different facts and this surface used to assert the least likely one. Not read
-  // off the connector context here: two hosts resolve a schema from a different read (the
-  // optimizer manifest, a draft's own response), and a status taken from the context would then
-  // describe someone else's fetch.
+  // Not read off the connector context: two hosts resolve `schema` from a different read, and the
+  // context's status would describe someone else's fetch.
   schemaStatus: PipelineStatus;
-  // The node-config document being edited. Its ROLE differs by mode, which is why each editor
-  // below receives it under its own name: search-space MERGES a patch onto it and reads no row
-  // from it (`patchBase`), values SEEDS its rows from it (`valuesSeed`).
+  // search-space merges a patch onto it and reads no row from it; values seeds its rows from it.
   overlay: Record<string, unknown>;
-  // Whether the ACTIVE chain is one node, SERVED — never counted here. The config rows cover
-  // every DECLARED node, and a check-in declares its connector's whole pipeline while running one
-  // step, so counting them drew locks the engine ignores.
+  // SERVED, never counted: rows cover every DECLARED node, while the active chain may run one.
   isSingleNode?: boolean;
   node?: string;
   readOnly?: boolean;
-  // values mode only: when false, a model the origin does not permit is held read-only —
-  // steering to one is the ADR-0005 babysit act, allowed only for a principal holding
-  // `campaign.babysit`. Default true keeps every other caller (draft setup, inspect)
-  // unchanged; the steer form passes the operator's cap.
+  // values mode: false holds un-permitted models read-only — steering to one is the ADR-0005
+  // babysit act, needing `campaign.babysit`.
   babysitEditable?: boolean;
-  // The half-width hosts' DENSITY (the chat run card, a measurement's run half). It tightens the
-  // grid and nothing else: `compact` is never a subset, or an unmoved searchpoint folds away.
   compact?: boolean;
-  // What each model on the menu ACCEPTS and costs, keyed by model id. Qualifies the reasoning
-  // row and backs the metadata card. Absent = nothing resolved, which every reader renders as
-  // UNKNOWN — never as a menu of unsupported models.
+  // Absent = UNKNOWN, never "no model supports it".
   modelCapabilities?: Record<string, ModelCapability>;
-  // values mode only: the origin's per-node permitted model sets, so a steer the operator may
-  // not make without the babysit cap is disabled rather than rejected on confirm.
+  // values mode only: an un-permitted steer is disabled rather than rejected on confirm.
   permittedModels?: Record<string, readonly string[]>;
   onApply?: (patch: DraftPatch) => void;
-  // search-space only: this node's permission half alone, for a host whose values are set
-  // elsewhere. Emitted alongside `onApply` where both are passed, so the draft origin cannot
-  // drift from the narrowing it implies.
-  // Per NODE, because this editor can span the whole pipeline: the whole-pipeline host used to
-  // be a second panel that scoped itself one node at a time, and folding that back in without
-  // the node id would emit one narrowing mixing every node's axes.
+  // search-space only: the permission half alone, per NODE — the editor can span the whole pipeline.
   onNarrowing?: (node: string, narrowing: NodeSearchNarrowing) => void;
   onChange?: (overlay: Record<string, Record<string, unknown>>) => void;
-  // Params a sibling region of this surface asks instead — the structured-output tree owns each
-  // field's description where it is shown. Not DRAWN here, still in every emit: a row missing from
-  // `rows` would leave `param_keys` and read as the operator closing it.
+  // Not drawn here but still in every emit: a row missing from `rows` would leave `param_keys`,
+  // reading as the operator closing it.
   keysAskedElsewhere?: readonly string[];
 }) {
   const {
@@ -105,17 +66,15 @@ export function NodeConfigEditor(props: {
     keysAskedElsewhere,
   } = props;
   const nodeId = node ?? "";
-  // The rows as SERVED, kept beside the edited copy: `seedOverlayFromRows` needs the untouched
-  // seed to tell an operator's edit from an inherited value, and diffing the live rows against
-  // themselves cannot.
+  // Kept beside the edited copy: `seedOverlayFromRows` needs the untouched seed to tell an edit
+  // from an inherited value.
   const base = useMemo(
     () => configRows(schema, overlay, mode, node),
     [schema, overlay, mode, node],
   );
   const [rows, setRows] = useState<ConfigRow[]>(base);
   const [touched, setTouched] = useState<ReadonlySet<string>>(() => new Set());
-  // Render-phase guarded reset. The seed lands ASYNC in the steer fork (`useRoundFile`), so an
-  // edit made before it arrives must not keep masking the value it brings.
+  // The steer fork's seed lands async (`useRoundFile`); an earlier edit must not mask it.
   const [prevBase, setPrevBase] = useState(base);
   if (base !== prevBase) {
     setPrevBase(base);
@@ -123,16 +82,11 @@ export function NodeConfigEditor(props: {
     setTouched(new Set());
   }
 
-  // Prompt rows and the keys a sibling region asks ride every emit (a lock is a `param_keys`
-  // membership) but are drawn elsewhere — so HERE they are neither drawn nor held by the node lock.
   const drawn = (r: ConfigRow) => r.kind !== "prompt" && !keysAskedElsewhere?.includes(r.key);
   if (!rows.some(drawn)) {
     return <EmptyConfig status={schemaStatus} schema={schema} node={node} />;
   }
 
-  // Each emitter fires only where its host owns the channel, and the two VALUE transports are
-  // the only thing `mode` still decides: a draft merges a whole `pipeline_overlay`, a fork seeds
-  // a sparse `{node:{param:value}}`. Everything above this line is one surface.
   const persist = (next: ConfigRow[], marks: ReadonlySet<string>) => {
     onApply?.(nodeOverlayPatch(overlay, nodeId, next));
     for (const n of new Set(next.map((r) => r.node))) {
@@ -160,13 +114,9 @@ export function NodeConfigEditor(props: {
     persist(next, marks);
   };
 
-  // Which of the two facts this host owns. A single-node pipeline has no NODE lock — the node row
-  // is the server's `is_single_node` guard — but each padlock and each tick still narrows it.
   const narrowChannel = Boolean(onApply || onNarrowing);
   const canSetValue = Boolean(onApply || onChange);
 
-  // ONE answer to "does this row carry a padlock", for the row and the node lock alike: a free
-  // value no optimizer is barred from. A `never_axis` key wears its badge, whose title says why.
   const lockable = (r: ConfigRow) =>
     narrowChannel && drawn(r) && r.kind !== "model" && r.kind !== "enum" && !r.neverAxis;
   const freeValued = rows.filter(lockable);
@@ -185,20 +135,15 @@ export function NodeConfigEditor(props: {
     if (next.length === 0) return; // an axis with nothing permitted has nothing to run
     update(i, { allowed: next });
   };
-  // A value the catalogue does not carry — a model added since the menu was written, a rung the
-  // node never declared. It joins the PERMITTED set, which is where a widening rides: the overlay
-  // states the axis's whole value space and `PipelineSchema.narrow` REPLACES rather than
-  // intersects (only `param_keys` subsets), so it survives the mint on a reused dataset too.
+  // A widening rides the PERMITTED set: `PipelineSchema.narrow` replaces rather than intersects it,
+  // so an added value survives the mint on a reused dataset.
   const add = (i: number, value: string) => {
     const r = rows[i];
     if (!r || r.allowed.includes(value)) return;
     update(i, { allowed: [...r.allowed, value] });
   };
 
-  // The picked model qualifies the reasoning row and backs the card. Measured:
-  // `qwen/qwen3.7-flash` takes `reasoning`/`include_reasoning` and no `reasoning_effort` at all,
-  // so a node's ladder is inert on it — the axis would otherwise read as live and the optimizer
-  // would spend rounds moving a parameter nobody receives.
+  // The picked model qualifies the reasoning ladder on the MENU only; the ticks stay the campaign's.
   const pickedModel = rows.find((r) => r.kind === "model")?.value ?? "";
   const caps = modelCapabilities?.[pickedModel];
 
@@ -211,9 +156,7 @@ export function NodeConfigEditor(props: {
             <ConfigRowView
               key={`${r.node}.${r.key}`}
               row={r}
-              // The general case of the struck rungs below: a key the picked model does not
-              // accept. `unsupported_params` is the SERVED answer over what we actually send, so
-              // `undefined` here means the catalogue said nothing and the row claims nothing.
+              // `unsupported_params` absent = the catalogue said nothing, and the row claims nothing.
               ignoredBy={caps?.unsupported_params?.includes(r.key) ? pickedModel : undefined}
               readOnly={readOnly || (!babysitEditable && r.neverAxis === "cost_lever")}
               onToggleLock={lockable(r) ? () => update(i, { locked: !r.locked }) : undefined}
@@ -222,9 +165,7 @@ export function NodeConfigEditor(props: {
           );
         }
         const { values, inert, userAdded } = axisMenu(r, caps);
-        // Steering the model outside what the origin permits is the ADR-0005 babysit act. Without
-        // the cap those values are `inert` — the same channel a capability refusal uses, because
-        // to the operator they are one fact: offered by the axis, refused downstream.
+        // Without the babysit cap, un-permitted models ride `inert`, like a capability refusal.
         const barred =
           r.kind === "model" && !babysitEditable
             ? values.filter((v) => !(permittedModels?.[r.node] ?? []).includes(v))
@@ -286,9 +227,7 @@ export function NodeConfigEditor(props: {
   );
 }
 
-// No rows is FOUR facts, and saying the last one whatever the truth is makes a read that never
-// landed report a node with nothing to configure. `frontend-surface-contract.md::I1`: resolve to
-// live, empty or error, never one of them wearing another's words.
+// No rows is several facts; `frontend-surface-contract.md::I1` — never one wearing another's words.
 function EmptyConfig({
   status,
   schema,
@@ -298,10 +237,8 @@ function EmptyConfig({
   schema: Record<string, NodeConfigParam[]> | null;
   node?: string;
 }) {
-  // Served and still empty: the node is absent from the resolution, or every param it has is a
-  // prompt field — the one kind these rows subtract. The WHOLE-PIPELINE hosts pass no node, so the
-  // second arm reads the flattened schema; scoped to `node` it would fall through and tell a
-  // prompt-only pipeline (pp-self) that its nodes declare nothing.
+  // Whole-pipeline hosts pass no node, so this reads the flattened schema — else a prompt-only
+  // pipeline would read as declaring nothing.
   const scoped = node !== undefined && schema !== null ? schema[node] : undefined;
   const declared = node !== undefined ? scoped : Object.values(schema ?? {}).flat();
   const subject = node !== undefined ? "node" : "pipeline";
@@ -324,20 +261,8 @@ function EmptyConfig({
   );
 }
 
-/** The menu one axis offers, plus the two provenance facts about it — kept apart, because a value
- *  can carry both.
- *
- *  `values` unions in what is PERMITTED, so a value the operator ticked and something then refused
- *  stays on screen rather than vanishing with its permission still on the wire. The start value
- *  leads by prepend-and-filter, not by a comparator: "move one element to the front" is not a
- *  valid total order and sorts only accidentally stably.
- *
- *  `inert` = the picked MODEL refuses it, and only where the model actually answered — an UNKNOWN
- *  capability must never strike a rung. **Ticked AND struck is the intersection the engine will
- *  apply** (`param_options`), shown as the two facts it is: folding them here would let a repaint
- *  emit the model's refusals as the campaign's own narrowing. `userAdded` = neither the node nor
- *  the model offered it, so the operator typed it — which is why `available_models` is served as
- *  the ADMIN's catalogue alone. */
+// `inert` strikes only where the model answered — UNKNOWN never strikes. Ticked AND struck stay two
+// facts: folding them would emit the model's refusals as the campaign's own narrowing.
 function axisMenu(row: ConfigRow, caps: ModelCapability | undefined) {
   const ladder = effortLadder(row, caps);
   const rest = [...new Set([...ladder, ...row.allowed])].filter((v) => v !== row.value);
@@ -351,9 +276,6 @@ function axisMenu(row: ConfigRow, caps: ModelCapability | undefined) {
   };
 }
 
-/** One served line under a value list: who the ticks license, and — on the reasoning row —
- *  whose claim moved it. Every arm of `reasoning_note` is populated server-side, so an unknown
- *  model SAYS it is unknown rather than rendering as a silent full ladder. */
 function axisNote(
   row: ConfigRow,
   caps: ModelCapability | undefined,
@@ -367,8 +289,6 @@ function axisNote(
   return `${grant} ${pickedModel}: ${caps.reasoning_note}`;
 }
 
-/** What the provider says about the picked model. Only what is PRESENT renders — the catalogue
- *  is a third party's claim, and a field it drops must degrade the card rather than blank it. */
 function ModelCard({ caps }: { caps: ModelCapability }) {
   const tok = (v: number | null) => (v === null ? null : `${v.toLocaleString()} tok`);
   const usd = (v: number | null) => (v === null ? "?" : `$${v.toFixed(2)}`);
@@ -398,8 +318,7 @@ function ModelCard({ caps }: { caps: ModelCapability }) {
   );
 }
 
-// The served `source`, never whether the seed carries the key: a searchpoint's seed carries every
-// key. `seed` stays unmarked because a steered fork's seed writes every key, so it would mark all.
+// The served `source`, never seed membership: a steered fork's seed writes every key.
 function EvolvedMark({ row }: { row: ConfigRow }) {
   return row.source === "evolved" ? (
     <span className="config-evolved" title="Set by this searchpoint's own mutation">
@@ -408,8 +327,6 @@ function EvolvedMark({ row }: { row: ConfigRow }) {
   ) : null;
 }
 
-// One row of FREE-VALUED config — number, string, bool, nested. An enumerable axis is a
-// `ValueList` and takes none of this chrome, in every host alike.
 function ConfigRowView({
   row,
   readOnly,
@@ -419,11 +336,7 @@ function ConfigRowView({
 }: {
   row: ConfigRow;
   readOnly: boolean;
-  // The picked model, when it does NOT accept this key — so the row says the value is dropped
-  // rather than showing it as a live setting. Undefined = accepted, or the catalogue never said.
   ignoredBy?: string;
-  // Absent = no padlock here (the host narrows nothing, or no optimizer may search the key) or no
-  // value (a permissions-only host). Each renders as what it is instead.
   onToggleLock?: () => void;
   onValue?: (v: string) => void;
 }) {
@@ -432,10 +345,6 @@ function ConfigRowView({
       <span className="config-label">
         {row.key}
         <EvolvedMark row={row} />
-        {/* A setting the provider DROPS must not render as live: the value sits there looking
-            set, the model never receives it, and nothing else says so. Wears the same badge as a
-            held axis, because to a reader it is the same fact — not in play, reason in the
-            title. */}
         {ignoredBy ? (
           <span
             className="config-optlocked"
@@ -444,10 +353,6 @@ function ConfigRowView({
             ⊘
           </span>
         ) : null}
-        {/* Two states — the optimizer may move this axis, or it may not — as the 🔓 / 🔒 pair the
-            hint under this editor teaches. The reasons it may not are different operator remedies,
-            so they ride the title with the layer names, read one row at a time. Where the host can
-            lock, the BUTTON takes the badge's place, so every value box starts on one edge. */}
         {onToggleLock ? (
           <LockButton locked={row.locked} readOnly={readOnly} onClick={onToggleLock} />
         ) : row.movableBy.length > 0 ? (
@@ -465,17 +370,12 @@ function ConfigRowView({
       </span>
       <div className="config-value">
         {!onValue ? (
-          // No value channel — a sibling surface sets this one, or the value is structured and
-          // nothing types it. Text rather than a disabled input: a greyed box says "you may not",
-          // where the truth is "not here". A nested value keeps its own line breaks, which is the
-          // difference between a readable schema and one long line of JSON.
+          // Text, not a disabled input: a greyed box says "you may not" where the truth is "not here".
           <span className={cx("config-static", row.kind === "nested" && "is-structured")}>
             {row.value || "—"}
           </span>
         ) : row.kind === "nested" ? (
-          // A box that can hold a structured value, and refuses a draft it cannot parse — the row
-          // keeps what was typed instead of emitting a string over an object. `parseNested` is the
-          // SAME question the emitter asks, so a box cannot accept what the emitter would drop.
+          // `parseNested` is the emitter's own question, so the box cannot accept what it would drop.
           <CommitInput
             rows={6}
             validate={(d) => parseNested(d) !== undefined}
@@ -496,9 +396,7 @@ function ConfigRowView({
             onChange={(e) => onValue(e.target.checked ? "true" : "false")}
           />
         ) : (
-          // Commits on Enter or blur, never per keystroke: this emission strikes a searchpoint and
-          // everything descending from it off the Compare cladogram, and per-keystroke that
-          // happens on `"1"` en route to `"12"`.
+          // Never per keystroke: each emission invalidates a searchpoint and its descendants on Compare.
           <CommitInput
             type={row.kind === "number" ? "number" : "text"}
             inputMode={row.kind === "number" ? "decimal" : undefined}
@@ -515,16 +413,10 @@ function ConfigRowView({
   );
 }
 
-// `neverAxis` outranks `held` (the campaign's own narrowing at mint): a key that could never be an
-// axis stays that however the campaign narrowed. Both of its reasons are SERVED — the browser
-// telling them apart by key name is what made every schema-owned row claim to be a cost lever.
-// `model` reaches neither arm: it is an ordinary axis and reads as held or unsearched like the
-// rest.
+// `neverAxis` outranks `held`. Both `neverAxis` reasons are SERVED — never tell them apart by key name.
 function lockReason(row: ConfigRow, readOnly: boolean): string {
   if (row.neverAxis === "schema_owned") {
-    // No optimizer may emit these keys (`SCHEMA_OWNED_FIELDS`) and no fork widens that. The
-    // OPERATOR sets it here like any other value: `never_axis` says who may SEARCH a key, never
-    // who may set it.
+    // `never_axis` says who may SEARCH a key (`SCHEMA_OWNED_FIELDS`), never who may set it.
     return "The structured-output contract — the shape this node answers in, and which slot carries the answer. No optimizer may search it; set it here to steer a fork onto a different contract.";
   }
   if (row.neverAxis === "cost_lever") {

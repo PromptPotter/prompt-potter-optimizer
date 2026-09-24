@@ -6,19 +6,10 @@ import { cx } from "@/lib/cx";
 import { PROMPT_STRING_FIELDS, promptFieldLabel } from "@/lib/prompt-fields";
 import { LockButton } from "./NodeConfigEditor";
 
-// The starting-prompt control panel. The check-in's decomposition (or an
-// authored dataset's prompt) lands on `draft.origin_prompt_fields` as a
-// PromptTemplate field dict; this surfaces the six string fields as editable
-// text. Edits persist via `edit-draft-campaign` on blur, unless `readOnly`
-// (the minted-campaign node panel shows the origin prompt with no draft to
-// write to).
+// The starting prompt's six string fields (`draft.origin_prompt_fields`), edited in place and
+// persisted via `edit-draft-campaign` on blur.
 
-// AUTHORING layout per field — the placeholder hint, and the box's height where the browser
-// cannot size it to its text (`field-sizing`).
-// The field's NAME is not here: `promptFieldLabel` owns it, beside the canonical
-// key list (the TS/Py seam, `lib/prompt-fields.ts`), because the run card's
-// "changed vs origin" summary names the same fields and two labels for one field is
-// a synonym, not a second fact. Render order + membership come from that list too.
+// A field's label is not here: `promptFieldLabel` owns it, shared with the run card's diff summary.
 const FIELD_META: Record<string, { hint: string; rows: number }> = {
   persona: { hint: "Who the model should act as", rows: 2 },
   task_intent: { hint: "The goal, in one line", rows: 2 },
@@ -52,28 +43,15 @@ export function PromptFieldsEditor({
 }: {
   value: Record<string, unknown>;
   onApply?: (patch: DraftPatch) => void;
-  // Each field's lock off its SERVED row — whether the optimizer may rewrite it is a `param_keys`
-  // membership like any param's. Present exactly where the host can emit one (`onLock`).
+  // Each field's lock off its SERVED row (a `param_keys` membership like any param's).
   locks?: Record<string, boolean>;
   onLock?: (field: string, locked: boolean) => void;
-  // When true, disable every field — the minted-campaign node panel shows the
-  // origin prompt read-only (no draft to persist to).
   readOnly?: boolean;
-  // Half-width host (the chat run card): shorter boxes, and — read-only only —
-  // empty fields dropped. An empty slot is an affordance while AUTHORING and pure
-  // noise while inspecting, so the drop is gated on `readOnly`, never on `compact`
-  // alone; hiding a typeable slot would make the prompt look shorter than it is.
+  // Empty fields drop only when also `readOnly`: hiding a typeable slot makes the prompt look shorter.
   compact?: boolean;
 }) {
-  // Fingerprint the incoming prompt; render-phase reset when it changes (e.g.
-  // the check-in just populated it) so external updates flow in without a stale
-  // frame. Local edits between resets are the operator's working copy.
-  //
-  // TWO latches, `ui/CommitInput`'s discipline over a record rather than a scalar: `prevFp` is
-  // "the prop moved", `sentFp` is "what was last handed UP", and one slot cannot tell them apart.
-  // The component itself is not reusable here — it commits one value, while this surface merges
-  // all six into ONE `edit-draft-campaign` patch, so six of them would make the wire chattier
-  // rather than quieter.
+  // `ui/CommitInput`'s two latches over a record: `prevFp` is "the prop moved", `sentFp` "what was
+  // last handed up". Not CommitInput itself, since all six fields merge into ONE patch.
   const fingerprint = JSON.stringify(asStrings(value));
   const [prevFp, setPrevFp] = useState(fingerprint);
   const [sentFp, setSentFp] = useState(fingerprint);
@@ -86,14 +64,10 @@ export function PromptFieldsEditor({
 
   const setField = (key: string, v: string) => setFields((prev) => ({ ...prev, [key]: v }));
 
-  // Persist on blur — never when readonly, and never for a value already sent: tabbing across the
-  // six boxes fired six identical `edit-draft-campaign` patches, each a CommandRecord on the
-  // check-in ledger for an edit nobody made. Merge over `value` so few_shot_examples / plan
-  // survive untouched.
+  // Never re-send a value already sent: each patch is a CommandRecord on the check-in ledger.
   const commit = () => {
     if (readOnly || !onApply) return;
-    // Through `asStrings` so both sides of the compare are keyed in `FIELDS` order — comparing the
-    // raw state would make correctness depend on React preserving insertion order.
+    // Through `asStrings` so both sides of the compare are keyed in `FIELDS` order.
     const draftFp = JSON.stringify(asStrings(fields));
     if (draftFp === sentFp) return;
     setSentFp(draftFp);
@@ -108,7 +82,6 @@ export function PromptFieldsEditor({
 
   const shown = compact && readOnly ? FIELDS.filter((f) => (fields[f.key] ?? "").trim()) : FIELDS;
 
-  // Draws no frame: `NodeSurface` is its only caller and already provides one.
   return (
     <section className={cx("prompt-editor", compact && "is-compact")}>
       <span className="prompt-editor-title">Starting prompt</span>

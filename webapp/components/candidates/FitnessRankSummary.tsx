@@ -1,31 +1,22 @@
 import type { CandidateView } from "@/lib/types";
 import { fmtNum } from "@/lib/format";
 
-// Both rank maps are SERVED (`composite_rank` / `lens_rank`, ranked among siblings by the
-// backend) — this panel folds them, it does not build them. An ordering is a score, and the
-// local sort that used to live here re-answered the question under its own tie rule.
 function ranks(lines: { key: string; r: number | null }[]): Map<string, number> {
   return new Map(lines.filter((l) => l.r != null).map((l) => [l.key, l.r as number]));
 }
 
-// Top bar by composite value — NOT the campaign winner (the real crown is
-// θ-elected `isWinner`). This mask panel ranks on composite; no θ-election claim.
+// Top bar by composite — NOT the round winner, which is θ-elected (`isWinner`).
 function topByFitness(rank: Map<string, number>): string | null {
   for (const [key, r] of rank) if (r === 1) return key;
   return null;
 }
 
-// Rank-shift read-out for the scoring mask — compares each candidate's
-// actual composite rank against its masked rank and flags whether the top
-// fitness bar flips. Spans every bar including origin and historical rounds.
 export function FitnessRankSummary({
   views,
   criterion,
 }: {
   views: CandidateView[];
-  // Whether the editor above has produced a criterion at all — `lensOf(mask) != null`. Asked as
-  // the one question rather than "are tiles ticked", because the expression mode builds a
-  // criterion with no tiles at all and read the empty-selection way.
+  // `lensOf(mask) != null`, not "are tiles ticked": Expression mode builds a criterion with no tiles.
   criterion: boolean;
 }) {
   if (views.length === 0) {

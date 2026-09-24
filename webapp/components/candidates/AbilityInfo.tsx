@@ -3,26 +3,11 @@
 import type { AbilityReading } from "@/lib/api/types.generated";
 import type { ThetaCaveat as Caveat } from "@/lib/types";
 
-// Teaches the one piece of vocabulary the fitness surface can't show as a bar:
-// difficulty-adjusted ability θ, the metric the round winner is actually elected
-// on. Without this, a θ-elected winner sitting below a higher-accuracy sibling
-// reads as a contradiction. Copy is the human-facing twin of
-// docs/methods/verdict-resolution.md — one corpus, two audiences; don't
-// fork the explanation, keep them in step.
-//
-// Content only — no trigger of its own. It's read once and then never again, so it
-// had no business owning a permanent toolbar button; it lives inside the card's
-// `⋯` menu, behind a disclosure.
-//
-// `model` is null while the ruler is cold — a flat ruler is neither 1PL nor 2PL, so the
-// third string is a real state, not a placeholder. Never collapse it into "1PL".
+// Copy is the human-facing twin of docs/methods/verdict-resolution.md — keep the two in step.
+// `model` null means a cold ruler (neither 1PL nor 2PL); never collapse it into "1PL".
 
-// The five states in which θ is NOT ability. SERVED, never derived here — the backend decides
-// (`domain/ruler.py::theta_caveat` for the four scale states, `results.py::is_floor_pinned` for
-// the per-arm one) and this only puts it into words, so the screen and the optimizer's own
-// `confounds` panel cannot disagree about whether a number means anything. `Record<Caveat, …>` is
-// total, so adding a member to the Python enum fails the build here rather than rendering blank.
-// One copy, read by the inline notice, the explainer and the sidebar row card.
+// SERVED, never derived here (`domain/ruler.py::theta_caveat`, `results.py::is_floor_pinned`),
+// so the screen and the optimizer's `confounds` panel cannot disagree.
 export const CAVEAT_COPY: Record<Caveat, { head: string; body: string }> = {
   cold_ruler: {
     head: "θ is not ability yet",
@@ -48,14 +33,8 @@ export const CAVEAT_COPY: Record<Caveat, { head: string; body: string }> = {
 
 const fmtSpan = (v: number | null) => (v == null ? null : `${v.toFixed(2)} logits`);
 
-// Silent unless a caveat is live — a warning that renders every round is read as boilerplate by
-// the third one, which is the same rule the `confounds` panel keeps on the optimizer's side.
-//
-// Takes the CAVEAT, not the reading, because the five arrive on two different carriers: four are
-// facts about the round's scale and ride `RoundResult.ability`, while `floor_pinned` is a fact
-// about one arm and rides that candidate's row. One component either way — the reader's question
-// is the same, so a second notice would be the same warning under a second name. The spans are
-// optional for the same reason: only the scale caveats have any.
+// Takes the caveat, not the reading: `floor_pinned` rides the candidate's row, the four scale
+// caveats ride `RoundResult.ability` — only those carry spans.
 export function ThetaCaveatNotice({
   caveat,
   ability,

@@ -11,17 +11,12 @@ import {
 } from "../forest-layout";
 import { candidatesOf, nodeKeyOf } from "@/lib/derivations";
 
-// --- builders -------------------------------------------------------------
 
-// A served node with every field at its serialized default — `over` names only
-// what the case is about.
 function node(
   over: Partial<LineageNode> & Pick<LineageNode, "kind" | "id" | "label">,
 ): LineageNode {
   return {
     parent_id: null,
-    // A candidate this course minted itself, so both labels agree. A fork-contributed
-    // attempt is the case where they diverge, and `over` names it when that is the point.
     course_label: over.label,
     path: [],
     children: [],
@@ -67,15 +62,11 @@ function node(
   };
 }
 
-// `counts` is one entry per round (round number is the index + 1); each value is
-// the candidate count for that round. The last candidate wins, so every round here
-// closes AND advances the parent.
+// `counts[i]` = candidates in round i+1; the last one wins, so every round advances.
 function cands(counts: number[]): LineageNode[] {
   return candsH(counts.map((n) => ({ n })));
 }
 
-// `held` marks a round that crowned nobody — it either closed with no candidate
-// beating the parent, or never closed at all. Either way there is no winner.
 function candsH(rounds: { n: number; held?: boolean }[]): LineageNode[] {
   return rounds.flatMap((r, ri) =>
     Array.from({ length: r.n }, (_, i) =>
@@ -96,8 +87,6 @@ function course(
   children: LineageNode[],
   over: Partial<LineageNode> = {},
 ): LineageNode {
-  // A course is addressed by its PATH, and the lane key is built from it. Default to
-  // the tenant's own store; a sandboxed course passes its own `path` via `over`.
   const path = over.path ?? [{ campaign_id: "camp", cycle_id: id }];
   return node({
     kind: "course",
@@ -107,21 +96,15 @@ function course(
     dataset_name: "ds",
     ...over,
     path,
-    // A candidate wears its COURSE's path, as the server stamps it — `nodeKeyOf` is
-    // `(path, id)`, so without it two seeds' identically-labelled arms share one address and
-    // anything keyed on it silently folds them together.
+    // Without its course's path, two seeds' identically-labelled arms share one `nodeKeyOf`.
     children: children.map((c) => (c.kind === "candidate" ? { ...c, path } : c)),
   });
 }
 
-// A course's lane key, exactly as `layout` computes it — asked of the same function
-// rather than hand-rolled here, so the test cannot drift from the key it asserts on.
 function laneKey(id: string, over: Partial<LineageNode> = {}): string {
   return nodeKeyOf(course(id, [], over));
 }
 
-// Hang a course off the winner of `round` — the edge the tree serves, and the only
-// thing a fork's geometry needs to know.
 function hangOffWinner(parent: LineageNode, round: number, child: LineageNode): LineageNode {
   const children = parent.children.map((c) =>
     c.round === round && c.is_winner
@@ -131,7 +114,6 @@ function hangOffWinner(parent: LineageNode, round: number, child: LineageNode): 
   return { ...parent, children };
 }
 
-// --- tests ----------------------------------------------------------------
 
 describe("expandedLaneSpan", () => {
   it("is the widest round's candidate count, floored at 1", () => {
@@ -155,10 +137,7 @@ describe("layout", () => {
     expect(laneByKey.get(laneKey("cycle_a_fork_b"))!.laneOffset).toBe(1);
   });
 
-  // Two L4 inner runs, one id. This is real: inner cycle ids are minted per sandbox,
-  // so sibling sandboxes repeat them — one id sits in three sandboxes on disk today.
-  // Keyed on `course.id` these two collapse onto one lane and a run vanishes from the
-  // forest; keyed on the address they are two courses, which is what they are.
+  // Two L4 inner runs, one id: inner cycle ids are minted per sandbox.
   it("two sandboxes' identically-named inner runs get their own lanes", () => {
     const inner = (sandbox: string): LineageNode =>
       course("cycle_inner", cands([1]), {
@@ -202,7 +181,7 @@ describe("layout", () => {
     const { totalLaneRows, laneByKey } = layout(tree, new Set([laneKey("cycle_a")]));
     expect(laneByKey.get(laneKey("cycle_a"))!.laneSpan).toBe(4);
     expect(laneByKey.get(laneKey("cycle_a"))!.laneOffset).toBe(0);
-    // The collapsed fork now starts at row 4, not row 1.
+    // The collapsed fork starts at row 4, not row 1.
     expect(laneByKey.get(laneKey("cycle_a_fork_b"))!.laneOffset).toBe(4);
     expect(totalLaneRows).toBe(5);
   });
@@ -219,8 +198,7 @@ describe("layout", () => {
     expect(laneByKey.get(laneKey("cycle_a_fork_b"))!.baseCol).toBe(3);
   });
 
-  // A cut has to take the SHAPE down, not just hide nodes: a fork cut after the point would
-  // otherwise reserve a lane row and widen the drawing with nothing drawn on it.
+  // A cut takes the SHAPE down, not just the nodes: no empty lane row, no extra width.
   it("cut at a candidate: later rounds and the courses cut after it take no row", () => {
     const tree = hangOffWinner(
       course("cycle_a", cands([2, 2])),
@@ -241,10 +219,8 @@ describe("layout", () => {
     expect(layout(tree, new Set()).laneByKey.size).toBe(2);
   });
 
-  // The L4 case, and the reason the extent is a WALK rather than a round-column test. A seed run
-  // measured the candidate it hangs off — it is how that point got its number — but it is drawn
-  // one column RIGHT of it, so a column test drops every seed of a campaign read at its own
-  // origin: a `promptpotter-self` card showing one dot where six lineages ran.
+  // Why the extent is a WALK, not a round-column test: a seed is drawn one column RIGHT of the
+  // candidate it measured.
   it("the seed runs that measured the point stay whole; a fork beside it goes", () => {
     const seed = (cycle: string, rounds: number[]): LineageNode =>
       course(cycle, cands(rounds), {
@@ -271,9 +247,7 @@ describe("layout", () => {
     expect(laneByKey.has(laneKey("cycle_a_fork_b"))).toBe(false);
   });
 
-  // The other half of the same rule, and the one an exemption gets wrong: a point INSIDE a seed
-  // is cut inside it, and the seeds measuring its ANCESTOR are not its history — they produced
-  // some other number for the same outer point.
+  // A point INSIDE a seed is cut inside it; sibling seeds of its ancestor are not its history.
   it("a point inside a seed cuts within it, and the sibling seeds are out", () => {
     const seed = (cycle: string): LineageNode =>
       course(cycle, cands([1, 1, 1]), {
@@ -300,8 +274,6 @@ describe("layout", () => {
     expect(laneByKey.get(laneKey("cycle_a"))!.candidates.map((c) => c.id)).toEqual(["c1_0"]);
   });
 
-  // A point on ANOTHER campaign's tree — the ordinary case once a board holds channels from
-  // several. Answering with an extent would cut this drawing to a history it has none of.
   it("an anchor this tree does not hold has no extent", () => {
     const tree = course("cycle_a", cands([2]));
     const here = layout(tree, new Set()).laneByKey.get(laneKey("cycle_a"))!.coursePathKey;
@@ -372,8 +344,7 @@ describe("placeNodes", () => {
     // No round-2 candidate is crowned.
     expect(nodes.filter((n) => n.round === 2 && n.isWinner)).toHaveLength(0);
 
-    // Round 3's candidates chain from round 1's winner (the last REAL winner),
-    // never from a held round-2 candidate — the pre-fix misdraw.
+    // Round 3 chains from round 1's winner, never from a held round-2 candidate.
     const r2xs = new Set(nodes.filter((n) => n.round === 2).map((n) => n.x));
     for (const child of nodes.filter((n) => n.round === 3)) {
       const fromWinner = segs.find(

@@ -1,14 +1,6 @@
 "use client";
-// Outer signal — is the L4 panel resolving anything yet, and is it getting sharper?
-//
-// Two stacked reads, both served, neither recomputed here:
-//   1. the leading arm's blocked lift over its PARENT, one row per round on a SHARED axis, so
-//      round-over-round tightening is a shape rather than three numbers to hold in your head;
-//   2. the panel's precision — how sharply each cell was measured against how far apart the cells
-//      landed — which is the lever the spread above calls for.
-//
-// The shared axis is the whole point. Per-round auto-scaling makes every interval look the same
-// width, which is exactly the pattern a reader is here to see change.
+// Outer signal: the leading arm's blocked lift over its parent per round, and the panel's precision.
+// ONE shared axis across rounds — per-round auto-scaling hides the tightening a reader is here to see.
 
 import { memo, useMemo } from "react";
 import { useDashboard } from "@/lib/hooks/useDashboard";
@@ -20,10 +12,8 @@ import { fmtSigned } from "@/lib/format";
 const AXIS_W = 220;
 const ROW_H = 18;
 
-// The arm the round's verdict is about — SERVED (`round_summary.py::_leading_arm`), the same one
-// `panel_precision` is measured on, so the two stacks below cannot describe different arms. The
-// argmax over `composite_fitness` that stood here could not apply the election's own admission
-// rule, so on a HELD round it drew a lift interval attributed to a collapsed arm.
+// SERVED (`round_summary.py::_leading_arm`), the same arm `panel_precision` is measured on — never
+// an argmax here, which cannot apply the election's admission rule.
 function leadingArm(r: RoundSummary): RoundSummaryCandidate | null {
   return r.candidates.find((c) => c.is_leading) ?? null;
 }
@@ -34,9 +24,8 @@ type Lift = {
   lo: number;
   hi: number;
   label: string;
-  // The ROUND's own verdict, SERVED three-state (`RoundResult.separable`), decided over its WHOLE
-  // electable field. The arm below is what a row DRAWS; whether the round resolved anything is not
-  // that arm's bracket to answer, and `null` — no arm carried an interval — is not `false`.
+  // SERVED three-state (`RoundResult.separable`) over the whole electable field; `null` (no arm
+  // carried an interval) is not `false`.
   separable: boolean | null;
 };
 
@@ -64,9 +53,7 @@ function liftsOf(rounds: RoundSummary[]): Lift[] {
   return out;
 }
 
-// What the round ANSWERED, in one word. `null` keeps its own word: a round no arm bracketed asked
-// nothing, and printing "inconclusive" there reports an unasked question as a negative answer. A
-// separated round takes its tone from the arm drawn, so one that separated DOWNWARD reads as worse.
+// `null` keeps its own word: "inconclusive" would report an unasked question as a negative answer.
 function verdictWord(d: Lift): { tone: "success" | "danger" | "accent"; word: string } {
   if (d.separable === true) {
     if (d.hi < 0) return { tone: "danger", word: "worse" };
@@ -76,7 +63,6 @@ function verdictWord(d: Lift): { tone: "success" | "danger" | "accent"; word: st
 }
 
 function LiftRow({ d, x }: { d: Lift; x: (v: number) => number }) {
-  // Sign-coloured, but the number and the verdict wording always carry the meaning on their own.
   const stroke = d.lo > 0
     ? "var(--color-success)"
     : d.hi < 0
@@ -117,7 +103,6 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
   const rounds = useMemo(() => dash?.rounds ?? [], [dash?.rounds]);
   const lifts = useMemo(() => liftsOf(rounds), [rounds]);
 
-  // ONE scale across every round — see the header note.
   const x = useMemo(() => {
     const vals = [0, ...lifts.flatMap((d) => [d.lo, d.hi])];
     const lo = Math.min(...vals);
@@ -152,16 +137,12 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
               ? " The interval spans 0 — this panel cannot yet tell that arm from its parent, and the point estimate above should not be read as a win."
               : ""}
           </p>
-          {/* The pattern the eye is meant to learn: does the whisker shorten, and does it clear
-              the zero line. Both are visible only because the axis is shared. */}
           <div className="ov-forest">
             {lifts.map((d) => (
               <LiftRow key={d.round} d={d} x={x} />
             ))}
           </div>
-          {/* Which lever that spread calls for. Two bars, deliberately not their ratio: the ratio
-              was served once, clamped to 1.0, and presented an impossible 5.55 as a tidy "100%
-              noise". In the measurand's own units (θ logits), never fitness. */}
+          {/* Two bars, never their ratio; in θ logits, never fitness. */}
           {precision ? (
             <p className="l4-lede">
               Each cell was measured to ±{precision.estimation_sd.toFixed(3)} logits; the cells

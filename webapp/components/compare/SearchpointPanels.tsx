@@ -1,20 +1,6 @@
 "use client";
-// WHAT the selected searchpoints ARE, side by side — as against what they scored, which is every
-// other card on this tab.
-//
-// Two questions, two panels, and they take their data from different places on purpose:
-//
-//   Configuration — SERVED per subject (`SubjectReading.config`), one flat `key -> value` map over
-//   the RESOLVED node config plus the prompt fields. Resolved rather than each candidate's sparse
-//   delta: two searchpoints from different campaigns share no delta, so lined up on deltas the
-//   panels would have nothing in common to line up ON. Nothing here re-merges a config.
-//
-//   Ancestry — derived from THE served tree, by walking `parent_id`. It is not fetched again: the
-//   picker already subscribed each campaign's tree, and `webapp/CLAUDE.md` is explicit that a leaf
-//   surface addresses into that one genealogy rather than reading its own.
-//
-// The alignment is a set union over served keys and a string comparison of served values. It
-// introduces no number, which is the line `lib/derivations/*` draws.
+// What the selected searchpoints ARE, side by side. Configuration is SERVED resolved (`SubjectReading.config`);
+// ancestry walks `parent_id` on the one served tree (`webapp/CLAUDE.md`), never a second read.
 
 import { useMemo, useState } from "react";
 import type { Evidence, LineageNode, SubjectReading } from "@/lib/api";
@@ -27,8 +13,6 @@ import { useLineageTree } from "@/lib/lineage";
 import { seriesVar } from "@/lib/theme";
 import { ChannelRestore, ConfigCell, pointKeyOf, type ScenarioEdits } from "./config-edit";
 
-// The channels this card is about. A campaign or an un-drilled course has a configuration too —
-// its head's — so all three kinds are welcome; what the card needs is two of them.
 function configured(evidence: Evidence): SubjectReading[] {
   return evidence.subjects.filter((s) => s.config !== null);
 }
@@ -47,11 +31,8 @@ export function ConfigPanels({
   const rows = configured(evidence);
   const [showSame, setShowSame] = useState(false);
 
-  // THREE bands, not two. A key only one side carries and a key both set differently are
-  // different findings, and lumping them is what makes two subjects from different pipelines read
-  // as "17 keys differ" — every one of them being "the other one has no such param". A pp-self
-  // outer origin and an inner justlogic searchpoint share no key at all, which is a fact about the
-  // pair rather than seventeen disagreements.
+  // THREE bands: a key only one side carries is a different finding from a key set differently —
+  // two pipelines sharing no key would otherwise read as "17 keys differ".
   const { differs, oneSided, same } = useMemo(() => {
     const keys = [...new Set(rows.flatMap((r) => Object.keys(r.config ?? {})))].sort();
     const split: { differs: string[]; oneSided: string[]; same: string[] } = {
@@ -68,10 +49,7 @@ export function ConfigPanels({
     return split;
   }, [rows]);
 
-  // Selected, read, and carrying no configuration — named rather than silently absent from the
-  // table. A channel that simply vanishes here reads as a bug in the card, which is what it was:
-  // an operator looking for `C2.2` had no way to tell "its round document records none" from
-  // "this panel dropped it".
+  // Named rather than silently absent, so "records no config" is not read as "the panel dropped it".
   const withoutConfig = evidence.subjects.filter((s) => s.config === null);
 
   if (rows.length === 0) {
@@ -117,10 +95,7 @@ export function ConfigPanels({
                   aria-hidden="true"
                 />
                 {r.kind === "campaign" ? shortId(r.label) : r.label}
-                {/* Keyed on the POINT this channel reads at, not on the channel's own address:
-                    a `campaign:` or `course:` channel names a branch while the edit lands on the
-                    searchpoint the server resolved it to. Same key the card's editor writes, which
-                    is what keeps the two synchronous. */}
+                {/* Keyed on the resolved POINT (`pointKeyOf`), the same key the card's editor writes. */}
                 <ChannelRestore edits={edits} subjectKey={pointKeyOf(r)} onEdits={onEdits} />
               </th>
             ))}
@@ -163,8 +138,6 @@ export function ConfigPanels({
   );
 }
 
-// A band heading, silent when its group is empty — an empty "0 keys set differently" row is a
-// finding announced for having found nothing.
 function Band({
   n,
   colSpan,
@@ -184,10 +157,7 @@ function Band({
   );
 }
 
-// A prose field is a paragraph; the cell holds it in a single line and carries the whole thing in
-// `title`, so the table stays a table and nothing is lost. The CELL itself is shared with the
-// channel card's own expandable (`config-edit.tsx`), which is what keeps the two editors of one
-// value from drifting apart.
+// The CELL is shared with the channel card's editor (`config-edit.tsx`), so one value has one editor.
 function Row({
   name,
   rows,
@@ -222,10 +192,7 @@ function Row({
   );
 }
 
-// ── Ancestry ────────────────────────────────────────────────────────────────
-// How we got to each point. One spine per CAMPAIGN, not per subject: when one selected point
-// descends from another they share a chain, and drawing it twice would hide the very thing the
-// shared prefix says — that one is an extension of the other.
+// One spine per CAMPAIGN, not per subject: a shared prefix shows one point extends the other.
 
 interface Spine {
   campaignId: string;
@@ -235,8 +202,7 @@ interface Spine {
 }
 
 export function AncestryPanels({ evidence }: { evidence: Evidence }) {
-  // One row per campaign in the selection, each opening its own tree subscription. Grouped
-  // first so a campaign contributing two channels still fetches once.
+  // Grouped first so a campaign contributing two channels fetches its tree once.
   const byCampaign = useMemo(() => {
     const out = new Map<string, SubjectReading[]>();
     for (const s of evidence.subjects) {
@@ -269,8 +235,6 @@ function CampaignSpines({
   subjects: readonly SubjectReading[];
   evidence: Evidence;
 }) {
-  // Rooted at the campaign's own root cycle. Every selected channel of this campaign carries the
-  // same one, so any of them names it.
   const rootCycleId = subjects[0]?.cycle_id ?? "";
   const path = useMemo<CyclePath>(
     () => [{ campaignId, cycleId: rootCycleId }],
@@ -334,14 +298,10 @@ function CampaignSpines({
   );
 }
 
-// The parent chain to each selected point, merged where one contains another. Pure walk over the
-// served tree: `parent_id` is the genealogy the server already decided, and following it is not
-// deriving a second one.
 function buildSpines(
   index: ReturnType<typeof indexLineage>,
   subjects: readonly SubjectReading[],
 ): Spine[] {
-  // Every candidate in this campaign's tree, by id — the walk's lookup table.
   const nodes = new Map<string, LineageNode>();
   const courseOf = new Map<string, string>();
   for (const [addr, entry] of index) {
@@ -358,14 +318,12 @@ function buildSpines(
     const chain: LineageNode[] = [];
     const seen = new Set<string>();
     let cursor: LineageNode | undefined = head;
-    // Bounded by `seen`: a tree that somehow cycles must not hang the tab.
     while (cursor && !seen.has(cursor.id)) {
       seen.add(cursor.id);
       chain.unshift(cursor);
       cursor = cursor.parent_id ? nodes.get(cursor.parent_id) : undefined;
     }
-    // Key on the ROOT of the chain: two points that share an origin share a spine, and the
-    // longer chain wins — which is precisely "one tree is a subset of the other".
+    // Keyed on the chain's ROOT, so the longer chain of a shared origin wins.
     const rootId = chain[0]?.id ?? s.candidate_id;
     const prior = chains.get(rootId);
     const merged = !prior || chain.length > prior.chain.length ? chain : prior.chain;
@@ -399,9 +357,7 @@ export function SearchpointCards({
   edits: ScenarioEdits;
   onEdits: (next: ScenarioEdits) => void;
 }) {
-  // Rendered even with nothing to show. A card that disappears when its channels record no
-  // configuration is indistinguishable from one that dropped them, which is the read that sent
-  // an operator looking for a searchpoint that was never in it.
+  // Rendered even when empty — a vanished card is indistinguishable from one that dropped channels.
   return (
     <>
       <CardFrame title="How these searchpoints are configured" headingTag="h2">

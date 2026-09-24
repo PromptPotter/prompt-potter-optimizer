@@ -18,10 +18,6 @@ import { PipelineDependencies } from "./PipelineDependencies";
 import { OriginCheckinPanel } from "./OriginCheckinPanel";
 import { DatasetPickList } from "./DatasetPickList";
 
-// The dropped-file bubble in the chat thread — "filename.csv · N rows". Reuses
-// the existing `.chat-msg.user-file` / `.file-chip` styles (app/styles/domains/
-// chat.css). `rows` is null until the upload resolves (n_samples comes back from
-// `postIngestDataset`), so the row count appears once the file is parsed.
 function ChatFileChip({ name, rows }: { name: string; rows: number | null }) {
   return (
     <div className="chat-msg user user-file">
@@ -46,18 +42,13 @@ function ChatFileChip({ name, rows }: { name: string; rows: number | null }) {
   );
 }
 
-// Inline "check-in agent working" line — 🤖 + the model + a seconds counter.
-// Shown while the real resolve runs and during the demo's simulation.
 function CheckinLoadingWindow({ model }: { model: string }) {
   const [secs, setSecs] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setSecs((s) => s + 1), 1000);
     return () => clearInterval(id);
   }, []);
-  // The resolve is a single blocking call; a slow provider — or a 2×-cost repair
-  // retry firing under the hood — can run a minute-plus. Past a threshold, set
-  // expectations so the counter isn't a mute "is it stuck?": reassure the wait is
-  // normal and that a degraded turn gets reported, never silently swallowed.
+  // The resolve is one blocking call, and a server-side repair retry can push it past a minute.
   const slow = secs >= 45;
   return (
     <p className="checkin-loading" role="status" aria-live="polite">
@@ -75,16 +66,11 @@ function CheckinLoadingWindow({ model }: { model: string }) {
   );
 }
 
-// How far off the bottom still counts as being AT the tail. Sub-pixel scroll
-// heights and a half-drawn row must not read as the reader having scrolled away.
+// Sub-pixel heights and a half-drawn row must not read as the reader having scrolled away.
 const FOLLOW_SLACK_PX = 24;
 
-// The single ingest conversation, driven by the one shared `useIngestFlow`
-// (`lib/ingest-flow.tsx`). The chat tab hosts it; the "New campaign" modal shows
-// the same resting entry list and hands the thread over the moment a pick or a
-// drop advances it, so the conversation only ever happens in one place.
-// One thread: pick/drop → ask context only if missing → one check-in → Start →
-// then the live cycle's curated activity + decisions (`liveSegment`).
+// The one ingest conversation, hosted only by the chat tab; the "New campaign" modal hands
+// the shared thread over here the moment a pick or drop advances it.
 export function IngestConversation({
   flow,
   origins,
@@ -93,42 +79,25 @@ export function IngestConversation({
   runCard,
 }: {
   flow: IngestFlow;
-  // The entry lists: existing origins to reuse + datasets to make a new origin
-  // from. Both surfaces supply them — withholding them from the chat tab is
-  // what left a visitor with no file and no way in.
   origins?: OriginEntry[];
   datasets?: DatasetIndexEntry[];
-  // The live tail (curated activity feed + decision buttons) appended into the
-  // thread once a cycle is bound. Present only on the chat tab.
   liveSegment?: ReactNode;
-  // The run card — LAST in the thread. Kept a separate slot from `liveSegment`:
-  // that one is the append-only activity history, this one is a single
-  // always-current pane.
+  // LAST in the thread; separate from the append-only `liveSegment` because it is always-current.
   runCard?: ReactNode;
 }) {
   const { phase, messages } = flow;
   const [dragging, setDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // The resting state of either surface: what you can start from. Gated on the
-  // collection having arrived, never on which pane is hosting the thread.
   const showEntryList = phase.stage === "idle" && datasets !== undefined;
-  // Open on an empty thread — it is the only thing to do — and folded to its summary
-  // once the thread has anything of its own, because a wall of every origin and dataset
-  // is otherwise the tallest thing above the conversation. No state behind it: React
-  // writes `open` only when the PROP changes, so a poll tick leaves a hand-opened list
-  // alone, and the flip re-asserts exactly when the thread gains or loses content.
+  // No state behind the fold: React writes `open` only when the PROP changes, so a poll tick
+  // leaves a hand-opened list alone.
   const threadHasContent = messages.length > 0 || !!liveSegment || !!runCard;
 
-  // Follow the tail. Nothing in the thread is pinned, so a live run would otherwise
-  // append its newest step below the fold and leave the reader watching a stale
-  // frame. Re-run on EVERY render because the growth arrives as `liveSegment` /
-  // `runCard` elements, which no dependency list can compare.
   const threadRef = useRef<HTMLDivElement | null>(null);
-  // A ref, not state: scrolling must not itself cause a render. Scrolling UP to read
-  // is deliberate and the next poll tick must not undo it; scrolling back to the
-  // bottom re-engages, which is the whole of the contract.
+  // A ref, not state: scrolling must not itself cause a render.
   const followRef = useRef(true);
+  // No deps: growth arrives as `liveSegment` / `runCard` elements no dependency list can compare.
   useEffect(() => {
     const el = threadRef.current;
     if (el && followRef.current) el.scrollTop = el.scrollHeight;
@@ -146,14 +115,11 @@ export function IngestConversation({
             el.scrollHeight - el.scrollTop - el.clientHeight <= FOLLOW_SLACK_PX;
         }}
       >
-        {/* FIRST in the thread, and inside the scroller with it: it scrolls away with
-            everything else instead of holding a slot above the conversation. */}
         {showEntryList ? (
           <details
             className="new-campaign-optional"
             open={!threadHasContent}
-            // The list expands ABOVE the tail, so a still-following thread would scroll
-            // straight past what was just opened. Opening it is a read, and a read wins.
+            // The list expands ABOVE the tail; a still-following thread would scroll past it.
             onToggle={(e) => {
               if (e.currentTarget.open) followRef.current = false;
             }}
@@ -220,8 +186,6 @@ export function IngestConversation({
           </div>
         ) : null}
 
-        {/* The live cycle's curated activity + inline decisions — the same
-            ordered thread, continued. */}
         {liveSegment}
         {runCard}
       </div>
@@ -263,16 +227,10 @@ export function IngestConversation({
             <path d="M14.5 7.5 8 14a3.5 3.5 0 0 1-4.95-4.95L9.5 2.6a2.4 2.4 0 0 1 3.4 3.4L6.4 12.5a1.3 1.3 0 0 1-1.83-1.83L11 4.2" />
           </svg>
         </button>
-        {/* The field carries the frame; the textarea inside it is bare. Tools sits in
-            the field's own bottom-right corner rather than beside it — it names what this
-            chat can do, and a label does not deserve a slot in the control row. */}
         <div className="chat-field">
           <textarea
             className="chat-input"
-            // Short enough to sit on ONE line beside the attach and send buttons at
-            // 390px — a composer that wraps to two rows is not a composer. The accepted
-            // formats are the attach button's `accept` list and the pick-list's own copy;
-            // spelling them here made this the widest thing in the row.
+            // Must fit ONE line beside attach and send at 390px; formats live in `accept`.
             placeholder={flow.awaitingContext ? "Describe the task…" : "Drop a dataset file…"}
             rows={1}
             value={flow.inputText}
@@ -301,14 +259,7 @@ export function IngestConversation({
   );
 }
 
-// The ready state: confirm the origin before Start. Any remaining gaps surface
-// inline (check-in assessment + questions, column mapping). The starting prompt
-// and pipeline are shown expanded + prefilled for confirmation — they're the
-// origin the operator is about to evolve. Only the meta-optimizer knobs (which
-// model drives the search, run bounds) collapse into an optional expander.
-// The three launch caps as TEXT, because a half-typed "0." is not a number and coercing per
-// keystroke arms a value on the way to the one the operator meant — the same reason
-// `ui/CommitInput` exists. Blank is a real answer: "no cap of mine", leaving the account's own.
+// Held as TEXT: a half-typed "0." is not a number. Blank means "no cap of mine".
 interface CapDrafts {
   halt: string;
   usd: string;
@@ -316,8 +267,8 @@ interface CapDrafts {
 }
 const NO_CAPS: CapDrafts = { halt: "", usd: "", tokens: "" };
 
-// Anything finite is SENT, range and all: `StartCheckinPayload` declares the bounds and refuses
-// what it must, and a 422 naming the field teaches where a silently dropped key would not.
+// Anything finite is SENT, out-of-range too: `StartCheckinPayload` owns the bounds, and its 422
+// names the field where a silently dropped key would not.
 function launchLimits(c: CapDrafts): StartCheckinLimits {
   const num = (s: string) => {
     const n = Number(s);
@@ -379,8 +330,6 @@ function LaunchCaps({
           onChange={(e) => onChange({ ...caps, halt: e.target.value })}
         />
       </label>
-      {/* Bare `<small>`, the register `ChoiceField`'s own hint uses — one note for all three,
-          because "not saved" is the fact that separates them from the knobs below. */}
       <small>
         What THIS launch may spend — not saved with the setup, so a reopened check-in starts
         from blank. Whichever cap trips first stops the run; your account&apos;s own allowance
@@ -395,8 +344,7 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
   const [caps, setCaps] = useState<CapDrafts>(NO_CAPS);
   if (flow.phase.stage !== "ready") return null;
   const { draft, resolution, raised, degradedCause } = flow.phase;
-  // `blocked` mirrors the server gate alone — adding `gaps.length` is a second
-  // definition whose divergent state is a dead Start with no explanation.
+  // `blocked` mirrors the server gate alone — never AND in `gaps.length`.
   const { complete: ready, gaps } = draft.readiness;
   const blocked = !ready;
 
@@ -428,19 +376,12 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         />
       ) : null}
 
-      {/* Above the picker on purpose: the mapping is chosen by reading the rows. */}
       <DatasetPreview draft={draft} />
 
       <ColumnMappingPicker draft={draft} onApply={flow.applyPatch} />
 
-      {/* The campaign's NAME — an identity fact, so it sits with the other things that
-          say what this run is. It used to be folded in with the loop knobs below, which
-          is the one place a reader would never look for it. */}
       <SlugField slug={draft.slug} onApply={(slug) => flow.applyPatch({ slug })} />
 
-      {/* The active pipeline's required inputs beyond (pipeline + dataset +
-          origin) — e.g. a candidate_source node's target library — surfaced so
-          the operator drops the missing one in place. Soft: doesn't gate Start. */}
       <PipelineDependencies
         dependencies={draft.dependencies}
         librarySize={draft.candidate_library_size}
@@ -451,24 +392,13 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         busy={flow.busy}
       />
 
-      {/* Per node: the optimizer search-space controls (lock/allow + origin
-          value) and, for the LLM node, the starting prompt — all inside that
-          node's surface (config → prompt → output), editable — the one
-          NodeSurface every node-detail surface renders. */}
       <PipelineSetupSection draft={draft} onApply={flow.applyPatch} />
 
-      {/* The loop that will do the searching, drawn the way the chat hero draws it.
-          Always open: it is what the operator is about to spend money running, and it
-          used to reach this surface only as the round-ceiling number field below. */}
       <OptimizerSetupSection />
 
       <details className="new-campaign-optional ingest-advanced">
-        {/* Bounds on the RUN, not the optimizer's wiring — that is the section above. Nothing
-            here is a node's. Two persistence classes, deliberately in one place because they
-            answer one question: the knobs below are campaign policy (`OptimizationConfig`) and
-            patch the draft, while the three caps ride the Start press and are saved nowhere,
-            which is what the caps' own note says. Splitting them into two expanders asks
-            "how far does this go" twice. */}
+        {/* Two persistence classes on purpose: the knobs patch the draft's `OptimizationConfig`,
+            the caps ride the Start press and are saved nowhere. */}
         <summary>Run bounds (optional)</summary>
         <div className="new-campaign-optional-body">
           <LaunchCaps caps={caps} onChange={setCaps} />
@@ -507,9 +437,6 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
               flow.applyPatch({ optimization_overrides: { escalation_ladder } })
             }
           />
-          {/* Pluggable orchestration mechanisms — sorting/selection + early-abort
-              toggles, the same surface the dashboard renders read-only. Editable
-              here at authoring time; each flip patches the draft's campaign.json. */}
           <MechanismsPanel
             mechanisms={draft.optimization_overrides.mechanisms}
             onChange={(mechanisms) =>
@@ -519,9 +446,7 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         </div>
       </details>
 
-      {/* The server gate's open fields, rendered against the button they close —
-          a disabled button carries no tooltip on touch, so the reason must be
-          text on the page. */}
+      {/* A disabled button carries no tooltip on touch, so the reason must be text on the page. */}
       {blocked ? (
         <ul className="ingest-gap-list" id={blockersId}>
           {gaps.length > 0 ? (
@@ -539,8 +464,8 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         </ul>
       ) : null}
 
-      {/* `saving` never disables Start — `startFromReady` awaits the in-flight
-          edit, and disabling would eat the tap whose blur committed the field. */}
+      {/* `saving` never disables Start: `startFromReady` awaits the in-flight edit, and
+          disabling would eat the tap whose blur committed the field. */}
       <button
         type="button"
         className="chat-cta-btn"

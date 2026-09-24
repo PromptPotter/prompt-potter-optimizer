@@ -3,27 +3,11 @@ import { availableRounds } from "@/lib/derivations";
 import { useSelection } from "@/lib/SelectionContext";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 
-// The round axis, in the toolbar of the card it scopes. One circle per L1 round,
-// plus a LIVE pill when an in-flight round exists that hasn't been summarized
-// into `dash.rounds[]` yet.
-//
-// It lives HERE because the optimizer canvas can only ever depict one round — so
-// "which round" is not a free-floating dashboard axis, it is this card's scope.
-// Standing apart as its own panel is what let the canvas drift into showing live
-// node state under a historical round's node detail.
-//
-// Click writes `selection.round`; the candidates card and the samples view react
-// to that same single source of truth.
-//
-// Selection semantics:
-//   round === null         → follow live (default, no explicit pick)
-//   round === liveRound    → explicit "show live" (same view as null)
-//   round  <  liveRound    → drill into a completed round
+// The round axis, in the optimizer card because its canvas depicts one round. Writes
+// `selection.round`: `null` and `liveRound` both follow live.
 export function RoundAxis() {
   const { dash, isLive } = useDashboard();
   const { round: selectedRound, setSelectionForRound } = useSelection();
-  // Single round-axis truth — `completed` circles + the `live` pill, the
-  // latter already gated on `isLive` so a stopped run drops the pill.
   const { completed, live: liveRound } = availableRounds(dash, isLive);
   const liveActive = liveRound != null;
   const followingLive =

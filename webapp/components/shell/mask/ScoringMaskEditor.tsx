@@ -1,18 +1,6 @@
 "use client";
-// The ONE scoring-mask form. It renders on the dashboard's candidates card and on a Compare
-// channel, so it is chrome (`webapp/CLAUDE.md` § Component conventions) rather than either
-// surface's.
-//
-// It replaced two editors for one idea: a slider grid that could only build a weighted sum, and a
-// free-text field that could only take one. Each was unreachable from the other surface, so an
-// operator who built a mask on the dashboard retyped it to compare it. Both forms survive here as
-// MODES of one value (`scoring-mask.ts::ScoringMask`) — the grid is the readable way to say the
-// common thing, the expression is the escape hatch for what a grid cannot spell, and switching is
-// a fact about the value rather than about which tab you are on.
-//
-// Text commits on Enter or blur, never per keystroke: on Compare the mask is part of the fetch key,
-// so a keystroke commit fires a request per character and 400s on every half-typed formula. The
-// grid commits per click, which is the same rule — a toggle is not a half-value.
+// The ONE scoring-mask form — chrome, rendered on the candidates card and on a Compare channel.
+// Text commits on Enter or blur: on Compare the mask is part of the fetch key.
 
 import type { ComponentType, ReactNode } from "react";
 import {
@@ -50,8 +38,6 @@ const EVALUATOR_GLYPHS: Record<string, ComponentType> = {
   cost: IconCoin,
 };
 
-// A namespaced display name (`fuzzy_matching_source_recall`) falls back to its registry stem,
-// so a node-bound metric wears its glyph whichever node owns it this round.
 function maskIconFor(displayName: string, registryName: string): ReactNode {
   const Glyph = EVALUATOR_GLYPHS[displayName] ?? EVALUATOR_GLYPHS[registryName] ?? IconCirclePlus;
   return <Glyph />;
@@ -81,21 +67,14 @@ export function ScoringMaskEditor({
   invalid,
   summary,
 }: {
-  // Evaluator tiles in display order. The dashboard narrows these to what this cycle MEASURED;
-  // Compare has no such cycle and offers the whole served registry.
   rows: readonly Row[];
-  // The evaluators the REALIZED composite names — the tile's "used in actual formula" state.
   inActive: ReadonlySet<string>;
   mask: ScoringMask;
   onMask: (mask: ScoringMask) => void;
-  // WHERE the weights started, which is the difference between reading them as the criterion in
-  // force and reading them as a starting point. `realized` = seeded from the served decomposition.
-  // `default` = the active formula is not a weighted sum, so no coefficient exists to seed from.
-  // `none` = there is no single active formula at all, which is every multi-campaign board.
+  // `default`: the active formula is not a weighted sum. `none`: no single active formula
+  // (a multi-campaign board).
   seeded: "realized" | "default" | "none";
-  // The sample subset, as the operator types it. Omitted where the surface already owns a richer
-  // editor of that same axis (the dashboard's chip strip) — two writers on one fact is what this
-  // module exists to avoid.
+  // Omit where the surface already owns a sample-subset editor (the dashboard's chip strip).
   samples?: string;
   onSamples?: (raw: string) => void;
   invalid?: string | null;
@@ -191,9 +170,6 @@ function WeightGrid({
           available, not in formula
         </span>
       </div>
-      {/* The weights are served, so "not seeded" is a fact about the active formula rather than a
-          parse that fell short — and saying it is what keeps a default from reading as the
-          criterion in force. */}
       {seeded === "default" && rows.length > 0 && (
         <p className="l4-subtle">
           The active formula is not a weighted sum, so these start from a default rather than from
@@ -222,9 +198,8 @@ function WeightGrid({
                   !r.applicable && "disabled",
                 )}
               >
-                {/* The direction glyph is the TILE's, beside the toggle: it is a `Term`, so inside
-                    the control reading it would press the control — and a `<button>` may hold no
-                    focusable descendant at all. */}
+                {/* Outside the toggle: a `Term` is focusable, and a `<button>` may hold no focusable
+                    descendant. */}
                 <Term
                   className={cx("mask-dir", down ? "down" : "up")}
                   content={down ? TERMS.mask_down : TERMS.mask_up}
@@ -256,8 +231,6 @@ function WeightGrid({
                   <span className="mask-ico">{maskIconFor(r.displayName, r.registryName)}</span>
                   <span className="mask-name">{r.displayName}</span>
                 </button>
-                {/* Weight thermometer — only where this evaluator counts. Seeded from the realized
-                    composite coefficient, served. */}
                 <div className="mask-weight" aria-hidden={!enabled || undefined}>
                   {enabled && r.applicable && (
                     <>

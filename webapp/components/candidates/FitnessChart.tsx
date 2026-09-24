@@ -23,18 +23,11 @@ import type { ChartData, ChartOptions, ChartType, Plugin } from "chart.js";
 
 ensureChartRegistered();
 
-// Published plot geometry — the bridge that lands the dendrogram strip's SVG nodes exactly on
-// this canvas's bar category centers.
-//
-// FRACTION space, deliberately: chart.js's category scale is linear in the plot width, so a
-// centre's fraction is INVARIANT under a pure width change and a resize costs no React work at
-// all. Raw pixels would re-render every resize tick and still leave the strip a frame behind.
+// Fractions, not pixels: a category centre's fraction is invariant under a width change, so a
+// resize costs no React work.
 export interface PlotGeometry {
-  // px inset, canvas left edge → plot area.
   left: number;
-  // px inset, plot area's right edge → canvas right edge.
   rightGutter: number;
-  // Category centre i, as a fraction of the plot width.
   centers: number[];
 }
 
@@ -56,9 +49,6 @@ declare module "chart.js" {
     divergenceLine?: { index: number | null };
     inFlightPulse?: { index: number | null };
     meanFitnessCiWhisker?: {
-      // The series the band brackets, or null when it is not on screen. A KEY, not a
-      // literal — this join used to be the string "accuracy", so turning that series off
-      // made every band vanish with nothing on screen to say so.
       anchor: SeriesKey | null;
       ciLo: (number | null)[];
       ciHi: (number | null)[];
@@ -67,10 +57,7 @@ declare module "chart.js" {
   }
 }
 
-// The strip above the bars — one pass, because both marks answer "what does this group need
-// said above it": the CROWN on the parent (one mark, not one per advancing round; the
-// per-round crowns are the dendrogram's job), and the sample COUNT only where
-// `partialPanels` judges it news.
+// One crown, on the parent only — the per-round crowns are the dendrogram's job.
 const CROWN = "♛";
 const barCapsPlugin: Plugin<
   "bar",
@@ -82,8 +69,7 @@ const barCapsPlugin: Plugin<
     const xScale = chart.scales.x;
     if (!counts || !xScale) return;
     const { ctx, chartArea } = chart;
-    // Highest (smallest y) bar top across this candidate's group. BARS only — letting the
-    // cache line into the minimum drags the caption onto the dash.
+    // Bars only: letting the cache line into the minimum drags the caption onto the dash.
     const topOf = (i: number): number => {
       let topY = Infinity;
       chart.data.datasets.forEach((_ds, di) => {
@@ -112,7 +98,6 @@ const barCapsPlugin: Plugin<
       if (Number.isFinite(topY)) {
         ctx.font = `12px ${mono}`;
         ctx.fillStyle = getCss("--color-accent");
-        // Above the count when both land on one group — the crown is the louder fact.
         const capY = counts[w] != null ? topY - 15 : topY - 4;
         ctx.fillText(
           `${CROWN}${opts?.crown ?? ""}`,
@@ -125,17 +110,8 @@ const barCapsPlugin: Plugin<
   },
 };
 
-// Error-bar whisker — a vertical line from `ciLo` to `ciHi` (mapped value→pixel via the left
-// [0,1] y scale) with short end-caps, so no point estimate stands alone. Drawn at the bracketed
-// dataset's OWN rendered x (which shifts within the bar group depending on how many series
-// show), not the category center — a whisker must sit on the bar it brackets. Bars with a null
-// CI are skipped.
-//
-// ONE band per CHANNEL, each on its own bar and its own declared axis — never a per-bar scale.
-// The distinction is the whole rule: a band is drawn against the axis its anchor channel already
-// declares in `CANDIDATE_SERIES`, so nothing rescales an interval onto a bar that did not produce
-// it. WHICH bars is `whiskerBands(ctx)`; each `anchor` is a `SeriesKey` rather than a literal so
-// the join cannot drift from the dataset it names without the compiler noticing.
+// Drawn at the anchor dataset's own rendered x, not the category centre, and on the axis that
+// channel declares in `CANDIDATE_SERIES` — never a per-bar scale.
 const ciWhiskerPlugin: Plugin<"bar", { bands: WhiskerBand[] }> = {
   id: "ciWhisker",
   afterDatasetsDraw(chart, _args, opts) {
@@ -147,7 +123,6 @@ const ciWhiskerPlugin: Plugin<"bar", { bands: WhiskerBand[] }> = {
     ctx.lineWidth = 1.5;
     const capHalf = 4;
     for (const band of bands) {
-      // The anchor's OWN axis, off the one channel declaration — not a scale the band carries.
       const yScale = chart.scales[seriesByKey(band.anchor)?.axis ?? "y"];
       const meta = chart.data.datasets.findIndex((ds) => ds.label === band.anchor);
       if (!yScale || meta < 0) continue;
@@ -161,10 +136,7 @@ const ciWhiskerPlugin: Plugin<"bar", { bands: WhiskerBand[] }> = {
           | undefined;
         const x = el?.getProps?.(["x"], true)?.x;
         if (typeof x !== "number") continue;
-        // The percent band is bounded to [0,1] by the server (`mean_fitness_ci` clips to its
-        // support) and θ's axis is fitted to the θ it plots, so both pixels land inside their own
-        // scale. This used to clamp to the plot area, compensating here for an interval that
-        // claimed negative accuracy.
+        // No clamp: the server clips `mean_fitness_ci` to [0,1] and θ's axis is fitted to its data.
         const yLo = yScale.getPixelForValue(lo);
         const yHi = yScale.getPixelForValue(hi);
         ctx.beginPath();
@@ -181,11 +153,6 @@ const ciWhiskerPlugin: Plugin<"bar", { bands: WhiskerBand[] }> = {
   },
 };
 
-// Red vertical divider at the mask divergence boundary: bars left of it are the
-// invariant prefix (the masked criterion would have elected the SAME winners up
-// to here), bars at/right of it are counterfactual. Drawn at the LEFT edge of the
-// first divergent bar — "before the divergent values, after what is truly the
-// same". Index null ⇒ no mask active / no divergence ⇒ nothing drawn.
 const divergenceLinePlugin: Plugin<"bar", { index: number | null }> = {
   id: "divergenceLine",
   afterDatasetsDraw(chart, _args, opts) {
@@ -194,8 +161,6 @@ const divergenceLinePlugin: Plugin<"bar", { index: number | null }> = {
     const xScale = chart.scales.x;
     if (!xScale) return;
     const { ctx, chartArea } = chart;
-    // Left edge of category `idx` = midpoint to its left neighbour; for idx 0,
-    // step half a category left of the first centre (clamped to the plot edge).
     const c = xScale.getPixelForValue(idx);
     let x: number;
     if (idx > 0) {
@@ -218,9 +183,7 @@ const divergenceLinePlugin: Plugin<"bar", { index: number | null }> = {
   },
 };
 
-// The scoring candidate's bar pulses a glow around its outline. Bars are canvas-drawn, so no CSS
-// animation can reach them: this strokes in `afterDatasetsDraw` and drives its own rAF redraw,
-// running ONLY while `index` is a real bar and cancelling itself when scoring ends.
+// Canvas bars are out of CSS animation's reach, so this drives its own rAF redraw while `index` is set.
 const PULSE_PERIOD_MS = 1600;
 const pulseRaf = new WeakMap<object, number>();
 const inFlightPulsePlugin: Plugin<"bar", { index: number | null }> = {
@@ -240,7 +203,6 @@ const inFlightPulsePlugin: Plugin<"bar", { index: number | null }> = {
     }
     const { ctx } = chart;
     if (!ctx) return;
-    // Bounding box of the candidate's bar group (all visible series at idx).
     let left = Infinity;
     let right = -Infinity;
     let top = Infinity;
@@ -281,8 +243,6 @@ const inFlightPulsePlugin: Plugin<"bar", { index: number | null }> = {
     ctx.shadowBlur = 7 + 9 * t;
     ctx.strokeRect(left - 1.5, top - 1.5, right - left + 3, base - top + 3);
     ctx.restore();
-    // Drive the next frame — chart.draw() re-enters this hook, so the loop
-    // self-sustains while a bar is in flight (rAF caps it to the refresh rate).
     pulseRaf.set(
       chart,
       requestAnimationFrame(() => {
@@ -297,11 +257,7 @@ const inFlightPulsePlugin: Plugin<"bar", { index: number | null }> = {
   },
 };
 
-// `afterLayout`, NOT `afterDraw`: (1) `chartArea` and `scales` are final here;
-// (2) it fires on every update AND on every resize (chart.js's resize path runs
-// an update, which re-lays-out); (3) `inFlightPulse` re-enters `chart.draw()` at
-// ~60fps via rAF while a candidate scores, so an afterDraw publisher would
-// rebuild this array 60×/s for nothing.
+// `afterLayout`, not `afterDraw`: `inFlightPulse` re-enters `chart.draw()` at ~60fps.
 const xBridgePlugin: Plugin<"bar", { onGeometry: (g: PlotGeometry) => void }> = {
   id: "xBridge",
   afterLayout(chart, _args, opts) {
@@ -309,9 +265,7 @@ const xBridgePlugin: Plugin<"bar", { onGeometry: (g: PlotGeometry) => void }> = 
     const x = chart.scales.x;
     if (!emit || !x) return;
     const { left, right, width } = chart.chartArea;
-    // Hidden / zero-width card (a collapsed chat dropdown) makes every fraction
-    // garbage. Keep the last good geometry; re-showing fires a resize, which
-    // republishes.
+    // A zero-width (hidden) card keeps the last good geometry; re-showing fires a resize.
     if (!(width > 0)) return;
     const n = chart.data.labels?.length ?? 0;
     const centers: number[] = [];
@@ -320,7 +274,6 @@ const xBridgePlugin: Plugin<"bar", { onGeometry: (g: PlotGeometry) => void }> = 
   },
 };
 
-// Stable identity — passing a fresh array each render churns the chart.
 const CHART_PLUGINS = [
   barCapsPlugin,
   divergenceLinePlugin,
@@ -329,36 +282,21 @@ const CHART_PLUGINS = [
   xBridgePlugin,
 ];
 
-// Above this real-bar count, x-axis labels rotate 60° so they stop
-// overlapping their neighbours. Picked empirically against the card
-// height (rotated labels eat ~30px of plot height).
 const ROTATE_THRESHOLD = 8;
 
 interface Props {
   views: CandidateView[];
-  // The card's metric axis — one bar series per selected metric. Never empty.
   metrics: ReadonlySet<HeadlineMetric>;
   showMask: boolean;
-  // Draw the dashed cache-provenance line at each candidate's replayed share.
   showCache: boolean;
-  // Draw every candidate's reading on the one set of cells all of them answered.
   showOverlap: boolean;
   selectedKey: string | null;
   onSelect: (view: CandidateView | null) => void;
-  // Bar index where the active mask first diverges from the realized record —
-  // the red vertical divider is drawn at its left edge. null = no mask / no
-  // divergence (no divider).
   divergenceBoundary: number | null;
-  // Bar index of the candidate currently accumulating samples — it pulses
-  // ("blinking") while live. null = nothing scoring (no pulse).
   inFlightIndex: number | null;
-  // Publishes the plot geometry the dendrogram strip aligns to. MUST be a stable
-  // callback: it rides the `options` memo, so a fresh identity per render would
-  // force a chart.update() on every poll tick.
+  // MUST be stable: it rides the `options` memo.
   onGeometry: (g: PlotGeometry) => void;
   unit: MeasuredUnit;
-  // The metric this campaign's ENGINE elects on (served). It decides which bar reads at
-  // full accent — so the loud bar is the DECIDING bar, not merely the familiar one.
   electedMetric: HeadlineMetric;
 }
 
@@ -376,13 +314,7 @@ export const FitnessChart = memo(function FitnessChart({
   unit,
   electedMetric,
 }: Props) {
-  // Subscribe to theme so a flip re-runs this component and the data/options
-  // memos below pick up the new getCss() values.
   const themeVersion = useThemeVersion();
-  // One x-axis label per real bar. No empty-slot padding: chart.js spaces
-  // categories evenly across the frame, and the `maxBarThickness` cap below
-  // keeps individual bars narrow even at very low counts (a 2-bar round
-  // shows two 28px bars centered, not two stretched-to-fill bars).
   const labels = useMemo(() => views.map((v) => v.label), [views]);
 
   const ctx = useMemo<SeriesCtx>(
@@ -392,9 +324,6 @@ export const FitnessChart = memo(function FitnessChart({
   const active = useMemo(() => activeSeries(ctx), [ctx]);
   const showAbility = metrics.has("ability");
 
-  // Per-bar border overlay — picks out the bar matching the shared
-  // SelectionContext. Driven by --color-selection (app/styles/foundation/themes.css)
-  // so it matches the dendrogram node's selected colour directly beneath it.
   const selectionBorder = useMemo(() => {
     if (selectedKey == null) return null;
     const idx = views.findIndex((v) => v.key === selectedKey);
@@ -405,21 +334,13 @@ export const FitnessChart = memo(function FitnessChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [views, selectedKey, themeVersion]);
 
-  // THE PARENT — the last bar on the spine wearing a crown. Not `findIndex`: this chart
-  // plots a whole timeline, so every advancing round has a winner and the first one is C0.
-  // The per-round crowns stay legible as filled dots on the dendrogram directly beneath; up
-  // here one mark answers "who holds the title now", which is the question the card is for.
-  // Null on a view with nothing crowned — a held round, a course, a round still scoring.
+  // The LAST crowned bar, not `findIndex`: every advancing round has a winner and the first is C0.
   const parentIdx = useMemo(() => {
     for (let i = views.length - 1; i >= 0; i--) if (views[i]?.is_winner) return i;
     return null;
   }, [views]);
 
-  // "…and by how much" — the SERVED blocked lift over the floor the promotion gate judged this
-  // candidate against. Claimed ONLY where the 95% interval excludes 0: an interval spanning it
-  // means the round could not separate the winner from its parent, and a bare point estimate
-  // there would report a win the measurement does not support. The number is in the tooltip
-  // either way; the crown alone is the honest caption when the round cannot say.
+  // The served lift, claimed only where its 95% interval excludes 0.
   const crown = useMemo(() => {
     const v = parentIdx == null ? undefined : views[parentIdx];
     const { matchedParentLift: lift, matchedParentLiftCiLo: lo, matchedParentLiftCiHi: hi } =
@@ -429,20 +350,11 @@ export const FitnessChart = memo(function FitnessChart({
   }, [views, parentIdx]);
 
   const data = useMemo<ChartData<"bar" | "line">>(() => {
-    // BAR series only — the cache line sits on top of the group rather than inside it, so
-    // counting it would narrow every bar the moment the overlay appeared.
     const bars = active.filter((s) => s.kind === "bar").length;
     const cat = bars <= 1 ? 0.55 : bars === 2 ? 0.75 : bars === 3 ? 0.9 : 0.95;
-    // Dynamic bar thickness ceiling: chart frame fans out to ~720px on
-    // wide layouts, so 25 bars × 3 series should leave room without
-    // clipping. Scale max thickness down as the bar count grows; min 6.
     const barCount = Math.max(1, labels.length);
     const maxBar = Math.max(6, Math.min(28, Math.round(640 / (barCount * Math.max(1, bars)))));
-    // Per-bar outline. A hollow series keeps its own edge; the selected bar overrides it (it
-    // must match the dendrogram dot beneath). The parent deliberately gets none: on the
-    // elected series its fill already IS the accent, so a ring would be invisible and any
-    // other colour would compete with the selection stroke and the in-flight pulse. Its
-    // marks — the crown and the lit x-axis label — sit off the bar, where contrast is free.
+    // The parent gets no ring: on the elected series its fill already IS the accent.
     const outline = (spec: SeriesSpec, ink: string) => {
       const base = spec.hollow ? ink : "transparent";
       const baseW = spec.hollow ? 1.5 : 0;
@@ -469,12 +381,9 @@ export const FitnessChart = memo(function FitnessChart({
             borderWidth: 1.5,
             pointRadius: 0,
             fill: false,
-            // Bridging a gap claims a share for a candidate that has none.
             spanGaps: false,
             yAxisID: spec.axis,
-            // ON TOP of the bars, and the sign is counterintuitive: chart.js sorts metasets
-            // ASCENDING by `order` and then draws them in REVERSE (`Chart#_drawDatasets`), so
-            // the LOWEST order paints last. Raising this to +1 hides the line behind the bars.
+            // Lowest `order` paints LAST in chart.js — +1 would hide the line behind the bars.
             order: -1,
           };
         }
@@ -487,8 +396,7 @@ export const FitnessChart = memo(function FitnessChart({
           barPercentage: 0.95,
           categoryPercentage: cat,
           maxBarThickness: maxBar,
-          // A signed series gets no minimum length: chart.js applies it as an absolute
-          // length, so a negative logit's stub would land on the wrong side of zero.
+          // chart.js applies `minBarLength` as absolute, so a negative stub would cross zero.
           ...(spec.signed ? {} : { minBarLength: 2 }),
         };
       }),
@@ -500,9 +408,6 @@ export const FitnessChart = memo(function FitnessChart({
   const options = useMemo<ChartOptions<"bar">>(() => ({
     responsive: true,
     maintainAspectRatio: false,
-    // Animation off — see chart-config.ts for the rationale. Chart.js's
-    // internal data-diff is fast enough that a poll-driven update lands in
-    // a single frame; the prior 200 ms tween was visible jank, not polish.
     animation: false,
     onClick: (_evt, elements) => {
       const hit = elements?.[0];
@@ -518,22 +423,15 @@ export const FitnessChart = memo(function FitnessChart({
       target.style.cursor = elements?.[0] ? "pointer" : "default";
     },
     scales: {
-      // The parent's own label lights up — the second half of its mark, and the half that
-      // works: it sits in the axis gutter, so unlike a ring on a filled bar it has nothing to
-      // lose contrast against, at any bar count and in either theme.
       x: { grid: { display: false }, ticks: { color: (t) => getCss(t.index === parentIdx ? "--color-accent" : "--color-text-secondary"), font: (t) => ({ size: rotate ? 10 : 11, family: getCss("--font-mono"), weight: t.index === parentIdx ? "bold" as const : "normal" as const }), autoSkip: false, maxRotation: rotate ? 60 : 0, minRotation: rotate ? 60 : 0 } },
       y: { min: 0, max: 1, grid: { color: getCss("--color-border") }, ticks: { font: { size: 11 }, stepSize: 0.2 } },
-      // θ's own axis, declared only while the ability series shows — otherwise the
-      // right-hand gutter (which every dendrogram fraction is measured against)
-      // would reserve space for an axis with no data.
+      // Declared only while θ shows: the right gutter shifts every dendrogram fraction.
       ...(showAbility
         ? {
             y1: {
               position: "right" as const,
               grid: { display: false },
               ticks: { font: { size: 11 } },
-              // Labels the right axis as θ, sitting at the top next to the left axis's
-              // "1" — replaces the "(right axis)" caption the legend used to carry.
               title: {
                 display: true,
                 text: "[θ]",
@@ -567,18 +465,14 @@ export const FitnessChart = memo(function FitnessChart({
                   : `${unitCount(n, unit)} scored`,
               );
             }
-            // Silent at 0 — the normal case, and noise on every bar.
             const cached = views[idx]?.cached_samples;
             if (cached != null && cached > 0 && n != null) {
               lines.push(`${cached} of ${unitCount(n, unit)} from cache`);
             }
-            // Difficulty-adjusted ability — the metric the winner is elected on, so a
-            // shorter (lower-accuracy) winner bar reads as "won on harder rows".
             const theta = views[idx]?.theta;
             if (typeof theta === "number") {
               const se = views[idx]?.theta_se;
-              // The SE, named as one — the whisker on this bar is the 95% band around it, and
-              // printing a bare ± beside a wider drawn interval reads as a mismatch.
+              // Named "se", not ±: the drawn whisker is the wider 95% band.
               const tail = typeof se === "number" ? `, se ${se.toFixed(2)}` : "";
               lines.push(`ability θ ${theta.toFixed(2)}${tail} (elected on θ, not accuracy)`);
             }
@@ -587,8 +481,6 @@ export const FitnessChart = memo(function FitnessChart({
             if (typeof ciLo === "number" && typeof ciHi === "number") {
               lines.push(`95% CI [${ciLo.toFixed(3)}, ${ciHi.toFixed(3)}]`);
             }
-            // The gate's own verdict, said out loud rather than leaving an interval that spans 0
-            // to be read as a win.
             const lift = views[idx]?.matchedParentLift;
             const lLo = views[idx]?.matchedParentLiftCiLo;
             const lHi = views[idx]?.matchedParentLiftCiHi;
@@ -598,10 +490,7 @@ export const FitnessChart = memo(function FitnessChart({
                 `lift vs parent ${fmtSigned(lift)} [${fmtSigned(lLo)}, ${fmtSigned(lHi)}]${flat}`,
               );
             }
-            // Say why there is no crown and no θ, rather than leaving the absence to be
-            // read as a loss: an arm in a round nothing has won yet has nothing to have
-            // lost to. Keyed on the ELECTION, not on the round close — those are two
-            // moments, and after the first one the absence really does mean "lost".
+            // Keyed on the election, not the round close: after it, no crown does mean "lost".
             if (views[idx]?.electionPending) {
               lines.push("no election yet — nothing crowned in this round");
             }
@@ -620,11 +509,7 @@ export const FitnessChart = memo(function FitnessChart({
 
   return (
     <div className="fitness-chart-frame">
-      {/* Explicit type argument — `type="bar"` alone infers the bar-only generic and
-          rejects the cache overlay's line dataset. */}
-      {/* A canvas has no text, so the name IS the whole reading for anyone not looking at it —
-          and it must say which measure the bars are on, because that is the one thing a glance
-          gets from the axis and a reader gets from nowhere. */}
+      {/* Explicit type argument: `type="bar"` alone rejects the cache overlay's line dataset. */}
       <Chart<"bar" | "line">
         type="bar"
         data={data}

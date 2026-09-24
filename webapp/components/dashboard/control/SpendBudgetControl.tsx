@@ -8,22 +8,15 @@ import { useWorkspace } from "@/lib/workspace";
 import { Modal } from "@/components/shell/Modal";
 
 interface Props {
-  // The two standing ceilings as the live dashboard reports them
-  // (`run_limits.spend_budget_usd` / `run_limits.token_budget`); `null` =
-  // disarmed. Used to prefill the inputs + show the standing caps.
+  // `null` = disarmed.
   currentBudgetUsd: number | null;
   currentBudgetTokens: number | null;
   usedUsd: number | null;
   usedTokens: number;
 }
 
-// Fulfils the job-bar "Adjust spend / finishing criteria" affordance with the
-// shipped `change-spend-budget` command — now two ceilings (USD + tokens),
-// whichever trips first halts. Write-only: it reads the standing caps from the
-// dashboard poll (no new endpoint) and POSTs new caps. The runner's BudgetGate
-// re-reads `.runtime/spend_cap.json` each clean round, so the change takes at the
-// next round boundary. Setting a ceiling to `0` halts after the current round —
-// confirmed first, since that's effectively a stop.
+// Arms both ceilings (USD, tokens) via `change-spend-budget`; BudgetGate re-reads them at the next
+// round boundary. A `0` ceiling halts after the current round, so it is confirmed first.
 export function SpendBudgetControl({
   currentBudgetUsd,
   currentBudgetTokens,
@@ -37,12 +30,8 @@ export function SpendBudgetControl({
   const [tokDraft, setTokDraft] = useState<string>(
     currentBudgetTokens != null ? String(currentBudgetTokens) : "",
   );
-  // Re-seed the edit buffers whenever the committed cap changes — render-phase
-  // guarded reset (webapp/CLAUDE.md "State reset on prop change"), the same recipe
-  // as useAppliableField. Without it the buffers keep their first-mount value: this
-  // control lives in the RemoteControl's persistent (un-keyed) panel, so a soft unit
-  // switch never remounts it, and `apply()` (posting to the now-updated workspace ids)
-  // would write the prior cycle's cap onto the newly-viewed one.
+  // This panel is never remounted on a unit switch, so re-seed here or `apply()` writes the prior
+  // cycle's cap onto the new one.
   const [prevUsd, setPrevUsd] = useState(currentBudgetUsd);
   if (currentBudgetUsd !== prevUsd) {
     setPrevUsd(currentBudgetUsd);
@@ -53,8 +42,7 @@ export function SpendBudgetControl({
     setPrevTok(currentBudgetTokens);
     setTokDraft(currentBudgetTokens != null ? String(currentBudgetTokens) : "");
   }
-  // Scoped to the cycle for the same reason the buffers re-seed above: this panel is never
-  // remounted, so a refusal from the previous unit would sit under the new one's caps.
+  // Scoped to the cycle: a refusal from the previous unit must not sit under the new one's caps.
   const cmd = useCommand<"change-spend-budget">("spend-budget", { scope: cycleId });
   const [confirmingHalt, setConfirmingHalt] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -62,9 +50,7 @@ export function SpendBudgetControl({
 
   const disabled = !campaignId || !cycleId;
 
-  // Send only the caps the operator actually changed; the applier merges, so an untouched cap is
-  // left exactly as it was on disk. `null` covers both ways there is nothing to send — `parseCap`
-  // refusing a blank or half-typed draft, and a parsed value equal to the cap already standing.
+  // Only changed caps are sent; the applier merges, so an untouched cap stays as it is on disk.
   const usd = parseCap(usdDraft);
   const tok = parseCap(tokDraft, { int: true });
   const nextUsd = usd !== currentBudgetUsd ? usd : null;
@@ -80,11 +66,8 @@ export function SpendBudgetControl({
       postChangeSpendBudget(campaignId, cycleId, { maxUsd: nextUsd, maxTokens: nextTok }),
     );
     if (!r.ok) return;
-    // The note quotes NO number, deliberately. `quota.py::clamp_budget_change` silently mins
-    // the request against the account's remaining allowance, so composing this text from the
-    // draft told a spent free-tier account "Cap set to 8.0M tok" while 0 was written. The two
-    // rows above already show the ARMED ceiling as the server reports it, so the honest report
-    // is to point at them rather than to restate — or re-derive — what landed.
+    // Quotes NO number: `quota.py::clamp_budget_change` silently mins the request against the
+    // remaining allowance; the rows above show what the server armed.
     setNote(
       isHalt
         ? "Applied — halting after this round."
@@ -163,10 +146,8 @@ export function SpendBudgetControl({
           {pending ? "Setting…" : "Set caps"}
         </button>
       </div>
-      {/* Two ceilings can stop a run and only ONE of them is editable here. Naming the other
-          and where it lives beats inferring which one bound from a raise that did not move:
-          that inference is a derivation the browser has no authority to make, and the account
-          pane already serves the lifetime pair. */}
+      {/* Name the other ceiling rather than infer which one bound — the browser has no authority
+          to make that derivation. */}
       <small className="spend-control-hint">
         {isHalt
           ? "Halts the run after the current round."

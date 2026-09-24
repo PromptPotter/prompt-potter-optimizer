@@ -1,16 +1,5 @@
-// The PromptPotter mark (v3) — a vessel that is also a violin plot: the
-// silhouette is a mirrored density curve, the belly is the mode, and the fill
-// level is where the area accumulates.
-//
-// The artwork is the approved raster (public/brand/mark-pot.png). It is used
-// as a CSS mask with `background: currentColor` rather than an <img>, because an
-// <img> bakes the ink in: these three surfaces sit on cobalt, on white and on
-// near-black, and the glyph has to tint with theme and hover. The mask takes
-// only the alpha channel, so colour still comes from the cascade and a
-// whitelabel host's accent flows through — promptpotter-web/BRAND.md principle 4.
-//
-// NO enclosing circle — a disc lockup was tried and rejected. The browser-tab
-// icon solves light/dark chrome with two cuts instead (see app/layout.tsx).
+// The PromptPotter mark, drawn as a CSS mask over `currentColor`, never an <img>: an <img> bakes
+// the ink in, and a whitelabel accent must flow through (promptpotter-web/BRAND.md principle 4).
 
 interface Props {
   size?: number;

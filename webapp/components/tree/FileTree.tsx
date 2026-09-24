@@ -32,8 +32,6 @@ function buildTree(entries: FileEntry[]): ScopedTree {
   for (const e of entries) {
     const scope = e.scope === "campaign" ? "campaign" : "cycle";
     const parts = e.path.split("/");
-    // Last segment is the file; anything left is the dir chain. A path with no
-    // trailing segment names no file — nothing to render, so drop it.
     const name = parts.pop();
     if (!name) continue;
     let cur = tree[scope];
@@ -61,8 +59,7 @@ interface Props {
 }
 
 export function FileTree({ campaignId, cycleId, selected, onSelect }: Props) {
-  // Workspace-level reachability — so the no-unit state can tell a network
-  // failure apart from a genuinely empty workspace.
+  // Tells a network failure apart from a genuinely empty workspace.
   const { activeError, cyclesError } = useWorkspace();
   const read = useRead(
     campaignId && cycleId

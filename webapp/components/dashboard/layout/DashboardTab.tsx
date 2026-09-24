@@ -12,22 +12,12 @@ import { LiveStateCard } from "@/components/dashboard/scoring/LiveStateCard";
 import { OuterSignalPanel } from "@/components/dashboard/scoring/OuterSignalPanel";
 import { ConfigMapPanel } from "@/components/dashboard/control/ConfigMapPanel";
 
-// The Dashboard tab's arrangement, owned here rather than inline in the shell:
-// AppShell stays a thin tab-router + provider stack. Every section reads its
-// own state from context (`useDashboard`/`useWorkspace`/`useSelection`); the
-// only thing threaded is the one-shot pipeline topology, fetched here because
-// it has no context home (a static read, not live state).
+// The Dashboard tab's arrangement; only the one-shot pipeline topology is threaded.
 export function DashboardTab() {
-  // One-shot pipeline (topology) lookup. Errors → pipeline stays null (the
-  // canvas renders its own empty state); no retry needed for a static read.
   const { doc: pipeline } = useOptimizerPipeline();
 
-  // The outer L4 loop earns extra boxes: the per-round outer verdict + the
-  // cross-cycle ranking / capability surfaces. `campaignId` is the ROOT hop, so
-  // this reads the outer campaign's backend_type; depth 1 == viewing the outer
-  // (not a drilled-in inner). Drilling into `↻ inner` → 2-hop path → gate false
-  // → the plain dashboard, which is what an inner run should show. No fallback for
-  // an unresolved backend_type — it correctly reads as "not self-optimizing".
+  // `campaignId` is the ROOT hop and depth 1 is the outer view, so a drilled-in inner run gets
+  // the plain dashboard.
   const { viewedPath, campaignId, campaigns } = useWorkspace();
   const rootBackendType = campaigns.find((c) => c.campaign_id === campaignId)?.backend_type;
   const isOuterSelfOpt = viewedPath?.length === 1 && isSelfOptimization(rootBackendType);
@@ -43,10 +33,7 @@ export function DashboardTab() {
           <OuterSignalPanel />
         </DashSpine>
       )}
-      {/* Full-bleed, and deliberately OUTSIDE DashSpine: the spine is a 980px stripe that
-          also translates left by half the sidebar width, so a chronology inside it reads as
-          a widget rather than an axis. It sits above the optimizer + candidates because it
-          answers the question you ask first — what happened, in order. */}
+      {/* Full-bleed, outside DashSpine: inside the spine a chronology reads as a widget. */}
       <TimeRay />
       <DashSpine>
         <NowTriad pipeline={pipeline} />

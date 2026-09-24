@@ -1,24 +1,5 @@
 "use client";
-// THE bar-chart channels, declared once each. The legend, the datasets, the columns, the
-// tooltip and the plugin joins all read this table; adding a channel is one entry.
-//
-// A row carries legend, ink token, axis, null-handling, sign, tooltip and applies-predicate,
-// and every join reads it from here -- never a bare string literal reintroduced in a plugin.
-//
-// BANDS: one per CHANNEL, no scale field. Each hangs off its own bar and is drawn against that
-// bar's own declared `axis` -- the mean interval on whichever percent-axis bar `whiskerAnchor`
-// names, theta's on the logit axis, and neither when its bar is not showing. `whiskerBands` is
-// the one declaration. A per-BAR scale must not come back: a band rescaled onto a bar that did
-// not produce it is how the confidence band twice went silently undrawn. Both bands are 95%,
-// because two whiskers drawn alike have to mean alike -- theta's SE is widened at that one site,
-// never at a render.
-//
-// Two fields carry facts nothing else states:
-//   • `gap` and `signed` are separate. `verify` is sparse and still wants a minimum bar
-//     length; θ is sparse AND signed, so it must not have one — chart.js applies
-//     `minBarLength` as an absolute length and paints a negative logit's stub below zero.
-//   • `metric` is the JOIN to `HEADLINE_METRICS`, which owns the glyph, prose and order. It
-//     also answers "does this channel have a chip", which is why the legend keeps no list.
+// The bar-chart channels, each declared once (`webapp/CLAUDE.md` § Display-data sources).
 
 import type { MeasuredUnit } from "@/lib/api/types";
 import type { HeadlineMetric } from "@/lib/derivations";
@@ -41,39 +22,28 @@ export interface SeriesCtx {
   showOverlap: boolean;
   views: readonly CandidateView[];
   unit: MeasuredUnit;
-  // Served `dash.headline_metric` — the one input deciding which channel reads primary.
   electedMetric: HeadlineMetric;
 }
 
 export interface SeriesSpec {
   key: SeriesKey;
   metric?: HeadlineMetric;
-  // Chipless channels only — a metric restating `headlineMetricLabel` under its own chip is
-  // the duplication this table deletes.
+  // The JOIN to `HEADLINE_METRICS`; its presence also means "this channel has a chip".
+  // Chipless channels only.
   legend?: (ctx: SeriesCtx) => string;
   hint?: (ctx: SeriesCtx) => string;
-  // ONE name: the legend swatch resolves it with `var()`, the canvas with `getCss()`.
   ink: (ctx: SeriesCtx) => string;
   kind: "bar" | "line";
-  // `y1` is θ's logit axis, declared only while θ shows — the right gutter feeds the
-  // dendrogram's alignment, so an axis reserving space for absent data slides every node off
-  // its bar.
   axis: "y" | "y1";
-  // `floor-when-started` paints a stub once scoring begins, telling "still computing" apart
-  // from "not yet started".
   gap: "floor-when-started" | "sparse";
+  // Separate from `gap`: a signed series must get no `minBarLength`.
   signed?: true;
-  // Outline, no fill — corroboration of a bar rather than a rival beside it, spending no new
-  // hue to say so.
   hollow?: true;
-  // This channel's own SERVED number. Computes nothing.
   valueOf: (v: CandidateView) => number | null;
   applies: (ctx: SeriesCtx) => boolean;
   tip: (v: CandidateView, ctx: SeriesCtx) => string;
 }
 
-// Per CAMPAIGN: the metric the engine elects on reads at full accent, its siblings recede
-// into the same hue. Three steps is the ceiling — at 25 bars × 3 series a bar is ~6px.
 export function metricInkToken(m: HeadlineMetric, elected: HeadlineMetric): string {
   return m === elected ? "--series-elected" : "--series-reading";
 }
@@ -83,16 +53,13 @@ const metricInk =
   (ctx: SeriesCtx): string =>
     metricInkToken(m, ctx.electedMetric);
 
-// The set drifts as the adopted line grows and changes outright when the operator pins one, so
-// the legend reads its size off the data.
 function basisN(ctx: SeriesCtx): number {
   let n = 0;
   for (const v of ctx.views) if (v.overlapN != null && v.overlapN > n) n = v.overlapN;
   return n;
 }
 
-// Draw order. Bars in metric-axis order; the provenance line last, since it paints OVER the
-// group rather than beside it.
+// Array order is draw order.
 export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
   {
     key: "accuracy",
@@ -111,8 +78,7 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     ink: metricInk("ability"),
     kind: "bar",
     axis: "y1",
-    // θ is a LOGIT: 0 is a real, middling ability, so a floored θ is a fabricated
-    // measurement rather than an empty slot.
+    // θ is a logit: a floored 0 would be a fabricated middling ability.
     gap: "sparse",
     signed: true,
     valueOf: (v) => v.theta,
@@ -135,8 +101,6 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     legend: () => "masked",
     hint: () =>
       "Every score re-read under the criterion you built — the on-disk composite is untouched.",
-    // A criterion like the three above, just a counterfactual one — its own step in the
-    // accent family rather than a rival hue.
     ink: () => "--series-counterfactual",
     kind: "bar",
     axis: "y",
@@ -153,25 +117,19 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     ink: () => "--color-overlap",
     kind: "bar",
     axis: "y",
-    // A candidate that did not answer the whole basis is not drawn at all, so a floored 0
-    // would claim it scored nothing rather than that it was never read on this set.
     gap: "sparse",
     valueOf: (v) => v.overlapAccuracy,
     applies: (c) => c.showOverlap && c.views.some((v) => v.overlapAccuracy != null),
     tip: (v, c) =>
       v.overlapAccuracy == null
         ? "overlap: not read on the whole set"
-        : // The COUNT travels with the rate: a percentage over an unnamed denominator is
-          // the reading this series exists to replace.
-          `overlap: ${fmtNum(v.overlapAccuracy)}${v.overlapN ? ` on ${unitCount(v.overlapN, c.unit)} shared` : ""}`,
+        : `overlap: ${fmtNum(v.overlapAccuracy)}${v.overlapN ? ` on ${unitCount(v.overlapN, c.unit)} shared` : ""}`,
   },
   {
     key: "verify",
     legend: () => "verify",
     hint: () =>
       "A `promptpotter verify` re-run of this candidate over the workspace set — did the verdict hold on more cells?",
-    // Shares the evidence ink with `overlap` and separates by fill, rhyming with the
-    // dendrogram's filled-winner / hollow-eliminated dot directly beneath.
     ink: () => "--color-overlap",
     hollow: true,
     kind: "bar",
@@ -192,18 +150,13 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     ink: () => "--color-cache",
     kind: "line",
     axis: "y",
-    // Bridging a gap claims a share for a candidate that has none.
     gap: "sparse",
     valueOf: (v) => {
       const n = v.n_samples;
       return v.cached_samples == null || n == null || n <= 0 ? null : v.cached_samples / n;
     },
     applies: (c) => c.showCache,
-    // The served INTEGERS, never the share: the height is geometry, the counts are the
-    // measurement, and only the measurement gets written down. Filed three times as a
-    // browser-computed number and refused each time — the test is whether the operator READS a
-    // number this layer made, and a bar's height on a shared 0–1 axis is the axis's own unit
-    // conversion. Serving `cached_share` would be a third field derivable from the two beside it.
+    // The served integers, never the share: the operator must not READ a number this layer made.
     tip: (v, c) =>
       v.cached_samples == null || v.n_samples == null
         ? "cached: —"
@@ -221,8 +174,7 @@ export function activeSeries(ctx: SeriesCtx): SeriesSpec[] {
   return CANDIDATE_SERIES.filter((s) => s.applies(ctx));
 }
 
-// One channel's column, index-aligned with the bars. The RAW value is what tooltips read;
-// the floor is a rendering decision and never leaves this array.
+// The floor is a rendering decision and never leaves this array; tooltips read the raw value.
 export function seriesColumn(
   spec: SeriesSpec,
   views: readonly CandidateView[],
@@ -234,12 +186,7 @@ export function seriesColumn(
   });
 }
 
-// The series the confidence band brackets — the elected metric where it is a percent, else
-// accuracy, and NULL when neither shows: a band hangs off a bar, so with no bar it must not
-// be drawn. A `SeriesKey` rather than a literal, because that join has gone silently missing
-// twice.
 export function whiskerAnchor(ctx: SeriesCtx): SeriesKey | null {
-  // θ's own axis is a logit; a [0,1] mean interval cannot be drawn against it.
   if (ctx.electedMetric !== "ability" && ctx.metrics.has(ctx.electedMetric)) {
     const spec = CANDIDATE_SERIES.find((s) => s.metric === ctx.electedMetric);
     if (spec && spec.axis === "y") return spec.key;
@@ -253,22 +200,10 @@ export interface WhiskerBand {
   hi: (number | null)[];
 }
 
-// 95%, normal. The server's mean band is already one (`scoring/selection.py::mean_fitness_ci`);
-// θ arrives as a standard error, so it is widened HERE rather than drawn raw — two whiskers drawn
-// alike have to mean alike, and one SE beside a 95% interval is the same picture for a third of
-// the coverage.
-// The QUANTILE is Python's choice (`shared/statistics.py::mean_ci_t`: t and z are not
-// interchangeable over a handful of cells), and z is right only because θ's SE is the Rasch fit's
-// posterior SE rather than a mean over cells. That reasoning belongs on a served
-// `theta_ci_lo/hi`; it stays here while the band is only ever DRAWN — the tooltip prints `se`.
+// Widens θ's SE to match the served 95% `mean_fitness_ci`. z (not t) holds only because θ's SE
+// is the Rasch posterior SE, not a mean over cells (`shared/statistics.py::mean_ci_t`).
 const Z95 = 1.96;
 
-// EVERY band the chart draws — one per channel that has an interval and is currently showing.
-// Each hangs off its own bar and is drawn against that bar's OWN declared `axis`: the mean band on
-// the percent axis, θ's on the logit one. So no band carries a scale of its own and none is
-// rescaled onto another channel's bar — which is the thing that must not come back. Before this,
-// the ability bar — the one a campaign electing on θ is decided by — carried no interval at all,
-// and its band hung on the accuracy bar beside it instead.
 export function whiskerBands(ctx: SeriesCtx): WhiskerBand[] {
   const bands: WhiskerBand[] = [];
   const percent = whiskerAnchor(ctx);

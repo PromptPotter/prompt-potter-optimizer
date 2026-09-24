@@ -1,15 +1,6 @@
 "use client";
-// ONE cell of an L4 panel — rendered as the inner campaign it actually is.
-//
-// A scored-cell row cannot say anything true about these: an outer round
-// records `is_hit: null`, no prediction and no ground truth for a cell, because
-// the cell was not scored — it was OPTIMIZED, by a whole campaign. Rendered as a
-// scored row it read as a bare query string that had missed.
-//
-// So the row shows what the run did (its phase, its origin → best) and opens it, the
-// same `drillInto` hop the sidebar's inner rows fire. A cell whose run is absent still
-// gets a row: the outer round measured it, and saying so is honest where inventing a
-// run is not — see the two absent states below, which are not the same absence.
+// One cell of an L4 panel, rendered as the inner campaign it is: an outer round records
+// `is_hit: null` for a cell, which was optimized by a whole campaign rather than scored.
 
 import { fmtPct0 } from "@/lib/format";
 import { runPhaseLabel } from "@/lib/run-phase";
@@ -29,11 +20,8 @@ export function PanelCellRow({
 }) {
   const name = panelCellLabel(cell);
 
-  // The LIVE round names no cell: its in-flight rows carry the sample's result and an
-  // empty `query`, and the cell's name only lands when the round file is written. With
-  // no name there is no join, so every cell of a live L4 round read "run not recorded"
-  // — which accuses the engine of losing provenance when it has simply not finished
-  // saying it yet. An unnamed cell is pending; a named one with no run is not.
+  // A live round's rows carry an empty `query` until the round file lands: an unnamed cell is
+  // pending, while a named one with no run is genuinely unrecorded.
   if (!cell) {
     return (
       <div className="rsv-row pcr-row pcr-absent">

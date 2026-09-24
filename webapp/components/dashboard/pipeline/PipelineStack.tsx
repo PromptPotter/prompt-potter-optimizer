@@ -12,29 +12,16 @@ import type { PipelineStatus } from "@/lib/types";
 import { ConnectorInspector } from "./ConnectorInspector";
 import { PipelineFlow } from "./PipelineFlow";
 
-// The campaign as the nesting it actually is, over one zoom axis. The stack is a chain,
-// outermost first — the optimization loop, this campaign's pipeline, then one level per
-// served `nests` — so its depth is data, not code.
-//
-//   [ optimization loop ── l1_score runs ↓                    ]
-//     [ promptpotter-self ── l1_score runs ↓             ]
-//       INPUT → [ justlogic-d234 ] → OUTPUT                      ANCHOR
-//
-// The ANCHOR is the innermost level: always drawn, never buttoned, sole bearer of
-// Input/Output and of full size. Zoom out with a button (one per UNDRAWN level, each
-// jumping straight to its own depth); zoom back in through a level's nesting node, which
-// drops everything above it. `outermost` is the whole of that state — nothing else about
-// the chain is stored, since a zoom re-parents every flow and re-parented state dies.
+// The campaign as its nesting chain, outermost first: optimization loop, this pipeline, one level
+// per served `nests`. `outermost` is the only zoom state — a zoom re-parents every flow.
 
 interface Layer {
   key: string;
-  // What this level's button says it will draw. Not the connector name — pp-self's target
-  // and the optimizer above it both report "PromptPotter".
+  // Not the connector name — pp-self's target and the optimizer both report "PromptPotter".
   label: string;
   view: PipelineView | null;
   status: PipelineStatus;
   connector: string | null;
-  // Served by whichever read produced this level's node rows — every level takes its own.
   reach: Record<string, NodeReach> | null;
   scope: NodeScope | null;
   nestsNode: string | null;
@@ -42,8 +29,6 @@ interface Layer {
   isLive: boolean;
 }
 
-// One bar per level the button draws: the glyph is the count, so adjacent buttons differ
-// by shape rather than by tooltip.
 function ZoomGlyph({ depth }: { depth: number }) {
   const pitch = 4;
   const top = (16 - (depth * pitch - 2)) / 2;
@@ -62,18 +47,14 @@ interface Props {
   onToggleSamples: () => void;
 }
 
-// Which level the chat opens on — "what am I optimizing" is the glance-level question. On
-// an ordinary campaign this is already the anchor.
 const CAMPAIGN_LEVEL = 1;
 
 export function PipelineStack({ datasetName, samplesOpen, onToggleSamples }: Props) {
   const cv = useConnector();
   const { dash } = useDashboard();
   const [outermost, setOutermost] = useState(CAMPAIGN_LEVEL);
-  // Everything below the campaign's pipeline. Gated on it resolving, so an anon preview
-  // fires nothing.
+  // Gated on the campaign pipeline resolving, so an anon preview fires nothing.
   const nested = useNestedPipelines(cv.nests, cv.pipelineStatus === "ok");
-  // The level above it: a static manifest, no identity dependency, read only on zoom-out.
   const { doc: optimizer } = useOptimizerPipeline(outermost === 0);
   const activeNode = dash?.current_round.active_node ?? null;
 
@@ -110,8 +91,7 @@ export function PipelineStack({ datasetName, samplesOpen, onToggleSamples }: Pro
       status: l.status,
       connector: l.connector,
       reach: l.reach,
-      // Read-only: no detail panel is scoped to another dataset's namespace, and an id
-      // collision here would light a node that is not running.
+      // Read-only: an id collision in another dataset's namespace would light a node not running.
       scope: null,
       nestsNode: l.nestsNode,
       activeNode: null,
@@ -119,12 +99,9 @@ export function PipelineStack({ datasetName, samplesOpen, onToggleSamples }: Pro
     })),
   ];
   const anchor = layers.length - 1;
-  // Indices count from the OUTSIDE in, so a choice survives deeper levels resolving; the
-  // clamp covers the window before the walk lands.
+  // Indices count from the OUTSIDE in, so a choice survives deeper levels resolving.
   const start = Math.min(outermost, anchor);
 
-  // Rides the anchor's row, ahead of its Input end — the strip is the level ABOVE the
-  // outermost drawn one, so it belongs beside the picture rather than on a row of its own.
   const zoomStrip =
     start > 0 ? (
       <div className="pipeline-zoom">

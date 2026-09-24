@@ -8,14 +8,8 @@ import { useRead } from "@/lib/hooks/useRead";
 import { cx } from "@/lib/cx";
 import { CopyButton, ErrorNote, Loading, SegmentedControl, SidePanel } from "@/components/ui";
 
-// One measured cell opened — the trace of one candidate on one sample, read off
-// `GET /datasets/{name}/cells/{run_id}/{sample_id}`. Chrome (it renders on every surface that
-// lists cells), so it takes IDENTITY props only: which dataset and which cell, never where to
-// read them from (`frontend-surface-contract.md::I9`).
-//
-// Left: the spans — one per pipeline node, in chain order. Right: the selected span's Input /
-// Output / Details / Tokens. Nothing here is computed: the input is the server's re-render of
-// what was sent, and every number is the row's own.
+// One measured cell opened. Chrome, so IDENTITY props only, never where to read from (I9);
+// nothing is computed — the input is the server's re-render of what was sent.
 
 type SpanTab = "input" | "output" | "details" | "tokens";
 

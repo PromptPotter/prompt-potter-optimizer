@@ -4,10 +4,8 @@ import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { Button } from "./Button";
 import s from "./SidePanel.module.css";
 
-// THE detail panel — one row of a table opened beside it, over the page. Opik's
-// `ResizableSidePanel`: the host passes only whether a previous/next row exists and how to
-// step (`onStep(±1)`); it never hands the panel its rows. J/K step, Esc closes, and the width
-// the operator drags is kept per `panelId` for the next visit.
+// THE detail panel for one table row. The host passes only whether a neighbour exists and how to
+// step (`onStep(±1)`), never the rows.
 
 const MIN_PX = 360;
 const DEFAULT_PX = 560;
@@ -38,16 +36,12 @@ export function SidePanel({
   onStep?: (shift: -1 | 1) => void;
   children: ReactNode;
 }) {
-  // A display preference, per device: the one localStorage hook, whose server snapshot is the
-  // default so the static export's first render matches.
   const [stored, setStored] = useLocalStorage<number>(`side-panel:${panelId}`, DEFAULT_PX);
-  // The width mid-drag, written through once on release rather than on every pointer move.
   const [dragging, setDragging] = useState<number | null>(null);
   const width = dragging ?? (Number.isFinite(stored) && stored >= MIN_PX ? stored : DEFAULT_PX);
   const endDrag = useRef<(() => void) | null>(null);
   useEffect(() => () => endDrag.current?.(), []);
 
-  // The handlers read the latest props through a ref, so the listener is bound once.
   const live = useRef({ onClose, onStep, hasPrev, hasNext });
   useEffect(() => {
     live.current = { onClose, onStep, hasPrev, hasNext };

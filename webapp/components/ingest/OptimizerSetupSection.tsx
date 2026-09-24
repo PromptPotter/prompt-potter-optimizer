@@ -6,38 +6,15 @@ import { Toolbar, ToolbarSpacer } from "@/components/ui";
 import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
 import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 
-// The OPTIMIZER, on the setup surface — the loop that is about to search, shown while
-// the operator is still deciding what to search over. `PipelineSetupSection` beside it
-// answers "what gets optimized"; this one answers "what does the optimizing".
-//
-// It draws through `PipelineFlow` — the SAME renderer the chat hero uses for the
-// optimizer level of its stack — rather than a list of its own. Not `PipelineStack`,
-// which is the zoom CHAIN: the level below the optimizer is this campaign's pipeline,
-// and that is already on screen in `PipelineSetupSection` directly underneath. Drawing
-// the chain here would render it twice.
-//
-// `/optimizer-pipeline` is a static manifest with no campaign in it, which is what makes
-// this reachable before mint — a draft has no cycle to read a pipeline from.
-//
-// The picked node opens the ONE `NodeDetail` — the same panel the chat hero and the
-// dashboard canvas open, so config and the prompt each node STARTS from read here
-// exactly as they do there, and it reads the served schema itself.
-//
-// Node config is READ-ONLY here, and that is a boundary rather than an omission:
-// `OptimizationConfig` declares no optimizer-node field and `assets/optimizer/
-// pipeline.yaml` is one repo-wide operator-owned file, so there is no per-campaign
-// optimizer overlay for an edit to land in. Offering an input would be a control that
-// writes nowhere.
+// The optimizer loop on the setup surface. Not `PipelineStack`: the level below is already
+// drawn by `PipelineSetupSection`. Read-only — there is no per-campaign optimizer overlay.
 
 export function OptimizerSetupSection() {
   const { doc, error } = useOptimizerPipeline();
   const { node: selected, setSelectionForNode } = useSelection();
 
   const view = doc?.view ?? null;
-  // The selection axis is app-global and node ids are not disjoint across pipelines, so
-  // match on the SCOPE as well as the id — a `target` click in the section below must
-  // not open an optimizer node that happens to share its name (on a self-optimizing
-  // campaign every one of them does).
+  // Match on SCOPE too: node ids are not disjoint across pipelines (self-optimization shares all).
   const shown = selected?.scope === "optimizer" ? selected : null;
 
   return (

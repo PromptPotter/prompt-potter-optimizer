@@ -29,52 +29,28 @@ import {
   type RoundNodePos,
 } from "./forest-layout";
 
-// What a cladogram needs from the surface it is drawn on — injected, so the dashboard and the
-// Compare tab draw the SAME tree and differ only in what a click there means. A second
-// cladogram would be a second answer to "what descends from what".
-// One comparison channel, as this drawing sees it: where it is anchored, and the ink it owns.
 export interface CladogramChannel extends CladogramAnchor {
-  // A `var()` reference, never a resolved value, so it repaints on a theme flip like everything
-  // else in the SVG (`theme.ts::seriesVar`).
+  // A `var()` reference (`theme.ts::seriesVar`), never a resolved value.
   ink: string;
 }
 
 export interface CladogramCtx {
-  // The read course's encoded address; its lane band renders highlighted.
   viewedKey: string | null;
-  // Is this the searchpoint the surface is reading at?
   isPicked: (n: RoundNodePos) => boolean;
-  // A searchpoint clicked, carrying the value painted on it — the surface holds no overlay.
   onPickCandidate: (n: RoundNodePos, value: number | null) => void;
-  // Every comparison channel on this drawing. A channel's EXTENT is everything at or before its
-  // anchor's round-column — the drawing's own time axis — so the extents NEST, and a node wears
-  // the ink of the NARROWEST one holding it. That is what makes a comparison something to look
-  // at: the campaign's own channel colours the whole family, and a channel picked at round 2
-  // takes the first three columns off it. Empty on a surface with no comparison on it.
   channels: readonly CladogramChannel[];
-  // The channel this drawing is FOR — the family is cut to its extent. What came after a
-  // searchpoint is no part of how that searchpoint came to be, and drawing it made every card
-  // show the same picture. `null` draws the whole family.
+  // The family is cut to this channel's extent; `null` draws the whole family.
   clip: CladogramAnchor | null;
-  // Searchpoints whose CONFIGURATION the operator has changed, and everything descending from
-  // one. Nothing ran at the edited value, so every measurement at or below it describes a
-  // searchpoint that no longer exists — the drawing WITHDRAWS those numbers rather than showing
-  // them under a changed setup. A different fact from `mask-divergent`, which recedes a
-  // counterfactual the server actually computed; here there is nothing to compute. Empty on every
-  // surface that offers no config editor. Candidate ids, the space `parent_id` speaks.
+  // Candidate ids (the space `parent_id` speaks) whose config was edited, plus descendants.
   invalidated?: ReadonlySet<string>;
 }
 
-// A course's operator-facing name: a root wears its dataset, a branch its short tail.
 function courseName(course: LineageNode): string {
   return course.course_kind === "root"
     ? course.dataset_name || course.id
     : shortFamilyTail(course.id);
 }
 
-// One expanded candidate node: parent→child slant is drawn as a seg upstream;
-// this renders the lineage-style stub + label, clickable for candidate
-// selection. Memo'd so unrelated lane toggles don't re-render every node.
 const CandidateNode = memo(function CandidateNode({
   n,
   accuracy,
@@ -90,34 +66,18 @@ const CandidateNode = memo(function CandidateNode({
   d,
 }: {
   n: RoundNodePos;
-  // The live percent-metric value painted on this node (the `valueByKey` overlay)
-  // — separate from geometry so a value tick re-renders only this text, not the
-  // memoized layout. Used as the node value for the accuracy/composite metrics.
   accuracy: number | null;
-  // Difficulty-adjusted ability — the value painted when `metric === "ability"`,
-  // and always shown in the tooltip (the metric the winner is elected on).
   theta: number | null;
-  // Which fitness number the operator selected for the node value.
   metric: HeadlineMetric;
   selected: boolean;
   onPick: (n: RoundNodePos) => void;
-  // Mask overlay (served): `dimmed` = in the counterfactual subtree past a
-  // divergence; `alt` = this candidate is the one the lens would have elected;
-  // `divergence` = this is the recorded winner AT the divergence round (the last
-  // agreed-upon point — glows red even when the lens names no alternative).
   dimmed: boolean;
   alt: boolean;
   divergence: boolean;
-  // A setting was changed at this point or above it, so nothing measured here describes it any
-  // more (`CladogramCtx.invalidated`).
   invalidated: boolean;
-  // The comparison channel anchored here, as its ink (`CladogramCtx.inkOf`).
   ink: string | null;
   d: Density;
 }) {
-  // Served (`superseded_by`): this attempt was replaced when the run branched away. It
-  // recedes like a lens counterfactual but is a different fact — what the run DID, not
-  // what a mask would have done — so it wears its own class and its own words.
   const retiredBy = n.retiredBy;
   return (
     <g
@@ -157,8 +117,6 @@ const CandidateNode = memo(function CandidateNode({
           : ""}
         {ink ? "\na channel of the comparison — its colour here is the one its bar carries" : ""}
       </title>
-      {/* The alternative candidate is marked by its own branch line glowing red
-          (`.mask-alt .lineage-stub`) — no glyph. */}
       <line
         x1={n.x - d.candStub}
         y1={n.y}
@@ -167,16 +125,10 @@ const CandidateNode = memo(function CandidateNode({
         className={cx("lineage-stub", n.isWinner && "winner")}
         style={ink ? { stroke: ink } : undefined}
       />
-      {/* SELECTED is a shape for the same two reasons the channel mark below is, and it needed
-          both: at DENSE the stub is a few px and unlabelled, so a stroke colour is invisible —
-          and on a channel node the ink is an INLINE style, which no class rule can beat. Drawn
-          first so a node that is both wears the ring outside its channel dot. */}
+      {/* A shape, not a colour: a channel's ink is an inline style no class rule can beat. */}
       {selected && (
         <circle cx={n.x} cy={n.y} r={NODE_R + 2.5} className="lineage-pick-mark" />
       )}
-      {/* The channel's own mark. It has to be a SHAPE, not the stub's colour alone: at DENSE the
-          stub is a few px and unlabelled, which is exactly the width two channels are compared
-          at. The `<title>` and the aria-label carry the same fact in words. */}
       {ink && (
         <circle
           cx={n.x}
@@ -196,8 +148,6 @@ const CandidateNode = memo(function CandidateNode({
           {n.candidateLabel} {invalidated ? "?" : fmtHeadlineValue(metric, accuracy, theta)}
         </text>
       )}
-      {/* Invisible click target: the candidate's own slot — its stub plus the one
-          column-width its label occupies before the next round's node. */}
       <rect
         x={n.x - d.candStub}
         y={n.y - 10}
@@ -209,8 +159,7 @@ const CandidateNode = memo(function CandidateNode({
   );
 });
 
-// The campaign's cladogram — the ONE served tree, rendered. Its own <svg> so lane
-// math is never reconciled across surfaces.
+// The campaign's cladogram — the one served tree, rendered.
 export function Forest({
   tree,
   valueByKey,
@@ -221,56 +170,31 @@ export function Forest({
   ctx,
   d,
 }: {
-  // The served genealogy's root course. Nodes alternate course → candidate →
-  // (course | sample), so forks and L4 inner runs need no special case here.
   tree: LineageNode;
-  // Live per-candidate percent metric (accuracy/composite), keyed
-  // Keyed by the candidate's address (`nodeKeyOf`) — painted onto nodes outside the geometry memo so a
-  // value tick costs only a text re-render.
   valueByKey: ReadonlyMap<string, number | null>;
-  // Same-key overlay of difficulty-adjusted ability θ — the node value when
-  // `metric === "ability"`, and always shown in node tooltips so a θ-elected winner
-  // below a higher-accuracy sibling is explainable in place.
   thetaByKey: ReadonlyMap<string, number | null>;
-  // Operator-selected headline metric for the node values (accuracy/composite/θ).
   metric: HeadlineMetric;
   expanded: ReadonlySet<string>;
-  // A lane clicked away from a searchpoint node — toggles that cycle's lane
-  // between its expanded candidate cladogram and the compact summary row, in
-  // place. Never changes the dashboard's selected cycle.
+  // Toggles the lane in place; never changes the dashboard's selected cycle.
   onLaneActivate: (courseKey: string) => void;
-  // Where this cladogram is drawn and what a searchpoint click does there.
   ctx: CladogramCtx;
-  // How much width it may spend. `DENSE` is what lets two trees sit beside each other.
   d: Density;
 }) {
   const { viewedKey, isPicked, onPickCandidate, channels, clip } = ctx;
-  // The live fitness painted on a node — the `valueByKey` overlay, looked up by
-  // the same candidate identity the bars use. Outside the layout memo, so it
-  // updates each poll without re-flowing the tree.
   const valOf = (n: RoundNodePos): number | null =>
     valueByKey.get(n.candKey) ?? null;
-  // Difficulty-adjusted ability for the node tooltip — what the winner was elected on.
   const thetaOf = (n: RoundNodePos): number | null =>
     thetaByKey.get(n.candKey) ?? null;
-  // Stable across a poll tick, because `CandidateNode` is memoized and an inline arrow here
-  // re-renders every node on every tick.
   const onPick = useCallback(
     (n: RoundNodePos) => onPickCandidate(n, valueByKey.get(n.candKey) ?? null),
     [onPickCandidate, valueByKey],
   );
-  // Layout is pure and the tree changes identity only on a real refetch, so this
-  // memo re-runs only on a shape change (new round / candidate / winner flip / lane
-  // toggle), never on a bare 2 s poll — the value overlay rides outside it.
-  //
   const { laneByKey, totalLaneRows, maxCol } = useMemo(
     () => layout(tree, expanded, clip && extentKeys(tree, clip)),
     [tree, expanded, clip],
   );
   const { nodes, segs } = useMemo(() => placeNodes(laneByKey, d), [laneByKey, d]);
-  // Each channel's extent, NARROWEST FIRST — so the first one holding a node is the one whose ink
-  // it wears, and a channel this tree does not hold is simply not in the list. The SAME set the
-  // cut is made from, so what a card draws and what it colours cannot disagree.
+  // Narrowest first: a node wears the ink of the first extent holding it.
   const extents = useMemo(
     () =>
       channels
@@ -286,9 +210,7 @@ export function Forest({
       extents.find((e) => e.keys.has(n.candKey))?.ink ?? null,
     [extents],
   );
-  // The candidates a lens would have elected instead. The marker rides the round's
-  // WINNER and names its alternative, so the alternative learns of itself here —
-  // one pass over the placed nodes, no parallel array to re-join.
+  // The divergence marker rides the round's WINNER, so the alternative learns of itself here.
   const altIds = useMemo(
     () =>
       new Set(
@@ -301,14 +223,12 @@ export function Forest({
   const height = TOP_PAD + totalLaneRows * LANE_H + 8;
   const width = d.leftPad + (maxCol + 1) * d.colW + d.rightPad;
 
-  // Round-number header — one label per column across the whole family.
   const headerCols: number[] = [];
   for (let c = 1; d.leftPad + c * d.colW <= width - d.rightPad + d.colW / 2; c += 1) {
     headerCols.push(c);
   }
 
   const laneList = [...laneByKey.values()];
-  // Band y/height for a lane (covers all its rows when expanded).
   const bandTop = (l: LaneLayout): number => TOP_PAD + l.laneOffset * LANE_H - LANE_H / 2 + 2;
   const bandH = (l: LaneLayout): number => l.laneSpan * LANE_H - 4;
 
@@ -357,7 +277,6 @@ export function Forest({
             />
           ))}
 
-          {/* Selected-lane highlight — covers the whole band when expanded. */}
           {laneList.map((l) => {
             if (l.coursePathKey !== viewedKey) return null;
             return (
@@ -372,11 +291,7 @@ export function Forest({
             );
           })}
 
-          {/* Per-lane activation overlay — painted before nodes so their clicks
-              win; clicks on the row background fall through to here. A different
-              fork selects+expands it; the selected fork toggles expanded ↔
-              compact. This is the row-background collapse target (a searchpoint
-              node always wins over it). */}
+          {/* Painted before nodes so their clicks win; the row background falls through here. */}
           {laneList.map((l) => {
             const course = l.course;
             const isEmpty = l.candidates.length === 0;
@@ -417,7 +332,6 @@ export function Forest({
             );
           })}
 
-          {/* Collapsed summary nodes (circles). */}
           {nodes
             .filter((n) => !n.isExpanded)
             .map((n) => {
@@ -426,17 +340,12 @@ export function Forest({
               const nodeCycleId = pathLeaf(n.coursePath).cycleId;
               const cycName = layoutEntry ? courseName(layoutEntry.course) : nodeCycleId;
               const rowLabelText = n.isLastInLane && layoutEntry ? cycName : null;
-              // The lane's ♥ bank, as glyphs — the cladogram is an <svg>, so the shared
-              // <Hearts> component can't mount here; `heartsText` is the same derivation
-              // rendered as text. Empty string when the cycle isn't in lives mode.
+              // Inside an <svg>, so `<Hearts>` can't mount; `heartsText` is the same derivation.
               const laneHearts = layoutEntry
                 ? heartsText(layoutEntry.course.hearts, layoutEntry.course.lives_cap)
                 : "";
               const isDivergence = n.divergence !== null;
               const isDivergent = n.divergent;
-              // A collapsed lane still carries its channels — the round the comparison is
-              // anchored on is a summary dot here, and leaving it black is what made an
-              // unexpanded seed indistinguishable from every other lane on the drawing.
               const ink = inkOf(n);
               return (
                 <g
@@ -506,7 +415,6 @@ export function Forest({
               );
             })}
 
-          {/* Expanded candidate nodes (lineage-style stubs). */}
           {nodes
             .filter((n) => n.isExpanded)
             .map((n) => (
@@ -527,7 +435,6 @@ export function Forest({
               />
             ))}
 
-          {/* Expanded lanes carry their cycle label beside the last winner. */}
           {(d.labels ? nodes : [])
             .filter((n) => n.isExpanded && n.isLastInLane)
             .map((n) => {

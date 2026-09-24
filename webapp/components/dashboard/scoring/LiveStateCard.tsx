@@ -8,9 +8,7 @@ import { FreqChart } from "@/components/eval/FreqChart";
 import { TrendChart } from "@/components/eval/TrendChart";
 import { CostStrip } from "@/components/eval/CostStrip";
 
-// Fields surfaced elsewhere (header, payload block, dedicated cards, workflow
-// toolbar) — or withheld from the UI entirely. `patience` is withheld pending
-// a redesign that gives it one dedicated location.
+// Fields surfaced elsewhere, or withheld from the UI.
 const SHOWN_ELSEWHERE = new Set([
   "cycle_id", "wallclock_serialized_at",
   "best", "total_queries_scored", "last_query_elapsed_s",
@@ -19,9 +17,6 @@ const SHOWN_ELSEWHERE = new Set([
   "current_query_payload",
   "state", "round", "candidate",
   "patience",
-  // ``rounds[]`` is the per-round summary array used by the chart /
-  // lineage tree — not a scalar field for this KV dump. Origin rides it
-  // as round 0; origin_acc is surfaced as a derived KV row below.
   "rounds",
 ]);
 
@@ -43,21 +38,15 @@ export function LiveStateCard() {
   const { dash } = useDashboard();
   const formula = dash?.composite_fitness_formula || "—";
 
-  // Build the KV grid: derived origin row first (origin is round 0 in
-  // ``rounds[]``), then known-order fields, then any remaining scalar
-  // fields in the dashboard.json snapshot.
   const items: [string, unknown][] = [];
   const seen = new Set(SHOWN_ELSEWHERE);
   if (dash) {
-    // Origin accuracy rides the headline SSOT (consistent finite-guard); round0
-    // is still read locally for origin_samples.
     const { origin } = headlineStats(dash);
     if (origin != null) {
       items.push(["origin_acc", origin]);
       seen.add("origin_acc");
     }
-    // The origin's own row, located the way every other candidate is — off the
-    // round's incumbency stamp, never by position.
+    // Located off the round's incumbency stamp, never by position.
     const round0 = dash.rounds.find((r) => r.round === 0);
     const originSamples = round0?.candidates.find((c) => c.is_winner)?.scored_samples;
     if (typeof originSamples === "number") {
@@ -119,14 +108,8 @@ export function LiveStateCard() {
       <div className={cx("payload-block", payloadEmpty && "empty")}>{payloadText}</div>
       <BackendWarnings dash={dash} />
       <PoBBBackfillLog dash={dash} />
-      {/* Trend + Score Frequency — relocated from the former Verdict lane
-          so the campaign's shape stays glanceable next to the live state.
-          Stacked vertically because the narrow spine doesn't have room for
-          the old side-by-side .dash-charts grid. */}
       <div className="lsc-charts">
         <TrendChart />
-        {/* Same x = round as the trend above, its own y = USD. Cost is a different unit from
-            fitness, so it gets its own strip rather than a channel on a fitness chart. */}
         <CostStrip />
         <FreqChart />
       </div>
@@ -135,13 +118,8 @@ export function LiveStateCard() {
 }
 
 function PoBBBackfillLog({ dash }: { dash: DashboardSnapshot | null }) {
-  // ``backfill_log`` is the paired-PoBB telemetry stream: one entry per
-  // sample where at least one prior gained a fresh measurement (cache-
-  // covered samples emit nothing). Each entry names the round/candidate
-  // the backfill fired during, the sample id, and which priors got
-  // caught up on that sample — so the operator can see paired comparison
-  // becoming valid sample-by-sample.
-  // See docs/methods/candidate-elimination.md.
+  // Paired-PoBB telemetry: one entry per sample where a prior gained a fresh measurement
+  // (docs/methods/candidate-elimination.md).
   const log = dash?.backfill_log;
   if (!log || log.length === 0) return null;
   return (
@@ -166,11 +144,6 @@ function PoBBBackfillLog({ dash }: { dash: DashboardSnapshot | null }) {
 }
 
 function BackendWarnings({ dash }: { dash: DashboardSnapshot | null }) {
-  // ``recent_backend_warnings`` is a list payload from
-  // ``dashboard.json``; the operator needs to see retries land in
-  // real time so a transient stall isn't mistaken for a stuck loop.
-  // Surfaces nothing when no retries have happened — zero visual cost
-  // in the happy path.
   const warnings = dash?.recent_backend_warnings;
   if (!warnings || warnings.length === 0) return null;
   return (

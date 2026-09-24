@@ -21,12 +21,8 @@ import { runPhaseLabel } from "@/lib/run-phase";
 import { useWorkspace } from "@/lib/workspace";
 import type { Tab } from "@/lib/view-tab";
 
-// The unit's masthead — three rows and the view strip, ONE header over every tab (chrome), so
-// no two can grow different answers to "what am I looking at". Who this campaign is, what it
-// runs with, and how it is doing; the strip sits in `main` rather than inside a pane's scroller,
-// because it is the only way to switch views and one that scrolls out of reach is no nav. The
-// band is full-bleed; the inner box centres on --dash-narrow-max, the one method the chat column
-// and the dashboard spine also use (masthead.css).
+// ONE header over every tab, owning "where is this run": no pane below repeats a fact it shows
+// (webapp/CLAUDE.md § Component conventions).
 export function RunMasthead({
   tab,
   onSelectTab,
@@ -34,15 +30,12 @@ export function RunMasthead({
 }: {
   tab: Tab;
   onSelectTab: (t: Tab) => void;
-  // Called after the operator follows the active run, so the shell can switch to the Dashboard
-  // — same contract as the JobsDock's `onPicked`.
   onFollowed: () => void;
 }) {
   const { campaignId, leafCycleId, viewedPath, campaigns, cycles, following, followActive } =
     useWorkspace();
   const { dash, dashRound } = useDashboard();
 
-  // ONE forest for the header and its switcher, the same builder the sidebar reads.
   const origins = useMemo(() => buildForest(campaigns, cycles), [campaigns, cycles]);
   const run = useMemo(
     () =>
@@ -52,8 +45,6 @@ export function RunMasthead({
     [origins, campaignId],
   );
 
-  // Sparkline: running-best composite over rounds, read from the dashboard's per-round summary
-  // block. Keyed on `dash?.rounds` so a per-sample tick does not re-trace the path.
   const spark = useMemo(() => {
     const { best: ys } = fitnessTrend(dash?.rounds, dash?.best);
     if (ys.length < 2) return null;
@@ -69,8 +60,7 @@ export function RunMasthead({
   }, [dash?.rounds, dash?.best]);
 
   const title = run ? campaignTitle(run.campaign) : null;
-  // Depth > 1 ⇒ viewing an inner descendant (an L4 inner loop). Backing out is the remote's
-  // drill button, which owns that navigation; this only says where the view is.
+  // Backing out is the remote's drill button; this only says where the view is.
   const innerLeaf = viewedPath && viewedPath.length > 1 ? pathLeaf(viewedPath) : null;
 
   const runPhase = dash?.run_phase ?? null;
@@ -83,8 +73,7 @@ export function RunMasthead({
   );
 
   const { best } = headlineStats(dash);
-  // The candidate currently being scored ("C3.2"). `dash.candidate` is "C3.2/4" and goes stale
-  // between rounds, so it stands in for the round only while the scorer is the active node.
+  // `dash.candidate` goes stale between rounds, so it stands in only while the scorer is active.
   const scoringCand =
     dash?.current_round.active_node === "l1_score"
       ? String(dash.candidate || "").split("/")[0]
@@ -92,8 +81,6 @@ export function RunMasthead({
   const roundsCap = dash?.run_limits?.max_rounds ?? null;
   const position = scoringCand || (dashRound != null ? `R${dashRound}` : "—");
 
-  // One parser for spend, ceilings included — `readSpend` reads the armed `run_limits` pair,
-  // which is the halt gate's own source.
   const { usedUsd, budgetUsd, unpricedTokens } = readSpend(dash);
   const spendFloor = unpricedTokens > 0 ? "≥" : "";
 
@@ -122,9 +109,6 @@ export function RunMasthead({
             </span>
           )}
         </div>
-        {/* The masthead OWNS "what does this run run with", and it has the room the sidebar row
-            does not — so the model reads here in FULL beside its mark, where the row lets the
-            mark stand in for it. Same two derivations either way; only the density differs. */}
         {run && (
           <div className="run-setup">
             <span className="run-setup-vendors">

@@ -1,15 +1,5 @@
-// Bracket-dendrogram geometry for the strip under the fitness bars, drawing the intra-cycle
-// genealogy of the SAME flat candidate spine the bars plot.
-//
-// The genealogy is spine-and-fan — every candidate of round r descends from the winner of the
-// last ADVANCING round before r — so in flat (round asc, idx asc) order every parent sits
-// strictly LEFT of every child and a bracket is a plain x-interval: INTERVAL PACKING, not tree
-// layout. Two rows suffice while every round advances, but a HELD round crowns no winner and its
-// brackets NEST, so packing is greedy lowest-free-row and the height falls out — nothing
-// hardcodes "2".
-//
-// x arrives and leaves as FRACTIONS of the chart's plot width, so this module is pure numbers
-// and unit-testable without a canvas.
+// Bracket-dendrogram geometry for the strip under the fitness bars. Pure numbers: x arrives and
+// leaves as fractions of the chart's plot width.
 
 import { roundSizes, wasElected } from "@/lib/derivations";
 
@@ -24,20 +14,13 @@ export interface DendroNode {
   candidateId: string;
   round: number;
   label: string;
-  // The served incumbency fact — who the round advanced. Structural: bracket
-  // parentage rides this.
   isWinner: boolean;
-  // Whether that crown was won over RIVALS (`wasElected`). Display-only: a
-  // single-arm round (round 0, whose one arm is the origin) advances without an
-  // election, so filling its dot and saying "elected" claims what never happened.
+  // Display-only: a single-arm round advances without an election.
   isElected: boolean;
-  // A fork bar — a sibling COURSE trailing the candidate spine. It keeps its bar
-  // slot (the alignment contract is over ALL categories) but joins no round band:
-  // its descent is cross-cycle, which the Forest draws, not this strip.
+  // Keeps its bar slot but joins no round band: its descent is cross-cycle, which the Forest draws.
   isFork: boolean;
-  // Spine index === bar category index. THE alignment contract.
+  // Spine index === bar category index — the alignment contract.
   i: number;
-  // Category-center fraction of the plot width, 0..1.
   xf: number;
   y: number;
 }
@@ -49,7 +32,6 @@ export interface DendroStub {
 }
 
 export interface DendroBracket {
-  // The CHILD round this beam feeds.
   round: number;
   x1f: number;
   x2f: number;
@@ -61,13 +43,10 @@ export interface Dendrogram {
   nodes: DendroNode[];
   stubs: DendroStub[];
   brackets: DendroBracket[];
-  // Total strip height in px — grows only with the packed depth.
   height: number;
 }
 
-// The narrow structural projection this geometry needs. Keeping it minimal is
-// what lets the caller content-stabilize it, so a per-sample value tick repaints
-// node text without ever re-running the packing.
+// Kept minimal so the caller can content-stabilize it: a per-sample tick must not re-run packing.
 export interface DendroRow {
   key: string;
   round: number;
@@ -87,17 +66,12 @@ export function dendrogram(
   const stubs: DendroStub[] = [];
   const brackets: DendroBracket[] = [];
 
-  // THE ALIGNMENT INVARIANT. This strip exists to be x-aligned with the bars; one
-  // drawn against a stale center list is a LIE about which candidate descends
-  // from which. React can render N+1 rows a frame before the chart knows about
-  // them (react-chartjs-2 updates in an effect), so refuse to draw rather than
-  // draw wrong — a blank band for one frame is the correct answer.
+  // react-chartjs-2 updates in an effect, so rows can lead the chart's centers by a frame;
+  // refuse to draw rather than draw a wrong genealogy.
   if (rows.length === 0 || rows.length !== centers.length) {
     return { nodes, stubs, brackets, height: FLOOR_H };
   }
 
-  // Arms per round, forks excluded — they trail the spine and join no band, so they
-  // are not rivals. Feeds `isElected`: a crown is only an achievement against rivals.
   const sizes = roundSizes(rows.filter((r) => !r.is_fork));
 
   rows.forEach((r, i) => {
@@ -115,8 +89,7 @@ export function dendrogram(
     });
   });
 
-  // A round is a CONTIGUOUS block in the spine (round asc, then idx asc). Fork
-  // rows trail the candidate spine and join no band, so contiguity holds.
+  // A round is a contiguous block of the spine (round asc, then idx asc).
   const bands = new Map<number, { first: number; last: number }>();
   rows.forEach((r, i) => {
     if (r.is_fork) return;
@@ -125,11 +98,8 @@ export function dendrogram(
     else bands.set(r.round, { first: i, last: i });
   });
 
-  // Greedy packing. `rowRight[d]` = right edge of the last bracket placed on
-  // depth row d. Rounds are walked in ascending order, which IS left-edge order
-  // (the parent index never decreases), so "the lowest row that ends before this
-  // one starts" is optimal. Strict `<`: a bracket whose left edge merely touches
-  // the row's right edge would render as one merged beam, so it gets its own row.
+  // Greedy lowest-free-row is optimal because rounds arrive in left-edge order. Strict `<`: a
+  // bracket merely touching the row's right edge would render as one merged beam.
   const rowRight: number[] = [];
   const place = (x1f: number, x2f: number): number => {
     for (let d = 0; d < rowRight.length; d++) {
@@ -142,10 +112,7 @@ export function dendrogram(
     return rowRight.length - 1;
   };
 
-  // The parent — the winner of the last ADVANCING round. A held round crowns
-  // nobody and so never becomes a parent: the next round still fans from this
-  // same node. `is_winner` already carries the held-round fact (a held round has
-  // no winner), so the flat spine is the only input this needs.
+  // The winner of the last ADVANCING round: a held round crowns nobody, so the next fans from here.
   let parent: DendroNode | null = null;
 
   for (const round of [...bands.keys()].sort((a, b) => a - b)) {

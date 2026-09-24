@@ -3,9 +3,8 @@ import type { ReactNode } from "react";
 import { HoverCard } from "./HoverCard";
 import s from "./Term.module.css";
 
-// Teaching prose on a term the operator is reading. The ONE mechanism for it: a DOM `title=`
-// is unselectable, keyboard-unreachable and dead on touch, so it stays for repeating a string
-// the trigger already shows truncated and for nothing else (`webapp/CLAUDE.md`).
+// Teaching prose on a term — the ONE mechanism, never `title=` (`webapp/CLAUDE.md` § Component
+// conventions).
 export function Term({
   children,
   content,

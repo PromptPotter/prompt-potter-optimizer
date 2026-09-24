@@ -19,11 +19,6 @@ interface Props {
   ctx: TreeCtx;
 }
 
-// The campaign-library body — the header + filter button, the auth/loading
-// resting states, and the campaign forest. The lifecycle + dataset filters
-// live behind the header's filter popover (SidebarFilterPopover) so the body
-// stays a clean forest; when a non-default filter is set, one summary line
-// keeps that fact visible with a one-click clear.
 export function SidebarContent({
   status,
   loaded,
@@ -93,8 +88,6 @@ export function SidebarContent({
       )}
       {loaded && origins.length === 0 && lifecycleFilter !== "archived" && (
         <div className="unit-library-empty">
-          {/* Points at the CTA already on screen (Sidebar's `+ New campaign`) rather than
-              sending a browser user to a terminal and a repo path they can't open. */}
           <div className="empty-headline">No campaigns yet</div>
           <div className="empty-body">
             Hit <strong>+ New campaign</strong> above. Bring the data your pipeline gets

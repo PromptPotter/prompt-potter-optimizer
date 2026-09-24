@@ -1,13 +1,6 @@
 "use client";
-// Pluggable orchestration mechanisms (campaign.json::optimization.mechanisms).
-// ONE component, two modes — the same element the operator asked to reuse:
-//   • pass `mechanisms` + `onChange` → EDITABLE (new-campaign form, Switch);
-//     each flip sends the full object up (like origin_prompt_fields).
-//   • omit them → READ-ONLY (dashboard): self-fetches the in-view committed
-//     campaign's config and renders Badge ON/OFF.
-// Group/toggle structure, labels, descriptions, and defaults come from the
-// `MechanismConfig` schema (`GET /campaigns/mechanisms-schema`), so a toggle
-// added backend-side appears in both modes with no edit here.
+// Orchestration mechanisms: editable given `mechanisms` + `onChange`, else read-only. Structure
+// comes from `GET /campaigns/mechanisms-schema`, so a backend toggle appears with no edit here.
 
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { fetchCampaignDetail, fetchMechanismsSchema } from "@/lib/api";
@@ -35,7 +28,6 @@ export function MechanismsPanel({
     { key: "mechanisms-schema", fetch: fetchMechanismsSchema },
     { surface: "mechanisms-schema" },
   );
-  // Committed-config source — only the read-only (dashboard) mode needs it.
   const detailRead = useRead(
     !editable && campaignId
       ? { key: campaignId, fetch: (signal) => fetchCampaignDetail(campaignId, signal) }
@@ -60,8 +52,7 @@ export function MechanismsPanel({
     ? (mechanisms ?? null)
     : ((opt.mechanisms as MechanismValues | undefined) ?? null);
 
-  // Editable flip rebuilds the FULL nested object from current values (filling
-  // defaults from the schema) so the draft patch always validates server-side.
+  // Rebuild the FULL nested object, schema defaults filled, so the draft patch validates.
   const flip = (g: string, k: string, next: boolean) => {
     const full: MechanismValues = {};
     for (const group of schema.groups) {
@@ -77,8 +68,7 @@ export function MechanismsPanel({
 
   return (
     <div className="mech-groups">
-      {/* A heading over a hairline, never a card: both hosts — the workflow panel and the ingest
-          dialog — already draw a border, and a card inside one nests two. */}
+      {/* Never a card: both hosts already draw a border. */}
       {schema.groups.map((group) => (
         <section key={group.key} className="mech-group">
           <h3 className="mech-card-title">{group.label}</h3>

@@ -1,5 +1,3 @@
-/* SidePanel primitive — the one resizable detail drawer, docked to the right edge. */
-
 @layer ui {
 .panel {
   position: fixed;

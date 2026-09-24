@@ -21,8 +21,7 @@ ensureChartRegistered();
 export const TrendChart = memo(function TrendChart({ compact = false }: { compact?: boolean }) {
   const { dash, isLive } = useDashboard();
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
-  // Subscribe to theme so a flip re-runs this component and pulls fresh
-  // getCss() values into the chart data/options below.
+  // Subscribe to the theme so a flip pulls fresh canvas inks.
   useThemeVersion();
   const { points, best: bestData } = useMemo(
     () => fitnessTrend(dash?.rounds, dash?.best),
@@ -30,28 +29,16 @@ export const TrendChart = memo(function TrendChart({ compact = false }: { compac
   );
   const curData = points.map((p) => p.composite);
   const thetaData = points.map((p) => p.theta);
-  // Silent until the ruler warms — a flat ruler makes θ logit-accuracy on each round's own
-  // subset, which is the very thing this axis exists to be independent of.
+  // Silent until the ruler warms: a flat ruler makes θ the per-subset accuracy this axis escapes.
   const hasTheta = thetaData.some((t) => typeof t === "number");
   const labels = points.map((p) => String(p.round));
-  // Quiet amber notices for rounds the backend graded `degraded` — the webapp
-  // twin of the CLI's yellow degraded line. `critical` stays on the loud banner.
+  // Rounds the backend graded `degraded`; `critical` stays on the loud banner.
   const degraded = degradedRoundNotices(dash);
 
-  // θ takes its ink by ROLE, from the ONE declaration the candidates card reads, so the operator
-  // learns that channel's colour once.
+  // θ's ink comes from the one declaration the candidates card reads.
   const elected = dash?.headline_metric ?? "accuracy";
-  // Two axes, deliberately. `y` is accuracy, pinned to 0..1 and unlabelled. `theta` is a LOGIT —
-  // unbounded, signed, and the series the round is actually won on — so it cannot share that
-  // scale and gets its own VISIBLE axis on the right. Drawing it against 0..1 would clip every
-  // negative ability to the floor and read as a run that never started.
-  //
-  // Accuracy takes two accent shades: amber for the best-so-far envelope, red-orange for
-  // the live round line.
-  //
-  // A changed dataset id makes Chart.js build that line anew and raise it from the baseline.
-  // The round line's id moves with every scored sample, so it pulses while a run writes; the
-  // best line keeps its id, so a closed round's new point flies in on it.
+  // θ is an unbounded, signed LOGIT, so it gets its own visible axis — on 0..1 every negative
+  // clips to the floor. A changed dataset id re-raises a line, so the live round line pulses.
   const data = {
     labels,
     datasets: [
@@ -70,8 +57,7 @@ export const TrendChart = memo(function TrendChart({ compact = false }: { compac
         callbacks: {
           afterBody: (items: { dataIndex: number }[]) => {
             const n = points[items[0]?.dataIndex ?? -1]?.n;
-            // The count the accuracy was measured over — the other half of the honest fix,
-            // since under `per_round_resubset` two rounds' accuracies sat different exams.
+            // Under `per_round_resubset` two rounds' accuracies sat different exams.
             return typeof n === "number" ? `n = ${n}` : "";
           },
         },

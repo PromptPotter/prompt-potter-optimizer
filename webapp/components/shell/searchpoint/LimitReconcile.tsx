@@ -7,16 +7,8 @@ import { fmtUsd, fmtTokens } from "@/lib/format";
 import { parseCap } from "@/lib/run-limits";
 import { useDashboard } from "@/lib/hooks/useDashboard";
 
-// The run-limit reconcile half of the steer flow (decision E). A fork numbers
-// its rounds from 1, so the operator confirms the fork's OWN absolute ceilings
-// — rounds + spend default to the parent's remaining ("3 of 6 rounds used → 3
-// left", "$4 of $10 spent → $6 left"). Patience + elimination epsilon inherit
-// the parent by default and live behind an "Advanced" disclosure (placeholders
-// show the inherited value; blank = inherit).
-//
-// Emits a sparse `RunLimitOverrides` on every edit: a field is included only when
-// the operator's value is present + valid, so blank = inherit. Self-contained
-// presentational input; the parent panel folds the result into the OperatorForkOverride.
+// The steer flow's run-limit reconcile. A fork numbers its rounds from 1, so rounds + spend default
+// to the parent's REMAINING; every other blank field inherits the parent's value.
 
 interface Fields {
   rounds: string;
@@ -34,9 +26,7 @@ export function LimitReconcile({
   onChange: (limits: RunLimitOverrides) => void;
 }) {
   const { dash } = useDashboard();
-  // Snapshot the defaults once at open — the cycle is stopped/paused while
-  // steering, but the 2 s poll keeps mutating `dash`; the operator's typed
-  // values are the working copy and must not be clobbered by a later tick.
+  // Snapshot once at open: the 2 s poll keeps mutating `dash` and must not clobber typed values.
   const [defaults] = useState(() => forkReconcileDefaults(dash));
   const [rl] = useState(() => dash?.run_limits ?? null);
   const [f, setF] = useState<Fields>(() => ({
@@ -51,9 +41,7 @@ export function LimitReconcile({
 
   const set = (next: Fields) => {
     setF(next);
-    // 0 is meaningful on every one of these, so the floor is 0, not 1: `max_rounds: 0` means
-    // "measure the origin and stop", `l1_patience: 0` makes L1 stall after round 1. `parseCap`
-    // drops anything blank or out of range, and the fork then INHERITS the parent's value.
+    // The floor is 0, not 1: `max_rounds: 0` means "measure the origin and stop".
     const count = { int: true } as const;
     const limits: RunLimitOverrides = {
       max_rounds: parseCap(next.rounds, count) ?? undefined,

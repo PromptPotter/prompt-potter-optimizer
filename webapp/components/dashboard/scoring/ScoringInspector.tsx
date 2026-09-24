@@ -21,31 +21,18 @@ interface Props {
   onClose: () => void;
 }
 
-// The dashboard's HOST for the searchpoint drill-in — the reading itself is
-// `shell/searchpoint/SearchpointDrillIn`, because a Compare channel shows the same point the same
-// way and two copies would drift. What lives here is what only the dashboard can answer: which
-// cycle is streaming, which round is in flight, and the fork verb that steers it.
-//
-// Source pick follows the no-stitch rule (`useRoundRows`): a completed round's spec comes from
-// its round file, the in-flight round's from `dashboard.json`'s live l1_score input, and the live
-// round's not-yet-written file is never fetched.
+// Dashboard HOST for `shell/searchpoint/SearchpointDrillIn`: it owns only the streaming cycle, the
+// round in flight and the fork verb. No stitch (`useRoundRows`): the live round never fetches its file.
 export function ScoringInspector({ selected, onClose }: Props) {
   const { dash } = useDashboard();
   const cv = useConnector();
   const { viewedPath } = useWorkspace();
-  // The candidate's own row, the arms it stood against and its sample lines — one lookup, one
-  // source. Composite and accuracy used to be read a SECOND time off `doc.scoreboard` beside it;
-  // both are projections of one `ScoredCandidate`, so that was one fact fetched twice.
   const round = useRoundRows(selected?.round ?? null);
   const arms = round.rows.length;
-  // On LABEL: a selection is minted off the served tree and carries the lineage id, while an
-  // in-flight row has none until it is scored — so an id match resolved every CLOSED round and
-  // no live one, which is the whole round the operator is watching.
+  // On LABEL: an in-flight row has no lineage id until it is scored.
   const row = selected ? round.row(selected.label) : null;
   const samples = useMemo(() => round.samples(row), [round, row]);
 
-  // The selected candidate's runnable spec, through the one observe join every spec surface
-  // reads. Round 0 = origin, and it resolves here like any other point.
   const cfg = !selected
     ? null
     : round.live
@@ -59,10 +46,7 @@ export function ScoringInspector({ selected, onClose }: Props) {
       <Toolbar className="inspector-head">
         <span className="inspector-title">Scoring · {selected.label}</span>
         <ToolbarSpacer />
-        {/* The panel below is presentational and frames nothing, so the copy sits in the one
-            header there is. WHAT it copies is not this host's decision — both hosts of the
-            drill-in read the same builder, or a paste from Records and a paste from here
-            would not be the same document. */}
+        {/* The payload comes from the shared builder, never from this host. */}
         <CopyButton
           choices={searchpointCopyChoices({ cfg, row, samples, arms: arms || null })}
           title={`Copy ${selected.label}`}
@@ -81,8 +65,6 @@ export function ScoringInspector({ selected, onClose }: Props) {
         row={row}
         cfg={cfg}
         measurements={
-          // This candidate's cells in the cycle it was picked on — the one measurement log,
-          // preset to one individual.
           <MeasurementsPane
             preset={{ candidateId: selected.candidate_id, scope: "cycle", groupBy: "none" }}
           />
@@ -98,8 +80,7 @@ export function ScoringInspector({ selected, onClose }: Props) {
         }
         actions={
           // The VIEWED address, so an L4 inner searchpoint is refused rather than forked at the
-          // outer cycle by a coincidental id — the guard is the action's, and it used to exist
-          // only on the Compare side of the same click.
+          // outer cycle.
           <>
             <VerifyAction candidate={selected} path={viewedPath} />
             <SteerForkAction

@@ -1,9 +1,6 @@
 "use client";
 import { useCallback, useRef, type PointerEvent, type KeyboardEvent } from "react";
 
-// Drag handle straddling the sidebar's right edge. Pointer-drag (or ←/→ when
-// focused) rewrites the persisted --sidebar-width; AppShell clamps + stores it and
-// mounts this only while the sidebar is expanded, so it never fights the rail.
 
 interface Props {
   width: number;

@@ -8,9 +8,7 @@
   display: block;
 }
 
-/* The floating card shell, portaled and placed by the component; this owns only the look.
-   Pointer events stay ON — the operator points into this card to select an id out of it —
-   and a card taller than the viewport scrolls. Above every overlay, like `Popover`'s panel. */
+/* Pointer events stay ON: the operator points into the card to select an id out of it. */
 .card {
   z-index: 1100;
   max-height: calc(var(--vh-full) - 16px);

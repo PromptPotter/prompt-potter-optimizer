@@ -1,10 +1,6 @@
 "use client";
 
-/**
- * One-of-N knob. A discrete choice has no partial state, so it applies on
- * change — no Apply button (that buffering exists for free text / numbers that
- * can be mid-edit and invalid; see NumberField).
- */
+// A discrete choice has no partial state, so it applies on change (unlike `CommitInput`).
 export function ChoiceField<T extends string>({
   label,
   value,

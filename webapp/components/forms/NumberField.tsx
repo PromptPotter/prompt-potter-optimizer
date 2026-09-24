@@ -17,8 +17,6 @@ export function NumberField({
   onApply: (value: number) => void;
 }) {
   const id = useId();
-  // Buffer the numeric value as a string so partial / empty edits don't
-  // round-trip a NaN; parse + guard on Apply.
   const { local, setLocal, dirty } = useAppliableField(String(value));
   return (
     <div className="new-campaign-field">

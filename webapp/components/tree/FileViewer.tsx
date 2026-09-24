@@ -85,8 +85,8 @@ async function loadViewerState(
     return { meta, body, contentType: ct, isMarkdown: false, roundDoc, rawJson: body };
   }
   if (ct === "markdown") {
-    // `renderMarkdownSafe`, never `marked.parse` — this body reaches
-    // `dangerouslySetInnerHTML` below, and these artifacts quote tenant-supplied text.
+    // `renderMarkdownSafe`, never `marked.parse`: this reaches `dangerouslySetInnerHTML` with
+    // tenant-supplied text.
     return {
       meta,
       body: renderMarkdownSafe(r.content),
@@ -100,7 +100,6 @@ async function loadViewerState(
 }
 
 export function FileViewer({ campaignId, cycleId, selected }: Props) {
-  // Bundle the non-null trio so the fetcher closure inherits the narrowing.
   const ready = campaignId && cycleId && selected ? { campaignId, cycleId, selected } : null;
 
   const read = useRead(

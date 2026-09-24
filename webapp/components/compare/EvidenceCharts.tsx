@@ -1,20 +1,6 @@
 "use client";
-// The visual forms of one served comparison. Four ways to look at the same numbers, because which
-// one reads depends on the question: bars beside each other for "who is higher on this cell", bars
-// on one axis for "how do the profiles overlap", lines for "does the shape track across cells",
-// and MERGED for "forget the cells — what is each subject worth, and how sure are we", which is
-// the one the intervals belong on.
-//
-// EVERY value plotted comes off `Evidence.subjects` as served — the per-cell map and the merged
-// estimate are fields of ONE row, so a bar and its interval cannot come from two lists that
-// disagree. The only work here is layout and colour; nothing recomputes a level, a mean, a bound
-// or a verdict (`webapp/CLAUDE.md` § Scoring authority).
-//
-// The axis is `metric.covered_cells`: every cell ANY subject reached. Not the intersection — a
-// subject that came up short would simply not be on the board there, and "who failed to answer
-// this cell" is exactly what the operator is looking for. What a blank means is served per cell
-// and rendered as two different glyphs by `Coverage` below; the paired tests and the variance
-// split stay on `scored_cells`, which is a different question and a different denominator.
+// Four views of one served comparison; every value comes off `Evidence.subjects`, nothing recomputes a level,
+// bound or verdict (`webapp/CLAUDE.md` § Scoring authority). The axis is `covered_cells`, not the intersection.
 
 import { memo } from "react";
 import { Bar, Line } from "react-chartjs-2";
@@ -29,10 +15,8 @@ ensureChartRegistered();
 
 export type CompareView = "grouped" | "overlaid" | "lines" | "merged";
 
-// Both chart forms share an axis pair and differ only by `stacked`. The y axis carries the
-// metric's NAME: without it a composed expression plots as bare numbers and nothing on screen
-// says what the height is. Shape copied from `candidates/FitnessChart.tsx`, the only other
-// titled axis in the app, so the two read alike.
+// The y axis carries the metric's NAME, or a composed expression plots as bare numbers. Shape matches
+// `candidates/FitnessChart.tsx`, the only other titled axis.
 function axisScales(title: string, stacked: boolean) {
   const tick = { color: getCss("--color-text-tertiary") };
   return {
@@ -51,8 +35,6 @@ function axisScales(title: string, stacked: boolean) {
   };
 }
 
-// What to call one channel. The label is served (`SubjectReading.label`) — a campaign by its own
-// name, a branch by its cycle, a searchpoint by its minted label — so nothing here decides it.
 function seriesLabel(row: SubjectReading): string {
   return row.kind === "campaign" ? shortId(row.label) : row.label;
 }
@@ -64,18 +46,14 @@ export const EvidenceCharts = memo(function EvidenceCharts({
   evidence: Evidence;
   view: CompareView;
 }) {
-  // Subscribe to theme so a flip re-runs this component and the `getCss` palette below resolves
-  // afresh. Built inline rather than memoized, same as the other charts: this reads a one-shot
-  // fetch that changes only when the SELECTION does, not the 2 s poll, so there is no per-tick
-  // cost to guard against — and a memo keyed on the theme version is a dependency the linter
-  // cannot verify and a reader cannot trust.
+  // Theme subscription re-resolves the `getCss` palette. Not memoized: the data changes only with the
+  // selection, not the poll.
   useThemeVersion();
   const cells = evidence.metric.covered_cells;
   const series = evidence.subjects;
   const axis = evidence.metric.spec.axis_label;
 
-  // Merged answers BEFORE the empty guard: it needs no shared cell, so a selection with nothing
-  // in common still reports what each subject is worth on its own.
+  // Merged before the empty guard: it needs no shared cell.
   if (view === "merged") {
     return <Merged evidence={evidence} />;
   }
@@ -90,8 +68,7 @@ export const EvidenceCharts = memo(function EvidenceCharts({
 
   const datasets = series.map((s, i) => ({
     label: seriesLabel(s),
-    // A cell absent from this subject cannot be plotted as 0 — that reads as a measured
-    // floor. `null` leaves a gap, which is what it is; the strip below says WHICH absence.
+    // `null`, never 0 — a 0 reads as a measured floor; `Coverage` says which absence.
     data: cells.map((cell) => {
       const value = s.values[cell];
       return value === undefined ? null : value;
@@ -127,8 +104,6 @@ export const EvidenceCharts = memo(function EvidenceCharts({
         data={{ labels, datasets }}
         options={barChartDefaults({
           plugins: { legend: { display: false } },
-          // `stacked` on BOTH axes is what puts one bar per cell with the subjects sharing it;
-          // false on both is the grouped form, one bar per subject per cell.
           scales: axisScales(axis, view === "overlaid"),
         })}
       />
@@ -136,10 +111,7 @@ export const EvidenceCharts = memo(function EvidenceCharts({
   );
 });
 
-// Why a bar is missing, per cell — the half a gap in the chart cannot carry. Two absences, two
-// facts: `?` the subject never measured this cell, `x` it measured it and this metric cannot read
-// the row. Both are SERVED (`values` and `unscorable_cells`); nothing here infers which is which,
-// which is the whole reason the server names the unscorable cells rather than counting them.
+// Two served absences: `?` never measured (`values`), `x` measured but unscorable (`unscorable_cells`).
 export function Coverage({ evidence }: { evidence: Evidence }) {
   const cells = evidence.metric.covered_cells;
   const gaps = evidence.subjects.some(
@@ -185,21 +157,12 @@ export function Coverage({ evidence }: { evidence: Evidence }) {
   );
 }
 
-// One row per subject — the cells merged into a single estimate with its served 95% interval.
-// The axis spans the whole selection's [min lo, max hi] rather than the point estimates', or a
-// whisker would run off the end of the row it belongs to.
-//
-// Drawn as the same `ov-axis` SVG row the outer-signal forest uses, so the one visual idiom this
-// app has for "an estimate and how sure we are" has one rendering. A subject with no interval
-// shows a dot alone: below two scored cells there is no spread, and a zero-width whisker would
-// read as a perfect measurement. A subject with no VALUE keeps its row with an em-dash —
-// vanishing from the chart is fabrication by omission.
+// One row per subject with its served 95% interval, in the `ov-axis` idiom the outer-signal forest uses.
+// No interval draws a dot alone (a zero-width whisker reads as perfect); no value keeps its row with `—`.
 const AXIS_W = 220;
 const ROW_H = 18;
 
-// The whole selection's bounds, so every row — and every winner-chain point under it — is drawn on
-// ONE scale. Read off the trajectories too: a chain point outside the heads' range would be
-// clipped to the edge and read as a value it never had.
+// One scale over heads AND chain points, or a chain point outside the heads' range clips to the edge.
 function scaleOver(rows: readonly { value: number | null; ci_lo: number | null; ci_hi: number | null }[]) {
   const bounds = rows.flatMap((r) =>
     r.value === null ? [] : [r.ci_lo ?? r.value, r.value, r.ci_hi ?? r.value],
@@ -221,9 +184,7 @@ function Merged({ evidence }: { evidence: Evidence }) {
     );
   }
   return (
-    // `cmp-forest` only turns OFF the trend emphasis the shared row style carries: in the outer
-    // signal panel the rows are rounds and the last one is the latest, so bolding it is the
-    // point; here they are subjects in run order and bolding the newest asserts a winner.
+    // `cmp-forest` turns OFF the shared row's newest-row emphasis: here rows are subjects, not rounds.
     <div className="ov-forest cmp-forest">
       {rows.map((r, i) => (
         <div key={r.key}>
@@ -236,8 +197,6 @@ function Merged({ evidence }: { evidence: Evidence }) {
             colour={seriesVar(i)}
             muted={r.comparable === false}
           />
-          {/* The branch behind this channel, origin first — the same estimate-and-interval row,
-              indented, so a head and the points it came from read on one scale. */}
           {r.winner_chain?.map((p: WinnerChainPoint) => (
             <MergedRow
               key={`${r.key}|${p.round}|${p.candidate_id}`}
@@ -277,9 +236,7 @@ function MergedRow({
 }) {
   const value = fmtMetricValue(unit, row.value);
   const interval = fmtMetricInterval(unit, row.ci_lo, row.ci_hi);
-  // Each row is merged over THIS subject's own cells, not the shared axis the other three views
-  // plot — so the count belongs on the row. Without it a wide interval and a short one look like
-  // a difference in the subjects rather than in how many cells each was read over.
+  // Merged over THIS subject's own cells, so the count belongs on the row.
   const cells = `${row.n_cells} cell${row.n_cells === 1 ? "" : "s"}`;
   return (
     <div className={cx("ov-row", nested && "cmp-row-nested", muted && "cmp-row-muted")}>
@@ -319,17 +276,14 @@ function MergedRow({
   );
 }
 
-// The channel roster, and where a scoring mask is opened on one. A subject the server marked not
-// comparable to the rest carries the tag here — served verdict, never a client guess at which row
-// is the odd one out — because that is the one thing a coloured swatch beside a number cannot say.
+// The comparable tag is the served verdict, never a client guess at the odd one out.
 export function SeriesLegend({
   evidence,
   masking,
   onMask,
 }: {
   evidence: Evidence;
-  // The BARE address whose editor is open, or null. Bare rather than the key, so applying a mask
-  // does not close the form that applied it.
+  // The BARE address, not the key, so applying a mask does not close the form that applied it.
   masking: string | null;
   onMask: (address: string) => void;
 }) {
@@ -352,9 +306,7 @@ export function SeriesLegend({
             )}
             {s.comparable === false && <span className="cmp-tag">not comparable</span>}
             {s.comparable === null && <span className="cmp-tag">ruler unknown</span>}
-            {/* Only a course has elections to re-decide, which is the server's own rule; a
-                sample subset alone would be offered on every kind, and one control that means
-                two things depending on the row is worse than the narrower one. */}
+            {/* Only a course has elections to re-decide — the server's rule. */}
             {s.kind === "course" && (
               <button
                 type="button"

@@ -8,12 +8,11 @@ import { useRead } from "@/lib/hooks/useRead";
 import { useRevalidation } from "@/lib/revalidate";
 import { useWorkspace } from "@/lib/workspace";
 
-// The quota read sums every ledger the account owns, so it polls slowly and re-ticks early when
-// the campaign list's SERVED spend moves — a round that bills is what changes the total.
+// The quota read sums every ledger the account owns: it polls slowly and re-ticks early when the
+// campaign list's served spend moves.
 const QUOTA_POLL_MS = 60_000;
 
-// What this ACCOUNT has spent, against its ALLOWANCE — pinned to the sidebar in every state,
-// the collapsed rail included. Both numbers are `/auth/quota-status`'s.
+// What this ACCOUNT has spent against its ALLOWANCE, pinned in every sidebar state.
 export function AccountSpend() {
   const { campaigns } = useWorkspace();
   const generation = useRevalidation();

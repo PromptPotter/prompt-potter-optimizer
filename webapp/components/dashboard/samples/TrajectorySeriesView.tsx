@@ -1,9 +1,6 @@
 "use client";
-// Series grid for the Sample Trajectory: one row per round, one column per
-// sample (union, first-appearance order), each cell coloured by position
-// change. Hovering a cell shows the round's order around it; clicking seeds the
-// fitness sample-set. No round-file fetch — the order is positional over the
-// round's `selection`, which `dashboard.json` already carries.
+// Sample Trajectory grid: one row per round, one column per sample, coloured by position change.
+// No round-file fetch — the order is positional over the round's `selection` in `dashboard.json`.
 
 import { useMemo, useState } from "react";
 import type { CSSProperties } from "react";
@@ -23,8 +20,7 @@ import {
 } from "@/lib/derivations";
 import { sameSampleSet } from "@/lib/sample-set";
 
-// Cell kind → CSS modifier (presentation half; `classifyCell` owns the predicate).
-// "gained" shares the "add" recipe — one colour for one meaning, wherever it lands.
+// Presentation half; `classifyCell` owns the predicate.
 const CELL_CLASS: Record<Exclude<CellKind, "absent">, string> = {
   new: "new",
   gained: "add",
@@ -54,22 +50,12 @@ export function SeriesView({
   const { sampleSet, setSelectionForSampleSet } = useSelection();
   const [hover, setHover] = useState<HoverState | null>(null);
 
-  // Cumulative ever-seen set per round-index so we can distinguish
-  // "newly added" (never seen before) from "re-added after a drop" — both
-  // get the NEW colour today, but kept separate so we can split later.
   const everSeen = cumulativeEverSeen(sorted.rounds);
 
-  // No round-file fetch here: the order is positional over the round's `selection`,
-  // which `dashboard.json` already carries. This used to lazy-fetch the whole
-  // `round_NNNN.json` on every hover purely to read a `sample_order_timeline` that
-  // held one step — and that one step only ever matched the round's FIRST cell, so
-  // the fetch bought a divergence rather than fixing one. Both are gone.
   const hoveredSelection = hover
     ? (sorted.rounds.find((r) => r.round === hover.round)?.selection ?? [])
     : [];
   const order = hover ? orderAtStep(hoveredSelection, hover.sampleId, hover.position) : null;
-  // Clicking a cell loads this state into the fitness sample-set — measured-
-  // through-here by default, or the whole round when selectMode is "all".
   const seedSet = order ? seedFromOrder(order, selectMode) : [];
 
   return (
@@ -79,7 +65,6 @@ export function SeriesView({
       onMouseLeave={() => setHover(null)}
     >
       <div className="st-series-inner">
-        {/* column header — sample ids */}
         <div className="st-series-row">
           <span className="st-row-label">id</span>
           <span className="st-series-cells">
@@ -88,9 +73,7 @@ export function SeriesView({
             ))}
           </span>
         </div>
-        {/* one row per round */}
         {sorted.rounds.map((r, i) => {
-          // `positions` and `everSeen` are built one-per-round, parallel to `sorted.rounds`.
           const pos = sorted.positions[i]!;
           const prev = i > 0 ? sorted.positions[i - 1]! : null;
           const everPrev = i > 0 ? everSeen[i - 1]! : new Set<number>();
@@ -106,7 +89,6 @@ export function SeriesView({
                   }
                   const p = pos.get(sid)!;
                   const pp = prev?.get(sid);
-                  // "new" covers first-appearance + re-add (split here by everPrev).
                   const titleNote =
                     kind === "new"
                       ? everPrev.has(sid)
@@ -166,9 +148,6 @@ export function SeriesView({
   );
 }
 
-// Floating order-at-step table, fixed at the cursor. Computed samples (✓, in
-// measurement order), the one being measured (▶), then the picker's planned
-// remainder — the frozen plan at this state.
 function SeriesHoverPopup({
   hover,
   order,

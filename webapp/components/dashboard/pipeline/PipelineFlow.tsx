@@ -22,23 +22,16 @@ import { TERMS } from "@/lib/terms";
 import { Icon, pressable } from "@/components/ui";
 import { cx } from "@/lib/cx";
 
-// One level of the stack: a UNIT that opens into another one. `PipelineStack` composes them
-// and owns everything about the chain; this file draws a single level.
+// One level of the pipeline stack; `PipelineStack` owns the chain of levels.
 
-// The backend target LLM is called exactly while the OPTIMIZER's scoring node is active —
-// `l1_score` covers origin scoring too and, unlike `dash.state`, does not flicker between
-// samples. Optimizer-side only: compared against the served `active_node`, never against a
-// target node's id (`nests.node` answers that).
+// The target LLM is called exactly while this OPTIMIZER node is active. Compare it against
+// the served `active_node` only, never against a target node's id.
 const OPTIMIZER_SCORING_NODE = "l1_score";
 
-// The served edge vocabulary, each with its own ink, dash and arrowhead in `chat.css`. An
-// unrecognised kind draws as `forward` rather than unstyled — the wire's `kind` is a bare
-// string, so a manifest can name one this does not know.
+// Each kind is styled in `chat.css`; the wire's `kind` is a bare string, so an unknown one
+// draws as `forward`.
 const EDGE_KINDS: readonly string[] = ["forward", "loop", "escalate", "directive"];
 
-// How far a node's name and the model under it reach BELOW its dot — the baseline offset
-// plus the second line's descender. Every label sits below its dot, so this is the only
-// direction that needs clearing.
 const LABEL_BELOW_EXTENT = 38;
 
 const ATTACH_ICON = (
@@ -70,9 +63,7 @@ const LLM_ICON = (
   </Icon>
 );
 
-// No view to draw. Never fabricate a node here — that would show a failed read as a real
-// single-LLM pipeline. The three reasons `view` can be missing must read differently: a
-// slow pipeline and a broken one are not otherwise distinguishable on screen.
+// Never fabricate a node here: a failed read would pass for a real single-LLM pipeline.
 function PipelinePlaceholder({ status }: { status: PipelineStatus }) {
   const [label, value, hint] =
     status === "error"
@@ -101,29 +92,17 @@ interface BoxProps {
   connector: string | null;
   activeNode: string | null;
   isLive: boolean;
-  // WHERE THE SEARCH REACHES, per node — SERVED off the node-config rows, never summed
-  // here. A node absent from the map is UNKNOWN, which is not `nothing`: an unread node drawn
-  // as shut is a claim nobody made.
+  // SERVED, never summed here. A node absent from the map is UNKNOWN — never draw it as shut.
   reach: Record<string, NodeReach> | null;
-  // Which namespace a node click writes. Null makes every node inert — a level whose
-  // detail panel does not exist must not offer a click that opens nothing.
+  // Null makes every node inert: a level with no detail panel offers no click.
   scope: NodeScope | null;
-  // The node that runs a nested pipeline, and what clicking it does. The FRAME is a fact
-  // about the node — it runs another pipeline — so it draws wherever that node is named;
-  // `onIsolate` is null where no level below is on screen (the dashboard's Optimizer card
-  // draws one level and zooms nowhere), and the node then selects like any other.
+  // `onIsolate` is null where no level below is on screen; the node then selects like any other.
   nest: { node: string; onIsolate: (() => void) | null } | null;
-  // Drawn around another level ⇒ context, not subject: no labels, a third of the height.
-  // From the flow, not from `nest`, which is null when the nesting node is unresolved.
   compact: boolean;
-  // Per-node resolved model, to print under each name. Its PRESENCE is what widens the
-  // cells to fit one — a provider-qualified model is far wider than a node id, and the
-  // nested levels have no room for either, so they pass nothing and stay narrow.
   models: { by: Record<string, string | null>; loading: boolean } | null;
 }
 
-// THE box: a glassmorphic frame tagged with what it is, holding its nodes. One box at
-// every size, single-node included.
+// One box at every size, single-node included.
 function PipelineBox({
   view,
   connector,
@@ -138,27 +117,18 @@ function PipelineBox({
   const { node: selected, setSelectionForNode: setSelected } = useSelection();
   const { dash } = useDashboard();
   const interior = interiorNodes(view);
-  // Compact drops the label row, which is most of the height; the names stay in `<title>`
-  // and `aria-label`. A level printing models needs the pitch to fit one — a
-  // provider-qualified name is far wider than the node id above it.
   const CELL_W = compact ? 44 : models ? 132 : 72;
   const CELL_W_OPEN = 132;
-  // How narrow a sibling may be squashed. Not 0: a cell still has to show its dot and take
-  // a tap, so when the floor binds the bonus shrinks instead of a cell being dropped.
+  // Not 0: a squashed cell still shows its dot and takes a tap, so the bonus shrinks instead.
   const CELL_W_MIN = 20;
   const ROW_H = compact ? 26 : 70;
   const RADIUS = compact ? 5.5 : 7;
   const cy = compact ? 13 : 14;
-  // How far a node's TEXT reaches below its dot, and how much clear air a backward edge
-  // has above its row. Compact draws no labels, so nothing has to be cleared.
   const LABEL_BLOCK = compact ? RADIUS : 34;
   const ROW_GAP = compact ? 18 : 38;
-  // The clickable band around one dot on the grid, where nodes stack in both axes and a
-  // full-height rect each would leave only the last-drawn one reachable.
+  // Per-dot band on a grid: a full-height rect each would leave only the last-drawn reachable.
   const HIT_BAND = compact ? 24 : 40;
   const isSel = (id: string) => scope != null && selected?.scope === scope && selected.id === id;
-  // A nesting node isolates rather than selects: its knobs live in another cycle. Returns
-  // the nest so a caller reading it gets narrowing.
   const nestAt = (id: string) => (nest != null && id === nest.node ? nest : null);
   const activate = (id: string) => {
     const here = nestAt(id);
@@ -167,19 +137,13 @@ function PipelineBox({
     setSelected(isSel(id) ? null : { id, scope });
   };
 
-  // Read off the SERVED graph: the `loop` edge names where the repeat closes, and the
-  // forward chain between its ends is the cycle. A chain declares no loop and gets none.
   const cycle = cycleOf(interior, view.edges);
 
-  // A loopless view is a straight rail, and the producer guarantees every node on one is
-  // tier 0 (`derive_pipeline_view`: an escalation always closes a loop), so `rank` alone
+  // `derive_pipeline_view` puts every node of a loopless view on tier 0, so `rank` alone
   // columns it.
   const cols = Math.max(interior.length, 1);
 
-  // Per-cell widths, then cumulative offsets. The open cell's bonus is capped by what the
-  // siblings can give above CELL_W_MIN and they give exactly it, so the total stays
-  // `cols * CELL_W` and expanding never pushes the tail out of the frame. The bonus buys
-  // room for an unwrapped label, so a compact level has none.
+  // Siblings give exactly the open cell's bonus, so expanding never pushes the tail out.
   const others = Math.max(cols - 1, 0);
   const givable = others * (CELL_W - CELL_W_MIN);
   const selectedCol = interior.find((n) => isSel(n.id))?.rank ?? -1;
@@ -197,17 +161,12 @@ function PipelineBox({
   const railW = cols * CELL_W;
   const colX = (i: number) => (offsets[i] ?? 0) + (widths[i] ?? CELL_W) / 2;
 
-  // A graph that REPEATS folds onto a grid rather than running as a line with a wire
-  // hanging off the end: on a rail the return has to cross the whole width under the
-  // labels, and an escalation lands far from the step that reaches for it. A chain has no
-  // cycle and keeps the rail. EVERY surface draws a looping pipeline the same way, compact
-  // included — one that folds on the dashboard and runs flat in the hero is two pictures of
-  // one graph. Compact keeps its own metrics: no labels, so the rows sit close.
+  // A looping graph folds onto a grid on EVERY surface, compact included — one graph, one
+  // picture. A chain keeps the rail.
   const ring = cycle.length
     ? layoutGrid(interior, cycle, {
         cell: CELL_W,
-        // Clearance for a name AND the model under it. Two pixels short and the sublabel
-        // is shaved off with nothing on screen to say so.
+        // Two pixels short and the model sublabel is shaved off silently.
         rowH: compact ? 24 : LABEL_BELOW_EXTENT + 34,
         padTop: compact ? 13 : 16,
         padBottom: compact ? 13 : LABEL_BELOW_EXTENT,
@@ -220,22 +179,16 @@ function PipelineBox({
     ring?.pos.get(n.id) ?? { x: colX(n.rank), y: cy, muted: false };
   const posOf = new Map(interior.map((n) => [n.id, at(n)] as const));
 
-  // One ribbon per SERVED edge, and only where one is served — never between
-  // array-adjacent nodes, which is right for a straight dataset and a falsehood for any
-  // pipeline that loops or escalates.
+  // One ribbon per SERVED edge only — never between array-adjacent nodes.
   const edgeD = (a: { x: number; y: number }, b: { x: number; y: number }) => {
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const len = Math.hypot(dx, dy) || 1;
-    // Endpoints sit at the dot's edge, so a stroke never runs under the dot it leaves.
     const [x1, y1] = [a.x + (dx / len) * RADIUS, a.y + (dy / len) * RADIUS];
     const [x2, y2] = [b.x - (dx / len) * RADIUS, b.y - (dy / len) * RADIUS];
     const mx = (x1 + x2) / 2;
 
-    // Every node's name and model sit DIRECTLY BELOW its dot; all three rules follow.
-    // BETWEEN ROWS — the upper node is joined below its text, never at its dot, so the
-    // stroke stops short of the block instead of running down through both lines of it.
-    // The lower node has nothing above it and keeps its dot edge.
+    // Between rows the upper node joins below its label block, never through its text.
     if (Math.abs(dy) > 1) {
       const down = a.y < b.y;
       const [upper, lower] = down ? [a, b] : [b, a];
@@ -244,43 +197,26 @@ function PipelineBox({
       const [p0, p1] = down ? [top, bottom] : [bottom, top];
       return `M ${p0.x} ${p0.y} Q ${(p0.x + p1.x) / 2} ${(p0.y + p1.y) / 2} ${p1.x} ${p1.y}`;
     }
-    // ALONG A ROW — a step forward keeps its soft sag, which clears the text below. A step
-    // BACK bows the other way, up into the gap above: sagging it would pass straight over
-    // the name and model of every node it spans. Longer spans rise further, so two
-    // backward reaches from one node stay told apart.
+    // A step BACK bows up into the gap: sagging would cross every spanned label.
     const rise = Math.min(len * 0.16, ROW_GAP * 0.78);
     const bow = dx > 0 ? 6 : -rise;
     return `M ${x1} ${y1} C ${mx} ${y1 + bow} ${mx} ${y2 + bow} ${x2} ${y2}`;
   };
 
-  // An edge onto a node this box does not draw is a TERMINAL: the `io` ends, which
-  // `interiorNodes` drops. It still has to appear — the produced searchpoint leaving the
-  // loop is the whole point of the run, so dropping it would take the arrow off the last
-  // node with nothing to say it had gone. Leaves rightward, from the dot's edge.
+  // An edge onto an `io` end (dropped by `interiorNodes`) still draws, as a terminal stub.
   const terminalD = (p: { x: number; y: number }) =>
     `M ${p.x + RADIUS} ${p.y} L ${p.x + CELL_W * 0.5} ${p.y}`;
 
   const labelLines = (label: string) =>
     label.includes("_") ? label.split("_") : [label];
 
-  // Light the node whose id IS the served `active_node` — which resolves only on a
-  // self-optimizing campaign, since `active_node` speaks for the optimizer and no wire
-  // says which BACKEND node is mid-call. The whole-chip pulse covers that case instead,
-  // never both at once.
+  // `active_node` speaks for the optimizer, so it names a node here only on a self-optimizing
+  // campaign; otherwise the whole chip pulses. Never both.
   const namedHere = isLive && interior.some((n) => n.id === activeNode);
   const calling = isLive && activeNode === OPTIMIZER_SCORING_NODE && !namedHere;
 
-  // One node is not a graph: draw the node and its resolved model, no strip.
   const sole = interior.length === 1 ? interior[0] : undefined;
-  // Off the searchpoint, not `current_round.nodes`, which carries optimizer calls only.
-  //
-  // ONE source. This is only ever rendered while `calling`, and in that window the engine's own
-  // record of the call is the answer — a served resolution delivered by the poll rather than by
-  // the pipeline route. It used to fall back to the served config ROW when the live value had not
-  // landed yet, which is the two-store stitch `webapp/CLAUDE.md` § Display-data sources forbids,
-  // and the fallback could only ever be WRONG: the row answers for the campaign root, so a round
-  // that evolved the model showed the origin's for the gap between the call starting and the
-  // config landing. `?? "running"` below is the honest reading of that gap.
+  // The live record alone; never fall back to the config row, which answers for the root.
   const liveCfg = sole ? liveObserveConfig(dash)?.config[sole.id] : null;
   const liveModel =
     liveCfg && typeof liveCfg === "object"
@@ -305,8 +241,7 @@ function PipelineBox({
           disabled={scope == null && soleNest?.onIsolate == null}
           onClick={() => activate(sole.id)}
         >
-          {/* Spans, not divs: a `<button>` takes phrasing content only, and every one of these
-              is a flex item, so the box each draws is its parent's doing. */}
+          {/* Spans, not divs: a `<button>` takes phrasing content only. */}
           <span className="head">
             <span className="ico">{LLM_ICON}</span>
             <span className="lbl">{sole.label}</span>
@@ -321,9 +256,7 @@ function PipelineBox({
     <div className={cx("wf-hero-node", "llm", "wf-hero-node-multi", calling && "active")}>
       {connector && <div className="wf-hero-multi-tag">{connector}</div>}
       <div className="wf-hero-multi-rail">
-      {/* width:100% so the whole pipeline SCALES into the frame. The min-width is
-          the floor where that stops being honest: below ~44px a cell is neither
-          readable nor tappable, so past that many nodes the rail scrolls. */}
+      {/* min-width floors the scaling: below ~44px a cell is unreadable, so the rail scrolls. */}
       <svg
         viewBox={`0 0 ${totalW} ${canvasH}`}
         preserveAspectRatio="xMidYMid meet"
@@ -354,16 +287,12 @@ function PipelineBox({
           const b = posOf.get(e.to);
           if (!a && !b) return null;
           const kind = EDGE_KINDS.includes(e.kind) ? e.kind : "forward";
-          // Only the OUTGOING end gets a stub. A level that shows where a sample enters
-          // draws an Input chip for it; inside the box there is no room left of the first
-          // node, and an arrow arriving there points backwards into it.
+          // Only the outgoing end gets a stub; the Input chip owns the incoming one.
           if (!a) return null;
           const d = b ? edgeD(a, b) : terminalD(a);
           return (
             <path
               key={`${e.from}>${e.to}`}
-              // An edge touching the receded preamble recedes with it — dimming the node
-              // while its wire stayed full-strength just moved the eye onto the wire.
               className={cx("edge", `kind-${kind}`, (a.muted || b?.muted) && "muted")}
               d={d}
               markerEnd={`url(#wf-arrow-${kind})`}
@@ -380,27 +309,10 @@ function PipelineBox({
             isSelected && "selected",
             isActive && "active",
           );
-          // The glyph answers WHERE THE SEARCH REACHES, and the POSITIVE state is the one that
-          // gets the mark: most nodes in a real pipeline declare no axis at all — tools,
-          // measurement, plumbing — so marking that case makes the default the loudest thing
-          // on screen and leaves the product's own behaviour unmarked.
-          //
-          //   FRAME    — runs a whole nested pipeline; what it IS, before any axis question
-          //   RING     — some agent searches here. The optimizer's actual reach.
-          //   PADLOCK  — nothing here is searched, though it COULD be: opening an axis is
-          //              adding its key to `param_keys`, so a config param no agent moves is
-          //              shut, not exempt. Closed shackle = every openable axis shut; open
-          //              shackle = some shut, some searched.
-          //   bare dot — nothing here could ever be opened (`model`/`provider` only, or no
-          //              params at all), or the reading is unknown.
-          //
-          // Ring and padlock COMPOSE on a partial node: it is searched AND partly shut, and
-          // those are two facts rather than a choice between two glyphs.
+          // Frame = runs a nested pipeline; ring = searched; padlock = openable via `param_keys`
+          // but shut (open shackle = partly). Ring and padlock compose; bare dot = never openable.
           const nests = nestAt(n.id);
           const reach = reachByNode?.[n.id] ?? null;
-          // Drawn on a nesting node too: the badge sits BESIDE the glyph, so "this runs a
-          // pipeline" and "its own axes are shut" never compete for one mark — two facts, two
-          // marks. A measurement node declares no axis at all and takes the bare dot.
           const lock: "open" | "closed" | null = !reach
             ? null
             : reach.state === "locked"
@@ -409,26 +321,19 @@ function PipelineBox({
                 ? "open"
                 : null;
           const reached = reach != null && reach.open > 0;
-          // Said in words too: the glyph carries three shapes and the operator's question is
-          // "which params, and moved by whom", which only a count and a name can answer.
           const reachNote =
             reach == null || reach.state === "nothing"
               ? null
               : reach.open === 0
                 ? `no axis open of ${reach.openable}${reach.held ? " — narrowed at mint" : ""}; open one by forking`
                 : `${reach.open} of ${reach.openable} axes open — ${reach.agents.map(agentLabel).join(", ")}`;
-          // Wrapped while narrow, whole id once widened — that is what expanding buys. A
-          // grid never wraps: it is already pitched wide enough for the id and the model.
           const parts = isSelected || ring ? [n.label] : labelLines(n.label);
           const cellW = ring ? CELL_W : (widths[n.rank] ?? CELL_W);
-          // A squashed sibling drops its label rather than spilling into its neighbours.
           const showLabel = !compact && cellW >= 44;
           const labelDy = 16;
           const sub = models
             ? nodeSubLabel(n.kind, models.by[n.id] ?? null, models.loading)
             : "";
-          // The glossary line for this node, where the operator vocabulary has one — a
-          // property of the node id, not of the surface drawing it.
           const tip = TERMS[`node_${n.id}`];
           const subDy = labelDy + parts.length * 11;
           const inert = scope == null && nests?.onIsolate == null;
@@ -447,9 +352,6 @@ function PipelineBox({
                     : n.label
               }
             >
-              {/* Hit target: the whole cell on a rail, where the gap between dot and label
-                  is otherwise dead — but only this node's own band on a grid, where a
-                  full-height rect each would leave the last-drawn one alone clickable. */}
               <rect
                 x={-cellW / 2}
                 y={ring ? nodeY - HIT_BAND / 2 : 0}
@@ -470,9 +372,7 @@ function PipelineBox({
                   .filter(Boolean)
                   .join(" — ")}
               </title>
-              {/* The node's OWN glyph, never replaced — reach and locking are things TRUE OF a
-                  node, so they adorn it. Swapping the dot for a padlock spends the kind
-                  vocabulary and leaves "what is this node" unanswerable at a glance. */}
+              {/* The node's own glyph is never replaced — reach and lock only adorn it. */}
               {nests ? (
                 <g
                   className={cx("node-nest", isActive && "active")}
@@ -484,7 +384,6 @@ function PipelineBox({
               ) : (
                 <circle className={dotCls} cx={0} cy={nodeY} r={RADIUS} />
               )}
-              {/* Halo where the search works. Wider than the dot, under nothing. */}
               {reached && (
                 <circle
                   className={cx("node-reach", isActive && "active")}
@@ -493,15 +392,11 @@ function PipelineBox({
                   r={RADIUS + 3.5}
                 />
               )}
-              {/* Corner badge: axes nothing searches, though they could be opened. Dropped on a
-                  compact level, which draws context rather than subject and has no room. */}
               {lock && !compact && (
                 <g
                   className={cx("node-lock", `is-${lock}`)}
                   transform={`translate(${RADIUS + 3.4} ${nodeY - RADIUS - 1.5}) scale(0.78)`}
                 >
-                  {/* Open = the right leg never meets the body, the only shape difference
-                      legible at this size. */}
                   <path
                     className="shackle"
                     d={
@@ -540,45 +435,28 @@ export interface PipelineFlowProps {
   view: PipelineView | null;
   status: PipelineStatus;
   connector: string | null;
-  // WHERE THE SEARCH REACHES, per node — SERVED off the node-config rows, never summed
-  // here. A node absent from the map is UNKNOWN, which is not `nothing`: an unread node drawn
-  // as shut is a claim nobody made.
   reach: Record<string, NodeReach> | null;
   scope: NodeScope | null;
   nestsNode: string | null;
   activeNode: string | null;
   isLive: boolean;
-  // Rendered on this level's row, ahead of the Input end. The stack puts its zoom strip
-  // here so the control shares a row with the ends instead of taking one of its own.
   leading?: ReactNode;
-  // The Input/Output ends and the connector dot between them. Present on exactly one level
-  // of a stack — the only one a sample flows through.
+  // Present on exactly one level of a stack — the only one a sample flows through.
   queryPath?: {
     pressed: boolean;
     label: string;
     onClick: () => void;
     connector: ReactNode;
   };
-  // The level this pipeline runs and what its nesting node does when clicked. Which levels
-  // are drawn is owned by the STACK, never a `useState` here: a zoom re-parents this flow,
-  // and React destroys the state of a re-parented component. Absent where a host draws one
-  // level only — `nestsNode` still marks the nesting node, which is a fact about the node
-  // rather than about how many levels this host happens to show.
+  // Which levels draw is owned by the STACK, never a `useState` here: a zoom re-parents this
+  // flow, and React drops a re-parented component's state.
   nest?: { level: ReactNode; onIsolate: () => void };
-  // Half of the depth alternation, from the stack — a level cannot know its own depth and
-  // CSS cannot count from the inside out.
+  // From the stack: a level cannot know its own depth, and CSS cannot count inside-out.
   tone: "accent" | "neutral";
-  // Per-node resolved model to print under each name; widens the cells to fit one. Only a
-  // level with room passes it — see `BoxProps.models`.
   models?: { by: Record<string, string | null>; loading: boolean } | null;
-  // Drawn without the surrounding flow chrome: no unit wrapper, no tone band. For a host
-  // that is already a card — the Optimizer card owns its own frame and toolbar.
   bare?: boolean;
 }
 
-// Module level, not a closure inside `PipelineFlow`: a component defined during render is
-// remounted every pass, so state and focus inside it die on each poll tick
-// (`react-hooks/static-components`).
 function FlowEnd({
   icon,
   lbl,
@@ -626,7 +504,6 @@ export function PipelineFlow({
   const interior = interiorNodes(view);
   const box =
     view == null || interior.length === 0 ? (
-      // Not loaded, failed, unbound, or genuinely empty — never a fabricated node.
       <PipelinePlaceholder status={status === "ok" ? "unbound" : status} />
     ) : (
       <PipelineBox
@@ -636,7 +513,6 @@ export function PipelineFlow({
         isLive={isLive}
         reach={reach}
         scope={scope}
-        // The frame follows the served id; only the ZOOM follows the level being drawn.
         nest={nestsNode ? { node: nestsNode, onIsolate: nest?.onIsolate ?? null } : null}
         compact={nest != null}
         models={models}
@@ -654,9 +530,8 @@ export function PipelineFlow({
           <div className="wf-hero-arrow">{queryPath.connector}</div>
         </>
       )}
-      {/* The UNIT: the box and the level it runs as SIBLINGS, never nested — inside the
-          box they fall under every `.wf-hero-node.llm <part>` rule in chat.css. The
-          wrapper draws the containment. */}
+      {/* Box and nested level are SIBLINGS: inside the box they would fall under every
+          `.wf-hero-node.llm <part>` rule in chat.css. */}
       <div className={cx("wf-hero-unit", `tone-${tone}`, nest && "has-nested")}>
         {box}
         {nest && <div className="wf-hero-nested">{nest.level}</div>}

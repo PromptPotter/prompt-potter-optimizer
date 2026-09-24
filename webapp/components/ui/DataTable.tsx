@@ -4,19 +4,12 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { cx } from "@/lib/cx";
 import s from "./DataTable.module.css";
 
-// THE table — every list of served rows (the measurement log, a candidate's cells, a round's
-// samples) is a configuration of this one, never a hand-rolled grid beside it. The shape is
-// Opik's: a view is columns + a served read + a detail panel, and the table owns only layout,
-// virtualization, group folding and the active row.
-//
-// It never ORDERS anything. Rows and groups arrive in the served order and render in it —
-// an ordering is a score (`webapp/CLAUDE.md` § Scoring authority) — so there is no sort state
-// here to drift from the server's.
+// THE table for every list of served rows. It never ORDERS anything: an ordering is a score
+// (`webapp/CLAUDE.md` § Scoring authority).
 
 export interface Column<T> {
   id: string;
   label: ReactNode;
-  // A CSS grid track: `"64px"`, `"minmax(160px, 2fr)"`. The header and every row share it.
   width: string;
   cell: (row: T) => ReactNode;
   align?: "start" | "end";
@@ -24,7 +17,6 @@ export interface Column<T> {
 
 export interface RowGroup<T> {
   key: string;
-  // The group's own summary line, drawn across the full width.
   header: ReactNode;
   rows: T[];
 }
@@ -33,7 +25,6 @@ type Item<T> = { kind: "group"; group: RowGroup<T> } | { kind: "row"; row: T };
 
 const ROW_PX = 30;
 const GROUP_PX = 34;
-// Below this many lines the rows lay out in normal flow; above it only the window is mounted.
 const VIRTUAL_FROM = 150;
 
 export function DataTable<T>({
@@ -50,7 +41,7 @@ export function DataTable<T>({
   className,
 }: {
   columns: readonly Column<T>[];
-  // Exactly one of the two: flat rows, or served groups each holding its rows.
+  // Exactly one of `rows` / `groups`.
   rows?: readonly T[];
   groups?: readonly RowGroup<T>[];
   getRowId: (row: T) => string;
@@ -62,7 +53,6 @@ export function DataTable<T>({
   maxHeight?: string;
   className?: string;
 }) {
-  // Folding is the one piece of state, and it is keyed by group so a re-read keeps it.
   const [flipped, setFlipped] = useState<ReadonlySet<string>>(() => new Set());
   const isOpen = (key: string) => flipped.has(key) !== expandedByDefault;
   const toggle = (key: string) =>
@@ -99,7 +89,6 @@ export function DataTable<T>({
   useEffect(() => {
     if (virtualized && activeIndex >= 0) virtual.scrollToIndex(activeIndex, { align: "auto" });
   }, [virtualized, activeIndex, virtual]);
-  // One list of (item, position) either way, so a row renders from one piece of markup.
   const placed = virtualized
     ? virtual.getVirtualItems().map((v) => ({
         index: v.index,

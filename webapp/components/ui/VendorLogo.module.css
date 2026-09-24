@@ -1,7 +1,3 @@
-/* Vendor mark — the ink is the signal, so the box is fixed-width: a column of these has to line
-   up down a sidebar to be countable. Sized in `em` off the type token rather than a literal, so
-   it contracts with the row. */
-
 @layer ui {
 .logo {
   flex: 0 0 auto;
@@ -25,8 +21,7 @@
   fill: currentColor;
 }
 
-/* The symbol definitions. Not `display:none` — that has historically kept `<use>` from
-   resolving in some engines; zero-size + hidden overflow is the pattern that does not. */
+/* Not `display:none`, which keeps `<use>` from resolving in some engines. */
 .sprite {
   position: absolute;
   inline-size: 0;

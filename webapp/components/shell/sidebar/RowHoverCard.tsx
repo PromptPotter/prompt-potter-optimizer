@@ -7,13 +7,8 @@ import { cx } from "@/lib/cx";
 import { declaredKnobs, type RowCardFacts } from "@/lib/derivations";
 import { fmtBytes, fmtValue } from "@/lib/format";
 
-// The ONE hover surface for every sidebar row. Three tiers, read top-down: WHAT the row is
-// (name, state, one line), the few NUMBERS an operator scans for, then the IDs and dates they
-// copy out. Rows hand in served values already formatted; the card lays them out and nothing else.
-//
-// The card is reachable (see `HoverCard`), so what is in it selects by drag, and the copy button
-// hands the same values over as JSON — both read the SAME lists, so the payload cannot claim
-// anything the card does not show.
+// The ONE hover surface for every sidebar row. The copy button reads the SAME lists the card
+// shows, so the payload cannot claim anything the card does not.
 
 const snake = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, "_");
 
@@ -35,8 +30,7 @@ function RowCardBody({ card }: { card: RowCardFacts }) {
   );
   const data = readyData(read);
   const error = read.status === "failed";
-  // The declared config is a second read, and most hovers never ask for it — so it waits for the
-  // fold. The latch stays true once opened: closing it again must not throw the answer away.
+  // Waits for the fold; latches true so closing it again keeps the answer.
   const [configAsked, setConfigAsked] = useState(false);
   const configRead = useRead(
     campaignId != null && configAsked

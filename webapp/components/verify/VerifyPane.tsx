@@ -1,9 +1,6 @@
 "use client";
-// Workspace-scope diagnostic-run records — one row per `verify` CLI invocation.
-// Categorically NOT a cycle or a fork: pure on-demand re-evaluation of
-// an existing candidate against more samples. Reads GET /api/v1/workspace/
-// diagnostic-runs and renders a sortable table with a per-row trend bar
-// (grey = source-campaign composite, red overlay = workspace composite).
+// One row per `verify` CLI invocation — a re-measure of an existing candidate on more samples,
+// never a cycle or a fork.
 
 import { fetchDiagnosticRuns, type DiagnosticRunRecord } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -137,12 +134,8 @@ function VerifyRow({ run }: { run: DiagnosticRunRecord }) {
   );
 }
 
-// Two-segment overlay: grey strip = source-campaign accuracy, red overlay
-// = workspace accuracy. Accuracy is the primary metric matched against the
-// dashboard's per-candidate fitness bars (blue = accuracy). Both clamped to
-// [0,1].
-// `held` is SERVED (`DiagnosticRunRecord.held`) — the producer owns when two measured rates count
-// as equal, so no surface picks its own epsilon. The two widths are geometry, clamped here.
+// `held` is SERVED: the producer owns when two measured rates count as equal, so no surface picks
+// its own epsilon.
 function TrendBar({
   source,
   workspace,

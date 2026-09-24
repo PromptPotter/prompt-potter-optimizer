@@ -1,10 +1,5 @@
 import { memo } from "react";
 
-// Minimal 8-bit lava-heart — the brand pixel heart, stripped to HUD size (no
-// sideways-laser brackets). Built from crisp unit rects on a 7×6 grid so it
-// stays sharp at any scale; `currentColor` lets the caller/theme drive the fill
-// (DOOM-orange in dark, the accent in light). `filled=false` dims it to an
-// empty slot. Self-contained SVG — no external asset, CSP-safe.
 const WIDTH = 11;
 
 export const HeartIcon = memo(function HeartIcon({ filled = true }: { filled?: boolean }) {

@@ -10,8 +10,6 @@ describe("CommitInput", () => {
     const onCommit = vi.fn();
     render(<CommitInput value="" onCommit={onCommit} aria-label="criterion" />);
     fireEvent.change(screen.getByLabelText("criterion"), { target: { value: "accur" } });
-    // Every half-typed value is a valid but WRONG request — one fetch per character, and a 400
-    // on each half-written formula.
     expect(onCommit).not.toHaveBeenCalled();
   });
 
@@ -22,8 +20,6 @@ describe("CommitInput", () => {
     fireEvent.change(input, { target: { value: "accuracy" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onCommit).toHaveBeenCalledWith("accuracy");
-    // The blur that follows an Enter must not re-fire: the committed value is now the prop's,
-    // and a second identical request is a second refetch of the same read.
     fireEvent.blur(input);
     expect(onCommit).toHaveBeenCalledTimes(1);
   });
@@ -42,8 +38,6 @@ describe("CommitInput", () => {
       <CommitInput value="{}" onCommit={onCommit} validate={ok} rows={4} aria-label="schema" />,
     );
     const box = screen.getByLabelText("schema");
-    // Half-typed JSON must not reach the caller as a STRING — the emitter would drop it, and a
-    // widget that accepted what the emitter drops loses the operator's schema in silence.
     fireEvent.change(box, { target: { value: '{"answer": ' } });
     fireEvent.blur(box);
     expect(onCommit).not.toHaveBeenCalled();
@@ -59,7 +53,6 @@ describe("CommitInput", () => {
     render(<CommitInput value="" onCommit={onCommit} rows={4} aria-label="layout" />);
     const box = screen.getByLabelText("layout");
     fireEvent.change(box, { target: { value: "one" } });
-    // A schema typed across four lines cannot be a control whose first Return sends it.
     fireEvent.keyDown(box, { key: "Enter" });
     expect(onCommit).not.toHaveBeenCalled();
     fireEvent.blur(box);
@@ -69,8 +62,6 @@ describe("CommitInput", () => {
   it("takes a value arriving from elsewhere in the SAME render", () => {
     const { rerender } = render(<CommitInput value="a" onCommit={() => {}} aria-label="cell" />);
     fireEvent.change(screen.getByLabelText("cell"), { target: { value: "typed" } });
-    // A restore, or a channel re-pointed under the cursor. An effect-based reset would paint one
-    // frame of "typed" first, which reads as the edit having survived the restore.
     rerender(<CommitInput value="b" onCommit={() => {}} aria-label="cell" />);
     expect((screen.getByLabelText("cell") as HTMLInputElement).value).toBe("b");
   });

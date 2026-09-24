@@ -15,22 +15,15 @@ import {
   type ViewGroup,
 } from "@/lib/view-tab";
 
-// The per-campaign view axis — the app's ONE nav surface for it, in two forms one
-// stylesheet apart: a strip under the run title, and below --bp-md the phone's
-// bottom tab bar (domains/shell.css). Two rows: the top level (Chat · Dashboard ·
-// Records), and the Records members, which appear only while one of them is the
-// view. Which view sits in which tier is `lib/view-tab.ts`.
+// The app's ONE nav surface for the view axis; below --bp-md it is the phone's bottom tab bar.
 
-// `Record<Tab, …>` on purpose: adding a view is a compile error here until it has a
-// glyph, which is the one place the type system enforces nav completeness.
+// `Record<Tab, …>` on purpose: a new view is a compile error here until it has a glyph.
 const ICONS: Record<Tab, ReactNode> = {
   chat: (
     <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h9A1.5 1.5 0 0 1 14 4.5v5A1.5 1.5 0 0 1 12.5 11H6l-3 2.5V11H3.5A1.5 1.5 0 0 1 2 9.5z" />
   ),
   dashboard: <path d="M2.5 13V6.5M6.5 13V3M10.5 13V8M14 13H2" />,
-  // Rows under a header — the log of every measured cell.
   measurements: <path d="M2.5 3.5h11M2.5 6.5h11M2.5 9.5h11M2.5 12.5h7" />,
-  // Two bars side by side — the comparison, not another chart.
   compare: <path d="M4 13V7M8 13V3M12 13V9M2 13h12" />,
   verify: <path d="M2.5 8.5 6 12l7.5-8" />,
   files: (
@@ -91,9 +84,8 @@ export function ViewTabs({
   onSelect: (tab: Tab) => void;
   className?: string;
 }) {
-  // The group segment fires on click even when it is already on, so entering
-  // Records is guarded: re-clicking it while reading Files must not bounce back
-  // to the entry member.
+  // The group segment fires even when already on; re-clicking it while reading Files must
+  // not bounce back to the entry member.
   const pickGroup = (group: ViewGroup) => {
     if (group !== "records") onSelect(group);
     else if (!isRecordsTab(tab)) onSelect(RECORDS_ENTRY);

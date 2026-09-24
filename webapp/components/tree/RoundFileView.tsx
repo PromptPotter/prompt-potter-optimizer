@@ -5,20 +5,11 @@ import type { RoundResult } from "@/lib/api/types";
 import { fmtNum, fmtPct1, fmtSigned } from "@/lib/format";
 import { isHit } from "@/lib/fitness";
 
-// The round file IS `RoundResult.model_dump()`, so its shape is DERIVED from the generated wire
-// type rather than re-declared (`webapp/CLAUDE.md` § A wire shape is GENERATED). A hand-typed
-// interface drifts with the gate green, because nothing can compare one against the model it
-// claims to describe: require a `hits` the model never declares (`domain/results.py` disowns it
-// outright) and every summary line renders "undefined/20 hits" with no check able to say so.
-//
-// `Partial` because the value reaching this component is a cast over arbitrary parsed JSON: a
-// file on disk can promise a SUBSET of the current model, never the whole of it. That is also
-// what keeps a removed field a compile error here instead of an `undefined` on screen.
+// The round file IS `RoundResult.model_dump()`. `Partial` because a file on disk promises only a
+// SUBSET of the current model.
 export type RoundDoc = Partial<RoundResult>;
 
-// The one shape that genuinely cannot be derived: `results` is `list[dict[str, Any]]` on the
-// model, so the wire type is `Record<string, unknown>[]` and the per-row keys exist nowhere to
-// generate from. Hand-written, and saying so, per that section's narrow escape.
+// Hand-written: `results` is `list[dict[str, Any]]` on the model, so there is nothing to generate from.
 interface ResultRow {
   sample_id?: string | number;
   query?: string;
@@ -41,8 +32,8 @@ export function RoundFileView({ doc, raw }: Props) {
   const [showRaw, setShowRaw] = useState(false);
   const results = (doc.results ?? []) as ResultRow[];
   const scoreboard = doc.scoreboard ?? [];
-  // Matched first, full-set only as the fallback, and the label says which — an
-  // unlabelled "(parent 18%)" beside a subset accuracy of 58% is a lift nothing measured.
+  // The label must say matched vs full-set: an unlabelled parent figure beside a subset accuracy
+  // reads as a lift nothing measured.
   const matched = typeof doc.matched_parent_accuracy === "number" ? doc.matched_parent_accuracy : null;
   const parentShown = matched ?? (typeof doc.parent_accuracy === "number" ? doc.parent_accuracy : null);
   const parentLabel = matched != null ? "matched parent" : "parent, full set";

@@ -1,7 +1,5 @@
 "use client";
-// Profile pane — who this account is, how it signs in, what it may do, and the session.
-// A session with no provider is the local workspace (sign-in off, or the CLI's own identity),
-// and every section says so rather than rendering an empty field.
+// A session with no provider is the local workspace (sign-in off, or the CLI's own identity).
 
 import { AccountEmpty, AccountSection } from "./AccountSection";
 import { PROVIDER_LABEL, ProviderIcon } from "./providers";

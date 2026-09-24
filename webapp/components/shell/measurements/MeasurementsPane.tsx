@@ -28,25 +28,16 @@ import {
 } from "@/components/ui";
 import { CellPanel } from "@/components/shell/cell/CellPanel";
 
-// THE measurement log — every list of measured cells in the app is a PRESET of this pane, never
-// a list of its own: Records → Measurements unfiltered, the scoring inspector on one candidate,
-// a round's measurement node on one round, a Compare channel on its point. Opik's shape: a view
-// is a preset + one served read (`/cells`) + one detail panel (`CellPanel`).
-//
-// Group by SAMPLE and it is the hard-sample leaderboard; by CANDIDATE, one arm's cells; by
-// NOTHING, the flat log — the time series, in the order the cells were measured. Grouping
-// buckets the served rows under a served key order and never re-sorts them (`webapp/CLAUDE.md`
-// § Scoring authority).
+// THE measurement log: every list of measured cells is a PRESET of this pane. Grouping buckets
+// served rows under a served key order and never re-sorts them.
 
 type GroupBy = "sample" | "candidate" | "none";
 
 interface MeasurementsPreset {
-  // IDENTITY, never source (`frontend-surface-contract.md::I9`): which cycle and dataset the
-  // cells belong to, where a host reads a point the dashboard is not viewing (a Compare channel).
+  // IDENTITY, never source (I9).
   path?: CyclePath;
   datasetName?: string;
-  // Server-side narrowing. Any of these set makes the pane read its own slice rather than
-  // the shared roster.
+  // Any of these set makes the pane read its own slice rather than the shared roster.
   candidateId?: string;
   round?: number;
   scope?: HardSamplesScope;
@@ -111,8 +102,8 @@ function CandidateHeader({ c, n }: { c: CellCandidate; n: number }) {
 
 export function MeasurementsPane({
   preset = {},
-  // The one pane that answers the ADDRESS's open cell on mount — Records → Measurements. An
-  // embedded preset opens the panel only for a row it was clicked on.
+  // Only Records → Measurements answers the ADDRESS's open cell; an embedded preset opens the
+  // panel only for a row clicked on it.
   claimsAddress = false,
   heading,
 }: {
@@ -124,20 +115,15 @@ export function MeasurementsPane({
   const { viewedPath, openCell, openCellOwner, setOpenCell, releaseCell } = useWorkspace();
   const { isLive } = useDashboard();
   const paneId = useId();
-  // Ungrouped by default: the flat log IS the time series. A host that means the leaderboard
-  // (the chat's hard-samples strip) asks for `sample`.
   const [groupBy, setGroupBy] = useState<GroupBy>(preset.groupBy ?? "none");
   const [status, setStatus] = useState<StatusPick>("all");
   const [hideUnmeasured, setHideUnmeasured] = useState(false);
-  // The panel is this pane's when it opened the cell, or when the cell came off the address and
-  // this is the pane that answers it.
   const owns = openCellOwner === paneId || (openCellOwner === null && claimsAddress);
   useEffect(() => () => releaseCell(paneId), [releaseCell, paneId]);
 
   const scope = preset.scope ?? shared.scope;
   const datasetName = preset.datasetName ?? shared.datasetName;
-  // Unfiltered, at the shared scope, on the viewed unit IS the shared roster — read it rather
-  // than fetching a second copy of the same slice.
+  // Unfiltered on the viewed unit IS the shared roster — never a second fetch of it.
   const ownRead =
     preset.path !== undefined ||
     preset.datasetName !== undefined ||
@@ -220,7 +206,6 @@ export function MeasurementsPane({
     [candidateOf],
   );
 
-  // Bucketing only — every list below keeps the order it was served in.
   const groups = useMemo<RowGroup<CellRow>[] | undefined>(() => {
     if (groupBy === "none") return undefined;
     const by = new Map<string, CellRow[]>();
@@ -244,7 +229,7 @@ export function MeasurementsPane({
     });
   }, [groupBy, data.cells, data.items, data.candidates, hideUnmeasured]);
 
-  // The order J/K walks — the rows as grouped, folds ignored, so stepping never skips a cell.
+  // Folds ignored, so J/K stepping never skips a cell.
   const walk = useMemo(
     () => (groups ? groups.flatMap((g) => g.rows) : data.cells).filter((c) => c.run_id),
     [groups, data.cells],

@@ -1,7 +1,5 @@
 "use client";
-// Usage & limits — what this account has spent, how many runs it may hold at once, and how many
-// campaigns it started today. Every figure is `/auth/quota-status` or `/machine-status` as served;
-// the meters only draw them.
+// Every figure is `/auth/quota-status` or `/machine-status` as served; the meters only draw them.
 
 import { useState } from "react";
 import { AccountFailure, AccountLoading, AccountSection } from "./AccountSection";
@@ -18,7 +16,6 @@ import {
   type QuotaStatus,
 } from "@/lib/api";
 
-// A limit above this many slots edits as a number instead of one button per value.
 const SEGMENTED_MAX = 8;
 
 export function AccountUsageTab() {
@@ -63,8 +60,7 @@ function Meter({ used, cap, tone }: { used: number; cap: number; tone?: "warn" }
 }
 
 function SpendSection({ quota }: { quota: QuotaStatus }) {
-  // Billed tokens with no resolvable rate, so the $ figure is a floor and the token ceiling is the
-  // one binding. Same condition and same words as the run strip's pill (`shell/RemoteControl.tsx`).
+  // Unpriced tokens make the $ figure a floor. Same condition and words as `shell/RemoteControl.tsx`'s pill.
   const blind = quota.spend_unpriced_tokens > 0;
   const usdCap = quota.spend_budget_usd_total;
   const tokenCap = quota.token_budget_total;
@@ -229,10 +225,8 @@ function RunsSection({
   );
 }
 
-// The server words its own two refusals — `concurrency_set_by_host` and
-// `concurrency_above_machine`, the latter naming the ceiling this surface would have to
-// re-derive — so only a flat denial needs a sentence here. 403 and 404 are one answer: the
-// route is not this session's to reach.
+// The server words `concurrency_set_by_host` / `concurrency_above_machine` itself; only a flat
+// denial needs a sentence here, and 403 and 404 are one answer.
 function refusal(f: CommandFailure): string | null {
   return f.kind === "denied" || f.kind === "gone"
     ? "This session may not change spend limits."
@@ -249,8 +243,7 @@ function LimitControl({
   onSaved: () => Promise<void>;
 }) {
   const cmd = useCommand<"set-concurrent-cycles">("account-run-limit", { describe: refusal });
-  // The quota re-read is this pane's own: by then the limit is written, and only the meters
-  // on this screen are stale — which is a different thing to report than a refused write.
+  // A failed re-read is not a refused write: the limit is already written.
   const [reread, setReread] = useState<"idle" | "busy" | "failed">("idle");
   const limit = quota.max_concurrent_cycles;
 

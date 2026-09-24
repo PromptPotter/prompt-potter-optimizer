@@ -1,6 +1,3 @@
-// Shared sign-in-provider presentation — label map + brand icon. Used by the
-// Profile (connected accounts) and Security (sign-in provider) tabs.
-
 export const PROVIDER_LABEL: Record<string, string> = {
   google: "Google",
   github: "GitHub",

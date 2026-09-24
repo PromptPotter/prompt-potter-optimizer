@@ -9,31 +9,16 @@ import type { CandidateView } from "@/lib/types";
 import { dendrogram, type DendroRow } from "./dendrogram";
 import type { PlotGeometry } from "./FitnessChart";
 
-// The genealogy hanging under the fitness bars, sharing their x-axis.
-//
-// This is the merge: the bars and this strip plot the SAME flat candidate spine
-// (C0, C1.1, C1.2, C2.1 …), so laying the tree out in that sequence — instead of
-// stacking each round's candidates vertically, as the forest does — makes the
-// tree's x map 1:1 onto the bar categories. Every candidate's ancestry is then
-// legible directly beneath its own bar.
-//
-// x is a PERCENTAGE of this SVG's viewport, and the viewport is inset by the
-// chart's own plot-area gutters — so the nodes land on the bar centres and KEEP
-// landing on them across any resize, with no JS. See `PlotGeometry`.
+// The genealogy under the fitness bars, plotting the same flat candidate spine so x maps 1:1 onto
+// bar categories. x is a percentage of a viewport inset by the chart's gutters (`PlotGeometry`).
 
 interface Props {
   views: CandidateView[];
   plot: PlotGeometry | null;
-  // Which number to paint under a node — the card's primary metric.
   metric: HeadlineMetric;
   selectedKey: string | null;
   onSelect: (view: CandidateView | null) => void;
-  // Candidates a sibling cycle was forked from → the ⑂ mark. Clicking it frees
-  // the hierarchy: the card swaps to the Forest view with that cycle opened.
   forkedFrom: ReadonlyMap<string, LineageNode>;
-  // Which view keys are fork bars — sibling courses trailing the candidate
-  // spine. They keep their bar slot but join no round band, and clicking one
-  // opens that course rather than selecting a candidate.
   forkKeys: ReadonlySet<string>;
   onFreeHierarchy: (course: LineageNode) => void;
 }
@@ -48,9 +33,6 @@ export const DendrogramStrip = memo(function DendrogramStrip({
   forkKeys,
   onFreeHierarchy,
 }: Props) {
-  // Structure only — the metric NUMBER painted on each node is looked up OUTSIDE
-  // this memo, so a per-sample value tick costs a text re-render and never a
-  // repack of the geometry.
   const rows = useStableContent(
     useMemo<DendroRow[]>(
       () =>
@@ -75,8 +57,6 @@ export const DendrogramStrip = memo(function DendrogramStrip({
   return (
     <div
       className="cand-dendro"
-      // The plot-area gutters as padding, so this SVG's viewport IS the chart's
-      // plot area and the percentage x's below resolve to the bar centres.
       style={{ paddingLeft: plot.left, paddingRight: plot.rightGutter, height: geo.height }}
     >
       <svg
@@ -135,8 +115,7 @@ export const DendrogramStrip = memo(function DendrogramStrip({
                         ? " · the round's only arm — it advances without an election"
                         : " · eliminated"}
                 </title>
-                {/* Transparent backing disc, CENTRED on the dot: the 3px dot alone is an unfair
-                    target, and a full-height stub takes the hit test off every node it crosses. */}
+                {/* Centred on the dot: a full-height stub would take the hit test off every node it crosses. */}
                 <circle cx={pct(n.xf)} cy={n.y} r={8} className="cand-dendro-hitarea" />
                 <circle
                   className={cx("cand-dendro-dot", n.isFork ? "fork" : n.isWinner ? "winner" : "eliminated")}

@@ -4,15 +4,9 @@ import { fetchStorageByDataset, type DatasetStorageEntry } from "@/lib/api";
 import { fmtBytes } from "@/lib/format";
 import { seriesVar } from "@/lib/theme";
 
-// Workspace storage "cakes" on the Files view: one donut per storage CATEGORY
-// (On disk + the six MECE leaves), and within each cake the slices are DATASETS
-// (every campaign of a dataset pooled, so a few slices, not dozens). A dataset
-// keeps the same colour across all cakes, so you can read "which dataset owns the
-// dataset-mirror bytes" vs "…the connector bytes" at a glance. Self-fetches
-// `GET /workspace/storage-by-dataset`; the shared measurement cache is excluded.
+// One donut per storage category, sliced by dataset; the shared measurement cache is excluded.
 
-// The cakes. "On disk" is the whole; the six leaves partition it — the operator axis
-// is Connector / Loop / Dataset, and Loop = State + Trace + History + Reports.
+// "On disk" is the whole; the six leaves partition it.
 const CATEGORIES = [
   { key: "total_bytes", label: "On disk" },
   { key: "dataset_bytes", label: "Dataset" },
@@ -93,8 +87,7 @@ export function StorageCakes() {
   );
   if (!data || data.datasets.length === 0) return null;
 
-  // Backend returns datasets fattest-first, and colour is `seriesVar(rank)` — so a dataset is
-  // the same colour in every cake, from the palette Compare and Activity also read.
+  // Served fattest-first; colour is `seriesVar(rank)`, so a dataset keeps its colour in every cake.
   const datasets = data.datasets;
 
   return (

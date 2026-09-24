@@ -8,10 +8,8 @@ import { MeasurementsPane } from "@/components/shell/measurements/MeasurementsPa
 import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
-// Hard-samples heat-map: a compact badge - one tile per sample in the served ranking, shaded
-// by its served mean fitness, dark = no measurements. Clicking it unfolds the leaderboard in
-// place - the one measurement log, preset to group by sample; the round in flight is already
-// in the served rows, merged once on the server.
+// Hard-samples heat-map: one tile per sample in the served ranking, shaded by served mean fitness;
+// clicking unfolds the one measurement log, preset to group by sample.
 export function HardSamplesHeatmap() {
   const {
     datasetName,
@@ -25,20 +23,10 @@ export function HardSamplesHeatmap() {
   const [heatExpanded, setHeatExpanded] = useState(false);
   const [bankExpanded, setBankExpanded] = useState(false);
 
-  // Tile order is the order `/cells` SERVED — `items[i].hard_sample_rank === i + 1`
-  // (`datasets.py`), so `datasetItems` IS the ranking and nothing here arranges it. Two
-  // hand-written comparators lived here and in the table; sorting on the served rank
-  // instead only made the re-derivation agree with itself. An ordering is a score: the
-  // fix is not to sort it correctly, it is not to sort it.
+  // Tile order IS the order `/cells` served — never sort it; an ordering is a score.
 
-  // FOUR facts, four sentences, and none of them replaces the control row. A failed
-  // read and an empty roster were split first (both used to `return null`, so a 404
-  // was indistinguishable from a collapsed panel); STILL LOADING came next, because
-  // the roster is four `limit=1000` reads and for their whole duration this panel
-  // asserted the campaign had no samples. The fourth is a CHECK-IN: `datasets/{slug}/`
-  // is written at Start, so `/cells` 404s by construction, and "no samples yet" reads
-  // as a broken dataset when nothing is broken. The rows for that state are on the
-  // draft, rendered by the check-in panel below this hero.
+  // Failed, loading, empty and check-in are four sentences. A check-in 404s `/cells` by
+  // construction (`datasets/{slug}/` is written at Start), so it must not read as a broken dataset.
   const rosterNote = datasetError
     ? `Couldn’t read this campaign’s samples${datasetName ? ` (${datasetName})` : ""}.`
     : datasetItems.length > 0
@@ -49,10 +37,7 @@ export function HardSamplesHeatmap() {
           ? "Loading this campaign’s samples…"
           : "No samples on this campaign’s dataset yet.";
 
-  // Mean fitness, not a hit rate: on a binary scorer the two are the same number
-  // (the mean of 0/1 IS the hit rate), and on a graded one only this reports
-  // anything — the hit ceiling is unreachable there, which is what made the old
-  // "0/N hit" headline read as a dead pipeline on a working campaign.
+  // Mean fitness, not a hit rate: on a graded scorer the hit ceiling is unreachable.
   const outcome =
     datasetTotals && datasetTotals.mean_fitness != null
       ? ` · ${datasetTotals.total_measurements} measurements · ${fmtPct0(datasetTotals.mean_fitness)} mean fitness`
@@ -61,9 +46,7 @@ export function HardSamplesHeatmap() {
 
   return (
     <div className="hs-heat-wrap">
-      {/* ONE control row, whatever the roster says. `SampleTrajectoryMiniButton` reads
-          `dash.rounds`, not the roster, so a roster read has no business hiding it — and
-          it did, because each state above used to replace the whole row with a sentence. */}
+      {/* ONE control row always: `SampleTrajectoryMiniButton` reads `dash.rounds`, not the roster. */}
       <div className="hs-controls-row">
         {rosterNote ? (
           <p className="hs-heat-empty" role="status">
@@ -81,9 +64,7 @@ export function HardSamplesHeatmap() {
             title={`${summary} - click to ${heatExpanded ? "collapse" : "expand"}`}
           >
             <span className="hs-mini-tiles" aria-hidden="true">
-              {/* The SERVED per-sample mean, shaded by the one `fitnessStyle` — the colour the
-                  same sample wears in Measurements. A gradient, never a threshold: two arms of a
-                  graded scorer must not land on one flat colour. */}
+              {/* The one `fitnessStyle`, as in Measurements — a gradient, never a threshold. */}
               {datasetItems.map((it) => {
                 const mean = it.mean_fitness ?? null;
                 return (

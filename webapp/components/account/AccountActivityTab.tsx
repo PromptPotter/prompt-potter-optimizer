@@ -1,6 +1,4 @@
 "use client";
-// Activity pane — 3 vertically-stacked time-bucketed charts (spend / requests /
-// tokens) over a selectable window, coloured by model or API key.
 
 import { useState } from "react";
 import { AccountEmpty, AccountFailure, AccountLoading } from "./AccountSection";
@@ -31,7 +29,7 @@ const WINDOW_ORDER = Object.keys(WINDOW_LABEL) as ActivityWindow[];
 export function AccountActivityTab() {
   const [window, setWindow] = useState<ActivityWindow>("1d");
   const [groupBy, setGroupBy] = useState<ActivityGroupBy>("model");
-  // Keyed on the axis, so the old buckets never render against the new axis labels.
+  // Keyed on the axis, so old buckets never render against new axis labels.
   const read = useRead(
     {
       key: `${window}\x1f${groupBy}`,
