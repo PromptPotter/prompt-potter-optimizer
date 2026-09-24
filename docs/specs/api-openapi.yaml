@@ -2248,7 +2248,7 @@ paths:
         re-sorts. Grouped by sample it IS the hard-sample leaderboard. The
         round still being measured is merged here, once. `candidate_id` /
         `round` / `status` narrow the rows — a preset, not a second read.
-        Wire shape: `leaderboard.py::CellsResponse`.
+        Wire shape: `domain/cells.py::CellsResponse`.
       tags: [datasets]
       parameters:
         - { name: name, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }

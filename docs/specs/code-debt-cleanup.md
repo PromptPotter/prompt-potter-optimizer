@@ -115,6 +115,10 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   `noise-floor -k 1` on a cycle and grep its `.runtime/ledger.jsonl` for a `token_usage` line
   stamped `diagnostic`; none means this is open.
 
+- **No gate stops a router importing `promptpotter.infrastructure.store`**, so a route that picks WHICH rows or in WHAT ORDER stays unreachable from every other entry point (`presentation/CLAUDE.md` § Out-of-bounds). Action: move each router's composition into `application/` (template: `routers/datasets/leaderboard.py` → `application/scoring/cells.py::measurement_log`), then add the import ban to the gate. **Rides with:** any change to one of those routers — each takes its own module off the list. **Re-test:** `grep -rl --include=*.py promptpotter.infrastructure.store promptpotter/presentation/api/routers` — a non-empty list means the gate cannot land yet.
+
+- **`webapp/lib/derivations/round-samples.ts` re-walks the sample mark with three arms** (ERR / HIT / MISS) over raw round-file rows, where `domain/dashboard_rows.py::sample_status` has four — so a historical UNSC row reads as a wrong answer. Action: serve the mark on the row the client reads (the round file's `all_candidate_results`, or route the reader through `/cells`, which already serves `CellRow.status`), then delete the client ladder. **Rides with:** any change to `round-samples.ts` or the round-file result row. **Re-test:** `grep -n '"UNSC"' webapp/lib/derivations/round-samples.ts` — empty while the client ladder still has three arms.
+
 ## Bypasses — one defect class, held for ONE holistic pass
 
 **A path that goes around the mechanism the rest of the code rides, and re-derives the answer

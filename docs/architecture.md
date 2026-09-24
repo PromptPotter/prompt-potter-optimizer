@@ -306,7 +306,7 @@ scopes: **campaign** (one campaign's own cycles — the campaign dir),
 `dataset_name`), **workspace** (everything, all datasets — the whole
 measurement store). The archive query API and the heatmap artifacts use these names; the served
 `scope` param stops at dataset and adds `cycle` instead
-(`routers/datasets/leaderboard.py::HeatmapScope`), because a workspace-wide
+(`domain/cells.py::HeatmapScope`), because a workspace-wide
 heatmap would compare samples that differ per dataset.
 
 **That ceiling is about MEASUREMENT queries, and only those.** A cell is

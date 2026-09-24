@@ -58,7 +58,14 @@ from promptpotter.application.pipeline_resolve import (
     RunsWithParam,
 )
 from promptpotter.domain.backend import BackpressureReading
-from promptpotter.domain.cells import Cell, CellCandidate, CellRow, CellSpan
+from promptpotter.domain.cells import (
+    Cell,
+    CellCandidate,
+    CellRow,
+    CellSpan,
+    CellsResponse,
+    DatasetItem,
+)
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import (
     DashboardCandidate,
@@ -167,10 +174,6 @@ from promptpotter.presentation.api.routers.datasets.index import (
     DatasetIndexEntry,
     DatasetIndexResponse,
     DatasetPipelineResponse,
-)
-from promptpotter.presentation.api.routers.datasets.leaderboard import (
-    CellsResponse,
-    DatasetItem,
 )
 from promptpotter.presentation.api.routers.origins import OriginEntry, OriginListResponse
 from promptpotter.presentation.api.routers.verify import DiagnosticRunListResponse

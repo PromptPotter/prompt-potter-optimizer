@@ -11,14 +11,27 @@ and such a cell lists but does not open."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
 from promptpotter.domain.dashboard_rows import SampleStatus
+from promptpotter.domain.results import HardSampleOrder
 from promptpotter.domain.strict_model import StrictModel
 
-__all__ = ["Cell", "CellCandidate", "CellRow", "CellSpan"]
+__all__ = [
+    "Cell",
+    "CellCandidate",
+    "CellRow",
+    "CellSpan",
+    "CellsResponse",
+    "DatasetItem",
+    "HeatmapScope",
+]
+
+# `cycle` (one cycle's Rasch fit) / `campaign` (pooled) / `dataset` (cross-campaign archive).
+# Workspace scope would be meaningless (samples differ per dataset), so the tier stops at dataset.
+HeatmapScope = Literal["cycle", "campaign", "dataset"]
 
 
 class CellCandidate(StrictModel):
@@ -127,4 +140,101 @@ class Cell(StrictModel):
         default_factory=dict,
         description="Everything else the row banked — rankings, diagnostics, turns, evaluator "
         "values — keyed as stored. Attributed to no node because no node declares it.",
+    )
+
+
+class DatasetItem(StrictModel):
+    sample_id: int
+    query: str
+    ground_truth: str | None = Field(
+        default=None,
+        description="The row's label, or `null` where the cell is VERIFIER-GRADED — a harbor "
+        "episode graded by its own task verifier, an L4 inner cycle graded by its proxies. Same "
+        "declaration `Sample.ground_truth` makes; a placeholder string would read as a miss on "
+        "every row of such a bank.",
+    )
+    task: str | None = None
+    hard_sample_rank: int = Field(
+        description="1-based position in the served hard-sample ranking under this response's "
+        "`order`. THE ordering — a client renders rows in it and never re-derives one, since "
+        "an ordering is a score and a locally-sorted one silently answers a different "
+        "question in the same slot. Rows measured in this scope rank first; the rest trail.",
+    )
+    n_obs: int | None = Field(
+        default=None,
+        description=(
+            "Times this sample has been tried. ``null`` where the row is not in this scope's "
+            "Rasch artifact at all — the same absence its `delta` / `delta_se` / `p_hat` "
+            "neighbours already report, and not a fit that observed it zero times."
+        ),
+    )
+    pick_score: float | None = Field(
+        default=None,
+        description=(
+            "Queue-mechanism's blended objective on this sample for a brand-new candidate (prior "
+            "N(0, sigma_theta**2)) vs the best fitted candidate. The live adaptive queue "
+            "mechanism re-evaluates per step. None when unmeasured."
+        ),
+    )
+    delta: float | None = Field(
+        default=None,
+        description="Rasch difficulty delta_s (higher = harder). None when unmeasured.",
+    )
+    delta_se: float | None = Field(
+        default=None,
+        description="SE of delta_s (large = barely measured). None when unmeasured.",
+    )
+    p_hat: float | None = Field(
+        default=None,
+        description=(
+            "Marginal hit prob the seed-centred decision-IG reads — see "
+            "``adaptive_queue_mechanism.marginal_hit_probability``. Near 0.5 = contested at seed; "
+            "near 0/1 = predictable. None when unmeasured."
+        ),
+    )
+    n_measured: int = Field(
+        default=0,
+        description="GRADED cells of this sample in scope (errored and unscored cells excluded, as "
+        "the Rasch fit excludes them) — the denominator of the two below.",
+    )
+    n_hits: int = Field(
+        default=0,
+        description="Of those, how many maxed out the active scorer (`domain.scoring.is_hit`). "
+        "Structurally 0 on a graded scorer; read `mean_fitness` there.",
+    )
+    mean_fitness: float | None = Field(
+        default=None, description="Mean graded fitness over those cells; null when none."
+    )
+
+
+class CellsResponse(StrictModel):
+    """The measurement log of one scope, in served order: ``samples`` ranked (their
+    ``hard_sample_rank``), ``candidates`` chronological within a cycle, ``cells`` by candidate,
+    then in each candidate's walk order, so the flat list is the run's time series.
+    A client GROUPS these — by sample, by candidate or not at all — by bucketing the served list
+    under a served key order, and never re-sorts: an ordering is a score."""
+
+    name: str
+    scope: HeatmapScope
+    row_count: int
+    split_test: int | None = Field(
+        default=None,
+        description="Declared held-out test fold size (not materialized). The training-bank "
+        "size is `row_count` above.",
+    )
+    order: HardSampleOrder = Field(
+        description="The key `samples` are ranked by — the request's `order` when it named one, "
+        "else the dataset's `CampaignConfig.hard_sample_order`. Echoed so a client that sent "
+        "no override can label what it is showing without guessing the default.",
+    )
+    samples: list[DatasetItem]
+    candidates: list[CellCandidate]
+    cells: list[CellRow]
+    total_measurements: int = Field(
+        description="Graded cells across `samples` — the headline's denominator, served so the "
+        "reader adds nothing up."
+    )
+    total_hits: int
+    mean_fitness: float | None = Field(
+        description="Mean graded fitness across those cells; null when the scope holds none."
     )
