@@ -2,9 +2,7 @@ import { BRAND } from "@/lib/brand";
 import { AuthCore } from "@/components/login/AuthCore";
 import { BrandShowcase } from "@/components/login/BrandShowcase";
 
-// Two panes: the shared auth core (left) + the brand showcase (right). The
-// left renders the same <AuthCore/> the WelcomeLockoutModal overlay wraps —
-// one sign-in surface, no duplicate copy to drift.
+// `AuthCore` is the one sign-in surface; `WelcomeLockoutModal` wraps the same component.
 export default function LoginPage() {
   return (
     <div className="login-split">

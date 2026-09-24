@@ -1,22 +1,5 @@
-// The LEAF cycle's per-round candidate rows, in display order — sole consumer of
-// `liveL1Candidates` / `roundOf` / `dash.rounds[]` for candidate-list purposes, and the
-// only list whose rows carry the `source` tag that routes a per-sample read live vs
-// historical (`samplesForRow`). Its consumers are the sample-scoped surfaces:
-// `ScoringInspector` and `MeasurementRun`.
-//
-// **It is not the bars.** The candidates card plots the children of the VIEWED node
-// straight off the served tree (`CandidatesCard`), because only the tree can express what
-// hangs off a candidate — a fork's contributed attempts, an L4 inner run, a course. This
-// module cannot: `dashboard.json` knows one cycle's own rounds and nothing below them.
-//
-// The two are not a stitch and not a drift: both are projections of the same
-// `ScoredCandidate`, through field lists derived from a model rather than hand-copied
-// (`RoundSummaryCandidate` here, `LedgerCandidate` on the tree side), so a field added to
-// the candidate report reaches both or fails loud. What they answer differs — "this
-// cycle's rows, with their samples" vs "what descends from what" — which is why both exist.
-//
-// Origin is not special: it's round 0 in `dash.rounds[]`, a one-candidate round labelled
-// "C0", and flows through the same history loop as every other round.
+// The leaf cycle's candidate rows, the only list carrying the `source` tag `samplesForRow` routes
+// on. Not the bars: those plot the served tree, which alone sees what hangs below a candidate.
 
 import { liveCandidateId } from "@/lib/candidate-label";
 import { liveCandidates, roundOf, type DashboardSnapshot } from "@/lib/poll";
@@ -29,32 +12,17 @@ import type {
   RoundSummary,
 } from "@/lib/types";
 
-// A `rounds[]` row is chartable/selectable only if it carries scored candidates.
-// When a round closes mid-L2/L3 — no `l1_score` ever fired — the round-display
-// projection materializes a row with an empty `candidates[]`. Such a row is real
-// history but has no fitness data, so it must NOT be advertised as a completed
-// round, plotted, or fallen back to as `lastCompleted` (else the card
-// resolves no bars and the round-scoped surfaces blank/hang on it). The single
-// predicate every round-row consumer (`roundCandidates`, `availableRounds`) shares.
+// A round closed mid-L2/L3 (no `l1_score` fired) is real history with an empty `candidates[]`,
+// and must never be plotted or treated as a completed round.
 export function roundHasCandidates(r: RoundSummary): boolean {
   return r.candidates.length > 0;
 }
 
-// `dash.rounds[]` ascending by round (round 0 = origin). The one place this
-// sort lives — every surface that walks history in order rides this instead of
-// re-spelling `(dash?.rounds ?? []).slice().sort(...)` (the card, the axis
-// derivation, the spine below).
 export function sortedRounds(dash: DashboardSnapshot | null): RoundSummary[] {
   return (dash?.rounds ?? []).slice().sort((a, b) => a.round - b.round);
 }
 
-// The set of round numbers that have *closed into history with real fitness
-// data* — present in `dash.rounds[]` AND carrying scored candidates. This is
-// the single definition of "this round is no longer live"; every liveness gate
-// (the round axis, the in-flight spine branch, the round-file source guard)
-// reads it so they cannot disagree. An empty L2/L3-terminal round is NOT here
-// (no candidates), so it never masks the in-flight round nor misroutes the
-// source guard to a not-yet-written round file.
+// The one definition of "no longer live"; every liveness gate reads it so none can disagree.
 export function closedRoundNumbers(dash: DashboardSnapshot | null): Set<number> {
   const closed = new Set<number>();
   for (const r of dash?.rounds ?? []) {
@@ -63,24 +31,8 @@ export function closedRoundNumbers(dash: DashboardSnapshot | null): Set<number> 
   return closed;
 }
 
-// All candidate rows for the dashboard, in display order:
-//   1. Completed rounds from `dash.rounds[]`, ascending by round (round 0
-//      = origin, labelled "C0"), then by their authored index within the round.
-//   2. In-flight current-round candidates, only if the current round
-//      isn't already represented in `dash.rounds[]`.
-//
-// Step 2's guard prevents double-counting: once `round:display` closes
-// the round into the summary, the in-flight projection drops out of
-// this list at the same tick. Both surfaces apply this rule the same
-// way because they both ride this list.
-// ONE mapping, both halves. A live row and a closed row are the same served shape
-// (`DashboardCandidate`), so there is nothing left to merge — the live arm used to hardcode
-// `theta`/`meanFitnessCi*`/`matchedParent*` to null on the claim that all of them are "stamped at
-// round close". None of them is: the band is folded per sample by the scoring gateway, and θ and
-// the lift land at the ELECTION, a whole `l1_critique` call before the round closes.
-//
-// `candidateId` is the caller's, because the two halves live in DIFFERENT identity spaces and
-// that is the one thing they may not share — see the two call sites below.
+// One mapping for both halves: θ and the lift land at the ELECTION, before the round closes, so a
+// live row carries them too. `candidateId` is the caller's: the halves use different id spaces.
 function rowOf(
   c: DashboardCandidate,
   round: number,
@@ -93,8 +45,6 @@ function rowOf(
     round,
     idx,
     candidate_id: candidateId,
-    // Served, never recomposed: `candidate_label` is the projection's own and display sites
-    // read it verbatim.
     label: c.label,
     accuracy: c.accuracy,
     composite: c.composite_fitness,
@@ -109,11 +59,8 @@ function rowOf(
     matchedParentLiftCiLo: c.matched_parent_lift_ci_lo,
     matchedParentLiftCiHi: c.matched_parent_lift_ci_hi,
     evaluators: c.evaluators,
-    // Served on the base shape, so a LIVE row carries it too: the election runs at the end
-    // of scoring, not at round close. `false` means nothing has been crowned yet — never
-    // that this candidate lost (`derivations/election.ts::crownState` owns that reading).
+    // `false` may mean nothing is crowned yet, never "lost" — `election.ts::crownState` reads it.
     is_winner: c.is_winner,
-    // Served on both halves; the reading is `ElectedRow.invalid`'s.
     invalid: c.invalid,
     n_samples: c.scored_samples,
     n_expected: c.expected_samples,
@@ -125,16 +72,8 @@ function rowOf(
   };
 }
 
-// The same row, off a ROUND DOCUMENT instead of the live snapshot — for a searchpoint on a cycle
-// this browser holds no stream for. `dashboard.json` is one cycle's projection and there is exactly
-// one of it (`webapp/CLAUDE.md` § Polling shape), so every surface reading a point on some OTHER
-// branch — the Compare tab's channels — has the round file and nothing else.
-//
-// Not a stitch: `ScoreboardRow` and `DashboardCandidate` are two projections of one
-// `ScoredCandidate`, and this reads ONE of them whole rather than filling a row from both. What
-// the scoreboard does not carry is left NULL — `expected_samples` and `cached_samples` describe a
-// panel still filling, which a written round file no longer has, and `evaluators` is the lens's
-// input rather than anything a drill-in renders. `total` IS the scored count there.
+// For a cycle this browser holds no stream for. Reads the scoreboard WHOLE, never filled from the
+// live half; what it lacks stays null. `total` IS the scored count there.
 export function scoreboardRow(
   doc: RoundResult | null,
   candidateId: string,
@@ -179,13 +118,8 @@ export function roundCandidates(dash: DashboardSnapshot | null): ElectedRow[] {
   const out: ElectedRow[] = [];
 
   for (const r of sortedRounds(dash)) {
-    // Skip empty historical entries (L2/L3-terminal rounds) — they carry no
-    // fitness data and `closedRoundNumbers` already excludes them, so the
-    // in-flight branch below isn't suppressed for that round number.
     if (!roundHasCandidates(r)) continue;
-    // A closed row keys on its LINEAGE id — the tree's identity space, which selection and the
-    // round file both join on. Positional only where the summary never stamped one, the same
-    // rule the lineage applies; without it every surface routing selection had to guard for "".
+    // A closed row keys on its LINEAGE id; positional only where the summary never stamped one.
     r.candidates.forEach((c, i) =>
       out.push(rowOf(c, r.round, i, c.candidate_id || liveCandidateId(r.round, i), "history")),
     );
@@ -193,9 +127,7 @@ export function roundCandidates(dash: DashboardSnapshot | null): ElectedRow[] {
 
   const liveRound = roundOf(dash);
   if (liveRound != null && !closedRoundNumbers(dash).has(liveRound)) {
-    // A live row's `candidate_id` is POSITIONAL — a row KEY, never a join key. The two live
-    // readers (the sample tape, the inspector) join on `label`, which the served row carries
-    // from mint and a lineage id cannot answer for until the candidate has been scored.
+    // Positional: a row key, never a join key — live readers join on `label`.
     liveCandidates(dash).forEach((c, i) =>
       out.push(rowOf(c, liveRound, i, liveCandidateId(liveRound, i), "inflight")),
     );
@@ -204,10 +136,6 @@ export function roundCandidates(dash: DashboardSnapshot | null): ElectedRow[] {
   return out;
 }
 
-// Round-grouped view of an already-computed candidate list. Pure regrouping —
-// takes the rows so the caller (`useRoundRows`) computes the spine once
-// per snapshot and groups the same array, rather than running the full merge
-// twice. Round 0 holds the origin row when it exists.
 export function groupByRound(rows: ElectedRow[]): RoundCandidates {
   const map: RoundCandidates = new Map();
   for (const row of rows) {

@@ -1,19 +1,6 @@
 "use client";
-// The dataset roster for the unit in view, the cells measured on it, and the two controls
-// that pick which slice that is — scope and ranking.
-//
-// A CONTEXT because the consumers are not adjacent: the heat-map hangs off the chat
-// hero, the table off the run card four hops further down, and what they must agree on
-// is SERVED — one fetch, one scope, one ranking. Carried as props it was twelve to
-// fourteen of them per hop under four naming schemes, and the invariant was a comment
-// on `ChatPane` ("Passed to BOTH consumers, so the pane and the run card cannot name
-// different orders") rather than something the shape made true.
-//
-// `useCells` stays the lower-level primitive owning the fetch chain; this is
-// the facade the consumers actually want — the same split as `useCycleStream` and
-// `useDashboard`.
-//
-// Nothing here computes a ranking (webapp/CLAUDE.md § Scoring authority).
+// The dataset roster for the unit in view, its measured cells, and the scope + ranking controls —
+// one context so non-adjacent consumers share one fetch, scope and ranking. The facade over `useCells`.
 
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import type {
@@ -33,29 +20,23 @@ interface HardSamples {
   measuredCount: number;
   unmeasuredCount: number;
   splitTest: number | null;
-  // Who measured the roster and every cell between them — `CellRow.candidate` joins
-  // `CellCandidate.key`. Served chronologically — by candidate, then walk order; bucket, never re-sort.
+  // `CellRow.candidate` joins `CellCandidate.key`. Served chronologically; bucket, never re-sort.
   candidates: CellCandidate[];
   cells: CellRow[];
   totals: SeriesTotals | null;
-  /** The key the SERVER ranked the roster by, off its echo; `null` while a read is in
-   *  flight. Not `order` — `sampleOrder` in this tree is the scoring WALK. */
+  /** The SERVER's echo; `null` while a read is in flight. Not `order` — `sampleOrder` in this
+   *  tree is the scoring WALK. */
   rankedBy: HardSampleOrder | null;
-  /** The operator's PICK, `null` until they make one. Kept apart from `rankedBy`: the
-   *  control moves on click, while every LABEL keeps naming the served order until the
-   *  rows land. */
+  /** The control moves on click, while every LABEL names the served order until the rows land. */
   rankedByPick: HardSampleOrder | null;
   setRankedBy: (o: HardSampleOrder) => void;
-  /** This campaign's cycles, or every campaign on the dataset — the real series the
-   *  optimizer's picker follows. That picker runs on the dataset scope regardless of
-   *  this toggle (see `l1/execute.py` round-subset fit). */
+  /** The optimizer's picker runs on the dataset scope regardless of this toggle
+   *  (`l1/execute.py` round-subset fit). */
   scope: HardSamplesScope;
   setScope: (s: HardSamplesScope) => void;
-  /** The slice on screen is a prior (unit, scope) with a fetch in flight — dim it,
-   *  never blank it. */
+  /** A prior (unit, scope) with a fetch in flight — dim it, never blank it. */
   stale: boolean;
-  /** The roster read FAILED for the unit in view. Consumers MUST render it: an empty
-   *  roster and a broken read are different facts that `items` spells the same way. */
+  /** Consumers MUST render it: an empty roster and a broken read spell `items` the same way. */
   error: string | null;
 }
 
@@ -71,17 +52,12 @@ export function HardSamplesProvider({
   children: ReactNode;
 }) {
   const [scope, setScope] = useState<HardSamplesScope>("campaign");
-  // `null` = send no override and let the server resolve the dataset's declared
-  // `hard_sample_order`. The browser must never restate that default; what the
-  // control DISPLAYS is the served echo, never this.
+  // `null` sends no override, so the server resolves the dataset's declared `hard_sample_order`;
+  // the browser never restates that default.
   const [rankedByPick, setRankedBy] = useState<HardSampleOrder | null>(null);
-  // The roster and its series follow a run that is still measuring: `isLive` is the same
-  // verdict every other live surface reads, so the panel cannot disagree with the tape
-  // above it about whether this cycle is moving.
   const { isLive } = useDashboard();
   const p = useCells(path, datasetName, scope, rankedByPick, isLive);
-  // Keyed on the FIELDS, never on `p`: the hook returns a fresh object every render,
-  // so a dep on it would hand every consumer a new value on every poll tick.
+  // Keyed on the FIELDS, never on `p`, which is a fresh object every render.
   const value = useMemo<HardSamples>(
     () => ({
       datasetName,

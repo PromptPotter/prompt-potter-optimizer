@@ -33,8 +33,7 @@ describe("sampleFlips", () => {
   });
 
   it("closes the partition — gained + lost + unchanged is the compared count", () => {
-    // Sample 3 answers HIT both times: the remainder, and the group that is largest in
-    // every real run. A panel that omits it prints 1 and 1 over a denominator of 3.
+    // Sample 3 (HIT both times) is the remainder; omitted, 1 and 1 over 3 does not close.
     const origin = [row(1, "MISS"), row(2, "HIT"), row(3, "HIT")];
     const champion = [row(1, "HIT"), row(2, "MISS"), row(3, "HIT")];
     const out = sampleFlips(origin, champion);

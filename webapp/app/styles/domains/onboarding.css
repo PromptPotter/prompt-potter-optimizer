@@ -1,15 +1,9 @@
-/* New campaign modal (Phase 4 Start surface) */
-/* Cap the modal to the viewport so a tall benchmark/demo list can't run
-   off-screen; the body scrolls within. */
 .new-campaign-modal{background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:10px;width:100%;max-width:440px;max-height:calc(var(--vh-full) - 32px);display:flex;flex-direction:column;box-shadow:0 18px 48px rgba(0,0,0,0.45);font-size:var(--text-base)}
 .new-campaign-header{flex:none;display:flex;justify-content:space-between;align-items:center;padding:var(--space-16) var(--space-18);border-bottom:0.5px solid var(--color-border)}
 .new-campaign-header h2{margin:0;font-size:var(--text-lg);font-weight:600}
-/* The flow body is the scroll region — `min-height:0` lets it shrink inside
-   the capped flex column so `overflow-y` actually engages. */
+/* `min-height:0` lets the body shrink inside the capped column, so `overflow-y` engages. */
 .new-campaign-body{flex:1 1 auto;min-height:0;overflow-y:auto;padding:var(--space-18) var(--space-18);display:flex;flex-direction:column;gap:var(--space-14)}
 .new-campaign-field{display:flex;flex-direction:column;gap:var(--space-6)}
-/* The caption, whether the field's own box is the label (a lone select) or the label sits beside
-   an Apply button and names the input alone. */
 .new-campaign-field span,.new-campaign-field>label{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-tertiary)}
 .new-campaign-apply{display:flex;gap:var(--space-8)}
 .new-campaign-field select,.new-campaign-field input{padding:var(--space-8) var(--space-10);border:0.5px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:var(--text-base)}
@@ -20,21 +14,16 @@
 .new-campaign-field button:hover:not(:disabled){background:var(--color-background-hover)}
 .new-campaign-field button:disabled{opacity:0.45;cursor:not-allowed}
 .new-campaign-warn{color:var(--color-warn);font-size:var(--text-sm)}
-/* A3 origin-resolution gate surfaces — required-tier column mapping
-   + per-field provenance badges. */
 .new-campaign-optional > summary{cursor:pointer;font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-tertiary);padding:2px 0}
 .new-campaign-optional > summary:hover{color:var(--color-text-secondary)}
 .new-campaign-optional-body{display:flex;flex-direction:column;gap:var(--space-14);padding-top:12px}
-/* The uploaded rows, above the mapping picker they inform — a `.setup-preview` section like
-   the two below it. Its own scroll container: a 40-column CSV must scroll inside it, never
-   widen the chat panel. */
+/* Its own scroll container: a 40-column CSV must never widen the chat panel. */
 .ds-preview-scroll{overflow-x:auto;max-height:220px;overflow-y:auto}
 .ds-preview-table{border-collapse:collapse;font-size:var(--text-sm);width:max-content;min-width:100%}
 .ds-preview-table th,.ds-preview-table td{text-align:left;padding:var(--space-4) var(--space-8);border-bottom:0.5px solid var(--color-border);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ds-preview-table th{position:sticky;top:0;background:var(--color-background-primary);font-weight:600;color:var(--color-text-secondary);white-space:nowrap}
 .ds-preview-table td{color:var(--color-text-primary)}
 .ds-preview-table tr:last-child td{border-bottom:0}
-/* The two mapped columns, marked where the operator is deciding them. */
 .ds-preview-table th.is-input,.ds-preview-table th.is-target{color:var(--color-text-primary)}
 .ds-preview-table td.is-input,.ds-preview-table td.is-target{background:var(--color-background-hover)}
 .ds-preview-role{margin-left:var(--space-6);font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-tertiary)}
@@ -47,12 +36,9 @@
 .origin-prov--confirmed{color:var(--color-success);background:var(--color-success-bg);border-color:var(--color-success-border)}
 .origin-prov--proposed{color:var(--color-warn);background:var(--color-warn-bg);border-color:var(--color-warn-border)}
 .origin-prov--unset{color:var(--color-text-tertiary)}
-/* Origin check-in — the setup-in-progress window (closed-set fields +
-   AI resolver). Reads the same tokens as the rest of the ingest surface. */
 .origin-checkin{display:flex;flex-direction:column;gap:var(--space-10);padding:var(--space-12) var(--space-14);border-radius:6px;border:0.5px solid var(--color-border);background:var(--color-background-secondary)}
 .origin-checkin-assessment{margin:0;font-size:var(--text-sm);line-height:1.5;color:var(--color-text-secondary);font-style:italic}
 .origin-checkin-questions{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:var(--space-6);font-size:var(--text-sm);color:var(--color-text-primary)}
-/* Proposals the resolver raised. The assistant offers; the click is the action. */
 .origin-raised{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:var(--space-6)}
 .origin-raised-item{display:flex;align-items:flex-start;gap:var(--space-8);padding:var(--space-8) var(--space-10);border:1px solid var(--color-border);border-radius:var(--border-radius-md);background:var(--color-background-secondary)}
 .origin-raised-text{display:flex;flex-direction:column;gap:2px;flex:1 1 auto;min-width:0}
@@ -64,32 +50,23 @@
 .origin-question-prompt{flex:1 1 auto}
 .origin-question-select{flex:0 0 auto}
 .origin-question-text{display:inline-flex;gap:var(--space-4);align-items:center;flex:0 0 auto}
-/* Pipeline mode toggle — two inline buttons (LLM only / Research + Match). */
-/* Starting-prompt control panel — the editable 6-field decomposition. Draws no frame of
-   its own: every host already frames it (`PromptFieldsEditor` nests inside `NodeSurface`). */
+/* No frame of its own: every host already frames it (`PromptFieldsEditor` nests inside `NodeSurface`). */
 .prompt-editor{display:flex;flex-direction:column;gap:var(--space-8)}
-/* A sibling of "Structured output" under the same node, so it wears that heading, not a section's. */
 .prompt-editor-title{font-size:var(--text-xs);font-weight:600;color:var(--color-text-secondary)}
-/* ONE grid, fields `display:contents`: the name column is as wide as the longest name with its
-   lock. A fixed 96px column pushed the lock under "Thinking style" and "Answer format". */
+/* ONE grid, fields `display:contents`, so the name column fits the longest name with its lock. */
 .prompt-editor-grid{display:grid;grid-template-columns:minmax(0,max-content) minmax(0,1fr);align-items:start;gap:var(--space-6) var(--space-12)}
 .prompt-field{display:contents}
-/* The lock at the column's far edge, beside the box it holds, so the six line up. */
 .prompt-field-label{display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);white-space:nowrap;font-size:var(--text-sm);font-weight:600;color:var(--color-text-primary);padding-top:var(--space-4)}
-/* Sized to its text where the browser can: a fixed row count clipped the long fields and left the
-   short ones half empty. `rows` is the fallback, and so is the resize handle. */
+/* Sized to its text where the browser can; `rows` and the resize handle are the fallback. */
 .prompt-field-input{width:100%;resize:vertical;field-sizing:content;max-height:16em;font:inherit;font-size:var(--text-sm);line-height:1.45;padding:var(--space-6) var(--space-8);border-radius:6px;border:0.5px solid var(--color-border);background:var(--color-background-primary);color:var(--color-text-primary)}
 @supports (field-sizing:content){.prompt-field-input{resize:none}}
 .prompt-field-input:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
 .prompt-editor-fewshot{margin:0;font-size:var(--text-xs);color:var(--color-text-tertiary)}
-/* Compact — the half-width hosts (the chat run card). Tighter, never truncating:
-   what compact hides is folded behind a disclosure, not dropped. */
+/* Tighter, never truncating: what compact hides is folded behind a disclosure, not dropped. */
 .prompt-editor.is-compact .prompt-editor-grid{gap:var(--space-4) var(--space-8)}
 .prompt-editor.is-compact .prompt-field-input{font-size:var(--text-xs)}
-/* The structured-output tree (`SchemaTreeEditor`) — the prompt list's shape, one row per field.
-   Nesting is indentation under a rule, never a fold. ONE grid for the whole tree, every level a
-   subgrid of it: an indent narrows the name column alone, so type, description, lock and the
-   buttons line up down the tree instead of drifting right at each depth. */
+/* Nesting is indentation, never a fold. ONE grid, every level a subgrid of it, so an indent
+   narrows only the name column and the rest lines up down the tree. */
 .schema-head{display:flex;align-items:center;gap:var(--space-6)}
 .schema-fields{display:grid;grid-template-columns:[name] minmax(4rem,11rem) [type] 6.5rem [desc] minmax(0,1fr) [lock] auto [answer] auto [add] auto [remove] auto;align-items:center;gap:var(--space-4) var(--space-6)}
 .schema-field,.schema-field .schema-fields{grid-column:1/-1;display:grid;grid-template-columns:subgrid;align-items:center}
@@ -103,16 +80,13 @@
 .schema-field-add{grid-column:add}
 .schema-field-remove{grid-column:remove}
 .schema-add{align-self:flex-start}
-/* Unified setup preview — one compact card holding the editable pipeline
-   config + starting prompt (step 3). */
 .setup-preview{display:flex;flex-direction:column;gap:var(--space-12);padding:var(--space-12) var(--space-14);border-radius:6px;border:0.5px solid var(--color-border);background:var(--color-background-secondary)}
 .setup-preview-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-8);flex-wrap:wrap}
 .setup-preview-title{font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-primary)}
 .setup-preview-sub{font-size:var(--text-xs);color:var(--color-text-tertiary)}
 .setup-preview-divider{width:100%;height:0;border:0;border-top:0.5px solid var(--color-border);margin:2px 0}
-/* Editable pipeline/optimizer config controls. ONE grid for the whole editor, rows
-   `display:contents`, so every key column agrees on a width sized to the longest key in
-   it — the shape `.inspector-body` (lineage.css) uses. */
+/* ONE grid, rows `display:contents`, so every key column agrees on one width — the shape
+   `.inspector-body` (lineage.css) uses. */
 .config-editor{display:grid;grid-template-columns:minmax(0,max-content) minmax(0,1fr);align-items:center;gap:var(--space-8) var(--space-10);font-size:var(--text-sm)}
 /* Compact is a DENSITY, never a subset: every param draws in both widths. */
 .config-editor.is-compact{gap:var(--space-4) var(--space-10)}
@@ -122,43 +96,32 @@
 .node-output-fold>summary{cursor:pointer;font-size:var(--text-xs);color:var(--color-text-tertiary);padding:2px 0}
 .node-output-fold>summary:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
 .config-row{display:contents}
-/* The key is the `snake_case` identifier the operator types into `pipeline.yaml` — set in
-   mono as itself, never as a heading for the value beside it. */
+/* The `snake_case` identifier the operator types into `pipeline.yaml`, set in mono as itself. */
 .config-label{display:flex;align-items:center;flex-wrap:wrap;gap:var(--space-6);color:var(--color-text-tertiary);font-family:var(--font-mono);font-size:var(--text-xs);overflow-wrap:anywhere}
 .config-evolved{font-size:var(--text-xs);color:var(--color-accent)}
 /* Asymmetric on purpose: locked is the majority state (bare glyph, hover for the reason),
    movable the rare one, so the ink lands on the axis the optimizer can actually move. */
-/* One column, two states, and the GLYPH is what tells them apart (🔓 / 🔒) — so they share a
-   rule and differ only in weight. The open arm used to be a bordered chip because it held a text
-   token (`l1`); left on a glyph, it drew a box around an emoji next to a bare one. */
+/* One column, two states told apart by the GLYPH (🔓 / 🔒), so they share a rule and differ only in weight. */
 .config-optlocked,.config-optmovable{font-size:var(--text-xs);cursor:help;white-space:nowrap}
 .config-optlocked{opacity:.5}
 .config-value{display:flex;align-items:center;gap:var(--space-6);flex-wrap:wrap;min-width:0}
-/* The button is a glyph too, for the same reason: a pill around the emoji, beside bordered
-   inputs, read as one more field. A hover wash says it can be clicked, an accent wash that it is
-   pressed — at this size the two shackles alone are a squint apart. */
+/* A hover wash says it can be clicked, an accent wash that it is pressed: at this size the two
+   shackles alone are a squint apart. */
 .config-lock{font-size:var(--text-sm);font-weight:600;line-height:1;padding:var(--space-4);border:0;border-radius:var(--border-radius-sm);background:transparent;color:var(--color-text-secondary);cursor:pointer}
 .config-lock:hover:not(:disabled){background:var(--color-background-hover)}
 .config-lock.is-locked{color:var(--color-accent);background:rgba(var(--color-accent-rgb),0.14)}
 .config-lock:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
 .config-input{flex:1;min-width:min(120px,100%);font:inherit;font-size:var(--text-sm);padding:var(--space-4) var(--space-8);border-radius:6px;border:0.5px solid var(--color-border);background:var(--color-background-primary);color:var(--color-text-primary);font-family:var(--font-mono)}
 .config-input:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
-/* The same field, holding a structured value the operator EDITS — an output schema, a layout.
-   `resize:vertical` because how much of a schema is worth seeing at once is the operator's call
-   and no row height can guess it; the line breaks are the readable part either way. */
+/* `resize:vertical`: how much of a schema to see at once is the operator's call. */
 textarea.config-input{resize:vertical;line-height:1.45;white-space:pre}
-/* A value this surface states but does not set — the host passed no value channel at all.
-   Deliberately unlike .config-input — no frame, no field background — so it never reads as an
-   input that has been greyed out, which is a different fact with a different remedy. */
+/* No frame, no field background: it must never read as a greyed-out input, which is a different
+   fact with a different remedy. */
 .config-static{flex:1;min-width:0;font-size:var(--text-sm);font-family:var(--font-mono);color:var(--color-text-secondary);overflow-wrap:anywhere}
-/* A structured value (object/array) — the schema-description axis, a layout, a domain list. Its
-   own line breaks are the readable part, and it is capped by SCROLL rather than clipped, so a
-   long one cannot push every row below it off the panel. */
+/* Capped by SCROLL, not clipped, so a long value cannot push every row below it off the panel. */
 .config-static.is-structured{white-space:pre-wrap;max-height:14em;overflow:auto}
 .config-hint{grid-column:2;font-size:var(--text-xs);line-height:1.4;color:var(--color-text-tertiary)}
-/* The picked model's card — a plain definition list under the model row, its pairs flowing
-   along one wrapped line rather than stacked six deep. Only what the catalogue actually
-   carries renders, so a missing field shortens the card instead of blanking it. */
+/* Only what the catalogue carries renders, so a missing field shortens the card. */
 .model-card{flex-basis:100%;margin:var(--space-4) 0 0;display:flex;flex-wrap:wrap;gap:1px var(--space-12);font-size:var(--text-xs);color:var(--color-text-tertiary)}
 .model-card-name{flex-basis:100%;color:var(--color-text-secondary);font-family:var(--font-mono);overflow-wrap:anywhere}
 .model-card-row{display:flex;gap:var(--space-4);min-width:0}
@@ -167,17 +130,14 @@ textarea.config-input{resize:vertical;line-height:1.45;white-space:pre}
    so it spans the editor and re-reads the two columns through `subgrid` to stay aligned. */
 .config-node-row{grid-column:1/-1;display:grid;grid-template-columns:subgrid;align-items:center;justify-items:start;padding-bottom:8px;margin-bottom:2px;border-bottom:0.5px solid var(--color-border)}
 .config-check{width:15px;height:15px;accent-color:var(--color-accent);cursor:pointer}
-/* Check-in agent working — a compact inline line (real resolve + demo sim). */
 .checkin-loading{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-8);font-size:var(--text-base);line-height:1.5;color:var(--color-text-secondary);padding:var(--space-8) 0}
 .checkin-loading-bot{font-size:var(--text-3xl);animation:checkin-bob 1s ease-in-out infinite}
 .checkin-loading-model{font-family:var(--font-mono);color:var(--color-accent)}
-/* Past the slow threshold the reassurance line wraps to its own row. */
 .checkin-loading-slow{flex-basis:100%;color:var(--color-text-tertiary);font-style:italic}
 @keyframes checkin-bob{50%{transform:translateY(-3px)}}
 @media (prefers-reduced-motion:reduce){.checkin-loading-bot{animation:none}}
-/* A phone gets the full width, and inputs at the iOS-safe size. The generic
-   pointer-coarse rule covers buttons + non-select inputs; select needs the
-   explicit font-size bump, its project-local selector being more specific. */
+/* `select` needs the explicit iOS-safe font-size: its project-local selector outranks the generic
+   pointer-coarse rule. */
 @media (max-width:640px){
   .new-campaign-modal{max-width:none}
   .new-campaign-field select,.new-campaign-field input{font-size:var(--text-xl);min-height:44px}

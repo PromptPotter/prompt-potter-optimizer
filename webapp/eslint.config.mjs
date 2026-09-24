@@ -5,9 +5,7 @@ import nextTs from "eslint-config-next/typescript";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
-  // Override default ignores of eslint-config-next.
   globalIgnores([
-    // Default ignores of eslint-config-next:
     ".next/**",
     "out/**",
     "build/**",
@@ -15,9 +13,7 @@ const eslintConfig = defineConfig([
     // Playwright writes and removes it while the gate's lint walks the tree.
     "test-results/**",
   ]),
-  // Anti-rot: where a barrel exists, import the barrel — not a deep path.
-  // Keeps the public surface declared (a deep import re-leaks internals).
-  // Sibling modules INSIDE these dirs use relative imports (./x), unaffected.
+  // Siblings INSIDE a barrel dir use relative imports, which these patterns do not match.
   {
     rules: {
       "no-restricted-imports": [

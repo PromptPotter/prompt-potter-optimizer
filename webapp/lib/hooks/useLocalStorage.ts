@@ -1,16 +1,10 @@
 "use client";
-// One localStorage-backed state hook, built on `useSyncExternalStore` — the
-// same external-store pattern as candidates-store.ts and Lane.tsx. The server
-// snapshot is the default, so the static export's first render matches the
-// server HTML. Components bound to the same key stay in sync within the tab
-// (a module-level listener registry) and across tabs (the `storage` event).
+// The one localStorage-backed state hook, synced within the tab and across tabs.
 
 import { useCallback, useRef, useSyncExternalStore } from "react";
 
 const listeners = new Map<string, Set<() => void>>();
-// Parsed-snapshot cache, keyed by storage key. `useSyncExternalStore` demands
-// a stable reference between reads — re-parsing JSON each call would hand back
-// a fresh object every render and loop. Invalidated on every write.
+// `useSyncExternalStore` needs a stable reference: re-parsing per read would loop.
 const snapCache = new Map<string, { raw: string | null; parsed: unknown }>();
 
 function emit(key: string): void {
@@ -18,8 +12,6 @@ function emit(key: string): void {
 }
 
 interface Options<T> {
-  // Default codec is JSON. Override for shapes JSON can't round-trip (a Set),
-  // or to merge a partial stored blob against a default.
   serialize?: (value: T) => string;
   deserialize?: (raw: string) => T;
 }
@@ -29,8 +21,7 @@ export function useLocalStorage<T>(
   initial: T,
   opts?: Options<T>,
 ): [T, (next: T | ((prev: T) => T)) => void] {
-  // Default + codecs are conceptually constant per usage — capture the first
-  // render's values so the callbacks below depend on `key` alone.
+  // First render's values, so the callbacks depend on `key` alone.
   const cfg = useRef({
     initial,
     serialize: opts?.serialize ?? (JSON.stringify as (v: T) => string),
@@ -76,7 +67,6 @@ export function useLocalStorage<T>(
     return parsed;
   }, [key]);
 
-  // Server / pre-hydration snapshot — the default, so first paint matches.
   const getServerSnapshot = useCallback((): T => cfg.current.initial, []);
 
   const value = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);

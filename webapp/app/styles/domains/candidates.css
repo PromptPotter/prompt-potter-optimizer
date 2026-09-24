@@ -1,60 +1,30 @@
-/* Candidates card — this cycle's population and its ancestry in one surface: the
-   fitness bars, with the bracket dendrogram hanging beneath them on the SAME
-   x-axis. The multi-cycle forest is NOT in here (see `.forest-card`) — it shares
-   no axis with the bars, so it gets its own box.
-
-   Compact, and it only grows for the scoring mask's second column. The bars keep the
-   footprint the fitness panel always had, so they never reflow underneath you.
-   The dendrogram needs no sizing rule at all: its x is a FRACTION of the plot
-   width, so it re-aligns at any card size. */
+/* Bars with the dendrogram beneath on the SAME x-axis, whose x is a FRACTION of the plot width.
+   The multi-cycle forest shares no axis, so it is `.forest-card`. */
 .cand-card{margin-bottom:14px;width:auto;margin-left:auto;margin-right:auto;max-width:var(--candidates-seq-w,460px)}
 
-/* The lineage forest — its own card, its own width. Deliberately unconstrained:
-   a cladogram of cycles wants whatever room the campaign's forks need, and the
-   viewport (family-tree.css) scrolls when that exceeds the band. */
+/* Unconstrained: the viewport (family-tree.css) scrolls when the forks exceed the band. */
 .forest-card{margin-bottom:14px;width:100%}
 .forest-close{background:transparent;border:0;color:var(--color-text-tertiary);cursor:pointer;font-size:var(--text-xl);line-height:1;padding:0 var(--space-4)}
 .forest-close:hover{color:var(--color-text-primary)}
-/* The header is ONE row: the `Toolbar` primitive fills `.card-title` end to end.
-   The shared card-title is a space-between row, which fought the toolbar's own
-   spacer — so give it a plain block and let the toolbar own the layout. */
+/* A plain block: the shared card-title's space-between fights the toolbar's own spacer. */
 .cand-card > .card-title{display:block;margin-bottom:10px}
 .cand-title{font-size:var(--text-md);font-weight:500;color:var(--color-text-primary);white-space:nowrap;flex:0 0 auto}
-/* Run-bars mode: the title is the way back out — styled as the title it replaces. */
 .cand-crumb{background:none;border:0;font:inherit;cursor:pointer;padding:0;
   color:var(--color-text-secondary)}
 .cand-crumb:hover{color:var(--color-text-primary)}
-/* The descendant count rides the forest toggle — the forest is the only thing
-   that can draw siblings, so "there are 3" belongs on the control that reveals
-   them, not in a badge of its own. */
 .cand-forest-toggle{display:inline-flex;align-items:center;gap:3px}
 
-/* The forest toggle, colocated with the tree it reveals — on its own row directly
-   UNDER the dendrogram, never overlapping it.
-   Why not tucked into the strip's left gutter, which looks tidier: the first
-   node's x is `plot.left + centers[0] × plotWidth`, and `centers[0]` shrinks as
-   candidates accumulate (1/2n). At 9 bars the gutter has room; at ~25 it does
-   not, and the toggle would sit on top of C0 and eat its clicks. A layout that
-   only works while the campaign is short is not a layout.
-   It must also stay OUT of the strip's box: the dendrogram aligns to the bars
-   only because its box is exactly the chart's box — anything laid out beside it
-   would shrink that box and slide every node off its bar. */
+/* Under the dendrogram, never in its gutter: `centers[0]` shrinks as candidates accrue, and
+   the toggle would eat C0's clicks. Outside the strip's box, which must equal the chart's. */
 .cand-tree-row{display:flex;flex-direction:column;align-items:flex-start;gap:2px}
 .cand-tree-row > .cand-dendro{width:100%}
-/* Scoped to the direct-child button ONLY. A descendant `svg` rule here also
-   matches the dendrogram's own <svg> and collapses it to icon size — which is
-   exactly what happened. */
+/* Direct-child button ONLY: a descendant `svg` rule collapses the dendrogram's own <svg>. */
 .cand-tree-row > button{opacity:.5;transition:opacity .15s}
 .cand-tree-row > button:hover,.cand-tree-row > button[aria-pressed="true"]{opacity:1}
 .cand-tree-row > button svg{width:12px;height:12px}
 .cand-view-count{font-size:var(--text-xs);font-weight:700;line-height:1;font-family:var(--font-mono)}
-/* Chart frame: fills the card's width so 5 → 25 bars all read; height stays
-   compact. Chart.js handles the bar fan-out within its responsive options. */
 .fitness-chart-frame{position:relative;height:160px;width:100%;max-width:100%;margin:0 auto;min-width:0}
-/* Only the channels with no chip in the header reach this row, so on the default view it
-   does not render at all. The swatch takes its colour from the series' own `--ink`, set
-   inline from the ONE token `series.ts` names — six per-channel colour rules used to live
-   here, each a second declaration of a colour the chart also spelled for itself. */
+/* The swatch reads the series' `--ink`, set inline from the one token `series.ts` names. */
 .fitness-legend{display:flex;justify-content:center;gap:var(--space-14);font-size:var(--text-xs);color:var(--color-text-tertiary);font-family:var(--font-mono);margin-bottom:var(--space-8)}
 .fitness-legend .swatch{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:var(--space-4);vertical-align:middle;background:var(--ink)}
 /* Hollow, matching the bar: corroboration of a series, not a rival of it. */
@@ -62,12 +32,8 @@
 /* A dashed rule, not a swatch — a filled block would imply another bar series. */
 .fitness-legend .swatch.line{width:16px;height:0;border-radius:0;background:transparent;border-top:1.5px dashed var(--ink)}
 
-/* The genealogy strip — the whole point of the merge. Its box is inset by the
-   chart's own plot-area gutters (inline padding, set from the published plot
-   geometry), so the SVG's viewport IS the plot area and the nodes' PERCENTAGE x
-   resolves to the bar category centres — and keeps resolving to them across any
-   resize, with no JS. Do not add horizontal padding/border here: it would shift
-   the viewport out from under the bars. */
+/* Inset by the chart's plot-area gutters, so the SVG viewport IS the plot area and percentage x
+   lands on the bar centres. No horizontal padding or border here. */
 .cand-dendro{width:100%;box-sizing:border-box}
 .cand-dendro-svg{display:block;overflow:visible}
 .cand-dendro-beam,.cand-dendro-stub{stroke:var(--color-border);stroke-width:1;fill:none}
@@ -86,7 +52,6 @@
 .cand-dendro-fork{cursor:pointer;outline:none}
 .cand-dendro-fork-glyph{fill:var(--color-text-tertiary);font-size:var(--text-xs);text-anchor:middle}
 .cand-dendro-fork:hover .cand-dendro-fork-glyph,.cand-dendro-fork:focus-visible .cand-dendro-fork-glyph{fill:var(--color-accent)}
-/* The fixed-sample-set picker. The strip is the information; everything under it controls it. */
 .ss-control{display:flex;flex-direction:column;gap:var(--space-6);padding:var(--space-6) var(--space-8);margin-bottom:var(--space-6);border:0.5px solid var(--color-new-border);border-radius:3px}
 .ss-strip{display:flex;flex-wrap:wrap;gap:3px}
 /* One cell carries THREE facts at once: selected is the fill, coverage the opacity, and a cell
@@ -96,64 +61,36 @@
 .ss-cell.on{border-color:var(--color-new-border);background:var(--color-new-bg);color:var(--color-new);font-weight:600}
 .ss-cell.shared{text-decoration:underline;text-decoration-color:var(--color-overlap);text-underline-offset:2px}
 .ss-row{display:flex;align-items:center;gap:var(--space-6);flex-wrap:wrap}
-/* The two set-wide verbs read at the chips' scale, not at the dialog button's. */
 .ss-action{padding:1px var(--space-8);border:0.5px solid var(--color-border);border-radius:2px;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary)}
 .ss-label{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-tertiary)}
 .ss-count{margin-left:auto;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-tertiary)}
 .ss-detail-toggle{align-self:flex-start;padding:0;border:0;background:transparent;cursor:pointer;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-tertiary);text-decoration:underline}
 .ss-detail{display:flex;flex-direction:column;gap:var(--space-6)}
-/* Ability θ teach card — content revealed inside the card's ⋯ menu. Capped and
-   indented to the menu's label gutter so it reads as the row's explanation, not
-   as a stray paragraph. */
 .ability-help{max-width:260px;padding:2px var(--space-8) var(--space-6) var(--space-24);font-size:var(--text-xs);line-height:1.5;color:var(--color-text-secondary)}
 .ability-help p{margin:0 0 var(--space-8)}
 .ability-help p:last-child{margin-bottom:0}
 .ability-help strong{color:var(--color-text-primary)}
 .ability-help-calib{padding-top:6px;border-top:0.5px solid var(--color-border);color:var(--color-text-tertiary)}
-/* Rendered only while a caveat is live, so it may sit in the body's flow and read as part of the
-   card rather than as a dismissible banner. Warn ink on the rule alone — the state is a fact about
-   the reading, not an error, and a filled panel here would outshout the bars it qualifies. */
+/* Rendered only while a caveat is live. Warn ink on the rule alone: a filled panel would
+   outshout the bars it qualifies. */
 .theta-caveat{margin:0 0 var(--space-8);padding:var(--space-6) var(--space-8);border-left:2px solid var(--color-warn);font-size:var(--text-xs);line-height:1.5;color:var(--color-text-secondary)}
 .theta-caveat strong{color:var(--color-text-primary)}
 .theta-caveat-spans{color:var(--color-text-tertiary)}
-/* Hangs under the notice it qualifies — same left inset, no second rule, so the two read as one
-   block rather than as two warnings. */
 .theta-caveat-arms{margin:calc(var(--space-8) * -1) 0 var(--space-8);padding:0 var(--space-8) var(--space-6) calc(var(--space-8) + 2px);font-size:var(--text-xs);line-height:1.5;color:var(--color-text-tertiary)}
-/* The scoring mask opens to the RIGHT of the chart (side-by-side) inside the
-   fitness card. .fitness-chart-wrap groups the legend + chart so the
-   legend stays positioned above the bars (matching the Composite-only
-   placement) when the card stretches; without the wrap, the legend
-   centres itself across the full widened card. The wrap is locked to
-   432px (= 460px card - 28px padding) so bars don't shift on toggle.
-   The card itself stretches to the full triad-row width via the :has()
-   rule above; the mask panel fills everything to the right. */
+/* The wrap is locked to 432px (460px card − 28px padding) so the bars don't shift when the mask opens. */
 .fitness-chart-wrap{display:flex;flex-direction:column;width:100%;min-width:0}
-/* When the scoring mask is open, the card becomes a 2-column grid so the mask
-   panel can span the FULL card height (rows 1+2 of col 2) instead of
-   sitting below the title in only-the-body row. The title pins to col 1
-   (432px), chart sits below it; the right panel starts at the very top
-   of the card — no wasted empty space above the legend. .fitness-body
-   uses display:contents so its children participate directly in the
-   card's grid without needing a JSX restructure. */
-/* Two rows: title (auto) + a flexible chart row. The mask panel spans
-   both rows in col 2; because the panel is taller than title+chart, the
-   1fr chart row soaks up that extra height and `align-self:start` pins the
-   chart directly under the title — the slack lands BELOW the chart, never
-   as a gap above it. (Pre-fix the chart dropped to the bottom-left.) */
-/* The scoring mask adds a second column, so the compact Sequence cap has to lift — the
-   bars stay at 432px inside it, so they don't shift when the panel opens. */
+/* `.fitness-body` is display:contents so its children join the card's grid, letting the mask
+   panel span the full card height. */
+/* The 1fr chart row soaks up the panel's extra height; `align-self:start` pins the chart under the title. */
+/* The mask adds a column, so the compact Sequence cap lifts; the bars stay at 432px inside it. */
 .cand-card.mask-open{max-width:100%;display:grid;grid-template-columns:minmax(0,432px) minmax(0,1fr);grid-template-rows:auto 1fr;column-gap:var(--space-18);align-items:start}
 .cand-card.mask-open > .card-title{grid-column:1;grid-row:1;max-width:432px}
 /* min-width:0 lets .fitness-body shrink once the stacked layout below makes
    it a flex item (flex default min-width:auto would pin it to the grid row). */
 .cand-card.mask-open > .fitness-body{display:contents;min-width:0}
-/* Chart caps at 432px but shrinks with the container (column is minmax(0,432px)),
-   so it never spills off a narrow card. */
 .cand-card.mask-open .fitness-chart-wrap{grid-column:1;grid-row:2;width:100%;max-width:432px;align-self:start}
 .cand-card.mask-open .fitness-mask{grid-column:2;grid-row:1 / span 2;align-self:stretch;min-width:0;margin-top:0;padding-top:0;padding-left:18px;border-top:0;border-left:0.5px solid var(--color-border)}
-/* Stacked layout: align-items:stretch (overriding the grid layout's `start`) so
-   flex children fill the card width instead of hugging their max-content (the
-   ~455px mask grid row), which would overflow a narrow card. */
+/* `stretch`, overriding the grid's `start`: hugging max-content (~455px) overflows a narrow card. */
 @media (max-width:960px){
   .cand-card.mask-open{display:flex;flex-direction:column;align-items:stretch}
   .cand-card.mask-open > .card-title{max-width:none}
@@ -162,13 +99,11 @@
   .cand-card.mask-open .fitness-mask{padding-left:0;padding-top:18px;border-left:0;border-top:0.5px solid var(--color-border);margin-top:0}
 }
 .fitness-mask{margin-top:18px;padding-top:18px;border-top:0.5px solid var(--color-border)}
-/* The mode switch and the sentence it heads. Wraps rather than shrinking the control — the
-   segmented control is the one thing here that must stay legible at any width. */
+/* Wraps rather than shrinking: the segmented control must stay legible at any width. */
 .mask-head{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-8);margin-bottom:var(--space-10)}
 .mask-head > :first-child{flex:0 0 auto}
 .mask-field{display:flex;flex-direction:column;gap:var(--space-4);margin-bottom:var(--space-10)}
-/* Where the preview becomes the run. Set apart because pressing it mints a branch — the one
-   control in this panel that spends anything. */
+/* Set apart: pressing it mints a branch — the one control in this panel that spends. */
 .mask-apply{margin-top:var(--space-12);padding-top:var(--space-12);border-top:0.5px solid var(--color-border);display:flex;flex-direction:column;gap:var(--space-6);align-items:flex-start}
 .fitness-empty{color:var(--color-text-tertiary);font-style:italic;font-size:var(--text-sm);padding:var(--space-16) 0;text-align:center}
 .mask-legend{display:flex;flex-wrap:wrap;gap:var(--space-14);font-size:var(--text-xs);color:var(--color-text-tertiary);margin-bottom:14px;letter-spacing:.04em}
@@ -180,25 +115,19 @@
   border:1.5px solid rgba(var(--color-accent-rgb),0.32);
   box-shadow:0 0 6px rgba(var(--color-accent-rgb),0.18);
 }
-/* Two rows of tiles visible: 2 × 126px tile + 1 × 10px gap + 2 × 6px wrap
-   padding = 274px. The tile carries a toggle button + a weight thermometer. */
+/* 2 × 126px tiles + one 10px gap + 2 × 6px padding = 274px. */
 .mask-grid-wrap{overflow-y:auto;max-height:274px;padding:var(--space-6) var(--space-4) var(--space-6) 0;margin-bottom:12px}
 .mask-grid{display:grid;grid-template-columns:repeat(auto-fill,100px);justify-content:start;gap:var(--space-10)}
 .mask-sq{position:relative;width:100px;background:var(--color-background-secondary);border:1.5px dashed var(--color-border);border-radius:9px;padding:0;display:flex;flex-direction:column;text-align:center;transition:border-color .15s,background .15s,opacity .15s,transform .1s,box-shadow .15s;height:126px;user-select:none;z-index:1;font-family:inherit}
 .mask-sq:hover:not(.disabled){border-color:var(--color-accent);transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.35);z-index:3}
-/* The toggle is the upper area (tick/icon/name); the weight row sits below. The direction glyph
-   rides the tile's own corner, outside the control, so reading it is not pressing it. */
+/* The direction glyph rides the tile's corner, outside the control, so reading it is not pressing it. */
 .mask-sq-toggle{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;gap:var(--space-6);width:100%;padding:var(--space-12) var(--space-6) var(--space-4);background:transparent;border:0;color:inherit;font:inherit;cursor:pointer}
 .mask-dir{position:absolute;top:5px;right:6px;z-index:2;font-size:var(--text-sm);line-height:1}
 .mask-sq-toggle-disabled{cursor:not-allowed}
 .mask-weight{display:flex;align-items:center;gap:var(--space-4);width:100%;min-height:18px;padding:0 var(--space-6) var(--space-8)}
 .mask-weight-range{flex:1;min-width:0;height:3px;accent-color:var(--color-accent);cursor:pointer}
 .mask-weight-val{font-size:var(--text-xs);font-family:var(--font-mono);color:var(--color-text-tertiary);min-width:22px;text-align:right}
-/* Phone (≤640px): lay every tile in ONE horizontally-scrolling row (the
-   .wf-hero-flow pattern) instead of the two-row vertical-scroll grid —
-   one swipe sweeps the whole evaluator set. Tiles drop to ~70% in both
-   dimensions (100→70px wide, 108→76px tall); the icon + name + gaps scale
-   to match so the smaller tile stays legible. */
+/* Phone: one horizontally-scrolling row (the .wf-hero-flow pattern); tiles drop to ~70%. */
 @media (max-width:640px){
   .mask-grid-wrap{overflow-x:auto;overflow-y:hidden;max-height:none;padding:var(--space-6) 0;-webkit-overflow-scrolling:touch;scrollbar-width:none}
   .mask-grid-wrap::-webkit-scrollbar{display:none}

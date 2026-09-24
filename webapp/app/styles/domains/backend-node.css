@@ -1,10 +1,5 @@
-/* Backend-node detail — the on-the-node config panel (replaces the old
-   ConfigMenu gear). It renders the node as one read-only unit straight off the
-   server schema — one `NodeSurface`, config → prompt → output, with no value
-   channel passed — so the inspect-the-node surface reads identically to the
-   steer panel's editor. This file only adds what the dashboard context needs on
-   top of that shared chrome: a width constraint (the hero is 980px wide), a
-   close affordance, and the now-clickable single-node hero chip. */
+/* The node as one read-only `NodeSurface`; this file adds only what the dashboard context
+   needs on top of that shared chrome. */
 
 .bnode {
   position: relative;
@@ -14,14 +9,10 @@
   flex-direction: column;
   gap: var(--space-8);
 }
-/* The same panel carrying a RUN trace: rendered input beside response, two columns
-   of payload that a 560px form column crushes. The width is the content's, not the
-   tab's — an optimizer node reads the same on Chat as on Dashboard. */
+/* Width is the content's, not the tab's: a RUN trace is two payload columns a 560px form crushes. */
 .bnode-wide { max-width: none; }
 
-/* The observe searchpoint selector (origin/live/historical) — sits ABOVE the
-   node surface, mirroring `.bnode`'s width constraint so the two read as one
-   column. It selects WHICH spec the box shows; it is not part of the spec. */
+/* Selects WHICH spec the box shows; it is not part of the spec. */
 .observe-toggle {
   max-width: 560px;
   margin: var(--space-14) auto 0;
@@ -36,8 +27,6 @@
   letter-spacing: 0.04em;
 }
 
-/* Per-node surface: a kind chip in the title + a one-line role descriptor, so a
-   retriever/tool/cache node reads as what it is rather than an empty prompt. */
 .bnode-kind {
   display: inline-block;
   margin-right: 6px;
@@ -56,8 +45,7 @@
   color: var(--color-text-tertiary);
 }
 
-/* Status notes under the stack (loading / truncated). Never the stack itself — a
-   level that failed says so where it sits, not in a footer. */
+/* A level that failed says so where it sits, never in a footer. */
 .pipeline-stack-note {
   font-size:var(--text-xs);
   color: var(--color-text-tertiary);
@@ -65,8 +53,6 @@
   margin: var(--space-8) 0 0;
 }
 
-/* Close affordance grouped with the sub-note at the right of the reused
-   `.setup-preview-head` (title left, sub + × right). */
 .setup-preview-side { display: inline-flex; align-items: center; gap: var(--space-8); }
 .bnode-close {
   background: none;
@@ -81,8 +67,6 @@
 .bnode-close:hover { color: var(--color-accent); background: var(--color-background-primary); }
 .bnode-close:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 
-/* The single-node LLM hero chip is now a button — affordances + selected state
-   matching the Input/Output toggles. */
 .wf-hero-node.llm {
   cursor: pointer;
   font: inherit;

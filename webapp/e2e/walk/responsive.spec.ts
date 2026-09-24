@@ -1,13 +1,6 @@
 import { test, expect, open, ready, noSidewaysScroll } from "../harness";
 
-// The widths the mobile pass never swept. `code-debt-cleanup.md` records that 375 and 1440
-// were verified on four views and that 393, 412, 768 and landscape were not — so those are
-// exactly the ones a standing walk is worth having.
-//
-// What it asserts is the one failure no screenshot review catches by eye and no stylesheet
-// lint can see: `overflow:hidden` on a wrapper DELETES content with nothing on screen to say
-// so, and a viewBox'd SVG at width:100% SCALES instead of overflowing. A body that scrolls
-// sideways is the observable half of that family.
+// A body that scrolls sideways is the observable half of the overflow family no lint sees.
 
 const WIDTHS = [
   { name: "phone-375", width: 375, height: 812 },
@@ -44,27 +37,17 @@ for (const vp of WIDTHS) {
       page,
       rich,
     }) => {
-      // `OuterSignalPanel` ("Outer signal") mounts unconditionally on every Dashboard — round 0
-      // or an empty read renders its own placeholder text — so unlike its per-round lift chart
-      // (which needs a real `promptpotter-self` campaign to ever draw a bar, and so stays
-      // untested by this walk), the CARD's own fit needs no special campaign shape. Read
-      // `code-debt-cleanup.md` before touching this claim again.
+      // `OuterSignalPanel` mounts on every Dashboard, so its CARD's fit needs no L4 campaign.
       await open(page, `${rich.addr}/dashboard`);
       await expect(page.getByRole("heading", { name: "Outer signal" })).toBeVisible();
       await noSidewaysScroll(page);
 
-      // The forest is the OTHER half of that same gap: `CandidatesCard`'s own dendrogram moved
-      // into `ForestCard` behind this toggle, so opening it is what a plain tab visit never did.
       await page.getByRole("button", { name: /the lineage forest/i }).click();
       const cladogram = page.getByRole("img", { name: "Session lineage cladogram" });
       await expect(cladogram).toBeVisible();
       await noSidewaysScroll(page);
 
-      // The failure class `noSidewaysScroll` cannot see: a `viewBox`'d SVG at `width:100%`
-      // never overflows, it SCALES — silently compressing until labels collide, with the page
-      // never growing wider (webapp/CLAUDE.md § Stylesheet organization). `Forest.tsx` gives the
-      // `<svg>` an explicit intrinsic `width` for exactly this reason; assert it actually reaches
-      // the DOM at that width instead of being squeezed into the viewport.
+      // What `noSidewaysScroll` cannot see: a `viewBox`'d SVG SCALES rather than overflowing.
       const attrWidth = Number(await cladogram.getAttribute("width"));
       expect(attrWidth, "the cladogram <svg> carries no width attribute").toBeGreaterThan(0);
       const box = await cladogram.boundingBox();
@@ -80,8 +63,6 @@ test.describe("below the md breakpoint", () => {
   test.use({ viewport: { width: 375, height: 812 } });
 
   test("the sidebar is the list screen, and carries no collapse chevron", async ({ page }) => {
-    // "A sidebar collapsed on a desktop must not become an empty list screen" — below
-    // --bp-md the same component IS the list screen, so it drops the collapse affordance.
     await open(page);
     await expect(page.getByRole("button", { name: "Collapse sidebar" })).toBeHidden();
   });

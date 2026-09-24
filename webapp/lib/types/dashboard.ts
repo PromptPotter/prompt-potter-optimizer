@@ -1,9 +1,4 @@
-// Re-export the dashboard.json surface from its definition site. This
-// file is the import target for anything that needs the typed snapshot
-// without pulling in the polling provider — keep components from
-// reaching into `@/lib/poll` for shapes alone (the hook layer moves
-// under `lib/hooks/` in a later workstream; the type surface stays
-// stable here).
+// Import `dashboard.json` shapes from here, never from `@/lib/poll`.
 
 export type {
   BucketResult,

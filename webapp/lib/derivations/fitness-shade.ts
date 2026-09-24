@@ -1,6 +1,5 @@
-// The one shade for a SERVED fitness in [0, 1] — red through green, stronger toward either
-// end. A colour for a number the server already graded, never a grade of its own: every strip
-// tile and every cell badge shades through here, so one fitness reads one colour everywhere.
+// The one shade for a SERVED fitness, so one fitness reads one colour everywhere — never a grade
+// of its own.
 
 import type { CSSProperties } from "react";
 

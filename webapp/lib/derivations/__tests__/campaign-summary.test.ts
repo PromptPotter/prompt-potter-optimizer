@@ -9,14 +9,8 @@ import { vendorOf } from "@/lib/format";
 import type { RunGroup } from "../campaign-forest";
 import type { CampaignRunsWith, CampaignSummary, CycleListEntry } from "@/lib/api";
 
-// The rounds part is read in the CAP's unit — `rounds_closed` counts rounds after the origin,
-// which is what `max_rounds` bounds. Every other state of that part (a campaign still at its
-// check-in, a declared origin-only run, a fork holding the line) renders a different sentence
-// off the same two numbers, and each was a different wrong reading before.
-//
-// The row is a NAME and a reading, not a config dump, and three of the tests below are the
-// whole of that rule: the models leave the line for the vendor mark, the ROUTING levers leave
-// it for the hover card, and a named campaign drops its id tail.
+// `rounds_closed` counts rounds after the origin, the unit `max_rounds` bounds. The row is a NAME
+// and a reading, never a config dump.
 
 function cycle(over: Partial<CycleListEntry> = {}): CycleListEntry {
   return {
@@ -58,10 +52,7 @@ const runsWith = (
 ): CampaignRunsWith => ({ params, max_rounds });
 
 describe("campaignLineParts", () => {
-  // No served SETTING reaches the row, whatever key it is and whichever layer won it — the
-  // models ride the vendor mark, and every other param rides the hover card whole. The row wore
-  // the campaign-sourced ones once, which put `temperature 0` on the campaigns that declare it
-  // and nothing on the rest: a difference on screen where there is none in the run.
+  // No served setting reaches the row: models ride the vendor mark, the rest the hover card.
   it("carries no resolved setting at all — the card is where a setup is read", () => {
     const parts = campaignLineParts(
       run({
@@ -85,8 +76,7 @@ describe("campaignLineParts", () => {
     expect(parts).toContain("R3/6");
   });
 
-  // One word, and it is the repo's own. `R0` is the reading this refuses — that reads as a run
-  // that went nowhere, rather than one declared never to leave its origin.
+  // `R0` would read as a run that went nowhere, not one declared never to leave its origin.
   it("says origin when the cap declares no round after C0", () => {
     const parts = campaignLineParts(
       run({ runsWith: runsWith([], 0), root: cycle({ rounds_closed: 0 }) }),
@@ -157,8 +147,7 @@ describe("campaignModels / campaignVendors", () => {
     ]);
   });
 
-  // Three OpenAI models are ONE brand to count. A column of repeated marks would say otherwise,
-  // which is the whole reason the mark is worth drawing.
+  // Three OpenAI models are ONE brand to count.
   it("collapses models to their vendors, each keeping the ids it stands for", () => {
     expect(campaignVendors(twoVendors)).toEqual([
       { vendor: "openai", models: ["openai/gpt-oss-20b:nitro", "openai/gpt-oss-120b"] },
@@ -172,8 +161,7 @@ describe("campaignModels / campaignVendors", () => {
 });
 
 describe("campaignTitle", () => {
-  // The tail is an id. It renders exactly while it is the only thing telling ten runs of one
-  // dataset apart — so naming a campaign is what buys it away, and an unnamed one keeps it.
+  // The id tail renders exactly while it is all that tells one dataset's runs apart.
   it("keeps the id tail while nothing human distinguishes the campaign", () => {
     expect(campaignTitle(run({}).campaign).suffix).toBe("00b7d7");
   });

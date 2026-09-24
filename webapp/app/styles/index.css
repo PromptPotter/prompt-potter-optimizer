@@ -1,19 +1,10 @@
-/* PromptPotter stylesheet — ordered cascade.
-   Imports are inlined at build (Lightning CSS); ORDER IS LOAD-BEARING.
-   Foundation first (tokens → themes → base), then component domains in the
-   source order the cascade was authored against, then the cross-cutting
-   responsive/a11y tail LAST so its overrides win.
+/* ORDER IS LOAD-BEARING: Lightning CSS inlines these in barrel order, so this list IS the
+   cascade, and the responsive/a11y tail imports last so its overrides win. */
 
-   foundation/ = the portable, whitelabel-safe skeleton (tokens, both theme
-   palettes, reset/base, reduced-motion, responsive floors).
-   domains/    = per-feature component rules + their co-located @media. */
-
-/* ── Foundation ─────────────────────────────────────────────── */
 @import "./foundation/tokens.css";
 @import "./foundation/themes.css";
 @import "./foundation/base.css";
 
-/* ── Domains (authored cascade order) ───────────────────────── */
 @import "./domains/shell.css";
 @import "./domains/dashboard.css";
 @import "./domains/masthead.css";
@@ -36,6 +27,5 @@
 @import "./domains/l4.css";
 @import "./domains/compare.css";
 
-/* ── Cross-cutting a11y + responsive tail (must win) ────────── */
 @import "./foundation/reduced-motion.css";
 @import "./foundation/responsive.css";

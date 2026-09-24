@@ -2,9 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { cacheShare, foldStepTokens, prefixReading } from "@/lib/derivations";
 
-// The browser half of `domain/spend.py::TokenAccount`. Both halves are pinned because the rule
-// they carry — a replayed row reports no provider discount — was implemented five times by hand
-// and got three of five right.
+// Pinned: a replayed row reports no provider discount.
 describe("cacheShare", () => {
   it("is null on a replay, whose counts are the banked row's", () => {
     expect(cacheShare(550, 1000, false)).toBe(0.55);
@@ -23,8 +21,7 @@ describe("cacheShare", () => {
   });
 });
 
-// Four states, one decision. Pinned because every renderer used to suppress on `> 0`, which
-// merges three of them into one blank — and on a live campaign the blank is ~91% of rows.
+// Four states, one decision: suppressing on `> 0` would merge three of them into one blank.
 describe("prefixReading", () => {
   it("names the state each renderer used to render as nothing", () => {
     expect(prefixReading(0.39, false)).toMatchObject({ state: "discounted", label: "c39%" });
@@ -56,8 +53,7 @@ describe("foldStepTokens", () => {
       a: { input: 600, output: 10, cache_read: 300 },
       b: { input: 400, output: 5, cache_read: 100 },
     });
-    // The defect this replaces took the numerator from here and the denominator from a top-level
-    // `input_tokens` twin that no writer ever set, so every historical row divided by undefined.
+    // Both halves come off the entries; no writer sets a top-level `input_tokens` twin.
     expect(account).toEqual({ input: 1000, output: 15, cacheRead: 400 });
     expect(cacheShare(account?.cacheRead, account?.input, false)).toBe(0.4);
   });

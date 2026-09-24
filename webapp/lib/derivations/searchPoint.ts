@@ -1,13 +1,5 @@
-// Observe-side resolver: the read-only "what config does THIS searchpoint run" view. Two states,
-// the live in-flight candidate and a completed one out of its round file, both reading the same
-// server-resolved `resolved_pipeline_params`.
-//
-// The ORIGIN is not a third state — C0 is a candidate of round 0 like any other, and typing it
-// as its own state makes the origin a mode of LOOKING rather than a thing to look AT.
-//
-// No client re-merge; this module only SELECTS which searchpoint's resolved config to show. The
-// STEER fork seed (`candidateSearchPoint.ts`) reads the same field for a different purpose — an
-// editable seed, not a view — so the two stay separate functions over one served field.
+// Selects which searchpoint's served `resolved_pipeline_params` the read-only observe view shows;
+// never re-merges. The origin is a round-0 candidate, not a third state.
 
 import {
   liveInputCandidate,
@@ -22,14 +14,8 @@ import type { ElectedRow, RoundResult, SampleRow } from "@/lib/types";
 import { roundHasCandidates, sortedRounds } from "./round-candidates";
 import { wasElected } from "./election";
 
-// WHICH searchpoint the observe box shows. Each state answers a question an
-// operator actually asks, which is why none of them names a data source:
-//
-//   best     — the parent: what the search is currently expanding from.
-//   latest   — the newest searchpoint touched: in-flight while running, else
-//              the last candidate the last closed round measured.
-//   selected — the candidate picked on another surface (a candidates-card bar,
-//              a sidebar row). Offered ONLY while such a pick exists.
+// best = the parent the search expands from; latest = in-flight while running, else the last
+// measured; selected = a pick made on another surface, offered only while one exists.
 export type ObserveState = "best" | "latest" | "selected";
 
 const OBSERVE_LABELS: Record<ObserveState, string> = {
@@ -38,10 +24,7 @@ const OBSERVE_LABELS: Record<ObserveState, string> = {
   selected: "Selected",
 };
 
-// The button set, shared so the two hosts (the pipeline node detail and the chat's
-// run card) cannot drift on wording or order. An UNAVAILABLE state is DROPPED, not
-// disabled: a permanently-dead button is the affordance dishonesty this rename was
-// for. `selected` is last because it only ever appears transiently.
+// An unavailable state is DROPPED, not disabled — no permanently-dead button.
 export function observeOptions(
   avail: Record<ObserveState, boolean>,
 ): { value: ObserveState; label: string }[] {
@@ -50,30 +33,15 @@ export function observeOptions(
 }
 
 export interface ObserveConfig {
-  // The searchpoint's evolved prompt fields (OptSearchPoint.prompt_field_dict()
-  // shape) — rendered read-only beneath the config.
+  // `OptSearchPoint.prompt_field_dict()` shape.
   promptFields: Record<string, unknown>;
-  // The server-resolved config-only params `{node:{param:value}, steps:[…]}`,
-  // fed verbatim to the values-mode editor as its seed (never re-merged client-side).
   config: Record<string, unknown>;
-  // Header sub-line naming which searchpoint this is (origin / live — C1.3 / …).
+  // Decorated header ("live — C1.3"); never a join key.
   label: string;
 }
 
-// WHAT a searchpoint panel hands to the clipboard, coarsest last. Built here rather than at
-// each host because the PAYLOAD is the half that drifts: the drill-in's two hosts and the chat
-// run card would otherwise each decide separately what "this searchpoint" is, and a paste from
-// one would not be comparable to a paste from the other.
-//
-// Nothing is computed — every value is served, and each reading is a strict superset of the one
-// above it. Keys are the SERVED names (`resolved_pipeline_params`, `prompt_fields`) so a paste
-// greps against `round_NNNN.json`; `label` is the row's join key rather than `cfg.label`, which
-// is a decorated header string ("live — C4.3") and must never be joined on.
-//
-// A reading with nothing behind it is DROPPED, not offered empty — the `observeOptions`
-// discipline: a menu row that copies `null` is the affordance dishonesty this avoids. So the
-// samples row carries the count, and it carries EVERY sample rather than the render cap the
-// list stops at: a cap is a screen budget and a copy has none.
+// Keys are the served names so a paste greps against `round_NNNN.json`. Samples are ALL of them,
+// never the render cap: a cap is a screen budget and a copy has none.
 export function searchpointCopyChoices({
   cfg,
   row,
@@ -87,18 +55,12 @@ export function searchpointCopyChoices({
 }): { key: string; label: string; data: unknown }[] {
   const spec = cfg
     ? {
-        // `label` is emitted only when a ROW answers for it. Falling back to `cfg.label` put the
-        // decorated header ("live — C4.3") under the key this whole payload is JOINED on — the one
-        // thing the note above forbids — and a paste carrying it greps against no round file while
-        // looking exactly like one that would. The decoration rides its own key instead, so the
-        // reader still knows which panel produced the copy.
+        // `label` is the join key, so only a row answers for it; the decorated header rides `shown_as`.
         ...(row ? { label: row.label } : { shown_as: cfg.label }),
         resolved_pipeline_params: cfg.config,
         prompt_fields: cfg.promptFields,
       }
     : null;
-  // No spec yet (the round file is still loading) but a row already resolved: the scores are
-  // still worth handing over, and the label alone still names what they belong to.
   const scored = row ? { ...(spec ?? { label: row.label }), arms, scored: row } : null;
 
   const choices: { key: string; label: string; data: unknown }[] = [];
@@ -114,14 +76,8 @@ export function searchpointCopyChoices({
   return choices;
 }
 
-// Project the six PromptTemplate string fields out of ONE node's resolved params.
-// Used when the flat `prompt_fields` carries no prompt content but the selected
-// node IS prompt-bearing and its evolved fields live per-node inside
-// `resolved_pipeline_params[nodeId]` — the pp-self optimizer prompt shape, where each
-// optimizer node (l1_generate / l1_critique / …) owns its own persona/instruction/…
-// rather than sharing one flat prompt. Only fields actually present are returned
-// (the round file carries only the optimizer's mutated delta, not the static
-// `prompts/{node}.json` origin).
+// The promptpotter-self shape: each optimizer node owns its prompt fields per-node, and the round
+// file carries only the mutated delta, not the static `prompts/{node}.json` origin.
 function nodePromptFields(
   resolved: Record<string, unknown> | undefined | null,
   nodeId: string | null | undefined,
@@ -137,11 +93,6 @@ function nodePromptFields(
   return out;
 }
 
-// A candidate row carrying the two observe fields — the same `LiveInputCandidate`
-// shape backs both the round-file `candidate_scores[]` and the live in-flight input.
-// `nodeId` (the selected node) lets a prompt-bearing optimizer node surface its OWN
-// evolved prompt when the flat `prompt_fields` is empty; single-prompt pipelines
-// (`llm_only`, every normal dataset) keep their flat prompt and ignore it.
 function rowConfig(
   row: LiveInputCandidate | undefined | null,
   label: string,
@@ -157,11 +108,8 @@ function rowConfig(
   };
 }
 
-// Live: the latest-seeded (max idx) in-flight candidate of the running round.
-// The candidate buffer persists THROUGH L2/L3 (the backend resets it only at the next
-// `L1_GENERATE:enter`, `projection.py::_apply_phase`), so this stays non-null there. The one
-// null window is l1_generate-after-reset-before-first-candidate-started; the
-// OBSERVE view falls back to the last completed searchpoint for that brief gap.
+// Null only between `L1_GENERATE:enter` (which resets the buffer, `projection.py::_apply_phase`)
+// and the first candidate starting; the host falls back to the last closed searchpoint.
 export function liveObserveConfig(
   dash: DashboardSnapshot | null,
   nodeId?: string | null,
@@ -176,10 +124,7 @@ export function liveObserveConfig(
   return rowConfig(latest, `live — ${label}`, nodeId);
 }
 
-// Live, by LABEL: the SELECTED in-flight candidate out of the live l1_score input
-// (not the latest-seeded one `liveObserveConfig` shows). Null until that
-// candidate has been seeded (`candidate_started`). The scoring inspector reads
-// this when the operator drills into a candidate of the still-running round.
+// Null until that candidate is seeded (`candidate_started`).
 export function liveCandidateObserveConfig(
   dash: DashboardSnapshot | null,
   label: string,
@@ -188,14 +133,8 @@ export function liveCandidateObserveConfig(
   return rowConfig(liveInputCandidate(dash, label), `live — ${label}`, nodeId);
 }
 
-// Historical: a past candidate out of its lazily-loaded round file, located by its POSITIONAL
-// label — any round including 0, which is what makes the origin an ordinary observe target.
-//
-// **Not `candidate_id`, and the difference is only visible after a resume.** A lineage id is a
-// fresh uuid per construction and a resumed run re-scores the origin, so the tree serves C0 under
-// a NEW id while the round file still holds the old one; an id join then finds nothing and the
-// table blanks with no error. The live sibling above may join on id only because it cannot cross
-// a run. `display` is decoration and must never be the join key.
+// Joined on the positional label, never `candidate_id`: a resume re-scores C0 under a NEW id while
+// the round file keeps the old one, and the miss is silent.
 export function candidateObserveConfig(
   doc: RoundResult | null,
   courseLabel: string,
@@ -208,13 +147,8 @@ export function candidateObserveConfig(
   return rowConfig(row, display, nodeId);
 }
 
-// WHICH past candidate a state points at, before its round file is loaded. Held
-// apart from `ObserveConfig` on purpose: availability of a state is a served fact
-// (does such a candidate exist), while the config is a fetch that may not have
-// landed — conflating them made a button flicker with its own round file.
-//
-// `courseLabel` is the SERVED join key `candidateObserveConfig` needs; `label` is the
-// decorated header string and must never be joined on.
+// Apart from `ObserveConfig`: a state's availability is served, its config a fetch that may not
+// have landed. `courseLabel` is the join key; `label` is decoration.
 export interface ObserveTarget {
   round: number;
   idx: number;
@@ -223,10 +157,8 @@ export interface ObserveTarget {
   candidateId: string;
 }
 
-// The label comes off the row, never off the position. `domain/results.py::candidate_label`
-// is the sole writer of the format and answers `C0` for EVERY round-0 arm, where re-deriving
-// it positionally answers `C0.2` from index 1 on — a join key matching no served row, and the
-// miss is silent because `find` simply returns undefined.
+// The label comes off the row, never the position: `domain/results.py::candidate_label` answers
+// `C0` for EVERY round-0 arm.
 function targetAt(
   round: number,
   idx: number,
@@ -237,19 +169,14 @@ function targetAt(
   return { round, idx, courseLabel, label: `${prefix} · ${courseLabel}`, candidateId };
 }
 
-// THE PARENT — the individual the search expands from. A WALK back to the most recent SERVED
-// crown, not `rounds.at(-1)`: a round that crowned nobody is skipped rather than inventing one.
-// Round 0 is included, since on a campaign that only measured its origin C0 IS the parent.
-// **Under a REWIND** the most recent crown is still what the search expands from but need not be
-// the highest-θ individual ever measured; a strict global best needs a SERVED pointer.
+// The most recent served crown, not the highest θ ever: after a rewind the two differ, and a strict
+// global best would need a served pointer.
 export function bestObserveTarget(dash: DashboardSnapshot | null): ObserveTarget | null {
   const rounds = sortedRounds(dash).filter(roundHasCandidates).reverse();
   for (const r of rounds) {
     const idx = r.candidates.findIndex((c) => c.is_winner);
     const w = idx >= 0 ? r.candidates[idx] : null;
     if (!w?.candidate_id) continue;
-    // Only badge `best` as a win when the round it won had rivals — round 0 crowns
-    // its sole arm by default and must not claim an election.
     return targetAt(
       r.round,
       idx,
@@ -261,10 +188,7 @@ export function bestObserveTarget(dash: DashboardSnapshot | null): ObserveTarget
   return null;
 }
 
-// The newest searchpoint that has CLOSED — the last candidate of the last round with
-// candidates. This is the historical half of `latest`; while the cycle is running the
-// state resolves to the in-flight candidate through `liveObserveConfig` instead, and
-// the host makes that switch (it is the only side that knows whether the run is live).
+// The closed half of `latest`; the host, which alone knows the run is live, switches to `liveObserveConfig`.
 export function latestClosedTarget(dash: DashboardSnapshot | null): ObserveTarget | null {
   const rounds = sortedRounds(dash).filter(roundHasCandidates);
   const last = rounds.at(-1);

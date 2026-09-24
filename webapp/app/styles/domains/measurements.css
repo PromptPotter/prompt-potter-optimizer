@@ -1,5 +1,5 @@
-/* Measurements — the one measurement log (`shell/measurements/MeasurementsPane`) and the
-   cell it opens (`shell/cell/CellPanel`). Every value is a token. */
+/* The one measurement log (`shell/measurements/MeasurementsPane`) and the cell it opens
+   (`shell/cell/CellPanel`). */
 
 .ms-pane {
   display: flex;
@@ -107,7 +107,6 @@
   color: var(--color-text-tertiary);
 }
 
-/* ── The cell panel ─────────────────────────────────────────── */
 
 .cell-body {
   display: flex;

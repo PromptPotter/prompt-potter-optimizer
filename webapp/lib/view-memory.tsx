@@ -7,44 +7,31 @@ import { ownerOfNodeAddress } from "@/lib/ids";
 
 export const VIEW_MEMORY_KEY = "promptpotter.view.byCampaign";
 
-// Bumping this DROPS every stored record rather than migrating it. There is nothing to be
-// compatible with — a lost expand state costs one click, and a migration path for view
-// memory is more code than the thing it protects.
+// Bumping this DROPS every stored record rather than migrating it.
 const RECORD_VERSION = 1;
 
-// "Recently" — 14 days. Past roughly two weeks a stored expansion set describes a tree that
-// has since grown forks and inner runs, so restoring it is likelier to confuse than help,
-// and the sidebar's own defaults (courses closed) are a safe resting state. Two weeks also
-// covers the longest absence where an operator still remembers the layout they left.
+// Past two weeks a stored expansion set describes a tree that has since grown forks and inner runs.
 const TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
-// Campaigns kept, most-recently-viewed first. One record is ~0.5–2 KB (the toggled key list
-// dominates), so 24 sits far under any quota while covering more campaigns than a sidebar
-// shows without scrolling.
 const MAX_CAMPAIGNS = 24;
 
+// Ids, flags and UI keys only — never a measurement. The card's headline `metrics` is not stored:
+// `CandidatesCard` seeds it per cycle from the evaluators the run actually produced.
 export interface CampaignView {
   v: number;
-  // Epoch ms of the last visit — drives both the TTL and the LRU eviction order.
+  // Drives both the TTL and the LRU eviction order.
   at: number;
-  // Sidebar nodes TOGGLED AWAY FROM THEIR DEFAULT (`campaign-forest.ts::isNodeOpen`), this
-  // campaign's only. Same semantics the global blob had, minus the sharing.
+  // Sidebar nodes TOGGLED AWAY FROM THEIR DEFAULT (`campaign-forest.ts::isNodeOpen`).
   toggled: string[];
-  // The active cycle whose one-shot "reveal the running course" already fired. Without
-  // this the reveal re-fires whenever the sidebar remounts, re-opening a row the operator
-  // deliberately collapsed.
+  // Latches the one-shot "reveal the running course", or a sidebar remount re-opens a row the
+  // operator deliberately collapsed.
   autoExpandedFor: string | null;
-  // The viewed address, encoded — restores a drilled-in L4 leaf, not just the campaign.
   viewedPath: string | null;
   viewedCandidateId: string | null;
   showForest: boolean;
-  // Candidates-card lane keys (`nodeKeyOf`), the same space `forest-layout::layout` matches.
+  // Lane keys (`nodeKeyOf`), the same space `forest-layout::layout` matches.
   expandedLanes: string[];
 }
-
-// NOT stored: the card's headline `metrics`. `CandidatesCard` seeds that per cycle from the
-// evaluators the run actually produced (`metricsSeededForCycle`), so a remembered set could
-// name evaluators this campaign never had — and the seeding already owns the axis.
 
 type Store = Record<string, CampaignView>;
 
@@ -63,8 +50,7 @@ export function emptyView(): CampaignView {
   };
 }
 
-// TTL + version drop + LRU, applied in ONE place: the codec. Every read prunes and every
-// write re-prunes, so no caller can forget and no separate sweep exists to fall out of sync.
+// TTL + version drop + LRU live in the codec, so no caller can forget them.
 export function pruneStore(store: Store, now: number): Store {
   const fresh = Object.entries(store).filter(
     ([, v]) => v && v.v === RECORD_VERSION && now - v.at < TTL_MS,
@@ -82,15 +68,12 @@ export const viewMemoryCodec = {
   },
 };
 
-// `owner` is a campaign id everywhere but the sidebar's origin tier — see the header.
+// `owner` is a campaign id everywhere but the sidebar's origin tier (see `NodeToggle`).
 interface ViewMemory {
-  // The record for an owner — defaults when absent, expired, or a stale version.
   viewFor: (owner: string | null) => CampaignView;
-  // An owner's toggled set, as a Set. `isOpen` runs per sidebar row per render, so the
-  // array→Set build happens once per store change here, not per call.
+  // Built once per store change: `isOpen` runs per sidebar row per render.
   toggledFor: (owner: string | null) => ReadonlySet<string>;
-  // Merge a patch into an owner's record and stamp `at`. Called from the handler that
-  // changed the axis, never during render.
+  // Called from the handler that changed the axis, never during render.
   recordView: (owner: string | null, patch: Partial<CampaignView>) => void;
 }
 
@@ -149,17 +132,11 @@ export function useViewMemory(): ViewMemory {
   return ctx;
 }
 
-// The sidebar's expand/collapse, resolved per owner.
-//
-// Every node address carries the record it belongs to — `ownerOfNodeAddress` reads it — so
-// there is no second lookup and no way for one campaign's toggles to reach another's. That
-// is what let the old blob be global without being obviously wrong. Owner is the ROOT hop's
-// campaign for a course or a candidate; an ORIGIN groups the runs of one declaration across
-// campaigns, so it owns its own record under its `cycle_<hash>` id.
+// Owner is the ROOT hop's campaign for a course or candidate; an ORIGIN spans campaigns, so it owns
+// its own record under its `cycle_<hash>` id (`ownerOfNodeAddress`).
 export interface NodeToggle {
   isOpen: (kind: NodeKind, path: string) => boolean;
   toggle: (kind: NodeKind, path: string) => void;
-  // The one-shot "reveal the active run" latch, per campaign — see `CampaignView`.
   autoExpandedFor: (campaignId: string | null) => string | null;
   markAutoExpanded: (campaignId: string, cycleId: string, key: string) => void;
 }

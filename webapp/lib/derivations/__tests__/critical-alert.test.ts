@@ -26,9 +26,8 @@ describe("criticalAlert", () => {
     });
   });
 
-  // A DESIGNED refusal must not be announced as the run falling over. The engine halted on
-  // purpose and named a recovery; calling it a crash sends the operator hunting a bug that
-  // does not exist. The label comes from the generated STOP_REASON_LABELS, never from here.
+  // A DESIGNED halt names a recovery and must not read as a crash; its label comes from the
+  // generated STOP_REASON_LABELS, never from here.
   it("names a designed halt by its own stop reason rather than calling it a crash", () => {
     const dash = {
       run_phase: "terminal",

@@ -1,16 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { EMPTY_ADDRESS, formatAddress, parseAddress, type Address } from "../address";
 
-// The address is the one thing a person copies out of this app, and the one thing a
-// reload has to reconstruct exactly. Both directions are pinned here: what an address
-// LOOKS like (a change to those strings breaks every link anyone saved) and that every
-// arm survives the round trip.
+// Pinned literals: changing an address string breaks every link anyone saved.
 
 const roundTrip = (a: Address): Address | null => parseAddress(formatAddress(a));
 
 describe("formatAddress", () => {
-  // The writer in `workspace.tsx` compares against EMPTY_ADDRESS to decide whether to
-  // drop the hash entirely, so this equality is load-bearing, not decorative.
+  // `workspace.tsx` drops the hash on this equality.
   it("writes the empty address for following the default view", () => {
     expect(formatAddress({ kind: "follow", tab: "chat", cell: null })).toBe(EMPTY_ADDRESS);
     expect(EMPTY_ADDRESS).toBe("#/");
@@ -105,9 +101,7 @@ describe("parseAddress round trip", () => {
       },
     ],
     [
-      // The sibling separators are suffixes ON TOP of the prefix, so the strip has to
-      // leave them intact — a fork that came back as its parent would re-root the whole
-      // dashboard onto the wrong cycle, silently.
+      // Fork/diag separators ride on top of the prefix; the strip must leave them intact.
       "a fork cycle id",
       {
         kind: "cycle",
@@ -179,7 +173,6 @@ describe("parseAddress tolerates what a person types", () => {
 });
 
 describe("parseAddress refuses what is not an address", () => {
-  // Null, never a throw and never a half-address: the caller keeps the view it had.
   const bad = [
     "#/c", // named a cycle and gave none
     "#/c/a__b", // a hop missing its cycle

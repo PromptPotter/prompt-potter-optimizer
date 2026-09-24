@@ -65,8 +65,7 @@ describe("nodeOverlayPatch (search-space emit)", () => {
         options: ["low", "medium", "high"],
       }),
       row({ key: "scorer", kind: "enum", allowed: ["t", "j"], options: ["t", "j"] }),
-      // The menu, but an absent entry would resolve to the declaration: ticking `json` on a node
-      // with no schema bounced back unticked until this was written out.
+      // Written out: an absent entry would resolve to the declaration and bounce `json` unticked.
       row({
         key: "response_format",
         kind: "enum",
@@ -132,7 +131,6 @@ describe("nodeOverlayPatch (search-space emit)", () => {
     ]);
     const node = patch.pipeline_overlay!.entity_profiling as Record<string, unknown>;
     expect(node.config).toEqual({ temperature: 0.2, model: "m2" });
-    // Two models permitted, so `model` is open — it is no longer a forbidden key.
     expect((node.optimizer as Record<string, unknown>).param_keys).toEqual([
       "temperature",
       "model",
@@ -148,11 +146,6 @@ describe("nodeOverlayPatch (search-space emit)", () => {
   });
 });
 
-// The server `node_config_schema` for an llm_only node: model (this node opens it, so it is a
-// real axis with `available_models` as its menu), reasoning_effort (enum), temperature (number),
-// max_tokens (number, declared but unset).
-//
-// `source` is SERVED now (`GET /campaigns/{id}/pipeline`).
 const schema: Record<string, NodeConfigParam[]> = {
   llm_only: [
     {
@@ -206,10 +199,8 @@ const schema: Record<string, NodeConfigParam[]> = {
   ],
 };
 
-// The half that decides what the OPTIMIZER may do with this campaign. Every field is served, and
-// the overlay argument is not read at all — deriving `locked` from a client-held `param_keys`
-// answered off whichever overlay the call site passed, so a campaign that narrowed further than
-// its dataset rendered as wide open and the operator confirmed a search space that was not theirs.
+// Every field is served and the overlay argument is never read: a client-derived `locked` answers
+// off whichever overlay the call site passed.
 describe("configRows (search-space mode)", () => {
   const param = (over: Partial<NodeConfigParam> & { key: string }): NodeConfigParam => ({
     value: null,
@@ -299,10 +290,8 @@ describe("configRows (values mode)", () => {
     expect(configRows(null, {}, "values")).toEqual([]);
   });
 
-  // A structured param is an AXIS (an inner node's `layout` is `movable_by: ["l1"]`), so a
-  // surface that drops it hides who may move it. It draws as JSON text, and an edit emits the
-  // OBJECT the text stands for — never the text itself, which would put a string where the
-  // object was; a draft that does not parse yet emits nothing at all.
+  // A structured param is an AXIS, drawn as JSON text: an edit emits the parsed OBJECT, never the
+  // text, and a draft that does not parse yet emits nothing.
   it("round-trips a nested param through JSON, and emits the OBJECT", () => {
     const nested: NodeConfigParam = {
       key: "layout",
@@ -321,23 +310,15 @@ describe("configRows (values mode)", () => {
     const drawn = rows.find((r) => r.key === "layout")!;
     expect(drawn.movableBy).toEqual(["l1"]);
     expect(JSON.parse(drawn.value)).toEqual({ instruction: ["plan"] });
-    // Untouched stays out, as any row does.
     expect(seedOverlayFromRows(rows, {})).toEqual({});
-    // Edited, it emits the parsed OBJECT — never the text that rendered it. Writing a string
-    // where an object belongs is the harm the row used to be withheld to prevent; the widget
-    // and this coercion prevent it instead, so the operator can actually set the value.
     const edited = seedOverlayFromRows(rows, { "llm_only.layout": '{"instruction":["critique"]}' });
     expect(edited.llm_only!.layout).toEqual({ instruction: ["critique"] });
 
-    // A draft that is not yet parseable emits NOTHING, rather than a broken string.
     expect(seedOverlayFromRows(rows, { "llm_only.layout": '{"instruction": ' })).toEqual({});
   });
 
-  // `answer_field` names the slot the executor destructures. `schema_owned` says the OPTIMIZER may
-  // never emit it — a fence `node_param_keys` / `l1_strict` / `build_l1_response_schema` already
-  // hold, three deep, none of them here. It never said the operator may not SET it, and reading it
-  // that way is what left the output contract the one piece of a searchpoint no human could
-  // author — which in turn pinned `response_format` shut on every node without a schema.
+  // `schema_owned` fences only the OPTIMIZER (`node_param_keys` / `l1_strict` /
+  // `build_l1_response_schema`), never the operator setting the value.
   it("lets the operator set a schema-owned key, and never makes it an axis", () => {
     const owned: NodeConfigParam = {
       key: "answer_field",
@@ -354,7 +335,6 @@ describe("configRows (values mode)", () => {
     const withOwned = { llm_only: [...schema.llm_only!, owned] };
     const rows = configRows(withOwned, { llm_only: { answer_field: "answer" } }, "values");
     expect(rows.find((r) => r.key === "answer_field")!.value).toBe("answer");
-    // Steering a fork onto a different answer slot is an ordinary edit and reaches the seed.
     expect(seedOverlayFromRows(rows, { "llm_only.answer_field": "reasoning" })).toEqual({
       llm_only: { answer_field: "reasoning" },
     });
@@ -366,12 +346,11 @@ describe("configRows (values mode)", () => {
         r.key === "answer_field" ? { ...r, value: "reasoning" } : r,
       ),
     );
-    // The VALUE is the operator declaring what this origin answers under…
     expect(patch.pipeline_overlay!.llm_only).toHaveProperty("config", {
       answer_field: "reasoning",
     });
-    // …and it is still not an AXIS. `movable_by: []` makes the row locked, and `nodeNarrowing`
-    // builds `param_keys` from unlocked rows — so the fence holds without a second gate.
+    // Still not an AXIS: `movable_by: []` locks the row, and `nodeNarrowing` builds `param_keys`
+    // from unlocked rows only.
     const optimizer = (patch.pipeline_overlay!.llm_only as { optimizer: { param_keys: string[] } })
       .optimizer;
     expect(optimizer.param_keys).not.toContain("answer_field");
@@ -439,10 +418,8 @@ describe("seedOverlayFromRows (values emit)", () => {
   });
 });
 
-// `values` mode emits the searchpoint's WHOLE running configuration, never a delta — the test
-// directly above pins that. So a surface reading the emission as "what the operator changed" marks
-// every parameter edited on the first keystroke, which on Compare blanks the channel instantly.
-// These two are what stands between that emission and an honest scenario.
+// `values` mode emits the WHOLE running config, so read raw it marks every parameter edited at
+// once; these two recover what the operator actually changed.
 describe("overlayEdits + applyFlatEdits", () => {
   const seed = { steps: ["llm_only"], llm_only: { reasoning_effort: "high", temperature: 0.2 } };
 
@@ -477,9 +454,8 @@ describe("overlayEdits + applyFlatEdits", () => {
   });
 });
 
-// What the babysit warning NAMES as permitted. The verdict itself is served
-// (`POST /campaigns/{id}/fork-preview`), so `null`-is-not-`[]` decides only what the sentence
-// lists, never whether the steer taints.
+// The taint verdict is served (`POST /campaigns/{id}/fork-preview`); this decides only what the
+// babysit warning lists.
 describe("permittedModels", () => {
   const modelRow = (over: Partial<NodeConfigParam>): NodeConfigParam[] => [
     {
@@ -520,9 +496,8 @@ describe("permittedModels", () => {
   });
 });
 
-// The model's ladder joins the MENU and never the ticks, and an unknown model subtracts nothing.
-// The engine's intersection is `param_options` (pinned in `tests/test_numerics.py`); folding it in
-// here would emit one model's refusals back as the campaign's own narrowing.
+// The ladder joins the MENU, never the ticks: the engine's intersection is `param_options`
+// (`tests/test_numerics.py`), and folding it in would emit a model's refusals as narrowing.
 describe("effortLadder", () => {
   const caps = (over: Partial<ModelCapability>): ModelCapability => ({
     model: "m",

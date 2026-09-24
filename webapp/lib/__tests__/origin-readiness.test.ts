@@ -33,8 +33,6 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
     headers: ["input", "gt"],
     column_query: "",
     column_ground_truth: "",
-    // Only the gated fields carry provenance: the two columns + task framing.
-    // Config is not gated (no entry); it carries a default the operator edits.
     field_provenance: {
       "column.query": "unset",
       "column.ground_truth": "unset",
@@ -49,8 +47,6 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
     node_config_schema: {},
     node_output_schema: {},
     dependencies: [],
-    // Server-authoritative mint-gate verdict (the gate lives in
-    // `origin_readiness.py`; the client reads this, never re-derives it).
     readiness: { complete: false, gaps: [] },
     ...over,
   };
@@ -77,7 +73,6 @@ describe("questionPatch / questionOptions (resolver answer-back loop)", () => {
 
   it("grounds a column question's options in the uploaded headers", () => {
     expect(questionOptions("column.query", [], ["a", "b"])).toEqual(["a", "b"]);
-    // The resolver's own options win when supplied; non-column free-text → empty.
     expect(questionOptions("connector", ["termnorm"], ["a"])).toEqual(["termnorm"]);
     expect(questionOptions("task_description", [], ["a"])).toEqual([]);
   });

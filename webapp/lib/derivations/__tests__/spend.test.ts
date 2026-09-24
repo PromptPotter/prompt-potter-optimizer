@@ -3,11 +3,8 @@ import { readSpend, roundCosts } from "../spend";
 import type { SpendBucket } from "@/lib/api/types";
 import type { DashboardSnapshot } from "@/lib/poll";
 
-// The prefix-cache discount is read PER BUCKET. It was one pooled ratio for a while, and the
-// three buckets are not comparable quantities: a backend row carries ~86k input against a judge's
-// ~1.6k, so the pool is the backend's share wearing everyone's name. Measured live at the time —
-// backend 20.0%, judge 42.1%, optimizer 0.0% — the pooled number rounded the judge away, and the
-// judge is the bucket whose rubric is a module constant and whose prefix pays best.
+// The prefix-cache discount is read PER BUCKET: a backend row carries far more input than a
+// judge's, so a pooled ratio is the backend's share wearing everyone's name.
 function bucket(over: Partial<SpendBucket> = {}): SpendBucket {
   return {
     used_usd: 0,
@@ -47,9 +44,7 @@ describe("readSpend prefix-cache shares", () => {
   it("reads each bucket on its own input, never on the pool", () => {
     const view = readSpend(
       dash({
-        // The live geometry: the backend dwarfs the other two, and the judge is the one holding
-        // a real prefix. A pooled ratio here is 20_800/101_600 ≈ 20.5% — the backend's number,
-        // to a decimal, with the judge invisible inside it.
+        // The backend dwarfs the other two: pooled, this reads ≈ the backend's number alone.
         backend: { input_tokens: 100_000, cache_read_tokens: 20_000 },
         loop: { input_tokens: 0, cache_read_tokens: 0 },
         judge: { input_tokens: 1_600, cache_read_tokens: 800 },
@@ -86,11 +81,8 @@ describe("readSpend prefix-cache shares", () => {
 
 describe("roundCosts against a dashboard an older build wrote", () => {
   it("drops a bucket that round's file never carried", () => {
-    // `dashboard.json` is served VERBATIM, so a round banked before `diagnostic` existed arrives
-    // with three buckets while the generated type declares four — 30 of 37 rounds on the machine
-    // this was found on. Reading the fourth through its annotation threw inside a `.map` and took
-    // the whole cost panel down with it; the type checker cannot see that, and only a walk against
-    // real history did.
+    // `dashboard.json` is served VERBATIM, so a round can lack a bucket the generated type
+    // declares; reading it through the annotation throws where no type check can see.
     const snapshot = {
       spend_by_round: {
         "0": {

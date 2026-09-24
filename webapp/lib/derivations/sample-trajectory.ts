@@ -1,6 +1,3 @@
-// Pure derivations for the Sample Trajectory views (Delta + Series). No React —
-// these turn a round list into the sorted/positioned/classified shapes the
-// grid renders. Sibling of round-timeline.ts (the picker-order derivation).
 
 import type { RoundSummary } from "@/lib/api/types";
 
@@ -11,7 +8,6 @@ export interface SortedRounds {
 
 export type CellKind = "new" | "gained" | "lost" | "kept" | "absent";
 
-// Sample-id → 1-indexed position in the round's measurement order.
 function positionMap(bank: number[] | undefined): Map<number, number> {
   const m = new Map<number, number>();
   if (!bank) return m;
@@ -19,9 +15,6 @@ function positionMap(bank: number[] | undefined): Map<number, number> {
   return m;
 }
 
-// Column ordering for the Series view: union of every round's selection,
-// ordered by first-appearance round, then within-round measurement
-// position. Late-arriving samples sit on the right.
 export function unionFirstAppearance(rounds: RoundSummary[]): number[] {
   const out: number[] = [];
   const seen = new Set<number>();
@@ -45,9 +38,6 @@ export function buildSorted(rounds: RoundSummary[]): SortedRounds {
   };
 }
 
-// Cumulative ever-seen set per round-index — lets a cell distinguish "newly
-// added" (never seen before) from "re-added after a drop". Used by both the
-// mini-button preview and the Series grid.
 export function cumulativeEverSeen(rounds: RoundSummary[]): Set<number>[] {
   const out: Set<number>[] = [];
   let seen = new Set<number>();

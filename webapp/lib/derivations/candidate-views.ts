@@ -1,12 +1,5 @@
-// The candidates card's bar spine — the served tree's children of the VIEWED node, turned
-// into the one row shape the bars, the dendrogram and the scoring-mask panel all read.
-//
-// Peer of `round-candidates.ts`: that one normalizes ONE cycle's rounds out of `dashboard.json`
-// for the sample-scoped surfaces; this one walks the genealogy, the only source that expresses
-// what hangs off a candidate.
-//
-// Every number here is SERVED — the rules below choose WHICH served number a bar may show, and
-// a picked sample set reaches only the overlap channel.
+// The served tree's children of the VIEWED node as the one row shape the bars, dendrogram and
+// mask panel read. Every number is served; a picked sample set reaches only the overlap channel.
 
 import type {
   DashboardCandidate,
@@ -18,22 +11,19 @@ import type { CandidateView } from "@/lib/types";
 import { panelCellLabel } from "./inner-panel";
 import { nodeKeyOf, splitRetired } from "./lineage-candidates";
 
-// A course is a run, not a scored row, so the server decorates it with no basis. Children
-// strictly alternate, so this is all-or-nothing and the basis never mixes within one chart.
+// A course is a run, not a scored row, so the server decorates it with no basis.
 export function barsAreCourses(viewedNode: LineageNode | undefined): boolean {
   return (viewedNode?.children ?? []).some((n) => n.kind === "course");
 }
 
-// A fork's attempt is a course under the hood — the ⑂ marks lead there.
 export function forkKeysOf(viewedNode: LineageNode | undefined): Set<string> {
   return new Set(
     (viewedNode?.children ?? []).filter((n) => n.course_kind != null).map((n) => nodeKeyOf(n)),
   );
 }
 
-// The count is worth painting over a bar only where it is NEWS — under its own budget, or
-// shorter than the fullest panel in its round (a PoBB leader-lock cut). Every bar's count stays
-// in the tooltip footer, which is the denominator of record. `null` = nothing to say here.
+// Painted only where it is NEWS — under its own budget, or shorter than its round's fullest
+// panel (a PoBB leader-lock cut); the tooltip footer is the denominator of record.
 export function partialPanels(views: readonly CandidateView[]): (number | null)[] {
   const fullest = new Map<number, number>();
   for (const v of views) {
@@ -48,7 +38,6 @@ export function partialPanels(views: readonly CandidateView[]): (number | null)[
   });
 }
 
-// The latest `verify` run for a candidate, in the shape the chart paints.
 function diagView(d: DiagnosticRunRecord | undefined): CandidateView["diag"] {
   return d
     ? { accuracy: d.workspace_accuracy, workspaceN: d.workspace_n, samplesAdded: d.samples_added }
@@ -57,17 +46,15 @@ function diagView(d: DiagnosticRunRecord | undefined): CandidateView["diag"] {
 
 export interface CandidateViewsInput {
   viewedNode: LineageNode | undefined;
-  // Label → the row `dash.current_round` is scoring now. Keyed by label because a course's OWN
-  // candidates keep their minted label, and `dash` is the viewed course's telemetry.
+  // Keyed by label: a course's own candidates keep their minted label, and `dash` is its telemetry.
   inflightByLabel: ReadonlyMap<string, DashboardCandidate>;
-  // The cells the operator pinned the overlap bars to, or null for the served reading.
+  // null ⇒ the served reading.
   sampleSet: number[] | null;
-  // Whether the mask in force re-derives whole from the masked rows — decided off the served
-  // evaluator registry (`scoring-mask::subsetExactFor`), not here.
+  // Decided off the served evaluator registry (`scoring-mask::subsetExactFor`), not here.
   lensSubsetExact: boolean;
   diagByLabel: ReadonlyMap<string, DiagnosticRunRecord>;
   overlapByCandidate: ReadonlyMap<string, OverlapMember>;
-  // Cells the SERVED reading holds — the denominator a member must match to be readable.
+  // The denominator a member must match to be readable.
   overlapSize: number | null;
 }
 
@@ -82,24 +69,17 @@ export function candidateViews({
 }: CandidateViewsInput): CandidateView[] {
   const pickedSet = sampleSet != null && !barsAreCourses(viewedNode);
   const basis = pickedSet ? (sampleSet?.length ?? null) : overlapSize;
-  // ONE half per bar, ALL-OR-NOTHING: the tree, unless it holds no measurement for this
-  // candidate yet. The ledger mints a candidate before it measures one and snapshots the score
-  // only at completion, so a bar mid-scoring is the one thing the tree cannot answer.
-  // The LIVE side of every supersede cut. A fork's attempts are folded onto the parent's one
-  // timeline, so the tail it retired sits here too — left in, a round of three reads as a round
-  // of six, half of them blank and wearing the live half's labels. The retired branches stay
-  // legible as their own collapsed rows in the forest.
+  // ONE half per bar, all-or-nothing: the tree, unless it has no score yet (the ledger snapshots
+  // one only at completion). Live side of each supersede cut only — retired tails double a round.
   return splitRetired(viewedNode?.children ?? []).live.map<CandidateView>((n, i) => {
     const isCourse = n.kind === "course";
-    // A course shows what it reached, else what it started from. A cut that broke before
-    // measuring anything has no number and must render blank, never as its origin's.
+    // A cut that broke before measuring anything renders blank, never as its origin's number.
     const own = isCourse ? (n.best_accuracy ?? n.origin_accuracy) : n.accuracy;
     const live = isCourse ? undefined : inflightByLabel.get(n.label);
     // An INVALID candidate reports `INVALID_SCORES`' synthetic 0.0 and the tree withholds it, so
     // falling back to the live half would put the fabricated number back on the bar.
     const useLive = live != null && !live.invalid && own == null;
-    // The chosen half. Every measured number below reads off THIS, so a bar and its whisker
-    // can never come from two different polling clocks.
+    // Every measured number reads off THIS half, so a bar and its whisker share one polling clock.
     const m = useLive ? live : n;
     const accuracy = isCourse ? (own ?? null) : (m.accuracy ?? null);
     const label = isCourse ? (n.task ? panelCellLabel(n.task) : n.dataset_name) : n.label;
@@ -118,10 +98,7 @@ export function candidateViews({
       composite: isCourse ? null : (m.composite_fitness ?? null),
       theta: m.theta ?? null,
       theta_se: m.theta_se ?? null,
-      // Off the same half as the θ it qualifies — a caveat read from the other clock could
-      // disclaim a number that is no longer on screen, or leave the one that is undisclaimed.
       thetaCaveat: m.theta_caveat ?? null,
-      // From the same row as the bar above it, whichever half that was.
       meanFitnessCiLo: m.mean_fitness_ci_lo ?? null,
       meanFitnessCiHi: m.mean_fitness_ci_hi ?? null,
       matchedParentLift: isCourse ? null : n.matched_parent_lift,

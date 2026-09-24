@@ -1,6 +1,4 @@
-/* The Compare tab — a picker beside the read. Shares the `l4-*` table/lede vocabulary
-   (imported just above this file) rather than restating it; only what is genuinely new to
-   this surface lives here. Theme-aware, operator-dense. */
+/* Shares the `l4-*` table/lede vocabulary (imported just above) rather than restating it. */
 
 .cmp-main {
   display: flex;
@@ -9,16 +7,11 @@
   min-width: 0; /* a chart must be allowed to shrink, or it forces the page wide */
 }
 
-/* Which point of this branch the card is reading — an inline toggle per card, because one
-   channel is usually the one being walked and a board-wide switch made every card grow to
-   serve it. */
+/* Per card: one channel is usually the one walked, and a board-wide switch grows every card to serve it. */
 .cmp-channel-lineage {
   margin: var(--space-8) 0 0;
 }
-/* ── Channel cards ──────────────────────────────────────────── */
-/* Side by side while they fit, wrapping to one column on a narrow viewport. `auto-fit` rather
-   than a fixed count: two channels get half each, four get quarters, and nothing needs a
-   breakpoint to say so. */
+/* `auto-fit`, not a fixed count: two channels get halves, four quarters, with no breakpoint. */
 .cmp-channels {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr));
@@ -79,18 +72,14 @@
   font-family: var(--font-mono);
   color: var(--color-text-secondary);
 }
-/* The dashboard's own cladogram, in a card — drawn at `DENSE`, so a six-round campaign is a few
-   hundred px rather than ~800. It can still outgrow the card (many forks, many rounds), so the
-   box scrolls in both axes: an `overflow:hidden` here would delete the part of the tree the
-   operator opened it to reach. */
+/* Drawn at `DENSE`, yet it can outgrow the card, so the box scrolls both axes — `overflow:hidden`
+   would delete the part of the tree the operator opened it to reach. */
 .cmp-channel-map {
   max-height: 26rem;
   overflow: auto;
   border-top: 1px solid var(--color-border);
   padding-top: var(--space-8);
 }
-/* What the map is showing — the cut, and the way out of it. Above the armed strip because it
-   describes the drawing rather than a click in it. */
 .cmp-map-scope {
   display: flex;
   flex-wrap: wrap;
@@ -99,8 +88,7 @@
   margin: var(--space-8) 0 0;
   font-size: var(--text-xs);
 }
-/* The clicked searchpoint and what can be done with it. Sticky to the bottom of the scrolling
-   map, because the node reached by scrolling right is never the one beside the buttons. */
+/* Sticky: the node reached by scrolling right is never the one beside the buttons. */
 .cmp-armed {
   position: sticky;
   bottom: 0;
@@ -123,9 +111,7 @@
   cursor: default;
 }
 
-/* ── Searchpoint configuration ──────────────────────────────── */
-/* One column per channel — wide by construction, so it scrolls inside its own box rather than
-   forcing the page wide. */
+/* Wide by construction: it scrolls inside its own box rather than forcing the page wide. */
 .cmp-cfg-wrap {
   overflow-x: auto;
 }
@@ -162,18 +148,14 @@
 .cmp-cfg-val {
   font-family: var(--font-mono);
   color: var(--color-text-tertiary);
-  /* A prompt field is a paragraph; the cell holds it on ONE line so the table stays a table, and
-     the whole value rides the cell's `title`. No line-clamp: the value is an input now, and a
-     `-webkit-box` here would take the restore button with it. */
+  /* ONE line, the whole value on `title`. No line-clamp: a `-webkit-box` would take the restore
+     button with it. */
   max-width: 22rem;
 }
 .cmp-cfg-differs .cmp-cfg-key,
 .cmp-cfg-differs .cmp-cfg-val {
   color: var(--color-text-primary);
 }
-/* The searchpoint's own setup, inside its channel card — the same editor as the table, in one
-   column instead of N. Collapsed by default: it is the largest thing on the card and the
-   comparison above it is what the tab is for. */
 .cmp-channel-setup > summary {
   display: flex;
   align-items: baseline;
@@ -183,9 +165,8 @@
   color: var(--color-text-tertiary);
   font-family: var(--font-mono);
 }
-/* The disclosure and its two controls are siblings on one row — the controls OUTSIDE `<summary>`,
-   which is a label and may hold neither a floating menu's markup nor its words in its accessible
-   name. A flex row, never an overlay: an absolute control sits on top of the open drill-in. */
+/* Controls OUTSIDE `<summary>`, a label that may hold neither a menu's markup nor its words in its
+   name. A flex row, never an overlay: an absolute control sits on the open drill-in. */
 .cmp-channel-setup-row {
   display: flex;
   align-items: flex-start;
@@ -198,8 +179,7 @@
 .cmp-channel-setup-row > :not(.cmp-channel-setup) {
   flex: 0 0 auto;
 }
-/* An editable cell. The input is the value — no box, no chrome — until it holds something the
-   record does not, which is the one state worth ink. */
+/* No chrome until it holds a value the record does not — the one state worth ink. */
 .cmp-cfg-cell {
   display: flex;
   align-items: baseline;
@@ -238,7 +218,6 @@
   color: var(--color-text-tertiary);
 }
 
-/* ── Ancestry spines ────────────────────────────────────────── */
 .cmp-spines {
   display: flex;
   flex-direction: column;
@@ -308,7 +287,6 @@
   cursor: default;
 }
 
-/* ── Charts ─────────────────────────────────────────────────── */
 .cmp-canvas {
   position: relative;
   height: 18rem;
@@ -334,8 +312,7 @@
   border-radius: 2px;
   flex: 0 0 auto;
 }
-/* A channel whose absolute level does not sit on the selection's scale. Struck rather than
-   hidden: its cells still pair where they overlap, so removing it would drop real evidence. */
+/* Struck rather than hidden: its cells still pair where they overlap. */
 .cmp-tag {
   border: 1px solid var(--color-border);
   border-radius: 4px;
@@ -357,9 +334,7 @@
   color: var(--color-text-tertiary);
 }
 
-/* ── Cell coverage ──────────────────────────────────────────── */
-/* Wide by construction — one column per cell — so it scrolls inside its own box rather than
-   forcing the page wide. */
+/* Wide by construction: it scrolls inside its own box rather than forcing the page wide. */
 .cmp-coverage {
   overflow-x: auto;
   margin: var(--space-12) 0;
@@ -390,10 +365,8 @@
   background: var(--color-background-secondary);
 }
 
-/* The merged forest is the `ov-*` row from `l4.css`, borrowed whole so the app has ONE rendering
-   of "an estimate and how sure we are". The one thing that does not carry over is its last-row
-   emphasis: there the rows are rounds and the last is the latest, here they are campaigns in run
-   order, and bolding the newest asserts a winner nothing measured. */
+/* The `ov-*` row from `l4.css`, borrowed whole minus its last-row emphasis: rows here are
+   campaigns in run order, and bolding the newest asserts a winner nothing measured. */
 .cmp-forest .ov-row:last-child .ov-cell-label,
 .cmp-forest .ov-row:last-child .ov-cell-val {
   font-weight: inherit;
@@ -402,7 +375,6 @@
   color: var(--color-text-secondary);
 }
 
-/* ── Composed metric ────────────────────────────────────────── */
 .cmp-expr {
   display: flex;
   flex-direction: column;
@@ -428,10 +400,7 @@
   border-color: var(--color-danger);
 }
 
-/* --- The factor grid ------------------------------------------------------------------------
-   The factorial read laid out as a table. It borrows `.l4-table` for the frame rather than
-   defining a second one; only what a GRID needs beyond a list lives here — the two axis pickers,
-   the margin band, and the per-subject stack inside one cell. */
+/* Borrows `.l4-table` for the frame; only what a GRID needs beyond a list lives here. */
 .l4-factor-controls {
   display: flex;
   flex-wrap: wrap;
@@ -454,9 +423,8 @@
   font-family: var(--font-mono);
   font-size: var(--text-sm);
 }
-/* The grid holds one column per level, so it outgrows the pane by design. Intrinsic width plus
-   the wrapper's scroll — never a percentage, which would compress the columns until the level
-   labels collided and nothing would overflow to say so. */
+/* Intrinsic width plus the wrapper's scroll, never a percentage: that compresses the columns
+   until the level labels collide, and nothing overflows to say so. */
 .l4-factor-grid {
   min-width: max-content;
 }
@@ -465,9 +433,8 @@
   font-weight: 400;
   color: var(--color-text-secondary);
 }
-/* The served marginal, set apart from the cells: it is a different population — every subject at
-   that level, not the one in this square — and a reader who takes it for another cell has read a
-   pooled number as a measurement. */
+/* Set apart from the cells: the served marginal pools every subject at that level, and read as
+   a cell it passes for a measurement. */
 .l4-margin {
   background: var(--color-background-secondary);
   font-variant-numeric: tabular-nums;

@@ -1,18 +1,5 @@
 "use client";
-// Lazy per-round file fetch. Deep audit surfaces (FreqChart bucket data,
-// ScoringInspector composite + hits, OptimizerNodeDetail node blocks) need
-// one round_NNNN.json at a time — not the full eager array. The summary
-// surfaces (the candidates card, TrendChart, TopStrip sparkline) read
-// `dash.rounds[]` directly and never hit this hook.
-//
-// Addressed by the viewed CYCLE PATH, not bare `(campaign, cycle)` ids: the
-// round file follows the LEAF hop the dashboard shows, so an L4 inner loop's
-// `rounds/round_NNNN.json` reads from the inner cycle's dir (via `?descend=`)
-// instead of the outer root's empty `rounds/`. `fetchCycleFileByPath` mirrors
-// `fetchDashboardByPath` — the same seam the live poll already rides.
-//
-// The key folds the round number in beside the encoded path, so the fetch re-runs
-// when either the viewed cycle or the round changes.
+// Lazy per-round file fetch, addressed by CYCLE PATH so an L4 inner loop reads its own `rounds/`.
 
 import { fetchCycleFileByPath } from "../api";
 import { encodeCyclePath, type CyclePath } from "../ids";
@@ -66,10 +53,7 @@ export function useRoundFile(
   return useCycleJson<RoundResult>(path, round, "round", "rounds/");
 }
 
-// The AUDIT TWIN — same basename, different tree. `rounds/round_NNNN.json` is the round
-// document (`RoundResult`) and carries NO `nodes` block; the per-node LLM I/O lives only
-// here, written by `AuditTrailProjection`. The node inspector used to read `nodes` off the round
-// document, which meant it rendered nothing for every completed round.
+// The AUDIT TWIN: the per-node LLM I/O lives only here — the round document has no `nodes`.
 export function useRoundAudit(
   path: CyclePath | null,
   round: number | null,

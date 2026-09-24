@@ -2,14 +2,8 @@ import { describe, it, expect } from "vitest";
 import { isLiveRound } from "@/lib/hooks/useRoundSource";
 import type { DashboardSnapshot } from "@/lib/poll";
 
-// Regression: the live/historical guard must key off round *closure*, not
-// topology equality with `current_round.round`. The round counter advances
-// only at scoring/close, so `current_round.round` lingers on an already-closed
-// round number (between a round closing and the next round scoring, after an
-// interrupt during next-round prep, and at some finish states). A round that
-// has migrated into `dash.rounds[]` is historical even while it still equals
-// `roundOf(dash)` — otherwise its samples/freq/node-detail get misrouted to the
-// now-empty in-flight projection.
+// `current_round.round` lingers on a closed round until the next one scores, so the guard keys
+// off closure into `rounds[]`.
 
 function dash(currentRoundNum: number, closedRounds: number[]): DashboardSnapshot {
   return {
@@ -20,8 +14,6 @@ function dash(currentRoundNum: number, closedRounds: number[]): DashboardSnapsho
 
 describe("isLiveRound closure guard", () => {
   it("treats a closed round as historical even when it equals current_round.round", () => {
-    // round 3 closed into rounds[] AND current_round.round still 3 (interrupted
-    // during round-4 prep) — the reported bug's exact shape.
     expect(isLiveRound(dash(3, [1, 2, 3]), 3)).toBe(false);
   });
 

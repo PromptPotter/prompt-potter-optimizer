@@ -1,13 +1,5 @@
-// The closed-set command highway — every campaign-state write posts to `/commands/{kind}`,
-// declared in `docs/specs/api-openapi.yaml` and dispatched server-side by `CommandDispatcher`
-// (`promptpotter/application/commands/`). The dispatcher writes a `CommandRecord` to the
-// target cycle's ledger, inline-applies the mutation, then writes a `CommandAckRecord`.
-//
-// These are pure I/O — they do NOT trigger poll revalidation themselves. The caller bumps
-// `lib/revalidate.ts` after a mutation resolves so the workspace poll picks the change up
-// immediately instead of on its next tick. The 202 body is generic (`CommandAcceptedBody` per
-// the OpenAPI schema); detailed apply results (new fork id, cleanup count) flow via the
-// workspace poll picking up the new on-disk state.
+// Every campaign-state write, posted to the closed-set `/commands/{kind}` highway. Pure I/O: the
+// caller bumps `lib/revalidate.ts` once a write resolves.
 
 import { encodeDescend, pathRoot, type CyclePath } from "../ids";
 import { API } from "./client";
@@ -20,10 +12,7 @@ import type {
 } from "./types.generated";
 import type { ArchiveReport, CommandAcceptedBody } from "./types";
 
-// The ONE `POST /commands/{kind}` write path. Generic over the response because the
-// typed routes (`edit-draft-campaign`, `start-checkin`, `resolve-origin`,
-// `replace-dataset`) answer with a domain object rather than the 202 envelope — those
-// four had each re-spelled this function to say so.
+// Generic over `T`: the typed routes answer with a domain object instead of the 202 envelope.
 export async function postCommand<T = CommandAcceptedBody>(
   kind: CommandKind,
   payload: Record<string, unknown>,
@@ -40,15 +29,10 @@ export async function postCommand<T = CommandAcceptedBody>(
   if (!r.ok) await throwApiError(r);
   return (await r.json()) as T;
 }
-// The fork's campaign-config delta — twin of the OpenAPI `ConfigOverrides`. Every field
-// optional; absent inherits the parent. Values are ABSOLUTE for the fork.
+// Absent inherits the parent; a present value is ABSOLUTE for the fork.
 export type ConfigOverrides = Partial<WireConfigOverrides>;
-// What the RECONCILE DIALOG may set, which is a narrower question than what the wire carries:
-// "how much budget does this fork get". The policy knobs beside them (`per_round_resubset`,
-// `schema_field_rename`) invalidate search comparability and are set at mint or by an L2/L3
-// `fork_proposal`, never by a checkbox on that dialog; `scoring` is set by the scoring mask's own
-// apply, which is the affordance that can say WHERE it applies from. A human-set model/provider
-// value rides the fork's `pipeline_overlay`, not here.
+// The reconcile dialog's subset. The policy knobs break search comparability and are set at mint
+// or by an L2/L3 `fork_proposal`, never on that dialog; `scoring` rides the scoring mask's apply.
 export type RunLimitOverrides = Partial<
   Pick<
     WireConfigOverrides,
@@ -61,28 +45,13 @@ export type RunLimitOverrides = Partial<
     | "pobb_epsilon"
   >
 >;
-// The edited-searchpoint origin override — twin of the OpenAPI
-// `OperatorForkOverride`. Required on every operator fork (all are
-// `operator_steered`). `origin_prompt_fields` is the PromptTemplate field shape;
-// `pipeline_overlay` is the candidate's `nodes.*.config` value delta, carried verbatim
-// and merged onto the dataset overlay at fork init. `optimizer_narrowing` carries
-// per-node param LOCK edits ({node: {param_keys, param_allowed_values}}) — overrides the
-// campaign's mint-time narrowing for this cycle only; absent inherits it unchanged.
+// `optimizer_narrowing` overrides the campaign's mint-time narrowing for this cycle only; absent
+// inherits it unchanged.
 export type OperatorForkOverride = Partial<
   Omit<CycleSeed, "origin_source" | "config_overrides">
 > & { config_overrides?: ConfigOverrides };
-// Mint a fork rooted at the selected searchpoint, carrying the operator's edits +
-// reconciled limits. The single fork write path, and the two acts it spells differ only
-// in `keepRounds`: unset is `operator_steered` (a clean offshoot from the origin, rounds
-// numbered from 1); set is `operator_rewind`, which LIFTS rounds 0..round-1 and continues
-// at `round` under the seed's overrides — what "apply this from here" means, and what the
-// terminal spells `resume --rewind N`. The server refuses the second with an
-// `origin_prompt_fields` seed: the lifted round 0 already is the origin.
-//
-// `pauseFirst` is the ORDER, not a convenience: a steer supersedes the parent, so a fork
-// launched beside a still-running loop races it. Whether the parent is live is the caller's
-// fact; what to do about it is not, which is why both panels state it here rather than
-// spelling the pause themselves.
+// `keepRounds` makes it `operator_rewind` (lifts rounds 0..round-1, the terminal's `resume --rewind
+// N`), which the server refuses with an `origin_prompt_fields` seed; unset is `operator_steered`.
 export async function postSteerFork(
   campaignId: string,
   cycleId: string,
@@ -95,6 +64,7 @@ export async function postSteerFork(
     pauseFirst: boolean;
   },
 ): Promise<CommandAcceptedBody> {
+  // A steer supersedes the parent, so a fork launched beside a still-running loop races it.
   if (opts.pauseFirst) await postPauseCycle(campaignId, cycleId);
   const payload: Record<string, unknown> = {
     campaign_id: campaignId,
@@ -107,13 +77,8 @@ export async function postSteerFork(
   if (opts.keepRounds) payload.keep_rounds = true;
   return postCommand("fork-cycle", payload);
 }
-// Give a campaign an operator name — `campaign.json::label`, which
-// `lib/names.ts::campaignDisplayName` prefers over the dataset name everywhere a
-// campaign is named to a human. `""` clears it and restores that fallback, so an
-// empty string is a real value here rather than a no-op. The campaign_id is NOT
-// touched: it addresses the directory, the measurement cache and every bookmark.
-// Owner-gated server-side (`campaign.lifecycle`); identity-neutral, so a rename
-// cannot void a banked origin.
+// `""` is a real value: it clears the label back to the dataset-name fallback. Identity-neutral,
+// so a rename never voids a banked origin.
 export async function postSetCampaignLabel(
   campaignId: string,
   label: string,
@@ -129,21 +94,8 @@ export async function postCleanupEmpty(
     cycle_id: cycleId,
   });
 }
-// Campaign lifecycle. Archive moves NOTHING — it flips `lifecycle_status`, so the
-// tree stays in `campaigns/` and only the listing filter hides it (reversible via
-// unarchive); delete is PHYSICAL and irreversible — the server
-// defaults `keep_results` to false, so the whole campaign tree plus every L4
-// inner sandbox its cycles spawned is removed. Measurements survive either way:
-// `measurements/` belongs to no single campaign, so siblings still cache-hit.
-//
-// (This comment used to claim "deletion is never physical at this site" and name
-// `try_delete_stub_cycle` as the only physical-delete path. That described a
-// design the store had already left, and it is exactly the kind of reassurance
-// worth distrusting on a destructive verb.)
-//
-// Both verbs 409 while any cycle in the campaign has a LIVE producer — pause or
-// stop it first. Being the campaign you are currently looking at is NOT a
-// refusal: the server releases the active pointer and proceeds.
+// Archive only flips `lifecycle_status`; delete PHYSICALLY removes the tree and every inner
+// sandbox (`measurements/` survives both). Both 409 while any cycle has a live producer.
 
 export async function postArchiveCampaign(
   campaignId: string,
@@ -166,35 +118,24 @@ export async function postDeleteCampaign(
   if (reason) payload.reason = reason;
   return postCommand("delete-campaign", payload);
 }
-// Pause a running cycle — the single operator-interrupt verb. Writes
-// `.runtime/pause.flag`; the loop's `pause_check` sees it at the next checkpoint,
-// the worker exits cleanly, and the cycle stays resumable (non-terminal). There
-// is no separate "stop" / "resume-cycle": resuming is `postStartRun(…, "resume")`
-// relaunching from the last completed round. Idempotent. Cycle-scoped per
-// `api-openapi.yaml::pauseCycle`. Pause-state reads back from
-// `GET /api/v1/sessions/active/live-state::is_paused`.
+// The one interrupt verb, idempotent: there is no stop, and resuming is `postStartRun(…, "resume")`.
+// Pause state reads back from `live-state::is_paused`.
 export async function postPauseCycle(
   campaignId: string,
   cycleId: string,
 ): Promise<CommandAcceptedBody> {
   return postCommand("pause-cycle", { campaign_id: campaignId, cycle_id: cycleId });
 }
-// Operator early-abort of the searchpoint scoring right now: writes a one-shot
-// `.runtime/skip.flag`; the loop cuts the remaining samples of the in-flight
-// searchpoint, accepts the partial score, and the cycle CONTINUES to the next
-// candidate (NOT a stop). The operator analog of automatic PoBB elimination.
-// A manual skip marks the cycle `human_intervened` (babysat). Cycle-scoped per
-// `api-openapi.yaml::skipSearchpoint`.
+// Cuts the in-flight searchpoint's remaining samples and CONTINUES to the next candidate (not a
+// stop). Marks the cycle `human_intervened`.
 export async function postSkipSearchpoint(
   campaignId: string,
   cycleId: string,
 ): Promise<CommandAcceptedBody> {
   return postCommand("skip-searchpoint", { campaign_id: campaignId, cycle_id: cycleId });
 }
-// Re-score one candidate on cells it has never been measured on. No `samples` parameter by
-// design: the count is derived server-side (`verify.py::derive_verify_samples`), so no client can
-// turn one click on a million-row dataset into a million-cell bill. Per
-// `api-openapi.yaml::verifyCandidate`.
+// No `samples` parameter by design: the server derives the count
+// (`verify.py::derive_verify_samples`), so one click cannot buy a million cells.
 export async function postVerifyCandidate(
   campaignId: string,
   cycleId: string,
@@ -206,18 +147,8 @@ export async function postVerifyCandidate(
     label,
   });
 }
-// Set how many calls the scoring round holds in flight; `cells: 1` disarms,
-// so it is a cancel rather than a second verb. The request is sent unclamped and the walk
-// clamps it to the backend's ceiling (`dashboard.json::max_cells_in_flight`). It also ends on
-// its own — spent by the round that scored under it, the same on every backend. Unlike skip it
-// does NOT mark the cycle babysat: the in-flight acquisition is discarded, so the measurement is
-// identical at any depth. Host-admin only.
-//
-// The one command addressed by PATH rather than by the root hop: throughput is what an inner
-// run answers for itself, so an L4 inner cycle is armed by descending to it — the same
-// `descend` grammar the dashboard poll uses, empty at depth 1. `auto` keeps the arming past its
-// round and past a relaunch, until a later press replaces it.
-// Per `api-openapi.yaml::setSampleLookahead`.
+// `cells: 1` disarms; sent unclamped, the walk clamps it to `max_cells_in_flight`. The one command
+// addressed by PATH, because an inner cycle arms its own throughput. Never marks the cycle babysat.
 export async function postSetSampleLookahead(
   path: CyclePath,
   cells: number,
@@ -233,18 +164,8 @@ export async function postSetSampleLookahead(
     ...(descend ? { descend } : {}),
   });
 }
-// Raise or lower a running cycle's USD and/or token spend cap mid-flight. Writes
-// `.runtime/spend_cap.json` ({max_usd, max_tokens}); the round loop's BudgetGate
-// re-reads it every clean round — `0` on a ceiling halts at the next round
-// boundary, raising above current usage releases. Pass `null` for a ceiling to
-// leave it unchanged (the applier merges). At least one must be a number.
-// Cycle-scoped command per `api-openapi.yaml::changeSpendBudget`.
-// Resolve a cycle blocked at the round-0 origin gate (`run_phase: gate`): the
-// origin verdict was not `healthy`, so the runner is holding before L1. Writes
-// `.runtime/gate_decision.json`, which the runner polls. `rescore` re-measures
-// the origin force-fresh (reflecting a backend-code fix) and re-evaluates the
-// gate in place; `proceed` overrides into L1; `abort` ends the cycle with
-// `StopReason.ORIGIN_GATE`. Cycle-scoped per `api-openapi.yaml::originGateDecision`.
+// `rescore` re-measures the origin force-fresh and re-judges the gate in place; `proceed` overrides
+// into L1; `abort` stops the cycle with `StopReason.ORIGIN_GATE`.
 export type OriginGateDecision = OriginGateDecisionPayload["decision"];
 export async function postOriginGateDecision(
   campaignId: string,
@@ -257,6 +178,7 @@ export async function postOriginGateDecision(
     decision,
   });
 }
+// A `0` ceiling halts at the next round boundary; an omitted one stays unchanged (the applier merges).
 export async function postChangeSpendBudget(
   campaignId: string,
   cycleId: string,
@@ -275,10 +197,7 @@ export async function postChangeSpendBudget(
 export async function postSetConcurrentCycles(limit: number): Promise<CommandAcceptedBody> {
   return postCommand("set-concurrent-cycles", { max_concurrent_cycles: limit });
 }
-// No cap args. A cap is declared where there is a surface to declare it on — the check-in's own
-// Start (`start-checkin`) for a fresh launch, `change-spend-budget` for a run already going — and
-// a resume inherits what the cycle already carries. The two optional ones that stood here reached
-// `useRunControl`, the sole caller, which has never passed either.
+// No cap args: a cap is declared at `start-checkin` or via `change-spend-budget`; a resume inherits.
 export async function postStartRun(
   campaignId: string,
   cycleId: string,
@@ -287,10 +206,8 @@ export async function postStartRun(
   return postCommand("start-run", { campaign_id: campaignId, cycle_id: cycleId, kind });
 }
 
-// Archive maintenance — the one command whose PREVIEW is the product. Every mode defaults to a
-// dry run server-side; `apply` is what writes, and `purge-cold` with it is the only step that
-// destroys (the rows it drops are paid LLM spend). The report shape is identical either way, so
-// a caller renders a preview and an apply with one component.
+// A dry run unless `apply`; `purge-cold` with `apply` destroys paid measurement. Preview and apply
+// return one report shape.
 export async function postCompactArchive(opts: {
   mode: "compact" | "restore" | "purge-cold";
   dataset?: string;

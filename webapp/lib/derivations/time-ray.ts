@@ -1,58 +1,32 @@
-// The time-ray, shaped for rendering. Pure: RayItem[] in, steps + a head state out.
-//
-// Two problems kept apart, deliberately. The SERVER bounds the payload — by KIND (it drops
-// `token_usage`/`decision` everywhere and everything but milestones inside an inner run) and
-// by FIELD (`RAY_PAYLOAD_FIELDS`: identity, address and the one-line reading, never a
-// record's bulk); this file bounds the PIXELS (it collapses a run of consecutive inner-cycle
-// steps into one and marks silences). Neither can do the other's job — the server cannot know
-// the viewport, and the client cannot cheaply page a ledger.
-//
-// Curation is NOT re-implemented here. Each item goes through `projectionToActivity`, the
-// same translator the chat uses, because a RayItem's `kind` is a `ProjectionEnvelope`'s and
-// its `payload` is a subset of the same body. One curated event vocabulary, two surfaces.
+// The time-ray shaped for rendering. The server bounds the payload (`RAY_PAYLOAD_FIELDS`); this
+// bounds the pixels. Curation rides `projectionToActivity`, the chat's own translator.
 
 import type { RayItem } from "@/lib/api/types";
 import { projectionToActivity, type ActivityItem } from "@/lib/chat/activity";
 import { candidateLabel } from "@/lib/candidate-label";
 import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 
-// No progress for this long, while the SERVER still says `running`, is wedged.
-//
-// The threshold is not taste. With `gate` excluded (see `rayHead`), the longest legitimately
-// silent-but-progressing interval in this package is `measure_sample`'s backend query, whose
-// QUERY_TIMEOUT is 120 s. An L4 inner heartbeat carries `detail` ("inner rX/Y · best Z%"),
-// which IS progress and counts as a non-heartbeat item. 300 s is 2.5× the longest legitimate
-// silence.
+// 2.5× the longest legitimately silent-but-progressing wait, `measure_sample`'s 120 s
+// QUERY_TIMEOUT. `gate` is excluded (see `rayHead`).
 export const WEDGED_AFTER_S = 300;
 
-// A step older than this is not "now" — the `running` head reads the newest step's text only
-// while that step is recent. Same number as the gap threshold, and for the same reason: nine
-// missed 10 s heartbeats.
+// Nine missed 10 s heartbeats.
 const RECENT_S = 90;
 
 export interface RayStep {
-  // Stable across refetches — never a window index, which shifts when a new cycle is
-  // discovered.
+  // Never a window index, which shifts when a new cycle is discovered.
   key: string;
   path: CyclePath;
   pathKey: string;
-  /** Physical offset in `path`'s OWN ledger — the moment this step stands at. A step on the
-   *  viewed course hands it to the dashboard route and the whole page folds to it; a step
-   *  below (a fork, an inner run) counts in a different ledger's space, so it is an address
-   *  to navigate to and never a moment to fold this course to. */
+  /** In `path`'s OWN ledger: a step below the viewed course is an address to navigate to, never
+   *  a moment to fold this course to. */
   offset: number;
-  /** Epoch ms of the step's effective timestamp. */
   at: number;
-  /** Seconds of silence before this step. 0 = no gap, or nothing precedes it. */
   gapBeforeS: number;
-  /** How many consecutive same-cycle steps this one stands for. 1 = just itself. */
   cluster: number;
   activity: ActivityItem;
-  /** The round this step is about, for the shared round axis. */
   round: number | null;
-  /** The candidate this step is about, by its MINTING course's label — the join the
-   *  lineage tree blesses (`course_label`), never `candidate_id`, which is re-minted
-   *  per run and would silently miss. */
+  /** The minting course's label (`course_label`), never `candidate_id`, which is re-minted per run. */
   candidateLabel: string | null;
 }
 
@@ -70,17 +44,13 @@ function toPath(item: RayItem): CyclePath {
   return item.path.map((h) => ({ campaignId: h.campaign_id, cycleId: h.cycle_id }));
 }
 
-// A BARE heartbeat: `llm_call_progress` with no `detail`. It proves the process was alive
-// and nothing else, which is exactly the distinction the whole head-state table turns on —
-// freshness proves attachment, never progress.
+// A `detail` (an L4 inner "rX/Y · best Z%") IS progress; a bare heartbeat proves only attachment.
 function isHeartbeat(item: RayItem): boolean {
   return item.kind === "llm_call_progress" && !str(item.payload.detail);
 }
 
-// WHICH candidate / round a step is about. Deliberately separate from
-// `projectionToActivity`, which answers a different question: that one produces a LINE to
-// read, this one produces an ADDRESS to navigate to. Folding them would make the chat carry
-// navigation fields it never uses, and would make a display tweak able to break a click.
+// Apart from `projectionToActivity`: that yields a line to read, this an address, and a display
+// tweak must not break a click.
 function addressOf(item: RayItem): { round: number | null; candidateLabel: string | null } {
   const p = item.payload;
   if (item.kind === "candidate_minted") {
@@ -108,24 +78,15 @@ function addressOf(item: RayItem): { round: number | null; candidateLabel: strin
   return { round: num(p.round) ?? null, candidateLabel: null };
 }
 
-/**
- * The rendered sequence: even steps, explicit gap markers, inner runs clustered.
- *
- * `rootPathKey` names the ray's own course. Only steps BELOW it cluster: the root's own
- * events are the story being told, while a run of events from one inner cycle is a
- * digression that belongs behind one expandable marker.
- */
+/** Only steps BELOW `rootPathKey` cluster: the root's own events are the story being told. */
 export function raySteps(items: readonly RayItem[], rootPathKey: string): RayStep[] {
   const steps: RayStep[] = [];
-  // Carried across ALL items, not just steps — a heartbeat resets the silence clock without
-  // becoming a step. That is what stops a heartbeated 120 s backend query growing a gap.
+  // Across ALL items: a heartbeat resets the silence clock without becoming a step.
   let lastAt: number | null = null;
 
   for (const item of items) {
     const raw = Date.parse(item.ts);
-    // An unparseable timestamp inherits its predecessor's, which is the same repair the
-    // server's clamp makes and for the same reason: the sequence is the authority, so a
-    // record with no readable time still has a place in it.
+    // Inherits its predecessor's time, the server clamp's repair: the sequence is the authority.
     const parsed: number = Number.isFinite(raw) ? raw : (lastAt ?? 0);
     const gapBeforeS = lastAt === null ? 0 : Math.max(0, (parsed - lastAt) / 1000);
     lastAt = parsed;
@@ -142,10 +103,7 @@ export function raySteps(items: readonly RayItem[], rootPathKey: string): RaySte
     const pathKey = encodeCyclePath(path);
     const prev = steps[steps.length - 1];
 
-    // CLUSTER: consecutive steps from the same non-root cycle fold into the newest one. The
-    // newest rather than the first because it carries the furthest-along state, and the
-    // cluster's gap stays the gap before the run began — folding the interior silences into
-    // the marker would invent a pause that never happened.
+    // Fold into the newest (furthest-along) step, keeping the gap before the run began.
     if (prev && prev.pathKey === pathKey && pathKey !== rootPathKey) {
       steps[steps.length - 1] = {
         ...prev,
@@ -188,21 +146,11 @@ export interface RayHead {
   state: RayHeadState;
   label: string;
   detail: string;
-  /** Where the newest activity is, when that is somewhere the operator can go. */
   target: CyclePath | null;
 }
 
-/**
- * What the head of the ray says. `run_phase` alone cannot express `running` vs `wedged`:
- * every long await heartbeats (`dispatch/llm_call/heartbeat.py`), so freshness proves
- * ATTACHMENT, never progress — a wedged process reads `running` forever. The ray holds the
- * other input: progress = a non-heartbeat ledger append.
- *
- * `wedged` is derived HERE and written nowhere — a display state layered on the one
- * server-owned run state (I6), never a `RunPhase` member. `gate` is excluded from the
- * wedged test (load-bearing): a held gate legitimately heartbeats with zero progress
- * indefinitely — it is blocked on the operator, and it already has a state saying so.
- */
+/** Every long await heartbeats (`dispatch/llm_call/heartbeat.py`), so a wedged run reads `running`
+ *  forever. `wedged` is display-only (I6); a held `gate` heartbeats with no progress legitimately. */
 export function rayHead(
   steps: readonly RayStep[],
   items: readonly RayItem[],
@@ -230,8 +178,6 @@ export function rayHead(
     return { state: "idle", label: terminalLabel, detail: "", target: null };
   }
 
-  // The server says attached-and-fresh. Whether it is PROGRESSING is this file's question,
-  // and a step is the only evidence of it — every step is a non-heartbeat append.
   const sinceProgressS = newestStep ? (nowMs - newestStep.at) / 1000 : Infinity;
   if (sinceProgressS > WEDGED_AFTER_S) {
     const mins = Number.isFinite(sinceProgressS) ? `${Math.round(sinceProgressS / 60)}m` : "";
@@ -243,10 +189,7 @@ export function rayHead(
     };
   }
 
-  // WAITING ON A CHILD: the root opened an LLM call that has not returned, and the newest
-  // thing in the family happened somewhere below. The pairing is sound within one window by
-  // construction — a completion is always appended AFTER its start, so if the start is in the
-  // window and its `llm_call` is not, the call genuinely has not completed.
+  // Sound within one window: a completion is always appended after its start.
   const rootItems = items.filter(
     (i) => encodeCyclePath(toPath(i)) === rootPathKey && !isHeartbeat(i),
   );

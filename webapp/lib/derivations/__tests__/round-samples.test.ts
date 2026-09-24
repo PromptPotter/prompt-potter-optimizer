@@ -5,12 +5,8 @@ import type { DashboardSnapshot } from "@/lib/poll";
 import type { RoundResult } from "@/lib/types";
 import { sampleRow } from "@/lib/test-fixtures";
 
-// `samplesForRow` is the single live-vs-historical source switch every sample
-// surface rides (candidates-card bars, MeasurementRun groups). It SELECTS one
-// source off the row's `source` tag — never merges, never falls back — so the
-// two readers can't drift on routing. These tests pin that an in-flight row
-// reads `dash` (ignoring the round file) and a historical row reads the round
-// file (ignoring `dash`).
+// `samplesForRow` SELECTS one source off the row's `source` tag — never merges, never falls back:
+// an in-flight row reads `dash`, a historical row the round file.
 
 function row(source: CandidateRow["source"]): CandidateRow {
   return {
@@ -87,9 +83,8 @@ describe("samplesForRow — source routing", () => {
   });
 });
 
-// The other half of the same block. It is a plain `dict[str, Any]` server-side with no model
-// behind it, so every read is defensive by contract, not by caution. These cases are the shapes
-// the producer actually emits plus the ones a half-written block emits mid-round.
+// A plain `dict[str, Any]` server-side with no model behind it, so every read is defensive by
+// contract — including a half-written block mid-round.
 const block = (input: unknown, output: unknown): NodeBlock =>
   ({ input, output }) as NodeBlock;
 

@@ -1,14 +1,9 @@
 
-/* `both-edges` so the centred spine sits at the same x as the unit header above it,
-   which has no scrollbar of its own. A gutter on one edge only would still bias the
-   centre by half a scrollbar, and reserving none moves the content sideways the
-   moment a pane grows past the fold. */
+/* `both-edges` so the spine sits at the unit header's x: a one-edge gutter biases the centre,
+   and none shifts content sideways when a pane passes the fold. */
 .content{flex:1;overflow-y:auto;scrollbar-gutter:stable both-edges;padding:var(--space-18);container-type:inline-size;container-name:content}
 
-/* Dashboard spine — the single width tier wrapping diagnostics + panel grids.
-   Centered in the MAIN COLUMN (max-width + auto margins), the one method the
-   chat column and the shared masthead also use, so the three align and all
-   three shift together when the sidebar collapses. */
+/* Centred in the MAIN COLUMN, the method the chat column and masthead also use, so all three align. */
 .dash-spine-narrow{width:100%;max-width:var(--dash-narrow-max);margin-left:auto;margin-right:auto;margin-bottom:var(--dash-zone-gap)}
 @media (max-width:880px){
   .content{padding:var(--space-12)}
@@ -18,19 +13,12 @@
 }
 .dash-spine-narrow:last-child{margin-bottom:0}
 
-/* CriticalAlertBanner — the loud, can't-miss failure surface. Sticky bar at the
-   top of the main column on every tab, above all content. `critical` =
-   blocking (server gone / crash) in danger tone + a weak blink; `warn` =
-   producer went silent in warn tone, no blink. The blink is decoration —
-   colour + icon + text carry the state, and reduced-motion neutralises it. */
 .critical-alert{position:sticky;top:0;z-index:40;display:flex;align-items:baseline;gap:var(--space-12);
   padding:var(--space-10) var(--space-18);border-bottom:1px solid transparent;font-size:var(--text-md)}
 .critical-alert.critical{background:var(--color-danger-bg);border-bottom-color:var(--color-danger-border);
   color:var(--color-danger);box-shadow:inset 4px 0 0 var(--color-danger);animation:critical-pulse 1.4s ease-in-out infinite}
 .critical-alert.warn{background:var(--color-warn-bg);border-bottom-color:var(--color-warn-border);
   color:var(--color-warn);box-shadow:inset 4px 0 0 var(--color-warn)}
-/* `info` — nothing is wrong; the app recovered and is saying why. Deliberately
-   neutral chrome + the accent rule: no danger/warn palette, no pulse. */
 .critical-alert.info{background:var(--color-background-secondary);border-bottom-color:var(--color-border);
   color:var(--color-text-primary);box-shadow:inset 4px 0 0 var(--color-accent)}
 .critical-alert-icon{font-size:var(--text-lg);line-height:1;flex-shrink:0}
@@ -42,16 +30,11 @@
   border:0.5px solid currentColor;border-radius:var(--border-radius-md);padding:3px var(--space-10);cursor:pointer;flex-shrink:0}
 .critical-alert-jump:hover{background:var(--color-background-hover)}
 .critical-alert-jump:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
-/* Stop is the destructive primary action on a critical banner — solid danger fill
-   so it reads as the consequential choice, not a peer of the secondary "Files →" jump. */
 .critical-alert-stop{background:var(--color-danger);color:var(--color-background-primary);
   border-color:var(--color-danger);font-weight:700}
 .critical-alert-stop:hover{background:var(--color-danger-border);border-color:var(--color-danger-border)}
 @keyframes critical-pulse{0%,100%{opacity:1}50%{opacity:.72}}
 
-/* RunErrorBanner — surfaces dashboard.json::error when the runner crashed.
-   Sits above the TopStrip in the "Now" lane so the operator sees the cause
-   before scanning anything else. */
 .run-error-banner{
   background:var(--color-danger-bg);
   border:1px solid var(--color-danger-border);
@@ -70,14 +53,9 @@
 .run-error-banner-msg{margin:0;font-family:var(--font-mono);white-space:pre-wrap;word-break:break-word}
 .run-error-banner-list{margin:var(--space-6) 0 0 0;padding-left:18px;color:var(--color-text-secondary);font-family:var(--font-mono);font-size:var(--text-xs)}
 .run-error-banner-list li{margin:2px 0}
-/* Warn tone for the same banner — non-fatal optimizer-loop degradations. */
 .run-error-banner.is-warn{background:var(--color-warn-bg);border-color:var(--color-warn-border)}
 .run-error-banner.is-warn .run-error-banner-head{color:var(--color-warn)}
 
-/* Dashboard lanes — three collapsible sections that taxonomize the
-   panels by operator intent: NOW (what's running this instant) /
-   VERDICT (has it improved?) / WHY (drill down). Open/closed state
-   persists in localStorage via the Lane component. */
 .dash-lane{margin:0 auto var(--dash-zone-gap);max-width:var(--dash-wide-max)}
 .dash-lane-head{display:flex;align-items:baseline;gap:var(--space-10);width:100%;padding:var(--space-6) var(--space-12);background:transparent;border:0;border-bottom:0.5px solid var(--color-border);cursor:pointer;color:inherit;text-align:left;font:inherit}
 .dash-lane-head:hover{background:var(--color-background-secondary)}
@@ -87,63 +65,39 @@
 .dash-lane-body{display:flex;flex-direction:column;gap:var(--space-12);padding-top:14px}
 .dash-lane.closed .dash-lane-head{border-bottom-color:transparent}
 
-/* The Now row — Optimizer first, then Candidates. Both cards size to their own
-   content, so the wrap is content-driven: Candidates keeps its compact Sequence
-   footprint and sits beside the optimizer, but the moment it needs the full band
-   (Forest, or the scoring mask opening its second column) its 100% basis can't share the
-   line and it drops to the next row. Nothing here has to know which view is on. */
+/* Both cards size to their content: Candidates' 100% basis drops it to its own row the moment
+   it needs the band, so nothing here knows which view is on. */
 .dash-now-row{display:flex;flex-wrap:wrap;align-items:flex-start;gap:var(--space-18);width:100%}
 .dash-now-row > *{margin-bottom:0}
-/* The candidates card centres itself when alone (margin:auto); in the row that
-   would shove it off the optimizer, so pin it left and let it take the slack. */
+/* In the row, `margin:auto` would shove it off the optimizer. */
 .dash-now-row > .cand-card{margin-left:0;margin-right:0;flex:0 1 auto}
 .dash-now-row > .workflow-card{flex:0 0 auto}
 
-/* Scoring inspector — its own full-width row below the Now row. The border reset
-   matches the card framing above it. */
 .inspector-card{max-height:520px;overflow:auto;margin-bottom:14px}
 .inspector-card .scoring-inspector{border-top:0;margin-top:0;padding-top:0}
-/* The selected candidate's cells — a Measurements preset, set off from the spec above. */
 .inspector-samples{margin-top:12px;border-top:0.5px solid var(--color-border);padding-top:var(--space-8)}
 
-/* Phone (≤640px): the chart frame shrinks so the dashboard reads in portrait
-   without the rotate prompt. */
 @media (max-width:640px){
   .fitness-chart-frame{height:140px}
 }
 
-/* Eval charts inside LiveStateCard — stacked vertically because the
-   narrow spine doesn't have width for the prior side-by-side layout.
-   Same Trend + Score Frequency cards from the dropped Verdict lane. */
 .lsc-charts{display:flex;flex-direction:column;gap:var(--space-14);margin-top:14px}
 .lsc-charts > *{margin-bottom:0;min-width:0}
-/* Each chart is a SECTION of this card, not a card of its own: the frame is already drawn by
-   the host, so a second one around every chart draws a double border. Heading over a hairline. */
+/* A SECTION of the host card, never a card: a second frame draws a double border. */
 .lsc-charts > .card{background:none;border:0;border-top:0.5px solid var(--color-border);border-radius:0;padding:var(--space-12) 0 0}
 
-/* Quiet per-round degraded notices under the trend — amber, never loud (the
-   critical grade owns the cross-tab banner). Webapp twin of the CLI yellow line. */
+/* Quiet: the critical grade owns the cross-tab banner. */
 .trend-degraded{list-style:none;margin:var(--space-8) 0 0;padding:0;display:flex;flex-direction:column;gap:3px}
 .trend-degraded-row{display:flex;align-items:baseline;gap:var(--space-6);font-size:var(--text-xs);line-height:1.4;min-width:0}
 .trend-degraded-dot{color:var(--color-warn);flex:none;font-size:var(--text-xs)}
 .trend-degraded-label{color:var(--color-warn);font-weight:600;flex:none}
 .trend-degraded-detail{color:var(--color-text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-/* The measurement node's run — a REGION inside its node panel, never a card of its own; the
-   panel header already names the node and the round, and the round axis owns which round that
-   is. Its body picks live vs historical off the same `selection.round`. Per-candidate groups
-   with sticky headers; click a header to anchor lineage + fitness on that candidate.
-
-   The `.rsv-row*` half is the L4 panel row's (`PanelCellRow`); a scored round's cells are the
-   Measurements preset beneath the strip. */
+/* A REGION inside its node panel, never a card. The `.rsv-row*` half is the L4 panel row's
+   (`PanelCellRow`). */
 .rsv-filters{display:flex;align-items:center;gap:var(--space-12);flex-wrap:wrap;padding:var(--space-4) var(--space-4) var(--space-8)}
-/* The candidate toggle. `min-width:0` is what lets it shrink inside the flex row at all, and
-   the scroll is what keeps a wide round from squeezing every label into illegibility. */
 .rsv-cand-strip{min-width:0;max-width:100%;overflow-x:auto;padding-bottom:2px}
-/* The candidate's own specification, folded under its group head. Indented so it reads as
-   belonging to the candidate rather than to the round, and bounded so a long prompt scrolls
-   inside the fold instead of pushing every sample row off the panel. The disclosure and its
-   copy control are siblings on one row, and the control keeps its width. */
+/* Bounded so a long prompt scrolls inside the fold instead of pushing sample rows off the panel. */
 .rsv-spec-row{display:flex;align-items:flex-start;gap:var(--space-6);margin:var(--space-6) var(--space-8) var(--space-8)}
 .rsv-spec-row > :not(.rsv-spec){flex:0 0 auto}
 .rsv-spec{flex:1;min-width:0;border-left:2px solid var(--color-border);padding-left:var(--space-10)}
@@ -159,11 +113,9 @@
 .rsv-cand-label{color:var(--color-text-primary);font-weight:600}
 .rsv-tally{display:inline-flex;gap:var(--space-8);font-weight:500}
 .rsv-tally-score{color:var(--color-text-secondary)}
-/* A candidate REJECTED before it ran. Colour plus the word, never colour alone — the fact it
-   carries (this is not a measurement) has to survive a monochrome reading. */
+/* Colour plus the word: "not a measurement" must survive a monochrome reading. */
 .rsv-rejected{color:var(--color-danger)}
-/* Under the group head: what the candidate tried, and — where it never ran — what validation
-   said. One line each, ellipsised, with the whole text on the `title`. */
+/* One line each, ellipsised; the whole text rides `title`. */
 .rsv-why{padding:var(--space-4) var(--space-8) 0;display:flex;flex-direction:column;gap:2px}
 .rsv-why > p{margin:0;font-size:var(--text-xs);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rsv-changes{color:var(--color-text-tertiary)}
@@ -172,9 +124,7 @@
 .rsv-rows{display:flex;flex-direction:column}
 .rsv-row{padding:2px var(--space-8);display:block;border-bottom:0.5px dotted transparent}
 
-/* An L4 panel cell — a whole inner campaign, not a scored row. It borrows
-   `.rsv-row`'s spacing so the two modes sit at the same rhythm, then overrides the
-   parts that only make sense for a scored line (a cell has no HIT/MISS body). */
+/* Borrows `.rsv-row`'s rhythm, then drops what only a scored line has. */
 .pcr-row{display:flex;align-items:baseline;gap:var(--space-8);width:100%;text-align:left;
   background:none;border:0;border-bottom:0.5px dotted transparent;font:inherit;cursor:pointer}
 .pcr-row:hover{background:var(--color-background-hover)}
@@ -186,11 +136,6 @@
 .pcr-status{color:var(--color-text-secondary);font-size:var(--text-xs)}
 .pcr-note{flex:0 0 auto;font-size:var(--text-xs);font-style:italic}
 
-/* Mechanisms panel — the campaign's pluggable orchestration toggles
-   (campaign.json::optimization.mechanisms). Read-only inside the Optimizer
-   card's modal, editable in the ingest draft. One CardFrame per group; each row
-   pairs the toggle label with an ON/OFF badge (state = colour + text, never
-   colour alone). "•" on the badge marks a non-default value. */
 .mech-lead{margin:0 0 var(--space-12);font-size:var(--text-sm);line-height:1.5;color:var(--color-text-tertiary)}
 .mech-empty{margin:0;padding:var(--space-8) var(--space-4);font-size:var(--text-sm);color:var(--color-text-tertiary)}
 .mech-groups{display:flex;flex-direction:column;gap:var(--space-12)}
@@ -206,10 +151,6 @@
 .mech-row-label{font-size:var(--text-base);font-weight:500;color:var(--color-text-primary)}
 .mech-row-desc{margin:var(--space-4) 0 0;font-size:var(--text-sm);line-height:1.5;color:var(--color-text-secondary)}
 
-/* Config map — couplings (what clashes) + knob provenance grouped by estimand.
-   Active clashes carry a severity badge (colour + word, never colour alone);
-   the source layer is a badge too (campaign/required/constant) or a muted
-   "default" so what the operator changed reads at a glance. */
 .cmap{display:flex;flex-direction:column;gap:var(--space-12)}
 .cmap-summary{margin:0 0 var(--space-10);font-size:var(--text-sm);line-height:1.6;color:var(--color-text-secondary)}
 .cmap-summary[data-collision="true"]{color:var(--color-text-primary)}
@@ -232,17 +173,8 @@
 .cmap-knob-value{font-family:var(--font-mono);font-weight:600;color:var(--color-text-primary)}
 .cmap-knob-source-default{font-size:var(--text-xs);color:var(--color-text-tertiary)}
 
-/* ── The TIME-RAY ────────────────────────────────────────────────────────────
-   The chronology strip above the optimizer. Full-bleed by construction: it is
-   mounted OUTSIDE .dash-spine-narrow, so it must not inherit that stripe's
-   max-width.
-
-   Steps are EVEN — one width per event, never proportional to elapsed time.
-   Time is not the x-axis; sequence is. A proportional axis squashes a night's
-   work into a pixel and stretches a lunch break across the screen, which is
-   exactly the reading the gap markers give instead, in words.
-
-   The strip scrolls horizontally inside itself; the page body never does. */
+/* Mounted OUTSIDE .dash-spine-narrow, so it must not inherit its max-width. Steps are EVEN:
+   sequence is the x-axis, not time — gaps are stated in words. */
 .dash-time-ray{display:flex;align-items:stretch;gap:0;margin-bottom:var(--dash-zone-gap);
   border:0.5px solid var(--color-border);border-radius:10px;
   background:var(--color-background-secondary);overflow:hidden}
@@ -257,37 +189,29 @@
 .dash-time-ray-step:hover{color:var(--color-accent);border-color:var(--color-accent)}
 .dash-time-ray-step:focus-visible{outline:2px solid var(--color-accent);outline-offset:1px}
 .dash-time-ray-step-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-/* A step from a fork or an inner run — dashed, so "somewhere else in the family"
-   is a SHAPE and not only a hue. */
+/* Dashed, so "elsewhere in the family" is a SHAPE and not only a hue. */
 .dash-time-ray-step.is-elsewhere{border-style:dashed}
-/* The moment the whole page is folded to. Not a hover or a focus state — it persists
-   while every panel below reports what was true at this step. */
+/* Persists while every panel below reports what was true at this step. */
 .dash-time-ray-step.is-viewing{color:var(--color-accent);border-color:var(--color-accent);
   box-shadow:inset 0 -2px 0 var(--color-accent)}
 .dash-time-ray-step.tone-good{color:var(--color-text-primary)}
 .dash-time-ray-step.tone-warn{color:var(--color-warn);border-color:var(--color-warn-border)}
 .dash-time-ray-step.tone-bad{color:var(--color-danger-border);border-color:var(--color-danger-border)}
 .dash-time-ray-x{font-variant-numeric:tabular-nums;color:var(--color-text-tertiary)}
-/* A SILENCE. Non-interactive on purpose — it is a fact about the gaps between
-   events, not an event, so it takes no tab stop on the way to the next step. */
+/* Non-interactive: a silence is not an event, so it takes no tab stop. */
 .dash-time-ray-gap{flex-shrink:0;padding:0 2px;color:var(--color-text-tertiary);
   font-size:var(--text-xs);letter-spacing:0.04em;white-space:nowrap;font-variant-numeric:tabular-nums}
 .dash-time-ray-more{flex-shrink:0;padding:var(--space-4) var(--space-8);border-radius:12px;cursor:pointer;
   background:transparent;border:0.5px dashed var(--color-border);
   color:var(--color-text-tertiary);font-family:inherit;font-size:var(--text-xs)}
 .dash-time-ray-more:hover{color:var(--color-accent);border-color:var(--color-accent)}
-/* Rendered only while a moment is picked — the way back to following the run. */
 .dash-time-ray-now{flex-shrink:0;padding:var(--space-4) var(--space-8);border-radius:12px;cursor:pointer;
   color:var(--color-accent);background:var(--color-background-primary);
   border:0.5px solid var(--color-accent);font-size:var(--text-xs)}
 .dash-time-ray-empty{padding:var(--space-4) var(--space-6);color:var(--color-text-tertiary);font-size:var(--text-xs)}
-/* The head cap — where the ray points NOW. Sticky at the right edge because the
-   newest event is the one you came to read; the track scrolls under it. */
-/* max-width + min-width:0 are load-bearing, not tidying. The detail string is
-   free text; with flex-shrink:0 and no cap the head demanded 747px, and the
-   ray's own `overflow:hidden` swallowed 382px of it at 375px wide — no
-   scrollbar, no ellipsis, nothing on screen to say the text was cut. It
-   truncates visibly now instead of disappearing quietly. */
+/* Sticky at the right edge: the newest event is the one you came to read. */
+/* max-width + min-width:0 are load-bearing: the detail is free text, and uncapped the ray's
+   `overflow:hidden` swallows it with no ellipsis. */
 .dash-time-ray-head{position:sticky;right:0;flex-shrink:0;max-width:60%;min-width:0;display:inline-flex;align-items:baseline;
   gap:var(--space-6);padding:var(--space-8) var(--space-14);border-left:0.5px solid var(--color-border);
   background:var(--color-background-tertiary);color:var(--color-text-primary);
@@ -303,11 +227,8 @@ button.dash-time-ray-head{cursor:pointer}
 .dash-time-ray-head.phase-finished,
 .dash-time-ray-head.phase-detached,
 .dash-time-ray-head.phase-idle{box-shadow:inset 3px 0 0 var(--color-border)}
-/* `wedged` is the ONE head state with no `phase-*` peer, and that is deliberate: it
-   is not a RunPhase member and must never become one (I6 — one server-owned run
-   state). It is a ray-local reading of "the server still says running, and nothing
-   has progressed". The hatch is its own shape so it cannot be mistaken for a phase
-   the server can produce. */
+/* `wedged` has no `phase-*` peer and must never become a RunPhase member (I6); its own hatch
+   keeps it from reading as a phase the server can produce. */
 .ray-head-wedged{color:var(--color-warn);box-shadow:inset 3px 0 0 var(--color-warn);
   background-image:repeating-linear-gradient(135deg,transparent 0 6px,
     rgba(var(--color-warn-rgb),0.10) 6px 12px)}

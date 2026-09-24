@@ -79,11 +79,8 @@ describe("liveCandidateObserveConfig", () => {
   });
 });
 
-// The origin has no reader of its own. C0 is a candidate of round 0, so it resolves through
-// the SAME join every other candidate does — the whole premise of deleting
-// `originObserveConfig`. The join is POSITIONAL, and C0 is where that matters most: a resume
-// re-scores the origin and mints a new lineage id, while `round_0000.json` keeps the id the
-// first run wrote.
+// C0 resolves through the same POSITIONAL join as every candidate: a resume re-scores the origin
+// under a new lineage id, while `round_0000.json` keeps the first run's.
 describe("the origin as an ordinary candidate", () => {
   const round0 = roundDoc({
     round: 0,
@@ -132,9 +129,8 @@ describe("candidateObserveConfig", () => {
   });
 });
 
-// The two observe TARGETS. Both read served facts only — a crown (`is_winner`) and a
-// position — so neither may re-rank, and a round that crowned nobody must not have one
-// invented for it.
+// Both targets read served facts only (a crown, a position): neither may re-rank, and a round
+// that crowned nobody must not have one invented for it.
 describe("bestObserveTarget — the parent", () => {
   const crowned = (round: number, winnerIdx: number, n: number) =>
     summaryRound({

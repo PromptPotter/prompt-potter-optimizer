@@ -4,9 +4,7 @@ import { AuthProvider } from "@/lib/auth-context";
 import { SurfaceFavicon } from "@/components/brand/SurfaceFavicon";
 import { BRAND, softwareApplicationLd } from "@/lib/brand";
 
-// Link-unfurl (share-card) copy — what WhatsApp/Slack/iMessage/X show when the
-// URL is pasted. Mirrors promptpotter-web's split: a descriptive card title +
-// punchy, jargon-free blurb (distinct from the terse browser-tab title above).
+// Link-unfurl copy, mirroring promptpotter-web's split: a descriptive card title, not the tab title.
 const CARD_TITLE = "PromptPotter — automatic prompt optimizer for better AI answers";
 const CARD_DESC =
   "Give PromptPotter the prompt you used on your AI provider. It critiques and " +
@@ -21,9 +19,6 @@ export const metadata: Metadata = {
   publisher: BRAND.publisher.name,
   authors: [{ name: BRAND.provider.name, url: BRAND.provider.url }],
   creator: BRAND.provider.name,
-  // No og:image — link unfurls show the title + blurb only (no thumbnail). A
-  // social card image must be a real fetched raster; we're not committing a
-  // brand asset pre-launch, so the card stays text-only for now.
   openGraph: {
     type: "website",
     url: BRAND.url,
@@ -41,18 +36,14 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  // iOS Safari tints the address bar / status bar to themeColor. The
-  // operator-toggleable theme attribute (`data-theme`) can't drive this
-  // — the OS-level scheme query is the closest signal. Light/dark map
-  // to the body background each theme uses.
+  // `data-theme` cannot drive this; the OS scheme query is the closest signal.
   themeColor: [
     { media: "(prefers-color-scheme: dark)", color: "#0d0d0d" },
     { media: "(prefers-color-scheme: light)", color: "#F5F1EA" },
   ],
 };
 
-// Inline pre-paint script: applies stored theme before first paint to avoid a
-// flash of the wrong palette. Mirrors the IIFE in the vanilla file.
+// Pre-paint, so the stored theme lands before the first frame.
 const themeInit = `(function(){var s=null;try{s=localStorage.getItem('promptpotter.theme');}catch(_){}var t=s||'light';if(t==='light')document.documentElement.setAttribute('data-theme','light');})();`;
 
 export default function RootLayout({
@@ -61,20 +52,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        {/* Browser-tab icon: the real mark (v3). The mark is raster, so it
-            cannot carry a prefers-color-scheme rule the way an SVG could — two
-            cuts and a media query instead, because tab chrome may be light or
-            dark and cannot pass a colour in. Declared here rather than through
-            `metadata.icons` because these are the PRE-PAINT cuts and
-            `SurfaceFavicon` repaints both onto a per-install ground: a
-            metadata-owned icon is re-emitted at hydration, landing after the
-            painted one and taking the tab back. One declaration, one owner. */}
+        {/* Not `metadata.icons`: that is re-emitted at hydration, after `SurfaceFavicon`
+            repaints, and takes the tab back. */}
         <link rel="icon" type="image/png" media="(prefers-color-scheme: light)" href="/brand/tab-icon-pot-32.png" />
         <link rel="icon" type="image/png" media="(prefers-color-scheme: dark)" href="/brand/tab-icon-pot-32-dark.png" />
         <script dangerouslySetInnerHTML={{ __html: themeInit }} />
-        {/* schema.org provenance — who publishes vs. who powers this unit.
-            The crawler/agent-readable surface; the About pane shows the same
-            object via softwareApplicationLd(). */}
+
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareApplicationLd()) }}

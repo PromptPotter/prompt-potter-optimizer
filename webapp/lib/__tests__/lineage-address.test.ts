@@ -3,13 +3,8 @@ import type { LineageNode } from "@/lib/api";
 import { candidatesAtPath, innerPanelIndex, panelCellKey } from "@/lib/derivations";
 import type { CyclePath } from "@/lib/ids";
 
-// The served tree collapses a fork onto its parent's timeline: the fork is NOT a node, and
-// its contributed attempts carry the FORK's `path` while wearing a `label` renumbered onto
-// the parent's sequence. `course_label` is the label the fork itself minted.
-//
-// Both facts below are what a per-cycle projection joins against, and both fail SILENTLY
-// when wrong — a mis-addressed lookup yields an empty map, and the L4 panel renders cells
-// that say "no run recorded" for runs that are sitting right there on disk.
+// The served tree dissolves a fork: its attempts carry the FORK's `path` and a `label`
+// renumbered onto the parent's timeline; `course_label` is what the fork itself minted.
 
 const ROOT: CyclePath = [{ campaignId: "demo__aaaaaa", cycleId: "cycle_root" }];
 const FORK: CyclePath = [{ campaignId: "demo__aaaaaa", cycleId: "cycle_root_fork_beef" }];
@@ -63,9 +58,7 @@ const innerRun = (id: string, task: string) =>
     path: hops([...ROOT, { campaignId: "inner__1", cycleId: id }]),
   });
 
-// A campaign whose root minted C0 + C1.1, and whose fork contributed one attempt that the
-// timeline renumbered to C1.2 (the fork had minted it as its own C1.1). Each candidate was
-// measured by an inner L4 run.
+// Root minted C0 + C1.1; its fork's own C1.1 is renumbered C1.2 on the timeline.
 function tree(): LineageNode {
   return node({
     kind: "course",
@@ -89,7 +82,6 @@ function tree(): LineageNode {
         path: hops(ROOT),
         children: [innerRun("inner_b", "justlogic-d234/seed-0")],
       }),
-      // The fork's contribution: renumbered `label`, private `course_label`, fork `path`.
       node({
         kind: "candidate",
         id: "fork-c1",
@@ -106,20 +98,16 @@ function tree(): LineageNode {
 
 describe("candidatesAtPath", () => {
   it("addresses a fork's attempts, which no course lookup can reach", () => {
-    // A fork has no course node — the server dissolved it — so its contributed attempts,
-    // each carrying the fork's own path, are its only trace in the tree.
     expect(candidatesAtPath(tree(), FORK).map((c) => c.id)).toEqual(["fork-c1"]);
   });
 
   it("gives a course its OWN candidates, without the ones a fork contributed to it", () => {
-    // The fork's attempt renders on the root's timeline, but it belongs to the fork: the
-    // root's own `dashboard.json` never minted it and has no row for it.
+    // The root's own `dashboard.json` never minted the fork's attempt.
     expect(candidatesAtPath(tree(), ROOT).map((c) => c.id)).toEqual(["root-c0", "root-c1"]);
   });
 
   it("does not match a different campaign that reuses a cycle id", () => {
-    // Inner ids repeat across sibling sandboxes, which is why the address is the whole
-    // path and never a bare cycle_id.
+    // Inner ids repeat across sibling sandboxes, so the address is the whole path.
     const other: CyclePath = [{ campaignId: "other__bbbbbb", cycleId: "cycle_root" }];
     expect(candidatesAtPath(tree(), other)).toEqual([]);
   });
@@ -127,9 +115,8 @@ describe("candidatesAtPath", () => {
 
 describe("innerPanelIndex", () => {
   it("keys a fork's cells on the label the FORK minted, not the renumbered one", () => {
-    // This is the whole reason `course_label` is served. The panel rows come from the
-    // leaf's own `dashboard.json`, which is per-cycle and says `C1.1`; the campaign
-    // timeline says `C1.2`. Keying on `label` looks right and silently resolves nothing.
+    // Panel rows come from the leaf's per-cycle `dashboard.json` (C1.1) while the timeline
+    // says C1.2: keying on `label` silently resolves nothing.
     const panel = innerPanelIndex(tree(), FORK);
     expect(panel.get(panelCellKey("C1.1", "justlogic-d234/seed-0"))?.id).toBe("inner_c");
     expect(panel.get(panelCellKey("C1.2", "justlogic-d234/seed-0"))).toBeUndefined();
@@ -139,7 +126,6 @@ describe("innerPanelIndex", () => {
     const panel = innerPanelIndex(tree(), ROOT);
     expect(panel.get(panelCellKey("C0", "justlogic-d234/seed-0"))?.id).toBe("inner_a");
     expect(panel.get(panelCellKey("C1.1", "justlogic-d234/seed-0"))?.id).toBe("inner_b");
-    // The fork's run belongs to the fork's panel, not this one.
     expect([...panel.values()].map((r) => r.id)).not.toContain("inner_c");
   });
 

@@ -1,18 +1,10 @@
-/* Verify panel — workspace-scope diagnostic-run table. The two-segment trend
-   bar is the panel's distinguishing visual: grey strip = source-campaign
-   composite, red overlay = workspace composite (held = green-tinted,
-   dropped = red). */
 .verify-pane{padding:var(--space-24) var(--space-40);overflow-y:auto;flex:1;min-height:0}
 .verify-header{margin-bottom:18px}
 .verify-header h2{margin:0 0 var(--space-6);font-size:var(--text-2xl);font-weight:600;color:var(--color-text-primary)}
 .verify-subtitle{margin:0 0 var(--space-8);font-size:var(--text-base);color:var(--color-text-secondary);max-width:680px;line-height:1.55}
-/* `overflow-x:auto`: a <pre> does not wrap, and this one is a command that has to
-   be read in full. It grows with the campaign id, so any column can be too narrow. */
+/* A <pre> does not wrap, and this command grows with the campaign id and must be read in full. */
 .verify-cli{background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:6px;padding:var(--space-8) var(--space-12);margin:var(--space-8) 0;font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-text-primary);overflow-x:auto}
-/* overflow-x:auto, not hidden. Nine columns cannot fit a phone, and `hidden`
-   did not make them fit — it deleted them from view with no scrollbar to say
-   so. The table scrolls inside its own box now, the same way .l4-table-wrap
-   already handles the optimizer-prompt ranking. */
+/* overflow-x:auto, never hidden: nine columns cannot fit a phone, and `hidden` deletes them silently. */
 .verify-table-wrap{background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:8px;overflow-x:auto;overflow-y:hidden}
 .verify-table{width:100%;border-collapse:collapse;font-size:var(--text-base)}
 .verify-table thead{background:var(--color-background-secondary)}
@@ -36,8 +28,7 @@
 .verify-bar-workspace.held{background:var(--color-success)}
 
 
-/* The Verify affordance's aftermath, not its button (`shell/searchpoint/VerifyAction.tsx`) —
-   shared by the accepted check and the refused one, sized like the refusal beside it. */
+/* Shared by the accepted check and the refused one (`shell/searchpoint/VerifyAction.tsx`). */
 .verify-action-note {
   margin: var(--space-8) 0 0;
   color: var(--color-text-secondary);

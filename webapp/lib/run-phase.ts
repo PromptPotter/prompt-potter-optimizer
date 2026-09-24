@@ -5,25 +5,9 @@ import {
   STOP_REASON_OUTCOMES,
 } from "@/lib/api/types.generated";
 
-// One display mapping for the run-state vocabulary (RunPhase), read off the
-// single `run_phase` field the backend computes. Replaces the old
-// `cycleStatusLabel`, which existed only to reconcile dashboard.json's `state` +
-// `stop_reason` against the cycle list's `status` — two vocabularies that
-// disagreed (a terminal cycle read "stopped" on one surface and "interrupted" on
-// another). Now every surface reads `run_phase`; this collapses it to one word.
-//
-// The terminal reason renders through STOP_REASON_LABELS — the generated mirror
-// of domain/phases.py::STOP_REASON_INFO (the single label source, no drift).
-//
-// EVERY map below is keyed on a GENERATED union, never on `string`. That is what
-// makes a new backend phase a compile error here instead of a blank render: the
-// maps used to be `Record<string, …>`, so a member could be missing and nothing —
-// not tsc, not eslint, not a test — could say so. `gate` proved it, sitting in
-// `RunPhase` while the dock read `string` and rendered a held origin gate as an
-// ordinary run. Regenerate with `python scripts/build_ts_types.py`.
+// The one display mapping for the served `run_phase`. Every map is keyed on a GENERATED union,
+// never `string`, so a new backend phase is a compile error here rather than a blank render.
 
-// Terminal is deliberately absent: its label is the STOP REASON, not the phase.
-// `Exclude` says so in the type rather than parking a placeholder here.
 const RUN_PHASE_LABEL: Record<Exclude<RunPhase, "terminal">, string> = {
   checkin: "Check-in",
   running: "Running",
@@ -32,22 +16,8 @@ const RUN_PHASE_LABEL: Record<Exclude<RunPhase, "terminal">, string> = {
   detached: "Detached",
 };
 
-// Dock order, and it sorts by WHAT NEEDS YOU rather than by what is busy.
-//
-//   gate    — blocked ON THE OPERATOR. It makes no progress until you decide, so
-//             every second it is not at the top is a second wasted.
-//   running — making progress without you. Interesting, not urgent.
-//
-// The old order was "executing first", which reads as a status board rather than
-// a queue of work. That was harmless only while `gate` was unreachable: the server
-// declared it but never derived it, so the cycle list reported an ordinary
-// `running` and this list could not distinguish the two. With the derivation fixed
-// (`runtime_flags.py::derive_run_phase`), "needs a decision" is finally a state the
-// dock can see, and it belongs first.
-//
-// Every other phase sorts last: the dock lists PRODUCERS, so `paused` never reaches
-// this map through it. Total anyway — `isRunPhase` derives membership from the key
-// set, and a phase missing here would stop being recognised as a phase at all.
+// Dock order sorts by what needs the operator: `gate` is blocked on them, so it leads. Keep it
+// total — `isRunPhase` derives membership from these keys.
 const DOCK_PRIORITY: Record<RunPhase, number> = {
   gate: 0,
   running: 1,
@@ -61,19 +31,8 @@ function isRunPhase(v: string | null | undefined): v is RunPhase {
   return !!v && v in DOCK_PRIORITY;
 }
 
-// Is a PRODUCER attached and driving this cycle right now? `gate` counts — the
-// process is alive, holding for a decision — and `paused` does not: the worker has
-// exited, which is the whole difference between a suspended unit and a busy one.
-// `detached` is excluded for the opposite reason: post-heartbeat it means the
-// producer is DEAD, not alive but quiet. The in-flight heartbeat
-// (dispatch/llm_call/heartbeat.py, 15 s) bumps the ledger → dashboard.json through
-// every long await heartbeated today, so a live cycle can no longer go stale past
-// RUN_FRESH_S (30 s) and a stale one really has vanished.
-//
-// A booleans-per-phase map rather than a Set, because a Set of three strings can go
-// stale in silence: that is how `gate` spent months declared by the server and
-// invisible to the dock. Here a new phase does not compile until somebody decides
-// which side it is on.
+// `gate` holds a live process; `paused` has exited; `detached` means the producer is DEAD, since
+// the in-flight heartbeat (`dispatch/llm_call/heartbeat.py`) keeps every live cycle fresh.
 const HAS_PRODUCER: Record<RunPhase, boolean> = {
   running: true,
   gate: true,
@@ -83,27 +42,19 @@ const HAS_PRODUCER: Record<RunPhase, boolean> = {
   terminal: false,
 };
 
-// "Something is happening" — the jobs dock and its phone stand-in, the chat's
-// listening state, whether a warming cycle's first snapshot is still coming. Its
-// predecessor counted `paused` as in-flight, so a parked campaign kept the dock lit
-// and the dock never went quiet; the absence of the dock IS the all-quiet signal, and
-// a suspended unit is not a run. A paused cycle is still reachable — it is a row in
-// the sidebar, wearing its phase — it just does not claim to be running.
+// A paused cycle is not in flight: the dock's absence IS the all-quiet signal.
 export function hasLiveProducer(runPhase: string | null | undefined): boolean {
   return isRunPhase(runPhase) && HAS_PRODUCER[runPhase];
 }
 
-// What the play/pause control may DO from here. Total, and `none` is a real
-// answer twice over: at the gate the decision lives in the chat, and in check-in
-// the ingest panel owns Start. An absent phase is also `none` — a warming cycle
-// has no phase yet, so a Start there duplicates the launch already in flight.
+// `none` at the gate (the chat decides), in check-in (ingest owns Start), and with no phase yet
+// (a warming cycle's launch is already in flight).
 export type RunAction = "pause" | "resume" | "start" | "none";
 
 const PHASE_ACTION: Record<RunPhase, RunAction> = {
   running: "pause",
   paused: "resume",
-  // A dead producer and a finished cycle take the same branch: relaunch from the
-  // last completed round. There is no in-place unpause to distinguish them.
+  // Both relaunch from the last completed round; there is no in-place unpause.
   detached: "start",
   terminal: "start",
   gate: "none",
@@ -114,14 +65,11 @@ export function runPhaseAction(runPhase: string | null | undefined): RunAction {
   return isRunPhase(runPhase) ? PHASE_ACTION[runPhase] : "none";
 }
 
-// Unknown / absent phases sort last.
 export function dockPriority(runPhase: string | null | undefined): number {
   return isRunPhase(runPhase) ? DOCK_PRIORITY[runPhase] : 3;
 }
 
-// Live view: reason lives in `dash.stop_reason`. Cycle list: reason lives in the
-// entry's `status` (the precise StopReason value, "active" while running). Pass
-// whichever the surface has.
+// `reason` is `dash.stop_reason` on the live view, the entry's `status` on the cycle list.
 export function runPhaseLabel(
   runPhase: string | null | undefined,
   reason: string | null | undefined,
@@ -133,9 +81,7 @@ export function runPhaseLabel(
   return runPhase || "—";
 }
 
-// The glyph form of `runPhaseLabel`, for a slot too narrow for the word: a truncated word reads
-// as nothing. The word still rides the mark's `aria-label`. A terminal phase is marked by its
-// served OUTCOME, so every reason sharing one shares a mark.
+// The glyph form of `runPhaseLabel`; the word still rides the mark's `aria-label`.
 export type RunPhaseTone = "live" | "attention" | "quiet" | "success" | "warn" | "danger";
 export interface RunPhaseMark {
   glyph: string;
@@ -157,7 +103,6 @@ const OUTCOME_MARK: Record<StopOutcome, RunPhaseMark> = {
   failed: { glyph: "✕", tone: "danger" },
 };
 
-// A reason the generated table does not classify renders as "?", never as one of the four above.
 const UNKNOWN_MARK: RunPhaseMark = { glyph: "?", tone: "quiet" };
 
 export function runPhaseMark(
@@ -171,21 +116,13 @@ export function runPhaseMark(
   return isRunPhase(runPhase) && runPhase !== "terminal" ? PHASE_MARK[runPhase] : UNKNOWN_MARK;
 }
 
-// What the operator does now, for a cycle that ENDED — the generated mirror of the same table's
-// `next_step`, so the browser advises what the terminal, `log.md` and `review.md` advise. `""`
-// where nothing is owed and while running. Never compose a sentence here; it is served, not derived.
+// Served, never composed here: the browser advises what the terminal and `review.md` advise.
 export function stopReasonNextStep(reason: string | null | undefined): string {
   return (reason && STOP_REASON_NEXT_STEPS[reason]) || "";
 }
 
-// Short, human label for the fine-grained activity phase (`dashboard.json::state`),
-// used in the pause affordance ("Finishing {…} — will pause"). Distinct register
-// from terms.ts (long tooltip sentences) and RUN_PHASE_LABEL (control words).
-//
-// `null` = no activity worth naming, so the caller's generic phrase reads better
-// than a literal one. It is a declared choice per state rather than an omission:
-// `init` and `stopped` were emitted by the writer from the start and simply had no
-// entry here, which rendered the affordance blank with nothing to notice.
+// The pause affordance's word for `dashboard.json::state`; `null` = nothing worth naming, so the
+// caller's generic phrase reads instead.
 const PHASE_PAUSE_LABEL: Record<DashboardState, string | null> = {
   origin: "scoring origin",
   scoring: "scoring samples",

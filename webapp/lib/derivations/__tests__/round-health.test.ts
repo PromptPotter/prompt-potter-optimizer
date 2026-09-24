@@ -25,9 +25,7 @@ function health(
     dominant_node: "web_search",
     node_failure_rates: {},
     node_warnings: {},
-    // The producer fills this for `degraded` as well as `critical`; the notice renders it
-    // verbatim rather than composing one, which is how the structural/transient split got
-    // stated backwards in the browser.
+    // Filled for `degraded` as well as `critical`; the notice renders it verbatim.
     suggested_action:
       "web_search degraded on 25% of samples, all transient. The numbers are soft but " +
       "usable; no action needed if the next round comes back clean.",

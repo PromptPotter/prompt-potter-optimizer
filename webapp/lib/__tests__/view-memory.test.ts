@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { emptyView, pruneStore, viewMemoryCodec, type CampaignView } from "@/lib/view-memory";
 
-// The pruning rules are the whole contract of view memory: what survives a reload, what
-// quietly expires, and what a bumped version drops. They live in the codec so every read
-// and every write applies them — a caller cannot forget, and there is no separate sweep to
-// fall out of sync with.
-
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = 1_800_000_000_000;
 
@@ -22,8 +17,6 @@ describe("pruneStore", () => {
   });
 
   it("drops a record past the 14-day window", () => {
-    // "Recently" has to mean something: a 15-day-old expansion set describes a tree that
-    // has since grown forks and inner runs, so restoring it misleads.
     const store = { a: view({ at: NOW - 15 * DAY }) };
     expect(pruneStore(store, NOW)).toEqual({});
   });
@@ -58,17 +51,15 @@ describe("viewMemoryCodec", () => {
   });
 
   it("returns an empty store for a non-object blob rather than crashing the app", () => {
-    // Storage is operator-writable and survives across versions; a hand-edited or
-    // half-written value must degrade to defaults, never to a render error.
+    // Storage is operator-writable: a hand-edited value degrades to defaults, never an error.
     expect(viewMemoryCodec.deserialize("[]")).toEqual({});
     expect(viewMemoryCodec.deserialize("null")).toEqual({});
     expect(viewMemoryCodec.deserialize('"nope"')).toEqual({});
   });
 
   it("stores no measurement — every persisted field is an id, a flag, or a UI key", () => {
-    // The rule this file exists to hold: a restored view may never render a number the
-    // operator reads as a current result. `ScoringInspector` renders `is_winner`, so the
-    // inspected candidate is deliberately NOT here — only the navigation axis is.
+    // A restored view never renders a number read as current: `ScoringInspector` renders
+    // `is_winner`, so only the navigation axis is remembered.
     const keys = Object.keys(emptyView()).sort();
     expect(keys).toEqual(
       [

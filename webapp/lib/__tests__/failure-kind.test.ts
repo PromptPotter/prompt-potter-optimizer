@@ -2,10 +2,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { ApiError, failureKind, IngestApiError, operatorMessage } from "@/lib/api";
 import { clearIncidents, formatDiagnostics, getIncidents, reportIncident } from "@/lib/diagnostics";
 
-// The classifier decides how a poll REACTS to a failure, so its direction of error
-// matters more than its precision: mistaking transient for gone destroys the
-// operator's view, while mistaking gone for transient only costs a retry. Every
-// unmapped case must therefore land on `transient`.
+// Every unmapped case lands on `transient`: mistaking transient for gone destroys the
+// operator's view, while the reverse costs one retry.
 
 describe("failureKind", () => {
   it("maps the statuses whose reactions differ", () => {
@@ -31,8 +29,7 @@ describe("failureKind", () => {
   });
 
   it("classifies a WRITE failure by its status, like any other", () => {
-    // Every command and ingest write throws `IngestApiError`. Declared outside this family it
-    // read as `transient` at every status, so a refusal rendered as "could not reach it".
+    // Command and ingest writes throw `IngestApiError`; it must classify inside this family.
     const write = (status: number) =>
       failureKind(new IngestApiError(status, "/api/v1/commands/compact-archive", "no"));
     expect(write(403)).toBe("denied");
@@ -74,13 +71,10 @@ describe("incident ring", () => {
     expect(only?.code).toBe("not_found");
     expect(only?.kind).toBe("gone");
     expect(only?.surface).toBe("lineage");
-    // Query stripped — a lens or cursor is noise in a bug report.
     expect(only?.path).toBe("/api/v1/campaigns/c/cycles/y/tree");
   });
 
   it("collapses a repeating signature instead of letting it flood the ring", () => {
-    // A stuck poll fires every 2 s. Without this, one dead address evicts the whole
-    // history that would make the report legible.
     for (let i = 0; i < 30; i++) {
       reportIncident(new ApiError(404, "/api/v1/t", "not_found", `id${i}`), {
         surface: "lineage",
@@ -90,7 +84,6 @@ describe("incident ring", () => {
     const ring = getIncidents();
     expect(ring).toHaveLength(1);
     expect(ring[0]?.count).toBe(30);
-    // Latest id wins — it is the one nearest the operator's log tail.
     expect(ring[0]?.errorId).toBe("id29");
   });
 

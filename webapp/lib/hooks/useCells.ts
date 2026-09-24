@@ -1,21 +1,6 @@
 "use client";
-// The measurement log for the unit in view — `GET /datasets/{name}/cells`: the ranked sample
-// roster, the candidates that measured it and every cell between them, in ONE read. Grouped
-// by sample it is the hard-sample leaderboard; the Measurements view buckets the same rows by
-// candidate or not at all (`domain/cells.py`).
-//
-// **One slice is fetched at a time: the one in view.** Each (unit, scope, order, filter) is
-// fetched once and kept, so flipping a control back is a pure in-memory pick and no slice is
-// ever borrowed across keys silently.
-//
-// A unit switch shows the prior unit's slice marked `isStale` until the new fetch lands (never
-// blanks); a failed read surfaces honestly via `error` rather than silently reading as an
-// empty roster.
-//
-// **Once is not enough while the unit is LIVE.** A run measuring cells right now would decorate
-// its roster with whatever was banked at mount — nothing at all through round 0 — until a
-// remount. A live unit re-reads on the same poll shape the tree uses; a stopped one reads once,
-// because nothing under it can change.
+// The measurement log for the unit in view — `GET /datasets/{name}/cells`, the sole source for
+// every list of measured cells. A live unit re-reads on a poll; a stopped one reads once.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePoll } from "./usePoll";
@@ -32,30 +17,24 @@ import {
 } from "../api";
 import { encodeCyclePath, encodeDescend, pathRoot, type CyclePath } from "../ids";
 
-// The roster-wide outcome numbers, straight off `CellsResponse` — a projection of the wire
-// type, never a second declaration of it.
 export type SeriesTotals = Pick<CellsResponse, "total_measurements" | "total_hits" | "mean_fitness">;
 
 interface ScopeSlice {
-  // The ranked roster — `items[i]` is served in `hard_sample_rank` order, and each row carries
-  // its own served aggregates (`n_measured`, `n_hits`, `mean_fitness`).
+  // Served in `hard_sample_rank` order; never re-sort.
   items: DatasetItem[];
   candidates: CellCandidate[];
   cells: CellRow[];
   measuredCount: number;
   unmeasuredCount: number;
-  // Null until a read lands — an unread scope and a scope with zero measurements are
-  // different facts, and the roster headline must not spell them the same way.
+  // Null until a read lands: unread and zero-measured must not spell the same headline.
   totals: SeriesTotals | null;
 }
 
-// One slice's outcome. `slice` null with no `error` means the read is still in flight; the
-// three states (loading / failed / empty) are distinguishable by construction.
+// `slice` null with no `error` = still in flight.
 interface ScopeState {
   slice: ScopeSlice | null;
   error: string | null;
   splitTest: number | null;
-  // The key the server ranked `items` by, off its echo. `null` until a read lands.
   order: HardSampleOrder | null;
 }
 
@@ -63,8 +42,7 @@ export interface CellsState extends ScopeSlice {
   splitTest: number | null;
   order: HardSampleOrder | null;
   isStale: boolean;
-  // Set when the read for the slice IN VIEW failed. Consumers MUST render it: an empty slice
-  // and a failed read are different facts that `items` spells the same way.
+  // Consumers MUST render it: a failed read and an empty slice spell `items` the same way.
   error: string | null;
 }
 
@@ -85,8 +63,6 @@ const EMPTY: CellsState = {
   error: null,
 };
 
-// "Measured" = at least one graded cell in scope — the served `n_measured`, so the footer
-// never lies about what "hide unmeasured" would hide.
 function sliceFrom(r: CellsResponse): ScopeSlice {
   const measured = r.samples.filter((it) => it.n_measured > 0).length;
   return {
@@ -105,12 +81,8 @@ function sliceFrom(r: CellsResponse): ScopeSlice {
 
 const SEP = "\u001f";
 
-// One entry per slice actually fetched. `order` and the filter are dimensions, not re-sorts:
-// the ranking is the server's (webapp/CLAUDE.md § Scoring authority).
 type SliceKey = string;
 
-// Keep only the unit in view. A roster is up to 1000 rows plus its cells, so a session that
-// browses ten campaigns would otherwise hold ten of them alive for no reader.
 function keepUnit(
   slices: Record<SliceKey, ScopeState>,
   unitKey: string,
@@ -121,26 +93,20 @@ function keepUnit(
   return out;
 }
 
-// How often a LIVE unit's slice is re-read. The route carries no validator, so every tick is a
-// full body — and it is not worth reading more often than a cell lands, which is tens of
-// seconds on every connector we ship.
+// The route carries no validator, so every tick is a full body.
 const LIVE_REFRESH_MS = 8000;
 
 export function useCells(
   path: CyclePath | null,
   datasetName: string | null,
   scope: HardSamplesScope,
-  // Null = send no override and let the server resolve the dataset's declared key. The
-  // resolved value comes back on `order`, so the caller never has to know the default.
+  // Null = no override; the server resolves the dataset's declared key and echoes it on `order`.
   order: HardSampleOrder | null,
-  // Whether the unit in view is still measuring. Only then is a re-read news.
   live: boolean,
-  // A preset's server-side narrowing; each field is part of the slice key.
   filter: CellsFilter = {},
 ): CellsState {
   const { candidateId, round, status } = filter;
-  // The scope artifact follows the VIEWED LEAF: the request addresses the ROOT hop + a
-  // `descend` tail (like the dashboard), so an L4 inner drill-in reads the inner sandbox.
+  // ROOT hop + `descend` tail, so an L4 inner drill-in reads the inner sandbox.
   const root = path ? pathRoot(path) : null;
   const rootCampaignId = root?.campaignId ?? null;
   const rootCycleId = root?.cycleId ?? null;
@@ -149,9 +115,8 @@ export function useCells(
   const sliceKey: SliceKey | null = unitKey
     ? [unitKey, scope, order ?? "", candidateId ?? "", round ?? "", status ?? ""].join(SEP)
     : null;
-  // ONE object claims a slice and fills it, and `null` is the whole of "not addressable yet":
-  // `datasetName` comes from a LATER read than the address does, and a claim made before it
-  // lands must not refuse the retry that arrives with it.
+  // ONE value guards both the claim and the fetch: `datasetName` lands from a LATER read, and a
+  // claim made before it would refuse the retry that arrives with it.
   const req = useMemo(
     () =>
       sliceKey && unitKey && rootCampaignId && rootCycleId && datasetName
@@ -161,13 +126,11 @@ export function useCells(
   );
 
   const [slices, setSlices] = useState<Record<SliceKey, ScopeState>>({});
-  // Slices already fetched or in flight. A ref, not state: it must not re-run the effect
-  // that writes it.
+  // A ref, not state: it must not re-run the effect that writes it.
   const started = useRef<Set<SliceKey>>(new Set());
 
-  // The one read, shared by the first fetch and the live re-read. `seeding` is about FAILURE:
-  // a slice with nothing in it yet must report why, while a refresh that fails leaves the rows
-  // already on screen alone — they were measured, and a failed poll is not news about them.
+  // `seeding` decides FAILURE only: an empty slice reports why; a failed refresh leaves the
+  // measured rows on screen alone.
   const load = useCallback(
     async (signal: AbortSignal, seeding: boolean) => {
       if (!req) return;
@@ -183,7 +146,7 @@ export function useCells(
           order ?? undefined,
           { candidateId, round, status },
         );
-        // Dropped, and the MARK is released by the effect's cleanup rather than here.
+        // The MARK is released by the effect's cleanup, never here.
         if (signal.aborted) return;
         setSlices((prev) => ({
           ...keepUnit(prev, unit),
@@ -191,8 +154,7 @@ export function useCells(
         }));
       } catch (e) {
         if (signal.aborted || !seeding) return;
-        // A scope whose artifact does not exist yet answers 404, and that is an honest EMPTY,
-        // not a failure: a campaign has no pooled slice before its first round closes.
+        // 404 is an honest EMPTY: no pooled slice exists before the first round closes.
         const gone = failureKind(e) === "gone";
         setSlices((prev) => ({
           ...keepUnit(prev, unit),
@@ -211,16 +173,13 @@ export function useCells(
   useEffect(() => {
     if (!req) return;
     const claims = started.current;
-    // Forget attempts for units no longer in view, so navigating back re-fetches.
     const prefix = `${req.unit}${SEP}`;
     for (const k of [...claims]) if (!k.startsWith(prefix)) claims.delete(k);
     if (claims.has(req.key)) return;
     claims.add(req.key);
     const ac = new AbortController();
-    // The mark is released HERE, in the cleanup: React runs cleanup before the next effect
-    // body, so a re-run that keeps the same `key` finds the mark gone and re-claims. Released
-    // from inside the aborted `load` it would land a microtask LATER, leaving the slice with
-    // neither a fetch in flight nor a claim — "loading" for the life of the tab.
+    // Released HERE: cleanup precedes the next effect body, while a release inside the aborted
+    // `load` lands a microtask late and strands the slice "loading" for the life of the tab.
     let settled = false;
     void load(ac.signal, true).then(
       () => {
@@ -234,19 +193,16 @@ export function useCells(
     };
   }, [req, load]);
 
-  // The live re-read. Only the slice in view, and only while the unit is measuring.
   usePoll((signal) => load(signal, false), {
     intervalMs: LIVE_REFRESH_MS,
     enabled: live && req !== null,
   });
 
   if (!sliceKey) return EMPTY;
-  // Addressed, but not yet resolvable — the dataset name has not landed.
   if (!req) return { ...EMPTY_SLICE, splitTest: null, order: null, isStale: true, error: null };
   const state = slices[sliceKey];
 
-  // Still in flight: fall back to ANY slice already held for this unit, marked stale, so a
-  // control flip shows the neighbouring rows greyed rather than blanking the panel.
+  // In flight: show any slice held for this unit, marked stale, rather than blank the panel.
   if (!state || (!state.slice && !state.error)) {
     const sibling = unitKey
       ? Object.entries(slices).find(([k, v]) => k.startsWith(`${unitKey}${SEP}`) && v.slice)?.[1]

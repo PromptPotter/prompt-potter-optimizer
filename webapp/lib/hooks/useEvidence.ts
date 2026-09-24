@@ -1,27 +1,18 @@
 "use client";
-// The Compare tab's one read. Not on the 2 s poll — a selection changes when the operator changes
-// it, so this is `useRead`, one shot per (selection, metric, ranking, winnerChain).
-//
-// `subjects` are opaque address strings (`lib/api/reads.ts::subjectKey` owns the grammar) and
-// `metric` an opaque selector — a catalogue key or a composed `expr:…`, both owned by the server.
-// The one failure that survives rather than blanking the pane is `invalid` — a rejected expression
-// is the operator's own half-typed input, not a dead read — and `useRead` owns that, so there is
-// no last-good state machine here.
+// The Compare tab's one read. `subjects` and `metric` are opaque, server-owned grammar.
 
 import { fetchEvidence } from "@/lib/api/reads";
 import type { Evidence } from "@/lib/api/types";
 import { useRead } from "@/lib/hooks/useRead";
 
-// The selection travels as one joined string. `|` is the separator because no part of a subject
-// address can contain it — a comma can (`;samples=3,7,11`), and splitting on one would tear an
-// address in half.
+// No subject address can contain `|`; a comma it can (`;samples=3,7,11`).
 const SEP = "|";
 
 export interface EvidenceRead {
   evidence: Evidence | null;
   loading: boolean;
   error: string | null;
-  /** Set only when `error` is a rejected metric — render it beside the input, not as a dead pane. */
+  // Render beside the input, not as a dead pane.
   invalidMetric: string | null;
 }
 
@@ -31,11 +22,9 @@ export function useEvidence(
   winnerChain: boolean,
   config: boolean,
   metric: string,
-  // `row,col` over two served factors, empty for none. Part of the key rather than a client-side
-  // grouping because the cells are POOLED server-side, so changing an axis is a different read.
+  // `row,col` over two served factors. Pooled server-side, so a new axis is a new read.
   grid: string,
 ): EvidenceRead {
-  // Sorted so the same SET refetches once however the operator got there.
   const selection = [...subjects].sort().join(SEP);
   const read = useRead(
     selection

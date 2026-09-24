@@ -2,11 +2,8 @@ import { describe, expect, it } from "vitest";
 import { descendantsOf } from "../lineage-descendants";
 import type { LineageNode } from "@/lib/api";
 
-// The closure this computes decides which served numbers a surface may still show as answers, and
-// it fails SILENTLY in the dangerous direction: miss a descendant and a channel goes on rendering a
-// measurement an edit invalidated, with nothing to say it did. The two shapes worth pinning are the
-// ones a real campaign always has — a losing arm that nothing was built on, and a FORK, whose
-// candidates hang off the point it branched from and are reachable by no other edge.
+// A missed descendant fails SILENTLY: a channel keeps rendering a measurement an edit invalidated.
+// Pinned: a losing arm nothing was built on, and a FORK reachable by `parent_id` alone.
 
 function node(
   over: Partial<LineageNode> & Pick<LineageNode, "kind" | "id">,
@@ -36,14 +33,12 @@ function family(): LineageNode {
 
 describe("descendantsOf", () => {
   it("takes the whole line under an edited point, across a fork", () => {
-    // R1.1 is where the fork left, so the fork's own candidate descends from it too — reachable by
-    // `parent_id` and by nothing else, since a fork is not a node on the line.
+    // The fork left at R1.1, so its candidate descends from it — reachable by `parent_id` alone.
     expect([...descendantsOf(family(), ["R1.1"])].sort()).toEqual(["F1.1", "R1.1", "R2.1"]);
   });
 
   it("takes only itself under a losing arm", () => {
-    // Nothing was built on R1.2 — a round's losers are not parents. Over-reaching here would blank
-    // a channel for an edit that cost it nothing.
+    // A round's losers are not parents; over-reaching would blank a channel the edit cost nothing.
     expect([...descendantsOf(family(), ["R1.2"])]).toEqual(["R1.2"]);
   });
 

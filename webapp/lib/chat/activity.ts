@@ -1,52 +1,13 @@
-// The chat's curated layer over the cycle event stream. Pure translators feed
-// the one ordered thread:
-//
-//   • snapshotToActivity() — paints state-so-far from the leading stream_snapshot
-//     frame (the cycle's dashboard.json, read as-is): completed rounds + the
-//     in-flight current round's candidates, so opening mid-run shows the
-//     candidate being scored, not the last finished round.
-//   • projectionToActivity() — maps each live tailed record to one item, 1:1 with
-//     the CLI's LiveDisplay handlers (presentation/terminal/live/display.py).
-//   • sampleScoredCandidate() — updates the in-flight candidate's fitness from the
-//     running composite the scorer rides on each sample (result._running), so the
-//     candidate line moves in real time instead of sitting at 0 until it completes.
-//
-// CURATED, not firehose: only high-signal records become items; the per-sample
-// torrent folds into one progress chip; diagnostics + spend telemetry map to null.
-// Items carry stable ids so the snapshot paint, the candidate start/scored, and
-// the per-sample running update all upsert to one row.
-//
-// `projectionToActivity` has a SECOND caller: the time-ray (`lib/derivations/time-ray.ts`)
-// maps a `RayItem` through it unchanged, because a RayItem's `kind` is an envelope's and its
-// `payload` is a SUBSET of the same body. One vocabulary, two surfaces. The subset is the
-// server's declaration (`domain/projection_envelope.py::RAY_PAYLOAD_FIELDS`): a ray window is
-// up to a thousand records at once, so it carries identity, address and the one-line reading
-// and leaves each record's bulk to the surface fetched one round at a time. **A new field read
-// below must be declared there** — it arrives on the live envelope and is simply absent from
-// every ray item, which renders as a step quietly missing half its line.
-//
-// WHICH kinds can be items is the server's — `domain/projection_envelope.py`, one declaration
-// total over `ProjectionKind`, whose complement arrives here as `NonActivityKind` and is what
-// the default arm proves nothing renderable fell through. What this file decides is how a
-// bearing kind LOOKS, and whether one PAYLOAD is worth a row (a `snapshot` that is a
-// `p_best_update` is not). Those two questions were one before, split across two languages.
+// The chat's curated translators over the cycle event stream, also run on every ray item. A field
+// read here must be declared in `projection_envelope.py::RAY_PAYLOAD_FIELDS`, or ray items lack it.
 
 import { candidateLabel } from "@/lib/candidate-label";
 import { cacheShare, prefixReading } from "@/lib/derivations";
 import { fmtDuration, fmtPct0 } from "@/lib/format";
 import type { NonActivityKind, ProjectionEnvelope } from "@/lib/api/types";
 
-// THE SCORING ORDER, on the channel that carries it FIRST.
-//
-// `sample_order_preview` is emitted once per candidate start (`l1/score/loop.py`)
-// with the shared order the scorer will walk. It is deliberately NOT an activity item
-// — nothing happened — it feeds "which sample comes next". `LiveDashboardProjection` also
-// absorbs it into `dashboard.json::declared_sample_order`, so this is the FASTER
-// source, not the only one: emitted once, a reader that joined mid-candidate never
-// sees it, and the walk used to lose its whole forward half on a reload.
-//
-// A DECLARED order, not a promise: PoBB can stop a candidate early, so the tail may
-// never be reached. Surfaces reading it must say "next" and not "will".
+// The faster copy of `dashboard.json::declared_sample_order`. A DECLARED order: PoBB can stop a
+// candidate early, so a surface says "next", never "will".
 export function sampleOrderFrom(env: ProjectionEnvelope): number[] | null {
   if (env.kind !== "snapshot") return null;
   const p = env.payload;
@@ -57,12 +18,10 @@ export function sampleOrderFrom(env: ProjectionEnvelope): number[] | null {
   return order.length > 0 ? order : null;
 }
 
-// `payload` is the underlying record's `model_dump`, so a record's own nested `payload` field
-// is reached at `envelope.payload.payload`; for stream_snapshot it is the cycle's
-// dashboard.json body + `snapshot_at_offset`.
+// `payload` is the record's `model_dump`, so a record's own nested `payload` is at
+// `env.payload.payload`.
 
-// State pairs an icon AND a label (never colour alone) per the frontend
-// accessibility invariant; `tone` is a styling hint layered on top.
+// State is an icon AND a label, never colour alone; `tone` only styles on top.
 type ActivityKind =
   | "running" // llm_call_start  — an optimizer call in flight
   | "done" //    llm_call        — a call completed (dur · tok)
@@ -75,8 +34,6 @@ type ActivityKind =
 
 type ActivityTone = "good" | "warn" | "bad" | "muted";
 
-// `id` is stable per logical event so every source upserts by id rather than
-// duplicate.
 export interface ActivityItem {
   id: string;
   kind: ActivityKind;
@@ -96,12 +53,10 @@ function num(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
 function pct0(v: number | null | undefined): string | undefined {
-  // `undefined` (omit the chip) where fmtPct0 would render an em-dash.
   return v == null ? undefined : fmtPct0(v);
 }
 
-// A candidate's subset-relative fitness as a %. Per-candidate rows only — round/origin
-// headlines read the round's measured `accuracy` (the header/trend basis) so the thread agrees.
+// Per-candidate rows only: a round headline reads the round's `accuracy`, as the header does.
 function fitPct(rec: Record<string, unknown>): string | undefined {
   return pct0(num(rec.composite_fitness));
 }
@@ -117,15 +72,10 @@ function roundItem(round: number, detail: string | undefined): ActivityItem {
   return { id: `round-${round}`, kind: "round", icon: "★", label: `Round ${round}`, detail, tone: "good" };
 }
 
-// One candidate row, keyed by its canonical label so snapshot + started + scored
-// + per-sample running update all upsert to the same line.
 function candidateItem(label: string, detail: string | undefined): ActivityItem {
   return { id: `cand-${label}`, kind: "candidate", icon: "◆", label, detail, tone: "good" };
 }
 
-// Paint history from the leading stream_snapshot frame (the cycle's
-// dashboard.json): completed rounds + the in-flight current round's candidates +
-// recent warnings + a crash, if any — the state the file already carries.
 export function snapshotToActivity(payload: Record<string, unknown>): ActivityItem[] {
   const out: ActivityItem[] = [];
 
@@ -137,16 +87,12 @@ export function snapshotToActivity(payload: Record<string, unknown>): ActivityIt
     out.push(roundItem(round, pct0(num(r.accuracy))));
   }
 
-  // The in-flight round: every planned candidate (so the one being scored shows
-  // immediately), fitness from the scored set where available. Round 0 is a round
-  // like any other here; it enumerates nothing only because the engine scores the
-  // origin without firing `candidate_started`, so no C0 row reaches the l1_score
-  // input. That is an engine gap, not a rule of this reader.
+  // Round 0 enumerates nothing only because the engine scores the origin without firing
+  // `candidate_started`: an engine gap, not a rule of this reader.
   const cr = asRec(payload.current_round);
   const crRound = num(cr.round);
   if (crRound != null && crRound >= 0) {
-    // Planned candidates come from the l1_score node INPUT — the seed half, the only place a
-    // candidate appears before it has a number. The numbers come from the served row.
+    // The l1_score INPUT is the only place a candidate appears before it has a number.
     const l1 = asRec(asRec(cr.nodes).l1_score);
     const inputs = Array.isArray(asRec(l1.input).candidates) ? asRec(l1.input).candidates : [];
     const rows = Array.isArray(cr.candidates) ? (cr.candidates as unknown[]) : [];
@@ -183,9 +129,6 @@ export function snapshotToActivity(payload: Record<string, unknown>): ActivityIt
   return out;
 }
 
-// The in-flight candidate's live fitness from a sample_scored frame's running
-// composite (`result._running`). `null` when the frame isn't a sample_scored or
-// carries no running block.
 export function sampleScoredCandidate(env: ProjectionEnvelope): ActivityItem | null {
   if (env.kind !== "snapshot") return null;
   const p = env.payload;
@@ -195,14 +138,9 @@ export function sampleScoredCandidate(env: ProjectionEnvelope): ActivityItem | n
   return candidateItem(candidateLabel(num(p.round) ?? 0, num(p.candidate_idx) ?? 0), fitPct(running));
 }
 
-// What the translator actually reads — an SSE envelope, or a ray item adapted into one.
-// Narrower than `ProjectionEnvelope` deliberately: a `RayItem` carries no `version` and no
-// `cycle_id` (its address is a whole `path`), so asking for the full shape would make the ray
-// adapter fabricate both.
+// Narrower than `ProjectionEnvelope`: a `RayItem` carries no `version` and no `cycle_id`.
 export type ActivitySource = Pick<ProjectionEnvelope, "kind" | "sequence" | "payload">;
 
-// Map one record to at most one item. `null` = a kind the server declares non-bearing, or a
-// payload this kind has no row for.
 export function projectionToActivity(env: ActivitySource): ActivityItem | null {
   const p = env.payload;
   const id = `${env.kind}-${env.sequence}`;
@@ -219,19 +157,14 @@ export function projectionToActivity(env: ActivitySource): ActivityItem | null {
       const bits: string[] = [];
       if (dur != null) bits.push(`${dur.toFixed(1)}s`);
       if (tok > 0) bits.push(`${tok} tok`);
-      // What the PROVIDER served off its own prefix cache, as a share of input — and null on a
-      // replay, whose `usage` is the banked call's and reached no provider this time. `cacheShare`
-      // takes `replayed` as a required argument so this line cannot drift from the terminal's, and
-      // `prefixReading` is the one place a cold 0% is told apart from a provider that said nothing.
       const prefix = prefixReading(
         cacheShare(num(usage.cache_read), num(usage.input), !!inner.cached),
         !!inner.cached,
       );
       if (prefix.state === "unreported") bits.push("prefix not reported");
       else if (prefix.share != null) bits.push(`${Math.round(prefix.share * 100)}% prefix cached`);
-      // "replayed", not "cached": OUR archive served this call and no provider saw it. The word
-      // `cached` names the provider-side discount one line up, and the terminal renders the same
-      // record with the same two words (`presentation/terminal/live/display.py`).
+      // "replayed", not "cached": OUR archive served it, and `cached` names the provider discount.
+      // The terminal (`live/display.py`) uses the same two words.
       if (inner.cached) bits.push("replayed");
       return { id, kind: "done", icon: "✓", label: nodeLabel(p), detail: bits.join(" · ") || undefined, tone: "muted" };
     }
@@ -249,9 +182,7 @@ export function projectionToActivity(env: ActivitySource): ActivityItem | null {
         const n = num(p.sample_total);
         return { id, kind: "progress", icon: "·", label: n ? `scoring ${i ?? 0}/${n}` : "scoring", tone: "muted" };
       }
-      // p_best_update / sample_order_preview / pobb_backfill — curated-out diagnostics.
-      // `sample_order_preview` is not an ITEM (nothing happened), but it does carry
-      // state no other channel does — see `sampleOrderFrom` below.
+      // Curated out; `sample_order_preview` is state, read by `sampleOrderFrom`.
       return null;
     }
     case "phase": {
@@ -277,19 +208,11 @@ export function projectionToActivity(env: ActivitySource): ActivityItem | null {
       return null;
     }
     case "llm_call_progress": {
-      // Ordinary optimizer heartbeats carry no detail — curated out (the elapsed
-      // counter rides freshness, not the thread). The L4 inner-campaign heartbeat
-      // sets `detail` ("inner rX/Y · best Z%"), which becomes one ticking chip
-      // (stable id ⇒ one upserted row) so the outer chat never reads as silent.
-      //
-      // The ray relies on this returning null for a bare heartbeat: it keeps those items
-      // to prove the process was alive across a silent stretch, then drops them here so
-      // they never become steps. Making them items would fill the ray with nothing.
+      // Only the L4 inner heartbeat carries `detail`. The ray relies on a bare one returning null:
+      // it keeps them as liveness proof and must never draw them as steps.
       const detail = str(p.detail);
       if (!detail) return null;
-      // The clock is formatted HERE, never composed into `detail` upstream: `elapsed_s` rides
-      // the same record, so the engine says only WHO the wait belongs to (the provider and its
-      // model) and no duration formatter is duplicated into the application layer.
+      // Formatted here, never composed into `detail` upstream.
       const secs = num(p.elapsed_s);
       return {
         id: "inner-progress",
@@ -301,16 +224,9 @@ export function projectionToActivity(env: ActivitySource): ActivityItem | null {
       };
     }
     case "candidate_minted": {
-      // The candidate exists but has not been scored — the earliest point anything can
-      // name it, and on the ray the first step that says "this attempt was proposed".
-      // Upserts to the SAME `cand-{label}` id the later `candidate_started` snapshot
-      // writes, so the row simply appears one beat earlier and nothing duplicates.
       return candidateItem(str(p.label) ?? "candidate", undefined);
     }
     case "cycle_seed": {
-      // At most one per cycle, at the head of its ledger — a fork or a
-      // campaign-from-origin declaring what it starts from. Reads as one marker at the
-      // top of that cycle's thread, which is exactly where it sits.
       const source = str(asRec(p.seed).origin_source);
       return {
         id,
@@ -322,14 +238,11 @@ export function projectionToActivity(env: ActivitySource): ActivityItem | null {
       };
     }
     case "stream_snapshot": {
-      // Synthesized by the tail, not a ledger record: `useCycleEvents` routes it to
-      // `snapshotToActivity` before this runs, and the ray can never carry one.
+      // Synthesized by the tail; `useCycleEvents` routes it to `snapshotToActivity` first.
       return null;
     }
     default: {
-      // Everything the server declares activity-bearing has a case above; what reaches here
-      // is a kind it declared non-bearing. Flip one and forget its case, and this assignment
-      // stops compiling — which a bare `return null` could only swallow.
+      // Compiles only while every kind the server declares activity-bearing has a case above.
       const nonBearing: NonActivityKind = env.kind;
       void nonBearing;
       return null;

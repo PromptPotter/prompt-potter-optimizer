@@ -1,9 +1,5 @@
-// Builders for the round document in tests. `RoundResult` / `ScoredCandidate` are
-// GENERATED from the Pydantic models, so every field the server always sends is
-// required here too. A test cares about two or three of them; these fill the rest with
-// inert values so the fixture stays about what it is testing — without casting through
-// `unknown`, which would hand back exactly the "typechecks anything" hole the generated
-// types exist to close.
+// Test builders over the generated wire types: fill every required field inert, never cast
+// through `unknown`.
 
 import type {
   CurrentRound,
@@ -16,8 +12,6 @@ import type {
   ScoredCandidate,
 } from "@/lib/types";
 
-// One served sample row. `status` defaults to HIT because most tests care about the id or the
-// position, not the verdict; the ones that care pass it.
 export function sampleRow(over: Partial<DashboardSample> = {}): DashboardSample {
   return {
     qi: 0,
@@ -38,8 +32,6 @@ export function sampleRow(over: Partial<DashboardSample> = {}): DashboardSample 
   };
 }
 
-// `current_round` is a MODEL now, not a free-form dict, so a test naming one or two of its
-// keys still has to produce the whole shape. This fills the rest inert.
 export function currentRound(over: Partial<CurrentRound> = {}): CurrentRound {
   return {
     round: 0,
@@ -47,15 +39,12 @@ export function currentRound(over: Partial<CurrentRound> = {}): CurrentRound {
     candidates: [],
     nodes: {},
     pobb: { current_id: "", n_samples: 0, leader_prob: 0, posterior_width: 1, top: [] },
-    // Null = the round has not elected yet, which is what an inert fixture is.
+    // Null = the round has not elected yet.
     overlap: null,
     ...over,
   };
 }
 
-// A live `current_round.candidates[]` row. Same field list as `summaryCandidate` below minus
-// what only closing settles — they are one model, `DashboardCandidate`, and this is the half
-// that has not finished yet.
 export function liveRow(over: Partial<DashboardCandidate> = {}): DashboardCandidate {
   return {
     label: "C1.1",
@@ -82,8 +71,7 @@ export function liveRow(over: Partial<DashboardCandidate> = {}): DashboardCandid
     matched_parent_lift: null,
     matched_parent_lift_ci_lo: null,
     matched_parent_lift_ci_hi: null,
-    // A live row carries the crown too — the election lands at the end of scoring, not at
-    // round close — so the default is "nothing crowned yet", never "this one lost".
+    // "Nothing crowned yet": the election lands at the end of scoring, not at round close.
     is_winner: false,
     invalid: false,
     ...over,
@@ -135,16 +123,14 @@ export function scored(over: Partial<ScoredCandidate> = {}): ScoredCandidate {
 export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
   return {
     round: 0,
-    // No ledger behind a fixture, so the round closed at no offset — the same `null` a
-    // diagnostic replay writes, never 0, which is a real record.
+    // `null` as a diagnostic replay writes, never 0, which is a real record.
     at_offset: null,
     label: "C0",
     accuracy: 0,
     composite_fitness: 0,
     total: 0,
     improved: false,
-    // No arms, so the round could not be read either way — never `false`, which asserts it
-    // measured cleanly and told nothing apart.
+    // Never `false`, which asserts it measured cleanly and told nothing apart.
     separable: null,
     electable_count: 0,
     p_value: null,
@@ -189,22 +175,17 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
   };
 }
 
-// `dashboard.json` is `LiveDashboardState` — same story as the round document: every
-// field the server always sends is required, so a fixture fills the inert ones here.
 export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState {
   return {
     campaign_id: "ds__000000",
     cycle_id: "cycle_0",
     session_id: "sess_0",
-    // A fixture folds no ledger, so it stands at the same pre-first-record offset the
-    // projection starts from.
+    // The pre-first-record offset the projection starts from.
     at_offset: -1,
     langfuse_trace_url: null,
     state: "init",
     state_since: "",
-    // Both halves: `declared_phase` is what the runner wrote to disk, `run_phase` what the
-    // route derived and served. A fixture that set only one would type-check while
-    // describing a body the server never sends.
+    // `declared_phase` is what the runner wrote, `run_phase` what the route derived; set both.
     declared_phase: "running",
     run_phase: "running",
     stop_reason: null,
@@ -259,7 +240,6 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
       total_tokens_used: 0,
       unpriced_tokens: 0,
     },
-    // The same fold under a second key — empty here, since the fixture bills nothing.
     spend_by_round: {},
     backfill_log: [],
     current_round: currentRound(),
@@ -268,14 +248,8 @@ export function dash(over: Partial<LiveDashboardState> = {}): LiveDashboardState
   };
 }
 
-// The `dash.rounds[]` display row and its candidate — the summary shapes, distinct
-// from the `round_NNNN.json` document above. Same rule: every field the server
-// always sends is filled inert here so a test names only what it is about.
-// What the server stamps on a candidate row (`domain/results.py::candidate_label`) — round 0
-// is `C0` for EVERY arm, and only from round 1 does the position get a suffix. Spelled here
-// because a fixture stands in for a RESPONSE; production code reads this off the row. Left
-// unset, every builder below returns the same default label whatever round it is placed in,
-// so an assertion naming the position's label was only ever testing a client re-derivation.
+// Mirrors `domain/results.py::candidate_label` (round 0 is `C0` for every arm). Only a fixture
+// spells it: it stands in for a response, and production reads the label off the row.
 export const servedLabel = (round: number, idx: number) =>
   round === 0 ? "C0" : `C${round}.${idx + 1}`;
 

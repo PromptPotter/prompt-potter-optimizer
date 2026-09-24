@@ -45,107 +45,53 @@ import { hasLiveProducer, dockPriority } from "./run-phase";
 
 interface WorkspaceState {
   sessionId: string | null;
-  activeCycleId: string | null; // server pointer (active_session.json)
-  activeCampaignId: string | null; // campaign of the server pointer
-  // The viewed cycle address — the single "what am I looking at". Null until the
-  // pointer / pin resolves. Its root hop is the top-level cycle; a deeper leaf is
-  // an L4 inner descendant.
+  activeCycleId: string | null;
+  activeCampaignId: string | null;
   viewedPath: CyclePath | null;
-  cycleId: string | null; // the ROOT hop's cycle (chat/dataset/files anchor)
-  // The campaign the root hop belongs to — authoritative, never derived from a
-  // bare `cycle_id` (a cycle_id is unique only within its campaign). Null until
-  // the pointer / pin resolves.
+  cycleId: string | null;
   campaignId: string | null;
-  // The LEAF hop — what the dashboard / live feed / samples / selection follow
-  // (the inner cycle when drilled into an L4 loop, else identical to the root
-  // hop). Derived once here so no surface re-inlines `viewedPath[len-1]`.
   leafCampaignId: string | null;
   leafCycleId: string | null;
-  // Does the VIEWED course optimize prompts — i.e. are its samples whole inner
-  // campaigns rather than scored rows? Read off the LEAF's campaign, never the
-  // root's: a fork of a pp-self campaign is still depth 1 and still self-optimizing,
-  // while drilling INTO an inner run puts an ordinary benchmark campaign on the leaf,
-  // which is not in `campaigns` (it lives in a sandbox) and correctly reads false.
-  // Derived here because three surfaces branch on it and each had re-run the lookup.
+  // Read off the LEAF's campaign: a fork of a pp-self campaign is still self-optimizing, while an
+  // inner run lives in a sandbox, is absent from `campaigns`, and correctly reads false.
   leafIsL4: boolean;
-  // The candidate NODE the tree is parked on inside the leaf course, by its served `id`,
-  // or null for the course itself. A candidate is a tier of the lineage tree but never a
-  // hop of a path — the course carries the address — so it rides beside `viewedPath`
-  // rather than inside it.
-  //
-  // An ID, never a LABEL: `C1.1` is a course's PRIVATE position, so a label addresses nothing
-  // across a campaign. This is NAVIGATION ("whose children do the bars plot"), written only by
-  // the tree — not `SelectionContext.candidate`, which is INSPECTION and written by a bar click.
+  // An ID, never a LABEL: `C1.1` is a course's private position and addresses nothing across a
+  // campaign. NAVIGATION, written only by the tree — not `SelectionContext.candidate`.
   viewedCandidateId: string | null;
   datasetName: string | null;
-  following: boolean; // the viewed path tracks the active pointer
-  // The per-campaign view, and the account modal's pane (null = closed). Both are on the
-  // ADDRESS (`lib/address.ts`), which is why they live beside the path rather than in the
-  // components that render them — a view held locally cannot be linked to.
+  following: boolean;
   tab: Tab;
   setTab: (t: Tab) => void;
-  // The one measured cell open in the detail panel, or null — on the ADDRESS for the same
-  // reason the view is, so a copied link opens on the cell it was copied from. Several
-  // measurement panes can be on screen at once, so the cell names the pane that OWNS it;
-  // null is the address's own, which the pane that claims the address answers.
+  // Several measurement panes can be on screen at once, so the cell names the pane that OWNS it;
+  // null is the address's own, answered by the pane that claims the address.
   openCell: CellAddress | null;
   openCellOwner: string | null;
   setOpenCell: (c: CellAddress | null, owner?: string | null) => void;
-  // Close the cell only if `owner` still holds it — an unmounting pane's cleanup.
   releaseCell: (owner: string) => void;
   accountPane: AccountPane | null;
   openAccount: (pane?: AccountPane) => void;
   closeAccount: () => void;
   cycles: CycleListEntry[];
-  cyclesLoaded: boolean; // first /cycles poll has resolved (success or fail)
-  // True once the campaign list on hand reflects the CURRENT lifecycleFilter.
-  // Flips false the instant the filter changes (Active⇄Archived) until the
-  // refetch for the new filter lands — so the sidebar shows `loading…` instead
-  // of the prior tab's stale list.
+  cyclesLoaded: boolean;
+  // False from a filter change until the refetch for the new filter lands.
   campaignsLoaded: boolean;
   cyclesError: string | null;
-  // The subset of `cycles` a producer is driving (running / gate — `paused` has
-  // no worker and `detached` means a dead one, I6) — derived once here,
-  // membership AND order, so every "what's running" surface reads the same list
-  // instead of re-filtering or re-sorting its own copy.
+  // Membership AND order derived once, so no "what's running" surface re-sorts its own copy (I6).
   runningCycles: CycleListEntry[];
-  // Campaign manifests (GET /campaigns) — polled in the same tick as
-  // /cycles. Carries the operator-editable `label`; surfaces resolve a
-  // campaign's display name from here. Last-good list survives a failed tick.
   campaigns: CampaignSummary[];
   activeError: string | null;
-  // Operator's lifecycle filter — drives both the poll's `?lifecycle=`
-  // query and the sidebar's "Active / Archived" tab. Default `active`.
-  // Persisted nowhere; resets per visit (matches dataset filter behaviour).
   lifecycleFilter: LifecycleFilter;
   setLifecycleFilter: (f: LifecycleFilter) => void;
-  // Pin an explicit cycle address → following=false. The general verb; a hop
-  // can be top-level or an inner descendant. `candidate` parks the tree on one of that
-  // course's candidates; omitting it means the course itself.
   selectCyclePath: (path: CyclePath, candidateId?: string | null) => void;
-  // Convenience: pin a top-level (1-hop) cycle. Both ids required — a cycle_id
-  // alone is ambiguous across campaigns.
+  // Both ids required — a cycle_id alone is ambiguous across campaigns.
   selectCycle: (campaignId: string, cycleId: string) => void;
-  // Open a run that lives in the VIEWED leaf's sandbox — one hop deeper than what
-  // is on screen. The L4 surfaces (a cell bar, a panel row) name a run and mean
-  // "descend into it"; they don't own the address, so they don't build the path.
+  // One hop into the VIEWED leaf's sandbox; callers name a run and never build the path.
   drillInto: (campaignId: string, cycleId: string) => void;
-  // Drop back to the top-level (root) cycle from an inner descendant, keeping it
-  // pinned. No-op at depth 1.
   backToOuter: () => void;
-  followActive: () => void; // un-pin → snap back to the active pointer
-  // The address the server says no longer exists — reported by whichever poll owns
-  // the AUTHORITATIVE read for it, acted on here. This is the only way a pin dies
-  // without the operator clicking: a campaign can be deleted (root CLAUDE.md calls
-  // deleting what you are looking at "the ordinary case"), an `.inner/` sandbox can
-  // be reaped with no user action at all, or a store can be reset under a bookmark.
-  //
-  // Detection is the address's OWN read, never list membership: an L4 inner hop is
-  // absent from `/cycles` (it lives in a sandbox) and an archived campaign is absent
-  // from the `active` filter, so membership would kill two live addresses.
-  // Archived ≠ gone.
+  followActive: () => void;
+  // Only the address's OWN read may report it, never list membership: an inner hop is absent from
+  // `/cycles` and an archived campaign from the `active` filter.
   reportAddressGone: (address: string) => void;
-  // Set for the surface that announces the recovery; null once acknowledged.
   goneAddress: string | null;
   dismissGoneNotice: () => void;
 }
@@ -160,41 +106,24 @@ export function useWorkspace(): WorkspaceState {
   return v;
 }
 
-// Reconnect cadence while the API is unreachable — matches lib/poll.tsx's
-// RECONNECT_INTERVAL_MS so both polls retry a downed server on the same 5 s beat.
+// Matches `poll.tsx::RECONNECT_INTERVAL_MS`, so both polls retry a downed server on one beat.
 const RECONNECT_INTERVAL_MS = 5000;
 
-// The deep-link, read as ONE address — path, candidate AND view, in the location hash.
-// The syntax and the reasons for it are `lib/address.ts`; this file only reads and
-// writes it. `webapp/CLAUDE.md` says the address is `(path, candidateId)`: encoding only
-// the first half dropped the node the tree was parked on, which for a FORK names nothing
-// at all, because a fork's path points at something the server dissolved onto the
-// parent's timeline — so the bars came back empty.
 function urlAddress(): Address | null {
   if (typeof window === "undefined") return null;
   return parseAddress(window.location.hash);
 }
 
-// Registry-list cadence (`/cycles` + `/campaigns`) — the passive floor for rarely-changing data.
 const REGISTRY_INTERVAL_MS = 10000;
-// Active-pointer cadence (`/sessions/active`) — matches the dashboard's 2 s live beat so a
-// CLI-minted cycle is followed without the registry's lag.
+// Matches the dashboard's live beat, so a CLI-minted cycle is followed without the registry's lag.
 const POINTER_INTERVAL_MS = 2000;
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  // The explicit pin — the viewed path while not following (null while
-  // following). Both the top-level and inner-descendant selections live here as
-  // one address; there is no separate inner-focus axis.
   const [pinnedPath, setPinnedPath] = useState<CyclePath | null>(null);
-  // Scoped to `pinnedPath` — every write below sets the pair, so a candidate can never
-  // outlive the course that owns it.
+  // Every write below sets it with `pinnedPath`, so a candidate never outlives its course.
   const [viewedCandidateId, setViewedCandidateId] = useState<string | null>(null);
   const [following, setFollowing] = useState(true);
-  // The per-campaign view. It lives here rather than in `AppShell` because it is part of
-  // the ADDRESS now, and the address has exactly one writer — a second holder of it would
-  // be a second answer to "what am I looking at", which is the thing this file exists to
-  // prevent. `AppShell` still owns the ONE call site (`openView`), which also leaves the
-  // phone's list screen.
+  // On the ADDRESS, whose one writer is this file; `AppShell::openView` is the one call site.
   const [tab, setTab] = useState<Tab>(DEFAULT_TAB);
   const [cellState, setCellState] = useState<{
     cell: CellAddress;
@@ -202,20 +131,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   } | null>(null);
   const openCell = cellState?.cell ?? null;
   const openCellOwner = cellState?.owner ?? null;
-  // The account modal's pane, or null for closed — the second view axis, on the same
-  // address. The pin is deliberately NOT cleared while it is up: closing returns to
-  // whatever was underneath, straight off the state that never moved.
+  // The pin is deliberately NOT cleared while the modal is up, so closing returns to what was under.
   const [accountPane, setAccountPane] = useState<AccountPane | null>(null);
-  // The deep-link is read in a mount effect rather than a useState initializer so the
-  // static-export HTML and the first client render agree (no hydration mismatch).
   const [initialized, setInitialized] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [activeCycleId, setActiveCycleId] = useState<string | null>(null);
   const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null);
   const [cycles, setCycles] = useState<CycleListEntry[]>([]);
   const [campaigns, setCampaigns] = useState<CampaignSummary[]>([]);
-  // Which lifecycle filter the current `campaigns` reflect — null until the
-  // first fetch lands. `campaignsLoaded` is this matching the live filter.
   const [campaignsFilter, setCampaignsFilter] = useState<LifecycleFilter | null>(
     null,
   );
@@ -224,27 +147,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [activeError, setActiveError] = useState<string | null>(null);
   const [lifecycleFilter, setLifecycleFilter] =
     useState<LifecycleFilter>("active");
-  // The address that just stopped existing — drives the one-shot recovery notice.
   const [goneAddress, setGoneAddress] = useState<string | null>(null);
 
-  // Poll only with a confirmed session; a 401 on any of the three reads
-  // re-probes /auth/me so the loop halts when the session dies (useAuthGate).
   const { authed, onAuthError } = useAuthGate();
 
-  // Tracks the active pointer from the last successful poll. When the
-  // server-side pointer transitions to a *different* cycle (CLI ran
-  // `new` or a fork — both mint a fresh cycle id and
-  // re-write active_session.json), we auto-snap follow=true so the
-  // viewed unit yanks to the new session. Resume does not move the
-  // pointer, so a pinned operator studying a finished cycle stays put.
-  // Ref (not state) so the comparison happens inline in the tick
-  // callback without re-render churn.
+  // `new` and a fork move the server pointer and snap the view to it; `resume` does not, so a
+  // pinned operator studying a finished cycle stays put.
   const prevActivePointerRef = useRef<string | null>(null);
 
-  // Adopt an address off the hash. Shared by the mount read and the `hashchange`
-  // listener below, so a pasted link and a hand-edited one land the same way. A null
-  // parse is a malformed hash and changes nothing — the operator keeps the view they
-  // had rather than being thrown back to the active run by a typo.
+  // A null parse is a malformed hash and changes nothing, rather than a typo throwing the
+  // operator back to the active run.
   const adoptAddress = useCallback((a: Address | null) => {
     if (!a) return;
     if (a.kind === "account") {
@@ -265,12 +177,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setFollowing(false);
   }, []);
 
-  // Mount: honour the hash deep-link as an explicit pin.
-  // The synchronous setState here is load-bearing, not an oversight — the
-  // deep-link is read in a mount effect (not a useState initializer) so
-  // the static-export HTML and the first client render agree, then
-  // corrected post-hydration. See the `initialized` comment above. This
-  // is the one place set-state-in-effect is deliberately waived.
+  // Read in a mount effect, not a useState initializer, so the static-export HTML and the first
+  // client render agree.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     adoptAddress(urlAddress());
@@ -278,11 +186,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [adoptAddress]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  // The hash can also change from OUTSIDE this app — a pasted link in the same tab, a
-  // hand-edit in the address bar, a click on an anchor. Without this the URL would say
-  // one thing and the app show another, which is exactly the split the single-address
-  // rule exists to prevent. The writer below no-ops when the hash already matches, so
-  // this cannot loop against it.
+  // The writer below no-ops when the hash already matches, so this cannot loop against it.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const onHash = () => adoptAddress(parseAddress(window.location.hash));
@@ -290,15 +194,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("hashchange", onHash);
   }, [adoptAddress]);
 
-  // TWO poll cadences. The active pointer is staleness-critical — a CLI-minted cycle must yank
-  // the viewed unit to it — so it rides the dashboard's fast beat; the cycle list and campaign
-  // registry are heavier and change rarely, so they stay on the slow floor. `usePoll` owns each
-  // loop's interval, hidden-tab pause, focus wake and per-tick aborts; a `useRevalidation` bump
-  // re-ticks both, so an in-app fork or stop lands without a poll-interval wait.
   const reval = useRevalidation();
 
-  // Fast loop — the active pointer + the follow-snap. Sole owner of the pointer
-  // state; the registry loop no longer second-guesses it from `/cycles`.
   const pointerTick = useCallback(
     async (signal: AbortSignal) => {
       let active;
@@ -306,13 +203,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         active = await fetchActive(signal);
       } catch (err) {
         if (signal.aborted) return;
-        // A 401 means the session died — re-probe /auth/me so the gate flips
-        // unauthed and the loop stops instead of storming.
         onAuthError(err);
-        // "No active session" is not an error and never reaches here: the route
-        // serves it as null ids on a 200 (`active.py::get_active_session`), so the
-        // success path below clears the pointer. Anything caught here is a real
-        // reachability failure and belongs in activeError.
+        // "No active session" is null ids on a 200 (`active.py::get_active_session`), never here.
         setActiveError((err as Error)?.message ?? "active session unavailable");
         return;
       }
@@ -323,16 +215,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setActiveCycleId(nextActiveCycle);
       setActiveCampaignId(nextActiveCampaign);
       setActiveError(null);
-      // Auto-snap to the active pointer when it transitions to a fresh cycle.
-      // The first poll's `prev === null` establishes the baseline (no snap);
-      // subsequent transitions are CLI-driven mints. A deliberately-pinned
-      // operator running `new` opted into the new session by issuing the command.
+      // The first poll only sets the baseline; a pinned operator running `new` opted into the snap.
       if (nextActiveCycle && nextActiveCampaign) {
         const nextPointer = `${nextActiveCampaign}::${nextActiveCycle}`;
         const prevPointer = prevActivePointerRef.current;
         if (prevPointer !== null && prevPointer !== nextPointer) {
           setFollowing(true);
-          setPinnedPath(null); // a fresh outer mint invalidates any pin
+          setPinnedPath(null);
           setViewedCandidateId(null);
         }
         prevActivePointerRef.current = nextPointer;
@@ -341,8 +230,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [onAuthError],
   );
 
-  // Slow loop — the cycle list + campaign registry that back the picker and
-  // sidebar. Keeps the last good list on a failed tick.
   const registryTick = useCallback(
     async (signal: AbortSignal) => {
       const [cyclesRes, campaignsRes] = await Promise.allSettled([
@@ -370,8 +257,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [lifecycleFilter, onAuthError],
   );
 
-  // When BOTH the pointer and the list fail, the API is unreachable — back
-  // both loops off to the 5 s reconnect probe. Either succeeding = reachable.
+  // Either read succeeding proves the API reachable.
   const wsOffline = activeError != null && cyclesError != null;
   usePoll(pointerTick, {
     intervalMs: wsOffline ? RECONNECT_INTERVAL_MS : POINTER_INTERVAL_MS,
@@ -386,12 +272,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     revalidateOn: reval,
   });
 
-  // The viewed path: the server pointer (a top-level 1-hop cycle) while
-  // following, else the explicit pin. Memoized because it is an ADDRESS, and an
-  // address that changes identity every render is not one: consumers key polls,
-  // memos and callbacks on it (`useLineageTree`, the candidates card's `onSelect` —
-  // which rides the chart's `options` memo, so a fresh array here forced a
-  // `chart.update()` on every 2 s pointer tick).
+  // Memoized: consumers key polls, memos and chart `options` on it, so a fresh array per render
+  // forces a `chart.update()` on every pointer tick.
   const viewedPath: CyclePath | null = useMemo(
     () =>
       following
@@ -402,14 +284,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [following, activeCampaignId, activeCycleId, pinnedPath],
   );
 
-  // The root hop — what chat / selection / dataset / files bind to. campaignId
-  // is authoritative on both sides — never inferred from a bare cycle_id.
   const rootHop = viewedPath ? pathRoot(viewedPath) : null;
   const campaignId = rootHop?.campaignId ?? null;
   const cycleId = rootHop?.cycleId ?? null;
 
-  // The leaf hop — the dashboard / feed / samples anchor. Identical to the root
-  // hop at depth 1; the inner cycle when drilled into an L4 loop.
   const leafHop = viewedPath ? pathLeaf(viewedPath) : null;
   const leafCampaignId = leafHop?.campaignId ?? null;
   const leafCycleId = leafHop?.cycleId ?? null;
@@ -417,7 +295,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     campaigns.find((c) => c.campaign_id === leafCampaignId)?.backend_type,
   );
 
-  // Dataset of the root hop: the cycle-list row matched on BOTH ids.
   const cycleEntry =
     cycleId && campaignId
       ? (cycles.find(
@@ -426,13 +303,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       : null;
   const datasetName = cycleEntry?.dataset_name ?? null;
 
-  // One workspace-wide "what is running" derivation — membership AND order, so every
-  // dock reader shares both for free instead of re-sorting its own copy
-  // (frontend-surface-contract I6: one shared ordering). Recomputed only when the list
-  // mutates. A PAUSED cycle is absent: nothing drives it, and it stays reachable as a
-  // sidebar row wearing its phase.
-  //
-  // Ordered by WHAT NEEDS YOU, not by what is busy — see `dockPriority`.
+  // A PAUSED cycle is absent: nothing drives it, and it stays reachable as a sidebar row.
   const runningCycles = useMemo(
     () =>
       cycles
@@ -441,14 +312,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [cycles],
   );
 
-  // URL contract: the hash IS the address — `lib/address.ts` owns its syntax, this is the
-  // sole writer of it. A cycle segment appears exactly while pinned; the view and the
-  // parked candidate ride alongside, so a reload restores the whole address rather than
-  // half of one, and a copied link opens on the pane it was copied from.
-  //
-  // `replaceState`, not `push`: navigating the app has never added history entries and
-  // this change does not start. Back still leaves the app, which is what the operator's
-  // muscle memory expects from a dashboard.
+  // The sole writer of the hash. `replaceState`, not `push`: Back leaves the app, as a dashboard's
+  // should.
   useEffect(() => {
     if (!initialized || typeof window === "undefined") return;
     const want = formatAddress(
@@ -458,13 +323,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           ? { kind: "follow", tab, cell: openCell }
           : { kind: "cycle", path: pinnedPath, tab, candidateId: viewedCandidateId, cell: openCell },
     );
-    // "Following, default view" has nothing to say, so it says nothing: the hash comes
-    // OFF rather than sitting there as a bare `#/`. Same discipline the query string had
-    // — an address is what distinguishes this view from the default, and a decoration
-    // that appears on every page load is not one.
+    // The default view carries no hash at all, never a bare `#/`.
     const bare = want === EMPTY_ADDRESS;
     const now = window.location.hash;
-    // Also the guard that stops this racing the `hashchange` listener above.
+    // Also stops this racing the `hashchange` listener above.
     if (bare ? now === "" || now === EMPTY_ADDRESS : now === want) return;
     window.history.replaceState(
       null,
@@ -503,9 +365,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [viewedPath, selectCyclePath],
   );
 
-  // Drop back to the top-level cycle from an inner descendant, keeping it
-  // pinned. No-op at depth 1 (and while following — a follow view is always a
-  // 1-hop pointer, so there is nothing to pop).
   const backToOuter = useCallback(() => {
     setPinnedPath((prev) => (prev && prev.length > 1 ? prev.slice(0, 1) : prev));
     setViewedCandidateId(null);
@@ -537,22 +396,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [tab],
   );
 
-  // The pin, mirrored into a ref so `reportAddressGone` keeps a STABLE identity.
-  // Its callers are poll ticks, and `usePoll` restarts its loop when the tick's
-  // identity changes — a callback that churned with every pin would re-arm the
-  // very polls this exists to quiet.
+  // Keeps `reportAddressGone` identity-stable: `usePoll` restarts its loop when a tick's identity
+  // changes, so churning with every pin would re-arm the very polls this quiets.
   const pinnedRef = useRef<CyclePath | null>(pinnedPath);
   useEffect(() => {
     pinnedRef.current = pinnedPath;
   });
 
-  // The ONE place a dead address dies. Unpins and resumes following, so the view
-  // lands somewhere real instead of hanging on an address that will never answer.
-  //
-  // The caller has already CONFIRMED the verdict (one 404 during a mint race is
-  // normal; see `poll.tsx`'s consecutive-miss guard) — this only checks that the
-  // report still describes what we are actually viewing, so a late report from a
-  // superseded address cannot yank a pin the operator has since moved on from.
+  // The caller has already confirmed the verdict (`poll.tsx::GONE_CONFIRM_LIMIT`); this only
+  // refuses a late report from an address the operator has since moved off.
   const reportAddressGone = useCallback((address: string) => {
     const pinned = pinnedRef.current;
     if (!pinned || encodeCyclePath(pinned) !== address) return;
@@ -564,8 +416,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const dismissGoneNotice = useCallback(() => setGoneAddress(null), []);
 
-  // Switching tabs re-queries `/campaigns?lifecycle=` — bump revalidation so the
-  // registry loop re-ticks at once instead of waiting out its 10 s interval.
+  // Re-tick the registry now rather than after its 10 s interval.
   const selectLifecycle = useCallback((f: LifecycleFilter) => {
     setLifecycleFilter(f);
     bumpRevalidation();

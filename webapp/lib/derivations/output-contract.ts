@@ -1,40 +1,20 @@
-// The structured output a node is CONTRACTED to return, flattened out of its served JSON
-// Schema into one row per parameter.
-//
-// Read `json_schema`, never the two thin fields beside it: `fields` is the TOP-LEVEL key list and
-// `field_descriptions` is empty on every optimizer node, so together they render `l1_generate` as
-// the single word `variants` while the schema declares six parameters, four descriptions and two
-// length caps. The contract is not a garnish — it is emitted into the call as `response_format`
-// and every byte of it is prompt text the model reads (`docs/concepts/structured-output.md`).
-//
-// Pure over the served schema — it resolves `$ref`, unwraps Pydantic's `anyOf … null` optionals
-// and steps into arrays, and it INVENTS nothing: every string here was authored server-side.
+// A node's contracted output, one row per parameter of its served JSON Schema. Read `json_schema`,
+// never `fields`/`field_descriptions` — top-level keys only, and empty on every optimizer node.
 
 import type { NodeOutputSchema } from "@/lib/api";
 
-// One parameter. Nesting is a `depth`, not a tree, because the renderer is a flat list and a
-// nested shape indents rather than folding — a contract read one disclosure at a time is a
-// contract nobody reads.
 export interface ContractField {
-  // Dotted path from the root — unique, so it keys the row.
   key: string;
   name: string;
   depth: number;
-  // The declared type, with a `$defs` name kept where one was referenced (`L1Variant[]` rather
-  // than `array`) so the rows below it have a heading that names them.
   type: string;
   required: boolean;
   description: string;
-  // The machine limits the model is held to — `≤320 chars`, `≤3 items`. Part of what the node
-  // promises, and the half the prose descriptions restate by hand.
   limit: string;
-  // A closed value space, where the schema declares one.
   enums: string[];
 }
 
-// Three levels reaches every optimizer contract's leaves (`variants[]` → `L1Variant` →
-// `VariantEvidenceGrounding`). A deeper one is a schema that should be flattened server-side,
-// not a list to scroll.
+// Reaches every optimizer contract's leaves; a deeper schema should be flattened server-side.
 const MAX_DEPTH = 3;
 
 function isRec(v: unknown): v is Record<string, unknown> {
@@ -46,23 +26,14 @@ function str(v: unknown): string {
 }
 
 interface Resolved {
-  // What to walk INTO — for an array that is the item schema, so its element's parameters
-  // become this row's children rather than a dead end.
   schema: Record<string, unknown>;
   type: string;
-  // The `$defs` name this resolved through, or null. Doubles as the cycle guard's key.
   ref: string | null;
-  // Pydantic writes an optional as `anyOf: [T, null]`, which is a second way to say what the
-  // `required` list already says. Both are read; either one makes the row optional.
   optional: boolean;
 }
 
-// One property's declaration → what it IS. Returns null only for a non-object declaration,
-// which is a malformed schema rather than an empty one.
 function resolve(raw: unknown, defs: Record<string, unknown>, hops = 0): Resolved | null {
   if (!isRec(raw)) return null;
-  // A `$ref` chain longer than a couple of hops is a schema pointing at itself; stop rather
-  // than recurse, and keep the name so the row still says what it pointed at.
   if (typeof raw.$ref === "string") {
     const name = raw.$ref.slice(raw.$ref.lastIndexOf("/") + 1);
     const target = defs[name];
@@ -96,8 +67,7 @@ function resolve(raw: unknown, defs: Record<string, unknown>, hops = 0): Resolve
   return { schema: raw, type: str(raw.type) || "object", ref: null, optional: false };
 }
 
-// The declaration site first, its `$defs` target second — a `$ref`'d field may cap itself where
-// it is used, and that cap is the one this row is held to.
+// Declaration site first: a `$ref`'d field may cap itself where used, and that cap binds.
 function limitOf(decl: unknown, target: unknown): string {
   const parts: string[] = [];
   for (const s of [decl, target]) {
@@ -153,8 +123,7 @@ function walk(
   }
 }
 
-// `[]` where the node declares no contract at all — which is a real answer (a measurement node
-// returns no structured output) and the caller renders nothing rather than an empty heading.
+// `[]` is a real answer: a measurement node returns no structured output.
 export function outputContract(schema: NodeOutputSchema | null | undefined): ContractField[] {
   if (!schema) return [];
   // A response-format envelope (`{name, strict, schema}`) and a bare JSON Schema both arrive
@@ -167,8 +136,7 @@ export function outputContract(schema: NodeOutputSchema | null | undefined): Con
     walk(root, 0, "", defs, new Set(), out);
   }
   if (out.length > 0) return out;
-  // No schema on the wire, only the flat key list — the shape a backend's `/pipeline` reports
-  // for a target node. Same rows, fewer columns filled; never a second renderer.
+  // Only the flat key list — what a backend's `/pipeline` reports for a target node.
   return schema.fields.map((f) => ({
     key: f,
     name: f,

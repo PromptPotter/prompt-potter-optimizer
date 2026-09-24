@@ -1,16 +1,5 @@
-/* Hard-samples heat-map: a compact resizable badge — one 4 px tile per sample in the
-   served ranking (green = mostly hit, red = mostly miss, dark = no measurements).
-   Standard layout ~10 tiles across × 3 down; drag the bottom-right corner on either
-   axis to resize — tiles keep their size, the grid reflows how many show. The grip
-   fades in on hover. Click to unfold the leaderboard in place. */
 .hs-heat-wrap{display:flex;flex-direction:column;align-items:center;gap:var(--space-6);width:100%;margin-top:24px;padding:0 var(--space-8)}
-/* Two-button control row: heat-map mini on the left, sample-trajectory
-   mini on the right. Each owns an independent expand state; their
-   expanded panels stack below (trajectory above the hard-samples table). */
 .hs-controls-row{display:flex;align-items:center;justify-content:center;gap:var(--space-8);width:100%}
-/* Run control — sits to the RIGHT of the heat-map + sample-trajectory view
-   toggles. Play/pause matches their bordered-rect shape (state shown by icon
-   colour, not a loud accent disc); fork is a quiet ghost, present but hushed. */
 .run-ctl{display:inline-flex;align-items:center;gap:var(--space-4);margin-left:2px}
 .run-ctl-primary{display:inline-flex;align-items:center;justify-content:center;width:30px;height:22px;padding:0;border:1px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);cursor:pointer;transition:border-color .12s,color .12s,background .12s}
 .run-ctl-primary.is-play{color:var(--color-success)}
@@ -19,38 +8,25 @@
 .run-ctl-primary:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
 .run-ctl-primary:disabled{opacity:0.5;cursor:not-allowed}
 .run-ctl-err{color:var(--color-danger);font-size:var(--text-xs);max-width:160px}
-/* Pause-pending hint — shown between the click and the run declaring `paused`,
-   explaining the graceful wait. Warn-toned to match the pause icon. */
 .run-ctl-pausing{color:var(--color-warn);font-size:var(--text-xs);max-width:220px}
-/* Mini-thumbnail button, shared by the heat-map badge and the sample-trajectory
-   badge — fixed 57x22px, one tile per unit. `.resizable` (heat-map only) adds the
-   drag-corner + grip; the trajectory badge is fixed instead. `--hs-mini-tile`
-   (set inline, trajectory only) shrinks the tile GEOMETRY so a strip wider than
-   the box fits instead of clipping tiles with no scrollbar and no ellipsis. */
+/* `--hs-mini-tile` (set inline, trajectory only) shrinks the tile GEOMETRY so a wider strip
+   fits, rather than clipping tiles with no scrollbar. */
 .hs-mini-btn{position:relative;display:block;margin:0;padding:3px;cursor:pointer;border:1px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);overflow:hidden;width:57px;height:22px;transition:border-color .12s,box-shadow .12s,background .12s}
 .hs-mini-btn:hover{border-color:var(--color-accent)}
 .hs-mini-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
 .hs-mini-btn[aria-expanded="true"]{border-color:var(--color-accent);background:var(--color-background-tertiary)}
 .hs-mini-btn.resizable{resize:both;min-width:30px;min-height:14px;max-width:90%;max-height:50vh}
-/* Native resizer glyph hidden; a diagonal-line grip fades in on hover. */
 .hs-mini-btn.resizable::-webkit-resizer{background:transparent}
 .hs-mini-btn.resizable::after{content:"";position:absolute;right:1px;bottom:1px;width:5px;height:5px;background:repeating-linear-gradient(135deg,var(--color-accent) 0 1.5px,transparent 1.5px 3px);opacity:0;transition:opacity .12s;pointer-events:none}
 .hs-mini-btn.resizable:hover::after{opacity:1}
-/* Tiles default to 4px and auto-fill so dragging the resizable badge on either
-   axis reflows how many tiles show; the trajectory badge overrides the size via
-   `--hs-mini-tile` instead of ever clipping. */
 .hs-mini-tiles{display:grid;grid-template-columns:repeat(auto-fill,var(--hs-mini-tile,4px));grid-auto-rows:var(--hs-mini-tile,4px);gap:1px;align-content:start}
-/* Unmeasured/kept is the base; a measured heat-map cell takes its hue inline
-   from `lib/derivations/fitness-shade.ts::fitnessStyle`, the shade Measurements wears. */
+/* A measured cell takes its hue inline from `lib/derivations/fitness-shade.ts::fitnessStyle`. */
 .hs-mini-cell{width:var(--hs-mini-tile,4px);height:var(--hs-mini-tile,4px);border-radius:1px;background:var(--color-background-tertiary)}
 .hs-mini-cell.new{background:var(--color-new)}
 .hs-mini-cell.gained{background:var(--color-success)}
 .hs-mini-cell.lost{background:var(--color-warn)}
 .hs-mini-cell.kept{background:var(--color-text-tertiary);opacity:.5}
 .hs-mini-cell.absent{background:var(--color-background-tertiary)}
-/* Sample Trajectory — Delta + Series views (SampleTrajectory.tsx,
-   TrajectorySeriesView.tsx), one shared square/label/chip palette so the
-   cell semantics (drop/add/new/gained/lost/kept/absent) read as one system. */
 .st-card{margin-bottom:12px;width:100%}
 .st-card-title{font-family:var(--font-mono);font-size:var(--text-sm)}
 .st-card-actions{display:flex;align-items:center;gap:var(--space-10)}
@@ -87,14 +63,12 @@
 .st-chip.current{color:var(--color-new);border-color:var(--color-new-border);background:var(--color-new-bg)}
 .st-chip.planned{color:var(--color-text-tertiary);background:var(--color-background-secondary)}
 
-/* A drag-to-resize corner is unoperable on touch — no hover, no grip. Both
-   resizable surfaces drop the affordance rather than advertise it. */
+/* A drag-resize corner is unoperable on touch, so both resizable surfaces drop it. */
 @media (pointer:coarse){
   .hs-mini-btn.resizable{resize:none}
 }
 
 .hs-heat-empty{color:var(--color-text-tertiary);font-style:italic}
 
-/* The leaderboard unfolded under the strip — the column's full width, never wider: the table
-   scrolls inside itself, so nothing here may push past the chat column's edges. */
+/* The table scrolls inside itself, so nothing here may push past the chat column's edges. */
 .hs-expand-wrap{align-self:stretch;width:100%;min-width:0}

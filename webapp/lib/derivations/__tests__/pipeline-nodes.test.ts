@@ -2,13 +2,8 @@ import { describe, expect, it } from "vitest";
 import { nodeOriginPrompt } from "../pipeline-nodes";
 import type { PipelineDoc } from "@/components/workflow";
 
-// `resolved_prompts` is keyed `"{node}/{version}"`. The join is a prefix match on the
-// LAST slash, which is the whole of what can go wrong here: a plain `startsWith` makes
-// `l1_score` a prefix of nothing but `l1_generate` a prefix of `l1_generate_extra`, and
-// a lexical version sort answers `"10"` before `"2"`.
-// The envelope's other fields are REQUIRED, not optional — the server sends every one of them on
-// every response — so the fixture supplies them empty rather than the type admitting a partial
-// body no route can produce.
+// Keys are `"{node}/{version}"`, split on the LAST slash: `startsWith` would take
+// `l1_generate_extra` for `l1_generate`, and a lexical sort puts `"10"` before `"2"`.
 const doc = (resolved_prompts: Record<string, Record<string, unknown>>): PipelineDoc => ({
   resolved_prompts,
   view: null,

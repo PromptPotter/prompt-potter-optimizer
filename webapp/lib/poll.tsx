@@ -1,48 +1,10 @@
 "use client";
-// Single live-stream store. One provider, one timer, TWO reads of one ledger: the
-// chronology (`/ray` — what happened, in order) and the dashboard (a FOLD of that same
-// ledger). Consumers subscribe via `useCycleStream()`; the chronology via `useTimeRay()`.
-// The dashboard's `rounds[]` summary block is the sole "completed rounds" surface —
-// round_NNNN.json is deep-audit only and fetched lazily via `useRoundFile`.
-//
-// CONDITIONAL REQUESTS. The dashboard route supports `If-Modified-Since` -> 304; we track the
-// latest `Last-Modified` per `unitKey` (the encoded CyclePath) in `lastModifiedRef` and skip
-// setState on a 304. One fetch (`fetchDashboardByPath`) serves any depth: an inner descendant
-// rides `?descend=<hops>` and the server walks each hop's `.inner/` sandbox, so at depth 1 the
-// URL is byte-identical to a plain per-cycle read and 304 semantics are unchanged.
-//
-// A `unitKey` change (ANY hop of the path) resets `lastModifiedRef` in the render-phase guard.
-// Required: without it, switching campaigns or drilling into an inner loop leaves a stale
-// `If-Modified-Since` on the wire.
-//
-// Before `dashboard.json` exists (fresh campaign, pre-origin) the route answers 200 with
-// `{ warming_up: true, ... }` and a `Last-Modified` off the session dir. Recognise that flag and
-// render the placeholder rather than reading the cycle as offline.
-//
-// `/tree` is conditional on a weak ETAG whose validator covers the lens/samples mask as well as
-// subtree mtime — that is what lets a MASKED read 304, which `Last-Modified` cannot express.
-// `/ray`'s HEAD window is polled; an older one is fetched once and revalidated like anything
-// else, since the server does not claim deep windows immutable.
-//
-// `llm_call_progress` rides the ray on purpose. A BARE tick proves only that the process was
-// alive across a silent stretch, so the client counts it and drops it from the rendered steps
-// (`projectionToActivity` returns null); a tick carrying `detail` names what the wait IS -- the
-// provider, or an inner campaign's round -- and becomes the progress chip. Stop sending them and
-// every heartbeated backend query grows a spurious gap marker. Coupled at `format.ts::fmtGap`,
-// `derivations/time-ray.ts` and `store/family_ray_queries.py`.
-//
-// THE LIVE HALF JOINS ON `label` -- `candidate_label(round, idx)`, composed at mint, unique
-// within a round, carried by the served row AND by the tree node a selection is minted off, so
-// C0 and C3.2 resolve identically whether or not the round has closed. A live row's
-// `candidate_id` is POSITIONAL (`liveCandidateId`) and stays a row KEY: joining on one resolved
-// every closed round and no live one, so every in-flight bar click read as "still scoring".
-//
-// They share a timer because they share a FILE: on unrelated cadences they drift, and any
-// surface reading one against the other reports a disagreement that is not on disk.
-//
-// The viewed MOMENT (`at`) is the seam. A ray step names a physical offset in the leaf cycle's
-// ledger, and handing it to the dashboard route replays the fold to that point, so scrubbing the
-// chronology moves every panel on the page. `null` is the head.
+// The live-stream store: one timer polls the dashboard (a fold of the ledger) and `/ray` (its
+// chronology) — on separate cadences they drift and report a disagreement that is not on disk.
+// Dashboard revalidates on `Last-Modified` (304), the ray head on an ETag; `?descend=` serves any
+// depth through one fetch. `at` is the viewed moment, a leaf-ledger offset; `null` is the head.
+// A BARE `llm_call_progress` ray tick is counted, never rendered; the server must keep sending it
+// or every heartbeated backend query grows a spurious gap marker (`format.ts::fmtGap`).
 
 import {
   createContext,
@@ -72,21 +34,10 @@ import { bumpRevalidation, useRevalidation } from "./revalidate";
 import { hasLiveProducer } from "./run-phase";
 import { useWorkspace } from "./workspace";
 
-// `gone` is NOT a flavour of `offline`, and conflating them is the bug this
-// vocabulary exists to prevent: "the server didn't answer" and "the server
-// answered, and says this no longer exists" call for opposite reactions — retry
-// vs stop — and reporting the second as the first sends an operator to restart a
-// server that was never down (frontend-surface-contract.md § I7).
+// `gone` is NOT a flavour of `offline`: "didn't answer" means retry, "answered: no longer exists"
+// means stop (frontend-surface-contract.md § I7).
 export type StatusKind = "live" | "stale" | "offline" | "gone";
 
-// `dashboard.json` IS `LiveDashboardState` — generated from the Pydantic model, not
-// re-declared here. The hand-written version made every field optional and ended with
-// `[key: string]: unknown`, so it typechecked anything (its `run_phase` union was
-// missing two of RunPhase's six members, and nothing caught it).
-//
-// The server's `warming_up` placeholder is a DIFFERENT, 4-key shape — not a sparse
-// dashboard. It is `WarmingSnapshot`, narrowed once in `tick` and never handed to a
-// consumer, so no component has to ask whether its snapshot is real.
 export type DashboardSnapshot = LiveDashboardState;
 
 export interface WarmingSnapshot {
@@ -94,9 +45,8 @@ export interface WarmingSnapshot {
   campaign_id: string;
   cycle_id: string;
   phase_hint: string;
-  // Derived server-side like every other phase (`derive_run_phase`), and it is what
-  // separates "no snapshot YET" from "no snapshot EVER": a cycle whose producer died
-  // during init reads `detached`/`terminal` here while still having no dashboard.
+  // Separates "no snapshot YET" from "EVER": a producer that died during init reads
+  // `detached`/`terminal` here while still having no dashboard.
   run_phase: string;
 }
 
@@ -104,51 +54,26 @@ function isWarming(d: unknown): d is WarmingSnapshot {
   return !!d && typeof d === "object" && (d as WarmingSnapshot).warming_up === true;
 }
 
-// `current_round.nodes.l1_score.output.candidates[]` shape — the live in-flight
-// projection of the round in progress. Every consumer drills into this same path;
-// `liveL1Candidates` narrows once so the call sites don't repeat the `as Record<...>` cast.
-
 export interface LiveCandidate {
   idx?: number;
   label?: string;
-  // ONE shape, whatever the round's state — the served row, already graded by the producer,
-  // so no reader re-derives a verdict the row states. It was a string tape here and dicts in
-  // the audit twin, which is what forced the browser to regex a rendering.
   samples?: DashboardSample[];
-  // The same rows rendered for the operator reading the file. No component reads it; it is
-  // declared so the folder-UI half of this block is visible to anyone typing `dash.`.
   sample_lines?: string[];
-  // WHY a candidate has no samples — the scoring node's own account of a validation rejection,
-  // and the only place it is served. It is NOT copied onto `current_round.candidates`: that row
-  // carries the `invalid` FLAG (which every surface reads), while the reasons stay here, where
-  // one panel reads them. Serving the list twice would put the same failures in `dashboard.json`
-  // in two places, which is the ledger duplication `infrastructure/CLAUDE.md` § Persistence
-  // measures. `invalid` is mirrored here only so this half is readable on its own.
+  // The only place a validation rejection's reasons are served; `current_round.candidates`
+  // carries just the `invalid` flag, which is mirrored here.
   invalid?: boolean;
   validation_failures?: ValidationFailure[];
-  // No numbers here: they moved to `current_round.candidates`, in the same shape a closed
-  // round serves, so no surface merges two shapes field by field. The tape is what this half
-  // still owns. (The block also carries the value-inlined formula and the self-healing state
-  // for a folder-UI reader; no component reads either, so neither is declared.)
+  // Numbers ride `current_round.candidates` in the closed-round shape; this half owns the tape.
 }
 
-// `current_round.nodes.l1_score.input.candidates[]` shape — the *input* half
-// of the live l1_score block (mirrors round_NNNN.json::candidate_scores for
-// the seed-able fields). Carries the candidate's evolved searchpoint:
-// `prompt_fields` (OptSearchPoint.prompt_field_dict() shape) + the resolved
-// config below.
 export interface LiveInputCandidate {
   idx?: number;
   label?: string;
   changes_description?: string;
-  // Present on settled `round_NNNN.json::candidate_scores[]` rows (the OBSERVE /
-  // STEER readers locate by it); absent on in-flight rows, which match by idx.
+  // Present on settled `round_NNNN.json::candidate_scores[]` rows; absent on in-flight rows.
   candidate_id?: string;
   prompt_fields?: Record<string, unknown>;
-  // Server-resolved, config-only effective params (`{node:{param:value}, steps}`),
-  // prompt stripped. The in-flight peer of round_NNNN.json::candidate_scores[].
-  // resolved_pipeline_params — read by `liveObserveConfig` (OBSERVE view) and
-  // `liveCandidateSearchPoint` (steer-fork seed from a still-in-flight candidate).
+  // Server-resolved, config-only effective params (`{node:{param:value}, steps}`), prompt stripped.
   resolved_pipeline_params?: Record<string, unknown> | null;
 }
 
@@ -160,11 +85,8 @@ interface L1ScoreInput {
   candidates?: LiveInputCandidate[];
 }
 
-// Shared frozen empty result for the no-candidate path so every consumer
-// gets a stable reference. A fresh `[]` per call gave each poll a new array
-// identity, churning the candidates card's Set chain
-// (realApplicable→viewApplicable→inActive) into an unbounded setState loop
-// once a real cycleId resolved post-login.
+// A stable empty reference: a fresh `[]` per poll churns the candidates card's Set chain into an
+// unbounded setState loop.
 const NO_CANDIDATES: LiveCandidate[] = Object.freeze([] as LiveCandidate[]) as LiveCandidate[];
 
 export function liveL1Candidates(dash: DashboardSnapshot | null): LiveCandidate[] {
@@ -178,10 +100,6 @@ const NO_ROWS: DashboardCandidate[] = Object.freeze(
   [] as DashboardCandidate[],
 ) as DashboardCandidate[];
 
-// The in-flight round's candidate rows — SAME shape a closed round serves
-// (`rounds[].candidates`), so a reader takes a whole row from whichever half has it. Filling one
-// in from the other per field is what drew a bar from the 2 s dashboard poll and its error
-// whisker from the 5 s tree poll.
 export function liveCandidates(dash: DashboardSnapshot | null): DashboardCandidate[] {
   return dash?.current_round.candidates ?? NO_ROWS;
 }
@@ -190,8 +108,6 @@ const NO_INPUT_CANDIDATES: LiveInputCandidate[] = Object.freeze(
   [] as LiveInputCandidate[],
 ) as LiveInputCandidate[];
 
-// The seed-able input half of the live l1_score block — the in-flight peer of
-// `round_NNNN.json::candidate_scores` for steer-fork seeding.
 export function liveL1InputCandidates(
   dash: DashboardSnapshot | null,
 ): LiveInputCandidate[] {
@@ -201,13 +117,7 @@ export function liveL1InputCandidates(
   return l1?.input?.candidates ?? NO_INPUT_CANDIDATES;
 }
 
-// Match a candidate back to its live slot BY LABEL — the one key both id spaces carry.
-//
-// A live row has no lineage id until `candidate_scored` stamps one, while every SELECTION is
-// minted off the served tree and carries that id — so neither id space spans both halves, and a
-// key from either resolves in one only. `label` is canonical (`candidate_label(round, idx)`,
-// composed at mint), unique within a round, and already what the HISTORICAL join uses
-// (`searchPoint.ts`, `RoundBuffer.stamp_fit`) — so it is the join, not a third id.
+// Joins on `label`: a live row has no lineage id until `candidate_scored` stamps one.
 function matchLiveCandidate<T extends { label?: string }>(
   candidates: readonly T[],
   label: string,
@@ -216,14 +126,11 @@ function matchLiveCandidate<T extends { label?: string }>(
   return candidates.find((c) => c.label === label) ?? null;
 }
 
-// Output-candidate slot — the sample tape.
 export const liveCandidate = (
   dash: DashboardSnapshot | null,
   label: string,
 ): LiveCandidate | null => matchLiveCandidate(liveL1Candidates(dash), label);
 
-// Input-candidate slot — the seed-able prompt_fields / resolved_pipeline_params
-// half, for steer-fork seeding from a still-in-flight candidate.
 export const liveInputCandidate = (
   dash: DashboardSnapshot | null,
   label: string,
@@ -236,19 +143,10 @@ export interface CycleStreamState {
   statusHint: string;
   termKey: string;
   error: string | null;
-  // Three orthogonal axes at once: the run declares `run_phase === "running"`, the connection is
-  // fresh, AND the page is showing the head rather than a replayed moment. The single gate for
-  // every transient indicator — which is why the moment belongs in it: a past moment has no
-  // in-flight anything, so they all go quiet without a panel testing `at` for itself. Composed
-  // once, in `useCycleStreamSource`; consumers never re-derive it.
+  // Running AND fresh AND showing the head — the one gate for every transient indicator.
+  // Composed once, in `useCycleStreamSource`; consumers never re-derive it.
   isLive: boolean;
-  // `dash.state` lifted to the top level so transient indicators can gate on
-  // the phase (e.g. only blink a sample row when `phase === "scoring"`).
   phase: string | null;
-  // The moment `dash` is OF: a physical offset in the leaf cycle's own ledger, or
-  // null for the head. Set by scrubbing the time-ray; part of the address, so it
-  // clears with it. Panels that name what they are showing read it; the rest do
-  // not have to, because it is already folded into `isLive`.
   at: number | null;
 }
 
@@ -264,40 +162,23 @@ const INITIAL_STATE: CycleStreamState = {
   at: null,
 };
 
-// Consecutive stamp-mismatch drops before the banner surfaces the problem.
-// 3 drops ≈ 6s at the 2s cadence — long enough to ride out a one-tick
-// re-instantiation during `new`, short enough the operator isn't left
-// staring at "Connecting…" with no reason.
+// Rides out a one-tick re-instantiation during `new`.
 const STAMP_MISMATCH_LIMIT = 3;
 
-// Consecutive 404s before this poll declares its address dead. Same reasoning and
-// same number as the stamp guard: one miss is a mint race (a cycle dir appearing
-// under a pointer that already names it), three across ~6 s is a fact. The floor
-// matters in the destructive direction — this verdict unpins the operator's view.
+// One 404 is a mint race; this verdict unpins the operator's view.
 const GONE_CONFIRM_LIMIT = 3;
 
-// Reconnect cadence while the API is unreachable — slower than the live poll so
-// a downed server is retried efficiently (every 5 s) rather than hammered. See
-// the two-cadence note at the `usePoll` call.
 const RECONNECT_INTERVAL_MS = 5000;
 
-// How many chronology records one window carries.
 const RAY_WINDOW = 200;
 
-// The two reads sharing the loop. Module-scoped so the identity is stable — `usePoll` reads
-// it fresh each tick and must not see a new array every render.
+// Module-scoped: `usePoll` reads it every tick and must not see a new array per render.
 const POLL_KEYS = (): readonly string[] => ["dash", "ray"];
 
-// Two windows, two lifetimes: the HEAD is refetched every tick (new events land there, its
-// ETag rides the family's mtimes); OLDER windows are fetched on demand and held, since a
-// deeper page is strictly below the cursor by construction and the head never overlaps it.
-// No SSE join, no `since=` on the tail: one live channel, one history channel
-// (webapp/CLAUDE.md § "/ray is the CHRONOLOGY").
 interface RayWindows {
-  // Windows older than the head, oldest-first, already concatenated in order.
   older: RayItem[];
   head: RayItem[];
-  // Cursor for the window before everything loaded — null at the family's beginning.
+  // null at the family's beginning.
   cursor: string | null;
   loaded: boolean;
   failed: boolean;
@@ -312,25 +193,19 @@ const EMPTY_RAY: RayWindows = {
 };
 
 export interface TimeRayState {
-  /** The whole loaded span, oldest-first. */
   items: RayItem[];
   loaded: boolean;
   failed: boolean;
-  /** Older records exist below what is loaded. */
   hasMore: boolean;
   loadOlder: () => void;
-  /** Wall clock, advanced once per poll tick — the input the head's age test needs. A pure
-   *  derivation cannot call `Date.now()`, and a 304 re-renders nothing, so without this the
-   *  "no progress for Xm" reading would freeze at whatever it said when progress stopped. */
+  /** A derivation cannot call `Date.now()` and a 304 re-renders nothing, so without this tick
+   *  the head's "no progress for Xm" reading freezes. */
   nowMs: number;
-  /** Move the viewed moment: an offset in THIS course's ledger replays every dashboard panel
-   *  to it, null returns them to the head. A step belonging to a fork or an inner run is an
-   *  address rather than a moment — those ledgers have their own offsets, and mixing the two
-   *  spaces is the confusion `infrastructure/ledger.py::iter` documents on the writing side. */
+  /** An offset in THIS course's ledger; a fork's or inner run's step is an address, not a moment
+   *  — those ledgers have their own offsets (`infrastructure/ledger.py::iter`). */
   setAt: (offset: number | null) => void;
 }
 
-// Status banner age buckets — same thresholds as vanilla setStatus call sites.
 export interface BucketResult {
   status: StatusKind;
   statusText: string;
@@ -338,16 +213,13 @@ export interface BucketResult {
   termKey: string;
 }
 
-// Canonical round number across the dashboard. `current_round.round` is authoritative and is
-// stamped from the projection's own `state.round` on every write, so it cannot lag the
-// top-level one. The fall-through covers cycle re-instantiation, before any phase has fired.
+// `current_round.round` is authoritative; the fall-through covers re-instantiation before any
+// phase has fired.
 export function roundOf(dash: DashboardSnapshot | null): number | null {
   const r = dash?.current_round.round ?? dash?.round;
   return typeof r === "number" ? r : null;
 }
 
-// Seconds since the dashboard self-stamped `wallclock_serialized_at`. Sole
-// reader of that field's age — feeds `ageBucket`. Unparseable/missing → null.
 function wallclockAgeS(iso: string | null | undefined): number | null {
   const wall = Date.parse(iso || "");
   return Number.isFinite(wall) ? (Date.now() - wall) / 1000 : null;
@@ -362,9 +234,8 @@ export function ageBucket(ageS: number | null): BucketResult {
       termKey: "status_nowall",
     };
   }
-  // The GENERATED `RUN_FRESH_S` — the same window the server splits `running` from `detached` on,
-  // so the banner and `run_phase` cannot disagree about whether a producer is still there. The 5 m
-  // below is this banner's own, dividing two flavours of stale that the server does not name.
+  // The server's `running`/`detached` window, so the banner and `run_phase` cannot disagree.
+  // The 5 m below is this banner's own.
   if (ageS < RUN_FRESH_S) {
     return {
       status: "live",
@@ -399,10 +270,8 @@ export function useCycleStream(): CycleStreamState {
   return v;
 }
 
-// The chronology rides its OWN context off the same provider. Not a style choice: the ray
-// window changes identity on a different beat from `dash`, and folding both into one value
-// would re-render every memoized chart on a poll that only moved the strip
-// (webapp/CLAUDE.md § Render-cost guards).
+// Its own context: the ray changes identity on a different beat from `dash`, and one value would
+// re-render every memoized chart on a poll that only moved the strip.
 const TimeRayContext = createContext<TimeRayState | null>(null);
 
 export function useTimeRay(): TimeRayState {
@@ -413,12 +282,6 @@ export function useTimeRay(): TimeRayState {
   return v;
 }
 
-// Internal hook backing the provider. Polls the viewed cycle's dashboard.json
-// every `intervalMs` and resets on any change to the viewed PATH via the
-// prev-prop pattern so the prior cycle's snapshot can't linger during the new
-// fetch. The path is the single address: its root hop is the top-level cycle,
-// deeper hops an L4 inner descendant. The stream re-roots to the LEAF hop's
-// dashboard (the file it fetches + the identity stamp it must match).
 function useCycleStreamSource(
   path: CyclePath | null,
   intervalMs: number,
@@ -426,68 +289,36 @@ function useCycleStreamSource(
   const [state, setState] = useState<CycleStreamState>(INITIAL_STATE);
   const [ray, setRay] = useState<RayWindows>(EMPTY_RAY);
   const [nowMs, setNowMs] = useState(() => Date.now());
-  // The viewed MOMENT. Kept beside the dashboard state rather than inside it because the
-  // tick writes that and only the operator writes this.
   const [at, setAtState] = useState<number | null>(null);
-  // Poll only with a confirmed session; a 401 mid-run re-probes /auth/me so
-  // the loop halts instead of storming the server (see useAuthGate).
   const { authed, onAuthError } = useAuthGate();
-  // This poll is the authoritative existence read for the viewed address, so it
-  // is the one that gets to declare it dead. `reportAddressGone` is identity-
-  // stable by construction (workspace.tsx) — the tick must not re-arm on it.
+  // Identity-stable by construction (workspace.tsx) — the tick must not re-arm on it.
   const { reportAddressGone } = useWorkspace();
-  // Bumped on every unit switch so `usePoll` fires an immediate tick — the
-  // hand-rolled loop used to restart (and tick at once) on each cycle change.
   const [revalCount, setRevalCount] = useState(0);
   const cycleRef = useRef<string | null>(null);
   const campaignRef = useRef<string | null>(null);
-  // Consecutive dashboard.json payloads whose identity stamp didn't match
-  // the polled unit. Once it crosses STAMP_MISMATCH_LIMIT the banner says
-  // so — a never-matching stamp can't leave the UI silently on "Connecting…".
   const stampMismatchRef = useRef(0);
-  // Consecutive 404s for the polled unit — see GONE_CONFIRM_LIMIT. Reset by the
-  // unit-key guard below and by any answered tick, so only an UNBROKEN run of
-  // misses counts.
   const goneRef = useRef(0);
-  // Last server-issued `Last-Modified` for this unit's dashboard.json.
-  // Sent back as `If-Modified-Since` next tick so the server can short-
-  // circuit with 304 when the file mtime hasn't advanced. Reset on unit
-  // switch so a stale value from the prior unit can't suppress the
-  // first real fetch of the new unit.
   const lastModifiedRef = useRef<string | null>(null);
-  // Last `run_phase` this poll observed for the unit. The same server-owned value
-  // also rides `/cycles` (10 s) and `/tree` (5 s), so without a nudge the dock, the
-  // sidebar and this stream sat up to 10 s apart on one transition — three surfaces
-  // showing three states because they were observed at unrelated cadences, not
-  // because they disagreed. Seeing it move here re-ticks the other two.
+  // The same `run_phase` rides `/cycles` (10 s) and `/tree` (5 s); a change seen here re-ticks
+  // both so three surfaces do not sit apart on one transition.
   const lastPhaseRef = useRef<string | null>(null);
-  // The viewed path, held in a ref so the tick reads it without re-subscribing;
-  // set in the same unit-key guard below.
   const pathRef = useRef<CyclePath | null>(null);
-  // The viewed moment, same reason. Written by `setAt` and by the unit-key guard.
   const atRef = useRef<number | null>(null);
-  // The head window's ETag, stamped WITH the key it belongs to. Stamping rather than
-  // clearing keeps this out of the render phase (`react-hooks/refs`): a mismatched stamp
-  // reads as "no validator", and only a tick ever writes. Replaying a stale ETag would
-  // 304 into an empty window.
+  // Stamped with its key rather than cleared, keeping writes out of render (`react-hooks/refs`);
+  // replaying a stale ETag would 304 into an empty window.
   const rayEtagRef = useRef<{ key: string | null; etag: string | null }>({
     key: null,
     etag: null,
   });
   const loadingOlderRef = useRef(false);
 
-  // Change-detect on the whole viewed PATH. A cycle_id is unique only within
-  // its campaign, and an inner descendant only within its parent's sandbox, so
-  // the full encoded path IS the identity — any hop change (outer→outer,
-  // outer→inner, inner→inner) hard-resets the stream, or a prior cycle's
-  // dashboard lingers forever.
+  // The whole encoded path is the identity: a cycle_id is unique only within its campaign, an
+  // inner one only within its parent's sandbox.
   const unitKeyRef = useRef<string | null>(null);
   const unitKey = path ? encodeCyclePath(path) : null;
   if (unitKeyRef.current !== unitKey) {
     unitKeyRef.current = unitKey;
     pathRef.current = path;
-    // The EXPECTED stamp ids: the LEAF hop's own ids (its dashboard.json
-    // self-stamps them — inner ids when descended, else the root).
     const leaf = path ? pathLeaf(path) : null;
     cycleRef.current = leaf?.cycleId ?? null;
     campaignRef.current = leaf?.campaignId ?? null;
@@ -495,22 +326,16 @@ function useCycleStreamSource(
     goneRef.current = 0;
     lastModifiedRef.current = null;
     lastPhaseRef.current = null;
-    // A moment is an offset into ONE cycle's ledger, so it means nothing anywhere else —
-    // carrying it across a switch would replay the new course to a position it may not
-    // even have reached.
+    // A moment is an offset into ONE cycle's ledger and means nothing in another.
     atRef.current = null;
     setAtState(null);
-    // Identity changed — hard-reset every cycle-scoped field so the prior
-    // unit's dash snapshot, chronology and `● Live` badge can't linger for a
-    // frame while the first poll of the new unit is in flight.
     setState({ ...INITIAL_STATE, statusText: "Switching to active campaign…" });
     setRay(EMPTY_RAY);
     setRevalCount((c) => c + 1);
   }
 
-  // Moving the moment re-addresses the dashboard read, so it clears that read's validator:
-  // the same file mtime answers "the head" and "offset N" differently, and replaying the
-  // stamp from the head would 304 the fold away before it was ever fetched.
+  // The same file mtime answers "the head" and "offset N" differently, so a head validator
+  // replayed here would 304 the fold away before it was ever fetched.
   const setAt = useCallback((offset: number | null) => {
     atRef.current = offset;
     lastModifiedRef.current = null;
@@ -518,8 +343,6 @@ function useCycleStreamSource(
     setRevalCount((c) => c + 1);
   }, []);
 
-  // No active campaign — the static prompt. The poll itself is gated off
-  // via `enabled` on the usePoll call below.
   useEffect(() => {
     if (!path) {
       setState({
@@ -531,33 +354,16 @@ function useCycleStreamSource(
     }
   }, [path]);
 
-  // The dashboard half of the tick. `usePoll` owns the interval, the hidden-tab
-  // pause, and the per-key AbortController; this fetches dashboard.json (via
-  // If-Modified-Since so unchanged ticks 304 cheaply) and guards its
-  // identity stamp. The completed-round summary block rides this same
-  // payload (`dash.rounds[]`) — no second fetch path.
   const tickDash = async (signal: AbortSignal) => {
     const id = cycleRef.current;
     const cmp = campaignRef.current;
     const p = pathRef.current;
     if (!id || !cmp || !p) return;
     try {
-      // One fetch for any depth: `fetchDashboardByPath` hits the root cycle's
-      // dashboard route, riding `?descend=` for inner descendants. `cmp`/`id` are
-      // the LEAF stamp ids the payload must self-report (inner ids when
-      // descended), so the identity guard below is depth-agnostic. `at` asks the
-      // same route for a past moment — the fold replayed to that offset, which the
-      // server rebuilds from the ledger rather than serving the materialized head.
       const resp = await fetchDashboardByPath(p, lastModifiedRef.current, signal, atRef.current);
       if (signal.aborted) return;
-      // Any answer at all proves the address exists, so only an UNBROKEN run of
-      // 404s can reach the confirm limit.
       goneRef.current = 0;
 
-      // 304 — file mtime hasn't advanced since the last fetch. Skip the
-      // setState entirely unless the age bucket crossed a threshold
-      // (Live → Stale → Snapshot); a no-op `setState(prev => prev)` is
-      // bailed-out by React, so consumers don't re-render.
       if (resp.kind === "not_modified") {
         setState((prev) => {
           const ageS = wallclockAgeS(prev.dash?.wallclock_serialized_at);
@@ -575,22 +381,10 @@ function useCycleStreamSource(
         return;
       }
 
-      // Only a 200 carries one. This route validates on mtime, so the validator IS a
-      // Last-Modified date; the lineage-tree route validates on an ETag through the same
-      // helper — hence the neutral field name.
       if (resp.validator) lastModifiedRef.current = resp.validator;
 
-      // Fresh-campaign warming_up payload (server returns this at 200 when
-      // dashboard.json doesn't exist yet — typically while origin is running). It is a
-      // 4-key stub, NOT a sparse dashboard, so it is narrowed off here and never handed
-      // downstream: `dash` stays null and consumers read the phase. No charts to render
-      // until the first real snapshot lands.
       if (isWarming(resp.data)) {
         stampMismatchRef.current = 0;
-        // "Initialising" is only true while something is still working on it. The
-        // served phase is the one that knows: a producer that died before its first
-        // flush leaves a cycle with no dashboard forever, and this branch used to
-        // announce it as warming up for as long as the operator kept the tab open.
         const stillComing = hasLiveProducer((resp.data as WarmingSnapshot).run_phase);
         setState((prev) => ({
           ...prev,
@@ -610,13 +404,8 @@ function useCycleStreamSource(
 
       const dash = resp.data as unknown as DashboardSnapshot;
 
-      // Payload-identity guard: dashboard.json self-stamps the cycle it
-      // describes (per-cycle — every cycle owns its own file, stamped with
-      // its own cycle_id). Drop any payload that doesn't match the unit we
-      // polled for — a late response from the prior cycle, or a transient
-      // identity/payload disagreement during a `new` or a cycle switch.
-      // Stale data never reaches the UI; the next tick retries against the
-      // correct unit.
+      // Drop a payload self-stamped for another unit — a late response from the prior cycle, or a
+      // `new` mid re-instantiation.
       if (dash.campaign_id !== cmp || dash.cycle_id !== id) {
         const reported = `(${dash.campaign_id}, ${dash.cycle_id})`;
         const expected = `(${cmp}, ${id})`;
@@ -624,8 +413,6 @@ function useCycleStreamSource(
           `[cycle-stream] dropped dashboard payload — stamp ${reported} != unit ${expected}`,
         );
         stampMismatchRef.current += 1;
-        // One re-instantiation tick is normal; a stamp that *never* matches
-        // is a real fault — surface it instead of polling silently forever.
         if (stampMismatchRef.current >= STAMP_MISMATCH_LIMIT) {
           setState((prev) => ({
             ...prev,
@@ -641,13 +428,11 @@ function useCycleStreamSource(
         }
         return;
       }
-      // A matching payload clears any prior mismatch streak.
       stampMismatchRef.current = 0;
       if (dash.run_phase !== lastPhaseRef.current) {
         const first = lastPhaseRef.current === null;
         lastPhaseRef.current = dash.run_phase;
-        // Not on the first observation: that is this unit's opening read, not a
-        // transition, and bumping there would re-tick the workspace on every switch.
+        // The first observation is this unit's opening read, not a transition.
         if (!first) bumpRevalidation();
       }
       const ageS = wallclockAgeS(dash.wallclock_serialized_at);
@@ -665,16 +450,11 @@ function useCycleStreamSource(
       }));
     } catch (e) {
       if ((e as Error).name === "AbortError" || signal.aborted) return;
-      // A 401 means the session died — re-probe /auth/me so the gate flips
-      // unauthed and this loop stops instead of 401-storming the server.
       onAuthError(e);
       reportIncident(e, { surface: "dashboard", address: unitKeyRef.current });
 
-      // THE dashboard read is this address's authoritative existence oracle: the
-      // route answers `warming_up` at 200 while a cycle exists without a dashboard
-      // yet, so a 404 here means the cycle dir itself is gone — deleted, reaped, or
-      // reset away. That is terminal, and retrying it forever is what left the app
-      // pinned to a dead campaign while announcing the SERVER was down.
+      // The route answers `warming_up` at 200 for a cycle with no dashboard yet, so a 404 here
+      // means the cycle dir itself is gone.
       if (failureKind(e) === "gone") {
         goneRef.current += 1;
         if (goneRef.current >= GONE_CONFIRM_LIMIT && unitKeyRef.current) {
@@ -682,9 +462,7 @@ function useCycleStreamSource(
         }
         setState((prev) => ({
           ...prev,
-          // Drop the snapshot with the address. It was fetched before the campaign
-          // stopped existing, so every number in it now describes something that is
-          // not on disk — rendering it would present a measurement for a deleted run.
+          // Every number in the kept snapshot would describe a run no longer on disk.
           dash: null,
           status: "gone",
           statusText: "This campaign no longer exists",
@@ -704,18 +482,12 @@ function useCycleStreamSource(
         statusHint: "Reconnecting every 5 s — check the server is running.",
         termKey: "status_offline",
         error: (e as Error).message,
-        // Connection loss is presentation (see `status`), never a run phase —
-        // `dash.run_phase` (and everything derived from it) is left untouched,
-        // so a client blip can't make an in-flight cycle read as gone.
+        // `dash.run_phase` stays untouched, so a client blip cannot read an in-flight cycle as gone.
         isLive: false,
       }));
     }
   };
 
-  // The chronology half. It reports no `gone` of its own: the dashboard read is this
-  // address's authoritative existence oracle (webapp/CLAUDE.md § Failure handling), it
-  // already stops the shared loop, and a second voter would only be a second chance to
-  // kill a live view.
   const tickRay = async (signal: AbortSignal) => {
     const p = pathRef.current;
     const key = unitKeyRef.current;
@@ -730,9 +502,8 @@ function useCycleStreamSource(
       }
       rayEtagRef.current = { key, etag: res.validator };
       setRay((prev) => ({
-        // A refetch replaces the HEAD only: the head can only have grown at its newest
-        // end, and the cursor stays whatever the oldest loaded window reported — a fresh
-        // head window's cursor describes a boundary already paged past.
+        // A fresh head window's cursor describes a boundary already paged past, so the oldest
+        // loaded window's cursor stands.
         older: prev.older,
         head: res.data.items,
         cursor: prev.older.length > 0 ? prev.cursor : res.data.cursor_prev,
@@ -747,34 +518,22 @@ function useCycleStreamSource(
     }
   };
 
-  // One timer, two keys. `usePoll` gives each its own AbortController and skips only the
-  // key still in flight, so a slow window fetch never delays the dashboard and neither
-  // holds the other to its own duration.
   const tick = (signal: AbortSignal, key: string): Promise<void> => {
     if (key === "ray") return tickRay(signal);
     setNowMs(Date.now());
     return tickDash(signal);
   };
 
-  // Three cadences. Reachable at the head → the responsive `intervalMs` (2 s, mostly
-  // 304-cheap; user actions fire an immediate tick via `revalidateOn`). Offline → a steady
-  // 5 s reconnect probe, so a downed API recovers within ~5 s without hammering. REPLAYING
-  // → the same 5 s, because a past moment cannot change: the fold at an offset is immutable
-  // and only `run_phase` still moves, so re-folding a growing ledger at 2 s would buy
-  // nothing but server work. `usePoll` restarts its timer when this changes.
+  // Replaying drops to the 5 s cadence too: a fold at a past offset is immutable, so re-folding
+  // it at 2 s buys only server work.
   const effectiveInterval =
     state.status === "offline" || at !== null ? RECONNECT_INTERVAL_MS : intervalMs;
   usePoll(tick, {
     intervalMs: effectiveInterval,
     keys: POLL_KEYS,
-    // A confirmed `gone` STOPS the loop — there is nothing to reconnect to, and a
-    // retry cadence would be a lie about the state. The unit-key guard resets
-    // `status` on any address change, so the poll re-arms the moment the view
-    // moves somewhere real (including the unpin this verdict just triggered).
+    // A confirmed `gone` stops the loop; the unit-key guard resets `status`, so the next real
+    // address re-arms it.
     enabled: !!path && authed && state.status !== "gone",
-    // A mutation elsewhere (fork / stop / cleanup) re-ticks both halves at once, which is
-    // the point of sharing the loop: the chronology and the fold move together or they
-    // disagree about a run neither of them is wrong about.
     revalidateOn: revalCount + useRevalidation(),
     tickOnFocus: true,
   });
@@ -802,14 +561,8 @@ function useCycleStreamSource(
 
   const items = useMemo(() => [...ray.older, ...ray.head], [ray.older, ray.head]);
 
-  // The moment joins the tick's two axes HERE rather than inside it: the tick knows what the
-  // server said, this knows what the page is showing.
-  //
-  // It also OVERRIDES the age reading, and that is the point rather than a wrinkle. A fold
-  // stamps `wallclock_serialized_at` at the instant it is composed, so a replayed moment
-  // arrives looking a second old and the banner would read "Live · last write 0s ago" over a
-  // dashboard showing an hour-old round. The freshness question does not apply: nothing was
-  // written, a moment was rebuilt, and the banner has to say which of the two it is.
+  // A fold stamps `wallclock_serialized_at` when composed, so a replayed moment would read
+  // "Live · last write 0s ago" over an hour-old round; replay overrides the age banner.
   const stream = useMemo<CycleStreamState>(() => {
     if (at === null) return { ...state, at };
     return {
@@ -838,16 +591,13 @@ function useCycleStreamSource(
   return { stream, ray: rayState };
 }
 
-// The live beat, matched by the workspace's active-pointer poll so a CLI-minted cycle is
-// followed without the registry's lag.
+// Matched by the workspace's active-pointer poll, so a CLI-minted cycle is followed without lag.
 const DASHBOARD_INTERVAL_MS = 2000;
 
 export function CycleStreamProvider({
   path,
   children,
 }: {
-  // The single viewed-cycle address (root → leaf hops). The stream re-roots to
-  // the leaf hop's dashboard; an inner descendant is just a deeper path.
   path: CyclePath | null;
   children: ReactNode;
 }) {

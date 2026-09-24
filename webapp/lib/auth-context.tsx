@@ -1,21 +1,6 @@
 "use client";
-// Auth context — single global probe of `/api/v1/auth/me`.
-//
-// It also owns the ANON ENTRY PROMPT: whether the sign-in modal is open, and the
-// error a failed OIDC callback bounced back with. Both live here because the
-// prompt has several triggers (a Log in chip in the sidebar footer, the same
-// chip in the mobile app bar, the `?auth_error=` redirect) and exactly one
-// modal — `<WelcomeLockoutModal>` in app/page.tsx. A per-trigger copy of the
-// modal is how two of them drift.
-//
-// Three states:
-//   loading  — initial probe in flight (also after a focus revalidation
-//              while we wait for the response)
-//   authed   — `/auth/me` returned 200, `me` carries the envelope
-//   unauthed — `/auth/me` returned non-200 (typically 401) or threw
-//
-// Probes on mount + on window focus so a successful OIDC callback in
-// another tab cleanly flips the lockout away on return.
+// The single `/auth/me` probe, re-run on window focus so an OIDC login in another tab lands.
+// It also owns the ONE sign-in modal's state (`<WelcomeLockoutModal>`), whatever triggers it.
 
 import {
   createContext,
@@ -30,8 +15,7 @@ import { ApiError, fetchMe, type MeResponse } from "@/lib/api";
 
 export type AuthStatus = "loading" | "authed" | "unauthed";
 
-// What the one sign-in modal needs to render. `code`/`email` are non-null only
-// after an OIDC callback bounced back with a failure.
+// `code`/`email` are non-null only after an OIDC callback bounced back with a failure.
 export interface AuthPrompt {
   open: boolean;
   code: string | null;
@@ -55,10 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>("loading");
   const [me, setMe] = useState<MeResponse | null>(null);
   const [authPrompt, setAuthPrompt] = useState<AuthPrompt>(PROMPT_CLOSED);
-  // Bumped to force re-probes; the effect below depends on it.
   const [nonce, setNonce] = useState(0);
-  // Latest probe wins — older in-flight responses are dropped if a newer
-  // one started.
   const probeIdRef = useRef(0);
 
   const refresh = useCallback(() => {
@@ -97,13 +78,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
   const closeAuthPrompt = useCallback(() => setAuthPrompt(PROMPT_CLOSED), []);
 
-  // OIDC callback bounce-back: /auth/callback/{provider} 303s to
-  // /?auth_error=<code>(&email=<addr>) on failure. Open the prompt with the
-  // error banner, then strip the params from the visible URL so a refresh
-  // doesn't replay. Read window.location directly (not useSearchParams) to
-  // avoid the Suspense requirement that breaks static export. Same sanctioned
-  // set-state-in-effect pattern as `lib/workspace.tsx` deep-link hydration:
-  // SSR renders empty, client effect corrects post-hydration.
+  // `/auth/callback/{provider}` 303s to `/?auth_error=<code>(&email=)` on failure. Read
+  // `window.location`, not `useSearchParams`, whose Suspense requirement breaks static export.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -131,21 +107,14 @@ export function useAuth(): AuthCtx {
   return ctx;
 }
 
-// Who a fork is stamped as having been steered by — the most identifying name this envelope
-// carries. One spelling, because two panels naming the same operator differently is a lineage
-// that cannot be joined on.
+// One spelling for who steered a fork: two panels naming the same operator differently is a
+// lineage that cannot be joined on.
 export function steeredBy(me: MeResponse | null): string | undefined {
   return me?.name || me?.email || me?.user_id || undefined;
 }
 
-// Poll gate. Every protected `/api/v1/*` read 401s without a session, so a
-// poll loop must (1) not run while unauthed and (2) detect a session that
-// died mid-run. `authed` gates `usePoll`'s `enabled`; `onAuthError`, called
-// from a tick's catch, re-probes `/auth/me` when a read 401s — confirming the
-// dead session and flipping `status` to "unauthed", which drops `authed` and
-// halts the loop. Without this a tab whose session died (e.g. server restart)
-// would 401-storm forever, since `/auth/me` is otherwise only re-probed on
-// window focus. Reads throw `ApiError` carrying `.status` (lib/api/client.ts::jget).
+// `authed` gates a poll's `enabled`; `onAuthError`, from a tick's catch, re-probes on a 401 so a
+// session that died mid-run halts the loop instead of 401-storming until the next focus.
 export function useAuthGate(): {
   authed: boolean;
   onAuthError: (err: unknown) => void;

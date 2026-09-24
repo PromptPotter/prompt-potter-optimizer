@@ -1,47 +1,28 @@
-// Unified per-sample row, plus the view-local address a renderer keys on. Live mode is the
-// served `DashboardSample` (`dashboard.json::current_round.nodes.l1_score.output.candidates[]
-// .samples[]`); historical mode is the structured dicts in
-// `round_NNNN.json::all_candidate_results[candidate_id][]`. Both readers live in
+// One per-sample row for the live and the historical source; both readers live in
 // `lib/derivations/round-samples.ts`.
 
 import type { DashboardSample } from "@/lib/api/types";
 
-// The served row surfaces through this module, beside the view shape built from it.
 export type { DashboardSample };
 
-// Read back off the served row rather than re-declared — a closed set belongs on the server
-// (`domain/dashboard_rows.py::SampleStatus`).
 export type SampleStatus = DashboardSample["status"];
 
 export interface SampleRow {
-  // Stable React key — `${round}|${candidate_id}|${sample_id ?? ord}`.
   key: string;
-  // Round this sample was scored under.
   round: number;
-  // Owning candidate.
   candidate_id: string;
-  // Dataset sample id when present; null where the source carries only an ordinal.
   sample_id: number | null;
-  // Null only in historical mode, where a row can carry neither a fitness nor an error
-  // category. The live row is served already graded.
+  // Null only for a historical row carrying neither a fitness nor an error category.
   status: SampleStatus | null;
-  // True when this measurement was reused from a prior identical searchpoint
-  // (📖) rather than a fresh backend call. Both source readers populate it.
   cached: boolean;
   query: string;
   predicted: string;
   ground_truth: string;
-  // Pipeline node the row terminated at. Empty when the historical dict omits it.
   terminal_node: string;
-  // Wall-clock duration in seconds; null when the source omits it. A REPLAY occupied no clock, so
-  // this is its true 0.0 and `cost_s` beside it is what the cell took when it was measured.
+  // A replay's true 0.0; `cost_s` is what the cell took when it was measured.
   elapsed_s: number | null;
-  // Seconds producing the row COST, summed off the per-node timings the cache stamp leaves intact.
-  // Null where the source recorded none.
   cost_s: number | null;
-  // Share of this row's INPUT tokens the provider served off its own prompt-prefix cache. A
-  // different fact from `cached` above: that one says no provider was reached at all, this one
-  // says one was and discounted part of the call. Null where the backend reports no breakdown —
-  // never 0, which would claim it reported one and there was no hit.
+  // The provider's prefix-cache share of INPUT tokens (unrelated to `cached`). Null = no breakdown
+  // reported, never 0.
   cache_share: number | null;
 }

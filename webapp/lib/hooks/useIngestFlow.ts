@@ -27,37 +27,21 @@ import { plainLanguageRecap } from "@/lib/origin-readiness";
 import type { RunSummary } from "@/lib/derivations";
 import type { OnMinted } from "@/components/ingest/types";
 
-// One durable chat message; the conversation renders from a list of these.
 type ChatMsg =
   | { id: string; kind: "user-file"; name: string; rows: number | null }
   | { id: string; kind: "user"; text: string }
   | { id: string; kind: "ai"; text: string }
-  // A non-fatal degradation notice (the check-in model hiccuped + retried). Loud
-  // but not an error — the draft still resolved, just thinly.
   | { id: string; kind: "warning"; text: string }
   | { id: string; kind: "error"; text: string }
-  // A finished run, frozen. It holds captured VALUES (`RunSummary`) rather than a
-  // pointer into `dashboard.json`, because a `resume` re-animates that file — and
-  // `resume --from N` can rewrite the round files under it — so a pointer would
-  // quietly restate itself as the NEXT run. The live view of the same facts is the
-  // run card; this is what stays in the log once the card has moved on.
+  // Captured VALUES, never a pointer into `dashboard.json`: `resume` re-animates that file, so a
+  // pointer would restate itself as the next run.
   | { id: string; kind: "run"; summary: RunSummary };
 
-// Transient ingest-pipeline status, separate from the durable thread — it's
-// replaced (not appended) as the pick/drop → context → check-in → ready
-// sequence advances.
 type IngestPhase =
   | { stage: "idle" }
   | { stage: "uploading" }
-  // Parsed/picked. The chat always surfaces the context box here — prefilled
-  // with whatever task the dataset already carries — so the operator confirms
-  // or refines it before the one check-in call. Context is required: the origin
-  // check-in needs it to configure anything, so we never burn the call empty.
   | { stage: "awaiting-context"; draft: DraftCampaignWire }
   | { stage: "checkin"; model: string }
-  // A dropped file's name matches a dataset already in the collection. The chat
-  // offers the safe choices (use existing / save as new / replace) rather than
-  // a dead-end 409.
   | {
       stage: "collision";
       file: File;
@@ -65,18 +49,12 @@ type IngestPhase =
       existingSlug: string;
       suggestedSlug: string;
     }
-  // A draft ready to commit. When `draft.readiness.complete` the view
-  // shows "Start campaign"; otherwise it surfaces the remaining gaps inline
-  // (check-in panel + column mapping) until the last one closes.
   | {
       stage: "ready";
       draft: DraftCampaignWire;
       resolution: OriginLastResolution | null;
-      // Proposals the resolver left unclicked. The assistant offers them; only
-      // the operator's click fires `edit-draft-campaign`.
+      // Offered, never fired: only the operator's click sends `edit-draft-campaign`.
       raised: RaisedCommand[];
-      // Why the resolver turn that produced this draft came back thin; `null` where it
-      // did not. The ready panel surfaces it + a "re-run check-in" affordance.
       degradedCause: string | null;
     };
 
@@ -86,66 +64,42 @@ export interface IngestFlow {
   inputText: string;
   setInputText: (v: string) => void;
   busy: boolean;
-  // A draft edit is in flight. NOT folded into `busy` and disables nothing:
-  // Start stays tappable ("Saving…") and `startFromReady` awaits the in-flight
-  // writes — disabling here eats the tap whose mousedown blurred the field.
+  // NOT folded into `busy` and disables nothing: disabling Start here eats the tap whose
+  // mousedown blurred the field; `startFromReady` awaits the in-flight writes instead.
   saving: boolean;
   awaitingContext: boolean;
-  // Drop or attach a tabular file → upload → readiness branch.
   onDatasetFile: (file: File) => void;
-  // Make a NEW origin for a dataset via the check-in LLM (for when the operator
-  // has no origin in mind yet) → editable ready panel → Start.
   pickDataset: (entry: DatasetIndexEntry) => void;
-  // Reuse an existing origin (from `GET /origins` — campaign-backed or prepared):
-  // open it in the editable ready panel with NO check-in (the optimizer graph
-  // enters at l1_generate, skipping checkin) — modify if wanted, then Start.
+  // No check-in call: the optimizer graph enters at l1_generate.
   openOrigin: (entry: OriginEntry) => void;
-  // Re-open a durable `checkin`-lifecycle campaign from the sidebar: load its
-  // draft + last resolver turn from disk straight into the editable ready panel.
   reopenCheckin: (campaignId: string) => void;
-  // The operator's one-message task description (awaiting-context → check-in).
   submitContext: () => void;
-  // Inline patch in the ready state (column mapping / question answers).
   applyPatch: (patch: DraftPatch) => void;
-  // Drop the target list for an unfulfilled candidate_source dependency.
   uploadCandidateLibrary: (file: File) => void;
-  // Build that library from one of the dataset's own columns instead of a file.
   buildCandidateLibraryFromColumn: (column: string) => void;
-  // Re-run the check-in on the current ready draft (recovery after a degraded turn).
   rerunCheckin: () => void;
-  // Commit the ready draft + spawn the runner, under the ceilings this press declares. They are
-  // the caller's because they are not draft state: nothing persists them, and a reopened check-in
-  // must not appear to still be holding a budget nobody re-entered.
+  // The limits are the caller's, not draft state: nothing persists them, so a reopened check-in
+  // must not appear to hold a budget nobody re-entered.
   startFromReady: (limits: StartCheckinLimits) => void;
-  // Collision choices.
   useExistingFromCollision: () => void;
   saveAsNew: () => void;
   replaceExisting: () => void;
   cancelCollision: () => void;
-  // Freeze a finished run into the thread. Idempotent per cycle — a poll tick can
-  // observe the same stop twice, and the log must not grow a duplicate for it.
   pushRunSummary: (summary: RunSummary) => void;
-  // Clear the conversation back to idle (the modal calls this on open).
   reset: () => void;
 }
 
 const uid = () => crypto.randomUUID();
 
-// The single dataset → origin → campaign state machine. One path: pick a dataset
-// OR drop a file → ask for context only if it's missing → ONE check-in call →
-// Start. `onMint` fires with the new (campaign, cycle) once the runner is
-// spawned. Instantiate it ONCE, in `lib/ingest-flow.tsx` — every surface reads
-// that provider. Three independent instances is what put two live server-side
-// drafts and two disabled composers on screen at the same time.
+// The single dataset → origin → campaign state machine. Instantiate it ONCE, in
+// `lib/ingest-flow.tsx`; every surface reads that provider.
 export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [phase, setPhase] = useState<IngestPhase>({ stage: "idle" });
   const [inputText, setInputText] = useState("");
   const [minting, setMinting] = useState(false);
-  // Counter, not a boolean: overlapping patches are the DESIGNED case (see
-  // `commitDraftUpdate`), so the first one to land must not clear the flag out
-  // from under a sibling. The ref holds the promises so `startFromReady` can
-  // await exactly what is in flight.
+  // Counter, not a boolean: overlapping patches are the designed case, so the first to land
+  // must not clear the flag under a sibling.
   const [pendingPatches, setPendingPatches] = useState(0);
   const pendingDraftWrites = useRef<Set<Promise<unknown>>>(new Set());
 
@@ -158,12 +112,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   const pushWarning = (text: string) =>
     setMessages((m) => [...m, { id: uid(), kind: "warning", text }]);
 
-  // Commit a server draft into the LIVE ready phase. Functional update so the
-  // rendered draft is always the latest server response (overlapping patches —
-  // a pipeline-mode toggle + a library drop, the 2 s poll re-rendering between —
-  // can't write a stale snapshot back). The whole ready panel, the dependency
-  // card included, renders strictly from this draft, so it never lags the server:
-  // switch to `llm_only` → server returns `dependencies: []` → the card drops.
+  // Functional update, so overlapping patches cannot write a stale snapshot back.
   const commitDraftUpdate = (updated: DraftCampaignWire) =>
     setPhase((p) => (p.stage === "ready" ? { ...p, draft: updated } : p));
   const pushError = (e: unknown) =>
@@ -172,9 +121,6 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
       { id: uid(), kind: "error", text: operatorMessage(e, failureKind(e)) },
     ]);
 
-  // The origin check-in — the single LLM call that configures the draft from the
-  // operator's context. The check-in failing is non-fatal: the draft still
-  // exists, so we land in `ready` and the view surfaces the gaps.
   const runCheckin = async (draft: DraftCampaignWire) => {
     setPhase({ stage: "checkin", model: "the check-in model" });
     let resolved = draft;
@@ -193,23 +139,12 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
       recap = plainLanguageRecap(resolved);
       pushError(e);
     }
-    // The resolver degraded (e.g. the model's first response was empty/truncated,
-    // forcing a 2×-cost repair retry). Surface it loudly — the old behavior left
-    // the operator watching a mute counter, then handed back a thin recap with no
-    // sign anything had gone wrong.
     if (degradedCause) pushWarning(degradedCause);
     pushAi(recap);
-    // EVERY resolved draft lands in review, the one the check-in confirmed
-    // completely included. A launch spends real money, so it is the operator's
-    // gesture and nobody else's — no path here mints and spawns the runner.
+    // Even a complete draft lands in review: a launch spends money, so no path here mints.
     setPhase({ stage: "ready", draft: resolved, resolution, raised, degradedCause });
   };
 
-  // After any draft-producing action (drop / pick). If the dataset already
-  // carries its task — a registered dataset, or a dropped file whose dataloader
-  // the backend recognized — there's nothing to ask: run the one check-in
-  // straight through to the Start button. Only a context-less drop stops to ask,
-  // prefilling the box and waiting for the operator's one message.
   const advance = (draft: DraftCampaignWire) => {
     if (draft.raw_task_description.trim()) {
       setInputText("");
@@ -224,13 +159,8 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     setPhase({ stage: "awaiting-context", draft });
   };
 
-  // Upload a tabular file → readiness branch. A 409 name collision is NOT an
-  // error — it routes to the choice card. `slug` re-runs ingest under a chosen
-  // name ("save as new"); `chipId` reuses the rendered file chip.
   const ingestAndResolve = async (file: File, slug?: string, chipId?: string) => {
-    // A refused drop must SAY it was refused: `busy` covers the reopen fetch,
-    // and a silent return leaves the operator reading the PREVIOUS campaign's
-    // draft believing it is the file they just dropped.
+    // A refused drop must SAY so, or the previous campaign's draft reads as this file's.
     if (busy) {
       pushWarning(
         `“${file.name}” wasn’t picked up — the previous step was still loading. ` +
@@ -274,8 +204,6 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     advance(draft);
   };
 
-  // Open a registered dataset as a draft → same context ask as a drop, prefilled
-  // with the dataset's known task description.
   const draftFrom = async (name: string, label: string) => {
     if (busy) return;
     setMessages((m) => [...m, { id: uid(), kind: "user", text: label }]);
@@ -294,12 +222,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   const pickDataset = (entry: DatasetIndexEntry) =>
     void draftFrom(entry.name, `Use dataset “${entry.title || entry.name}”`);
 
-  // Reuse an origin: open it straight into the editable ready panel — NO
-  // check-in LLM. A campaign-backed origin reproduces that origin's EXACT prompt
-  // fields (and stamps `campaign_origin` lineage on mint) via `draft-from-origin`;
-  // a prepared origin IS its dataset's current config, so the dataset-draft path
-  // already reproduces it. The operator modifies if wanted and Starts, which mints
-  // from the draft. Skips the checkin node; the graph enters at l1_generate.
+  // A prepared origin IS its dataset's current config, so the dataset-draft path reproduces it.
   const openOrigin = async (entry: OriginEntry) => {
     if (busy) return;
     setMessages((m) => [
@@ -321,18 +244,8 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     setPhase({ stage: "ready", draft, resolution: null, raised: [], degradedCause: null });
   };
 
-  // Re-open a durable check-in: load its draft + last resolver turn from disk. The
-  // campaign already exists (minted on the first ingest action) and survived
-  // whatever happened since — a restart, a closed tab — which is the whole point of
-  // making check-in durable. Finishing + Start flips it `checkin` → `active`.
-  //
-  // If the check-in agent never authored the origin prompt (minted on drop but
-  // abandoned before the resolver ran — `origin_prompt_fields` still empty), RESUME
-  // the authoring flow via `advance`: it runs the check-in so the agent proposes the
-  // whole prompt + answer_format, exactly as a fresh drop would (no context yet →
-  // ask for it first). Nothing is clobbered — the fields are blank. An already-
-  // authored draft instead lands straight in the editable ready panel: re-running
-  // the resolver would re-propose the L1 fields and overwrite the operator's edits.
+  // Only an unauthored draft re-runs the resolver: on an authored one it would re-propose the
+  // L1 fields over the operator's edits.
   const reopenCheckin = async (campaignId: string) => {
     setMessages([]);
     setPhase({ stage: "uploading" });
@@ -351,8 +264,6 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
       return;
     }
     pushAi("Reopened your check-in — finish the setup below, then Start.");
-    // Reopen is not a fresh resolve turn, so there's no live degradation to
-    // surface — a re-run from the ready panel re-grades.
     setPhase({
       stage: "ready",
       draft,
@@ -380,9 +291,8 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     await runCheckin(updated);
   };
 
-  // THE seam for every write that mutates the ready draft — registering the
-  // promise is what lets `startFromReady` await whatever is in flight, so a
-  // mutator that posts on its own re-opens the mint-races-a-patch bug.
+  // THE seam for every ready-draft write: a mutator posting on its own escapes the await in
+  // `startFromReady`, and the mint races the patch.
   const mutateDraft = async (
     send: () => Promise<DraftCampaignWire>,
   ): Promise<DraftCampaignWire | null> => {
@@ -407,10 +317,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     void mutateDraft(() => postEditDraftCampaign(phase.draft.draft_id, patch));
   };
 
-  // Drop a candidate library onto the ready draft → the unfulfilled
-  // `candidate_source` dependency reads fulfilled. The library doesn't gate mint
-  // (the answers are a runnable pool), so this never blocks Start — it sharpens
-  // the candidate pool the backend ranks against.
+  // Never gates mint: the answers are already a runnable pool.
   const uploadCandidateLibrary = async (file: File) => {
     if (phase.stage !== "ready" || busy) return;
     const updated = await mutateDraft(() =>
@@ -419,7 +326,6 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     if (updated) pushAi(`Candidate library attached — ${updated.candidate_library_size} targets.`);
   };
 
-  // Build the candidate library from one of the dataset's own columns (no file).
   const buildCandidateLibraryFromColumn = async (column: string) => {
     if (phase.stage !== "ready" || busy) return;
     const updated = await mutateDraft(() =>
@@ -429,9 +335,6 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
       pushAi(`Candidate library built from “${column}” — ${updated.candidate_library_size} targets.`);
   };
 
-  // Recovery from a degraded turn: re-run the one check-in call on the current
-  // draft. Reuses `runCheckin` (which re-enters the `checkin` phase, then back to
-  // `ready` with the fresh resolution + degraded grade).
   const rerunCheckin = () => {
     if (phase.stage !== "ready" || busy) return;
     void runCheckin(phase.draft);
@@ -441,9 +344,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     if (phase.stage !== "ready" || !phase.draft.readiness.complete) return;
     setMinting(true);
     try {
-      // The starting tap can be the gesture that blurred a field, so let every
-      // in-flight draft write settle before minting. A settled write enqueues
-      // nothing further, so the loop terminates.
+      // The starting tap can be the blur that sent a patch; a settled write enqueues nothing.
       while (pendingDraftWrites.current.size > 0) {
         await Promise.allSettled([...pendingDraftWrites.current]);
       }
@@ -458,22 +359,17 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     }
   };
 
-  // Collision: start a new campaign on the dataset already in the collection —
-  // routes through the same readiness branch as any other dataset pick.
   const useExistingFromCollision = () => {
     if (phase.stage !== "collision") return;
     void draftFrom(phase.existingSlug, `Use existing dataset “${phase.existingSlug}”`);
   };
 
-  // Collision: save the dropped file under the suggested free name.
   const saveAsNew = () => {
     if (phase.stage !== "collision") return;
     void ingestAndResolve(phase.file, phase.suggestedSlug, phase.chipId);
   };
 
-  // Collision: version-and-repoint the existing dataset so its name frees, then
-  // re-ingest the dropped file under it. Data-safe — old data + every prior
-  // campaign's results are preserved under `{slug}-vN`.
+  // Data-safe: the server keeps the old data and every prior campaign under `{slug}-vN`.
   const replaceExisting = async () => {
     if (phase.stage !== "collision") return;
     const { file, existingSlug, chipId } = phase;
@@ -490,9 +386,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
 
   const cancelCollision = () => setPhase({ stage: "idle" });
 
-  // One frozen item per cycle. The caller fires this off a live→stopped edge, and
-  // an edge can be observed more than once (a re-mount, a soft unit switch back);
-  // the guard lives here, with the list it protects, rather than in the caller.
+  // Idempotent per cycle: a live→stopped edge can be observed twice (a re-mount, a switch back).
   const pushRunSummary = (summary: RunSummary) =>
     setMessages((m) =>
       m.some((x) => x.kind === "run" && x.summary.cycleId === summary.cycleId)

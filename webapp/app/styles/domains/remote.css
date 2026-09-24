@@ -1,10 +1,5 @@
-/* Remote control — the global bottom-fixed floating control strip
-   (components/shell/RemoteControl.tsx). Present on every tab while a cycle is
-   live: run-phase, play/pause (the reused .run-ctl), Skip, where the run is, and
-   the Lift readout that opens the panel holding everything else — spend, outcome,
-   look-ahead, the tags. Floats over content (position:fixed) — a remote control,
-   not a layout band, which is why it is not named for the band it isn't. It DOES
-   dock as a band below --bp-md, where a phone has no whitespace to hover over. */
+/* The global floating control strip (components/shell/RemoteControl.tsx); it docks as a band
+   below --bp-md, where a phone has no whitespace to hover over. */
 .remote-control{
   position:fixed;
   left:50%;
@@ -24,16 +19,14 @@
   color:var(--color-text-secondary);
 }
 
-/* Connection lost (poll.tsx status === "offline") — it stays mounted (it reads
-   the server's last-known run_phase, not the connection), just dimmed +
-   labelled so the operator knows the state on screen may lag. */
+/* Stays mounted offline — it reads the server's last-known run_phase — dimmed so the operator
+   knows the state on screen may lag. */
 .remote-control-offline{opacity:.6}
 
 /* It floats and reserves no space of its own, so it publishes its height to the
    spacer shell.css puts at the foot of every pane — only while mounted. */
 .shell:has(> .remote-control){--remote-dock-h:62px}
-/* ≤bp-md: a docked band, not a floating pill — a phone has no whitespace to
-   hover over, and squeezed to `100vw - 24px` the pill crushed its own contents. */
+/* Squeezed to `100vw - 24px`, the floating pill crushes its own contents. */
 @media (max-width:880px){
   .remote-control{
     left:0;right:0;transform:none;max-width:none;
@@ -47,9 +40,8 @@
   /* Nothing shrinks below its own text; a row that no longer fits wraps. Five slots
      fit 390px only at these gaps — the sixth is what the panel is for. */
   .remote-control > *{flex:0 0 auto}
-  /* One touch-sized row — the one place this height is stated, for the spacer and
-     the list screen alike. Measure under touch emulation: `pointer:coarse` does not
-     match in a desktop browser, where the band draws shorter than any phone. */
+  /* The one place this height is stated. Measure under touch emulation: `pointer:coarse` does not
+     match in a desktop browser. */
   .shell:has(> .remote-control){--remote-dock-h:64px}
   /* The list screen's scroller is the forest, not `.content`, so it reserves its own;
      the footer is a flex sibling BELOW the scroller, under the band, so it lifts too. */
@@ -60,8 +52,6 @@
 }
 .remote-offline{display:inline-flex;align-items:center;gap:var(--space-4);padding:2px var(--space-8);border-radius:999px;background:var(--color-background-tertiary);color:var(--color-text-tertiary);font-weight:600}
 
-/* Skip — bordered button matching the .run-ctl register (state by icon
-   colour, quiet border that lifts to accent on hover). */
 .remote-btn{
   display:inline-flex;align-items:center;gap:var(--space-4);
   height:24px;padding:0 var(--space-10);
@@ -76,38 +66,24 @@
 .remote-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
 .remote-btn:disabled{opacity:.45;cursor:not-allowed}
 .remote-skip{color:var(--color-warn)}
-/* Inner/outer drill — navigation, not a run command: hop into the live inner
-   run from the outer view, or back out while an inner is viewed. */
 .remote-drill{color:var(--color-accent)}
-/* The look-ahead arm and gauge: the ⇉ mark, then one segment per depth the backend takes, sharing
-   the panel's width so a ceiling of 16 fits without scrolling. The segments ARE the buttons, so
-   `.remote-btn` here would nest one control inside another. */
+/* The segments ARE the buttons, so `.remote-btn` here would nest one control inside another. */
 .remote-cells-group{display:flex;align-items:center;gap:var(--space-4);width:100%}
 .remote-cells-group .remote-cells{display:flex;flex:1 1 auto;min-width:0}
 .remote-cells-group .remote-cells > button{flex:1 1 0;min-width:0;padding-inline:0;font-variant-numeric:tabular-nums}
 .remote-cells-icon{color:var(--color-text-tertiary)}
 .remote-btn-label{font-weight:600}
 
-/* Babysat tag — this cycle was human-steered (a skip), no longer purely
-   reproducible. Icon + word, never colour alone. */
 .remote-babysat{display:inline-flex;align-items:center;gap:var(--space-4);padding:2px var(--space-8);border-radius:999px;background:var(--color-background-tertiary);color:var(--color-warn);font-weight:600}
 
-/* Unpriced-spend warning — some calls had no resolvable USD cost (e.g. Groq
-   returns no wire cost), so the $ figure undercounts and the USD cap is blind.
-   Icon + word, never colour alone. */
+/* Some calls had no resolvable USD cost, so the $ figure undercounts and the USD cap is blind. */
 .remote-spend-warn{display:inline-flex;align-items:center;gap:var(--space-4);padding:2px var(--space-8);border-radius:999px;background:var(--color-background-tertiary);color:var(--color-warn);font-weight:600}
 
-/* The provider's prefix-cache discount, riding its own bucket's spend figure. Secondary ink
-   deliberately: it qualifies the number beside it rather than being one of its own, and it is
-   the only thing on a spend row that is not money. */
 .remote-spend-cache{color:var(--color-text-secondary);font-weight:400}
 
 .remote-err{color:var(--color-danger);max-width:200px}
 
-/* ── The outcome readout + its panel ──────────────────────────────────────────
-   Folded in from the chat tab's own job-bar, which answered the same question on
-   one surface only. The readout is the strip's trailing chips AND the panel's
-   toggle; the panel opens UPWARD because the strip is bottom-fixed. */
+/* The panel opens UPWARD because the strip is bottom-fixed. */
 .remote-readout{
   display:inline-flex;align-items:center;gap:var(--space-10);
   padding:var(--space-4) var(--space-10);
@@ -128,10 +104,8 @@
 .remote-readout .chev{transition:transform .15s;flex-shrink:0}
 .remote-readout-toggle[aria-expanded="true"] .chev{transform:rotate(180deg);color:var(--color-accent)}
 
-/* Absolutely positioned rather than a flex child: the strip is a centre-anchored
-   pill, so stacking the panel in normal flow would re-flow and re-centre the
-   controls under the operator's cursor every time it opened. It scrolls inside
-   itself — on a short viewport the panel, not the page, is what gives. */
+/* Absolute, not a flex child: in flow the centre-anchored pill would re-centre its controls
+   under the cursor on open. It scrolls inside itself. */
 .remote-panel{
   position:absolute;
   left:50%;transform:translateX(-50%);
@@ -152,8 +126,6 @@
 .remote-panel .lbl{color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-size:var(--text-xs);font-weight:600;flex-shrink:0}
 .remote-panel .val{color:var(--color-text-primary);font-family:var(--font-mono);font-size:var(--text-sm);text-align:right;word-break:break-all}
 
-/* Finishing-criteria control (change-spend-budget) — a write-only mid-flight cap
-   edit, and on a halted cycle the way its budget is raised before restarting. */
 .spend-control{display:flex;flex-direction:column;gap:var(--space-6);padding-top:4px}
 .spend-control-used{color:var(--color-text-tertiary);font-weight:400}
 .spend-control-edit{display:flex;align-items:center;gap:var(--space-6)}
@@ -165,8 +137,7 @@
 .spend-control-note{color:var(--color-success);font-size:var(--text-xs)}
 
 @media (max-width:640px){
-  /* Skip keeps its glyph and drops its word — scoped to the STRIP, so the look-ahead
-     button now living in the panel keeps a label the panel has room for. */
+  /* Scoped to the STRIP, so the look-ahead button in the panel keeps its label. */
   .remote-control > .remote-btn .remote-btn-label{display:none}
 }
 @media (prefers-reduced-motion:reduce){.remote-readout .chev{transition:none}}

@@ -1,6 +1,4 @@
-// Dataset ingest, draft check-in and origin resolution — the write paths that are NOT command
-// verbs, because they create the thing a command would later address. Multipart uploads, the
-// draft patch, the check-in start/reopen, and the origin resolve turn.
+// Ingest, check-in and origin resolution: the writes that CREATE what a command later addresses.
 
 import { API } from "./client";
 import { mintIdempotencyKey, throwApiError } from "./errors";
@@ -30,10 +28,6 @@ export async function postIngestDataset(
   if (!r.ok) await throwApiError(r);
   return (await r.json()) as DraftCampaignWire;
 }
-// Drop a candidate library onto a draft — the operator's "drop in place" for an
-// unfulfilled `candidate_source` dependency. The file is parsed server-side (one
-// entry per line, or the first column of a CSV/Excel); the returned draft's
-// `dependencies` block reports the dependency `fulfilled`.
 export async function postUploadCandidateLibrary(
   draftId: string,
   file: File,
@@ -50,10 +44,6 @@ export async function postUploadCandidateLibrary(
   if (!r.ok) await throwApiError(r);
   return (await r.json()) as DraftCampaignWire;
 }
-// Build a draft's candidate library from one of its OWN columns — the unified
-// "build from dataset" path. When the targets already live in the data (the
-// target column / the union of the dataset's category sheets), the library is
-// derived server-side, no external file. Returns the updated draft wire.
 export async function postBuildCandidateLibraryFromColumn(
   draftId: string,
   column: string,
@@ -70,12 +60,8 @@ export async function postBuildCandidateLibraryFromColumn(
   if (!r.ok) await throwApiError(r);
   return (await r.json()) as DraftCampaignWire;
 }
-// Open an existing dataset (demo / benchmark / owned Origin) in the setup
-// flow: the server builds a fully-prefilled DraftCampaign straight from the
-// dataset's files — no browser-side CSV reconstruction, and the dataset's
-// pipeline node config (backend model/provider) is preserved through commit.
-// Like `postIngestDataset`, this mints a durable `checkin` campaign; nothing runs
-// until the operator starts it via `postStartCheckin`.
+// Mints a durable `checkin` campaign from the dataset's CURRENT committed config; nothing runs
+// until `postStartCheckin`.
 export async function postDraftFromDataset(name: string): Promise<DraftCampaignWire> {
   const r = await fetch(`${API}/datasets/${encodeURIComponent(name)}/draft`, {
     method: "POST",
@@ -84,12 +70,8 @@ export async function postDraftFromDataset(name: string): Promise<DraftCampaignW
   if (!r.ok) await throwApiError(r);
   return (await r.json()) as DraftCampaignWire;
 }
-// Reuse a campaign-backed origin: the server builds a DraftCampaign prefilled
-// with that origin's EXACT prompt fields (the root-cycle seed when it was itself
-// minted from an origin, else the dataset's authored prompt) and marks it so
-// committing mints with `campaign_origin` lineage. Unlike `postDraftFromDataset`
-// (which opens the dataset's CURRENT committed config) this reproduces the chosen
-// origin's prompt verbatim. Mints a durable `checkin` campaign; run via `postStartCheckin`.
+// Unlike `postDraftFromDataset`, reproduces the origin's prompt verbatim and commits with
+// `campaign_origin` lineage.
 export async function postDraftFromOrigin(originId: string): Promise<DraftCampaignWire> {
   const r = await fetch(`${API}/origins/${encodeURIComponent(originId)}/draft`, {
     method: "POST",
@@ -110,30 +92,19 @@ export async function postEditDraftCampaign(
     patch,
   });
 }
-// What THIS launch may spend, which is not a draft field: the draft says what the campaign IS,
-// and it survives a reopen, while a ceiling is declared per press. DERIVED off the payload the
-// server declares, so a fourth `LaunchLimits` field arrives here by regeneration rather than by
-// somebody remembering to spell it.
+// Not a draft field: the draft survives a reopen, while a ceiling is declared per press.
 export type StartCheckinLimits = Partial<Omit<StartCheckinPayload, "campaign_id">>;
 
-// The ceilings SPELLED OUT, as a map TOTAL over that type: a fourth `LaunchLimits` field makes
-// this literal a type error rather than a budget the browser quietly stops sending. Spread
-// generically instead, the three names appear nowhere in this file — and "does the browser send a
-// ceiling at all" stops being a question anyone can answer with a grep.
+// TOTAL over the type, so a new `LaunchLimits` field is a type error here rather than a ceiling
+// the browser silently stops sending.
 const CEILING_KEYS: { [K in keyof Required<StartCheckinLimits>]: true } = {
   halt_at_accuracy: true,
   spend_budget_usd: true,
   token_budget: true,
 };
 
-// Start a durable check-in campaign: gate the origin, commit the dataset, mint +
-// spawn the run, flipping `checkin` → `active`. `campaignId` is the draft's
-// `draft_id` (which IS the campaign id). Same response shape the old
-// mint-campaign-from-draft returned. Wire: `POST /commands/start-checkin`.
-//
-// An omitted ceiling is "no ceiling of mine" — the account's own still binds, and admission
-// clamps whatever is asked for down to what the wallet covers. Sent sparsely so the
-// `CommandRecord` says which ones the operator actually declared.
+// `campaignId` is the draft's `draft_id`. An omitted ceiling is "no ceiling of mine" (the account's
+// still binds); sent sparsely so the `CommandRecord` shows which the operator declared.
 export async function postStartCheckin(
   campaignId: string,
   limits: StartCheckinLimits = {},
@@ -155,10 +126,7 @@ export async function getCampaignCheckin(
   if (!r.ok) await throwApiError(r);
   return (await r.json()) as CheckinReopenResponse;
 }
-// One origin-resolver turn: the origin-aware `checkin` node proposes
-// evidence-cited values for the unresolved closed-set fields (high-confidence
-// auto-confirms; low-confidence lands `proposed`). Synchronous, like
-// `edit-draft-campaign`. Returns the resolver output + the post-apply draft.
+// High-confidence proposals auto-confirm; low-confidence ones land `proposed`.
 export async function postResolveOrigin(draftId: string): Promise<ResolveOriginResponse> {
   return postCommand<ResolveOriginResponse>("resolve-origin", { draft_id: draftId });
 }

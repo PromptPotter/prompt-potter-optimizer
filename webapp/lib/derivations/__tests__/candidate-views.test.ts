@@ -2,10 +2,6 @@ import { describe, expect, it } from "vitest";
 import { barsAreCourses, candidateViews, forkKeysOf } from "../candidate-views";
 import type { DashboardCandidate, LineageNode, OverlapMember } from "@/lib/api";
 
-// `candidateViews` decides WHICH served number each bar is allowed to show. Every rule it
-// applies is a suppression or a source choice, and every one of them was prose until now —
-// the card assembled these rows inline, where no test could reach them.
-
 function node(
   over: Partial<LineageNode> & Pick<LineageNode, "kind" | "id" | "label">,
 ): LineageNode {
@@ -121,9 +117,8 @@ describe("the half choice — tree unless it holds no measurement", () => {
     });
   });
 
-  // The one that matters: `INVALID_SCORES` reports a synthetic 0.0 for a candidate rejected
-  // before it cost a sample. The tree withholds it; falling back to the live half would put
-  // the fabricated number back on the bar and render it as "got everything wrong".
+  // `INVALID_SCORES` reports a synthetic 0.0 the tree withholds; falling back to the live half
+  // would render it as "got everything wrong".
   it("does NOT fall back to an invalid live row's synthetic 0.0", () => {
     const views = candidateViews({
       ...EMPTY,
@@ -200,10 +195,7 @@ describe("a picked sample set moves the overlap bars, and nothing else", () => {
     }),
   ]);
 
-  // The whole point of the split: before the overlap series existed, "compare these on one
-  // basis" could only be said by re-basing the metric bars themselves, which then forced θ,
-  // the composite and the lift to be suppressed wholesale. They are on this candidate's OWN
-  // cells and stay there whatever is picked here.
+  // Metric bars stay on the candidate's OWN cells whatever is picked; only overlap re-bases.
   it("leaves every metric bar on the candidate's own cells", () => {
     const views = candidateViews({ ...EMPTY, viewedNode: arm, sampleSet: [1, 2, 3, 4, 5, 6] });
     expect(views[0]).toMatchObject({
@@ -246,12 +238,8 @@ describe("a picked sample set moves the overlap bars, and nothing else", () => {
     expect(on(19)).toMatchObject({ overlapAccuracy: null, overlapN: null });
   });
 
-  // The one channel a picked set still moves besides the overlap bars, because the route
-  // composes `lens` and `samples` in the same read. The silent harm is the FALSE arm: a
-  // criterion naming an evaluator that only exists in the full-set snapshot re-scores partly on
-  // the subset and partly on everything, and renders as a subset number either way. The TRUE arm
-  // is pinned beside it so a future edit cannot collapse the pair back into "suppress whenever a
-  // set is picked" — that dropped a value the server had already computed over these very cells.
+  // FALSE arm: an evaluator only in the full-set snapshot re-scores half on the subset, silently.
+  // TRUE arm: a value re-deriving whole from the picked rows is the server's own — keep it.
   it("keeps a masked value that re-derives whole from the picked rows, drops one that cannot", () => {
     const lensed = course([
       node({

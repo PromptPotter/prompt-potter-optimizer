@@ -1,14 +1,7 @@
-// The per-campaign view axis and its HIERARCHY — one closed client union with its
-// labels beside it, the same shape as `lib/run-phase.ts`. ONE surface reads it: the
-// unit header's tab strip (`components/shell/ViewTabs`), at every width. Promoting a
-// view out of RECORDS moves one line here and lands there.
-//
-// Client-side on purpose: "a closed set belongs on the server" (webapp/CLAUDE.md)
-// governs shapes the API also names, and no route names this one.
+// The view axis, rendered only by `components/shell/ViewTabs`. A client-side closed set on
+// purpose: no route names it, so the server-owns-closed-sets rule does not reach it.
 
 export type PrimaryTab = "chat" | "dashboard";
-// The run's written record — every measured cell, the cross-campaign read, the diagnostic
-// runs and the on-disk artifacts. They ride one top-level segment together.
 export type RecordsTab = "measurements" | "compare" | "verify" | "files";
 export type Tab = PrimaryTab | RecordsTab;
 
@@ -24,9 +17,6 @@ const TAB_LABEL: Record<Tab, string> = {
 export const PRIMARY_TABS: readonly PrimaryTab[] = ["chat", "dashboard"];
 export const RECORDS_TABS: readonly RecordsTab[] = ["measurements", "compare", "verify", "files"];
 export const RECORDS_LABEL = "Records";
-// Which member a click on the Records segment opens, arriving from a primary view.
-// The first of them, named rather than indexed — `RECORDS_TABS[0]` types as
-// possibly-undefined and there is no honest default to fall back to.
 export const RECORDS_ENTRY: RecordsTab = "measurements";
 
 export function tabLabel(tab: Tab): string {
@@ -37,27 +27,20 @@ export function isRecordsTab(tab: Tab): tab is RecordsTab {
   return (RECORDS_TABS as readonly string[]).includes(tab);
 }
 
-// What the TOP row of the strip selects. One segment stands for the Records
-// views, so the strip's value is the group rather than the tab itself.
 export type ViewGroup = PrimaryTab | "records";
 
 export function groupOf(tab: Tab): ViewGroup {
   return isRecordsTab(tab) ? "records" : tab;
 }
 
-// The default view — what the address means when it names no tab, and where a fresh
-// visitor lands. Named rather than spelled "chat" at each site, because the address
-// codec OMITS it and the app must agree on what the omission restores.
+// The address codec OMITS this tab, so every site must agree on what the omission restores.
 export const DEFAULT_TAB: Tab = "chat";
 
 export function isTab(s: string): s is Tab {
   return (PRIMARY_TABS as readonly string[]).includes(s) || (RECORDS_TABS as readonly string[]).includes(s);
 }
 
-// The account modal's own panes — the second view axis, and a closed client set for the
-// same reason `Tab` is: no route names it. It lives here rather than inside AccountModal
-// because the address codec has to name a pane, and a type declared inside the component
-// that renders it cannot be the thing an address is parsed into.
+// Declared here, not in AccountModal, because the address codec parses into it.
 export type AccountPane =
   | "profile"
   | "usage"

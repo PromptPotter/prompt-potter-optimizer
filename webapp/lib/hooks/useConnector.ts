@@ -1,39 +1,6 @@
 "use client";
-// Joins the three connector-state streams into one typed `ConnectorView`,
-// exposed via a single shared `ConnectorProvider` so every consumer
-// (`ChatPane`, `ScoringInspector`, `SteerForkPanel`) rides ONE set of
-// fetches and ONE 5 s `/status` health poll. Calling the engine hook per
-// component — the prior shape — fanned the `/backends` + `/pipeline` reads
-// and the health poll out N times, flooding the backend's `/status`. Read
-// it with `useConnector()`; mount `ConnectorProvider` once above the
-// consumers (see `AppShellInner`).
-//
-// Three input streams, all orthogonal (no stitching — they describe
-// different facts, not the same fact at different freshness levels):
-//
-//   1. `/backends` — operator-level registered backends. One-shot on
-//      mount. Immutable within a session.
-//   2. `/campaigns/{id}/pipeline?at=` — what THIS campaign runs at the
-//      addressed searchpoint, resolved server-side with per-value
-//      provenance. One-shot per `(campaignId, at)`. Render-phase guarded
-//      reset (`webapp/CLAUDE.md § State reset on prop change`) clears all
-//      campaign-keyed slots atomically so a unit switch never shows a
-//      stale frame.
-//
-//      It was `/datasets/{name}/pipeline`, keyed on the dataset NAME, and
-//      that is the defect this arc exists for: one `pipeline.yaml` is
-//      shared by every campaign built on it, so the answer belonged to
-//      none of them. Five campaigns on `swiss-invoices-eval` each declare
-//      a different model; the hero chip showed whichever one the FILE
-//      names while the dashboard node panel showed the running searchpoint.
-//   3. `useDashboard()::dash.current_round.nodes` + `isLive` — live
-//      per-LLM-node observations from `dashboard.json` (polled every 2 s
-//      by `useCycleStream`).
-//
-// Match dataset's `backend_name` to a registered backend by `.name` to
-// resolve `base_url` + the rest of `BackendConnection`. Case-sensitive,
-// matching the wire field. When M12 adds an authoritative endpoint, the
-// match moves to the server; this hook becomes a thin wire wrapper.
+// Joins `/backends`, `/campaigns/{id}/pipeline?at=` and the live `dash` nodes into one
+// `ConnectorView`. Mount `ConnectorProvider` ONCE above its consumers: one health poll per app.
 
 import {
   createContext,
@@ -84,30 +51,18 @@ const EMPTY: ConnectorView = {
   nests: null,
 };
 
-// Connector reachability is rare-changing; a 5 s probe is plenty and stays
-// efficient (matches the offline reconnect cadence elsewhere).
 const HEALTH_INTERVAL_MS = 5000;
 
-// ONE key for every campaign-derived slot below, minted HERE and nowhere else, so the
-// render-phase reset, the freshness test and the fetch's own stamp cannot disagree about what
-// "this campaign" means. `at` is part of it: two searchpoints of one campaign are two different
-// answers. Spelled twice, the two separators drifted and the gate below never matched again.
+// Minted HERE only, so the reset, the freshness test and the fetch stamp cannot disagree.
 function connectorKey(campaignId: string, at: string | null): string {
   return `${campaignId}|${at ?? ""}`;
 }
 
 function useConnectorViewEngine(campaignId: string | null, at: string | null): ConnectorView {
   const key = campaignId ? connectorKey(campaignId, at) : null;
-  // Poll health only with a confirmed session; a 401 re-probes /auth/me so
-  // the loop halts when the session dies instead of storming (useAuthGate).
   const { authed, onAuthError } = useAuthGate();
   const [backends, setBackends] = useState<BackendResponse[]>([]);
   const [view, setView] = useState<PipelineView | null>(null);
-  // The campaign+searchpoint the resolved fields below were fetched FOR, plus whether that
-  // fetch failed. Stamping the key (rather than resetting state in the effect)
-  // is the pure-derivation recipe in webapp/CLAUDE.md § State reset on prop
-  // change: freshness is computed during render, so switching campaigns can
-  // never paint the previous one's pipeline for a frame.
   const [loaded, setLoaded] = useState<{ key: string; failed: boolean } | null>(null);
   const [connector, setConnector] = useState<string | null>(null);
   const [backendType, setBackendType] = useState<string | null>(null);
@@ -119,17 +74,12 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
     string,
     NodeOutputSchema | null
   > | null>(null);
-  // `{}` rather than `null`: an unresolved catalogue and a resolved-but-empty one are the same
-  // answer to every reader — UNKNOWN, render nothing struck — so there is no second state to keep.
+  // `{}`, not `null`: unresolved and empty both read UNKNOWN — render nothing struck.
   const [modelCapabilities, setModelCapabilities] = useState<Record<string, ModelCapability>>({});
   const [reach, setReach] = useState<Record<string, NodeReach> | null>(null);
   const [isSingleNode, setIsSingleNode] = useState(false);
   const [nests, setNests] = useState<NestedPipelineRef | null>(null);
 
-  // Render-phase guarded reset — drops every campaign-keyed slot together
-  // the same render the key changes, so no consumer ever sees a
-  // half-swapped frame mixing the prior campaign's view with the new
-  // campaign's connector.
   const [prevKey, setPrevKey] = useState(key);
   if (key !== prevKey) {
     setPrevKey(key);
@@ -144,18 +94,13 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
     setNests(null);
   }
 
-  // Drop the backend list when `authed` goes false (logout / dead
-  // session) — render-phase guarded reset, so no stale list survives sign-out
-  // (webapp/CLAUDE.md § State reset on prop change).
   const [prevAuthed, setPrevAuthed] = useState(authed);
   if (authed !== prevAuthed) {
     setPrevAuthed(authed);
     if (!authed) setBackends([]);
   }
 
-  // Backends — one-shot once a session is confirmed; immutable within it.
-  // Gated on `authed` so an anon preview never fires the protected `/backends`
-  // read (it would 401; frontend-surface-contract.md § I5).
+  // Gated on `authed`: an anon preview must never fire the protected read (I5).
   useEffect(() => {
     if (!authed) return;
     let cancelled = false;
@@ -175,19 +120,14 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
     };
   }, [authed, onAuthError]);
 
-  // The campaign's own resolved pipeline. One fetch per `(campaignId, at)`, and every field it
-  // sets is server-resolved — the browser joins nothing, which is `I9` (a VALUE from one store
-  // onto a SCHEMA from another is the join that produced the reported defect).
+  // Every field is server-resolved; the browser joins nothing (I9).
   useEffect(() => {
     if (!campaignId) return;
     let cancelled = false;
     const stamp = connectorKey(campaignId, at);
     (async () => {
       try {
-        // `backend_type` is a top-level connector fact (peer of `connector`), NOT nested in
-        // `view` — the server's schema is the parsed `PipelineSchema`, which drops it. Reading
-        // it here is what lets `isSelfOptimization` recognise pp-self, and it is the CAMPAIGN's
-        // frozen kind now rather than its dataset file's answer today.
+        // `backend_type` is top-level, never in `view`: the parsed `PipelineSchema` drops it.
         const resp = await fetchCampaignPipeline(campaignId, at);
         if (!cancelled) {
           setView((resp?.view ?? null) as PipelineView | null);
@@ -230,20 +170,13 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
     () => (dash?.current_round.nodes as Record<string, NodeDataLike> | undefined) ?? {},
     [dash],
   );
-  // Fine-grained activity phase — drives the hero's running/idle indicator.
   const phase = typeof dash?.state === "string" ? dash.state : null;
 
-  // Resolved backend id (dataset's connector name → registered backend). Drives
-  // the reachability probe below; null until both streams resolve.
   const activeId = useMemo(
     () => (connector ? backends.find((b) => b.name === connector)?.id ?? null : null),
     [connector, backends],
   );
 
-  // Slow connector reachability probe. Server-side ping of the backend's own
-  // GET /status; the connector node shows the result as a dot + footer line.
-  // Separate from the 2 s dashboard poll — this is "is the dependency up", not
-  // "is the optimizer scoring". Drop stale health when the backend changes.
   const [health, setHealth] = useState<BackendHealthResponse | null>(null);
   const [prevActiveId, setPrevActiveId] = useState(activeId);
   if (activeId !== prevActiveId) {
@@ -257,9 +190,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
         const h = await fetchBackendHealth(activeId, signal);
         if (!signal.aborted) setHealth(h);
       } catch (e) {
-        // PromptPotter API itself unreachable — that's the dashboard banner's
-        // job; leave connector health unknown rather than asserting offline.
-        // A 401 still flips the auth gate so the loop stops.
+        // Our own API down is the dashboard banner's to say: health stays unknown, not offline.
         if (!signal.aborted) {
           onAuthError(e);
           setHealth(null);
@@ -272,9 +203,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
 
   return useMemo<ConnectorView>(() => {
     if (!key) return { ...EMPTY, isLive, currentNodes, phase };
-    // Every field below is campaign-derived, so until this campaign's own fetch has
-    // landed they belong to the PREVIOUS one. Report "loading" and withhold them
-    // rather than paint another campaign's pipeline as this one's.
+    // Until this key's fetch lands, every field below belongs to the PREVIOUS campaign.
     if (loaded?.key !== key) {
       return { ...EMPTY, pipelineStatus: "loading", isLive, currentNodes, phase };
     }
@@ -321,9 +250,6 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
   ]);
 }
 
-// Shared connector state. Mounted once (per viewed dataset) above all
-// consumers; `useConnector()` reads it. This is what collapses the former
-// per-component fan-out into a single health poll + single overlay fetch.
 const ConnectorContext = createContext<ConnectorView | null>(null);
 
 export function ConnectorProvider({
@@ -332,8 +258,7 @@ export function ConnectorProvider({
   children,
 }: {
   campaignId: string | null;
-  // The searchpoint being viewed, in the `parse_subject` grammar; null is the campaign root.
-  // Part of the key, because two searchpoints of one campaign are two different answers.
+  // `parse_subject` grammar; null is the campaign root.
   at?: string | null;
   children: ReactNode;
 }) {
@@ -341,18 +266,8 @@ export function ConnectorProvider({
   return createElement(ConnectorContext.Provider, { value: view }, children);
 }
 
-// The check-in TRANSPORT for the same served resolution — not a second source, and the
-// distinction is the whole of why this is allowed to exist.
-//
-// `GET /campaigns/{id}/pipeline` and the draft response are two deliveries of ONE answer:
-// `draft_wire` calls `pipeline_resolve.resolve_pipeline_for_draft`, which is the check-in arm
-// of the resolver the route serves. So the fields below carry served `value` + `source` +
-// `permitted` + `reach` exactly as the fetching provider does. It exists because the ingest
-// surface already HOLDS that answer — every draft mutation returns a fresh one — and fetching
-// it again would put an HTTP round-trip on each commit-on-blur edit.
-//
-// **Overlay anything else here and it becomes the four-store defect again.** The live-run
-// streams (backends, health, currentNodes) stay empty; setup needs none of them.
+// A second TRANSPORT of the same served resolution (`resolve_pipeline_for_draft`), never a
+// second source: overlay anything but a draft response's fields here and the stores diverge.
 export function StaticConnectorProvider({
   fields,
   children,

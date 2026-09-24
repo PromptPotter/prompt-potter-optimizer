@@ -2,9 +2,7 @@ import { describe, expect, it } from "vitest";
 import { currentRound, dash } from "@/lib/test-fixtures";
 import { liveInputCandidate, liveL1Candidates, type DashboardSnapshot } from "../poll";
 
-// Regression guard for the post-login render loop: the no-candidate path must
-// return a STABLE reference. A fresh `[]` per call churned the candidates card's
-// Set chain into an unbounded setState loop.
+// The no-candidate path returns a STABLE reference, or the candidates card loops setState.
 describe("liveL1Candidates", () => {
   it("returns the same reference on the no-candidate path", () => {
     expect(liveL1Candidates(null)).toBe(liveL1Candidates(null));
@@ -24,8 +22,7 @@ describe("liveL1Candidates", () => {
   });
 });
 
-// Regression: the live half joins on LABEL, the one key a tree-minted selection and a
-// not-yet-scored live row both carry. A row missing its label must not answer for one.
+// The live half joins on LABEL; a row missing its label must not answer for one.
 describe("liveInputCandidate label join", () => {
   const dash = {
     current_round: {

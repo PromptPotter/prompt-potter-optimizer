@@ -1,17 +1,5 @@
-// Read endpoints — thin wrappers over the FastAPI surface. GET, except where the SUBJECT is
-// client-held state too big for a URL (`fetchForkPreview`): the verb is POST, the operation is
-// still a read, and a write module is not where it belongs.
-//
-// **The response shapes are GENERATED, not declared here.** A hand-mirrored interface bypasses
-// `scripts/build_ts_types.py` and drifts behind its model silently. Everything below imports from
-// `./types`; adding a field to a Pydantic response model now reaches this file by regeneration.
-//
-// Three exceptions, each because the server has nothing to generate FROM, and each named so
-// the gap reads as a gap:
-//   - `HealthResponse` — `/health` returns a bare `dict[str, str]` with no `response_model`.
-//   - `LifecycleFilter` — a QUERY-param set (`manifests.py::_LIFECYCLE_FILTERS`), so there is no
-//     response model to generate from. It must MATCH that tuple member for member.
-//   - the three narrow aliases below are DERIVED from generated interfaces, not re-declared.
+// Every read endpoint. Response shapes come from `./types` (generated); each hand-written
+// exception says why at its declaration.
 
 import { API, jget, jgetIfModified, jgetIfNoneMatch, jpost, type Conditional } from "./client";
 import { encodeCyclePath, encodeDescend, pathRoot, type CyclePath } from "../ids";
@@ -50,24 +38,17 @@ import type {
   WorkspaceStorageResponse,
 } from "./types";
 
-// Derived, never re-declared: the closed sets live on the server's own response model
-// (`auth.py::ActivityWindow` / `ActivityGroupBy`), and these read them back off the generated
-// interface so a member added there arrives here.
 export type ActivityWindow = ActivityResponse["window"];
 export type ActivityGroupBy = ActivityResponse["group_by"];
-// `domain/results.py::HardSampleOrder`, the key the leaderboard ranks by, read back off the
-// cells response that echoes it.
 export type HardSampleOrder = CellsResponse["order"];
-// The cell marks, off the served row rather than restated.
 export type CellStatus = CellsResponse["cells"][number]["status"];
 
 export function fetchActive(signal?: AbortSignal): Promise<ActiveSessionResponse> {
   return jget<ActiveSessionResponse>(`${API}/sessions/active`, signal);
 }
 
-// Server health + the single-source app version (`APP_VERSION`, surfaced by the `/health` route
-// in `main.py`). Hand-written because that route declares no response model, and the About pane
-// reads the version from here rather than carrying a build-time copy that could drift.
+// Hand-written: `/health` (`main.py`) declares no response model. `version` is the one source of
+// `APP_VERSION` in the browser.
 export interface HealthResponse {
   status: string;
   service: string;
@@ -114,10 +95,8 @@ export function fetchPipeline(signal?: AbortSignal): Promise<OptimizerPipelineRe
   return jget<OptimizerPipelineResponse>(`${API}/optimizer-pipeline`, signal);
 }
 
-// What ONE campaign runs, at one searchpoint — the single server-owned answer for every config
-// row, model chip, lock glyph and reach ring (`frontend-surface-contract.md::I9`). `at` takes the
-// `parse_subject` grammar and defaults to the campaign root; a scoring mask (`lens=` / `samples=`)
-// is refused, because a mask cannot change what config a point RAN.
+// `at` takes the `parse_subject` grammar (absent = campaign root); the server refuses a scoring
+// mask there, because a mask cannot change what config a point RAN.
 export function fetchCampaignPipeline(
   campaignId: string,
   at?: string | null,
@@ -130,10 +109,7 @@ export function fetchCampaignPipeline(
   );
 }
 
-// Target connector pipeline for a dataset. One-shot — topology is bound at
-// cycle-identity hash time and doesn't mutate during the loop. The server
-// reads `datasets/{name}/pipeline.yaml` (dataset overlay = source of truth)
-// and derives the `view` from its `nodes` + `pipelines`. Consumed by the ChatPane hero.
+// One-shot: topology is bound into the cycle identity hash and never changes mid-loop.
 export function fetchDatasetPipeline(
   name: string,
   signal?: AbortSignal,
@@ -159,10 +135,7 @@ export function fetchMachineStatus(signal?: AbortSignal): Promise<MachineStatusR
   return jget<MachineStatusResponse>(`${API}/machine-status`, signal);
 }
 
-// Per-cycle file content. Files live either under the cycle dir
-// (`scope=cycle`) or at the campaign dir (`scope=campaign` — campaign.json,
-// log.md, hard_samples.json). `dashboard.json` is NOT a campaign artifact —
-// it is per-session; fetch it via `fetchDashboardConditional`.
+// `dashboard.json` is per-session, not a campaign or cycle file: read it via `fetchDashboardByPath`.
 export function fetchCycleFile(
   campaignId: string,
   cycleId: string,
@@ -177,14 +150,8 @@ export function fetchCycleFile(
   return jget<FileContentResponse>(url, signal);
 }
 
-// The `${API}/campaigns/{root}/cycles/{root}{suffix}` URL for a cycle PATH. The
-// URL carries the path's ROOT ids; deeper hops (an L4 inner loop, L5+) ride
-// `?descend=`, which the server walks into each hop's `.inner/<previous cycle id>`
-// sandbox. `suffix` is the sub-route (`/dashboard`, `/events:subscribe`,
-// `/file?scope=…`); descend appends with `?` or `&` depending on whether the
-// suffix already opened a query. At depth 1 (no descend) the URL is byte-identical
-// to a plain per-cycle read — the one builder every path-addressed read/subscribe
-// shares (dashboard poll, SSE feed, deep-audit file).
+// Hops below the root (an L4 inner loop) ride `?descend=`, which the server walks through each
+// hop's `.inner/` sandbox.
 export function cyclePathUrl(path: CyclePath, suffix: string): string {
   const root = pathRoot(path);
   const base =
@@ -196,9 +163,8 @@ export function cyclePathUrl(path: CyclePath, suffix: string): string {
   return `${base}${sep}descend=${encodeURIComponent(descend)}`;
 }
 
-// Per-cycle file content, addressed by a CYCLE PATH (mirrors
-// `fetchDashboardByPath`). Follows the viewed leaf cycle, so use this (not the
-// bare id form) for any deep-audit file, e.g. `rounds/round_NNNN.json`.
+// Use this rather than `fetchCycleFile` for a file of the viewed LEAF: the id form cannot reach an
+// inner cycle.
 export function fetchCycleFileByPath(
   path: CyclePath,
   scope: string,
@@ -222,14 +188,8 @@ export function fetchFiles(
   );
 }
 
-// `descend` (the `~`-joined `campaign::cycle` tail below the root hop) makes the
-// hard-samples slice follow an L4 inner drill-in: present → the server reads the
-// scope artifact from the inner `.inner/` sandbox instead of the outer archive.
-// It only walks from the ROOT hop, so when descend is set both root ids ride
-// along regardless of scope. Empty/absent → byte-identical to a top-level read.
-// `order` overrides the ranking key for this read; absent → the server resolves the
-// dataset's `CampaignConfig.hard_sample_order`. A label is drawn from the response's echo,
-// never from this argument.
+// The server walks `descend` from the ROOT hop, so both root ids ride along whatever the scope.
+// Absent `order` = the dataset's `CampaignConfig.hard_sample_order`; label from the echo, never this.
 function hardSamplesParams(
   limit: number,
   scope: HardSamplesScope,
@@ -252,16 +212,13 @@ function hardSamplesParams(
   return params;
 }
 
-// What narrows a cells read to a preset — one individual, one round, one mark. Each is a
-// server-side filter, so a preset's rows and its totals come back already narrowed.
+// Server-side filters: a preset's totals come back narrowed along with its rows.
 export interface CellsFilter {
   candidateId?: string;
   round?: number;
   status?: CellStatus;
 }
 
-// The measurement log of one scope — `GET /datasets/{name}/cells`, the one read behind every
-// measurement view (`domain/cells.py`). Served in rank order; a client never re-sorts it.
 export function fetchCells(
   name: string,
   signal: AbortSignal | undefined,
@@ -283,7 +240,6 @@ export function fetchCells(
   );
 }
 
-// One cell opened — its archive row assembled into a trace, addressed `(run_id, sample_id)`.
 export function fetchCell(
   name: string,
   runId: string,
@@ -296,19 +252,8 @@ export function fetchCell(
   );
 }
 
-// Conditional dashboard fetch for the 2 s poll, addressed by a CYCLE PATH.
-// The path's ROOT hop is the top-level cycle; deeper hops (an L4 inner loop, or
-// L5+) ride the `?descend=` query, which the server walks into each hop's
-// `.inner/<previous cycle id>` sandbox. At depth 1 the URL is byte-identical to
-// a plain per-cycle read — so `If-Modified-Since`/304 behavior is unchanged.
-// Pass the prior response's `Last-Modified` as `ifModifiedSince`; the
-// fresh-campaign warming_up payload arrives as a 200 `{warming_up: true, ...}`.
-//
-// `at` asks for a MOMENT: the same state folded from the ledger up to that physical offset
-// rather than read off the materialized head. One route rather than two, because "the
-// dashboard" and "the dashboard at a moment" are one question with a default. The offset is
-// the leaf cycle's own — the space `RayItem.offset` speaks, which is what makes a chronology
-// step an address the whole page can be moved to.
+// A cycle with no dashboard yet answers 200 `{warming_up: true}`. `at` folds the ledger up to that
+// leaf-cycle offset (`RayItem.offset`'s space) instead of reading the materialized head.
 export function fetchDashboardByPath(
   path: CyclePath,
   ifModifiedSince?: string | null,
@@ -322,21 +267,12 @@ export function fetchDashboardByPath(
   );
 }
 
-// `lifecycle` mirrors the server's `?lifecycle=` filter — defaults to
-// "active" server-side; pass "archived" to surface the archived set
-// (deleted stays out of the default UI). "all" returns every status. "checkin"
-// is not a status but the authoring PHASE — a narrowing of "active", which
-// already carries the origin-authoring set.
+// Hand-written query-param set: must match `manifests.py::_LIFECYCLE_FILTERS` member for member.
+// Absent = "active"; "checkin" is the authoring PHASE, a narrowing of "active", not a status.
 export type LifecycleFilter = "active" | "archived" | "deleted" | "checkin" | "all";
 
-// The forest reads. `at` is the chain of cycles to descend INTO — `[]` (the
-// default) is the tenant's own tree, one hop is an L4 cycle's inner fan-out, two
-// is an L5 descendant. A sandbox is structurally a normal projects tree, so these
-// are the SAME two endpoints at every depth; nothing here is depth-aware.
-//
-// Note this is `encodeCyclePath`, not `encodeDescend`: the dashboard names a leaf
-// ENTITY (so its descend drops the root hop), while a forest names a STORE — every
-// hop is a descent.
+// `encodeCyclePath`, not `encodeDescend`: a forest names a STORE, so every hop in `at` is a
+// descent, while a leaf ENTITY's descend drops the root hop.
 export function fetchCampaigns(
   dataset?: string,
   signal?: AbortSignal,
@@ -407,10 +343,8 @@ export function fetchConfigMap(
   );
 }
 
-// Would this steer take the babysit path? — the verdict `fork-cycle` reaches inside its own
-// dispatch, where it 404s rather than answers. POSTed because the subject is an overlay that
-// exists nowhere on disk yet; it writes nothing, so it is a read like the rest of this file.
-// The browser must not re-derive this (`frontend-surface-contract.md::I9`).
+// A read despite the POST: its subject is an overlay that exists nowhere on disk yet. The verdict
+// is `fork-cycle`'s own, and the browser must not re-derive it (`frontend-surface-contract.md::I9`).
 export function fetchForkPreview(
   campaignId: string,
   pipelineOverlay: Record<string, unknown>,
@@ -423,34 +357,8 @@ export function fetchForkPreview(
   );
 }
 
-// --- Cross-subject evidence (the Compare tab) ------------------------------------
-// What an arbitrary SET of subjects jointly says: the roster, whether their levels are
-// comparable at all, the per-cell levels to plot, the cell/subject/residual decomposition, what
-// the selection can resolve, and the run-order confound. The selection may span campaigns and
-// datasets, and there is no L4 gate — an ordinary campaign and a self-optimizing one take the
-// same path.
-//
-// A SUBJECT is what one channel of the comparison is anchored on: a whole campaign (its root
-// origin), a course (one branch, read at its last elected winner), or a single candidate. The
-// address grammar is spelled by `subjectKey` below and NOWHERE else in the browser — every other
-// module passes the opaque string, which is also what the response keys its rows and its pairwise
-// refs on, so nothing downstream re-splits it.
-//
-// `metric` picks WHICH number all of it is about — a catalogue key, or a formula composed over
-// the channel names the response echoes back in `metric.namespace`. The `expr:` prefix is spelled
-// HERE and nowhere else, so no component has to know the wire encoding.
-//
-// `ranking` and `winnerChain` are the two walks that open round documents, and both are off by
-// default: everything else reads one document per subject. That is why the pane puts them behind
-// a press instead of a poll.
-//
-// Every shape is GENERATED from the Pydantic source (`Evidence` &c in
-// `application/evidence/`) — hand-mirroring them here bypasses `build_ts_types.py`
-// and drifts behind the model silently.
-// `inside` is the sandbox chain the address lives in — the hops ABOVE the leaf, which for a
-// tree node is `coursePath.slice(0, -1)`. Empty for a top-level campaign; one hop per L4
-// recursion below it. It rides the same `campaign::cycle` codec as `?descend=` because it is the
-// same question, so `encodeCyclePath` is the encoder here too.
+// The subject address grammar is spelled here and nowhere else in the browser; every other module
+// passes the opaque string. `inside` = the hops ABOVE the leaf, on the `?descend=` codec.
 export function subjectKey(
   kind: SubjectReading["kind"],
   ids: readonly string[],
@@ -460,10 +368,7 @@ export function subjectKey(
   return inside.length > 0 ? `${address};in=${encodeCyclePath(inside)}` : address;
 }
 
-// A served reading's COURSE, as one address: the sandbox chain it lives in with its own leaf hop
-// on the end. Every joiner against the lineage tree needs exactly this — the ids alone name the
-// leaf, and a depth-1 guess never matches a node inside a sandbox — and four surfaces were
-// spelling the `inside` conversion inline, which is one wire-shape decision copied five ways.
+// A reading's ids name only its leaf; a join against the lineage tree needs this whole path.
 export function readingPath(reading: SubjectReading): CyclePath {
   return [
     ...reading.inside.map((h) => ({ campaignId: h.campaign_id, cycleId: h.cycle_id })),
@@ -471,22 +376,14 @@ export function readingPath(reading: SubjectReading): CyclePath {
   ];
 }
 
-// One searchpoint's address, from the path it sits at. The leaf/`inside` split is the grammar's,
-// so it is made here rather than at each caller: a point's own hop names it, and everything above
-// is the sandbox chain the read descends. Empty for a pathless node, which addresses nothing.
 export function candidateSubject(path: CyclePath, candidateId: string): string {
   const leaf = path.at(-1);
   if (!leaf) return "";
   return subjectKey("candidate", [leaf.campaignId, leaf.cycleId, candidateId], path.slice(0, -1));
 }
 
-// The MASK segments of the same address — a scoring lens and/or a sample subset, appended to
-// the subject a served reading was already resolved from. `;` separates them because it cannot
-// appear in a safe-AST formula, which is also why the server splits on it. Blank values drop the
-// segment, so clearing both fields is how a channel goes back to the record.
-//
-// The subject's `inside` completes its address: the id fields name the LEAF, so rebuilding from
-// them alone silently re-addressed every inner subject to the outer tree.
+// `;` separates because it cannot appear in a safe-AST formula, which is why the server splits on
+// it. A blank value drops its segment, so clearing both returns the channel to the record.
 export function withMask(
   address: string,
   mask: { lens?: string | null; samples?: string | null },
@@ -540,37 +437,16 @@ export function fetchEvidence(
   return jget<Evidence>(`${API}/evidence?${qs.join("&")}`, signal);
 }
 
-// THE lineage read — one recursive tree rooted at a COURSE, nodes alternating
-// `course → candidate → (course | sample)` at every depth. It is the only
-// genealogy the webapp fetches; nothing here re-derives one.
-//
-// Rooted at a course, not a campaign: a campaign is a bag of courses, and the
-// tree's own recursion (a fork or an L4 inner run is a course hanging off a
-// candidate) already reaches every one of them. `/campaigns` + `/cycles` stay the
-// flat registry the sidebar groups by.
-//
-// Conditional on an **ETag**, not a date: the validator covers the lens/samples mask
-// as well as the subtree mtime, so a MASKED read gets its own 304 instead of
-// recomputing the whole tree on every poll while a lens is open.
-//
-// There is no `depth`: one tree per campaign serves every consumer, and the recursion
-// bound is the server's (`lineage_queries._MAX_COURSE_DEPTH`). Two clients picking
-// different depths for the same served object is what let them disagree.
-//
-// `path` addresses the ROOT COURSE of the tree — the same CyclePath every other
-// path-addressed read uses, so an L4 inner course's tree rides `?descend=` through
-// the one URL builder rather than a second convention.
+// An ETag, not a date: the validator covers the lens/samples mask, so a masked read gets its own
+// 304. No `depth` parameter: the recursion bound is the server's (`_MAX_COURSE_DEPTH`).
 export function fetchLineageTree(
   path: CyclePath,
   opts: { lens?: string | null; samples?: number[] | null } = {},
   etag?: string | null,
   signal?: AbortSignal,
 ): Promise<Conditional<LineageNode>> {
-  // One `lens` value drives the counterfactual: `score:<formula>` = an alternative
-  // scoring formula, `abort:<variant>` = a PoBB abort-contributor switch-off.
-  // `samples` = the sample-set mask (re-score accuracy over only these ids); it
-  // composes with a `score:` lens and is ignored for an `abort:` lens. Both land
-  // ON the node they describe — there is no parallel array to re-join.
+  // `lens` is `score:<formula>` or `abort:<variant>` (a PoBB abort-contributor switch-off);
+  // `samples` composes with `score:` and is ignored under `abort:`.
   const { lens = null, samples = null } = opts;
   const params = new URLSearchParams();
   if (lens) params.set("lens", lens);
@@ -579,10 +455,8 @@ export function fetchLineageTree(
   return jgetIfNoneMatch<LineageNode>(cyclePathUrl(path, `/tree${q ? `?${q}` : ""}`), etag, signal);
 }
 
-// THE CHRONOLOGY — one merged order across a course, its forks and its inner runs; also
-// the replay endpoint (the SSE tail seeks to EOF and has no `since=`). Not a second
-// `/tree`: genealogy vs sequence — see webapp/CLAUDE.md § "/ray is the CHRONOLOGY".
-// Windowed newest-first, delivered oldest-first; `before` = a prior `cursor_prev`.
+// Also the replay endpoint: the SSE tail seeks to EOF and has no `since=`. Windowed newest-first,
+// delivered oldest-first; `before` is a prior `cursor_prev`.
 export function fetchTimeRay(
   path: CyclePath,
   opts: { limit?: number; before?: string | null } = {},
@@ -597,8 +471,7 @@ export function fetchTimeRay(
   return jgetIfNoneMatch<RayResponse>(cyclePathUrl(path, `/ray${q ? `?${q}` : ""}`), etag, signal);
 }
 
-// Workspace-scope diagnostic-run records — sidecars written by `verify` CLI.
-// `dataset` filters to one dataset's records; omit for everything on disk.
+// The sidecars the `verify` verb writes.
 export function fetchDiagnosticRuns(
   dataset?: string | null,
   signal?: AbortSignal,
