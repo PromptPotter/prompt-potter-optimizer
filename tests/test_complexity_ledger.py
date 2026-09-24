@@ -290,6 +290,7 @@ LEDGER_BASELINE = {
     # +1: `application/evidence/CLAUDE.md` — the evidence rules, apart from `application/CLAUDE.md`
     # so only a reader editing that package pays for them.
     "claude_md": 9,
+    "claude_md_words": 34579,  # every CLAUDE.md word, billed to each session loading beneath it
     # SIX by charter (`tests/CLAUDE.md` § What each file is for). This row never rises: a test
     # rides an existing file's existing section, or it is not written.
     "test_files": 6,

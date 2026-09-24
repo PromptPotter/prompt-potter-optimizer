@@ -42,6 +42,15 @@ collects everything else.
   **Past tense is a smell** — "used to", "its predecessor", a date, a
   percentage, a run id, an `A -> B` tally: how the code got that way is git's
   job (commit body, `CHANGELOG.md`).
+- **The webapp is in scope — `.ts`, `.tsx`, `.css`, and JSX `{/* */}` alike.** Same two gates,
+  same ≤2 lines, same past-tense smell; a component header says what the component IS and which
+  rule binds it, never what it replaced. The one generated file (`lib/api/types.generated.ts`) is
+  not prose — fix its source docstring and regenerate.
+- **A `CLAUDE.md` is billed to every session beneath it, so its words are ratcheted surface** —
+  `complexity_ledger::claude_md_words`, EQUALITY like every row, a raise carrying its reason
+  beside the number. It holds rules binding a set of symbols; mechanism goes to the module
+  docstring, and an incident to the commit body — the Recompute Test in
+  [`../CLAUDE.md`](../CLAUDE.md) § Editing a doc applies to these files too.
 - **A cut fact has a DESTINATION, and the ladder is priced by who pays.** A line
   in a hot module is billed to every future session that opens it, needed or
   not, so a fact goes to the cheapest rung that still reaches the reader who
@@ -114,6 +123,12 @@ collects everything else.
   A default is fine when it is a *derivation* every caller would repeat identically
   (`round_scorer=None` → the schema's own default formula), not when the right value
   genuinely differs per call site.
+- **A query module reads a persisted document through its MODEL, never as a dict.** A round file
+  parses as `RoundResult`, `dashboard.json` as its projection model — then direct field access is
+  the natural reading, not an aspiration defended by `.get()`/`isinstance` at every key. A dict
+  walk survives only in a cross-cycle SURVEY that must outlive one corrupt neighbour
+  (`read_json_tolerant`, infrastructure `CLAUDE.md` § Picking a JSON reader). Converting an
+  existing walk is standing maintenance: do it when you touch the module.
 - **String-keyed *call* dispatch is a defect** — it hides the caller→handler
   edge from `grep`, so "is this method live?" costs a multi-hop tour.
   Fix by template: key is internal → explicit `match` with literal calls;
@@ -150,6 +165,7 @@ Productive patterns:
 - **Dead exception paths / enum variants** — handler arms outliving the raising path. Grep every variant for a construction site.
 - **Speculative API surface** — params never read, an `X | None` always non-None, fields declared and written but never read.
 - **Absent collapsed into zero** — a `float = 0.0` default or an `or 0.0` coercion on a field carrying a MEASUREMENT. The tell is a `| None` sibling in the same model — the rule and its violation sitting in one constructor call. Counts, rates and money are honest zeros; reporting-only models default by written rule ([`../../promptpotter/domain/CLAUDE.md`](../../promptpotter/domain/CLAUDE.md) § Tolerance is scoped by what a payload is FOR). Enforcement is per-site — [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md) forbids a repo-wide scan — which is why this is a hunt pattern and not a task.
+- **A decision in a router** — a route that ranks, filters or selects rows rather than parsing, checking, paging and formatting. No other entry point can import it, so the next one writes a copy (`presentation/CLAUDE.md` § Out-of-bounds).
 - **Vibe-coded scaffolding** — `NotImplementedError` branches, comments about work the project does not plan. Check the roadmap before believing the "future".
 
 **NOT debt — skip on sight:** intentional UI placeholders (each names itself in its own component

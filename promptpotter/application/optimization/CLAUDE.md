@@ -2,7 +2,7 @@
 
 The optimizer is three nested generation loops, and each layer mutates with cause, never at random. This file is the **agent contract**: what each layer may do, and what it may never do.
 
-Mechanism lives at its definition site, not here — `l1/generate.py` and `escalation/firing.py` carry the composition and transition detail in their module docstrings, and each `_r_*` docstring in `dispatch/injections/panels.py` is the definition site for what its panel is and why it exists. The orchestration shape (Cycle, dispatch, escalation rules) is [`../CLAUDE.md`](../CLAUDE.md); channels and signal routing are [`../../../docs/developer/dispatch-hub.md`](../../../docs/developer/dispatch-hub.md).
+Mechanism lives at its definition site — the `l1/generate.py` and `escalation/firing.py` module docstrings, and each `_r_*` docstring in `dispatch/injections/panels.py` for its panel. The orchestration shape (Cycle, dispatch, escalation rules) is [`../CLAUDE.md`](../CLAUDE.md); channels and signal routing are [`../../../docs/developer/dispatch-hub.md`](../../../docs/developer/dispatch-hub.md).
 
 <dispatch-first>
 **★ FIRST PRINCIPLE, THIS PHASE — fix it in the dispatch.** A prompt is one *information package* for a small model: short, every line unique, high-value, in the right slot. The **dispatch hub** (`application/optimization/dispatch/`) is where raw measurement is recomposed into those packages and wired in through **deterministic wires** (`DispatchHub.fill`) — so it is the FIRST place to fix a bloated / low-value / misplaced prompt, and the one place to be **creative**: new functions, processing, recomposition, panel logic, whatever forms the information *perfectly for its slot*. The wires stay deterministic; the intelligence lives in the shaping. Corollaries: a panel renders only what adds signal **for this task/state** and is otherwise silent (the `answer_distribution` / suppressed-RANK rule); duplication, paraphrase, filler and task-mismatched blocks are reshaped at source — never patched downstream (a render-time dedup, a louder optimizer prompt clause).
@@ -21,15 +21,15 @@ Mechanism lives at its definition site, not here — `l1/generate.py` and `escal
 
 ## Origin = conservative floor
 
-**Start every tunable in the dataset's per-node overlay (`datasets/{name}/pipeline.yaml::nodes.{name}.config`) at its FLOOR, not its centre** — `reasoning_effort: "low"`, low `temperature`, minimal `thinking_budget`, no expensive system-prompt scaffolding. L1 expands upward when sibling-yield or stall evidence supports it; starting from expanded-thinking defaults burns budget on round 0 and steals the headroom L1 exists to discover. Per-dataset starting points: [`../../../docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md).
+**Start every tunable in the dataset's per-node overlay (`datasets/{name}/pipeline.yaml::nodes.{name}.config`) at its FLOOR, not its centre** — `reasoning_effort: "low"`, low `temperature`, minimal `thinking_budget`, no expensive system-prompt scaffolding. L1 expands upward when sibling-yield or stall evidence supports it; an expanded start burns round-0 budget and steals the headroom L1 exists to discover. Per-dataset starting points: [`../../../docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md).
 
 ## Cycle stop conditions
 
-Boundary stops are `max_rounds` and its opt-in measurement-driven twin `OptimizationConfig.lives` — "hearts", +1 per improving round, −1 per stall, banked, stop at 0 → `LIVES_EXHAUSTED`. It banks `improved` alone, where the stall counter beside it also requires `RoundResult.separable`, so a round crowning a winner no arm's interval cleared 0 spends patience but not a life. Two more sit in the rule set and the FSM, and neither is a layer's doing: `objective_exhausted` → `STOP_PERFECT`, and `l3_patience` spent → `STOP_L3_PATIENCE`. **The only stop a LAYER authors is `terminate_proposal`** (→ `StopReason.ABORT`, § The layer-control channel) — deterministic rules route and never diagnose, so no rule is a layer's exit.
+Boundary stops are `max_rounds` and its opt-in measurement-driven twin `OptimizationConfig.lives` — "hearts", +1 per improving round, −1 per stall, banked, stop at 0 → `LIVES_EXHAUSTED`. It banks `improved` alone, where the stall counter also requires `RoundResult.separable`, so an inseparable winner spends patience but not a life. Two more sit in the rule set and the FSM, neither a layer's doing: `objective_exhausted` → `STOP_PERFECT`, and `l3_patience` spent → `STOP_L3_PATIENCE`. **The only stop a LAYER authors is `terminate_proposal`** (→ `StopReason.ABORT`, § The layer-control channel) — deterministic rules route and never diagnose, so no rule is a layer's exit.
 
 ## The ladder's DEPTH is a knob, and it is a real suppression
 
-`OptimizationConfig.escalation_ladder` is `full` / `l1_l2` / `l1` — the ablation arms. At `l1` the `l1_only_ladder` rule preempts every `FIRE_L2` rule, so `escalate_l2` is never called and no `l2_context` / `l3_plan` prompt is ever composed; at `l1_l2` the L3 gate and the post-L2 force-trigger both stand down. **A patience never shortens the ladder** — it paces one. L1's own prompt is bit-for-bit identical across the three arms, which is what makes them comparable at all.
+`OptimizationConfig.escalation_ladder` is `full` / `l1_l2` / `l1` — the ablation arms. At `l1` the `l1_only_ladder` rule preempts every `FIRE_L2` rule, so `escalate_l2` is never called and no `l2_context` / `l3_plan` prompt is ever composed; at `l1_l2` the L3 gate and the post-L2 force-trigger both stand down. **A patience never shortens the ladder** — it paces one. L1's own prompt is bit-for-bit identical across the three arms, which is what makes them comparable.
 
 ## L1 — what `l1_generate` may propose
 
@@ -45,17 +45,17 @@ Boundary stops are `max_rounds` and its opt-in measurement-driven twin `Optimiza
 
 ## L2 — what `l2_context` may write
 
-Fires on L1 stall (default), yield drought (`l2_axis_yield_drought`), or evidence-starvation (`l1_evidence_starved`). `decide_escalation` over `DEFAULT_ESCALATION_RULES` decides transitions — **the rule set is the policy**; `EscalationFSM` holds the counters those rules read but is no longer the decider.
+Fires on L1 stall (default), yield drought (`l2_axis_yield_drought`), or evidence-starvation (`l1_evidence_starved`). `decide_escalation` over `DEFAULT_ESCALATION_RULES` decides transitions — **the rule set is the policy**; `EscalationFSM` only holds the counters those rules read.
 
 - **Deterministic rules route; they never diagnose or stop.** A systemic fault brings L2 in as a *weak preemptor*, bypassing `l1_patience`, and L2 judges recoverability — fixable by steering L1's attention, or unfixable by any prompt move, in which case `terminate_proposal` is the HITL exit. The diagnose-and-stop authority lives in the LLM tier.
 - **L2 writes exactly two surfaces**: `l1_layout` (which panels L1 sees) and `l1_overrides` (how hard it explores), plus optional optimizer-param tweaks — **never pipeline_params**, which belong to `l1_generate`.
 - **The steer is evidence-anchored**: it cites a specific axis, sample or yield number. Speculative moves ("maybe try X") are out of contract, and a fire touching no L1 surface is a wasted escalation scored as one (`l2_targets_l1_surface`).
-- **The framing is frozen — L2 does not write `task_context`.** The five framing fields are operator-authored evidence, and the lock is structural rather than conventional: `TaskDecomposition.merge` refuses them and the L2 wire schema has no field for them. A round's findings reach L1 through `critique`, `axis_memory` and `mutation_memory` instead — derived from measurement rather than paraphrased from the previous prompt. Only `upstream_context` / `downstream_context` stay mutable, because those splice into the TARGET prompt and a candidate carrying them is scored.
+- **The framing is frozen — L2 does not write `task_context`.** The five framing fields are operator-authored evidence, locked structurally: `TaskDecomposition.merge` refuses them and the L2 wire schema has no field for them. A round's findings reach L1 through `critique`, `axis_memory` and `mutation_memory` instead. Only `upstream_context` / `downstream_context` stay mutable, because those splice into the TARGET prompt and a candidate carrying them is scored.
 - **Escalating to L3 is rare** — only when the failure mode is outside the framing surface. Default: keep refining the framing for L1.
 
 ## L3 — what `l3_plan` may write
 
-Fires only on L2 stall. Produces a **strategic replan** — the framing surface, escalation policy, or which axes are in scope — written to `OptSearchPoint.plan` and read by **every** prompt, so it is the frame inside which both L2 and L1 operate. It heals L2 on layout HARD-validator failures or repeated cross-field issues, which are signs L2 is thrashing within the plan rather than refining across the plan-space.
+Fires only on L2 stall. Produces a **strategic replan** — the framing surface, escalation policy, or which axes are in scope — written to `OptSearchPoint.plan` and read by **every** prompt, so it is the frame inside which both L2 and L1 operate. It heals L2 on layout HARD-validator failures or repeated cross-field issues — L2 thrashing within the plan.
 
 **Firing is rarer still than L2**: a fire signals the cycle's plan was wrong, not that one variant missed. If L3 fires repeatedly inside one cycle the plan-space itself is exhausted, and it should terminate rather than replan again.
 
@@ -63,13 +63,13 @@ Fires only on L2 stall. Produces a **strategic replan** — the framing surface,
 
 **These two are the COMPLETE layer-control vocabulary; nothing else back-doors a cycle exit.** Both ride the `_run_transition` post-apply seam and each is gated by an `OptimizationConfig` capability bit whose injection renders empty when off, so an ablation run is bit-for-bit identical on prompt text. Terminate outranks fork when both are set.
 
-- **`fork_proposal` carries no round offset, because the layer decides WHETHER to rewind and UCB decides WHERE** (`application/mask/backprop.py::select_rewind_round`, UCB1 over the lineage tree). A layer never had the evidence to name a round — no panel enumerates the ancestors and their fitness — so asking it to was a phantom citation on the loop's most expensive decision. `resume --rewind N` is the operator's equivalent gesture.
+- **`fork_proposal` carries no round offset, because the layer decides WHETHER to rewind and UCB decides WHERE** (`application/mask/backprop.py::select_rewind_round`, UCB1 over the lineage tree). A layer has no evidence to name a round — no panel enumerates the ancestors and their fitness — so asking would buy a phantom citation on the loop's most expensive decision. `resume --rewind N` is the operator's equivalent gesture.
 - **`unlock_schema_field_rename` is a bool, never the `ConfigOverrides` object.** Handed the whole delta, a layer could move its own spend ceiling. It is the layer's only search-policy request and can ride nothing but this rewind, because `schema_field_rename` invalidates comparability and must mint a sibling.
-- **A REASON is what makes `terminate_proposal` a decision.** The field is optional, so a blank one is a volunteered field — ignored, exactly as one arriving with the capability off is — and both the honored stop and the ignored blank land on the operator's warnings channel, because a halt whose reason lives only in a log line is a halt nobody can act on.
+- **A REASON is what makes `terminate_proposal` a decision.** A blank one is ignored, exactly as one arriving with the capability off is, and both the honored stop and the ignored blank land on the operator's warnings channel — a halt whose reason lives only in a log line is one nobody can act on.
 
 ## The optimizer never searches the GATEWAY or the ROUTE
 
-`PARAM_FORBIDDEN_KEYS` (`domain/search_point.py` — read the set there) holds `provider` and `route_order`, and is an INVARIANT rather than a toggle: neither is emitted for the LLM to set, so the lock is structural and not policed per round. Both are cost levers the operator sets against a measured capture, and hosts of one model disagree systematically.
+`PARAM_FORBIDDEN_KEYS` (`domain/search_point.py` — read the set there) holds `provider` and `route_order`, and is an INVARIANT rather than a toggle: neither is emitted for the LLM to set, so the lock is structural. Both are cost levers the operator sets against a measured capture, and hosts of one model disagree systematically.
 
 **Where the operator sets one is two places, split by which side of the recursion answers.** A BACKEND node's rides the dataset overlay ([`../../../datasets/CLAUDE.md`](../../../datasets/CLAUDE.md) § Sole route). The OPTIMIZER's own rides `OptimizationConfig.determinism`, which pins temperature, seed and route together on every optimizer call and is applied LAST, so it beats the node's file config and `l1_generate`'s per-call `temperature: creativity` alike. An L4 inner cell is one caller of that field among the rest — `runner/inner/tasks.py::inner_instrument_config` writes the panel's temperature and the cell's seed into it — never a second mechanism.
 
@@ -87,7 +87,7 @@ The hashed set is `bundle` + `compose` + `facade` + `domain/ruler.py` + the rend
 
 Within the reject posture, `l1_strict.py` judges ONE proposal against a declared rule; `l1_invariants.py` compares proposals against each other and against history. **Emitting the wire schema is neither posture** — that is `dispatch/l1_wire_schema.py`, which composes a prompt surface. The SCORING vocabulary (`CheckResult`, `ValidatorContext`, `CheckFn`) is owned by `validators/behavior_base.py` and by neither layer that speaks it.
 
-**A rejection the REJECT posture already makes deterministically must not also be taught in prompt text.** The model earns nothing by obeying it — the candidate dies before the backend call either way — so the words buy no behaviour and are charged twice, once as tokens and once as the quality tax every model pays on a longer input (`<simplify-the-problem>`). State that they ARE mechanical in one clause, and spend the prompt on the traps nothing polices.
+**A rejection the REJECT posture already makes deterministically must not also be taught in prompt text.** The candidate dies before the backend call either way, so the words buy no behaviour and are charged twice — tokens and the quality tax of a longer input (`<simplify-the-problem>`). State that they ARE mechanical in one clause, and spend the prompt on the traps nothing polices.
 
 ## Signals come from measurement, not from the calendar
 
@@ -101,10 +101,10 @@ Conceptually L2 / L3 / L4 are one family, each mutating a slower-changing surfac
 
 ## checkin — the fifth optimizer node
 
-`checkin` is a registered optimizer node (`OPTIMIZER_RESPONSE_MODELS`) but **not a loop layer**: it runs *around* the loop and skips the injection path. It is **not** thereby a "non-ledger" call — both modes bind the seeded campaign's cycle ledger via `task_context.py::checkin_call_context` and wrap in `observed_node`, so tokens, cost and audit record land like any other. They did not, once.
+`checkin` is a registered optimizer node (`OPTIMIZER_RESPONSE_MODELS`) but **not a loop layer**: it runs *around* the loop and skips the injection path. It is **not** thereby a "non-ledger" call — both modes bind the seeded campaign's cycle ledger via `task_context.py::checkin_call_context` and wrap in `observed_node`, so tokens, cost and audit record land like any other.
 
 **One node, two modes, one output schema (`CheckinOutput`) — don't add a second decomposition/resolution node.** Task decomposition (CLI `new`) turns a raw `task_description` into the six Layer-1 prompt strings plus `task_context`; origin resolution (web ingest) turns a draft origin into `assessment` + `findings` + `next_action` + `recap`. Both produce the six decomposition fields and both drivers capture them, so an origin turn returns the resolved origin *and* a seeded starting prompt the operator edits before mint.
 
 ## Reviewing an L1 round trace
 
-Walk the checklist in the `potter-self` skill (§ The round-trace checklist) before reporting findings on any operator-pasted round dump — it enumerates the checks that historically slipped past, and which are validator-enforced versus pure analysis responsibility.
+Walk the checklist in the `potter-self` skill (§ The round-trace checklist) before reporting findings on any operator-pasted round dump — it names which checks are validator-enforced and which are analysis alone.

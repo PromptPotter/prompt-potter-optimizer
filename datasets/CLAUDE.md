@@ -20,7 +20,7 @@ datasets/{name}/
 
 ## A ceiling is DECLARED, or the clock that needs it reports nothing
 
-`campaign_config.accuracy_ceiling` is the accuracy a best-reachable prompt would score on this dataset at this campaign's model, and only the dataset owner can state it — it is a joint claim about the two, so it is not derivable from the bank, the schema or a literature number. Declaring one turns on `index.json::final.rounds_to_ceiling`; leaving it unset (the default on every dataset here) leaves that clock unset too, which is the honest reading and costs nothing else. **Declare it only where you can say what measured it** — a saturation screen on the same model, a published ceiling for the same split. A guessed value makes every campaign on the dataset publish a round count nobody can defend, and no run says so.
+`campaign_config.accuracy_ceiling` is the accuracy a best-reachable prompt would score on this dataset at this campaign's model, and only the dataset owner can state it — it is a joint claim about the two, so it is not derivable from the bank, the schema or a literature number. Declaring one turns on `index.json::final.rounds_to_ceiling`; leaving it unset leaves that clock unset too, which is the honest reading and costs nothing else. **Declare it only where you can say what measured it** — a saturation screen on the same model, a published ceiling for the same split. A guessed value makes every campaign on the dataset publish a round count nobody can defend, and no run says so.
 
 ## Sole route for backend tunable changes
 
@@ -28,7 +28,7 @@ datasets/{name}/
 
 `load_dataset_node_overlay` → `configure_and_apply_pipeline()` (`promptpotter/application/pipeline_resolve.py`) merges the overlay onto each wire payload. **The dataset owns its task model** in `nodes.{node}.config.model` — every LLM node must declare one, or `configure_and_apply_pipeline` raises a loud setup error (no silent fall-through to the backend's own default).
 
-**`route_order` is the third key on that overlay, and only two of the three are locked.** `model` names WHAT answers, `provider` the GATEWAY it is asked through, and `route_order: [<host>, …]` which of that gateway's upstream HOSTS to try, in order (`nodes.{name}.config.route_order`; `current_config` carries it to `llm_call` untouched). `provider` and `route_order` sit in `PARAM_FORBIDDEN_KEYS`, so `node_param_keys()` strips them and L1 can never emit one: they are **operator cost levers set against a measured capture, never search axes**. **`model` is a real axis** — a dataset opens it by listing it in `optimizer.param_keys`, and bounds it with `param_allowed_values.model` (absent ⇒ the whole `available_models` menu); a dataset whose model is a measurement premise simply does not list it. Names are the gateway's own `provider_name` — read them off `served_by` in the ledger, never from a catalogue. Why an order pays at all, and the measured numbers: [`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md) § LLM client.
+**`route_order` is the third key on that overlay, and only two of the three are locked.** `model` names WHAT answers, `provider` the GATEWAY it is asked through, and `route_order: [<host>, …]` which of that gateway's upstream HOSTS to try, in order (`nodes.{name}.config.route_order`; `current_config` carries it to `llm_call` untouched). `provider` and `route_order` sit in `PARAM_FORBIDDEN_KEYS`, so `node_param_keys()` strips them and L1 can never emit one: they are **operator cost levers set against a measured capture, never search axes**. **`model` is a real axis** — a dataset opens it by listing it in `optimizer.param_keys`, and bounds it with `param_allowed_values.model` (absent ⇒ the whole `available_models` menu); a dataset whose model is a measurement premise simply does not list it. Names are the gateway's own `provider_name` — read them off `served_by` in the ledger, never from a catalogue. Why an order pays at all: [`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md) § LLM client.
 
 ## Registered datasets
 
@@ -36,7 +36,7 @@ The roster is the directory listing; each dataset's connector is read off its ow
 
 - **`lca-termnorm`** (`termnorm`) — the multi-node retrieval pipeline. Every other benchmark declares a single `llm_only` **node**: all of them are `backend_type: "termnorm"` and route over HTTP to the server exactly as `lca-termnorm` does. `llm_only` is a node name only, never a connector.
 - **`aime_2025`** — its overlay routes to OpenRouter+Mistral, off the Groq default.
-- **`email-tagging`** — the built-in try-and-learn demo. `User.demo_mode_enabled` is a stored preference with **no reader**: nothing surfaces this dataset from it yet ([`../docs/specs/roadmap.md`](../docs/specs/roadmap.md) lane A1).
+- **`email-tagging`** — the built-in try-and-learn demo; how it gets surfaced is [`../docs/specs/roadmap.md`](../docs/specs/roadmap.md) lane A1.
 - **`justlogic-d234`** — the L4 inner benchmark, an iid mix of depths 2-4 ([§ L4 below](#l4--promptpotter-self)); **`promptpotter-self`** (`promptpotter` connector) — the L4 dataset, and the only one to read a result off, because **`promptpotter-self-e2e`** beside it is a degenerate one-cell twin the browser walk runs for cents. A fixture, never a second instrument (`promptpotter-self-e2e/dataset.md`).
 - **The optimizer's own prompt homes are not in this directory.** They are package install content, shipped in the wheel: `promptpotter/assets/optimizer/pipeline.yaml` + `sets/*.yaml`. Still **operator-owned files** — nothing writes them. `application/evidence/read.py` ranks the measured edits; graduating a winner into `assets/optimizer/pipeline.yaml` is a deliberate hand-edit, and an installed operator shadows that one file via `config/paths.py::optimizer_pipeline_path`.
 
@@ -52,7 +52,7 @@ L4 is **not** a 4th `LayerStrategy` — it is the same PromptPotter applied to i
 
 **The inner instrument is `justlogic-d234`, and a cut switch is never advice.** Each depth cut is a separate `dataset_name` with its own δ scale, so comparing "bands" across cuts reads a difference of rulers as a capability difference. A new cut is a new directory and nothing else — `justlogic_depths` reads the depths off the name — so widening difficulty means adding `justlogic-dNNN/`, never re-cutting this one.
 
-The remaining work lives in ONE place — [`../docs/specs/l4-outer-loop.md`](../docs/specs/l4-outer-loop.md) § Open (don't restate it here; it re-goes-stale every slice).
+The remaining work lives in ONE place — [`../docs/specs/l4-outer-loop.md`](../docs/specs/l4-outer-loop.md) § Open (don't restate it here).
 
 ## Reference points — consult on every dataset question
 
@@ -63,7 +63,7 @@ The remaining work lives in ONE place — [`../docs/specs/l4-outer-loop.md`](../
 
 **Don't hand-edit it, and don't reason about origin cost from it.** It holds
 `{name, created_at, source_file, row_count, items}`, read into `session.samples` at wiring.
-A file *here* is the SHIPPED bank (only `email-tagging` has one); a fetched one is the
+A file *here* is the SHIPPED bank; a fetched one is the
 operator's, written to `.promptpotter/{tenant}/benchmark-rows/{name}.json` by
 `resolve_dataset_items` → `TenantDatasetStore.save_benchmark_rows`, since this tier is
 read-only under a wheel. Both resolve through `readable_dataset_rows`. It is **not** an
