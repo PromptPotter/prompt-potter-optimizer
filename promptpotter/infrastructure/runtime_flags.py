@@ -88,32 +88,30 @@ def read_sample_lookahead(cycle_dir: Path) -> int:
     return max(1, cells)
 
 
-def clear_run_control_flags(cycle_dir: Path) -> BudgetChange:
-    """Drop every POLLED run-control flag — a fresh launch IS the operator's intent to run at the
-    engine's own cadence, and a flag surviving the gesture it answered re-answers the next one. An
-    ``auto`` look-ahead answered no gesture, so it stays until toggled off.
+def clear_run_control_flags(cycle_dir: Path) -> None:
+    """Drop every POLLED run-control flag a fresh launch supersedes — a launch IS the operator's
+    intent to run at the engine's own cadence, and a flag surviving the gesture it answered
+    re-answers the next one. An ``auto`` look-ahead answered no gesture, so it stays until toggled
+    off.
 
-    **Returns the spend ceiling it dropped, and the caller must compose it.** Alone among these
-    flags, ``spend_cap.json`` can carry a decision the run has not acted on yet:
-    ``change-spend-budget`` applies to a PAUSED cycle too, and swept like the rest, a lowering the
-    operator was acked ``applied`` for simply stopped existing at resume. Reading it HERE rather
-    than at the call site is what stops the read and the sweep drifting apart into the wrong order,
-    which loses the ceiling with nothing raising."""
+    ``spend_cap.json`` goes too, and loses nothing: it only MIRRORS the ledger's standing ceiling,
+    which the launch has already declared and admitted, and re-lands the mirror at the value it
+    holds (`runner/entry.py::_prepare_run`)."""
     layout = CycleLayout(cycle_dir)
-    dropped = read_spend_caps(cycle_dir)
     layout.pause_flag.unlink(missing_ok=True)
     layout.skip_flag.unlink(missing_ok=True)
-    spend_sample_lookahead(cycle_dir)
-    # `entry.py::_usd_cap` prefers this file over the cap the launch just composed, so a ceiling
-    # clamped against a richer account governs every later resume unless it goes with the run.
     layout.spend_cap.unlink(missing_ok=True)
-    return dropped
+    spend_sample_lookahead(cycle_dir)
 
 
 def write_spend_caps(cycle_dir: Path, change: BudgetChange) -> None:
-    """Land the live ceilings, an untouched arm omitted. Peer of :func:`read_spend_caps` so the
-    shape is spelled once — a caller hand-building this dict is a writer that can drift from its
-    own reader."""
+    """Land the POLLED MIRROR of the cycle's standing operator ceiling, an unset arm omitted.
+
+    The mirror has one job: carrying a ceiling moved in another process to a run already in
+    flight, read on every paid call (`runner/entry.py::_build_budget_gate`) and every served
+    dashboard (:func:`overlay_armed_controls`), where rescanning the ledger each time costs the
+    whole log. What the operator DECLARED is the ledger's ``SpendCeilingRecord`` alone —
+    `CampaignStore.write_spend_ceiling` writes both, and nothing else declares one."""
     path = CycleLayout(cycle_dir).spend_cap
     path.parent.mkdir(parents=True, exist_ok=True)
     caps: dict[str, float | int] = {}
@@ -125,7 +123,8 @@ def write_spend_caps(cycle_dir: Path, change: BudgetChange) -> None:
 
 
 def read_spend_caps(cycle_dir: Path) -> BudgetChange:
-    """Live ceilings, ``None`` per arm when absent, unreadable or the wrong type.
+    """The mirrored ceilings, ``None`` per arm when absent, unreadable or the wrong type — for the
+    pollers only; a launch reads the ledger (`CampaignStore.read_spend_ceiling`).
     **The one place that knows this file's shape.**"""
     data = read_json_tolerant(CycleLayout(cycle_dir).spend_cap)
     if not isinstance(data, dict):

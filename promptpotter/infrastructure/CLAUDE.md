@@ -136,11 +136,11 @@ The `CycleDir` / `WorkspaceDir` write-target newtypes live in `domain/cycle_path
 
 **`store/account_spend.py` banks what a subject still HOLDS, not what its rows say.** It sums an account's lifetime spend and banks it as a `SpendTombstoneRecord` before a delete takes the rows carrying it. It sits in `infrastructure/` rather than `application/` for exactly that reason: the three destroyers (`delete_campaign`, `try_delete_stub_cycle`, `delete_inner_sandbox`) call it themselves, so no caller can destroy a ledger and skip the bank. An L4 inner cycle's calls are carried onto its outer ledger as they settle, and its own copies are flagged `mirrored`, which the sum skips — banking them would bill that money twice.
 
-**Two read-once ledger records ride `CampaignStore`.** `write_cycle_seed`/`read_cycle_seed` append and scan the cycle seed as a `CycleSeedRecord`, read once at the runner seam. A fork inherits the parent's seed record virtually then appends its own, so a scan of the cycle's own ledger returns that cycle's seed.
+**Three read-once ledger records ride `CampaignStore`.** `write_cycle_seed`/`read_cycle_seed` append and scan the cycle seed as a `CycleSeedRecord`, read once at the runner seam. A fork inherits the parent's seed record virtually then appends its own, so a scan of the cycle's own ledger returns that cycle's seed.
 
 `write_ruler`/`read_ruler` ride the same shape for a δ ruler (`RulerRecord`, last-wins PER `dataset_name`) — **WHOLE each time rather than as a delta**, because `append` is not crash-atomic and a torn line must fall back to a smaller-but-valid scale. It lands BEFORE the round document naming it, since a round whose θ nothing can reproduce is the state it exists to end. **One ledger carries more than one** (δ keys name a sample only within one dataset, and an L4 outer cycle also carries the shared inner scale — `application/runner/inner/ruler.py`), so `copy_rulers` is what a fork lifts, never one of them.
 
-Both are distinct from `.runtime/{skip,pause,spend_cap}`, the **polled** per-checkpoint flags consumed at the next sample boundary rather than held to the round close: one is a durable ledger fact, the others transient.
+`write_spend_ceiling`/`read_spend_ceiling` carry the operator's standing ceiling (`SpendCeilingRecord`, last-wins), scanned physically so a fork never inherits it; its polled mirror is `.runtime/spend_cap.json`. All three differ from `.runtime/{skip,pause,spend_cap}`, the transient **polled** flags read at the next sample boundary.
 
 ## One deleter — `rmtree_robust`
 

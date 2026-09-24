@@ -403,7 +403,7 @@ def declared_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
 
 def default_campaign_config(draft: DraftCampaign) -> CampaignConfig:
     """The campaign config a draft mints WITHOUT its node overlay — the floor the split below
-    layers onto, and the same one ``_campaign_config_for_launch`` starts from at Start."""
+    layers onto, and the same one ``build_cycle_config`` starts from at Start."""
     connector = connectors.get(draft.connector)
     overrides = draft.optimization_overrides
     optimization: dict[str, Any] = {"max_rounds": overrides["max_rounds"]}
@@ -426,7 +426,7 @@ def draft_campaign_config(draft: DraftCampaign) -> CampaignConfig:
     two flat fields a campaign carries.
 
     The resolver reads this so the answer an operator sees while authoring IS the answer their
-    campaign runs; ``mint_and_start._campaign_config_for_launch`` performs the same merge onto the
+    campaign runs; ``mint_and_start.build_cycle_config`` performs the same merge onto the
     committed snapshot. The two agreeing is the point — a setup screen showing something the mint
     will not reproduce is the defect this whole seam exists to close."""
     base = default_campaign_config(draft)

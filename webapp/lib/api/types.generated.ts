@@ -1605,7 +1605,7 @@ export interface RayItem {
    * the two invert (records are stamped at construction but appended later). */
   ts: string;
   /** The ledger record_type — ProjectionEnvelope.kind. */
-  kind: 'candidate_minted' | 'decision' | 'command' | 'command_ack' | 'cycle_seed' | 'election' | 'error' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'round_warning' | 'ruler' | 'snapshot' | 'spend_hold' | 'spend_tombstone' | 'token_usage' | 'stream_snapshot';
+  kind: 'candidate_minted' | 'decision' | 'command' | 'command_ack' | 'cycle_seed' | 'election' | 'error' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'round_warning' | 'ruler' | 'snapshot' | 'spend_ceiling' | 'spend_hold' | 'spend_tombstone' | 'token_usage' | 'stream_snapshot';
   /** The chronology projection of the record's model_dump — identity, address and
    * the one-line reading, per
    * domain/projection_envelope.py::RAY_PAYLOAD_FIELDS. A SUBSET of
@@ -1630,7 +1630,7 @@ export interface RayResponse {
 /** One outbound SSE frame. Frozen wire shape — a receiver MUST treat an unknown field as a DRIFT SIGNAL, not as */
 export interface ProjectionEnvelope {
   /** Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot. */
-  kind: 'candidate_minted' | 'decision' | 'command' | 'command_ack' | 'cycle_seed' | 'election' | 'error' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'round_warning' | 'ruler' | 'snapshot' | 'spend_hold' | 'spend_tombstone' | 'token_usage' | 'stream_snapshot';
+  kind: 'candidate_minted' | 'decision' | 'command' | 'command_ack' | 'cycle_seed' | 'election' | 'error' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'round_warning' | 'ruler' | 'snapshot' | 'spend_ceiling' | 'spend_hold' | 'spend_tombstone' | 'token_usage' | 'stream_snapshot';
   /** Envelope shape version. Bump only on a breaking restructure of this class;
    * payload churn is per-kind. */
   version: number;
@@ -2119,7 +2119,7 @@ export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-spe
 
 // Kinds no activity item is ever made of — the ray drops them and the translator
 // returns null. Complement of domain/projection_envelope.py::RENDERS_AS_ACTIVITY.
-export type NonActivityKind = 'decision' | 'election' | 'ruler' | 'spend_hold' | 'spend_tombstone' | 'token_usage';
+export type NonActivityKind = 'decision' | 'election' | 'ruler' | 'spend_ceiling' | 'spend_hold' | 'spend_tombstone' | 'token_usage';
 
 // Operator-facing label per terminal reason (StopReason). Mirror of
 // domain/phases.py::STOP_REASON_INFO — the single label source.

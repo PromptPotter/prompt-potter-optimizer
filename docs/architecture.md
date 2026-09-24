@@ -836,19 +836,21 @@ the PR description.
 
 - **Spend-ceiling resolution chain** — **a ceiling is never one number; always ask
   "at which tier?"** Four carry one, answering different questions: the **campaign
-  knob** is what the operator wants this run to cost; the **run-scoped** pair is
-  what the host wallet ADMITTED at launch (`jobs/quota.py::admit_launch`); the
-  **account lifetime** ceiling is what the tenant may ever spend; and
-  `.runtime/spend_cap.json` is a **mid-flight** move. The tiers and their law are
+  knob** is what the operator wants this run to cost; the **held** ceiling is the
+  run's whole declaration as the host wallet ADMITTED it at launch
+  (`jobs/quota.py::admit_launch`); the **account lifetime** ceiling is what the
+  tenant may ever spend; and the cycle ledger's last `SpendCeilingRecord` is its
+  **standing** operator ceiling, moved by `set-budget` and polled mid-flight through
+  its mirror, `.runtime/spend_cap.json`. The tiers and their law are
   owned by [`adr/0003-spend-and-tenancy.md`](adr/0003-spend-and-tenancy.md) § D1.
   Three rulings a cleanup PR cannot touch:
-  - **The composition order is a security property**
-    (`runner/entry.py::_compose_run_ceilings`): config → operator override →
-    wallet bound. The *seed* may only lower, because a `CycleSeed` is request
-    input from anyone holding `campaign.run`; the **operator** ceiling SETS and
-    may raise as well as lower, which is the only way a budget-halted cycle is
-    ever continued. Bounding that one downward too was one guard doing two jobs,
-    and it silently destroyed every legitimate raise.
+  - **Declare once, then admit — one number** (`jobs/quota.py::declare_run_ceiling`
+    → `admit_launch`): knob → seed → standing ceiling → launch flag, each SETTING
+    over the last, then the wallet admits the result whole or refuses it. That
+    held ceiling is the reservation, the run's config, `run_limits` and the spend
+    book at once; the runner SETS it and never re-bounds it. Composed after
+    admission (a `min` against the knob), no launch could raise a dataset's
+    ceiling and the reservation would name a number the run never runs to.
   - **Only the cycle tier halts a run, and it halts one BEFORE a call is sent**:
     its spend book (`infrastructure/llm/spend_book.py`) admits every paid call
     at the most it may cost, in both units, beside everything still out, and a

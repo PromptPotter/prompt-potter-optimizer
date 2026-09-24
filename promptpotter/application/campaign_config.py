@@ -375,10 +375,10 @@ class OptimizationConfig(StrictModel):
         0.025,
         description=(
             "Halt this cycle when cumulative spend (optimizer + backend) ≥ this "
-            "value in USD. A launch flag (CLI ``--spend-budget``) only LOWERS it — it "
-            "arrives in the wallet slot, which may never be trusted upward; raising a "
-            "ceiling is ``set-budget``, whose value is clamped against the account and "
-            "then SETS. Default ≈ a 5-round run on the free-backend setup "
+            "value in USD. The campaign's own layer of the run's budget: a fork seed, "
+            "a standing ``set-budget`` and a launch flag (CLI ``--spend-budget``) each "
+            "SET over it, raise or lower, and the account admits the result whole or "
+            "refuses the launch. Default ≈ a 5-round run on the free-backend setup "
             "(measured ~$0.019) with headroom; raise ``max_rounds`` and let this be "
             "the binding limit. ``None`` disarms the USD ceiling. Tenant-wide "
             "enforcement is M12 / JobRegistry work; this gate halts the current "

@@ -12,6 +12,7 @@ from promptpotter.application.datasets.dataset_replace import recover_pending_re
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     dataset_source_of,
+    default_campaign_config,
     load_checkin_draft,
 )
 from promptpotter.application.datasets.origin_readiness import resolution_block
@@ -31,6 +32,7 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     _record_launch_stop,
     _run_in_background,
     build_cycle_config,
+    dataset_campaign_config,
     materialize_and_write_origin,
     persist_origin_candidate_library,
 )
@@ -196,6 +198,17 @@ async def prepare_checkin_run(
     )
 
 
+def _checkin_campaign_config(stores: Stores, draft: DraftCampaign) -> CampaignConfig:
+    """The campaign declaration Start is about to commit, read BEFORE it commits, so admission sees
+    the ceiling the run will hold: a reused dataset's own file, or the draft's floor that
+    ``_build_default_campaign_json`` writes for a fresh upload. The overlay ``build_cycle_config``
+    adds later moves no budget arm."""
+    canonical = dataset_source_of(draft.source_file)
+    if canonical is None:
+        return default_campaign_config(draft)
+    return dataset_campaign_config(readable_dataset_dir(stores, canonical))
+
+
 async def start_checkin_campaign(
     *,
     stores: Stores,
@@ -248,6 +261,8 @@ async def _start_checkin_run(
         backend_type=draft.connector,
         backend_url=backend_url,
         requested=limits,
+        config=lambda: _checkin_campaign_config(stores, draft),
+        hop=hop,
     )
 
     async def make_session(dataset_name: str) -> Session:

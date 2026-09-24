@@ -166,7 +166,7 @@ Polled per checkpoint and consumed at the next **sample** boundary — transient
 | `checkin.flag` | The campaign is still authoring its origin. Dropped at skeleton creation, cleared when Start flips `checkin` → `active`. |
 | `sample_lookahead.json` | The operator's *request* that the round hold several calls in flight, for one round — or, with `auto`, until a later press replaces it. What the loop actually ran at is `dashboard.json::sample_lookahead` — never serve the flag as that. |
 | `skip.flag` | Skip the current unit at the next checkpoint. |
-| `spend_cap` | Live `(usd, tokens)` ceilings. |
+| `spend_cap` | The polled mirror of the cycle's standing operator `(usd, tokens)` ceiling, whose record is the ledger's last `SpendCeilingRecord`. Swept and re-landed by every launch. |
 
 A fresh launch clears every polled run-control flag: a flag surviving the gesture it answered would re-answer the next one. An `auto` look-ahead answered no gesture — it is a mode — so it stays.
 

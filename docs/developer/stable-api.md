@@ -188,7 +188,7 @@ which is both where `pip` deletes on upgrade and where the HuggingFace `datasets
 Two behaviours a fork may rely on, neither of them readable off `--help`:
 
 - Every `new` mints a fresh `campaign_id`, but two `new` calls on an unchanged declaration SHARE their content-addressed root `cycle_id` and its origin score, then diverge from round 1 (`runner/campaign_ids.py::mint_campaign_id`). The prior campaign is preserved.
-- A launch flag may only lower a budget. `set-budget` is the verb that raises one.
+- A launch flag SETS the cycle's budget, raise or lower, over what the dataset declares, and stays as the cycle's standing ceiling for later resumes; the account admits the result whole or refuses the launch. `set-budget` moves it mid-flight.
 
 The maintenance and diagnostic verbs are not part of v1.
 
@@ -206,7 +206,8 @@ result = await run_campaign(session, train_data, campaign_config, *, display=Non
 
 `limits` is a `promptpotter.domain.launch_limits.LaunchLimits(halt_at_accuracy=…,
 spend_budget_usd=…, token_budget=…)`, the model the CLI flags and the `start-run` payload build; a
-budget it declares may only lower the campaign's own, and `LaunchLimits()` declares none. `mode`
+budget it declares sets the run's over the campaign's own (no admission — the host program holds no
+slot), and `LaunchLimits()` declares none. `mode`
 is `runner/entry.py::RunMode`, and `RunMode()` is a plain run.
 
 Two steps rather than one because every caller does its own work between them. It mints through

@@ -18,6 +18,7 @@ from promptpotter.application.datasets.authored import (
 from promptpotter.application.diagnostics.seed_screen import class_floor, draw_bank
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.mint import prepare_fresh_cycle, resolve_cycle_plan
+from promptpotter.application.jobs.quota import unadmitted_limits
 from promptpotter.application.optimization.dispatch.llm_call.heartbeat import heartbeat
 from promptpotter.application.optimization.dispatch.llm_call.prompts import (
     resolved_overrides,
@@ -465,9 +466,14 @@ async def _run_inner_campaign(
             campaign_config,
             session=session,
             observers=observers,
-            # Declares none: restating the config's own cap here would be a second spelling of
-            # it, so the inner cycle binds on `campaign_config.optimization` alone.
-            limits=LaunchLimits(),
+            # Declares nothing of its own: the inner cycle holds what its config declares (none —
+            # `inner_instrument_config` clears both arms) and spends under the ROOT's book.
+            limits=unadmitted_limits(
+                campaign_config,
+                stores=session.store,
+                hop=session.hop if session.state.cycle_id else None,
+                requested=LaunchLimits(),
+            ),
             mode=RunMode(),
         )
     finally:

@@ -72,8 +72,6 @@ class Loop:
     elimination_n_min: int = 4
     pobb_epsilon: float = 0.2
     spend_budget_usd: float | None = None
-    # Rides the run-scoped seam rather than ``_optimization`` below, so ``None`` keeps the
-    # campaign's armed default instead of disarming the ceiling the way its USD neighbour does.
     token_budget: int | None = None
 
     def _optimization(self) -> dict[str, Any]:
@@ -87,6 +85,7 @@ class Loop:
             "elimination_n_min": self.elimination_n_min,
             "pobb_epsilon": self.pobb_epsilon,
             "spend_budget_usd": self.spend_budget_usd,
+            "token_budget": self.token_budget,
         }
 
 
@@ -182,18 +181,15 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
         self._write_dataset_dir()
         session = await open_session(self.dataset_name, program=program)
         try:
-            # No overrides: the file this compile just wrote IS the projection of `loop` and
-            # `nodes`, so passing them again would be a second path to the same values.
+            # No overrides, budgets included: the file this compile just wrote IS the projection
+            # of `loop` and `nodes`, so passing them again would be a second path to the same values.
             config = load_dataset_campaign_config(self._campaign_path())
             configure_and_apply_pipeline(session, config)
             result = await run_campaign(
                 session,
                 rows,
                 config,
-                limits=LaunchLimits(
-                    spend_budget_usd=self.loop.spend_budget_usd,
-                    token_budget=self.loop.token_budget,
-                ),
+                limits=LaunchLimits(),
                 mode=RunMode(),
             )
         finally:

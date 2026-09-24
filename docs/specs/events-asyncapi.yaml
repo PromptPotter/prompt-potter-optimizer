@@ -215,6 +215,10 @@ components:
             # The cycle's δ scale, appended WHOLE at lock and after every
             # extension (``RulerRecord``).
             - ruler
+            # The cycle's standing operator spend ceiling, appended by
+            # ``set-budget`` and by a launch flag that moves it
+            # (``SpendCeilingRecord``); the last one wins.
+            - spend_ceiling
             # An account's banked spend, written before a delete takes the rows
             # carrying it (``SpendTombstoneRecord``). Rides the WORKSPACE ledger,
             # so it reaches no cycle subscriber — listed because the enum's rule

@@ -50,7 +50,7 @@ from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import RunMode, run_optimization
 from promptpotter.config.settings import DEFAULT_BACKEND_URL
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.launch_limits import HeldLimits, LaunchLimits
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.infrastructure.llm.telemetry import set_cycle_ledger
 from promptpotter.infrastructure.projections.live_dashboard.projection import (
@@ -129,6 +129,12 @@ def _assert_origin_ready(draft: DraftCampaign) -> None:
         raise OriginIncompleteError(readiness.gaps)
 
 
+def dataset_campaign_config(dataset_root: Path) -> CampaignConfig:
+    """The dataset's own campaign declaration, before any per-campaign overlay — what admission
+    reads the budget arms off, since no overlay moves one."""
+    return load_campaign_config(read_campaign_config_file(dataset_campaign_path(dataset_root)))
+
+
 def build_cycle_config(
     session: Session,
     dataset_root: Path,
@@ -147,9 +153,7 @@ def build_cycle_config(
     channel a campaign already has; a second `pipeline_steps` knob would be `exclude_nodes` spelled
     twice (measured: they have identical expressive power, and `filter_to_steps` preserves the
     schema's own order, so a step list cannot even reorder)."""
-    campaign_config = load_campaign_config(
-        read_campaign_config_file(dataset_campaign_path(dataset_root))
-    )
+    campaign_config = dataset_campaign_config(dataset_root)
     if pipeline_overlay:
         overrides, narrowing = split_overlay(pipeline_overlay)
         campaign_config = campaign_config.model_copy(
@@ -205,6 +209,11 @@ async def mint_campaign_command(
         backend_type=backend_type,
         backend_url=backend_url,
         requested=limits,
+        # The dataset's own declaration, read before the session exists: the overlay that
+        # `build_cycle_config` folds on afterwards touches no budget arm. No hop — a fresh mint
+        # has no seed and no standing ceiling.
+        config=lambda: dataset_campaign_config(dataset_root),
+        hop=None,
     )
 
     # SETUP — the ids bind only once the mint resolves; init them so the failure handler can tell
@@ -356,6 +365,8 @@ async def start_run_command(
         backend_type=backend_type,
         backend_url=backend_url,
         requested=limits,
+        config=lambda: resolve_campaign_config(stores, campaign, hop),
+        hop=hop,
     )
 
     try:
@@ -411,7 +422,7 @@ async def _run_in_background(
     train_data: list[Any],
     job_registry: JobRegistry,
     job_id: str,
-    limits: LaunchLimits,
+    limits: HeldLimits,
     stop_after_rounds: int | None = None,
 ) -> None:
 
@@ -506,6 +517,7 @@ __all__ = [
     "OriginIncompleteError",
     "QuotaExceededError",
     "build_cycle_config",
+    "dataset_campaign_config",
     "materialize_and_write_origin",
     "mint_campaign_command",
     "persist_origin_candidate_library",

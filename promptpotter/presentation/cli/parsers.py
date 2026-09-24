@@ -61,8 +61,8 @@ def _add_runtime_halts(p: argparse.ArgumentParser) -> None:
         type=float,
         default=None,
         metavar="USD",
-        help="Halt when cumulative cycle spend (optimizer + backend) ≥ USD. Lowers the "
-        "configured ceiling only; `set-budget` is what raises one.",
+        help="Halt when cumulative cycle spend (optimizer + backend) ≥ USD. Sets the "
+        "cycle's ceiling, raise or lower, over the dataset's; kept for later resumes.",
     )
     p.add_argument(
         "--token-budget",

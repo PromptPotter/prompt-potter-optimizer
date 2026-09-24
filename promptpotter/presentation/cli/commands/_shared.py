@@ -33,7 +33,7 @@ from promptpotter.config.settings import (
     DEFAULT_BACKEND_URL,
 )
 from promptpotter.domain.connector import BackendUnreachableError
-from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.launch_limits import HeldLimits, LaunchLimits
 from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir
@@ -210,8 +210,8 @@ def _build_observers(
 
 
 async def _hold_machine_slot(
-    args: argparse.Namespace, ctx: SessionCtx, session: Session
-) -> tuple[JobRegistry, Job, LaunchLimits]:
+    args: argparse.Namespace, ctx: SessionCtx, session: Session, campaign_config: CampaignConfig
+) -> tuple[JobRegistry, Job, HeldLimits]:
     """Take the SAME machine slot the browser takes, joining the SAME queue when the box is full.
 
     A terminal run that holds nothing makes every statement the machine makes about itself false
@@ -262,6 +262,8 @@ async def _hold_machine_slot(
         backend_type=backend_type_of_dataset(session.store, dataset_name),
         backend_url=ctx.backend_url,
         requested=launch_limits_from_args(args),
+        config=lambda: campaign_config,
+        hop=ctx.hop,
     )
     return registry, job, held
 
@@ -283,7 +285,7 @@ async def drive_cycle(
     mint), and deliberately so: the front of a CLI verb can sit for minutes on an interactive
     check-in, and a slot held across operator typing is a slot nobody else can have."""
 
-    registry, job, held = await _hold_machine_slot(args, ctx, session)
+    registry, job, held = await _hold_machine_slot(args, ctx, session, campaign_config)
     registry.mark_started(job.job_id)
     pre_origin_acc = ctx.state.get("origin_accuracy", 0.0)
     try:
@@ -298,9 +300,10 @@ async def drive_cycle(
             session=session,
             observers=observers,
             mode=mode,
-            # What admission HELD, not what the flags asked for. Identical for the operator of
-            # the box, who is metered in neither unit; a delegate reaching the terminal under
-            # `--tenant` is held to the ceiling their grant allows, exactly as in the browser.
+            # What admission HELD — the campaign's declaration under the flags, admitted against
+            # the account. For the operator of the box, metered in neither unit, that is the
+            # declaration itself; a delegate reaching the terminal under `--tenant` is held to the
+            # ceiling their grant allows, exactly as in the browser.
             limits=held,
         )
     except BaseException as exc:

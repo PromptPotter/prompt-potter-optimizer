@@ -135,7 +135,7 @@ def _build_default_campaign_json(draft: DraftCampaign) -> dict[str, Any]:
     rename cannot make the file unreadable — which matters because ``CampaignConfig`` forbids extras.
 
     The node overlay is deliberately NOT folded in here: the mint splits it onto the per-campaign
-    snapshot at launch (``_campaign_config_for_launch``), which is what leaves a REUSED dataset's
+    snapshot at launch (``build_cycle_config``), which is what leaves a REUSED dataset's
     shared file untouched."""
     return {"campaign_config": freeze_campaign_config(default_campaign_config(draft))}
 

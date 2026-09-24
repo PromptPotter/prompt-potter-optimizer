@@ -35,6 +35,7 @@ __all__ = [
     "RoundWarningKind",
     "RoundWarningRecord",
     "SnapshotRecord",
+    "SpendCeilingRecord",
     "SpendHoldRecord",
     "TokenUsageRecord",
     "WallClock",
@@ -710,6 +711,24 @@ class RulerRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
+class SpendCeilingRecord(StrictModel):
+    """The cycle's STANDING operator ceiling, whole — the one source for what the operator declared
+    this cycle may spend. Appended by ``set-budget`` at its account-clamped value and by a launch
+    whose flag moved it, at the value admitted; the LAST record wins. Every launch reads it as one
+    layer of the run's budget and re-admits it against the account as it stands then.
+
+    Read PHYSICALLY (``ledger_scan.py::scan_ledger_spend_ceiling``), so a fork does not inherit
+    its parent's: a fork's budget is its seed's declaration, and an inherited standing ceiling
+    would override it. Not a progress event — the SSE tail skips it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    record_type: Literal["spend_ceiling"] = "spend_ceiling"
+    usd: float | None = None
+    tokens: int | None = None
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
 class CycleSeedRecord(StrictModel):
     """A fork inherits its parent's seed VIRTUALLY but appends its own, so a scan of one cycle's
     ledger returns that cycle's seed. Not a progress event — the SSE tail skips it."""
@@ -737,6 +756,7 @@ CycleRecord = Annotated[
     | RoundWarningRecord
     | RulerRecord
     | SnapshotRecord
+    | SpendCeilingRecord
     | SpendHoldRecord
     | SpendTombstoneRecord
     | TokenUsageRecord,

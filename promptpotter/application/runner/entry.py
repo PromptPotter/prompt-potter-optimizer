@@ -50,7 +50,7 @@ from promptpotter.application.scoring.query_loop import FlightGauge
 from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import PromptExport, build_prompt_export
-from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.launch_limits import HeldLimits
 from promptpotter.domain.phases import STOP_REASON_INFO, RunPhase, StopOutcome, StopReason
 from promptpotter.domain.pipeline_overlay import (
     overlay_sets_model_outside_allowed,
@@ -175,12 +175,14 @@ def _apply_config_overrides(
 ) -> CampaignConfig:
     """Snapshot the fork's effective config — parent frozen config plus absolute overrides, never a
     mutation. Reassigning it at the runner seam is what propagates to every reader."""
+    # No budget arm here: a seed's budget is one layer of the run's declaration, composed and
+    # ADMITTED before launch (`jobs/quota.py::declare_run_ceiling`). Applied here too it
+    # would be a second composition — and an auto-rebase's overrides would move a ceiling the
+    # account never admitted.
     opt_updates: dict[str, Any] = {
         k: v
         for k, v in {
             "max_rounds": overrides.max_rounds,
-            "spend_budget_usd": overrides.spend_budget_usd,
-            "token_budget": overrides.token_budget,
             "l1_patience": overrides.l1_patience,
             "l2_patience": overrides.l2_patience,
             "l3_patience": overrides.l3_patience,
@@ -225,7 +227,7 @@ class _PreparedRun:
     """Resolved run inputs — the straight-line prep done once before the rebase loop.
     ``campaign_config`` re-emits because a seed may reconcile new limits.
 
-    There is deliberately no ``spend_budget_usd`` beside it: the run-scoped cap is folded INTO
+    There is deliberately no ``spend_budget_usd`` beside it: the held ceiling is SET INTO
     ``campaign_config.optimization`` by ``_prepare_run``, so one value both halts the run and
     reaches every reader. Held separately, the cap that halted was invisible — ``run_limits`` in
     ``dashboard.json`` reported the campaign's declared default while a different number bound.
@@ -273,60 +275,17 @@ def _bind_run_controls(session: Session, cycle_dir: Path) -> None:
     session.sample_lookahead_consume = partial(spend_sample_lookahead, cycle_dir)
 
 
-def _tighten_budgets(config: CampaignConfig, wallet: SpendCeilings) -> CampaignConfig:
-    """Impose the WALLET's ceiling: it may LOWER what the config declares and never raise it;
-    ``None`` imposes nothing. One source composes through here and it may not be trusted upward —
-    what the host wallet ADMITTED (`jobs/quota.py::admit_launch`), which BOUNDS rather than defaults
-    because a `CycleSeed` arrives over `fork-cycle` as request input. Re-read against the CURRENT
-    account at every launch, which is what keeps the ADR-0003 guard at the layer that owns it.
-
-    The operator's own ceiling does NOT come through here — see :func:`_compose_run_ceilings`.
-    Bounding it downward too was one guard doing two jobs, and it silently destroyed every
-    legitimate raise: a cap lifted to 500k was min'd back to the config's default on the very next
-    launch, so a budget-halted cycle re-tripped inside its first sample."""
-    opt = config.optimization
-    bounded: dict[str, float | int] = {}
-    if (usd := wallet.usd) is not None:
-        bounded["spend_budget_usd"] = (
-            usd if opt.spend_budget_usd is None else min(usd, opt.spend_budget_usd)
-        )
-    if (tokens := wallet.tokens) is not None:
-        bounded["token_budget"] = (
-            tokens if opt.token_budget is None else min(tokens, opt.token_budget)
-        )
-    if not bounded:
-        return config
-    return config.model_copy(update={"optimization": opt.model_copy(update=bounded)})
-
-
-def _compose_run_ceilings(
-    config: CampaignConfig,
-    *,
-    operator: BudgetChange,
-    wallet: SpendCeilings,
-) -> CampaignConfig:
-    """``config → operator override → wallet bound``, in that order, as one call — **the order is a
-    security property and must not be expressible as two swappable lines at the call site.**
-
-    The **operator** ceiling (what ``change-spend-budget`` left in ``spend_cap.json``, handed back
-    by the launch sweep) SETS: it may RAISE as well as lower, which is the only way a budget-halted
-    cycle is ever continued. Trusting it upward is safe because ``quota.py::clamp_budget_change``
-    already clamped it against the account when it was written.
-
-    The **wallet** ceiling then BOUNDS whatever came out, re-read against the account as it stands
-    now — so a raise can never escape it, and the ADR-0003 guard stays at the layer that owns it.
-    Reverse these two and an operator-typed number spends the host's provider key with every
-    surface reporting a healthy account."""
-    updates: dict[str, float | int] = {}
-    if operator.usd is not None:
-        updates["spend_budget_usd"] = operator.usd
-    if operator.tokens is not None:
-        updates["token_budget"] = operator.tokens
-    if updates:
-        config = config.model_copy(
-            update={"optimization": config.optimization.model_copy(update=updates)}
-        )
-    return _tighten_budgets(config, wallet)
+def _set_held_ceiling(config: CampaignConfig, ceiling: SpendCeilings) -> CampaignConfig:
+    """SET the run's budget arms to the ceiling it HOLDS — never a ``min`` against the config.
+    The config's knob is already one layer of that ceiling (`jobs/quota.py::declare_run_ceiling`),
+    so bounding by it again here pins every launch at or under the knob, whatever it declared."""
+    return config.model_copy(
+        update={
+            "optimization": config.optimization.model_copy(
+                update={"spend_budget_usd": ceiling.usd, "token_budget": ceiling.tokens}
+            )
+        }
+    )
 
 
 async def _prepare_run(
@@ -335,20 +294,17 @@ async def _prepare_run(
     *,
     session: Session,
     observers: RunObservers,
-    limits: LaunchLimits,
+    limits: HeldLimits,
 ) -> _PreparedRun:
     cb = observers.callbacks
 
     # A fresh launch supersedes any prior run-control intent: a stale `pause.flag` would pause
     # this very resume on its first poll, so a paused cycle could never be resumed. Binding
     # after it makes the origin pass below pausable like every other phase.
-    carried = BudgetChange(None, None)
     launch_cycle_dir: Path | None = None
     if session.state.cycle_id:
         launch_cycle_dir = session.store.campaigns.cycle_dir(session.hop)
-        # The sweep HANDS BACK the ceiling it drops — see the function for why it is the one
-        # polled flag a launch may not simply discard.
-        carried = clear_run_control_flags(launch_cycle_dir)
+        clear_run_control_flags(launch_cycle_dir)
 
     # Read HERE — the single runner seam every launch path funnels through — never threaded
     # through each launcher. Precedence is seed > dataset > backend.
@@ -377,33 +333,26 @@ async def _prepare_run(
             )
             session.human_intervened = True
 
-    # LAST, and one call because the composition ORDER is the security property — see the function.
-    # Composing the operator's carried ceiling as a second `min` is what made a raise unsurvivable:
-    # a cap lifted to 500k was min'd back to the config default here, on the very next launch.
-    campaign_config = _compose_run_ceilings(
-        campaign_config, operator=carried, wallet=limits.budgets
-    )
-    # The composed ceilings are the ones that bind, and this is the first moment they exist —
-    # `_arm_run_controls` below reads the same object. Stamped before origin scoring, which is
-    # where the operator spends the longest stretch of the run. The stamp is the READOUT; the
-    # enforcement is the arming further down, and only both together mean "the ceiling holds".
+    # LAST, after the seed's other knobs: the held ceiling is the one number the reservation, this
+    # config and the dashboard all carry, composed and admitted before launch.
+    campaign_config = _set_held_ceiling(campaign_config, limits.ceiling)
+    # Stamped before origin scoring, which is where the operator spends the longest stretch of the
+    # run. The stamp is the READOUT; the enforcement is the arming further down, and only both
+    # together mean "the ceiling holds".
     observers.dashboard.stamp_run_limits(run_limits_from(campaign_config))
-    if launch_cycle_dir is not None and carried != BudgetChange(None, None):
-        # Re-land what the sweep dropped, so the raise outlives THIS launch too — otherwise it is
-        # the same dead end one relaunch further out. Composed, not raw: `_build_budget_gate`
-        # prefers this file over the cap just composed, so writing the unbounded intent would let
-        # it escape the wallet. Only the arms the operator actually set are written.
-        opt = campaign_config.optimization
-        write_spend_caps(
-            launch_cycle_dir,
-            BudgetChange(
-                opt.spend_budget_usd if carried.usd is not None else None,
-                opt.token_budget if carried.tokens is not None else None,
-            ),
-        )
+    if launch_cycle_dir is not None and limits.operator != BudgetChange(None, None):
+        # The operator's arms are the cycle's STANDING ceiling, so a plain relaunch declares them
+        # again rather than falling back to the knob. Held values, not the request: the gate
+        # prefers the mirror over the config, so landing more than was admitted would let the run
+        # escape its own admission. A launch that moved nothing re-lands the swept mirror alone.
+        campaigns = session.store.campaigns
+        if campaigns.read_spend_ceiling(session.hop) != limits.operator:
+            campaigns.write_spend_ceiling(session.hop, limits.operator)
+        else:
+            write_spend_caps(launch_cycle_dir, limits.operator)
 
-    # After the caps file, so the gate's probes read the same ceiling the composed config carries,
-    # and before the origin pass, which spends without one otherwise.
+    # After the mirror, so the gate's probes read the same ceiling the config carries, and
+    # before the origin pass, which spends without one otherwise.
     _arm_run_controls(session, observers, campaign_config)
 
     # Round 0 IS a round, so it is declared like any other: `_CURRENT_ROUND` must be bound
@@ -798,7 +747,7 @@ async def run_optimization(
     observers: RunObservers,
     langfuse_session_id: str | None = None,
     mode: RunMode,
-    limits: LaunchLimits,
+    limits: HeldLimits,
 ) -> CycleResult:
     """End-to-end optimization, origin scoring included. *observers* MUST be pre-built (ledger bound
     before origin)."""

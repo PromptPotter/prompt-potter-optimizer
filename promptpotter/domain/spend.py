@@ -25,6 +25,7 @@ __all__ = [
     "StepTokenUsage",
     "TokenAccount",
     "TokenUsageKind",
+    "declare_ceiling",
 ]
 
 
@@ -188,6 +189,17 @@ class BudgetChange(NamedTuple):
 
     usd: float | None
     tokens: int | None
+
+
+def declare_ceiling(base: SpendCeilings, *layers: BudgetChange) -> SpendCeilings:
+    """Lay each declaration over *base*, per arm, the LAST set arm winning — raise or lower alike.
+    Declaring is preference, never authority: the account bound is admission's, applied to what
+    this returns, which is why no layer here has to be trusted only downward."""
+    usd, tokens = base
+    for layer in layers:
+        usd = usd if layer.usd is None else layer.usd
+        tokens = tokens if layer.tokens is None else layer.tokens
+    return SpendCeilings(usd, tokens)
 
 
 class SpendBucket(StrictModel):

@@ -5078,6 +5078,7 @@
               "round_warning",
               "ruler",
               "snapshot",
+              "spend_ceiling",
               "spend_hold",
               "spend_tombstone",
               "token_usage",

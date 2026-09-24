@@ -758,20 +758,16 @@ class CommandDispatcher:
     async def _apply_change_spend_budget(self, hop: CycleHop, change: BudgetChange) -> None:
         """The round loop's BudgetGate re-reads the moved ceiling every clean round. A ``None`` arm
         leaves that ceiling untouched; ``0`` halts at the next round boundary. Both arms compose
-        against the account first, because ``entry.py::_usd_cap`` prefers this file over the cap the
-        launch composed — unclamped, raising one here is the way around the host-wallet gate."""
+        against the account first, because the run's gate prefers the standing ceiling's mirror over
+        the cap the launch admitted — unclamped, raising one here is the way around the host-wallet
+        gate. The next launch declares the standing ceiling again and re-admits it."""
         registry = self._job_registry
         if registry is None:
             raise ServiceUnavailableError(
                 "job registry not initialised", code="job_registry_unavailable"
             )
         clamped = await asyncio.to_thread(self._clamp_to_account_ceilings, hop, registry, change)
-        hold_ceiling(
-            job_registry=registry,
-            hop=hop,
-            cycle_dir=self._stores.campaigns.cycle_dir(hop),
-            change=clamped,
-        )
+        hold_ceiling(job_registry=registry, stores=self._stores, hop=hop, change=clamped)
 
     async def _apply_mint_campaign(self, payload: MintCampaignPayload) -> None:
         """The 202 returns once the manifest + root cycle index are written — or, when the box is

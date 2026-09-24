@@ -106,9 +106,10 @@ class RunLimits(StrictModel):
     the longest phase of the run with no ceiling on screen at all.
 
     **The two spend arms are the ARMED ceilings, not the declared ones**, re-read from
-    ``spend_cap.json`` at every persist (``projection.py::_persist``). They were static, and that is
-    precisely what made every surface reading them — the control's own prefill, the run strip —
-    report a number ``BudgetGate`` had stopped using the moment ``change-spend-budget`` landed."""
+    ``spend_cap.json``, the standing ceiling's polled mirror, at every persist
+    (``projection.py::_persist``). Held static, every surface reading them — the control's own
+    prefill, the run strip — reports a number ``BudgetGate`` stops using the moment
+    ``change-spend-budget`` lands."""
 
     max_rounds: int | None = None
     l1_patience: int

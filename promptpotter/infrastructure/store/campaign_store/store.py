@@ -21,15 +21,22 @@ from promptpotter.domain.run_records import (
     ForkTrigger,
     MintKind,
     RulerRecord,
+    SpendCeilingRecord,
 )
+from promptpotter.domain.spend import BudgetChange
 from promptpotter.domain.value_tree import ValueLeaf
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.runtime_flags import derive_run_phase, is_checkin
+from promptpotter.infrastructure.runtime_flags import (
+    derive_run_phase,
+    is_checkin,
+    write_spend_caps,
+)
 from promptpotter.infrastructure.store.account_spend import bank_spend, sandbox_cycle_dirs
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_cycle_seed,
     scan_ledger_round_closes,
     scan_ledger_rulers,
+    scan_ledger_spend_ceiling,
 )
 from promptpotter.infrastructure.store.io import (
     iter_files,
@@ -1086,6 +1093,19 @@ class CampaignStore:
 
     def read_cycle_seed(self, hop: CycleHop) -> CycleSeed | None:
         return scan_ledger_cycle_seed(self._layout(hop).ledger)
+
+    def write_spend_ceiling(self, hop: CycleHop, ceiling: BudgetChange) -> None:
+        """Land the cycle's standing operator ceiling — the record, then its polled mirror. The ONE
+        writer of both, so the mirror a running gate reads can never name a ceiling the ledger does
+        not."""
+        cycle_dir = self.cycle_dir(hop)
+        CycleEventLog.open(CycleDir(cycle_dir)).append(
+            SpendCeilingRecord(usd=ceiling.usd, tokens=ceiling.tokens)
+        )
+        write_spend_caps(cycle_dir, ceiling)
+
+    def read_spend_ceiling(self, hop: CycleHop) -> BudgetChange:
+        return scan_ledger_spend_ceiling(self._layout(hop).ledger)
 
     def write_resolved_pipeline(self, hop: CycleHop, declaration: dict[str, Any]) -> None:
         """Record the declaration this cycle RUNS — the merge of the live backend and the dataset

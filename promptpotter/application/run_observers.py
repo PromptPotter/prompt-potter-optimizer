@@ -109,9 +109,9 @@ def build_campaign_emitter(
 
 def run_limits_from(config: CampaignConfig) -> RunLimits:
     """The declared ceilings, read off ONE config — the same object ``_build_budget_gate`` takes
-    its arms from, so the number on screen is the number that halts. Stamped by the run at
-    ``_compose_run_ceilings``: earlier is the pre-wallet config, and the ledger's own INIT record
-    lands after the entire origin has scored."""
+    its arms from, so the number on screen is the number that halts. Stamped by ``_prepare_run``
+    once the held ceiling is set on it: earlier is the unadmitted config, and the ledger's own
+    INIT record lands after the entire origin has scored."""
     opt = config.optimization
     return RunLimits(
         max_rounds=opt.max_rounds or None,

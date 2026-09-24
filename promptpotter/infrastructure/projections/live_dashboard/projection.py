@@ -985,7 +985,7 @@ class LiveDashboardProjection(Projection):
             overlap=self._buffer.overlap,
         )
         # The ARMED ceiling, never the one INIT declared. `_build_budget_gate` prefers
-        # `spend_cap.json` over the launch-composed cap, so serving the stamped value left every
+        # `spend_cap.json` over the admitted cap, so serving the stamped value left every
         # reader — the budget control's prefill, the run strip — quoting a number nothing would
         # enforce. Overlaid at the single write, so no reader has to join two sources.
         if s.run_limits is not None:

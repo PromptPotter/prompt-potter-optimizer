@@ -29,9 +29,10 @@ from promptpotter.domain.run_records import (
     ElectionRecord,
     LedgerCandidate,
     LedgerRoundClose,
+    SpendCeilingRecord,
     WallClock,
 )
-from promptpotter.domain.spend import TOKEN_KIND_BUCKET
+from promptpotter.domain.spend import TOKEN_KIND_BUCKET, BudgetChange
 from promptpotter.infrastructure.store.read_model import iter_jsonl
 from promptpotter.shared.clock import epoch_seconds
 
@@ -62,6 +63,21 @@ def scan_ledger_cycle_seed(ledger_path: Path) -> CycleSeed | None:
                 found = CycleSeed.model_validate(seed_data)
             except ValidationError:
                 continue
+    return found
+
+
+def scan_ledger_spend_ceiling(ledger_path: Path) -> BudgetChange:
+    """The cycle's standing operator ceiling — the LAST ``SpendCeilingRecord`` on its OWN ledger,
+    so a fork never reads its parent's. ``(None, None)`` where the operator never set one."""
+    found = BudgetChange(None, None)
+    for rec in iter_jsonl(ledger_path, record_types=frozenset({"spend_ceiling"})):
+        if rec.get("record_type") != "spend_ceiling":
+            continue
+        try:
+            ceiling = SpendCeilingRecord.model_validate(rec)
+        except ValidationError:
+            continue
+        found = BudgetChange(ceiling.usd, ceiling.tokens)
     return found
 
 

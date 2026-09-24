@@ -455,7 +455,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
     # cannot outspend its grant even if the requested/account caps are higher. Escaping
     # it is silent budget over-run, so it is pinned here with the other authority caps.
     from promptpotter.application.jobs.quota import admit_launch
-    from promptpotter.domain.launch_limits import LaunchLimits
+    from promptpotter.domain.spend import SpendCeilings
     from promptpotter.infrastructure.store.user_store import User
 
     def _oidc_stores(claims: dict[str, float]) -> types.SimpleNamespace:
@@ -480,7 +480,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
     )
     assert (
         admit_launch(
-            requested=LaunchLimits(spend_budget_usd=10.0),
+            declared=SpendCeilings(10.0, None),
             user=generous,
             stores=_oidc_stores({"spend_ceiling_usd": 2.0}),
             job_registry=idle_registry,
@@ -490,7 +490,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
     )
     assert (
         admit_launch(
-            requested=LaunchLimits(spend_budget_usd=10.0),
+            declared=SpendCeilings(10.0, None),
             user=generous,
             stores=_oidc_stores({}),
             job_registry=idle_registry,
@@ -512,7 +512,7 @@ def test_subprincipal_grant_attenuates_and_the_dispatcher_gate_enforces(tmp_path
     )
     assert (
         admit_launch(
-            requested=LaunchLimits(),
+            declared=SpendCeilings(None, None),
             user=thin,
             stores=_oidc_stores({"spend_ceiling_usd": 2.0}),
             job_registry=idle_registry,
@@ -908,9 +908,8 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
     the next launch, before the resume could read it. Both end the same way: the number is on the
     dashboard, the command returned 202, and the run spends past it to completion.
 
-    The sweep is pinned by CONSTRUCTION rather than by a second assertion here — it hands the
-    dropped ceiling back, so losing it is a visible omission at the call site instead of an
-    ordering nobody re-checks.
+    What the operator declared lives on the ledger (``SpendCeilingRecord``), which every launch
+    re-declares; the file the gate polls is only its mirror, so a launch may sweep it.
     """
     import types
 
@@ -938,9 +937,9 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
     write_spend_caps(cycle_dir, BudgetChange(None, 5_000))
     assert gate.tripped() == StopReason.TOKEN_BUDGET
 
-    # And the launch sweep returns what it dropped, so a paused-cycle change cannot be lost silently.
-    assert clear_run_control_flags(cycle_dir) == (None, 5_000)
-    assert gate.tripped() is None, "the swept file must stop governing the next run"
+    # The launch sweep drops the mirror; the standing ceiling itself is the ledger's to carry.
+    clear_run_control_flags(cycle_dir)
+    assert gate.tripped() is None, "a swept mirror still governed the next run"
 
 
 def test_no_burst_of_sends_records_spend_past_its_ceiling(
@@ -1229,46 +1228,97 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     assert purse.fits(whole) == 1
 
 
-def test_an_operator_raise_survives_relaunch_but_never_escapes_the_wallet() -> None:
-    """A budget-halted cycle can only be continued if the ceiling ``change-spend-budget`` wrote may
-    RAISE the config — it was composed as a second ``min`` before, so a cap lifted to 500k was cut
-    back to the config default on the very next launch and the run re-tripped inside its first
-    sample. Making it settable is the fix; making it settable *after* the wallet bound would be a
-    leak of exactly the class above, and the two differ by the order of two lines.
+def test_a_run_holds_the_budget_it_declared_and_admission_is_the_only_bound(
+    tmp_path: Path,
+) -> None:
+    """A launch flag above the campaign knob must be the ceiling the run holds. Bounded by the knob
+    after admission instead, no launch can raise a dataset's ceiling and the reservation names a
+    number the run never runs to — silent: the job and the halt disagree and nothing reports it.
 
-    That is why the composition is one function rather than two calls at the seam: reversed, an
-    operator-typed number arms ``BudgetGate`` while ``admit_launch`` and ``JobRegistry.set_caps``
-    both still read the account as bounded, and nothing anywhere reports it.
+    The run's budget is now declared ONCE — config, seed, standing operator ceiling, launch flag,
+    each SETTING over the last — and admitted whole. Letting every layer raise is only safe because
+    the wallet bounds the FINAL number, so both halves are pinned here together.
     """
+    import types
+
     from promptpotter.application.campaign_config import load_campaign_config
-    from promptpotter.application.runner.entry import _compose_run_ceilings
-    from promptpotter.domain.spend import BudgetChange as B
-    from promptpotter.domain.spend import SpendCeilings as C
+    from promptpotter.application.jobs.quota import (
+        QuotaExceededError,
+        admit_launch,
+        declare_run_ceiling,
+    )
+    from promptpotter.application.runner.entry import _set_held_ceiling
+    from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.domain.launch_limits import LaunchLimits
+    from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
+    from promptpotter.domain.spend import BudgetChange, SpendCeilings
+    from promptpotter.infrastructure.store.user_store import User
 
     config = load_campaign_config(
         {
             "optimization": {
                 "degradation_threshold": 0.05,
-                "spend_budget_usd": 0.10,
+                "spend_budget_usd": 0.025,
                 "token_budget": 210_000,
             }
         }
     )
+    hop = CycleHop(campaign_id="camp", cycle_id="cyc")
+    seeds: dict[str, CycleSeed] = {}
+    standing = {"ceiling": BudgetChange(None, None)}
 
-    # The raise the fix exists for: above the config, under an unmetered wallet.
-    raised = _compose_run_ceilings(config, operator=B(0.50, 500_000), wallet=C(None, None))
-    assert raised.optimization.spend_budget_usd == pytest.approx(0.50)
-    assert raised.optimization.token_budget == 500_000
+    def _stores(*, issuer: str | None) -> Any:
+        return types.SimpleNamespace(
+            identity=types.SimpleNamespace(issuer=issuer, user_id="sub-9", claims={}),
+            campaigns=types.SimpleNamespace(
+                iter_cycle_ledgers=lambda: [],
+                workspace=tmp_path / "ws",
+                read_cycle_seed=lambda _hop: seeds.get("seed"),
+                read_spend_ceiling=lambda _hop: standing["ceiling"],
+            ),
+        )
 
-    # ...and the wallet still bounds it, in both units, however large the operator typed.
-    bounded = _compose_run_ceilings(config, operator=B(1e9, 10**12), wallet=C(0.30, 5_000_000))
-    assert bounded.optimization.spend_budget_usd == pytest.approx(0.30)
-    assert bounded.optimization.token_budget == 5_000_000
+    host = _stores(issuer=None)
 
-    # One arm set leaves the other at what the config declared — a raise is not a reset.
-    tokens_only = _compose_run_ceilings(config, operator=B(None, 400_000), wallet=C(None, None))
-    assert tokens_only.optimization.token_budget == 400_000
-    assert tokens_only.optimization.spend_budget_usd == pytest.approx(0.10)
+    # The bug: a launch flag above the knob is the ceiling the run holds, not a bound under it.
+    declared, operator = declare_run_ceiling(
+        config, stores=host, hop=None, requested=LaunchLimits(spend_budget_usd=0.30)
+    )
+    assert declared == (pytest.approx(0.30), 210_000)
+    assert operator == (pytest.approx(0.30), None), "a knob nobody typed became the operator's"
+    held = _set_held_ceiling(config, declared)
+    assert held.optimization.spend_budget_usd == pytest.approx(0.30), "the config re-bounded it"
+
+    # A standing ceiling (`set-budget`, an earlier flag) is declared again by a plain relaunch...
+    standing["ceiling"] = BudgetChange(0.50, None)
+    declared, _ = declare_run_ceiling(config, stores=host, hop=hop, requested=LaunchLimits())
+    assert declared.usd == pytest.approx(0.50)
+    # ...and this launch's own flag is the last word over it, in either direction.
+    declared, _ = declare_run_ceiling(
+        config, stores=host, hop=hop, requested=LaunchLimits(spend_budget_usd=0.10)
+    )
+    assert declared.usd == pytest.approx(0.10)
+    standing["ceiling"] = BudgetChange(None, None)
+
+    # A seed arrives over `fork-cycle` from anyone holding `campaign.run`, and it may raise too —
+    # because what it declares is ADMITTED: a free-tier account is refused, never clamped.
+    seeds["seed"] = CycleSeed(config_overrides=ConfigOverrides(spend_budget_usd=5.0))
+    declared, _ = declare_run_ceiling(config, stores=host, hop=hop, requested=LaunchLimits())
+    assert declared.usd == pytest.approx(5.0)
+    free_tier = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
+    idle = types.SimpleNamespace(list_running=lambda *, user_id: [])
+    with pytest.raises(QuotaExceededError):
+        admit_launch(
+            declared=declared,
+            user=free_tier,
+            stores=_stores(issuer="https://accounts.google.com"),
+            job_registry=idle,
+            job_id="job-a",
+        )
+    # The operator of the box spends their own money: held exactly as declared.
+    assert admit_launch(
+        declared=declared, user=free_tier, stores=host, job_registry=idle, job_id="job-a"
+    ) == SpendCeilings(pytest.approx(5.0), 210_000)
 
 
 def test_host_wallet_ceilings_hold_in_both_units(
@@ -1284,7 +1334,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
 
     from promptpotter.application.jobs.quota import QuotaExceededError, admit_launch
     from promptpotter.config.settings import settings
-    from promptpotter.domain.launch_limits import LaunchLimits
+    from promptpotter.domain.spend import SpendCeilings
     from promptpotter.infrastructure.store.account_spend import sum_user_spend
     from promptpotter.infrastructure.store.user_store import User
 
@@ -1325,7 +1375,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
     # No override must NOT read as uncapped in either unit. The USD arm is one STEP, not the whole
     # ceiling — the offer is denominated in runs, and a first run declaring the lot funds no second.
     fresh = admit_launch(
-        requested=LaunchLimits(),
+        declared=SpendCeilings(None, None),
         user=free_tier,
         stores=_stores(issuer=web, ledgers=[]),
         job_registry=idle,
@@ -1339,7 +1389,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
     # declaration the account cannot cover is refused at the door instead.
     with pytest.raises(QuotaExceededError):
         admit_launch(
-            requested=LaunchLimits(spend_budget_usd=10.0),
+            declared=SpendCeilings(10.0, None),
             user=free_tier,
             stores=_stores(issuer=web, ledgers=[]),
             job_registry=idle,
@@ -1354,7 +1404,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
 
     with pytest.raises(QuotaExceededError):
         admit_launch(
-            requested=LaunchLimits(),
+            declared=SpendCeilings(None, None),
             user=free_tier,
             stores=_stores(issuer=web, ledgers=[]),
             job_registry=_sibling(
@@ -1369,7 +1419,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
     # ceiling, with no error at any step. It must refuse instead.
     with pytest.raises(QuotaExceededError):
         admit_launch(
-            requested=LaunchLimits(),
+            declared=SpendCeilings(None, None),
             user=free_tier,
             stores=_stores(issuer=web, ledgers=[]),
             job_registry=_sibling(cap_usd=None, cap_tokens=None),
@@ -1380,7 +1430,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
     # total reads $0.00 for 500k billed tokens. Trusting `ceiling - spent` would hand back nearly
     # the whole ceiling; the grace bounds it, and the token arm counts what the USD arm cannot.
     blind = admit_launch(
-        requested=LaunchLimits(),
+        declared=SpendCeilings(None, None),
         user=free_tier,
         stores=_stores(
             issuer=web, ledgers=_ledger("blind.jsonl", model="openai/gpt-oss-20b:nitro")
@@ -1426,7 +1476,7 @@ def test_host_wallet_ceilings_hold_in_both_units(
 
     # The box operator spends their own money and is metered in neither unit.
     assert admit_launch(
-        requested=LaunchLimits(),
+        declared=SpendCeilings(None, None),
         user=free_tier,
         stores=_stores(issuer=None, ledgers=[]),
         job_registry=idle,
