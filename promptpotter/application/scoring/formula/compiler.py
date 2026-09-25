@@ -378,7 +378,7 @@ def _refuse_label_formula(formula: str, names: frozenset[str], *, source: str) -
     """A formula reading the LABEL, armed against a bank that has none, does not merely score
     badly — it scores WRONG, and in the flattering direction.
 
-    ``exact_match(predicted, ground_truth)`` strips and lowercases both sides, so with the label
+    ``label_match(predicted, ground_truth)`` strips and lowercases both sides, so with the label
     empty every cell whose prediction is also empty compares equal and takes a PERFECT 1.0. That
     is the launcher's own default formula shape (``jobs/launcher/draft_build.py``), so a
     verifier-graded dataset drafted through the browser arrives armed this way with nothing
@@ -394,7 +394,7 @@ def _refuse_label_formula(formula: str, names: frozenset[str], *, source: str) -
     raise PayloadInvalidError(
         f"the {source} {formula!r} compares against {_LABEL_TERM}, but this dataset's cells carry "
         f"no label — its backend answers with a number that its own verifier decided. Every cell "
-        f"would be graded against an empty string, which `exact_match` scores as a PERFECT 1.0 "
+        f"would be graded against an empty string, which `label_match` scores as a PERFECT 1.0 "
         f"wherever the prediction is also empty. Score the observation the backend emits instead "
         f"(the key the connector declares in `required_observation_keys`, e.g. "
         f"`max(0.0, min(1.0, env_reward))`).",
@@ -420,7 +420,7 @@ def compile_scorer(
         raise ValueError(
             "compile_scorer: scoring formula is required. "
             "Set ``campaign_config.scoring`` (e.g. "
-            '"exact_match(predicted, ground_truth)") — a trace carries a prediction '
+            '"label_match(predicted, ground_truth)") — a trace carries a prediction '
             "and a ground truth, never a verdict; the formula IS the verdict."
         )
 

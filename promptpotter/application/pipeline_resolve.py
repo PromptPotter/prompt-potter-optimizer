@@ -51,13 +51,14 @@ from promptpotter.domain.pipeline_schema import (
     NodeReach,
     NodeSearchNarrowing,
     ParamSource,
+    PipelineNode,
     PipelineView,
     reach_map,
     stable_hash,
 )
 from promptpotter.domain.search_point import strip_rendered_prompt
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.llm.capabilities import resolve_schema_menu
+from promptpotter.infrastructure.llm.capabilities import resolve_menu, resolve_schema_menu
 from promptpotter.infrastructure.runtime_flags import is_checkin
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetAccessError,
@@ -168,6 +169,7 @@ def resolve_pipeline_config_params(
     judges: Mapping[str, JudgeSpec] | None = None,
     *,
     experiment: Mapping[str, Any] | None,
+    workspace: Path | None,
     base_config: Mapping[str, Any] | None = None,
     provenance: MutableMapping[str, dict[str, ParamSource]] | None = None,
 ) -> dict[str, Any]:
@@ -180,6 +182,7 @@ def resolve_pipeline_config_params(
         campaign_overlay,
         dataset_dir,
         schema,
+        workspace=workspace,
         base_config=base_config,
         provenance=provenance,
     )
@@ -200,6 +203,7 @@ def merge_declared_layers(
     dataset_dir: Path | None,
     schema: PipelineSchema,
     *,
+    workspace: Path | None,
     base_config: Mapping[str, Any] | None = None,
     provenance: MutableMapping[str, dict[str, ParamSource]] | None = None,
 ) -> dict[str, Any]:
@@ -238,8 +242,75 @@ def merge_declared_layers(
                 key,
                 value,
             )
-    return apply_node_overlay(
+    pipeline_params = apply_node_overlay(
         pipeline_params, valid_overrides, schema, source="campaign", provenance=provenance
+    )
+    return _apply_model_floors(pipeline_params, active, schema, workspace, provenance)
+
+
+def schema_as_run(
+    schema: PipelineSchema,
+    pipeline_params: dict[str, Any],
+    active: list[str],
+    workspace: Path | None,
+) -> PipelineSchema:
+    """*schema* with each active node's ``current_config.model`` set to the model it RUNS, and
+    that model's capabilities resolved. A campaign overlay swaps the model and
+    ``selectable_models`` never resolves the overlay's pick, so a schema read as declared answers
+    every model-dependent question — the floor, the search's value spaces, the pin — for a model
+    the run does not use."""
+    running = {
+        name: model
+        for name in active
+        if isinstance(model := (pipeline_params.get(name) or {}).get("model"), str) and model
+    }
+    if not running:
+        return schema
+    unanswered = sorted(set(running.values()) - set(schema.model_capabilities))
+
+    def as_run(nodes: list[PipelineNode]) -> list[PipelineNode]:
+        return [
+            n.model_copy(update={"current_config": {**n.current_config, "model": running[n.name]}})
+            if n.name in running
+            else n
+            for n in nodes
+        ]
+
+    # Both lists: `get_node` reads the declared one, the chain walks the other.
+    return schema.model_copy(
+        update={
+            "nodes": as_run(schema.nodes),
+            "declared_nodes": as_run(schema.declared_nodes),
+            "model_capabilities": {
+                **schema.model_capabilities,
+                **resolve_menu(unanswered, workspace=workspace),
+            },
+        }
+    )
+
+
+def _apply_model_floors(
+    pipeline_params: dict[str, Any],
+    active: list[str],
+    schema: PipelineSchema,
+    workspace: Path | None,
+    provenance: MutableMapping[str, dict[str, ParamSource]] | None,
+) -> dict[str, Any]:
+    """Floored on the model the node RUNS, never the one its schema declares."""
+    answering = schema_as_run(schema, pipeline_params, active, workspace)
+    floors: dict[str, dict[str, Any]] = {}
+    for name in active:
+        node = answering.get_node(name)
+        cfg = pipeline_params.get(name)
+        if node is None or not isinstance(cfg, dict) or "reasoning_effort" in cfg:
+            continue
+        if "reasoning_effort" not in node.param_keys | node.param_keys_held:
+            continue
+        floor = answering.effort_floor(node, model=None)
+        if floor is not None:
+            floors[name] = {"reasoning_effort": floor}
+    return apply_node_overlay(
+        pipeline_params, floors, schema, source="model_floor", provenance=provenance
     )
 
 
@@ -660,7 +731,7 @@ class _CampaignMerge(_Merge):
         )
 
 
-def _draft_merge(draft: DraftCampaign) -> _Merge:
+def _draft_merge(draft: DraftCampaign, *, workspace: Path | None) -> _Merge:
     schema = parse_pipeline_response(rendered_pipeline_json(draft))
     cfg = draft_campaign_config(draft)
     active, filtered = _resolve_active_schema(
@@ -675,6 +746,7 @@ def _draft_merge(draft: DraftCampaign) -> _Merge:
         cfg.pipeline_overlay,
         None,
         filtered,
+        workspace=workspace,
         base_config={n.name: dict(n.current_config) for n in filtered.config_nodes},
         provenance=provenance,
     )
@@ -713,7 +785,12 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: SubjectSpec) -> _Cam
     )
     provenance: dict[str, dict[str, ParamSource]] = {}
     params = merge_declared_layers(
-        active, cfg.pipeline_overlay, dataset_dir, filtered, provenance=provenance
+        active,
+        cfg.pipeline_overlay,
+        dataset_dir,
+        filtered,
+        workspace=stores.base_dir,
+        provenance=provenance,
     )
     return _CampaignMerge(
         declared=schema,
@@ -742,7 +819,7 @@ def resolve_pipeline_for_draft(
     The dataset file is not consulted even when the slug exists — one file, shared by every
     campaign on it, is the defect this seam ends; a reused origin's values arrive via
     ``origins.py::draft_from_origin`` instead."""
-    m = _draft_merge(draft)
+    m = _draft_merge(draft, workspace=workspace)
     params = apply_identity_layer(
         m.params,
         m.active,
@@ -781,7 +858,6 @@ def resolve_pipeline_for_campaign(
     campaign: Campaign,
     *,
     at: SubjectSpec,
-    workspace: Path | None = None,
 ) -> CampaignPipelineResponse:
     """The ONE campaign-scoped resolution. Five layers through the one merge, each stamping its
     provenance: ``dataset`` < ``campaign`` (the FROZEN snapshot) < ``seed`` < ``evolved`` <
@@ -795,7 +871,7 @@ def resolve_pipeline_for_campaign(
             draft,
             campaign_id=campaign.campaign_id,
             cycle_id=campaign.root_cycle_id,
-            workspace=workspace,
+            workspace=stores.base_dir,
         )
 
     m = _campaign_merge(stores, campaign, at)
@@ -840,7 +916,7 @@ def resolve_pipeline_for_campaign(
         node_config_schema=rows,
         view=m.filtered.view,
         node_output_schema=resolved_output_schemas(m.filtered, params),
-        model_capabilities=resolve_schema_menu(m.filtered, workspace=workspace),
+        model_capabilities=resolve_schema_menu(m.filtered, workspace=stores.base_dir),
         reach=reach_map(rows),
         # On this read so the L4 drill-in needs no second fetch to stitch against.
         nests=nested_pipeline_ref(m.dataset_dir, m.filtered.view) if m.dataset_dir else None,
@@ -929,7 +1005,7 @@ def _runs_with_key(
 def _runs_with(stores: Stores, campaign: Campaign, draft: DraftCampaign | None) -> CampaignRunsWith:
     m: _Merge
     if draft is not None:
-        m = _draft_merge(draft)
+        m = _draft_merge(draft, workspace=stores.base_dir)
         params = m.params
     else:
         read = _campaign_merge(stores, campaign, SubjectSpec("campaign", campaign.campaign_id))
@@ -983,6 +1059,7 @@ def configure_and_apply_pipeline(
         filtered,
         judges=campaign_config.judges,
         experiment=session.backend_client.workload.experiment,
+        workspace=session.store.base_dir,
     )
 
     ships_prompts = dataset_dir is not None and has_dataset_prompts(dataset_dir)
@@ -1011,7 +1088,9 @@ def configure_and_apply_pipeline(
     # refusal stops init instead of erroring every cell of the origin.
     session.backend_client.prompt_delivery(pipeline_params)
 
-    session.pipeline_schema = filtered
+    session.pipeline_schema = schema_as_run(
+        filtered, pipeline_params, active, session.store.base_dir
+    )
     session.pipeline_params = pipeline_params
 
     nodes_str = ", ".join(active)

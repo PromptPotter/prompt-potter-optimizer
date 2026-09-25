@@ -67,7 +67,7 @@ is the property that makes two of those algorithms' numbers mean the same thing:
 
 - **One grader.** Both sides of a comparison score through the same compiled formula, rather than
   each method carrying its own metric function that drifts. Our own published head-to-head has
-  already been bitten by this — `matchers.py::_exact_match` strips to the last bold span while the
+  already been bitten by this — `matchers.py::_label_match` strips to the last bold span while the
   peer notebooks inline a whole-string compare ([`bbeh-comparison/`](bbeh-comparison/README.md)).
 - **One budget meter.** A method that spends internally — GEPA's reflective rollouts, MIPROv2's
   minibatch trials — bills onto the same ledger as everything else, so cost-per-fitness is a

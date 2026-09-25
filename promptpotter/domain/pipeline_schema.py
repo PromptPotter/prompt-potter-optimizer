@@ -455,7 +455,9 @@ class PipelineNode(StrictModel):
         return "number" if t in ("number", "integer") else "bool" if t == "boolean" else "string"
 
 
-ParamSource = Literal["backend", "dataset", "campaign", "seed", "evolved", "identity", "unset"]
+ParamSource = Literal[
+    "backend", "dataset", "campaign", "model_floor", "seed", "evolved", "identity", "unset"
+]
 """WHICH LAYER set a resolved param's value, stamped BY the merge (last writer wins), never diffed
 against it. Each member is described beside its producer in ``api-openapi.yaml::ParamSource``;
 ``backend`` is the CHECK-IN arm's floor (a captured declaration, where a campaign read has a
@@ -626,6 +628,10 @@ _MODEL_ANSWER_FIELDS: frozenset[str] = frozenset(
 )
 assert CAPABILITY_ANSWERED_PARAMS.issubset(_MODEL_ANSWER_FIELDS)
 
+# The provider's NOMINAL rung order, lowest first — a naming order, never a measured cost.
+# `default` is absent: it omits the field, so it sits at no position on the ladder.
+_EFFORT_LADDER_ORDER: tuple[str, ...] = ("none", "minimal", "low", "medium", "high")
+
 
 class NodeSearchNarrowing(StrictModel):
     """A campaign's own declaration over the dataset's, and the two halves do NOT compose the same
@@ -764,6 +770,12 @@ class PipelineSchema(StrictModel):
             return [rung for rung in offered if rung in set(declared)]
         return list(offered)
 
+    def effort_floor(self, node: "PipelineNode", *, model: str | None) -> str | None:
+        """The lowest rung *model* accepts here. ``None`` on an unknown model with no declared
+        ladder: the field is then omitted, the one request no endpoint refuses."""
+        offered = self.param_options(node, "reasoning_effort", model=model) or ()
+        return next((rung for rung in _EFFORT_LADDER_ORDER if rung in offered), None)
+
     def pinned(self, node: "PipelineNode", param: str) -> bool:
         """Is this axis's value space a single value? Then every "mutation" of it emits the value
         already there, so it is not something an agent can search: listed anyway it costs a
@@ -848,8 +860,8 @@ class PipelineSchema(StrictModel):
 
         And it is not ``available_models`` alone. That is the ADMIN's catalogue, and a model the
         OPERATOR typed deliberately rides ``param_allowed_values.model`` instead
-        (``draft_build._origin_pipeline_json`` states why merging the two would erase the one thing
-        that marks a value as theirs) — so asking the catalogue could not, by construction, answer
+        (``draft_campaign.py::draft_pipeline_json`` states why merging the two would erase the one
+        thing that marks a value as theirs) — so asking the catalogue could not, by construction, answer
         for a typed model. Picking one resolved no capabilities at all, and the card carrying its
         context, price and modality rendered nothing, silently, on the very surface where the model
         is chosen and the spend is committed.

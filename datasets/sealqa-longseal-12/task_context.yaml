@@ -3,8 +3,8 @@
 # reads carried nothing a candidate could cite — and an origin that replays from cache never
 # re-runs it, so the emptiness is sticky. Declared, it cannot fall through.
 #
-# `upstream_context` / `downstream_context` are deliberately absent: those two are L1's own
-# (`task_context_updates`), and the other five are frozen operator evidence.
+# `upstream_context` / `downstream_context` are deliberately absent: they splice into the TARGET
+# prompt, and this dataset's target text lives in its prompt fields alone.
 #
 # BUDGETED — 600 chars a field, 1500 across the five (`TaskDecomposition.check_budget`), because
 # every one of them renders VERBATIM into every optimizer prompt. So each field says one thing

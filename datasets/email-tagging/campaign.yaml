@@ -1,6 +1,6 @@
 campaign_config:
   dataset_name: email-tagging
-  scoring: exact_match(predicted, ground_truth)
+  scoring: label_match(predicted, ground_truth)
   exclude_nodes: []
   optimization:
     l1_patience: 3

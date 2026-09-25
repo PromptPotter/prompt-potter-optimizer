@@ -193,8 +193,8 @@ def lift_over_bar(
     abilities: RaschPosterior, candidate_id: str, parent_bias: float
 ) -> tuple[float, float] | None:
     """What ADMISSION reads, as its two halves: θ over the parent's, and the share of the parent's
-    selection bias this arm has earned back. Split so a verdict can state both — a round won at
-    zero θ over the parent is won on the second. ``None`` where either arm was never fit.
+    selection bias this arm has earned back. Split so a verdict can state both; admission needs the
+    first positive on its own. ``None`` where either arm was never fit.
 
     The credit is EARNED, not granted: it corrects a bar read at the parent's SE, so an arm read
     less precisely carries a wider draw of its own and a flat credit would be worth most to the
@@ -216,10 +216,10 @@ def elect_round_winner(
     *,
     parent_bias: float,
 ) -> tuple[str, RaschPosterior]:
-    """ADMISSION is the point-estimate lift — strictly above the parent. The RANK is ``P(θ_cand >
-    θ_parent)``, the same quantity ``elimination_p_best`` cuts on, so the two cannot disagree about
-    what better means. The overlap guard and the θ-lift guard cover different holes: one grades an
-    errored row 0.0, the fit drops it."""
+    """ADMISSION is the point-estimate lift — raw θ strictly above the parent's. The RANK is
+    ``P(θ_cand > θ_parent)``, the same quantity ``elimination_p_best`` cuts on, so the two cannot
+    disagree about what better means. The overlap guard and the θ-lift guard cover different holes:
+    one grades an errored row 0.0, the fit drops it."""
 
     abilities = candidate_abilities(
         {cid: list(results_by_id.get(cid) or []) for cid in candidate_ids},
@@ -247,8 +247,10 @@ def elect_round_winner(
             continue
         # ADMISSION is the bare point lift, no SE margin — subtracting one shrinks the estimate
         # itself, turning a wide-posterior gain negative. Uncertainty belongs in the RANK below.
+        # The raw lift alone admits: the earned credit (never negative) is reported, and never
+        # admits an arm that ties or trails the parent.
         read = lift_over_bar(abilities, cid, parent_bias)
-        if read is None or sum(read) <= 0.0:
+        if read is None or read[0] <= 0.0:
             continue
         # RANK: the lift over the noise it cleared, because a bare gap cannot say whether the
         # round could TELL the arms apart — a thin arm out-points a full panel on a margin

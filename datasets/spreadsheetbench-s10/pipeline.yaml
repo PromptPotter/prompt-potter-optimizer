@@ -27,7 +27,7 @@ nodes:
       # WALL-CLOCK knob, not a nicety: a cell is one agent episode, so generation speed multiplies
       # by turn count. Measured on gpt-oss-120b through this same connector, the suffix moved
       # 20 tok/s to 87 — and it changes which host answers, so it changes price too
-      # (`docs/operations/backend-integration.md` § served_by).
+      # (`docs/operations/backend-integration.md` § Endpoints).
       model: qwen/qwen3.7-flash:nitro
       temperature: 0.0
       max_turns: 20

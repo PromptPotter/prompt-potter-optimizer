@@ -67,10 +67,11 @@ the optimizer manifest's ``$PROMPTPOTTER_HOME`` shadow. Shape, and every key opt
 
 _CACHE_REL = Path(".cache") / "model_capabilities.json"
 
-# PROVENANCE ONLY — this bounds nothing. The catalogue reports the parameter's presence, never its
-# value set, and presence predicts acceptance in neither direction: `qwen/qwen3.7-flash` carries no
-# `reasoning_effort` and honours every rung, `openai/gpt-oss-20b` carries it and 400s on `none`.
+# Presence bounds no RUNG — the catalogue never lists a value set. A model taking an effort may be
+# listed under OpenRouter's `reasoning` object alone and still honour `reasoning_effort` on the
+# wire (`qwen/qwen3.7-flash`), while `openai/gpt-oss-20b` lists both and 400s on `none`.
 _EFFORT_PARAM = "reasoning_effort"
+_REASONING_PARAM = "reasoning"
 
 STANDARD_EFFORT_LADDER: tuple[str, ...] = ("none", "default", "low", "medium", "high")
 """The rungs EVERY model is offered — OURS, not a provider's, since no catalogue publishes a value
@@ -176,7 +177,8 @@ def resolve_model_capabilities(model: str, *, workspace: Path) -> ModelCapabilit
     unsupported: list[str] | None
     if isinstance(raw_params, list):
         params = [str(p) for p in raw_params]
-        unsupported = sorted(PROVIDER_REQUEST_PARAMS - set(params))
+        accepted = set(params) | ({_EFFORT_PARAM} if _REASONING_PARAM in params else set())
+        unsupported = sorted(PROVIDER_REQUEST_PARAMS - accepted)
     else:
         params = []
         unsupported = None

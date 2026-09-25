@@ -76,7 +76,7 @@ def _extract_list_display(text: str) -> str:
 
 
 DISPLAY_EXTRACTORS: dict[str, Any] = {
-    "exact_match": extract_last_bold,
+    "label_match": extract_last_bold,
     "gsm8k_match": _extract_gsm8k_display,
     "aime_match": _extract_boxed_display,
     "list_rr": _extract_list_display,
@@ -89,7 +89,7 @@ def extract_display_answer(predicted: str, formula: str | None) -> str:
 
     Single-line is the CONTRACT, not the caller's to re-impose: every consumer renders into a
     one-line-per-sample readout, so a multi-line answer — a ranked slate, reasoning no extractor
-    isolates — splits the row and the ANSI-stripped `logs/latest.log` mirror with it."""
+    isolates — splits the row and the cycle's ANSI-stripped `readout.log` with it."""
     text = predicted or ""
     if formula:
         for name, extractor in DISPLAY_EXTRACTORS.items():
@@ -239,15 +239,6 @@ def fmt_query_result(
             YELLOW,
             "\U0001f504",
             f"cache had pipeline warnings → reran{detail}",
-        )
-    elif r.get("samplescan_resolved"):
-        line = _append_annotation(
-            line,
-            _ann_indent,
-            YELLOW,
-            "\U0001f52c",
-            "cache had warnings + rerun still degraded → re-measured fresh on "
-            "pipeline defaults; result accepted",
         )
     elif r.get("switched_out"):
         line = _append_annotation(

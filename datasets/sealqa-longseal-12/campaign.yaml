@@ -18,7 +18,7 @@ campaign_config:
     # dataset it reports whether the episode left an answer file at all — the gold is held outside
     # the container, so a verifier inside it cannot decide correctness — and scoring it would grade
     # every arm that wrote a file as perfect. It is read as instrument health, not as the score.
-    per_sample: exact_match(predicted, ground_truth)
+    per_sample: label_match(predicted, ground_truth)
     # Cost is charged in TOKENS, not seconds — justlogic's argument holds here and harder. An
     # episode's wall clock is `turns x per-turn latency`, and only the first factor is the
     # prompt's: the same panel reads 48.6s at p50 and 710.7s at its worst, so charging seconds
@@ -41,7 +41,7 @@ campaign_config:
     # `per_cell` rather than folding it into `per_sample`: a correct-but-expensive answer must stay
     # a HIT, or L1 is sent to repair reasoning that was right.
     per_cell: max(0.0, min(1.0, fitness * 21301.0 / (21301.0 + 0.5 * max(0.0, tokens - 21301.0))))
-  # The `retrieve -> ground -> answer` schema, keyed by the term the formula reads.
+  # The judge schema — the answer step alone — keyed by the term the formula reads.
   #
   # The ANSWER step is `sealqa`, and using SealQA's own published auto-rater is the point: it is
   # what the paper's numbers were produced with, so our number can sit beside theirs. It grades
@@ -53,35 +53,26 @@ campaign_config:
   # from `nodes.agent.config`. A ruler that moved with whatever the search was last steered to
   # would not be one.
   judges:
-    # `evidence_settled` and `answer_grounded` are GONE, and the screen they were added for is why:
-    # this campaign existed to find out whether they say anything, and `def880` answered no. They
-    # saturate — 17/20 SETTLED and 18/20 GROUNDED in round 3 — and both grade a property of the
-    # CELL rather than of the arm: `evidence_settled` asks whether the twelve documents settle the
-    # question, and returned SETTLED on #83, #101 and #10, which every arm got wrong. A per-cell
-    # constant cannot separate arms however many arms pay for it, and they were re-graded per arm:
-    # 240 grader calls over the campaign, for a reading that is the same number every time.
-    #
-    # What they DID establish is worth keeping in words rather than in spend: the haystack usually
-    # contains the answer, so the failure is the agent's reading, not the retrieval. Re-add either
-    # one only to re-test that, and grade it once per cell rather than once per arm.
+    # No per-cell judge (evidence settled, answer grounded): it grades the CELL, not the arm, so it
+    # saturates and cannot separate arms. The haystack usually holds the answer; the failure is the
+    # agent's reading. Re-test that only with a judge graded once per cell, never per arm.
     answer_correct:
       name: sealqa
       stages:
         - model: openai/gpt-oss-120b
           provider: openrouter
-  # NEITHER budget is declared — both take the package default (origin 40, round 20), which is what
-  # every other dataset in this tree runs. Raising them was priced and did not pay: at the measured
-  # ~10% origin rate, a 10%->15% candidate ranks above its parent 0.68 of the time on 20 cells and
-  # 0.75 on 40, so doubling the round budget buys +0.07 for double the wall clock (83s a cell, so
-  # 2.8h of rounds against 5.5h). Re-price this against the rate an arm actually lands on before
+  # NEITHER budget is declared — both take the package default (origin 40, round 20). Raising them
+  # was priced and did not pay: at the measured ~10% origin rate, a 10%->15% candidate ranks above
+  # its parent 0.68 of the time on 20 cells and 0.75 on 40, so doubling the round budget buys +0.07
+  # for double the wall clock. Re-price this against the rate an arm actually lands on before
   # raising either — a rate near the paper's 26-33% band moves these numbers a long way.
   optimization:
-    # The instrument check is DONE (origin 5% exact_match / 10% `answer_correct`, err=0.000, both
-    # evidence rubrics separating). These rounds search.
+    # The instrument check is DONE (origin 5% label_match / 10% `answer_correct`, err=0.000). These
+    # rounds search.
     max_rounds: 3
     n_variants: 2
     l1_patience: 3
     degradation_threshold: 0.4
-    # Wall clock is the real budget here, not money: a cell is $0.0015 and 41s, so three rounds
-    # cost well under a dollar and roughly three hours serial. This rail only stops a runaway.
+    # Wall clock is the real budget here, not money: a cell is $0.0015, so three rounds cost well
+    # under a dollar (per-cell latency: the p50 under `scoring` above). This rail only stops a runaway.
     spend_budget_usd: 5.00

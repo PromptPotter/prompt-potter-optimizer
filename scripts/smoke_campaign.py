@@ -72,13 +72,13 @@ def _build_config(
 
 
 def _infer_scoring(dataset: str) -> str:
-    """Prefer the dataset's own declared formula; fall back to ``exact_match``. Through the one
+    """Prefer the dataset's own declared formula; fall back to ``label_match``. Through the one
     reader — this parsed the YAML template with ``json.loads`` behind a bare ``except``, so it
     never once read a formula and every smoke run scored on the fallback."""
     formula = read_campaign_config_file(
         dataset_campaign_path(_REPO_ROOT / "datasets" / dataset)
     ).get("scoring")
-    return str(formula) if formula else "exact_match(predicted, ground_truth)"
+    return str(formula) if formula else "label_match(predicted, ground_truth)"
 
 
 async def _run(args: argparse.Namespace) -> int:

@@ -9,10 +9,10 @@ description: >-
 
   SINGLE-STEP ON PURPOSE, and that is what this dataset is for. The published LongSeal numbers are
   for a single-turn long-context setting, so imposing a protocol on the episode would make the
-  number ours rather than the paper's. `sealqa-longseal-12-2step` is where a declared
-  `retrieve -> answer` protocol and its per-step measurement live; this one is the anchor that
-  says our instrument did not move the task, and without it that config's per-step result has
-  nothing to be read against.
+  number ours rather than the paper's. A planned two-step cut is where a declared
+  `retrieve -> answer` protocol and its per-step measurement would live; this one is the anchor
+  that says our instrument did not move the task, and without it that cut's per-step result would
+  have nothing to be read against.
 backend_name: Harbor
 backend_type: harbor
 available_models:
@@ -85,10 +85,9 @@ nodes:
       # Past that it collapses — 0.019 on the 54 four-turn cells, a flat 0.000 on every deeper
       # bucket — so a long cell here is a LOST cell, not a working one. Capping moved headline
       # accuracy 0.273 -> 0.268. OPEN: that same table argues for 3, which would drop the 4-turn
-      # bucket's spend for ~nothing. The number belongs to this dataset alone: its siblings run 20
-      # and 30 and no equivalent distribution has been pulled for either, so do not cap them by
-      # analogy. This value is inside `node_configs`, so changing it re-keys the archive — which is
-      # correct, a 4-turn cell is not the same measurement as a 10-turn one, and it is why the 3
+      # bucket's spend for ~nothing. The number belongs to this dataset alone: a planned 20- or
+      # 30-document cut needs its own turn distribution, so do not cap one by analogy. This value
+      # is inside `node_configs`, so changing it re-keys the archive — which is correct, a 4-turn cell is not the same measurement as a 10-turn one, and it is why the 3
       # above is the operator's call rather than a comment's.
       observation_name: agent
       observation_mappings:

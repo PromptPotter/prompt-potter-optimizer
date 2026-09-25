@@ -56,9 +56,9 @@ split diverged before. `bbeh_dspy.ipynb` has a flags cell to toggle `RUN_GEPA` /
 > ⚠️ **The rule is already broken, and nothing caught it.** Both notebooks do
 > `from shared_config import (… exact_match, export_results)`, and this directory's
 > `shared_config.py` defines **no `exact_match` at all** — it exists only inside each notebook's
-> own `%%writefile` cell, where it compares whole strings. `matchers.py::_exact_match` runs
-> `extract_last_bold` on both sides, so on a chain-of-thought benchmark the two graders differ in a
-> direction that favours us. The drift is not the finding; **the rule being unenforceable is** —
+> own `%%writefile` cell, where it compares whole strings. PromptPotter grades with
+> `matchers.py::_label_match` — the last bold span, then BBEH's own `fuzzy_match` rules — so on a
+> chain-of-thought benchmark the two graders differ in a direction that favours us. The drift is not the finding; **the rule being unenforceable is** —
 > it is asserted in prose against a cell no check reads, so it will drift again. Recount before
 > quoting any number produced by these notebooks.
 

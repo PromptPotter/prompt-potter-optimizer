@@ -139,7 +139,7 @@ and moves every round.
 
 | shape | `extract_experiment` yields | who decides the score | the formula reads |
 |---|---|---|---|
-| **ranked-label** (`termnorm`, `dspy`) | `ground_truth: "<label>"` | a node emitting a ranking; `predicted` is compared to the label | `exact_match(predicted, ground_truth)` |
+| **ranked-label** (`termnorm`, `dspy`) | `ground_truth: "<label>"` | a node emitting a ranking; `predicted` is compared to the label | `label_match(predicted, ground_truth)` |
 | **verifier-graded** (`harbor`, `promptpotter`) | `ground_truth: None` | something else, with a NUMBER — the task's own verifier, L4's outer proxies | a `required_observation_keys` entry: `max(0.0, min(1.0, env_reward))` |
 
 `domain/scoring.py::is_verifier_graded` (one label) and `all_verifier_graded` (a round, a bank,
@@ -167,7 +167,7 @@ Four things that follow:
   `candidate_recall`, which walks a ranking for a ground truth the backend does not have and
   banks the resulting `0.0` into `rounds/round_NNNN.json` and `index.jsonl::scores`.
 - **A label-comparing formula is refused at compile** (`formula/compiler.py`), because
-  `exact_match` strips both sides and scores an empty answer against an empty label as a PERFECT
+  `label_match` strips both sides and scores an empty answer against an empty label as a PERFECT
   `1.0` — and that is the launcher's own default formula shape.
 - **Emit absence, not zero.** Rank buckets, top-k and recall are all comparisons against a label;
   with none, every one reads `not_found` / `0.0` and reports a round that solved eight of ten as

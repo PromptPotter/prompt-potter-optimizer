@@ -79,7 +79,7 @@ async def run_bbeh_campaign(
     already saved to disk by the loop's finalizer; the test-eval / export
     phase is skipped because the user signalled stop.
     """
-    exact_match = SCORING_FUNCTIONS["exact_match"]
+    label_match = SCORING_FUNCTIONS["label_match"]
     tasks = sorted(test_by_task.keys())
     train_norm = _normalize(train_pool)
     test_norm_by_task = {t: _normalize(v) for t, v in test_by_task.items()}
@@ -148,7 +148,7 @@ async def run_bbeh_campaign(
                     )
                     ranking = resp.get("data", {}).get("final_ranking") or []
                     predicted = ranking[0].get("candidate", "") if ranking else ""
-                    hits += int(exact_match(predicted, ex.ground_truth))
+                    hits += int(label_match(predicted, ex.ground_truth))
                 acc = hits / len(test_items) if test_items else 0.0
                 per_task_results[task] = {"accuracy": round(acc, 4), "n_test": len(test_items)}
                 print(

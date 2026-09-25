@@ -14,9 +14,7 @@ nodes:
     node_role: ranker
     description: >-
       Direct LLM generation on the TermNorm backend. No dataset-side max_tokens cap — provider ceiling
-      applies. reasoning_effort=low so the reasoning trace stays clear of Groq's per-model output ceiling
-      on small models (the BBEH 'Extra Hard' puzzles otherwise burn the budget before any visible token
-      emerges; see datasets/bbeh/task_description.md).
+      applies.
     config:
       provider: openrouter
       model: mistralai/mistral-small-3.2-24b-instruct
@@ -27,7 +25,6 @@ nodes:
         # `model` is deliberately NOT here: this dataset's model is a measurement premise
         # (task_description.md), so the axis stays closed even though the engine would now
         # search it. `provider` cannot be opened by any dataset — it is a cost lever.
-        - provider
         - temperature
         - max_tokens
         - reasoning_effort
@@ -44,8 +41,6 @@ nodes:
           - low
           - medium
           - high
-        provider:
-          - openrouter
       observation_name: llm_only
       observation_mappings:
         - pipeline_key: final_ranking

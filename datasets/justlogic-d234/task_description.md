@@ -13,7 +13,7 @@ knowledge-independent by design, no factual recall.
 ## Success criteria
 
 - Exact Match: the predicted label equals the gold label (case-insensitive), read from the
-  final answer span
+  `answer` field of the JSON output
 - The model must commit to one of the three labels in the expected format — prose with no
   extractable label scores zero regardless of the reasoning
 
@@ -39,8 +39,7 @@ knowledge-independent by design, no factual recall.
 
 ## Constraints
 
-- Target model / provider / reasoning effort are operator-locked (see `pipeline.yaml`) — the
-  point is what a PROMPT buys at fixed capability, not buying reasoning compute.
-- Freely mutable: `temperature`, `max_tokens`, and any prompt field (`persona`, `task_intent`,
-  `problem_description`, `instruction`, `thinking_style`, `answer_format`), plus the
-  structured-output field descriptions.
+- Target model and provider are operator-locked (see `pipeline.yaml`) — the point is what a
+  PROMPT buys at fixed capability.
+- Mutable: every lever the pipeline param catalogue lists — the tunables (`reasoning_effort`
+  included), every prompt field, and the structured-output field descriptions.

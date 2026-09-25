@@ -40,8 +40,7 @@ logger = logging.getLogger(__name__)
 # optional Advanced block, not facts the LLM infers from the data.
 #
 # Every finding is therefore expressible as a command, which is why the resolver
-# never has to name one: it proposes a field, code derives the button. Pinned by an
-# import-time assert in the commands router against ``_EditDraftPatch``.
+# never has to name one: it proposes a field, code derives the button.
 FINDING_PATCH_KEYS: dict[str, str] = {
     "column.query": "column_query",
     "column.ground_truth": "column_ground_truth",
@@ -197,7 +196,7 @@ async def resolve_origin_turn(
     updated = _apply_findings(draft, raw, raised)
 
     # Degradation gate. The resolver LLM can return a structurally-valid but content-empty
-    # CheckinOutput (every field defaults ``""``), which ``_apply_findings`` silently no-ops
+    # CheckinOutput (the origin block defaults ``""``), which ``_apply_findings`` silently no-ops
     # on (``updated is draft``) — a thin origin the draft must carry a cause for.
     degraded_cause = _degraded_cause(
         output=raw, applied=updated is not draft, repair_attempts=repair_attempts

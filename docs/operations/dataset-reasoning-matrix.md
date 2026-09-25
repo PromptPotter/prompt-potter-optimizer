@@ -4,10 +4,10 @@ Single canonical view of the model + reasoning_effort + max_tokens defaults ship
 
 | Dataset | model (default) | `reasoning_effort` | `max_tokens` | Notes |
 |---|---|---|---|---|
-| `aime_2025` | `openai/gpt-oss-20b:nitro` | `low` | absent | Competition math. Chosen on price ($0.03/$0.14) with `:nitro` routing to the highest-throughput provider at no cost premium. |
+| `aime_2025` | `openai/gpt-oss-20b:nitro` | model floor | absent | Competition math. Chosen on price ($0.03/$0.14) with `:nitro` routing to the highest-throughput provider at no cost premium. |
 | `gsm8k` | `openai/gpt-oss-120b` | `medium` | absent | Grade-school math word problems. Medium reasoning is enough. |
 | `bbeh` | `mistralai/mistral-small-3.2-24b-instruct` (openrouter) | `low` | absent | "Big-Bench Extra Hard" puzzles. `low` is intentional — the rationale in `task_description.md` is written against Groq's `gpt-oss-20b` output ceiling, which is where the dataset's screening numbers were taken; `available_models` now admits this model only. |
-| `justlogic-d234` | `openai/gpt-oss-20b:nitro` | `low` | absent | JustLogic (Chen 2025), 3-class deductive reasoning. iid random mix of depths 2, 3, 4 (200/depth from HF `train`, seed=42, interleaved). Each depth cut is a separate dataset name sharing no cache key with another — never compare across cuts (`datasets/CLAUDE.md` § L4). |
+| `justlogic-d234` | `openai/gpt-oss-20b:nitro` | model floor | absent | JustLogic (Chen 2025), 3-class deductive reasoning. iid random mix of depths 2, 3, 4 (200/depth from HF `train`, seed=42, interleaved). Each depth cut is a separate dataset name sharing no cache key with another — never compare across cuts (`datasets/CLAUDE.md` § L4). |
 | `lca-termnorm` | `openai/gpt-oss-120b` | n/a | absent (`null`) | Multi-node TermNorm pipeline; not a single-call reasoning dataset. |
 | `lca-bom-termnorm` | `entity_profiling` → `openai/gpt-oss-20b` | `low` (entity_profiling) | absent (`null`) | Tenant material-matching pipeline (`web_search → entity_profiling → token_matching`, no `llm_ranking`). `entity_profiling` emits **native** `json_schema` and pins `reasoning_effort: low` — the cap is load-bearing, see § The Groq output ceiling. Multi-node, so the single-call columns describe the profiling node only. Tenant config on disk, gitignored. |
 | `spreadsheetbench-s10` | `qwen/qwen3.7-flash:nitro` (agent) | unset | `4096` (a spend limit) | Harbor agent episode: the prompt is an injected `SKILL.md`. The agent model is chosen under § The agent model on a Harbor dataset. |
@@ -16,7 +16,9 @@ Single canonical view of the model + reasoning_effort + max_tokens defaults ship
 
 `max_tokens` is **never** set as a numeric default in any dataset's `pipeline.yaml` node config — the provider ceiling applies. Held by convention, not by a test, so check the overlay rather than assuming. **A Harbor agent node is the exception:** there `max_tokens`, `max_input_tokens` and `max_turns` are the limits we send the agent, and the only thing its cell's spend is bounded by — leave one out and no cell runs under a spend ceiling (`connectors/harbor.py::_sent_spend_bound`).
 
-**The floor default for a new dataset** is `openai/gpt-oss-20b:nitro @ low` via OpenRouter — cheapest, fastest, and it leaves L1 headroom.
+**The default for a new dataset** is `openai/gpt-oss-20b:nitro` via OpenRouter with no `reasoning_effort` — cheapest, fastest, and it leaves L1 headroom.
+
+**"model floor" is a rung the MODEL decides, never the file.** A declared `reasoning_effort` no layer sets resolves to the lowest rung (`none` < `minimal` < `low` < `medium` < `high`) the running model's capability answer offers — `low` on `openai/gpt-oss-*`, which refuses `none`; `none` on a model that takes it. A model no layer answers for has no floor, and the field is omitted. A rung spelled in the file is an explicit pin (`gsm8k`, `bbeh`) and follows no model a campaign swaps in.
 
 **What a dataset DECLARES is not what the axis SEARCHES.** `PipelineSchema.param_options` replaces these defaults with the model's own answer at run time — widening as often as narrowing — while a CAMPAIGN narrowing intersects instead, so an operator's closing still binds (`promptpotter/infrastructure/CLAUDE.md` § LLM client owns both halves). The columns above are the starting point in the literal sense: they say what the file asks for, never what the endpoint takes. Two consequences a reader of this table has to hold:
 

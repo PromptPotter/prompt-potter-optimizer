@@ -9,7 +9,7 @@ function draft(over: Partial<DraftCampaignWire> = {}): DraftCampaignWire {
     sample_preview: [{ query: "Na", ground_truth: "Sodium" }],
     n_samples: 42,
     connector: "termnorm",
-    scoring_composite: "exact_match",
+    scoring_composite: "label_match",
     optimization_overrides: {
       max_rounds: 5,
       prompt_block_catalogue: "guidance",

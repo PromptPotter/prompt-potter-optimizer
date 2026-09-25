@@ -3,7 +3,7 @@
 # lift is measured against.
 #
 # It is also deliberately quiet about HOW to weigh conflicting documents, even though that is
-# exactly what LongSeal tests and what two of the three judges read. An origin that already spelled
+# exactly what LongSeal tests. An origin that already spelled
 # out "prefer the primary source, check dates, discount the aggregator" would be an origin written
 # to the ruler, and the headroom it left for a prompt to find would be the part we forgot to write
 # down. Say that conflict EXISTS; leave the strategy to the search.

@@ -14,13 +14,11 @@ nodes:
     runtime: backend
     node_role: ranker
     description: >-
-      Direct LLM generation: read the email, emit one category label. reasoning_effort floored at low
-      — the optimizer can raise it within the allowed set if it pays.
+      Direct LLM generation: read the email, emit one category label.
     config:
       provider: openrouter
       model: openai/gpt-oss-20b
       temperature: 0.0
-      reasoning_effort: low
     optimizer:
       param_keys:
         - temperature
@@ -32,10 +30,6 @@ nodes:
         - instruction
         - thinking_style
         - answer_format
-      param_allowed_values:
-        reasoning_effort:
-          - default
-          - low
       observation_name: llm_only
       observation_mappings:
         - pipeline_key: final_ranking

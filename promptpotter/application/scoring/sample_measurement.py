@@ -37,7 +37,6 @@ from promptpotter.shared.errors import (
     CellUnscoreableError,
     ErrorCategory,
     SendRefusedError,
-    has_pipeline_warnings,
 )
 
 if TYPE_CHECKING:
@@ -47,7 +46,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-STALE_DATA_LOAD_PROTOCOL: tuple[str, ...] = ("rerun", "samplescan", "sampleswitch")
+STALE_DATA_LOAD_PROTOCOL: tuple[str, ...] = ("rerun", "sampleswitch")
 """Step order for handling a degraded cached query. ``execute_stale_data_protocol``
 walks this in order; first step that returns a non-degraded result wins."""
 
@@ -119,7 +118,7 @@ def interpolate_pipeline_params(
     return out
 
 
-__all__ = ["execute_stale_data_protocol", "measure_sample"]
+__all__ = ["execute_stale_data_protocol", "measure_sample", "needs_rerun"]
 
 # Wire-response keys always kept on pipeline_data, whatever the pipeline schema.
 # ``reasoning_trace`` is the task model's chain-of-thought (head-capped at the backend); the
@@ -148,7 +147,8 @@ _INFRA_KEYS: frozenset[str] = frozenset(
         PARENT_LEVEL_SE_KEY,
         # L4: what the inner campaign knows about ITSELF (`domain/l4/proxies.py`). Infra keys, so
         # they need no dataset `observation_mapping` — an undeclared observation is dropped here
-        # silently, which is exactly the trap `_verify_outer_panel_contract` exists to catch.
+        # silently — the trap `initialization/wiring.py::_verify_required_observation_keys`
+        # exists to catch.
         *INNER_FACT_KEYS,
     }
 )
@@ -437,6 +437,27 @@ def _extract_upstream_detail(exc: httpx.HTTPStatusError) -> str:
     return body_text[:300]
 
 
+# TermNorm's typed 422 codes for a model that ANSWERED but left nothing gradeable after its repair
+# turns (`llm_providers.py`) — an answer cut at the candidate's own `max_tokens`, or one that is not
+# the declared JSON. That is what THIS configuration produced, so it is a measured miss: never a
+# hole (a round halts before electing on one) and never a stop for the walk.
+_OUTPUT_FAILURE_CODES = frozenset(
+    {"json_parse_failed", "schema_validation_failed", "output_truncated"}
+)
+
+
+def _answered_nothing(exc: httpx.HTTPStatusError) -> dict[str, Any] | None:
+    """The response ``data`` of a cell whose model answered nothing gradeable — no answer, and the
+    tokens it was billed for — or ``None`` where the error is not that."""
+    try:
+        detail = exc.response.json().get("detail")
+    except Exception:
+        return None
+    if not isinstance(detail, dict) or detail.get("error_code") not in _OUTPUT_FAILURE_CODES:
+        return None
+    return {"step_tokens": detail.get("step_tokens") or {}}
+
+
 def _classify_http_error(exc: httpx.HTTPStatusError) -> tuple[ErrorCategory, str]:
     """Never a 429: ``BackendClient.run_query`` answers every one with the run's backpressure, which
     re-sends the cell or refuses the run. A throttle is the provider's load, never a row charged to
@@ -485,12 +506,22 @@ async def measure_sample(
         )
         try:
             async with envelope:
-                resp = await client.run_query(
-                    query,
-                    pipeline_params=wire_params,
-                    bound=bound,
-                    billed=cell_billing(pipeline_schema, wire_params),
-                )
+                try:
+                    resp = await client.run_query(
+                        query,
+                        pipeline_params=wire_params,
+                        bound=bound,
+                        billed=cell_billing(pipeline_schema, wire_params),
+                    )
+                except httpx.HTTPStatusError as exc:
+                    if (answered := _answered_nothing(exc)) is None:
+                        raise
+                    logger.warning(
+                        "measure_sample for %s: answered nothing gradeable (%s) — a miss",
+                        query[:60],
+                        _extract_upstream_detail(exc),
+                    )
+                    resp = {"data": answered}
         finally:
             # Cancel whether the query succeeded or raised — an in-flight task survives and
             # keeps appending progress records against a closed call.
@@ -704,6 +735,12 @@ def _rerun_would_repeat_token_budget_failure(
     return int(rerun_max_tokens) <= cached_completion
 
 
+def needs_rerun(row: Mapping[str, Any]) -> bool:
+    """Whether the stale-data ladder re-sends a row: an infra or fatal code, never a bare warning.
+    A schema repair that went on to answer leaves an advisory and a gradeable row, which replays."""
+    return classify_result(row).is_fatal
+
+
 async def execute_stale_data_protocol(
     protocol_steps: list[str],
     sample: Sample,
@@ -744,15 +781,8 @@ async def execute_stale_data_protocol(
             result = dict(await measure_sample(sample, session, pipeline_params=pipeline_params))
             result["retry_of_degraded"] = True
             result["rerun_comparison"] = compare_rerun(cached_result, result)
-            if not has_pipeline_warnings(result):
+            if not needs_rerun(result):
                 return result, "rerun"
-
-        elif step == "samplescan":
-            probe_params = session.pipeline_schema.to_pipeline_params()
-            result = dict(await measure_sample(sample, session, pipeline_params=probe_params))
-            result["samplescan_resolved"] = True
-            if not has_pipeline_warnings(result):
-                return result, "samplescan"
 
         elif step == "sampleswitch":
             if (

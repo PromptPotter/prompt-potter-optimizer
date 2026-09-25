@@ -30,7 +30,7 @@ from promptpotter.shared.identity import TenantId, safe_name
 if TYPE_CHECKING:
     from promptpotter.connectors.protocol import Connector
 
-DEFAULT_SCORING_COMPOSITE = "exact_match"
+DEFAULT_SCORING_COMPOSITE = "label_match"
 """Only universally-applicable scorer for ``(query, ground_truth)`` shape."""
 
 DEFAULT_MAX_ROUNDS = 5
@@ -139,7 +139,7 @@ class DraftCampaign:
     # reading the live schema, had the axis open. Captured rather than fetched per response
     # because it is a material fact about THIS check-in, and one an operator can read back off
     # disk. Empty = never fetched or the backend was unreachable, which is why the wire carries
-    # `backend_reachable` beside the schema rather than letting empty mean "locked".
+    # `schema_source` (`unreachable`) beside the schema rather than letting empty mean "locked".
     backend_nodes: dict[str, Any] = field(default_factory=dict)
     # The chosen origin's content id when this draft reused a prior origin. Non-empty routes
     # ``prepare_checkin_run`` through the ``origin_override`` seed, so C0 resolves via the
@@ -392,9 +392,9 @@ def declared_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
 
     The resolver needs both: ``narrow`` REPLACES ``param_allowed_values``, so a value the operator
     unticked is gone from the narrowed schema, and a menu built from that could never offer it
-    back. Union the two and unticking stays reversible (``pipeline_resolve::_enum_menu``). Reading
-    it off :func:`rendered_pipeline_json` cannot work — that one has already folded the narrowing
-    in, which is exactly the layer this omits."""
+    back. Union the two and unticking stays reversible (``PipelineSchema.node_config_schema``).
+    Reading it off :func:`rendered_pipeline_json` cannot work — that one has already folded the
+    narrowing in, which is exactly the layer this omits."""
     connector = connectors.get(draft.connector)
     return draft_pipeline_json(
         draft, merge_node_blocks(dict(draft.backend_nodes), dict(connector.default_node_config))

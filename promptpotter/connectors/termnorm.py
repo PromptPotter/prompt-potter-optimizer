@@ -281,8 +281,7 @@ CONNECTOR = Connector(
     # tenant may pick from, that is where they start. Without it the committed pipeline.yaml
     # carries no `available_models` and the check-in's model list has zero options — so an
     # operator could see their model and not change it.
-    # The three below price at or under gpt-oss-20b on both axes and postdate it; none of them
-    # takes `reasoning_effort`, so the rung a dataset pins is inert on them.
+    # The three below price at or under gpt-oss-20b on both axes and postdate it.
     available_models=(
         "openai/gpt-oss-20b",
         "qwen/qwen3.7-flash:nitro",
@@ -295,20 +294,15 @@ CONNECTOR = Connector(
     # GET /pipeline default (which would silently pick the heavy groq/120b). This
     # seed is copied verbatim into the new dataset's file by ``merge_pipeline_overlay``,
     # so the dataset owns ``openrouter/gpt-oss-20b`` explicitly, visible on disk.
-    # The origin floor ``low`` is the tenant's cost rail. The rung list beside it is a
-    # DEFAULT, so ``PipelineSchema.param_options`` replaces it wherever the model has
-    # answered — only a check-in narrowing intersects. It bounds the axis on a workspace
-    # with no capability snapshot yet, which is why it excludes ``none``: that rung is
-    # HTTP 400 on this model, so declaring it would hand L1 an unsendable configuration.
+    # No ``reasoning_effort``: a rung named here would follow no model the tenant swaps in, so
+    # the origin's starts at the picked model's floor (``pipeline_resolve::_apply_model_floors``).
     default_node_config={
         "llm_only": {
             "config": {
                 "provider": "openrouter",
                 "model": "openai/gpt-oss-20b",
-                "reasoning_effort": "low",
                 "temperature": 0.0,
             },
-            "optimizer": {"param_allowed_values": {"reasoning_effort": ["default", "low"]}},
         },
     },
 )

@@ -22,6 +22,7 @@ from promptpotter.application.scoring.sample_measurement import (
     cell_bound,
     emit_replayed_step_tokens,
     measure_sample,
+    needs_rerun,
 )
 from promptpotter.application.scoring.sample_measurement import (
     execute_stale_data_protocol as _execute_stale_data_protocol,
@@ -46,9 +47,6 @@ from promptpotter.shared.errors import (
     error_category,
     graceful,
     is_error_result,
-)
-from promptpotter.shared.errors import (
-    has_pipeline_warnings as _has_pipeline_warnings,
 )
 
 if TYPE_CHECKING:
@@ -297,7 +295,7 @@ async def _maybe_recover_degraded(
     ctx: QueryLoopState,
 ) -> QueryMeasurement:
 
-    if not _has_pipeline_warnings(result):
+    if not needs_rerun(result):
         return result
     recovered, _step = await _execute_stale_data_protocol(
         list(STALE_DATA_LOAD_PROTOCOL),

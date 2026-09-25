@@ -119,8 +119,10 @@ class PipelineData(LedgerPipelineData, total=False):
     # ``result_ranking`` was derived from; both may be absent for non-ranking pipelines.
     final_ranking: list[dict[str, Any]]
     pipeline_params: dict[str, Any]
-    # The task model's chain-of-thought, head-capped at the backend. The critique tier reads
-    # it to diagnose WHERE a deduction broke, off the in-memory trajectory.
+    # Everything the target produced BESIDES its answer — hidden reasoning, a structured
+    # response's other slots, an agent's decisions — whatever the shape (pipeline, loop, LLM,
+    # agent, skill). The critique tier reads it to diagnose WHERE a deduction broke; a connector
+    # that forwards less leaves the critique quoting the input instead.
     reasoning_trace: str
     # The cell's conversation, beside `reasoning_trace` rather than instead of it: the trace is one
     # prose blob every backend composes, this is the record a judge segments by step. Absent means
@@ -200,7 +202,6 @@ class QueryMeasurement(TypedDict):
     retry_of_deprecated_cache: NotRequired[bool]
     retry_of_degraded: NotRequired[bool]
     rerun_comparison: NotRequired[dict[str, Any]]
-    samplescan_resolved: NotRequired[bool]
     switched_out: NotRequired[bool]
     config_fundamental_skip: NotRequired[bool]
     persistently_degraded: NotRequired[bool]

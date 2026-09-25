@@ -49,7 +49,7 @@ export function questionOptions(field: string, options: string[], headers: strin
 
 const CONNECTOR_LABELS: Record<string, string> = { termnorm: "the TermNorm pipeline" };
 const SCORER_LABELS: Record<string, string> = {
-  exact_match: "an exact match against the target",
+  label_match: "an exact match against the target",
 };
 
 function shortTaskTitle(task: string): string | null {

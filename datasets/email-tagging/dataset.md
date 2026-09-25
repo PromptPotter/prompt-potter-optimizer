@@ -23,7 +23,7 @@ running TermNorm backend.
 
 ## Scoring
 
-`exact_match(predicted, ground_truth)`. The answer-format contract is the live string
+`label_match(predicted, ground_truth)`. The answer-format contract is the live string
 `matchers.py::EXTRACTION_NOTES`, already fed to the prompt by the origin resolver — read it there,
 not from a paraphrase.
 

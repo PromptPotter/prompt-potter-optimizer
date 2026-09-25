@@ -71,7 +71,7 @@
           "expected_samples": 200,
           "is_winner": false,
           "evaluators": {
-            "exact_match": 0.3
+            "label_match": 0.3
           },
           "changes_description": "shorten preamble"
         },
@@ -84,7 +84,7 @@
           "expected_samples": 200,
           "is_winner": true,
           "evaluators": {
-            "exact_match": 0.34
+            "label_match": 0.34
           },
           "changes_description": "add worked example"
         }
@@ -107,7 +107,7 @@
           "expected_samples": 200,
           "is_winner": false,
           "evaluators": {
-            "exact_match": 0.42
+            "label_match": 0.42
           },
           "changes_description": "tighten constraint phrasing"
         },
@@ -120,7 +120,7 @@
           "expected_samples": 200,
           "is_winner": true,
           "evaluators": {
-            "exact_match": 0.48
+            "label_match": 0.48
           },
           "changes_description": "re-order steps"
         }
@@ -143,7 +143,7 @@
           "expected_samples": 200,
           "is_winner": false,
           "evaluators": {
-            "exact_match": 0.51
+            "label_match": 0.51
           },
           "changes_description": "swap example"
         },
@@ -156,7 +156,7 @@
           "expected_samples": 200,
           "is_winner": true,
           "evaluators": {
-            "exact_match": 0.55
+            "label_match": 0.55
           },
           "changes_description": "rewrite intro"
         }
@@ -179,7 +179,7 @@
           "expected_samples": 200,
           "is_winner": false,
           "evaluators": {
-            "exact_match": 0.58
+            "label_match": 0.58
           },
           "changes_description": "trim worked example"
         },
@@ -192,7 +192,7 @@
           "expected_samples": 200,
           "is_winner": true,
           "evaluators": {
-            "exact_match": 0.62
+            "label_match": 0.62
           },
           "changes_description": "add explicit count step"
         }

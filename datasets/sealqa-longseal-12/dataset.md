@@ -15,10 +15,10 @@
 >
 > **This is the SINGLE-STEP config, and that is what it is for.** The published LongSeal numbers
 > are for a single-turn long-context setting, so this cell carries the whole haystack in one
-> episode's instruction and imposes no protocol on it. `sealqa-longseal-12-2step` is where a
-> declared `retrieve -> answer` protocol and its per-step measurement live; this one is the anchor
-> saying our instrument did not move the task, without which that config's per-step result has
-> nothing to be read against.
+> episode's instruction and imposes no protocol on it. A planned two-step cut is where a declared
+> `retrieve -> answer` protocol and its per-step measurement would live; this one is the anchor
+> saying our instrument did not move the task, without which that cut's per-step result would
+> have nothing to be read against.
 >
 > **No loader is registered for this name.** `wiring.py::_load_dataset_into_session` now reads a
 > declared `experiment_file` FIRST, so rows cached under this name can no longer win — but they
@@ -45,15 +45,15 @@ the `sealqa` judge.
 **Our cut.** The full 254 rows at the **12-document** size — the smallest haystack, which is the
 easiest of the three and the fastest per cell. Deviations, said out loud:
 
-- **Size is part of the identity, not a parameter.** `sealqa-longseal-20` and `-30` are separate
-  dataset directories, each naming its own `{12,20,30}_docs` column. The haystack is the query
+- **Size is part of the identity, not a parameter.** A 20- or 30-document cut is planned as its own
+  dataset directory, each naming its own `{12,20,30}_docs` column. The haystack is the query
   text, so no size can replay another's reading.
 - **`urls` and `date` are dropped** when the haystack is written out. A URL is a retrieval artifact
   rather than evidence and `date` is frequently null, so both spend context the answer does not
   depend on. Documents are **numbered**, which is what lets a model cite one and a grounding judge
   read the citation back. `build_sealqa_tasks.py::_render_docs` is the one place that
   choice is made, on either layout — this config renders the haystack into the episode's
-  instruction; the two-step config writes the same rendering one document per file.
+  instruction; a two-step layout writes the same rendering one document per file.
 - **The container has no way to reach the web, but on Docker Desktop that is NOT enforced** — and
   the difference is worth stating, because the first run's agent tried. It planned and ran
   `curl -s https://en.wikipedia.org/...`, got nothing (`ubuntu:24.04` ships no `curl`, `wget` or
@@ -66,9 +66,8 @@ easiest of the three and the fastest per cell. Deviations, said out loud:
   spending an episode discovering it. This is the contamination axis SealQA's per-row `canary`
   exists to detect.
 - **`golds` is carried by the dataset and not used.** It holds the gold documents themselves, in
-  the same shape as the haystack. It could ground a *deterministic* retrieve check later; using it
-  now would hand the answer's own evidence to the row the retrieve judge is meant to assess
-  independently.
+  the same shape as the haystack. It could ground a *deterministic* retrieve check later; no
+  term reads it today.
 
 ## Sample shape
 
@@ -101,7 +100,7 @@ Two steps are graded per cell
 `def880` campaign screened them, and the answer was no — `campaign.yaml::judges` records the
 numbers and the argument, which are not restated here.
 
-**Only `exact_match` decides the round today**, with `answer_correct` banked beside it. Naming a
+**Only `label_match` decides the round today**, with `answer_correct` banked beside it. Naming a
 judge term in the formula is safe — a grading that fails past its retry resolves the row UNSCORED
 and keeps its measurement (`application/scoring/formula/rescore.py`) — so this is a choice about
 which grader the round is won on, not a constraint.
@@ -112,13 +111,3 @@ letting PoBB eliminate on confidence it never earned. Held by
 `exploration.py::dedup_observations`; fitting δ and `a` per step needs a testlet model and a new
 `ruler_id` ([`../../docs/methods/verdict-resolution.md`](../../docs/methods/verdict-resolution.md)
 § Phase 3).
-
-## Caveats
-
-1. **Two of the three rubrics are ours**, not upstream's, and unscreened. `sealqa` is the paper's.
-2. **`evidence_settled` reads the model's own reasoning trace.** On a single-call backend that is
-   whatever the model chose to write down, which is not the same as what it actually attended to. A
-   terse correct answer may score MISSING. Read traces before trusting a low value.
-3. **Some questions are unsettleable from their documents** by construction. `MISSING` is the
-   correct reading there, not an instrument fault — which is why `evidence_settled` is banked
-   rather than scored.

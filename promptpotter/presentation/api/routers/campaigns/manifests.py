@@ -66,10 +66,9 @@ class CampaignSummary(StrictModel):
         description=(
             "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN "
             "on the manifest at mint. The webapp's ONE test for a self-optimizing (L4) campaign — "
-            "it renders the 'inner loops' disclosure and the pp-self panel variants on it. It no "
-            "longer goes stale when the dataset is re-pointed, and no longer empties when the "
-            "dataset dir is deleted: a campaign outlives its dataset dir, and what it RAN is a "
-            "fact about the campaign. Empty only on a manifest `restamp` has not reached."
+            "it renders the 'inner loops' disclosure and the pp-self panel variants on it. "
+            "Re-pointing or deleting the dataset dir never changes it: a campaign outlives its "
+            "dataset dir, and what it RAN is a fact about the campaign."
         ),
     )
     owner_user_id: str = Field(
@@ -321,7 +320,7 @@ def get_campaign_pipeline(
     campaign = leaf.campaigns.load_owned(campaign_id, str(leaf.identity.user_id))
     if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
-    return resolve_pipeline_for_campaign(leaf, campaign, at=spec, workspace=leaf.base_dir)
+    return resolve_pipeline_for_campaign(leaf, campaign, at=spec)
 
 
 class ForkPreviewRequest(StrictModel):

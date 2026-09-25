@@ -49,7 +49,7 @@ class EditDraftPatch(StrictModel):
     scoring_composite: str | None = Field(default=None, min_length=1, max_length=64)
     raw_task_description: str | None = Field(default=None, min_length=1, max_length=16384)
     pipeline_overlay: dict[str, Any] | None = None
-    # Written by the setup-panel mode toggle; read by commit's `_build_origin_pipeline_json`
+    # Written by the setup-panel mode toggle; read by commit's `committed_pipeline_json`
     # and by `draft_active_steps`.
     pipeline_steps: list[str] | None = None
     column_query: str | None = Field(default=None, max_length=256)

@@ -56,18 +56,45 @@ def _list_rr(predicted: str, ground_truth: str) -> float:
     return 1.0 / rank if rank else 0.0
 
 
-def _exact_match(predicted: str, ground_truth: str) -> float:
-    """Exact match after bold-strip + lowercase. Markdown bold markers stripped both sides."""
-    p = extract_last_bold(predicted).strip().lower()
-    g = extract_last_bold(ground_truth).strip().lower()
-    return 1.0 if p == g else 0.0
+def _label_match(predicted: str, ground_truth: str) -> float:
+    """The LAST bold span, compared to the label under a benchmark grader's tolerances — the rules
+    of google-deepmind/bbeh ``evaluate.py`` (``preprocess_sample`` + ``fuzzy_match``), which are
+    generic to any labelled task: ``(D)`` equals ``D``, ``5.0`` equals ``5``, and quotes, brackets,
+    a trailing ``.`` or ``?`` and LaTeX wrappers do not decide a hit."""
+    p = extract_last_bold(predicted).strip().strip("_").strip().lower()
+    p = p.replace(", ", ",").replace("**", "").split("\n")[0].removesuffix(".")
+    if p.startswith("$") and p.endswith("$"):
+        p = p[1:-1]
+    for wrapper in ("boxed{", "text{", "texttt{"):
+        if wrapper in p and p.endswith("}"):
+            p = p[:-1].split(wrapper)[1]
+    g = extract_last_bold(ground_truth).strip().lower().replace(", ", ",")
+    if p == g:
+        return 1.0
+    if len(p) == 3 and p[0] == "(" and p[-1] == ")":
+        return 1.0 if p[1] == g else 0.0
+    if len(g) == 3 and g[0] == "(" and g[-1] == ")":
+        return 1.0 if g[1] == p else 0.0
+    try:
+        if float(p) == float(g):
+            return 1.0
+    except ValueError:
+        pass
+    return (
+        1.0
+        if p.replace("'", "") == g.replace("'", "")
+        or f"[{g}]" == p
+        or f"[{p}]" == g
+        or (p.endswith("?") and p[:-1] == g)
+        else 0.0
+    )
 
 
 SCORING_FUNCTIONS: dict[str, Callable[..., Any]] = {
     "rr": _rr,
     "gsm8k_match": _gsm8k_match,
     "aime_match": _aime_match,
-    "exact_match": _exact_match,
+    "label_match": _label_match,
     "list_rr": _list_rr,
 }
 
@@ -84,8 +111,8 @@ SCORING_FUNCTIONS: dict[str, Callable[..., Any]] = {
 # health is what catches an unscoreable one. Matchers that compare the raw text
 # (no extraction step) carry no entry — the output IS the label.
 EXTRACTION_NOTES: Annotated[dict[str, str], shapes_optimizer_prompt] = {
-    "exact_match": (
-        "Scoring exact-matches the answer after taking the LAST bolded span (the "
+    "label_match": (
+        "Scoring matches the answer after taking the LAST bolded span (the "
         "last **…** run) of the output, lowercased. Commit the final answer on its "
         "own last line wrapped in double asterisks — e.g. **TRUE**. With "
         "chain-of-thought, an unbolded answer leaves the label buried in the "

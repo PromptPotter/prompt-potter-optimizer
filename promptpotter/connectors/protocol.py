@@ -273,8 +273,7 @@ class Connector:
     name; each value is a node overlay (``config`` floor + ``optimizer``
     constraints) merged onto the backend's live ``GET /pipeline`` schema (the
     overlay's ``config``/``optimizer`` sub-blocks shallow-merge, so a partial
-    clamp narrows the backend schema rather than clobbering it). TermNorm uses
-    this to seed ``llm_only.reasoning_effort`` at ``low``. A seeded
+    clamp narrows the backend schema rather than clobbering it). A seeded
     ``param_allowed_values`` is a DEFAULT, so ``PipelineSchema.param_options``
     replaces it wherever the model has answered — a cost rail has to be a check-in
     narrowing, which intersects. Empty mapping means "no seed; the backend schema stands."

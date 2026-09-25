@@ -454,6 +454,7 @@ def prospective_origin_id(stores: Stores, dataset_dir: Path, dataset_name: str) 
             schema,
             judges=cfg.judges,
             experiment=experiment_outside_run(dataset_dir),
+            workspace=stores.base_dir,
         )
         opt_sp = resolve_origin_opt_search_point(
             prompt_node_names=schema.prompt_node_names(),
