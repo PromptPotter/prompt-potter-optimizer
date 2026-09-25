@@ -97,8 +97,6 @@ class PreparedCheckinRun:
     session: Session
     campaign_config: CampaignConfig
     train_data: list[Any]
-    cycle_id: str
-    session_id: str
 
 
 def load_checkin_for_start(stores: Stores, campaign_id: str) -> tuple[CycleHop, DraftCampaign]:
@@ -193,8 +191,6 @@ async def prepare_checkin_run(
         session=session,
         campaign_config=campaign_config,
         train_data=train_data,
-        cycle_id=hop.cycle_id,
-        session_id=session_id,
     )
 
 

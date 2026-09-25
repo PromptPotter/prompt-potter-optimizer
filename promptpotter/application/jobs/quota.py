@@ -14,7 +14,7 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import default_jobs_dir
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.launch_limits import HeldLimits, LaunchLimits
+from promptpotter.domain.launch_limits import HeldLimits, LaunchLimits, RoundsCap
 from promptpotter.domain.spend import BudgetChange, SpendCeilings, declare_ceiling
 from promptpotter.infrastructure.identity.migration import registered_user_id
 from promptpotter.infrastructure.identity.paths import default_identity_paths
@@ -306,9 +306,10 @@ def declare_run_ceiling(
     before anything is admitted so the wallet bounds the number the run will actually hold.
 
     Four layers, each SETTING its arms over the last: the campaign's knob, the fork seed's
-    override, the cycle's standing operator ceiling (its ledger's ``SpendCeilingRecord``, what
-    ``set-budget`` or an earlier launch flag left) and this launch's flag. Every layer may raise as well as lower because
-    none of them is the authority — :func:`admit_launch` is, applied to what this returns. Composed
+    override, the cycle's standing operator ceiling (its ledger's ``RunLimitsRecord``, what
+    ``set-limits`` or an earlier launch flag left) and this launch's flag. Every layer may raise as
+    well as lower because none of them is the authority — :func:`admit_launch` is, applied to what
+    this returns. Composed
     AFTER admission, the knob becomes a bound under the launch flag rather than a layer beneath it,
     and no launch can raise a dataset's ceiling.
 
@@ -324,7 +325,7 @@ def declare_run_ceiling(
         if cycle_seed is not None:
             overrides = cycle_seed.config_overrides
             seed = BudgetChange(overrides.spend_budget_usd, overrides.token_budget)
-        standing = stores.campaigns.read_spend_ceiling(hop)
+        standing = stores.campaigns.read_run_limits(hop).ceiling
     opt = config.optimization
     declared = declare_ceiling(
         SpendCeilings(opt.spend_budget_usd, opt.token_budget), seed, standing, requested.budgets
@@ -387,23 +388,25 @@ def clamp_budget_change(
     return BudgetChange(usd, tokens)
 
 
-def hold_ceiling(
+def hold_run_limits(
     *,
     job_registry: JobRegistry,
     stores: Stores,
     hop: CycleHop,
     change: BudgetChange,
+    rounds: RoundsCap | None,
 ) -> None:
     """Land *change* on the job's reservation and on the cycle's standing ceiling, each from its
     OWN prior — the standing ceiling's absent arm defers to the run's admitted cap, often far below
-    the reservation."""
-    prior = stores.campaigns.read_spend_ceiling(hop)
-    stores.campaigns.write_spend_ceiling(
+    the reservation. *rounds* ``None`` keeps the standing round cap; the job reserves no rounds."""
+    prior = stores.campaigns.read_run_limits(hop)
+    stores.campaigns.write_run_limits(
         hop,
         BudgetChange(
             prior.usd if change.usd is None else change.usd,
             prior.tokens if change.tokens is None else change.tokens,
         ),
+        rounds=prior.rounds if rounds is None else rounds,
     )
     job = job_registry.running_job_for(hop)
     if job is not None:
@@ -541,7 +544,8 @@ def set_concurrent_cycles(*, stores: Stores, limit: int) -> User:
     if limit > ceiling:
         raise PayloadInvalidError(
             f"This machine runs at most {ceiling} campaigns at once, so an account limit of "
-            f"{limit} could never bind.",
+            f"{limit} could never bind. That ceiling is MACHINE_RUN_CAPACITY in .env, read when "
+            "the process starts: raise it there and restart the server.",
             code="concurrency_above_machine",
             details={"requested": limit, "machine_ceiling": ceiling},
         )
@@ -587,7 +591,7 @@ __all__ = [
     "clamp_budget_change",
     "concurrent_cycles_writable",
     "declare_run_ceiling",
-    "hold_ceiling",
+    "hold_run_limits",
     "is_host_tenant_dir",
     "lifetime_ceilings",
     "overrun",

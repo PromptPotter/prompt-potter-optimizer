@@ -64,9 +64,10 @@ async def run_origin_gate(
         grade = cycle.origin_round.health.grade if cycle.origin_round.health else "unknown"
         logger.warning(
             "Origin gate (%s): round-0 verdict is %s — holding before L1. Decide via "
-            "the webapp modal, the CLI prompt, or the origin-gate-decision command.",
+            "the webapp modal, the TTY prompt, or `python -m promptpotter origin-gate %s`.",
             mode,
             grade,
+            "{" + ",".join(_DECISIONS) + "}",
         )
         if stdin_q is not None:
             # Operator-facing gate prompt; the gate state is also on disk

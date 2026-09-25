@@ -40,7 +40,7 @@ from promptpotter.application.run_observers import (
 from promptpotter.application.run_phase_control import declare_run_phase
 from promptpotter.application.runner.inner.ruler import refresh_inner_rulers
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
-from promptpotter.application.runner.loop import run_round_loop
+from promptpotter.application.runner.loop import run_round_loop, set_round_cap
 from promptpotter.application.runner.output import write_log_md
 from promptpotter.application.runner.round import flush_pending_decisions
 from promptpotter.application.runner.termination import RUN_STOPS, BudgetGate, run_stop_reason
@@ -74,10 +74,10 @@ from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.llm.telemetry import emit_error_record
 from promptpotter.infrastructure.runtime_flags import (
     clear_run_control_flags,
+    read_run_limits_mirror,
     read_sample_lookahead,
-    read_spend_caps,
     spend_sample_lookahead,
-    write_spend_caps,
+    write_run_limits_mirror,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_wall_clock
 from promptpotter.infrastructure.store.layout import CycleLayout
@@ -115,7 +115,7 @@ def _build_budget_gate(
     token_cap: int | None,
 ) -> BudgetGate:
     """**Always armed**, because a run's ceiling is not settled at launch: the probes re-read
-    ``.runtime/spend_cap.json`` each tick, so ``change-spend-budget`` can bind a run that declared
+    ``.runtime/run_limits.json`` each tick, so ``change-run-limits`` can bind a run that declared
     nothing. Returning no gate for a launch with no starting caps is what let that command ack
     ``applied`` against a ceiling that could never trip — set by the operator, served to the
     webapp, enforced by nothing. An unset arm still costs nothing: the book skips a ``None`` cap.
@@ -123,11 +123,11 @@ def _build_budget_gate(
     dashboard = observers.dashboard
 
     def _usd_cap() -> float | None:
-        saved = read_spend_caps(cycle_dir).usd
+        saved = read_run_limits_mirror(cycle_dir).usd
         return saved if saved is not None else usd_cap
 
     def _token_cap() -> int | None:
-        saved = read_spend_caps(cycle_dir).tokens
+        saved = read_run_limits_mirror(cycle_dir).tokens
         return saved if saved is not None else token_cap
 
     # Seeded from the rollup the resume folded, then fed by the ledger itself.
@@ -336,20 +336,30 @@ async def _prepare_run(
     # LAST, after the seed's other knobs: the held ceiling is the one number the reservation, this
     # config and the dashboard all carry, composed and admitted before launch.
     campaign_config = _set_held_ceiling(campaign_config, limits.ceiling)
+    # A standing round cap outranks the seed's, as the standing spend ceiling does; it admits
+    # nothing, so it is set here rather than composed with the budget before launch.
+    campaigns = session.store.campaigns
+    standing = campaigns.read_run_limits(session.hop) if launch_cycle_dir is not None else None
+    rounds = None if standing is None else standing.rounds
+    if rounds is not None:
+        campaign_config = set_round_cap(campaign_config, rounds.max_rounds)
     # Stamped before origin scoring, which is where the operator spends the longest stretch of the
     # run. The stamp is the READOUT; the enforcement is the arming further down, and only both
     # together mean "the ceiling holds".
     observers.dashboard.stamp_run_limits(run_limits_from(campaign_config))
-    if launch_cycle_dir is not None and limits.operator != BudgetChange(None, None):
+    if (
+        launch_cycle_dir is not None
+        and standing is not None
+        and (limits.operator != BudgetChange(None, None) or rounds is not None)
+    ):
         # The operator's arms are the cycle's STANDING ceiling, so a plain relaunch declares them
         # again rather than falling back to the knob. Held values, not the request: the gate
         # prefers the mirror over the config, so landing more than was admitted would let the run
         # escape its own admission. A launch that moved nothing re-lands the swept mirror alone.
-        campaigns = session.store.campaigns
-        if campaigns.read_spend_ceiling(session.hop) != limits.operator:
-            campaigns.write_spend_ceiling(session.hop, limits.operator)
+        if standing.ceiling != limits.operator:
+            campaigns.write_run_limits(session.hop, limits.operator, rounds=rounds)
         else:
-            write_spend_caps(launch_cycle_dir, limits.operator)
+            write_run_limits_mirror(launch_cycle_dir, limits.operator, rounds=rounds)
 
     # After the mirror, so the gate's probes read the same ceiling the config carries, and
     # before the origin pass, which spends without one otherwise.

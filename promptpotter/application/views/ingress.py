@@ -129,10 +129,9 @@ def _l1_generate_enter(d: dict[str, Any], ctx: ViewContext) -> RoundStartView:
     for field_name, value in (d.get("parent_prompt_fields") or {}).items():
         if value:
             new_flat[field_name] = str(value)
-    for field_name, value in (d.get("parent_task_context") or {}).items():
-        if value:
-            new_flat[f"tc.{field_name}"] = str(value)
     ctx.current_sp_flat = new_flat
+    # Per round, not only at INIT: `change-run-limits` moves the cap between rounds.
+    ctx.max_rounds = d["max_rounds"] or 0
 
     return RoundStartView(
         round=ctx.round_num,

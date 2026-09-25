@@ -113,6 +113,7 @@
       },
       "ActiveSessionResponse": {
         "additionalProperties": false,
+        "description": "The tenant's latest launch — not the set of live runs, which is `run_phase` on `/cycles`.",
         "properties": {
           "campaign_id": {
             "anyOf": [
@@ -123,7 +124,7 @@
                 "type": "null"
               }
             ],
-            "description": "Active campaign id (pinned by the webapp); null when no session is active.",
+            "description": "Campaign of the latest launch; null when no session is active.",
             "title": "Campaign Id"
           },
           "cycle_id": {
@@ -135,7 +136,7 @@
                 "type": "null"
               }
             ],
-            "description": "Active cycle id within the campaign; null when no session is active.",
+            "description": "Cycle of the latest launch; null when no session is active.",
             "title": "Cycle Id"
           },
           "session_id": {
@@ -549,7 +550,7 @@
           },
           "backend_type": {
             "default": "",
-            "description": "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN on the manifest at mint. The webapp's ONE test for a self-optimizing (L4) campaign — it renders the 'inner loops' disclosure and the pp-self panel variants on it. It no longer goes stale when the dataset is re-pointed, and no longer empties when the dataset dir is deleted: a campaign outlives its dataset dir, and what it RAN is a fact about the campaign. Empty only on a manifest `restamp` has not reached.",
+            "description": "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN on the manifest at mint. The webapp's ONE test for a self-optimizing (L4) campaign — it renders the 'inner loops' disclosure and the pp-self panel variants on it. Re-pointing or deleting the dataset dir never changes it: a campaign outlives its dataset dir, and what it RAN is a fact about the campaign.",
             "title": "Backend Type",
             "type": "string"
           },
@@ -892,7 +893,7 @@
           },
           "backend_type": {
             "default": "",
-            "description": "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN on the manifest at mint. The webapp's ONE test for a self-optimizing (L4) campaign — it renders the 'inner loops' disclosure and the pp-self panel variants on it. It no longer goes stale when the dataset is re-pointed, and no longer empties when the dataset dir is deleted: a campaign outlives its dataset dir, and what it RAN is a fact about the campaign. Empty only on a manifest `restamp` has not reached.",
+            "description": "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN on the manifest at mint. The webapp's ONE test for a self-optimizing (L4) campaign — it renders the 'inner loops' disclosure and the pp-self panel variants on it. Re-pointing or deleting the dataset dir never changes it: a campaign outlives its dataset dir, and what it RAN is a fact about the campaign.",
             "title": "Backend Type",
             "type": "string"
           },
@@ -3659,7 +3660,7 @@
           },
           "sp_hash": {
             "default": "",
-            "description": "THE address of this candidate's measurements — the searchpoint id the archive stores on every row it wrote, under its own spelling `prompt_fields_id`. Neither `id` (a per-individual `uuid4`) nor `label` joins to a row; this does. Served rather than derived: it hashes the node configs INCLUDING the rendered prompt, which no served field carries, so a client recomputing it would match nothing and see no error. Empty on a course, on a candidate minted before the stamp existed, and on one that measured nothing. NOT unique — one searchpoint scored on two subsets is one `sp_hash` over two runs, and a re-proposed configuration shares it across rounds.",
+            "description": "THE address of this candidate's measurements — the searchpoint id the archive stores on every row it wrote, under its own spelling `prompt_fields_id`. Neither `id` (a per-individual `uuid4`) nor `label` joins to a row; this does. Served rather than derived: it hashes the node configs INCLUDING the rendered prompt, which no served field carries, so a client recomputing it would match nothing and see no error. Empty on a course and on a candidate that measured nothing. NOT unique — one searchpoint scored on two subsets is one `sp_hash` over two runs, and a re-proposed configuration shares it across rounds.",
             "title": "Sp Hash",
             "type": "string"
           },
@@ -4435,6 +4436,7 @@
               "backend",
               "dataset",
               "campaign",
+              "model_floor",
               "seed",
               "evolved",
               "identity",
@@ -5078,7 +5080,7 @@
               "round_warning",
               "ruler",
               "snapshot",
-              "spend_ceiling",
+              "run_limits",
               "spend_hold",
               "spend_tombstone",
               "token_usage",
@@ -5181,6 +5183,7 @@
               "backend",
               "dataset",
               "campaign",
+              "model_floor",
               "seed",
               "evolved",
               "identity",
@@ -5388,7 +5391,7 @@
       },
       "SubjectReading": {
         "additionalProperties": false,
-        "description": "One subject, read under the selected metric — its identity, its per-cell values and the one\nestimate they merge to. ONE row, because a roster row and a metric reading that live in separate\nlists can disagree about the same subject, and under the default metric they held the same\nnumber reached two ways.\n\n``values`` is keyed by the cell's QUERY, the identity that survives across campaigns; a cell the\nmetric cannot read is ABSENT from it and counted in ``n_unscorable`` rather than scored — the\ntwo absences are different facts and a surface renders them as different glyphs.\n``ci_lo``/``ci_hi`` are ``None`` below two scored cells — one reading has no spread, and a\nbracket drawn from it is a fiction.",
+        "description": "One subject, read under the selected metric — its identity, its per-cell values and the one\nestimate they merge to. ONE row, because a roster row and a metric reading that live in separate\nlists can disagree about the same subject, and under the default metric they held the same\nnumber reached two ways.\n\n``values`` is keyed by the cell's QUERY, the identity that survives across campaigns; a cell the\nmetric cannot read is ABSENT from it and named in ``unscorable_cells`` rather than scored — the\ntwo absences are different facts and a surface renders them as different glyphs.\n``ci_lo``/``ci_hi`` are ``None`` below two scored cells — one reading has no spread, and a\nbracket drawn from it is a fiction.",
         "properties": {
           "ability": {
             "anyOf": [
@@ -8559,7 +8562,7 @@
     },
     "/api/v1/sessions/active": {
       "get": {
-        "description": "The caller-tenant's active-session pointer, null-valued while nothing runs.\n\n**\"No active session\" is a STEADY STATE, not a missing resource** — nothing has\nbeen launched yet, or the workspace was cleared — so it answers 200 with null ids\nexactly as :class:`CyclesResponse` does, and this route has no 404. The webapp\npolls it every 2 s from boot, and a 404 here is wrong twice over: it minted a\nwarning per tick for the whole idle life of the server, and 404 is the client's\n``gone`` classification, which means \"stop, this address is dead\". Pointers are\nper-tenant on disk; unauthed callers are rejected by ``resolve_identity`` before\n``StoresDep`` resolves.",
+        "description": "The caller-tenant's active-session pointer: its LATEST launch from any entry point, the\nterminal's default ``resume`` target and what an unpinned webapp follows. Several runs can be\nlive at once, and each is a ``/cycles`` entry whose ``run_phase`` says so — never this route.\n\n**\"No active session\" is a STEADY STATE, not a missing resource** — nothing has\nbeen launched yet, or the workspace was cleared — so it answers 200 with null ids\nexactly as :class:`CyclesResponse` does, and this route has no 404. The webapp\npolls it every 2 s from boot, and a 404 here is wrong twice over: it minted a\nwarning per tick for the whole idle life of the server, and 404 is the client's\n``gone`` classification, which means \"stop, this address is dead\". Pointers are\nper-tenant on disk; unauthed callers are rejected by ``resolve_identity`` before\n``StoresDep`` resolves.",
         "operationId": "get_active_session_api_v1_sessions_active_get",
         "responses": {
           "200": {

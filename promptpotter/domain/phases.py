@@ -182,7 +182,8 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         StopOutcome.SUCCESS,
         False,
         False,
-        "Raise `max_rounds` and `resume` if the curve was still moving; else read `review.md`.",
+        "`set-limits --max-rounds <more>` then `resume` if the curve was still moving; else read "
+        "`review.md`.",
     ),
     StopReason.TARGET_HIT: StopReasonInfo("Target reached", StopOutcome.SUCCESS, False, False, ""),
     StopReason.LIVES_EXHAUSTED: StopReasonInfo(
@@ -208,7 +209,8 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         StopOutcome.PAUSED,
         False,
         False,
-        "Give the cut cells room (`Connector.cell_envelope_s`) before `resume`, or "
+        "Give the cut cells room (`Connector.cell_envelope_s`, or the backend deadline their "
+        "rows name) before `resume`, or "
         "`optimization.panel_gate: off` to elect on the holed panel.",
     ),
     StopReason.ABORT: StopReasonInfo("Escalation abort", StopOutcome.HALTED, False, False, ""),
@@ -220,14 +222,14 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         StopOutcome.HALTED,
         True,
         False,
-        "`set-budget --max-usd <above what is already spent>` then `resume`.",
+        "`set-limits --max-usd <above what is already spent>` then `resume`.",
     ),
     StopReason.TOKEN_BUDGET: StopReasonInfo(
         "Token budget reached",
         StopOutcome.HALTED,
         True,
         False,
-        "`set-budget --max-tokens <above what is already spent>` then `resume`.",
+        "`set-limits --max-tokens <above what is already spent>` then `resume`.",
     ),
     StopReason.ORIGIN_GATE: StopReasonInfo(
         "Origin gate (unhealthy origin)", StopOutcome.HALTED, False, False, ""
@@ -240,7 +242,7 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         "The unreached cell is a hole, not a score: restore the backend or the network it "
         "needs, then `resume` re-measures it.",
     ),
-    # Not SPEND_BUDGET: that ceiling is ours and `set-budget` moves it. This one is the provider's.
+    # Not SPEND_BUDGET: that ceiling is ours and `set-limits` moves it. This one is the provider's.
     StopReason.PROVIDER_CREDIT: StopReasonInfo(
         "Provider out of credit",
         StopOutcome.HALTED,

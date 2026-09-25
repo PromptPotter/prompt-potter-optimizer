@@ -228,7 +228,7 @@ not backend-supplied.
   owns why — and holds that ceiling as a reservation
   while it runs — [ADR-0003](../adr/0003-spend-and-tenancy.md)'s D1 owns why, including the overrun
   the account never sees. Every path that sets a ceiling composes there,
-  `change-spend-budget` included: it writes the cycle's standing ceiling, whose mirror the run's
+  `change-run-limits` included: it writes the cycle's standing ceiling, whose mirror the run's
   gate prefers over the admitted cap mid-flight, so an unclamped one is the way around this whole section.
   `oidc.py::resolve_access_state` (re-read live) answers
   `blocked` only for an email the operator has revoked; a `blocked` account resolves to an EMPTY

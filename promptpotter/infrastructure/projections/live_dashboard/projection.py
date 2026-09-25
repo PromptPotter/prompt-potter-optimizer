@@ -70,9 +70,9 @@ from promptpotter.infrastructure.projections.live_state import (
     roll_p_best_at_round_complete,
 )
 from promptpotter.infrastructure.runtime_flags import (
+    armed_run_limits,
     effective_lookahead,
     read_sample_lookahead,
-    read_spend_caps,
     sample_lookahead_auto,
 )
 from promptpotter.infrastructure.store.io import write_json
@@ -332,7 +332,7 @@ class LiveDashboardProjection(Projection):
         )
         # Stamped at WIRING, not on a phase event: origin scoring runs before INIT fires, and the
         # browser reads the `1` default as "this backend holds one sample" and disables the
-        # control. After `resume_from` — the live connector outranks a pair an older build wrote.
+        # control. After `resume_from` — the live connector outranks a pair the prior run wrote.
         if max_cells_in_flight is not None:
             view.state.max_cells_in_flight = max_cells_in_flight
         if measured_unit is not None:
@@ -435,9 +435,8 @@ class LiveDashboardProjection(Projection):
         if record.phase == "control":
             # The SOLE writer of `declared_phase` — and nothing here writes `run_phase`, which is
             # wire-only and derived at the read. Flushing bumps the mtime, so the 304-cached route
-            # re-derives immediately. TERMINAL arrives here like every other phase since the stop
-            # became a record; it used to be pushed in by `mark_stopped`, so a fold of the ledger
-            # reported a stopped cycle as still running.
+            # re-derives immediately. TERMINAL arrives here like every other phase, so a fold
+            # of the ledger reports a stopped cycle as stopped.
             event_phase = RunPhase(record.event)
             if self.state.declared_phase == event_phase:
                 return
@@ -523,7 +522,7 @@ class LiveDashboardProjection(Projection):
                 rounds_list.sort(key=lambda r: r.round)
                 self.state.rounds = rounds_list
                 # AFTER the append, so round 0's summary is present when it computes its first
-                # value. Both ends come off the subset-invariant `cumulative_theta`, so the
+                # value. Both ends come off the subset-invariant `ability`, so the
                 # difference is a real lift rather than the luckiest draw minus the fullest one.
                 self.state.ability_delta = _ability_delta(self.state.rounds)
                 self._flush_pending_persist()
@@ -985,16 +984,11 @@ class LiveDashboardProjection(Projection):
             overlap=self._buffer.overlap,
         )
         # The ARMED ceiling, never the one INIT declared. `_build_budget_gate` prefers
-        # `spend_cap.json` over the admitted cap, so serving the stamped value left every
+        # `run_limits.json` over the admitted cap, so serving the stamped value left every
         # reader — the budget control's prefill, the run strip — quoting a number nothing would
         # enforce. Overlaid at the single write, so no reader has to join two sources.
         if s.run_limits is not None:
-            armed_usd, armed_tokens = read_spend_caps(self.cycle_dir)
-            armed: dict[str, float | int] = {}
-            if armed_usd is not None:
-                armed["spend_budget_usd"] = armed_usd
-            if armed_tokens is not None:
-                armed["token_budget"] = armed_tokens
+            armed = armed_run_limits(self.cycle_dir)
             if armed:
                 s.run_limits = s.run_limits.model_copy(update=armed)
         # Same shape as the spend caps above, and for the same narrow purpose: keeping the FILE

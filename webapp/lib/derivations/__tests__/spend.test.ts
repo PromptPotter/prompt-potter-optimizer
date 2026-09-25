@@ -79,7 +79,7 @@ describe("readSpend prefix-cache shares", () => {
   });
 });
 
-describe("roundCosts against a dashboard an older build wrote", () => {
+describe("roundCosts over a round missing a bucket", () => {
   it("drops a bucket that round's file never carried", () => {
     // `dashboard.json` is served VERBATIM, so a round can lack a bucket the generated type
     // declares; reading it through the annotation throws where no type check can see.

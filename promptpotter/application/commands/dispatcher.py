@@ -18,7 +18,7 @@ from promptpotter.application.commands.payloads import (
     ArchiveCampaignPayload,
     CampaignPayload,
     CancelQueuedRunPayload,
-    ChangeSpendBudgetPayload,
+    ChangeRunLimitsPayload,
     CheckinPayload,
     CleanupEmptyCyclesPayload,
     CommandAcceptedBody,
@@ -56,7 +56,7 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
 from promptpotter.application.jobs.quota import (
     admit_spend,
     clamp_budget_change,
-    hold_ceiling,
+    hold_run_limits,
     set_concurrent_cycles,
 )
 from promptpotter.application.jobs.registry import JobRegistry
@@ -75,7 +75,7 @@ from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.launch_limits import LaunchLimits, RoundsCap
 from promptpotter.domain.pipeline_overlay import steers_disallowed_model
 from promptpotter.domain.results import parse_candidate_label
 from promptpotter.domain.run_records import CommandAckRecord, CommandRecord, CycleSeed
@@ -201,7 +201,7 @@ CAP_FOR_KIND: dict[str, str] = {
     "start-run": CAMPAIGN_RUN_CAP,
     "fork-cycle": CAMPAIGN_RUN_CAP,
     "start-checkin": CAMPAIGN_RUN_CAP,
-    "change-spend-budget": CAMPAIGN_BUDGET_CAP,
+    "change-run-limits": CAMPAIGN_BUDGET_CAP,
     "mint-campaign": CAMPAIGN_CREATE_CAP,
     # Leaving the queue is the same authority as joining it — and the OWNER check is stricter
     # still, enforced in `JobRegistry.cancel_queued`, so a delegate holding `campaign.run`
@@ -629,9 +629,10 @@ class CommandDispatcher:
         if isinstance(payload, OriginGateDecisionPayload):
             decision = payload.decision
             return Applier(lambda: self._apply_origin_gate_decision(hop, decision))
-        if isinstance(payload, ChangeSpendBudgetPayload):
+        if isinstance(payload, ChangeRunLimitsPayload):
             change = BudgetChange(payload.max_usd, payload.max_tokens)
-            return Applier(lambda: self._apply_change_spend_budget(hop, change))
+            rounds = payload.rounds_cap
+            return Applier(lambda: self._apply_change_run_limits(hop, change, rounds))
         if isinstance(payload, StartRunPayload):
             run = payload
 
@@ -755,19 +756,21 @@ class CommandDispatcher:
             hop=hop,
         )
 
-    async def _apply_change_spend_budget(self, hop: CycleHop, change: BudgetChange) -> None:
-        """The round loop's BudgetGate re-reads the moved ceiling every clean round. A ``None`` arm
-        leaves that ceiling untouched; ``0`` halts at the next round boundary. Both arms compose
-        against the account first, because the run's gate prefers the standing ceiling's mirror over
-        the cap the launch admitted — unclamped, raising one here is the way around the host-wallet
-        gate. The next launch declares the standing ceiling again and re-admits it."""
-        registry = self._job_registry
-        if registry is None:
-            raise ServiceUnavailableError(
-                "job registry not initialised", code="job_registry_unavailable"
-            )
-        clamped = await asyncio.to_thread(self._clamp_to_account_ceilings, hop, registry, change)
-        hold_ceiling(job_registry=registry, stores=self._stores, hop=hop, change=clamped)
+    async def _apply_change_run_limits(
+        self, hop: CycleHop, change: BudgetChange, rounds: RoundsCap | None
+    ) -> None:
+        """The round loop re-reads the moved ceiling every clean round. A ``None`` arm leaves that
+        ceiling untouched; ``0`` halts at the next round boundary. Both spend arms compose against
+        the account first, because the run's gate prefers the standing ceiling's mirror over the cap
+        the launch admitted — unclamped, raising one here is the way around the host-wallet gate.
+        The next launch declares the standing ceiling again and re-admits it. A round cap is no
+        money, so a rounds-only change skips the wallet read, whose contention would refuse it."""
+        registry = self._require_job_registry()
+        if change != BudgetChange(None, None):
+            change = await asyncio.to_thread(self._clamp_to_account_ceilings, hop, registry, change)
+        hold_run_limits(
+            job_registry=registry, stores=self._stores, hop=hop, change=change, rounds=rounds
+        )
 
     async def _apply_mint_campaign(self, payload: MintCampaignPayload) -> None:
         """The 202 returns once the manifest + root cycle index are written — or, when the box is

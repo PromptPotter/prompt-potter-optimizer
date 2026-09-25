@@ -8,7 +8,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
+from promptpotter.domain.launch_limits import RoundsCap
 from promptpotter.domain.phases import RunPhase
+from promptpotter.domain.run_records import RunLimitsRecord
 from promptpotter.domain.spend import BudgetChange
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
 from promptpotter.infrastructure.store.layout import CycleLayout
@@ -94,47 +98,74 @@ def clear_run_control_flags(cycle_dir: Path) -> None:
     re-answers the next one. An ``auto`` look-ahead answered no gesture, so it stays until toggled
     off.
 
-    ``spend_cap.json`` goes too, and loses nothing: it only MIRRORS the ledger's standing ceiling,
+    ``run_limits.json`` goes too, and loses nothing: it only MIRRORS the ledger's standing ceiling,
     which the launch has already declared and admitted, and re-lands the mirror at the value it
     holds (`runner/entry.py::_prepare_run`)."""
     layout = CycleLayout(cycle_dir)
     layout.pause_flag.unlink(missing_ok=True)
     layout.skip_flag.unlink(missing_ok=True)
-    layout.spend_cap.unlink(missing_ok=True)
+    layout.run_limits.unlink(missing_ok=True)
     spend_sample_lookahead(cycle_dir)
 
 
-def write_spend_caps(cycle_dir: Path, change: BudgetChange) -> None:
-    """Land the POLLED MIRROR of the cycle's standing operator ceiling, an unset arm omitted.
+def write_run_limits_mirror(
+    cycle_dir: Path, change: BudgetChange, *, rounds: RoundsCap | None
+) -> None:
+    """Land the POLLED MIRROR of the cycle's standing operator ceiling, an unset arm omitted — so
+    ``max_rounds: null`` (a lifted round cap) and no ``max_rounds`` key are two answers.
 
     The mirror has one job: carrying a ceiling moved in another process to a run already in
-    flight, read on every paid call (`runner/entry.py::_build_budget_gate`) and every served
-    dashboard (:func:`overlay_armed_controls`), where rescanning the ledger each time costs the
-    whole log. What the operator DECLARED is the ledger's ``SpendCeilingRecord`` alone —
-    `CampaignStore.write_spend_ceiling` writes both, and nothing else declares one."""
-    path = CycleLayout(cycle_dir).spend_cap
+    flight, read on every paid call (`runner/entry.py::_build_budget_gate`), every round boundary
+    (`runner/loop.py`) and every served dashboard (:func:`overlay_armed_controls`), where
+    rescanning the ledger each time costs the whole log. What the operator DECLARED is the ledger's
+    ``RunLimitsRecord`` alone — `CampaignStore.write_run_limits` writes both, and nothing
+    else declares one."""
+    path = CycleLayout(cycle_dir).run_limits
     path.parent.mkdir(parents=True, exist_ok=True)
-    caps: dict[str, float | int] = {}
+    caps: dict[str, float | int | None] = {}
     if change.usd is not None:
         caps["max_usd"] = change.usd
     if change.tokens is not None:
         caps["max_tokens"] = change.tokens
+    if rounds is not None:
+        caps["max_rounds"] = rounds.max_rounds
     write_json(path, caps)
 
 
-def read_spend_caps(cycle_dir: Path) -> BudgetChange:
+def read_run_limits_mirror(cycle_dir: Path) -> RunLimitsRecord:
     """The mirrored ceilings, ``None`` per arm when absent, unreadable or the wrong type — for the
-    pollers only; a launch reads the ledger (`CampaignStore.read_spend_ceiling`).
-    **The one place that knows this file's shape.**"""
-    data = read_json_tolerant(CycleLayout(cycle_dir).spend_cap)
+    pollers only; a launch reads the ledger (`CampaignStore.read_run_limits`). The one place that
+    knows this file's shape."""
+    data = read_json_tolerant(CycleLayout(cycle_dir).run_limits)
     if not isinstance(data, dict):
-        return BudgetChange(None, None)
+        return RunLimitsRecord()
     usd = data.get("max_usd")
     tokens = data.get("max_tokens")
-    return BudgetChange(
-        float(usd) if isinstance(usd, int | float) and not isinstance(usd, bool) else None,
-        int(tokens) if isinstance(tokens, int) and not isinstance(tokens, bool) else None,
+    rounds = None
+    if "max_rounds" in data:
+        try:
+            rounds = RoundsCap(max_rounds=data["max_rounds"])
+        except ValidationError:
+            rounds = None
+    return RunLimitsRecord(
+        usd=float(usd) if isinstance(usd, int | float) and not isinstance(usd, bool) else None,
+        tokens=int(tokens) if isinstance(tokens, int) and not isinstance(tokens, bool) else None,
+        rounds=rounds,
     )
+
+
+def armed_run_limits(cycle_dir: Path) -> dict[str, float | int | None]:
+    """The mirror as ``run_limits`` updates, an unmoved arm omitted — the ARMED ceilings, which
+    both writers of a dashboard body lay over the ones INIT declared."""
+    mirror = read_run_limits_mirror(cycle_dir)
+    armed: dict[str, float | int | None] = {}
+    if mirror.usd is not None:
+        armed["spend_budget_usd"] = mirror.usd
+    if mirror.tokens is not None:
+        armed["token_budget"] = mirror.tokens
+    if mirror.rounds is not None:
+        armed["max_rounds"] = mirror.rounds.max_rounds
+    return armed
 
 
 def overlay_armed_controls(body: dict[str, Any], cycle_dir: Path) -> None:
@@ -152,11 +183,7 @@ def overlay_armed_controls(body: dict[str, Any], cycle_dir: Path) -> None:
     moment's is a fabrication. Call it after ``run_phase`` is set on the body."""
     limits = body.get("run_limits")
     if isinstance(limits, dict):
-        armed_usd, armed_tokens = read_spend_caps(cycle_dir)
-        if armed_usd is not None:
-            limits["spend_budget_usd"] = armed_usd
-        if armed_tokens is not None:
-            limits["token_budget"] = armed_tokens
+        limits.update(armed_run_limits(cycle_dir))
     # Clamped against the SERVED ceiling, so this is the depth the walk will hold rather than the
     # depth someone asked for. `max_cells_in_flight` is a WIRING_FIELD stamped at INIT:exit, so it
     # is already in the body being corrected. Unclamped, an out-of-range request rendered as fact —
@@ -285,15 +312,16 @@ def run_phase_validator_epoch(cycle_dir: Path, *, fresh_s: float = RUN_FRESH_S) 
 
 __all__ = [
     "RUN_FRESH_S",
+    "armed_run_limits",
     "clear_run_control_flags",
     "derive_run_phase",
     "is_checkin",
     "is_paused",
+    "read_run_limits_mirror",
     "read_sample_lookahead",
-    "read_spend_caps",
     "run_phase_validator_epoch",
     "sample_lookahead_auto",
     "spend_sample_lookahead",
+    "write_run_limits_mirror",
     "write_sample_lookahead",
-    "write_spend_caps",
 ]

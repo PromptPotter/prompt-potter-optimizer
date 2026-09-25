@@ -1,5 +1,6 @@
-"""Round loop — generate → score → escalate → stop. Pause and budget are polled EVERY clean round, so ``pause-cycle``
-exits resumably and ``change-spend-budget`` moves a ceiling mid-flight without a restart."""
+"""Round loop — generate → score → escalate → stop. Pause, budget and the round cap are polled
+EVERY clean round, so ``pause-cycle`` exits resumably and ``change-run-limits`` moves a ceiling
+mid-flight without a restart."""
 
 from __future__ import annotations
 
@@ -41,11 +42,27 @@ from promptpotter.domain.phases import (
 from promptpotter.domain.run_records import ErrorRecord, PhaseRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.llm.telemetry import emit_error_record
+from promptpotter.infrastructure.runtime_flags import read_run_limits_mirror
 
 logger = logging.getLogger(__name__)
 
 
 HARD_CAP: int = 100  # runaway-loop guard for max_rounds=None + non-converging L2/L3
+
+
+def set_round_cap(config: CampaignConfig, max_rounds: int | None) -> CampaignConfig:
+    return config.model_copy(
+        update={"optimization": config.optimization.model_copy(update={"max_rounds": max_rounds})}
+    )
+
+
+def _armed_round_cap(session: Session, config: CampaignConfig) -> int | None:
+    armed = (
+        read_run_limits_mirror(session.store.campaigns.cycle_dir(session.hop)).rounds
+        if session.state.cycle_id
+        else None
+    )
+    return config.optimization.max_rounds if armed is None else armed.max_rounds
 
 
 async def run_round_loop(
@@ -60,14 +77,13 @@ async def run_round_loop(
     stop_after_rounds: int | None = None,
     budget_gate: BudgetGate,
 ) -> tuple[StopReason, ErrorRecord | None]:
-    """The round loop. The budget gate re-reads its caps every clean round, so ``change-spend-budget`` mutates a ceiling
-    mid-flight. Returns ``(stop_reason, error)`` — ``error`` is set so the caller need not re-read the ledger."""
+    """The round loop. The budget gate and the round cap are re-read every clean round, so
+    ``change-run-limits`` moves either mid-flight. Returns ``(stop_reason, error)`` — ``error`` is
+    set so the caller need not re-read the ledger."""
     opt = config.optimization
     # resumed_from_round = next L1 round (fresh=1); clean_rounds = lifetime L1 completed (origin not counted).
     round_num = session.state.resumed_from_round
     clean_rounds = max(session.state.resumed_from_round - 1, 0)
-    # None ⇒ unlimited; HARD_CAP is the real ceiling either way.
-    max_rounds = opt.max_rounds if opt.max_rounds is not None else HARD_CAP
     # `step-cycle`: advance exactly this many rounds in place then auto-pause (stays
     # resumable, so the operator can step again). Bounded by rounds completed THIS
     # invocation (delta off `clean_rounds`), reusing the pause stop below rather than
@@ -75,30 +91,27 @@ async def run_round_loop(
     clean_rounds_at_start = clean_rounds
 
     try:
-        # Origin is round 0 — emit it through the standard completion path before
-        # the L1 loop on a fresh start (clean_rounds == 0) when it isn't already on
-        # disk. Resume (round 0 present) and divergence forks (clean_rounds > 0,
-        # round 0 inherited from the parent lane) skip it.
+        # Until an L1 round closes, every launch closes round 0 from the origin IT measured and
+        # gates on that verdict — a round-0 file left by a stopped run has passed no gate.
         if not diag and clean_rounds == 0:
-            round0_present = bool(
-                session.state.cycle_id and session.store.campaigns.load_round_file(session.hop, 0)
-            )
-            if not round0_present:
-                await emit_origin_round(cycle, session, cb)
-                # Origin gate: a non-healthy round-0 verdict holds at an interactive
-                # checkpoint before L1 instead of burning a campaign against a broken
-                # floor (the common case while a dev brings up a new connector). The
-                # operator decides — rescore (re-measure force-fresh after a backend
-                # fix) / proceed (override) / abort — across webapp + CLI + notebook.
-                # ``None`` ⇒ proceed into L1; a StopReason ⇒ end the cycle.
-                if origin_gate_tripped(cycle.origin_round.health, opt.origin_gate) is not None:
-                    gate_stop = await run_origin_gate(
-                        cycle, dataset, config, session, cb, opt.origin_gate
-                    )
-                    if gate_stop is not None:
-                        return gate_stop, None
+            await emit_origin_round(cycle, session, cb)
+            if origin_gate_tripped(cycle.origin_round.health, opt.origin_gate) is not None:
+                gate_stop = await run_origin_gate(
+                    cycle, dataset, config, session, cb, opt.origin_gate
+                )
+                if gate_stop is not None:
+                    return gate_stop, None
 
-        while clean_rounds < max_rounds and round_num < HARD_CAP:
+        while True:
+            # Set on the config every reader holds (the optimizer's "round N of M", the result's
+            # round budget), not merely compared, so a cap moved mid-flight reads one way.
+            cap = _armed_round_cap(session, config)
+            if cap != config.optimization.max_rounds:
+                config = cycle.config = set_round_cap(config, cap)
+            # None ⇒ unlimited; HARD_CAP is the real ceiling either way.
+            max_rounds = cap if cap is not None else HARD_CAP
+            if clean_rounds >= max_rounds or round_num >= HARD_CAP:
+                break
             # Pause cooperation: exit cleanly at the round boundary when the
             # operator set the pause flag. The scoring phase (run_walks)
             # checks the same predicate, so a mid-round pause lands once the
@@ -275,4 +288,4 @@ async def run_round_loop(
         )
 
 
-__all__ = ["HARD_CAP", "run_round_loop"]
+__all__ = ["HARD_CAP", "run_round_loop", "set_round_cap"]

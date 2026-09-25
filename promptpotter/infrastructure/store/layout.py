@@ -220,6 +220,11 @@ class CycleLayout:
         """
         return self.cycle_dir / "optimized.md"
 
+    @property
+    def readout(self) -> Path:
+        """The terminal readout ANSI-stripped, every launch appended — ``LiveDisplay``'s mirror."""
+        return self.cycle_dir / "readout.log"
+
     # --- resume state (heavy: dropped by ``delete --keep-results``) ---
     @property
     def rounds(self) -> Path:
@@ -284,7 +289,7 @@ class CycleLayout:
     @property
     def sample_lookahead(self) -> Path:
         # Not a `.flag`: it carries the COUNT the operator armed, so presence alone no longer
-        # answers what the walk should do. Peer of `spend_cap` — same write / poll / consume
+        # answers what the walk should do. Peer of `run_limits` — same write / poll / consume
         # shape, same JSON body.
         return self.runtime / "sample_lookahead.json"
 
@@ -293,8 +298,8 @@ class CycleLayout:
         return self.runtime / "gate_decision.json"
 
     @property
-    def spend_cap(self) -> Path:
-        return self.runtime / "spend_cap.json"
+    def run_limits(self) -> Path:
+        return self.runtime / "run_limits.json"
 
 
 def _cycle_report_names() -> frozenset[str]:

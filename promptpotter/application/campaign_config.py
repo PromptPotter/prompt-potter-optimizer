@@ -104,7 +104,7 @@ class Knob:
 
 
 class SelectionMechanisms(StrictModel):
-    """Turn BOTH off to freeze the sample basis at campaign start: one fixed subset, fixed order,
+    """Turn it off to freeze the sample basis at campaign start: one fixed subset, fixed order,
     identical for every round and candidate."""
 
     per_round_resubset: Annotated[bool, Knob(Scope.POLICY, Estimand.SELECTION, Estimand.GATE)] = (
@@ -376,7 +376,7 @@ class OptimizationConfig(StrictModel):
         description=(
             "Halt this cycle when cumulative spend (optimizer + backend) ≥ this "
             "value in USD. The campaign's own layer of the run's budget: a fork seed, "
-            "a standing ``set-budget`` and a launch flag (CLI ``--spend-budget``) each "
+            "a standing ``set-limits`` and a launch flag (CLI ``--spend-budget``) each "
             "SET over it, raise or lower, and the account admits the result whole or "
             "refuses the launch. Default ≈ a 5-round run on the free-backend setup "
             "(measured ~$0.019) with headroom; raise ``max_rounds`` and let this be "

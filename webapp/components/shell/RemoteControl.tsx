@@ -11,7 +11,7 @@ import { useDashboard } from "@/lib/hooks/useDashboard";
 import { useLineageTree } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
 import { RunControlButton } from "@/components/dashboard/control/RunControlButton";
-import { SpendBudgetControl } from "@/components/dashboard/control/SpendBudgetControl";
+import { RunLimitsControl } from "@/components/dashboard/control/RunLimitsControl";
 
 // The global remote, bottom-fixed on every tab: the strip carries only what it ACTS on, every
 // other number is a panel row, and WHERE the run is stays RunMasthead's.
@@ -325,9 +325,10 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
           </div>
           <div className="remote-panel-section">
             <div className="section-title">Finishing criteria</div>
-            <SpendBudgetControl
+            <RunLimitsControl
               currentBudgetUsd={budgetUsd}
               currentBudgetTokens={budgetTokens}
+              currentMaxRounds={dash?.run_limits?.max_rounds ?? null}
               usedUsd={usedUsd}
               usedTokens={totalTokens}
             />

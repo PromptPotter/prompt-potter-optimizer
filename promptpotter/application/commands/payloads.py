@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, SerializerFunctionWrapHandler, model_serializer, model_validator
 
 from promptpotter.application.datasets.draft_patch import EditDraftPatch
 from promptpotter.application.runner.origin_gate import GateDecision
 from promptpotter.domain.command_kinds import ALL_DISPATCHED_KINDS
-from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.launch_limits import LaunchLimits, RoundsCap
 from promptpotter.domain.strict_model import StrictModel, WireFloat, WireInt
 from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.shared.errors import PayloadInvalidError
@@ -88,21 +88,39 @@ class OriginGateDecisionPayload(CyclePayload):
     decision: GateDecision
 
 
-class ChangeSpendBudgetPayload(CyclePayload):
+class ChangeRunLimitsPayload(CyclePayload):
     max_usd: WireFloat | None = Field(default=None, ge=0.0)
     max_tokens: WireInt | None = Field(default=None, ge=0)
+    # Absent leaves the round cap alone and an explicit `null` lifts it, so only this arm reads
+    # `model_fields_set` — `rounds_cap` is the one reading of the difference.
+    max_rounds: WireInt | None = Field(default=None, ge=0)
+
+    @property
+    def rounds_cap(self) -> RoundsCap | None:
+        if "max_rounds" not in self.model_fields_set:
+            return None
+        return RoundsCap(max_rounds=self.max_rounds)
 
     @model_validator(mode="after")
-    def _at_least_one_ceiling(self) -> ChangeSpendBudgetPayload:
-        """An ABSENT arm means "leave it untouched", so both absent is a command that asks for
-        nothing and would ack ``applied`` having moved neither ceiling. Raised as the domain error
+    def _at_least_one_ceiling(self) -> ChangeRunLimitsPayload:
+        """An ABSENT arm means "leave it untouched", so all absent is a command that asks for
+        nothing and would ack ``applied`` having moved no ceiling. Raised as the domain error
         rather than a ``ValueError``, which Pydantic would wrap — this one propagates unwrapped, so
         the CLI building the model directly gets the same 422-shaped refusal the route does."""
-        if self.max_usd is None and self.max_tokens is None:
+        if self.max_usd is None and self.max_tokens is None and self.rounds_cap is None:
             raise PayloadInvalidError(
-                "change-spend-budget requires at least one of max_usd / max_tokens."
+                "change-run-limits requires at least one of max_usd / max_tokens / max_rounds."
             )
         return self
+
+    @model_serializer(mode="wrap")
+    def _omit_unmoved_rounds(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """The ``CommandRecord`` carries this dump; a ``null`` there would record a lift nobody
+        asked for."""
+        data: dict[str, Any] = handler(self)
+        if "max_rounds" not in self.model_fields_set:
+            data.pop("max_rounds", None)
+        return data
 
 
 class StartRunPayload(CyclePayload, LaunchLimits):
@@ -258,7 +276,7 @@ PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {
     "pause-cycle": PauseCyclePayload,
     "set-sample-lookahead": SetSampleLookaheadPayload,
     "origin-gate-decision": OriginGateDecisionPayload,
-    "change-spend-budget": ChangeSpendBudgetPayload,
+    "change-run-limits": ChangeRunLimitsPayload,
     "start-run": StartRunPayload,
     "step-cycle": StepCyclePayload,
     "verify-candidate": VerifyCandidatePayload,

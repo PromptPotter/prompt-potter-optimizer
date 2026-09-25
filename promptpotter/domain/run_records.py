@@ -6,9 +6,10 @@ from typing import Annotated, Any, Literal
 
 from pydantic import ConfigDict, Field, model_validator
 
+from promptpotter.domain.launch_limits import RoundsCap
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler, ThetaCaveat
-from promptpotter.domain.spend import TokenUsageKind
+from promptpotter.domain.spend import BudgetChange, TokenUsageKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
@@ -34,8 +35,8 @@ __all__ = [
     "ResumeCheckpointRecord",
     "RoundWarningKind",
     "RoundWarningRecord",
+    "RunLimitsRecord",
     "SnapshotRecord",
-    "SpendCeilingRecord",
     "SpendHoldRecord",
     "TokenUsageRecord",
     "WallClock",
@@ -144,8 +145,7 @@ class TokenUsageRecord(StrictModel):
     """Who billed the call. Not decoration beside ``model``: a rate belongs to the PAIR,
     and the rate table registers the same model under many vendors at prices that differ
     several-fold, so a model alone cannot be priced
-    (``infrastructure/llm/pricing.py::lookup_rate``). ``None`` on a row written before this
-    field, where only an exact key resolves."""
+    (``infrastructure/llm/pricing.py::lookup_rate``). ``None`` ⇒ only an exact key resolves."""
     served_by: str | None = None
     """WHICH upstream host answered, where the one above is a GATEWAY that routes onward. The pair
     is the point: ``provider`` is who bills, this is whose silicon ran it, and hosts of one model
@@ -624,10 +624,11 @@ class WallClock(StrictModel):
     BANKED, because the records it is read from are compactable and the clock is not re-derivable
     from the round documents — none of them carries a timestamp.
 
-    Two denominators, and confusing them is the whole trap. ``phase_s`` is CLOCK: the brackets do
-    not nest, so they sum, and a leg over ``elapsed_s`` is impossible. ``worked_s`` is summed CALL
-    time, which exceeds the clock whenever cells run concurrently and understates it whenever they
-    replay — it says what the search WORKED, never what share of the run a bucket held."""
+    Two denominators, and confusing them is the whole trap. ``phase_s``, ``gate_s`` and
+    ``unbracketed_call_s`` are CLOCK: disjoint legs that sum, so one over ``elapsed_s`` is
+    impossible. ``worked_s`` is summed CALL time, which exceeds the clock whenever cells run
+    concurrently and understates it whenever they replay — it says what the search WORKED, never
+    what share of the run a node held."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -636,9 +637,12 @@ class WallClock(StrictModel):
     # Keyed by ``CampaignPhase`` value — a phase that never fired, or whose exit never landed, is
     # ABSENT rather than 0.0: an unclosed bracket measured nothing.
     phase_s: dict[str, float] = Field(default_factory=dict)
-    # Keyed by ``TOKEN_KIND_BUCKET``'s bucket. Cached calls are excluded, as they are from the
-    # BILL: a replay occupied no clock.
-    worked_s: dict[str, float] = Field(default_factory=dict)
+    # ``TOKEN_KIND_BUCKET``'s bucket → the node that billed the call → summed call seconds. Cached
+    # calls are excluded, as they are from the BILL: a replay occupied no clock.
+    worked_s: dict[str, dict[str, float]] = Field(default_factory=dict)
+    # Same keys, in CLOCK: the seconds a node's calls held while no phase bracket and no gate was
+    # open — an optimizer call the round runs between brackets. Concurrent calls split an instant.
+    unbracketed_call_s: dict[str, dict[str, float]] = Field(default_factory=dict)
     # Round number (as a JSON key) → seconds from ``started_at`` to that round's FIRST close. This
     # is what puts a wall clock beside ``RoundClocks``'s round counts, and it takes the first close
     # rather than the last because the last is round 0's ruler restamp and a rewind's re-run —
@@ -647,9 +651,9 @@ class WallClock(StrictModel):
     # Time held at the origin gate — HUMAN, so it is never folded into a machine leg. An abandoned
     # gate closes at ``finished_at``, since the operator held it until the cycle ended.
     gate_s: float = 0.0
-    # ``elapsed_s`` minus every leg above. What it holds is real and unbracketed: the round's tail
-    # (the overlap series, the election, the critique call, the persist) and run init before the
-    # ledger exists. It is the number to drive DOWN, and never the one to explain away.
+    # ``elapsed_s`` minus every CLOCK leg: time no bracket, gate or fresh call held — the round's
+    # local tail (replayed cells, the election, the persist) and run init before the ledger exists.
+    # It is the number to drive DOWN, and never the one to explain away.
     unattributed_s: float | None = None
     # Seconds cells were not ALLOWED to spend — machine suspend plus the shared limiter's queue,
     # summed off the cells' own envelopes. ``None`` = no cell was measured under one, so nothing
@@ -711,22 +715,28 @@ class RulerRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class SpendCeilingRecord(StrictModel):
+class RunLimitsRecord(StrictModel):
     """The cycle's STANDING operator ceiling, whole — the one source for what the operator declared
-    this cycle may spend. Appended by ``set-budget`` at its account-clamped value and by a launch
-    whose flag moved it, at the value admitted; the LAST record wins. Every launch reads it as one
-    layer of the run's budget and re-admits it against the account as it stands then.
+    this cycle may spend, and for how many rounds. Appended by ``set-limits`` at its account-clamped
+    value and by a launch whose flag moved it, at the value admitted; the LAST record wins. Every
+    launch reads it as one layer of the run's budget and re-admits the spend arms against the
+    account as it stands then; ``rounds`` is set over the config and admits nothing.
 
-    Read PHYSICALLY (``ledger_scan.py::scan_ledger_spend_ceiling``), so a fork does not inherit
+    Read PHYSICALLY (``ledger_scan.py::scan_ledger_run_limits``), so a fork does not inherit
     its parent's: a fork's budget is its seed's declaration, and an inherited standing ceiling
     would override it. Not a progress event — the SSE tail skips it."""
 
     model_config = ConfigDict(frozen=True)
 
-    record_type: Literal["spend_ceiling"] = "spend_ceiling"
+    record_type: Literal["run_limits"] = "run_limits"
     usd: float | None = None
     tokens: int | None = None
+    rounds: RoundsCap | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
+
+    @property
+    def ceiling(self) -> BudgetChange:
+        return BudgetChange(self.usd, self.tokens)
 
 
 class CycleSeedRecord(StrictModel):
@@ -756,7 +766,7 @@ CycleRecord = Annotated[
     | RoundWarningRecord
     | RulerRecord
     | SnapshotRecord
-    | SpendCeilingRecord
+    | RunLimitsRecord
     | SpendHoldRecord
     | SpendTombstoneRecord
     | TokenUsageRecord,

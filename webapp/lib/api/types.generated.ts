@@ -423,11 +423,9 @@ export interface L2L3Memory {
    * (``persona``, ``instruction``, …). L2 writes here to nudge L1 without
    * rewriting the shared optimizer prompt. */
   l1_overrides: Record<string, unknown>;
-  /** Operator-authored task framing, spliced around ``problem_description`` at
-   * render time. The five ``FRAMING_FIELDS`` are frozen for the run —
-   * ``TaskDecomposition.merge`` refuses them and the L2 wire schema declares
-   * none of them; only ``upstream_context`` / ``downstream_context`` are
-   * mutable. */
+  /** Operator-authored task framing, frozen for the run: no layer's wire schema
+   * declares a field of it. ``upstream_context`` / ``downstream_context``
+   * splice around ``problem_description`` at render time. */
   task_context: unknown;
 }
 
@@ -865,7 +863,7 @@ export interface NodeConfigParam {
   never_axis: '' | 'cost_lever' | 'schema_owned';
   movable_by: string[];
   held: boolean;
-  source: 'backend' | 'dataset' | 'campaign' | 'seed' | 'evolved' | 'identity' | 'unset';
+  source: 'backend' | 'dataset' | 'campaign' | 'model_floor' | 'seed' | 'evolved' | 'identity' | 'unset';
   permitted: string[] | null;
 }
 
@@ -928,14 +926,15 @@ export interface DatasetPipelineResponse {
   model_capabilities: Record<string, ModelCapability>;
 }
 
+/** The tenant's latest launch — not the set of live runs, which is `run_phase` on `/cycles`. */
 export interface ActiveSessionResponse {
   /** Tenant the pointer belongs to — the caller's own, always known */
   tenant_id: string;
   /** Active session id; null when no session is active. */
   session_id: string | null;
-  /** Active campaign id (pinned by the webapp); null when no session is active. */
+  /** Campaign of the latest launch; null when no session is active. */
   campaign_id: string | null;
-  /** Active cycle id within the campaign; null when no session is active. */
+  /** Cycle of the latest launch; null when no session is active. */
   cycle_id: string | null;
 }
 
@@ -1045,7 +1044,7 @@ export interface RunsWithParam {
   /** The config grid's own param key (`NodeConfigParam.key`) */
   key: string;
   value: unknown;
-  source: 'backend' | 'dataset' | 'campaign' | 'seed' | 'evolved' | 'identity' | 'unset';
+  source: 'backend' | 'dataset' | 'campaign' | 'model_floor' | 'seed' | 'evolved' | 'identity' | 'unset';
 }
 
 /** What a campaign's root course runs with — the root's pipeline resolution, cut to settings. */
@@ -1075,10 +1074,9 @@ export interface CampaignSummary {
   /** Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …),
    * FROZEN on the manifest at mint. The webapp's ONE test for a self-
    * optimizing (L4) campaign — it renders the 'inner loops' disclosure and
-   * the pp-self panel variants on it. It no longer goes stale when the
-   * dataset is re-pointed, and no longer empties when the dataset dir is
-   * deleted: a campaign outlives its dataset dir, and what it RAN is a fact
-   * about the campaign. Empty only on a manifest `restamp` has not reached. */
+   * the pp-self panel variants on it. Re-pointing or deleting the dataset dir
+   * never changes it: a campaign outlives its dataset dir, and what it RAN is
+   * a fact about the campaign. */
   backend_type: string;
   /** UserId of the operator who minted the campaign */
   owner_user_id: string;
@@ -1465,11 +1463,10 @@ export interface LineageNode {
    * Neither `id` (a per-individual `uuid4`) nor `label` joins to a row; this
    * does. Served rather than derived: it hashes the node configs INCLUDING
    * the rendered prompt, which no served field carries, so a client
-   * recomputing it would match nothing and see no error. Empty on a course,
-   * on a candidate minted before the stamp existed, and on one that measured
-   * nothing. NOT unique — one searchpoint scored on two subsets is one
-   * `sp_hash` over two runs, and a re-proposed configuration shares it across
-   * rounds. */
+   * recomputing it would match nothing and see no error. Empty on a course
+   * and on a candidate that measured nothing. NOT unique — one searchpoint
+   * scored on two subsets is one `sp_hash` over two runs, and a re-proposed
+   * configuration shares it across rounds. */
   sp_hash: string;
   accuracy: number | null;
   composite_fitness: number | null;
@@ -1605,7 +1602,7 @@ export interface RayItem {
    * the two invert (records are stamped at construction but appended later). */
   ts: string;
   /** The ledger record_type — ProjectionEnvelope.kind. */
-  kind: 'candidate_minted' | 'decision' | 'command' | 'command_ack' | 'cycle_seed' | 'election' | 'error' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'round_warning' | 'ruler' | 'snapshot' | 'spend_ceiling' | 'spend_hold' | 'spend_tombstone' | 'token_usage' | 'stream_snapshot';
+  kind: 'candidate_minted' | 'decision' | 'command' | 'command_ack' | 'cycle_seed' | 'election' | 'error' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'round_warning' | 'ruler' | 'snapshot' | 'run_limits' | 'spend_hold' | 'spend_tombstone' | 'token_usage' | 'stream_snapshot';
   /** The chronology projection of the record's model_dump — identity, address and
    * the one-line reading, per
    * domain/projection_envelope.py::RAY_PAYLOAD_FIELDS. A SUBSET of
@@ -1630,7 +1627,7 @@ export interface RayResponse {
 /** One outbound SSE frame. Frozen wire shape — a receiver MUST treat an unknown field as a DRIFT SIGNAL, not as */
 export interface ProjectionEnvelope {
   /** Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot. */
-  kind: 'candidate_minted' | 'decision' | 'command' | 'command_ack' | 'cycle_seed' | 'election' | 'error' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'round_warning' | 'ruler' | 'snapshot' | 'spend_ceiling' | 'spend_hold' | 'spend_tombstone' | 'token_usage' | 'stream_snapshot';
+  kind: 'candidate_minted' | 'decision' | 'command' | 'command_ack' | 'cycle_seed' | 'election' | 'error' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'round_warning' | 'ruler' | 'snapshot' | 'run_limits' | 'spend_hold' | 'spend_tombstone' | 'token_usage' | 'stream_snapshot';
   /** Envelope shape version. Bump only on a breaking restructure of this class;
    * payload churn is per-kind. */
   version: number;
@@ -1954,10 +1951,9 @@ export interface CampaignDetailResponse {
   /** Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …),
    * FROZEN on the manifest at mint. The webapp's ONE test for a self-
    * optimizing (L4) campaign — it renders the 'inner loops' disclosure and
-   * the pp-self panel variants on it. It no longer goes stale when the
-   * dataset is re-pointed, and no longer empties when the dataset dir is
-   * deleted: a campaign outlives its dataset dir, and what it RAN is a fact
-   * about the campaign. Empty only on a manifest `restamp` has not reached. */
+   * the pp-self panel variants on it. Re-pointing or deleting the dataset dir
+   * never changes it: a campaign outlives its dataset dir, and what it RAN is
+   * a fact about the campaign. */
   backend_type: string;
   /** UserId of the operator who minted the campaign */
   owner_user_id: string;
@@ -2115,11 +2111,11 @@ export type RunPhase = 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 
 export type DashboardState = 'init' | 'origin' | 'scoring' | 'between_samples' | 'between_candidates' | 'l1_generate' | 'l2_refining' | 'l3_replanning' | 'escalation' | 'stopped';
 
 // Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).
-export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-spend-budget' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-campaign-label' | 'set-concurrent-cycles' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign' | 'verify-candidate';
+export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-run-limits' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'register-backend' | 'replace-dataset' | 'resolve-origin' | 'set-campaign-label' | 'set-concurrent-cycles' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'unarchive-campaign' | 'verify-candidate';
 
 // Kinds no activity item is ever made of — the ray drops them and the translator
 // returns null. Complement of domain/projection_envelope.py::RENDERS_AS_ACTIVITY.
-export type NonActivityKind = 'decision' | 'election' | 'ruler' | 'spend_ceiling' | 'spend_hold' | 'spend_tombstone' | 'token_usage';
+export type NonActivityKind = 'decision' | 'election' | 'ruler' | 'run_limits' | 'spend_hold' | 'spend_tombstone' | 'token_usage';
 
 // Operator-facing label per terminal reason (StopReason). Mirror of
 // domain/phases.py::STOP_REASON_INFO — the single label source.
@@ -2153,11 +2149,11 @@ export const STOP_REASON_LABELS: Record<string, string> = {
 // here states that nothing is owed; it is not a gap.
 export const STOP_REASON_NEXT_STEPS: Record<string, string> = {
   'perfect_score': "`verify` the winner on more cells — this is one round's panel, not the dataset.",
-  'max_rounds': 'Raise `max_rounds` and `resume` if the curve was still moving; else read `review.md`.',
+  'max_rounds': '`set-limits --max-rounds <more>` then `resume` if the curve was still moving; else read `review.md`.',
   'paused': '`resume` picks it up at the next checkpoint.',
-  'panel_cut': 'Give the cut cells room (`Connector.cell_envelope_s`) before `resume`, or `optimization.panel_gate: off` to elect on the holed panel.',
-  'spend_budget': '`set-budget --max-usd <above what is already spent>` then `resume`.',
-  'token_budget': '`set-budget --max-tokens <above what is already spent>` then `resume`.',
+  'panel_cut': 'Give the cut cells room (`Connector.cell_envelope_s`, or the backend deadline their rows name) before `resume`, or `optimization.panel_gate: off` to elect on the holed panel.',
+  'spend_budget': '`set-limits --max-usd <above what is already spent>` then `resume`.',
+  'token_budget': '`set-limits --max-tokens <above what is already spent>` then `resume`.',
   'backend_unreachable': 'The unreached cell is a hole, not a score: restore the backend or the network it needs, then `resume` re-measures it.',
   'provider_credit_exhausted': "Raise the provider key's limit or top up its credit, then `resume`; a refused cell is a hole it re-measures.",
   'provider_throttled': 'Use your own key for that provider (OpenRouter BYOK) or route to another host (`route_order`), or wait out its quota, then `resume`; the refused cell is a hole it re-measures.',

@@ -7,7 +7,16 @@ from pydantic import ConfigDict, Field
 from promptpotter.domain.spend import BudgetChange, SpendCeilings
 from promptpotter.domain.strict_model import StrictModel, WireFloat, WireInt
 
-__all__ = ["HeldLimits", "LaunchLimits"]
+__all__ = ["HeldLimits", "LaunchLimits", "RoundsCap"]
+
+
+class RoundsCap(StrictModel):
+    """An operator's L1 round cap on one cycle; ``max_rounds`` ``None`` lifts it, so the spend
+    ceiling governs. Where a cap may be absent, ``RoundsCap | None`` — ``None`` never moved it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    max_rounds: WireInt | None = Field(ge=0)
 
 
 class LaunchLimits(StrictModel):
@@ -33,7 +42,7 @@ class HeldLimits(NamedTuple):
     job, set on the run's config, stamped on the dashboard and armed on the spend book.
 
     ``operator`` is the subset of arms an operator gesture declared (a launch flag, a standing
-    ``set-budget``), at their HELD values — the runner persists exactly those as the cycle's
+    ``set-limits``), at their HELD values — the runner persists exactly those as the cycle's
     standing ceiling, so a raise outlives the launch that made it while a knob nobody touched keeps
     coming from the config."""
 

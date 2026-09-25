@@ -11,6 +11,7 @@ from typing import Any
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.export import PromptExport, parse_prompt_export
+from promptpotter.domain.launch_limits import RoundsCap
 from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.domain.results import RoundResult, best_round_on_shared_cells, overlap_row
 from promptpotter.domain.ruler import DeltaRuler
@@ -21,7 +22,7 @@ from promptpotter.domain.run_records import (
     ForkTrigger,
     MintKind,
     RulerRecord,
-    SpendCeilingRecord,
+    RunLimitsRecord,
 )
 from promptpotter.domain.spend import BudgetChange
 from promptpotter.domain.value_tree import ValueLeaf
@@ -29,14 +30,14 @@ from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.runtime_flags import (
     derive_run_phase,
     is_checkin,
-    write_spend_caps,
+    write_run_limits_mirror,
 )
 from promptpotter.infrastructure.store.account_spend import bank_spend, sandbox_cycle_dirs
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_cycle_seed,
     scan_ledger_round_closes,
     scan_ledger_rulers,
-    scan_ledger_spend_ceiling,
+    scan_ledger_run_limits,
 )
 from promptpotter.infrastructure.store.io import (
     iter_files,
@@ -1058,18 +1059,11 @@ class CampaignStore:
         self,
         hop: CycleHop,
         round_num: int,
-    ) -> tuple[list[dict[str, Any]], str | None] | None:
-        """``consumed`` is ``None`` for a cache written before the digest was recorded —
-        unvouched, which is a state to act on rather than a detail to shrug at."""
+    ) -> tuple[list[dict[str, Any]], str] | None:
         raw = read_json_optional(self._layout(hop).candidate_file(round_num))
         if raw is None:
             return None
-        if isinstance(raw, dict):
-            consumed = raw.get("consumed")
-            return list(raw.get("candidates") or []), consumed if isinstance(
-                consumed, str
-            ) else None
-        return list(raw), None
+        return list(raw["candidates"]), str(raw["consumed"])
 
     def delete_round_candidates(
         self,
@@ -1094,18 +1088,20 @@ class CampaignStore:
     def read_cycle_seed(self, hop: CycleHop) -> CycleSeed | None:
         return scan_ledger_cycle_seed(self._layout(hop).ledger)
 
-    def write_spend_ceiling(self, hop: CycleHop, ceiling: BudgetChange) -> None:
+    def write_run_limits(
+        self, hop: CycleHop, ceiling: BudgetChange, *, rounds: RoundsCap | None
+    ) -> None:
         """Land the cycle's standing operator ceiling — the record, then its polled mirror. The ONE
         writer of both, so the mirror a running gate reads can never name a ceiling the ledger does
-        not."""
+        not. WHOLE: the last record wins, so ``rounds=None`` drops a standing round cap."""
         cycle_dir = self.cycle_dir(hop)
         CycleEventLog.open(CycleDir(cycle_dir)).append(
-            SpendCeilingRecord(usd=ceiling.usd, tokens=ceiling.tokens)
+            RunLimitsRecord(usd=ceiling.usd, tokens=ceiling.tokens, rounds=rounds)
         )
-        write_spend_caps(cycle_dir, ceiling)
+        write_run_limits_mirror(cycle_dir, ceiling, rounds=rounds)
 
-    def read_spend_ceiling(self, hop: CycleHop) -> BudgetChange:
-        return scan_ledger_spend_ceiling(self._layout(hop).ledger)
+    def read_run_limits(self, hop: CycleHop) -> RunLimitsRecord:
+        return scan_ledger_run_limits(self._layout(hop).ledger)
 
     def write_resolved_pipeline(self, hop: CycleHop, declaration: dict[str, Any]) -> None:
         """Record the declaration this cycle RUNS — the merge of the live backend and the dataset

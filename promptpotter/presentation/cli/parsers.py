@@ -4,13 +4,27 @@ text is verbose by design — this is the operator-facing surface."""
 from __future__ import annotations
 
 import argparse
+from typing import get_args
 
+from promptpotter.application.runner.origin_gate import GateDecision
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
     settings,
 )
+from promptpotter.domain.launch_limits import RoundsCap
 from promptpotter.infrastructure.store.layout import SHARED_CACHE_DIRS
+
+
+def _rounds_cap_arg(raw: str) -> RoundsCap:
+    if raw.strip().lower() == "none":
+        return RoundsCap(max_rounds=None)
+    try:
+        return RoundsCap(max_rounds=int(raw))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"expected a round count >= 0 or `none`, got {raw!r}"
+        ) from exc
 
 
 def _add_global_args(parser: argparse.ArgumentParser) -> None:
@@ -472,9 +486,9 @@ def build_parser() -> argparse.ArgumentParser:
         "has from every CampaignConfig — the minted snapshots and the dataset templates; "
         "every dropped key is reported with the value its file held. (2) Re-project each "
         "finished cycle's ledger onto the current record shape, dropping what the archive "
-        "and the round files already hold and lifting escalation's resume counters onto "
-        "the persisted view. A cycle with a live producer is left alone. (3) REPORT whether "
-        "every banked round document still loads, grouped by what drifted — read-only, because "
+        "and the round files already hold. A cycle with a live producer is left alone. (3) "
+        "REPORT whether every banked round document still loads, grouped by what drifted — "
+        "read-only, because "
         "pruning cannot restore a renamed field's value, so a repair there would be silently "
         "wrong. The sanctioned remedy after a field rename or a record-shape change, and (3) is "
         "how you find out you need one. Dry-run by default. Pure disk work, zero spend.",
@@ -621,31 +635,41 @@ def build_parser() -> argparse.ArgumentParser:
         "--reason", default="", help="Optional operator-supplied reason, recorded with the command."
     )
 
-    p_set_budget = sub.add_parser(
-        "set-budget",
-        help="Raise or lower an EXISTING cycle's spend / token ceiling — the same "
-        "change-spend-budget command the webapp fires. This is how a budget-halted cycle is "
-        "continued: set a higher ceiling, then `resume`. The launch flags only shape a launch. "
-        "Clamped against your account allowance; read the armed value off the dashboard.",
+    p_set_limits = sub.add_parser(
+        "set-limits",
+        help="Raise or lower an EXISTING cycle's spend / token / round ceiling — the same "
+        "change-run-limits command the webapp fires. This is how a budget- or round-halted "
+        "cycle is continued: set a higher ceiling, then `resume`. The launch flags only shape a "
+        "launch. Spend is clamped against your account allowance; read the armed value off the "
+        "dashboard.",
     )
-    p_set_budget.add_argument(
+    p_set_limits.add_argument(
         "--campaign", default="", help="Campaign id (default: the active one)."
     )
-    p_set_budget.add_argument("--cycle", default="", help="Cycle id (default: the active one).")
-    p_set_budget.add_argument(
+    p_set_limits.add_argument("--cycle", default="", help="Cycle id (default: the active one).")
+    p_set_limits.add_argument(
         "--max-usd",
         dest="max_usd",
         type=float,
         default=None,
         help="New USD ceiling. 0 halts after the current round. Omit to leave it untouched.",
     )
-    p_set_budget.add_argument(
+    p_set_limits.add_argument(
         "--max-tokens",
         dest="max_tokens",
         type=int,
         default=None,
         help="New token ceiling — the unit that survives an unpriced model. 0 halts after the "
         "current round. Omit to leave it untouched.",
+    )
+    p_set_limits.add_argument(
+        "--max-rounds",
+        dest="rounds_cap",
+        type=_rounds_cap_arg,
+        default=None,
+        metavar="N|none",
+        help="New L1 round cap, read at the next round boundary. `none` lifts it, so the spend "
+        "ceiling governs. Omit to leave it untouched.",
     )
 
     for verb, summary in (
@@ -701,6 +725,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_skip.add_argument("--campaign", default="", help="Campaign id (default: the active one).")
     p_skip.add_argument("--cycle", default="", help="Cycle id (default: the active one).")
+
+    p_gate = sub.add_parser(
+        "origin-gate",
+        help="Answer a cycle holding at the round-0 origin gate — the same origin-gate-decision "
+        "command the webapp modal fires. A run launched without a TTY has no prompt to type "
+        "into, so this is its terminal answer. Defaults to the active cycle.",
+    )
+    p_gate.add_argument(
+        "decision",
+        choices=get_args(GateDecision),
+        help="proceed into L1 anyway, rescore the origin force-fresh, or abort the cycle.",
+    )
+    p_gate.add_argument("--campaign", default="", help="Campaign id (default: the active one).")
+    p_gate.add_argument("--cycle", default="", help="Cycle id (default: the active one).")
 
     p_step = sub.add_parser(
         "step-cycle",

@@ -52,7 +52,7 @@ The §0 amendment defining the Control-remote I/O kind is the precondition. Sche
 * **Good** — schemas constrain only the wire; the optimizer's internal richness is untouched.
 * **Good** — Stage-1-ready: capability gates + identity scoping plug in at Profile C without touching handlers.
 * **Neutral** — adds ~6 KB of YAML boilerplate at Profile −1.
-* **Bad** — adds `pyyaml` + `types-PyYAML` as test-only dev deps.
+* **Neutral** — needs no new runtime dependency: `pyyaml` is already core (the operator config tier), with `types-PyYAML` a dev stub.
 
 ### Confirmation
 
@@ -66,10 +66,10 @@ the structural/contract suite was cut to the silent-harm core, see
 3. Reusable schemas (`CommandEnvelope`, `CommandAcceptedBody`, `ErrorEnvelope`) exist with the closed error-code set.
 4. AsyncAPI `cycleEvents` channel + `ProjectionEnvelope` schema with the required envelope fields exist.
 5. Heartbeat shape is declared (security box 15).
-6. **Closed outbound set parity** — every `record_type: Literal[...]` in `domain/run_records.py::CycleRecord` is present in the AsyncAPI `kind` enum; extra enum entries must be on the `_PROJECTION_ONLY_KINDS` allowlist.
+6. **Closed outbound set parity** — every `record_type: Literal[...]` in `domain/run_records.py::CycleRecord` is covered by `domain/projection_envelope.py::ProjectionKind`, which raises at import on drift in either direction; extra kinds must be on its `_PROJECTION_ONLY` allowlist. `ProjectionKind` against the AsyncAPI `kind` enum is kept by hand — [`../developer/event-stream.md`](../developer/event-stream.md) § Testing.
 7. **Anchors table integrity** — every file path in the ## Anchors section of this ADR exists on disk, and no anchor cites a test file (anchors name stable contracts; tests move freely).
 
-CI runs the test on every PR. Spectral lint on the OpenAPI YAML and AsyncAPI Studio CLI on the AsyncAPI YAML wire in as the ADR's schemas accumulate operations / messages.
+No CI job runs a schema linter yet; Spectral on the OpenAPI YAML and AsyncAPI Studio CLI on the AsyncAPI YAML wire in as the ADR's schemas accumulate operations / messages.
 
 ## Pros and Cons of the Options
 
@@ -110,10 +110,10 @@ CI runs the test on every PR. Spectral lint on the OpenAPI YAML and AsyncAPI Stu
 
 The wire surface rides the canonical per-cycle `.runtime/ledger.jsonl` ledger alongside every other record. The "highway" is the existing Persistence stream; this contract promotes the path commands and events take through that highway to the optimal sequence by eliminating four middlemen (mirroring the spend-and-tenancy arc):
 
-1. **No process global.** `emit_command` (inbound, from the dispatcher) reads the active ledger from `_CYCLE_LEDGER: ContextVar[CycleEventLog | None]` and the cycle target from `_ACTIVE_CYCLE: ContextVar[CycleId | None]`. `emit_command_ack` (outbound at the runner) reads the same ContextVars. Per-asyncio-task isolation; concurrent commands across cycles get isolation for free.
+1. **No process global.** `emit_command` and `emit_command_ack` both append to the ledger bound in `_CYCLE_LEDGER: ContextVar[CycleEventLog | None]`, which the dispatcher binds to the target cycle's ledger around its work. Per-asyncio-task isolation; concurrent commands across cycles get isolation for free.
 2. **No wrapper dataclass.** `emit_command(*, command_id, kind, payload, idempotency_key, issued_by_user_id)` and `emit_command_ack(*, command_id, status, detail)` are kwargs-only; both build their `*Record` directly inside the helper. Mirrors `emit_token_usage` verbatim. (`expected_version` is a dispatch-time concurrency check against the ledger offset — it is consumed at the seam, not stored on the record.)
 3. **Sole writer per surface.** ONE `CommandDispatcher` (`application/commands/`) writes `CommandRecord` AND the paired `CommandAckRecord`, whether HTTP or a terminal verb dispatched the kind; the kinds the terminal reaches in-process instead, writing no `CommandRecord`, are declared in `presentation/cli/campaign_runner.py::CLI_VERB_FOR_KIND`. The split this ADR originally specified — a `RunnerCommandSubscriber` owning the ack — was never built; one writer for both is the same invariant with one fewer part. Outbound SSE frames have no writer at all — the in-process `EventStreamView` fan-out this ADR originally specified was replaced by `CycleLedgerTail`, which tails the on-disk ledger directly (cross-process; the API server, the CLI, or a spawned runner can all be the writer, any reader can subscribe). See [`../developer/event-stream.md`](../developer/event-stream.md).
-4. **No dual ingress.** Commands ARE events. The runner subscribes to `CommandRecord` on the ledger as another driver — no in-memory queue, no `commands.jsonl`, no parallel pipeline. The 6 pre-M12 sanctioned POSTs (`POST /forks`, `POST /stop`, `DELETE /cycle`, `POST /cleanup-empty`, `POST /backends`, `POST /backends/{id}/sync`) migrate to ride this highway at Profile B (no-back-compat — they migrate, they don't shim).
+4. **No dual ingress.** Commands ARE events. The dispatcher records the `CommandRecord`, applies the kind and acks it — no in-memory queue, no `commands.jsonl`, no parallel pipeline; a verb that must reach a running cycle lands as a fact the runner already polls (a `.runtime/` flag or a ledger record). The pre-M12 sanctioned POSTs migrate to ride this highway at Profile B (no-back-compat — they migrate, they don't shim); the table under Profile B names each.
 
 Identity scope rides the ledger path (tenant prefix on the per-cycle directory) — no per-record `tenant_id` field. Outbound `ProjectionEnvelope{kind, version, cycle_id, sequence, payload}` is the only frame shape on the SSE channel. Mid-cycle subscribers receive a snapshot frame (matching current `dashboard.json`) followed by the live tail with strictly-increasing `sequence`; missed frames detectable via sequence gap; heartbeat fires every 15 s during idle.
 
@@ -169,7 +169,7 @@ Each profile is a named, stable conformance level. Newer profiles compose with o
 
 **Profile A** — `GET /campaigns/{c}/cycles/{cy}/events:subscribe` serves SSE frames by tailing the on-disk `.runtime/ledger.jsonl` (`CycleLedgerTail`) — no projection subscriber synthesizes frames; the ledger is the single medium (superseded the originally-specified in-process `EventStreamView` fan-out, which 404'd for any reader outside the runner's own process). Snapshot-then-tail; boundary sequence explicit; heartbeat every 15 s. Certified: `docs/developer/event-stream.md`; boxes 4, 13, 14, 15 flipped.
 
-**Profile B** — `CommandRecord` + `CommandAckRecord` added to `domain/run_records.py::CycleRecord`. `emit_command` + `emit_command_ack` kwargs-only helpers. `CommandDispatcher` at API seam. `_ACTIVE_CYCLE` ContextVar wired. The 6 sanctioned POSTs migrate to ride the highway:
+**Profile B** — `CommandRecord` + `CommandAckRecord` added to `domain/run_records.py::CycleRecord`. `emit_command` + `emit_command_ack` kwargs-only helpers. `CommandDispatcher` at API seam, binding `_CYCLE_LEDGER` to the target cycle. The sanctioned POSTs migrate to ride the highway:
 
 | Pre-M12 route | Command kind v0 |
 |---|---|
@@ -178,9 +178,9 @@ Each profile is a named, stable conformance level. Newer profiles compose with o
 | `DELETE /campaigns/{c}/cycles/{cy}` | `delete-cycle` |
 | `POST /campaigns/{c}/cycles/{cy}/cleanup-empty` | `cleanup-empty-cycles` |
 | `POST /backends` | `register-backend` |
-| `POST /backends/{id}/sync` | `sync-backend-experiments` |
+| `POST /backends/{id}/sync` | dropped — no backend sync verb exists |
 
-**Closed inbound set draft (23 commands).** The full enumeration lives in `docs/specs/api-openapi.yaml` and is the single source of truth for the inbound surface; the ADR keeps only the migration table above + the category map below. Categories (= OpenAPI `tags`): cycle-control (pause / step / rewind — `pause-cycle` is the single operator-interrupt, no separate stop/resume-cycle), cycle-lifecycle (fork / delete / cleanup-empty / archive / mint-campaign / start-run), budget (spend / halt / sample), pipeline-params (change-pipeline-param / reset-pipeline-overlay), scoring (change-scoring-composite), operator-feedback (mark / unmark hard-sample / annotate-round / endorse-candidate), backends (register / sync-experiments). All v0 — operator-redline cycle precedes any handler.
+**Closed inbound set draft.** The full enumeration lives in `docs/specs/api-openapi.yaml` and is the single source of truth for the inbound surface; the ADR keeps only the migration table above + the category map below. Categories (= OpenAPI `tags`): cycle-control (pause / step / rewind — `pause-cycle` is the single operator-interrupt, no separate stop/resume-cycle), cycle-lifecycle (fork / delete / cleanup-empty / archive / mint-campaign / start-run), budget (run-limits / sample), pipeline-params (change-pipeline-param / reset-pipeline-overlay), scoring (change-scoring-composite), operator-feedback (mark / unmark hard-sample / annotate-round / endorse-candidate), backends (register). All v0 — operator-redline cycle precedes any handler.
 
 First end-to-end command: **`pause-cycle`**. On certification, boxes 1–10 and 17 flip.
 
@@ -201,8 +201,8 @@ are the only self-checking record: a command with no schema there has nowhere to
 
 ### Anchors
 
-Every claim in this ADR names a file. The drift detector reads this table and
-asserts each path exists. Anchors cite **stable contract artifacts** — specs and
+Every claim in this ADR names a file, and review checks each path in this table
+exists. Anchors cite **stable contract artifacts** — specs and
 the code/domain modules the ADR depends on — never test files: tests are
 enforcement detail that must move freely, so they are named in prose (see
 *Confirmation* above), never anchored here.
@@ -233,7 +233,7 @@ Profile A (outbound highway) certified its wire contract into [`../developer/eve
 - Webapp redesign (component-level) — design surface in `promptpotter-web/BRAND.md`.
 - Multi-user merge / CRDT operations — identity-foundation Stage 2+.
 - Per-tenant rate limiting / quotas — roadmap `C6`, public-service hardening.
-- L4 inner-cycle execution path — [`roadmap.md`](../specs/roadmap.md) Track 1.5.
+- L4 inner-cycle execution path — [`l4-outer-loop.md`](../specs/l4-outer-loop.md).
 
 ### Cross-refs
 

@@ -118,7 +118,7 @@ tags:
 #     delete, cleanup-empty, register-backend).
 #   - 2 CLI verbs hoisted into the wire surface (mint-campaign = `new`,
 #     start-run = `resume` / launcher per ADR-0001 control plane).
-#   - M12-new commands (pause, step, rewind-to-round, change-spend-budget,
+#   - M12-new commands (pause, step, rewind-to-round, change-run-limits,
 #     change-pipeline-param) — plan-listed v0 candidates. `pause-cycle` is the
 #     single operator-interrupt verb: the worker exits cleanly, the cycle stays
 #     resumable, and `start-run`/`resume` relaunches it (there is no `stop-cycle`
@@ -807,10 +807,10 @@ paths:
         '422': { $ref: '#/components/responses/PayloadInvalid' }
         '503': { $ref: '#/components/responses/BackendUnreachable' }
 
-  /commands/change-spend-budget:
+  /commands/change-run-limits:
     post:
-      operationId: changeSpendBudget
-      summary: Raise or lower a cycle's USD and/or token spend cap mid-flight.
+      operationId: changeRunLimits
+      summary: Raise or lower a cycle's USD, token and/or round cap mid-flight.
       tags: [budget]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -825,36 +825,8 @@ paths:
                 - type: object
                   required: [kind, payload]
                   properties:
-                    kind: { const: change-spend-budget }
-                    payload: { $ref: '#/components/schemas/ChangeSpendBudgetPayload' }
-      responses:
-        '202': { $ref: '#/components/responses/CommandAccepted' }
-        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
-        '403': { $ref: '#/components/responses/CapabilityDenied' }
-        '409': { $ref: '#/components/responses/VersionConflict' }
-        '422': { $ref: '#/components/responses/PayloadInvalid' }
-
-  /commands/change-halt-budget:
-    post:
-      operationId: changeHaltBudget
-      x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
-      summary: Raise or lower a cycle's max-rounds halt cap mid-flight.
-      tags: [budget]
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/ExpectedVersion'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              allOf:
-                - $ref: '#/components/schemas/CommandEnvelope'
-                - type: object
-                  required: [kind, payload]
-                  properties:
-                    kind: { const: change-halt-budget }
-                    payload: { $ref: '#/components/schemas/ChangeHaltBudgetPayload' }
+                    kind: { const: change-run-limits }
+                    payload: { $ref: '#/components/schemas/ChangeRunLimitsPayload' }
       responses:
         '202': { $ref: '#/components/responses/CommandAccepted' }
         '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
@@ -2401,9 +2373,12 @@ paths:
       operationId: getActiveSession
       summary: The caller-tenant's active-session pointer.
       description: |
-        The three ids naming what is running for this tenant, read off
-        `.workspace/active_session.json`. The webapp polls it on the live 2 s beat
-        so a CLI-minted cycle is followed promptly.
+        The three ids naming this tenant's LATEST launch (`new`, Start or a fork, from
+        any entry point), read off `.workspace/active_session.json` — the terminal's
+        default `resume` target and what an unpinned webapp follows. It is not the
+        set of live runs: several may run at once, and each is a `/cycles` entry whose
+        `run_phase` says so. The webapp polls it on the live 2 s beat so a new launch
+        is followed promptly.
 
         **There is no 404 on this route, deliberately.** "No active session" is a
         steady state — nothing launched yet, or the workspace was cleared — so it
@@ -2681,7 +2656,7 @@ components:
             The command kind. MUST be one of the kinds declared in this
             file's `paths` keys (the closed set). Examples once Profile B
             lands: `pause-cycle`, `fork-cycle`,
-            `change-spend-budget`. See `docs/adr/0001-m12-control-plane.md`
+            `change-run-limits`. See `docs/adr/0001-m12-control-plane.md`
             Profile B table.
           minLength: 1
           maxLength: 64
@@ -2979,7 +2954,7 @@ components:
             `PotterError` subclass at the single `main.py` handler. Control-plane
             specifics: `version_conflict` (409), `idempotency_key_missing` (400),
             `command_kind_unknown` (404), `slug_collision` (409),
-            `machine_busy` (409), `backend_unreachable` (503),
+            `machine_busy` (409), `cycle_busy` (409), `backend_unreachable` (503),
             `admission_gate_stuck` (503 — a process is wedged inside the
             machine-wide admission window, so occupancy cannot be read and
             nothing was started; retryable),
@@ -3000,6 +2975,7 @@ components:
             - tenant_mismatch
             - slug_collision
             - machine_busy
+            - cycle_busy
             - backend_unreachable
             - ingest_failed
             - origin_incomplete
@@ -3052,6 +3028,11 @@ components:
               `holder_user`, `campaign_id`, `cycle_id`, `started_at`. What the
               webapp reads is `GET /machine-status` — occupancy, and the
               caller's own place in line.
+            * `cycle_busy` (409 on `start-run`, `step-cycle` and
+              `start-checkin`) — the targeted cycle already has an unfinished
+              job (queued included), so a second launch would put two
+              producers on one ledger. Carries that job: `job_id`, `status`,
+              `holder_user`, `campaign_id`, `cycle_id`, `started_at`.
             * `backend_unreachable` (503 on any command that needs the
               backend reachable) — `backend_type` (connector name) and
               `backend_url` (configured URL) — the IDENTITY of what refused.
@@ -3592,7 +3573,7 @@ components:
                 when a model has no rate on file. Whichever ceiling is met first halts
                 the cycle. The CLI's `--token-budget`, hoisted onto the wire.
 
-    ChangeSpendBudgetPayload:
+    ChangeRunLimitsPayload:
       allOf:
         - $ref: '#/components/schemas/CycleRef'
         - type: object
@@ -3600,13 +3581,14 @@ components:
           anyOf:
             - required: [max_usd]
             - required: [max_tokens]
+            - required: [max_rounds]
           description: |
-            At least one of `max_usd` / `max_tokens` must be present — expressed as
-            `anyOf`, because the `minProperties: 1` this carried was satisfied by
-            `campaign_id` alone and so asserted nothing (the handler enforced the
-            real rule by itself). A field that is omitted leaves that ceiling
-            unchanged, in the running job's reservation and the cycle's live file
-            alike, each from its own prior. Whichever ceiling is met first halts
+            At least one of `max_usd` / `max_tokens` / `max_rounds` must be present —
+            expressed as `anyOf`, because the `minProperties: 1` this carried was
+            satisfied by `campaign_id` alone and so asserted nothing (the handler
+            enforced the real rule by itself). A field that is omitted leaves that
+            ceiling unchanged, in the running job's reservation and the cycle's live
+            file alike, each from its own prior. Whichever ceiling is met first halts
             the cycle.
           properties:
             max_usd:
@@ -3624,6 +3606,14 @@ components:
                 for the cycle. Setting `0` halts at the next checkpoint; raising
                 above current usage releases the halt. The model-portable twin of
                 `max_usd` — counts free-backend work the USD ceiling misses.
+            max_rounds:
+              type: [integer, "null"]
+              minimum: 0
+              description: |
+                New L1 round cap for the cycle, read at the next round boundary.
+                `null` lifts it, so the spend ceiling governs; a cap at or below
+                the rounds already run halts after the current round. Not clamped
+                against the account — a round is not money.
 
     ChangePipelineParamPayload:
       allOf:
@@ -3755,20 +3745,6 @@ components:
               minLength: 1
               maxLength: 512
               description: 'Operator-supplied reason; stored on the archive marker for audit.'
-
-    ChangeHaltBudgetPayload:
-      allOf:
-        - $ref: '#/components/schemas/CycleRef'
-        - type: object
-          required: [max_rounds]
-          additionalProperties: false
-          properties:
-            max_rounds:
-              type: integer
-              minimum: 0
-              description: |
-                New round cap. Setting `0` halts the cycle at the next
-                checkpoint; raising above current round count releases.
 
     ChangeSampleBudgetPayload:
       allOf:
@@ -3934,7 +3910,7 @@ components:
 
     ParamSource:
       type: string
-      enum: [backend, dataset, campaign, seed, evolved, identity, unset]
+      enum: [backend, dataset, campaign, model_floor, seed, evolved, identity, unset]
       description: |
         WHICH LAYER set a resolved param's value — stamped BY the merge (last
         writer wins), never diffed against it. A member is admitted with its
@@ -3944,7 +3920,9 @@ components:
         dataset overlay is read from.
         `dataset` the slug's `nodes.{n}.config`; `campaign` the frozen
         `pipeline_overlay`, and a check-in draft's overlay (a draft IS the
-        pre-committed config); `seed` a cycle seed; `evolved` the candidate's
+        pre-committed config); `model_floor` a declared `reasoning_effort` no
+        layer above set, at the lowest rung the node's model accepts; `seed` a
+        cycle seed; `evolved` the candidate's
         sparse `pipeline_overlay`; `identity` connector + judge
         contributions, unoverridable, so a surface never offers to edit one;
         `unset` declared with no value at any layer — never attributed to a
@@ -4269,9 +4247,9 @@ components:
           type: string
           minLength: 1
           maxLength: 64
-          default: exact_match
+          default: label_match
           description: |
-            Smart-default `exact_match` (only universally-applicable scorer
+            Smart-default `label_match` (only universally-applicable scorer
             for `(query, ground_truth)`). Operator-editable.
         optimization_overrides:
           allOf:
@@ -4509,8 +4487,9 @@ components:
       additionalProperties: false
       required: [tenant_id, session_id, campaign_id, cycle_id]
       description: |
-        What is running for this tenant. All three ids are null together while no
-        session is active — that state is served on a 200, never a 404.
+        This tenant's latest launch — not the set of live runs, which is `run_phase`
+        on every `/cycles` entry. All three ids are null together while nothing has
+        launched — that state is served on a 200, never a 404.
       properties:
         tenant_id:
           type: string
@@ -4520,10 +4499,10 @@ components:
           description: Active session id; null when no session is active.
         campaign_id:
           type: [string, 'null']
-          description: Active campaign id (pinned by the webapp); null when no session is active.
+          description: Campaign of the latest launch; null when no session is active.
         cycle_id:
           type: [string, 'null']
-          description: Active cycle id within the campaign; null when no session is active.
+          description: Cycle of the latest launch; null when no session is active.
 
     MachineHolder:
       type: object

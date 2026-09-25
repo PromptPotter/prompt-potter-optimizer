@@ -215,10 +215,10 @@ components:
             # The cycle's δ scale, appended WHOLE at lock and after every
             # extension (``RulerRecord``).
             - ruler
-            # The cycle's standing operator spend ceiling, appended by
-            # ``set-budget`` and by a launch flag that moves it
-            # (``SpendCeilingRecord``); the last one wins.
-            - spend_ceiling
+            # The cycle's standing operator ceiling (spend and round cap), appended by
+            # ``set-limits`` and by a launch flag that moves it
+            # (``RunLimitsRecord``); the last one wins.
+            - run_limits
             # An account's banked spend, written before a delete takes the rows
             # carrying it (``SpendTombstoneRecord``). Rides the WORKSPACE ledger,
             # so it reaches no cycle subscriber — listed because the enum's rule
@@ -726,7 +726,7 @@ components:
         gates, coerces, or infers: `resolve-origin` carries only `{draft_id}` in
         its payload, so the fields its LLM turn moved exist nowhere else on the
         ledger. Empty for commands whose payload already IS their effect
-        (`pause-cycle`, `change-spend-budget`), and for every `rejected` ack.
+        (`pause-cycle`, `change-run-limits`), and for every `rejected` ack.
       required: [command_id, status, timestamp]
       additionalProperties: false
       properties:

@@ -80,7 +80,8 @@ class BackendWarning(StrictModel):
 
 class LoopWarning(StrictModel):
     """One entry in ``recent_loop_warnings`` — an optimizer-loop degradation the
-    self-healing rails recovered from: zero-candidate round, L2 framing soft-reject, truncation."""
+    self-healing rails recovered from: a zero-candidate round, a layer's unparseable output, a blank
+    terminate, truncation."""
 
     ts: str
     kind: str
@@ -105,11 +106,11 @@ class RunLimits(StrictModel):
     ``INIT:enter`` and that record lands after the whole origin has scored, so the operator watched
     the longest phase of the run with no ceiling on screen at all.
 
-    **The two spend arms are the ARMED ceilings, not the declared ones**, re-read from
-    ``spend_cap.json``, the standing ceiling's polled mirror, at every persist
+    **The two spend arms and ``max_rounds`` are the ARMED ceilings, not the declared ones**,
+    re-read from ``run_limits.json``, the standing ceiling's polled mirror, at every persist
     (``projection.py::_persist``). Held static, every surface reading them — the control's own
-    prefill, the run strip — reports a number ``BudgetGate`` stops using the moment
-    ``change-spend-budget`` lands."""
+    prefill, the run strip — reports a number the run stops using the moment
+    ``change-run-limits`` lands."""
 
     max_rounds: int | None = None
     l1_patience: int

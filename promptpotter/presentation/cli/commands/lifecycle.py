@@ -16,12 +16,13 @@ from promptpotter.application.commands.dispatcher import CommandCall, CommandDis
 from promptpotter.application.commands.payloads import (
     ArchiveCampaignPayload,
     CancelQueuedRunPayload,
-    ChangeSpendBudgetPayload,
+    ChangeRunLimitsPayload,
     CleanupEmptyCyclesPayload,
     CyclePayload,
     DeleteCampaignPayload,
     DeleteCyclePayload,
     LifecyclePayload,
+    OriginGateDecisionPayload,
     PauseCyclePayload,
     ReplaceDatasetPayload,
     SetCampaignLabelPayload,
@@ -32,7 +33,9 @@ from promptpotter.application.commands.payloads import (
 )
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.runner.origin_gate import GateDecision
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, default_jobs_dir
+from promptpotter.domain.launch_limits import RoundsCap
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
@@ -50,11 +53,12 @@ __all__ = [
     "cmd_cleanup_empty_cycles",
     "cmd_delete",
     "cmd_delete_cycle",
+    "cmd_origin_gate",
     "cmd_pause",
     "cmd_rename",
     "cmd_replace_dataset",
-    "cmd_set_budget",
     "cmd_set_concurrent_cycles",
+    "cmd_set_limits",
     "cmd_skip_searchpoint",
     "cmd_step_cycle",
     "cmd_unarchive",
@@ -186,13 +190,14 @@ async def cmd_pause(args: argparse.Namespace) -> CommandResult:
     )
 
 
-async def cmd_set_budget(args: argparse.Namespace) -> CommandResult:
-    """Raise or lower a cycle's spend / token ceiling — the SAME ``change-spend-budget`` command the
-    browser fires, so the terminal can clear a budget wall too.
+async def cmd_set_limits(args: argparse.Namespace) -> CommandResult:
+    """Raise or lower a cycle's spend / token / round ceiling — the SAME ``change-run-limits``
+    command the browser fires, so the terminal can clear a budget wall too.
 
-    This is the verb that continues a budget-halted cycle: raise the ceiling, then ``resume``. The
-    launch flags (``--spend-budget`` / ``--token-budget``) cannot do it, because they only shape a
-    launch — this writes the operator ceiling the next launch composes on top of its config.
+    This is the verb that continues a budget- or round-halted cycle: raise the ceiling, then
+    ``resume``. The launch flags (``--spend-budget`` / ``--token-budget``) cannot do it, because
+    they only shape a launch — this writes the operator ceiling the next launch composes on top of
+    its config.
     """
     identity = identity_from_args(args)
     store = build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
@@ -202,16 +207,19 @@ async def cmd_set_budget(args: argparse.Namespace) -> CommandResult:
             data={"status": "no_target"},
             human="No active cycle — name one with --campaign/--cycle.",
         )
-    # Both absent is a no-op the dispatcher already rejects; sending them through keeps ONE
+    # All absent is a no-op the dispatcher already rejects; sending them through keeps ONE
     # validation of "at least one ceiling", on the command highway rather than per entry point.
-    payload = ChangeSpendBudgetPayload(
+    rounds_cap: RoundsCap | None = getattr(args, "rounds_cap", None)
+    payload = ChangeRunLimitsPayload(
         campaign_id=campaign_id,
         cycle_id=cycle_id,
         max_usd=getattr(args, "max_usd", None),
         max_tokens=getattr(args, "max_tokens", None),
+        # Passed only when given: an explicit `None` here is the LIFT, not "untouched".
+        **({} if rounds_cap is None else {"max_rounds": rounds_cap.max_rounds}),
     )
     # The ONE verb here that needs the registry: the clamp counts in-flight commitments against
-    # the account, and `hold_ceiling` asks whether a live job carries the ceiling too. It is
+    # the account, and `hold_run_limits` asks whether a live job carries the ceiling too. It is
     # disk-backed over `default_jobs_dir()`, so this reads the server's jobs rather than an empty
     # set — the dispatcher refuses outright without one, which is what left this verb unrunnable.
     # No `on_reap`: this process exits in a second and may not touch the server's live cycle.
@@ -232,7 +240,7 @@ async def cmd_set_budget(args: argparse.Namespace) -> CommandResult:
             "campaign_id": campaign_id,
             "cycle_id": cycle_id,
             "status": "budget_set",
-            **payload.model_dump(mode="json", include={"max_usd", "max_tokens"}),
+            **payload.model_dump(mode="json", include={"max_usd", "max_tokens", "max_rounds"}),
         },
         human=(
             f"{campaign_id}/{cycle_id} -> ceiling written. It is clamped against your account "
@@ -290,6 +298,25 @@ async def cmd_skip_searchpoint(args: argparse.Namespace) -> CommandResult:
         human=(
             f"{campaign_id}/{cycle_id} -> skip requested. The scorer drops the current "
             "candidate at its next sample boundary; the round continues with the rest."
+        ),
+    )
+
+
+async def cmd_origin_gate(args: argparse.Namespace) -> CommandResult:
+    decision: GateDecision = args.decision
+    refused, campaign_id, cycle_id = await _cycle_scoped(
+        args,
+        lambda c, cy: OriginGateDecisionPayload(campaign_id=c, cycle_id=cy, decision=decision),
+        "answer the origin gate of",
+    )
+    if refused is not None:
+        return refused
+    logger.info("run control: %s/%s -> origin gate %s", campaign_id, cycle_id, decision)
+    return CommandResult(
+        data={"campaign_id": campaign_id, "cycle_id": cycle_id, "decision": decision},
+        human=(
+            f"{campaign_id}/{cycle_id} -> origin gate: {decision}. A cycle holding at the gate "
+            "acts on it within a second; one that is not clears it when it next arrives there."
         ),
     )
 

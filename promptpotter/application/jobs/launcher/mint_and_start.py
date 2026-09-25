@@ -248,7 +248,7 @@ async def mint_campaign_command(
         )
         campaign_id, cycle_id = minted.campaign_id, minted.cycle_id
         # Resolve the reservation onto the cycle it now names. Every hop-keyed join reads this —
-        # `running_job_for` (how `change-spend-budget` reaches the held cap), `reap_cycle_by_id`,
+        # `running_job_for` (how `change-run-limits` reaches the held cap), `reap_cycle_by_id`,
         # the holder readout — and each answers nothing at all against `UNRESOLVED_HOP`.
         job_registry.update_target(
             job.job_id, hop=CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
@@ -383,9 +383,9 @@ async def start_run_command(
         train_data = session.samples
         configure_and_apply_pipeline(session, campaign_config, log=lambda *_a, **_k: None)
         # Bind to the EXISTING campaign/cycle before launch, mirroring CLI `cmd_resume`.
-        # `_ensure_session_minted` guards on an empty session_id, so without this it mints a
-        # fresh campaign + root cycle and steals the active pointer, stranding an
-        # operator-steered fork in its real campaign.
+        # The embedded launch (`embedded_run.py::run_campaign`) mints on an empty
+        # `session.campaign_id`, so without this it mints a fresh campaign + root cycle and steals
+        # the active pointer, stranding an operator-steered fork in its real campaign.
         session.campaign_id = hop.campaign_id
         session.state.cycle_id = hop.cycle_id
         index = stores.campaigns.load(hop) or {}

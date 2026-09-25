@@ -119,7 +119,7 @@ export async function postDeleteCampaign(
   return postCommand("delete-campaign", payload);
 }
 // The one interrupt verb, idempotent: there is no stop, and resuming is `postStartRun(…, "resume")`.
-// Pause state reads back from `live-state::is_paused`.
+// Pause state reads back from `infrastructure/runtime_flags.py::is_paused`.
 export async function postPauseCycle(
   campaignId: string,
   cycleId: string,
@@ -179,10 +179,11 @@ export async function postOriginGateDecision(
   });
 }
 // A `0` ceiling halts at the next round boundary; an omitted one stays unchanged (the applier merges).
-export async function postChangeSpendBudget(
+// `maxRounds: null` is SENT — it lifts the round cap, where a null spend arm is simply not sent.
+export async function postChangeRunLimits(
   campaignId: string,
   cycleId: string,
-  caps: { maxUsd?: number | null; maxTokens?: number | null },
+  caps: { maxUsd?: number | null; maxTokens?: number | null; maxRounds?: number | null },
 ): Promise<CommandAcceptedBody> {
   const payload: Record<string, unknown> = {
     campaign_id: campaignId,
@@ -190,14 +191,15 @@ export async function postChangeSpendBudget(
   };
   if (typeof caps.maxUsd === "number") payload.max_usd = caps.maxUsd;
   if (typeof caps.maxTokens === "number") payload.max_tokens = caps.maxTokens;
-  return postCommand("change-spend-budget", payload);
+  if (caps.maxRounds !== undefined) payload.max_rounds = caps.maxRounds;
+  return postCommand("change-run-limits", payload);
 }
 // The caller's OWN account limit — workspace-scoped, so no cycle. Refused (422) above the
 // machine ceiling and on the host's key; read the result back off `/auth/quota-status`.
 export async function postSetConcurrentCycles(limit: number): Promise<CommandAcceptedBody> {
   return postCommand("set-concurrent-cycles", { max_concurrent_cycles: limit });
 }
-// No cap args: a cap is declared at `start-checkin` or via `change-spend-budget`; a resume inherits.
+// No cap args: a cap is declared at `start-checkin` or via `change-run-limits`; a resume inherits.
 export async function postStartRun(
   campaignId: string,
   cycleId: string,

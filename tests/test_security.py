@@ -104,7 +104,7 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
                 query=poisoned_query,
                 ground_truth="42",
                 predicted="canary",
-                rank=None,
+                rank=3,
                 terminal_node="llm_only",
                 gt_in_source=None,
                 gt_in_ranked=None,
@@ -719,7 +719,7 @@ def test_deleting_a_spent_stub_fork_does_not_un_spend_it(built_stores: Any) -> N
 async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
     built_stores: Any, tmp_path: Path
 ) -> None:
-    """``change-spend-budget`` takes each ceiling independently, and both halves of "leave it alone"
+    """``change-run-limits`` takes each ceiling independently, and both halves of "leave it alone"
     are silent when they break. Down at the clamp, a delegate's grant composed into an ABSENT arm
     writes a USD ceiling the caller never asked for, and `BudgetGate` then halts a run nobody
     capped. Up in the job's reservation, an absent arm has to stay at the JOB's prior: merged
@@ -732,7 +732,9 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
     from promptpotter.application.jobs.quota import clamp_budget_change
     from promptpotter.application.jobs.registry import JobRegistry
     from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.domain.launch_limits import RoundsCap
     from promptpotter.domain.spend import BudgetChange
+    from promptpotter.infrastructure.runtime_flags import read_run_limits_mirror
     from promptpotter.infrastructure.store.user_store import User
 
     stores = built_stores
@@ -742,13 +744,19 @@ async def test_a_budget_change_leaves_the_arm_it_did_not_touch_alone(
     assert job.status == "pending", "an empty box must hand out a slot, not a place in line"
     registry.set_caps(job.job_id, cap_usd=0.30, cap_tokens=5_000_000)
 
-    await CommandDispatcher(stores, registry)._apply_change_spend_budget(
-        hop, BudgetChange(None, 1_000)
+    dispatcher = CommandDispatcher(stores, registry)
+    await dispatcher._apply_change_run_limits(
+        hop, BudgetChange(None, None), RoundsCap(max_rounds=3)
     )
+    await dispatcher._apply_change_run_limits(hop, BudgetChange(None, 1_000), None)
     held = registry.get(job.job_id)
     assert held is not None
     assert held.cap_tokens == 1_000
     assert held.cap_usd == pytest.approx(0.30), "the untouched USD reservation was released"
+    # The standing record is written WHOLE, so a spend move must carry the round cap it did not
+    # touch — dropped, the run falls back to the config's cap and spends past the operator's.
+    assert stores.campaigns.read_run_limits(hop).rounds == RoundsCap(max_rounds=3)
+    assert read_run_limits_mirror(stores.campaigns.cycle_dir(hop)).rounds == RoundsCap(max_rounds=3)
 
     # An absent arm stays absent through the clamp too, delegated ceiling or not.
     delegated = types.SimpleNamespace(
@@ -778,7 +786,7 @@ async def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
 ) -> None:
     """A run declaring nothing reserves the account's headroom while the wallet bound composes its
     ceiling far lower. Moving one arm must leave the other at that composed cap: pinned at the
-    reservation in ``spend_cap.json``, which the gate prefers, it lets the run spend past it."""
+    reservation in ``run_limits.json``, which the gate prefers, it lets the run spend past it."""
     import types
 
     from promptpotter.application.commands.dispatcher import CommandDispatcher
@@ -801,8 +809,8 @@ async def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
     )
     assert gate.tripped() == StopReason.TOKEN_BUDGET
 
-    await CommandDispatcher(built_stores, registry)._apply_change_spend_budget(
-        hop, BudgetChange(0.50, None)
+    await CommandDispatcher(built_stores, registry)._apply_change_run_limits(
+        hop, BudgetChange(0.50, None), None
     )
     assert gate.tripped() == StopReason.TOKEN_BUDGET, "a USD raise lifted the token ceiling"
 
@@ -813,16 +821,16 @@ def test_a_non_finite_budget_cannot_disarm_the_spend_ceiling() -> None:
     ``NaN > headroom`` is False — becomes the run's cap, and the ``BudgetGate`` probe ``spent >=
     cap`` is false forever, leaving only the token arm to bind a stranger on the host's key.
     ``+inf`` does the same wherever the bound is one-sided. Both then serialize into
-    ``spend_cap.json`` as literals no strict JSON reader accepts. Nothing raises at any step: the
+    ``run_limits.json`` as literals no strict JSON reader accepts. Nothing raises at any step: the
     USD ceiling simply stops existing, on a run the client was told 202 for.
 
     Pinned at BOTH seams that turn a wire number into a ceiling — the router's launch limits and
-    the dispatcher's ``change-spend-budget`` — because a guard on one leaves the other open.
+    the dispatcher's ``change-run-limits`` — because a guard on one leaves the other open.
     """
     from pydantic import ValidationError
 
     from promptpotter.application.commands.payloads import (
-        ChangeSpendBudgetPayload,
+        ChangeRunLimitsPayload,
         MintCampaignPayload,
         StartRunPayload,
     )
@@ -836,7 +844,7 @@ def test_a_non_finite_budget_cannot_disarm_the_spend_ceiling() -> None:
         with pytest.raises(ValidationError):
             MintCampaignPayload(dataset_name="ds", spend_budget_usd=bad)
         with pytest.raises(ValidationError):
-            ChangeSpendBudgetPayload(**at, max_usd=bad)
+            ChangeRunLimitsPayload(**at, max_usd=bad)
 
     # And the guard rejects only what it names: the bounds themselves still admit, or a launch
     # that CAN be metered is refused instead — the same ceiling gone, the other direction. All
@@ -853,7 +861,7 @@ def test_a_non_finite_budget_cannot_disarm_the_spend_ceiling() -> None:
     with pytest.raises(ValidationError):
         StartRunPayload(**at, kind="resume", token_budget=True)
     with pytest.raises(ValidationError):
-        ChangeSpendBudgetPayload(**at, max_usd=True)
+        ChangeRunLimitsPayload(**at, max_usd=True)
 
 
 async def test_a_revoked_principal_cannot_replay_an_applied_command(tmp_path: Path) -> None:
@@ -900,7 +908,7 @@ async def test_a_revoked_principal_cannot_replay_an_applied_command(tmp_path: Pa
 
 
 def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path) -> None:
-    """``change-spend-budget`` acks ``applied`` the moment the ledger takes the record — it cannot
+    """``change-run-limits`` acks ``applied`` the moment the ledger takes the record — it cannot
     see whether anything will ever READ the ceiling it wrote, so every way of writing one nothing
     polls is a lie the operator has no way to catch. Two existed. A run launched declaring nothing
     got no ``BudgetGate`` at all, so the file was written and read by no one for the life of the
@@ -908,17 +916,20 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
     the next launch, before the resume could read it. Both end the same way: the number is on the
     dashboard, the command returned 202, and the run spends past it to completion.
 
-    What the operator declared lives on the ledger (``SpendCeilingRecord``), which every launch
+    What the operator declared lives on the ledger (``RunLimitsRecord``), which every launch
     re-declares; the file the gate polls is only its mirror, so a launch may sweep it.
     """
     import types
 
+    from promptpotter.application.campaign_config import load_campaign_config
     from promptpotter.application.runner.entry import _build_budget_gate
+    from promptpotter.application.runner.loop import _armed_round_cap
+    from promptpotter.domain.launch_limits import RoundsCap
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.spend import BudgetChange
     from promptpotter.infrastructure.runtime_flags import (
         clear_run_control_flags,
-        write_spend_caps,
+        write_run_limits_mirror,
     )
 
     cycle_dir = tmp_path / "cyc"
@@ -930,12 +941,29 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
     # A run that declared NOTHING is still gated, and the gate stays silent until a ceiling exists.
     gate = _build_budget_gate(observers, cycle_dir, usd_cap=None, token_cap=None)
     assert gate.tripped() is None
-    write_spend_caps(cycle_dir, BudgetChange(0.50, None))
+    write_run_limits_mirror(cycle_dir, BudgetChange(0.50, None), rounds=None)
     assert gate.tripped() == StopReason.SPEND_BUDGET, "a mid-run ceiling reached no gate"
 
     # The token arm binds on its own, in the unit that survives an unpriced model.
-    write_spend_caps(cycle_dir, BudgetChange(None, 5_000))
+    write_run_limits_mirror(cycle_dir, BudgetChange(None, 5_000), rounds=None)
     assert gate.tripped() == StopReason.TOKEN_BUDGET
+
+    # The round cap rides the same mirror into the loop's boundary: lowered mid-run it binds over
+    # the config's, and a LIFT reads as no cap rather than falling back to the config's.
+    session = types.SimpleNamespace(
+        state=types.SimpleNamespace(cycle_id="cyc"),
+        hop=None,
+        store=types.SimpleNamespace(
+            campaigns=types.SimpleNamespace(cycle_dir=lambda _h: cycle_dir)
+        ),
+    )
+    config = load_campaign_config(
+        {"optimization": {"degradation_threshold": 0.05, "max_rounds": 50}}
+    )
+    write_run_limits_mirror(cycle_dir, BudgetChange(None, None), rounds=RoundsCap(max_rounds=3))
+    assert _armed_round_cap(session, config) == 3, "a mid-run round cap reached no loop"
+    write_run_limits_mirror(cycle_dir, BudgetChange(None, None), rounds=RoundsCap(max_rounds=None))
+    assert _armed_round_cap(session, config) is None
 
     # The launch sweep drops the mirror; the standing ceiling itself is the ledger's to carry.
     clear_run_control_flags(cycle_dir)
@@ -956,6 +984,7 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     money spent ($1.87 on a campaign the provider had billed $0.235)."""
     import contextlib
     import random
+    import ssl
     import types
 
     import httpx
@@ -1121,27 +1150,76 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
         reset_cycle_ledger(token)
     assert unreported_on(ledger).sends == unreported + 2
 
-    # A backend cell: a connection never made is retried free; a 5xx that billed is settled off
-    # its error envelope and retried; a read timeout is left unreported and NEVER sent again — the
-    # backend is still working it, and a second POST was a second bill nobody recorded.
+    # A connection that broke AFTER the request left (a TLS record fault) crashed a whole campaign
+    # on one optimizer call. It is retried like a 5xx, and the broken send stays held.
+    broke = [True]
+    answer = create
+
+    async def create_once_broken(**params: Any) -> Any:
+        if broke[0]:
+            broke[0] = False
+            try:
+                raise ssl.SSLError("bad record mac")
+            except ssl.SSLError as err:
+                raise openai.APIConnectionError(request=request) from err
+        return await answer(**params)
+
+    async def no_wait(*_: Any) -> None:
+        return None
+
+    monkeypatch.setattr("promptpotter.infrastructure.llm.base.wait_with_countdown", no_wait)
+    client._client.chat.completions.with_raw_response.create = create_once_broken  # type: ignore[union-attr]
+    token = set_cycle_ledger(ledger)
+    try:
+        with spending_under(book):
+            asyncio.run(
+                client.chat(
+                    [{"role": "user", "content": "x"}],
+                    model="gpt-x",
+                    label=CallLabel("tls", "optimizer"),
+                    max_tokens=10,
+                )
+            )
+    finally:
+        reset_cycle_ledger(token)
+    assert unreported_on(ledger).sends == unreported + 3
+
+    # A backend cell: a connection never made is retried free once `/status` answers; a 5xx that
+    # billed is settled off its error envelope and retried; a read timeout is left unreported and
+    # NEVER sent again — the backend is still working it, and a second POST was a second bill
+    # nobody recorded. Nor is a 5xx the backend declares deterministic: its bill stays unreported.
     from promptpotter.application.scoring.sample_measurement import cell_billing
     from promptpotter.infrastructure.backend import BackendClient
+    from promptpotter.shared.errors import CellHaltedError
 
     posts: list[int] = []
+    probes: list[int] = []
     billed_step = {"step_tokens": {"n": {"input": 10, "output": 5, "cost_usd": 0.001}}}
+    deadline = {
+        "detail": {"error_code": "llm_timeout", "retryable": False, "message": "no reply in 164s"},
+        "data": {"step_tokens": None},
+    }
 
     async def _no_wait(*_args: Any) -> None:
         return None
 
     def backend(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/status":
+            probes.append(1)
+            if len(probes) == 1:
+                raise httpx.ConnectError("still restarting", request=request)
+            return httpx.Response(200, json={"status": "ok"})
         posts.append(1)
         if len(posts) == 1:
             raise httpx.ConnectError("refused", request=request)
         if len(posts) == 2:
             return httpx.Response(500, json={"detail": "upstream", "data": billed_step})
+        if len(posts) == 4:
+            return httpx.Response(504, json=deadline)
         raise httpx.ReadTimeout("slow", request=request)
 
     monkeypatch.setattr("promptpotter.infrastructure.backend.wait_with_countdown", _no_wait)
+    monkeypatch.setattr("promptpotter.infrastructure.backend._OUTAGE_POLL_S", 0.0)
     cells = BackendClient(
         "http://termnorm",
         wire_adapter=lambda query, params: {"query": query},
@@ -1155,20 +1233,21 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling(
     before = sum(isinstance(r, TokenUsageRecord) for _, r in ledger.iter())
     token = set_cycle_ledger(ledger)
     try:
-        with spending_under(wallet), pytest.raises(httpx.ReadTimeout):
-            asyncio.run(
-                cells.run_query(
-                    "q",
-                    bound=cell,
-                    billed=cell_billing(types.SimpleNamespace(nodes=[]), {}),  # type: ignore[arg-type]
+        for ends in (httpx.ReadTimeout, CellHaltedError):
+            with spending_under(wallet), pytest.raises(ends):
+                asyncio.run(
+                    cells.run_query(
+                        "q",
+                        bound=cell,
+                        billed=cell_billing(types.SimpleNamespace(nodes=[]), {}),  # type: ignore[arg-type]
+                    )
                 )
-            )
     finally:
         reset_cycle_ledger(token)
-    assert len(posts) == 3, f"{len(posts)} POSTs — a read timeout was sent again"
+    assert len(posts) == 4, f"{len(posts)} POSTs — a cell that cannot end otherwise was sent again"
     after = [r for _, r in ledger.iter() if isinstance(r, TokenUsageRecord)][before:]
     assert [r.cost_usd for r in after] == [0.0, 0.001]
-    assert wallet.usd_unreported == pytest.approx(0.01)
+    assert wallet.usd_unreported == pytest.approx(0.02)
 
     # A cell whose sends are each billed where they are made (Harbor's agent) RESERVES its bound
     # rather than holding it as one send. Cancelled mid-episode, it has paid for the turns that
@@ -1250,8 +1329,8 @@ def test_a_run_holds_the_budget_it_declared_and_admission_is_the_only_bound(
     from promptpotter.application.runner.entry import _set_held_ceiling
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.launch_limits import LaunchLimits
-    from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
-    from promptpotter.domain.spend import BudgetChange, SpendCeilings
+    from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, RunLimitsRecord
+    from promptpotter.domain.spend import SpendCeilings
     from promptpotter.infrastructure.store.user_store import User
 
     config = load_campaign_config(
@@ -1265,7 +1344,7 @@ def test_a_run_holds_the_budget_it_declared_and_admission_is_the_only_bound(
     )
     hop = CycleHop(campaign_id="camp", cycle_id="cyc")
     seeds: dict[str, CycleSeed] = {}
-    standing = {"ceiling": BudgetChange(None, None)}
+    standing = {"ceiling": RunLimitsRecord()}
 
     def _stores(*, issuer: str | None) -> Any:
         return types.SimpleNamespace(
@@ -1274,7 +1353,7 @@ def test_a_run_holds_the_budget_it_declared_and_admission_is_the_only_bound(
                 iter_cycle_ledgers=lambda: [],
                 workspace=tmp_path / "ws",
                 read_cycle_seed=lambda _hop: seeds.get("seed"),
-                read_spend_ceiling=lambda _hop: standing["ceiling"],
+                read_run_limits=lambda _hop: standing["ceiling"],
             ),
         )
 
@@ -1289,8 +1368,8 @@ def test_a_run_holds_the_budget_it_declared_and_admission_is_the_only_bound(
     held = _set_held_ceiling(config, declared)
     assert held.optimization.spend_budget_usd == pytest.approx(0.30), "the config re-bounded it"
 
-    # A standing ceiling (`set-budget`, an earlier flag) is declared again by a plain relaunch...
-    standing["ceiling"] = BudgetChange(0.50, None)
+    # A standing ceiling (`set-limits`, an earlier flag) is declared again by a plain relaunch...
+    standing["ceiling"] = RunLimitsRecord(usd=0.50)
     declared, _ = declare_run_ceiling(config, stores=host, hop=hop, requested=LaunchLimits())
     assert declared.usd == pytest.approx(0.50)
     # ...and this launch's own flag is the last word over it, in either direction.
@@ -1298,7 +1377,7 @@ def test_a_run_holds_the_budget_it_declared_and_admission_is_the_only_bound(
         config, stores=host, hop=hop, requested=LaunchLimits(spend_budget_usd=0.10)
     )
     assert declared.usd == pytest.approx(0.10)
-    standing["ceiling"] = BudgetChange(None, None)
+    standing["ceiling"] = RunLimitsRecord()
 
     # A seed arrives over `fork-cycle` from anyone holding `campaign.run`, and it may raise too —
     # because what it declares is ADMITTED: a free-tier account is refused, never clamped.

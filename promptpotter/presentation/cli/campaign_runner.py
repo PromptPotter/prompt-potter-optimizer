@@ -36,11 +36,12 @@ from promptpotter.presentation.cli.commands.lifecycle import (
     cmd_cleanup_empty_cycles,
     cmd_delete,
     cmd_delete_cycle,
+    cmd_origin_gate,
     cmd_pause,
     cmd_rename,
     cmd_replace_dataset,
-    cmd_set_budget,
     cmd_set_concurrent_cycles,
+    cmd_set_limits,
     cmd_skip_searchpoint,
     cmd_step_cycle,
     cmd_unarchive,
@@ -84,8 +85,9 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], Coroutine[Any, Any, CommandRe
     "unarchive": cmd_unarchive,
     "pause": cmd_pause,
     "rename": cmd_rename,
-    "set-budget": cmd_set_budget,
+    "set-limits": cmd_set_limits,
     "skip-searchpoint": cmd_skip_searchpoint,
+    "origin-gate": cmd_origin_gate,
     "step-cycle": cmd_step_cycle,
     "delete-cycle": cmd_delete_cycle,
     "cleanup-empty-cycles": cmd_cleanup_empty_cycles,
@@ -121,9 +123,10 @@ CLI_VERB_FOR_KIND: dict[str, str | None] = {
     "delete-cycle": "delete-cycle",
     "cleanup-empty-cycles": "cleanup-empty-cycles",
     "skip-searchpoint": "skip-searchpoint",
+    "origin-gate-decision": "origin-gate",
     "step-cycle": "step-cycle",
     "pause-cycle": "pause",
-    "change-spend-budget": "set-budget",
+    "change-run-limits": "set-limits",
     "set-campaign-label": "rename",
     "replace-dataset": "replace-dataset",
     "edit-draft-campaign": "new",
@@ -135,15 +138,13 @@ CLI_VERB_FOR_KIND: dict[str, str | None] = {
     # terminal changes the same state and writes no `CommandRecord` naming who asked. Each is its
     # own standing finding; they are named here so the next reader inherits them instead of
     # rediscovering them. `new`/`resume` mint and run inline (`--steer` is the fork),
-    # `register-backend` is written by init wiring, `origin-gate-decision` is answered by the
-    # in-run stdin prompt, `verify` calls `verify_candidate` and `compact-archive` the maintenance
-    # pass direct.
+    # `register-backend` is written by init wiring, `verify` calls `verify_candidate` and
+    # `compact-archive` the maintenance pass direct.
     "verify-candidate": "verify",
     "mint-campaign": "new",
     "register-backend": "new",
     "start-run": "resume",
     "fork-cycle": "resume",
-    "origin-gate-decision": "resume",
     "compact-archive": "compact-archive",
     # Browser-only ON PURPOSE, and the absence IS the boundary: look-ahead spends the box's shared
     # provider rate bucket, so an assistant may recommend the control but never press it. Root

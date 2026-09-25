@@ -20,7 +20,7 @@ field that is live-only rides `Field(exclude=True)` (`PhaseRecord.data`, `.live_
 `ElectionRecord.live_round_result`, which is how the round's own readings reach `current_round` at
 the election) so nothing decides per-key at the seam what serializes.
 
-**A resume-critical fact must be a declared field on the persisted half.** A fold that reads an excluded live-only field (`payload["data"]`) sees nothing on resume — no error, just zeros, and budget re-spent. When a shape moves, `application/maintenance/restamp.py::compact_cycle_ledgers` is where already-written data is lifted across, and it CALLS the writer's projections rather than restating them.
+**A resume-critical fact must be a declared field on the persisted half.** A fold that reads an excluded live-only field (`payload["data"]`) sees nothing on resume — no error, just zeros, and budget re-spent. `application/maintenance/restamp.py::compact_cycle_ledgers` re-projects written records by CALLING the writer's projections, and lifts no retired shape across.
 
 **Newtype-guarded projections** under `projections/`:
 
@@ -140,7 +140,7 @@ The `CycleDir` / `WorkspaceDir` write-target newtypes live in `domain/cycle_path
 
 `write_ruler`/`read_ruler` ride the same shape for a δ ruler (`RulerRecord`, last-wins PER `dataset_name`) — **WHOLE each time rather than as a delta**, because `append` is not crash-atomic and a torn line must fall back to a smaller-but-valid scale. It lands BEFORE the round document naming it, since a round whose θ nothing can reproduce is the state it exists to end. **One ledger carries more than one** (δ keys name a sample only within one dataset, and an L4 outer cycle also carries the shared inner scale — `application/runner/inner/ruler.py`), so `copy_rulers` is what a fork lifts, never one of them.
 
-`write_spend_ceiling`/`read_spend_ceiling` carry the operator's standing ceiling (`SpendCeilingRecord`, last-wins), scanned physically so a fork never inherits it; its polled mirror is `.runtime/spend_cap.json`. All three differ from `.runtime/{skip,pause,spend_cap}`, the transient **polled** flags read at the next sample boundary.
+`write_run_limits`/`read_run_limits` carry the operator's standing ceiling (`RunLimitsRecord`, last-wins), scanned physically so a fork never inherits it; its polled mirror is `.runtime/run_limits.json`. All three differ from `.runtime/{skip,pause,run_limits}`, the transient **polled** flags read at the next sample boundary.
 
 ## One deleter — `rmtree_robust`
 

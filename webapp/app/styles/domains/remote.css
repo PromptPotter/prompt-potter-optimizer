@@ -126,15 +126,16 @@
 .remote-panel .lbl{color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-size:var(--text-xs);font-weight:600;flex-shrink:0}
 .remote-panel .val{color:var(--color-text-primary);font-family:var(--font-mono);font-size:var(--text-sm);text-align:right;word-break:break-all}
 
-.spend-control{display:flex;flex-direction:column;gap:var(--space-6);padding-top:4px}
-.spend-control-used{color:var(--color-text-tertiary);font-weight:400}
-.spend-control-edit{display:flex;align-items:center;gap:var(--space-6)}
-.spend-control-prefix{color:var(--color-text-tertiary);font-size:var(--text-sm)}
-.spend-control-edit input{flex:1;min-width:0;padding:var(--space-6) var(--space-8);border:0.5px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:var(--text-sm);font-family:var(--font-mono)}
-.spend-control-set{padding:var(--space-6) var(--space-12);border-radius:5px;border:0.5px solid var(--color-accent);background:var(--color-accent);color:var(--color-text-on-accent);font-size:var(--text-sm);font-weight:500;cursor:pointer;flex-shrink:0}
-.spend-control-set:disabled{opacity:0.5;cursor:not-allowed}
-.spend-control-hint{color:var(--color-text-tertiary);font-size:var(--text-xs);line-height:1.4}
-.spend-control-note{color:var(--color-success);font-size:var(--text-xs)}
+.run-limits-control{display:flex;flex-direction:column;gap:var(--space-6);padding-top:4px}
+.run-limits-control-used{color:var(--color-text-tertiary);font-weight:400}
+.run-limits-control-edit{display:flex;align-items:center;gap:var(--space-6)}
+.run-limits-control-prefix{color:var(--color-text-tertiary);font-size:var(--text-sm)}
+.run-limits-control-edit input{flex:1;min-width:0;padding:var(--space-6) var(--space-8);border:0.5px solid var(--color-border);border-radius:5px;background:var(--color-background-secondary);color:var(--color-text-primary);font-size:var(--text-sm);font-family:var(--font-mono)}
+.run-limits-control-set{padding:var(--space-6) var(--space-12);border-radius:5px;border:0.5px solid var(--color-accent);background:var(--color-accent);color:var(--color-text-on-accent);font-size:var(--text-sm);font-weight:500;cursor:pointer;flex-shrink:0}
+.run-limits-control-set:disabled{opacity:0.5;cursor:not-allowed}
+.run-limits-control-lift{padding:var(--space-6) var(--space-12);border-radius:5px;font-size:var(--text-sm);flex-shrink:0}
+.run-limits-control-hint{color:var(--color-text-tertiary);font-size:var(--text-xs);line-height:1.4}
+.run-limits-control-note{color:var(--color-success);font-size:var(--text-xs)}
 
 @media (max-width:640px){
   /* Scoped to the STRIP, so the look-ahead button in the panel keeps its label. */

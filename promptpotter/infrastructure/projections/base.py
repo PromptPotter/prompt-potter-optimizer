@@ -34,8 +34,8 @@ from promptpotter.domain.run_records import (
     ResumeCheckpointRecord,
     RoundWarningRecord,
     RulerRecord,
+    RunLimitsRecord,
     SnapshotRecord,
-    SpendCeilingRecord,
     SpendHoldRecord,
     SpendTombstoneRecord,
     TokenUsageRecord,
@@ -71,9 +71,9 @@ _ROUTES: dict[type, str | None] = {
     # continuously would hold a second copy of a fact one reader wants once.
     CycleSeedRecord: None,
     RulerRecord: None,
-    # The standing operator ceiling, read by a scan at launch (`scan_ledger_spend_ceiling`); the
-    # running gate polls its mirror, `.runtime/spend_cap.json`, written beside it.
-    SpendCeilingRecord: None,
+    # The standing operator ceiling, read by a scan at launch (`scan_ledger_run_limits`); the
+    # running gate polls its mirror, `.runtime/run_limits.json`, written beside it.
+    RunLimitsRecord: None,
     # Banked by `store/account_spend.py` before a delete takes the rows it stands for — a fact
     # about a cycle that no longer exists, so no live view of one can hold it.
     SpendTombstoneRecord: None,
