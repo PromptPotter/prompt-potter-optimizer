@@ -211,7 +211,7 @@ async def post_round(
     is_final_round: bool = False,
 ) -> None:
     """Clean-round escalation observation; raises ``StopLoop`` on a stop condition. ``is_final_round``
-    suppresses the L2 fire — its refined ``task_context`` is read by a NEXT round that never comes."""
+    suppresses the L2 fire — its layout/override edit is read by a NEXT round that never comes."""
     axes_with_positive_yield = count_positive_yield_axes(cycle)
     # A dropped mandatory backend placeholder is structural, not a stall — heal L2 now
     # (patience 0) instead of burning l1_patience rounds while L1 re-drops it.

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Callable, Mapping
-from typing import Annotated, Any, ClassVar
+from typing import Annotated, Any, ClassVar, cast
 
 from pydantic import (
     BaseModel,
@@ -18,6 +18,8 @@ from pydantic import (
 )
 
 from promptpotter.application.optimization.dispatch.bundle import LAYOUT_SCHEMA_INSTRUCTION
+from promptpotter.config.settings import PROMPT_STRING_FIELDS
+from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.domain.l1_layout import NODE_LAYOUTS, layout_json_schema
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -42,6 +44,10 @@ def _truncate(max_len: int) -> Callable[[Any], Any]:
 # `priority_fix`, sized so a mandated format can still hold a verbatim quote), and it sits ~29%
 # above the measured 249-chars-per-variant, so it binds the tail and leaves the median untouched.
 VARIANT_PROSE_MAX = 320
+
+# Per-field ceiling on a check-in-authored starting prompt, sized so every hand-authored origin
+# field in `datasets/*/prompts/` fits under it bar one templated `instruction`.
+ORIGIN_FIELD_MAX = 600
 
 # The only two keys anything reads off `l1_overrides` (`l1/candidate_source.py`). Filtered at parse
 # because `_parse_l2` MERGES this LLM-written dict forward on every fire: an invented key was
@@ -69,6 +75,12 @@ def _keep_known_keys(allowed: frozenset[str]) -> Callable[[Any], Any]:
         return value
 
     return _v
+
+
+def _drop_blank_values(value: object) -> object:
+    if isinstance(value, dict):
+        return {k: v for k, v in value.items() if not (isinstance(v, str) and not v.strip())}
+    return value
 
 
 def _truncate_marked(max_len: int) -> Callable[[Any], Any]:
@@ -134,7 +146,7 @@ class L1Variant(OptimizerResponseModel):
     loose so a backend-specific node name never fails the parse. An all-empty variant re-asks instead of costing a slot."""
 
     # FIELD ORDER IS GENERATION ORDER — evidence precedes the decision it justifies, and the
-    # decision is the MUTATION, not the prose about it. `changes_description` trails the three
+    # decision is the MUTATION, not the prose about it. `changes_description` trails the two
     # delta slots so it can only ever REPORT a mutation already emitted. Ahead of them it was
     # a promise the model could make and then break, and it did: the required set asked for a
     # name and a paragraph while marking the payload optional, so ~10% of live variants arrived
@@ -160,17 +172,13 @@ class L1Variant(OptimizerResponseModel):
             "properties are grafted from the active PipelineSchema at runtime."
         ),
     )
-    prompt_fields_updates: dict[str, str] = Field(
+    # Blank values dropped at the boundary, so nothing downstream ever holds a "" that one reader
+    # takes for a clear and another for no edit.
+    prompt_fields_updates: Annotated[dict[str, str], BeforeValidator(_drop_blank_values)] = Field(
         default_factory=dict,
         description=(
             "Top-level prompt-template fields; the open ones are grafted from the "
             "active PipelineSchema at runtime."
-        ),
-    )
-    task_context_updates: dict[str, str] = Field(
-        default_factory=dict,
-        description=(
-            "Pipeline-context strings; keys must be one of {upstream_context, downstream_context}."
         ),
     )
     # Capped like every other node's prose. `l1_generate` was the ONLY optimizer node with no
@@ -184,33 +192,26 @@ class L1Variant(OptimizerResponseModel):
         Field(max_length=VARIANT_PROSE_MAX)
     )
 
-    # The parent's CURRENT text per delta key, bound per round onto the SUBCLASS
-    # `build_l1_response_model` mints. Empty on this base class, which is reached only where the
-    # round has no parent text and no rename to apply — there a blank slot is still convicted,
-    # and only a deliberate CLEAR becomes indistinguishable from a restatement.
-    parent_text: ClassVar[Mapping[str, str]] = {}
+    # The parent this round mutates away from, bound per round onto the SUBCLASS
+    # `build_l1_response_model` mints. Empty on the base class, where only a blank variant is
+    # convicted and a restatement of the parent passes to `l1_invariants`.
+    parent_prompt: ClassVar[Mapping[str, str]] = {}
+    parent_params: ClassVar[Mapping[str, Any]] = {}
 
     @model_validator(mode="after")
     def _reject_empty_mutation(self) -> L1Variant:
-        # A slot FILLED is not a mutation MADE, and only the parent's text tells the two apart:
-        # `{"upstream_context": ""}` beside two empty slots passes any container test — the dict
-        # is non-empty — while carrying no edit at all. `l1_invariants.py` convicts the same
-        # delta after the call returns, where it can only drop the candidate; here the message
-        # rides the schema-repair retry back to the model (`llm/openai_compat.py`), so the round
-        # gets the arm instead of losing it.
-        parent = type(self).parent_text
-        blank = not self.pipeline_overlay and not any(
-            value != parent.get(key, "")
-            for slot in (self.prompt_fields_updates, self.task_context_updates)
-            for key, value in slot.items()
-        )
-        if blank:
+        # The same `candidate_delta` `l1_invariants` convicts with after the call returns, where
+        # it can only drop the candidate; here the message rides the schema-repair retry back to
+        # the model (`llm/openai_compat.py`), so the round gets the arm instead of losing it.
+        cls = type(self)
+        if not candidate_delta(
+            self.prompt_fields_updates, cls.parent_prompt, self.pipeline_overlay, cls.parent_params
+        ):
             raise ValueError(
-                "this variant mutates nothing: at least one of pipeline_overlay, "
-                "prompt_fields_updates or task_context_updates must carry a value that "
-                "DIFFERS from the current prompt. Describing a change in changes_description "
-                "is not making one, and a key mapped to an empty string — or to what the field "
-                "already says — fills a slot without making a mutation. Emit the new text."
+                "this variant mutates nothing: pipeline_overlay or prompt_fields_updates must "
+                "carry a value that DIFFERS from the current one. Describing a change in "
+                "changes_description is not making one, and an empty string or the field's "
+                "current text is not an edit. Emit the new text."
             )
         return self
 
@@ -220,26 +221,34 @@ class L1GenerateOutput(OptimizerResponseModel):
 
 
 def build_l1_response_model(
-    field_names: Mapping[str, str], *, parent_text: Mapping[str, str]
+    field_names: Mapping[str, str],
+    *,
+    parent_prompt: Mapping[str, str],
+    parent_params: Mapping[str, Any],
 ) -> type[L1GenerateOutput]:
-    """``L1GenerateOutput`` validating through renamed wire keys. ``populate_by_name`` is left OFF deliberately: a model
-    emitting the original key fails validation and self-penalises, rather than the rename silently half-applying.
-
-    ``parent_text`` is what each delta key says on the parent RIGHT NOW, so
-    ``_reject_empty_mutation`` measures a value rather than a container. REQUIRED, because it
-    changes which variants that guard convicts — passing it is the caller declaring which parent
-    this round is mutating away from, and a default would decide that from an absent argument."""
-    if not field_names and not parent_text:
-        return L1GenerateOutput
-    return _build_l1_response_model(
-        tuple(sorted(field_names.items())), tuple(sorted(parent_text.items()))
+    """``L1GenerateOutput`` validating through renamed wire keys, against the parent this round
+    mutates. ``populate_by_name`` is left OFF deliberately: a model emitting the original key fails
+    validation and self-penalises, rather than the rename silently half-applying. The parent is
+    REQUIRED because it decides which variants ``_reject_empty_mutation`` convicts."""
+    variant = cast(
+        "type[L1Variant]",
+        create_model("L1Variant", __base__=_renamed_variant(tuple(sorted(field_names.items())))),
     )
+    # ClassVars, so they ride the subclass without becoming fields the wire schema advertises —
+    # the parent's own text must never be emitted back to the model as something to fill in.
+    variant.parent_prompt = dict(parent_prompt)
+    variant.parent_params = dict(parent_params)
+    # `variant` is a class only at runtime, so `list[variant]` written as a subscript is a type
+    # expression over a variable that mypy objects to unstably; `__class_getitem__` builds the same
+    # `list[...]` as a VALUE, which no configuration type-analyses.
+    variants_field: Any = (list.__class_getitem__(variant), ...)
+    return create_model("L1GenerateOutput", __base__=L1GenerateOutput, variants=variants_field)
 
 
 @functools.lru_cache(maxsize=16)
-def _build_l1_response_model(
-    items: tuple[tuple[str, str], ...], parent: tuple[tuple[str, str], ...]
-) -> type[L1GenerateOutput]:
+def _renamed_variant(items: tuple[tuple[str, str], ...]) -> type[L1Variant]:
+    if not items:
+        return L1Variant
     overrides: dict[str, Any] = {}
     for field, wire in items:
         info = L1Variant.model_fields[field]
@@ -254,23 +263,7 @@ def _build_l1_response_model(
             kwargs["default"] = info.default
         # No default and no default_factory ⇒ Field() stays required, matching the source field.
         overrides[field] = (info.annotation, Field(**kwargs))
-    variant = create_model("L1Variant", __base__=L1Variant, **overrides)
-    # A ClassVar, so it rides the subclass without becoming a field the wire schema advertises —
-    # the parent's own text must never be emitted back to the model as something to fill in.
-    variant.parent_text = dict(parent)
-    suffix = "_".join(f"{f}2{w}" for f, w in items)
-    # `variant` is a class only at runtime (`create_model` above), so `list[variant]` written as a
-    # subscript is a type expression over a variable and mypy objects — correctly. Whether it
-    # objects is NOT stable: it turns on cache state and on what else is in the build graph, so a
-    # `type: ignore` there read as needed under one invocation and unused under the next, and the
-    # check could only ever be green for one of them. `__class_getitem__` builds the same
-    # `list[...]` as a VALUE, which no configuration type-analyses, so none of them has an opinion.
-    variants_field: Any = (list.__class_getitem__(variant), ...)
-    return create_model(
-        f"L1GenerateOutput__{suffix}",
-        __base__=L1GenerateOutput,
-        variants=variants_field,
-    )
+    return create_model("L1Variant", __base__=L1Variant, **overrides)
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +345,7 @@ class TerminateProposal(OptimizerResponseModel):
 
 
 # ---------------------------------------------------------------------------
-# l2_context — refine task framing + optional layout/runtime knobs.
+# l2_context — move L1's panels (l1_layout) + runtime knobs (l1_overrides).
 # ---------------------------------------------------------------------------
 
 
@@ -524,20 +517,18 @@ class CheckinOutput(OptimizerResponseModel):
     """Output of the checkin prompt. Two modes share one shape: task decomposition leaves the origin block empty, origin
     resolution fills it AND the Layer-1 fields — which seed the campaign's starting prompt either way."""
 
+    # FIELD ORDER IS GENERATION ORDER, and the two the starting prompt cannot lack are REQUIRED
+    # on the wire: optional and trailing, a constrained decoder closes the object without them.
     persona: str = ""
-    task_intent: str = ""
+    task_intent: str
+    answer_format: str = Field(
+        description="The output contract only: the exact shape the scorer extracts, as described to you in context. The valid labels are appended deterministically — never list them here.",
+    )
     problem_description: str = ""
     instruction: str = ""
-    # Undescribed, these two collide: the node wrote the scorer's bold-span contract into
-    # `thinking_style` and left `answer_format` empty, so the one field the optimizer may NOT
-    # freely rewrite held the extraction rule and the one it protects held nothing.
     thinking_style: str = Field(
         default="",
         description="How to reason. Never the output shape or the scoring rule — those are answer_format's.",
-    )
-    answer_format: str = Field(
-        default="",
-        description="The output contract only: the exact shape the scorer extracts, as described to you in context. The valid labels are appended deterministically — never list them here.",
     )
     task_context: CheckinTaskContext = Field(default_factory=CheckinTaskContext)
     # Origin-resolution block — populated only on the web ingest check-in path.
@@ -548,6 +539,27 @@ class CheckinOutput(OptimizerResponseModel):
         default="",
         description="On a 'ready' turn: a jargon-free paragraph restating what the campaign will do, for the operator to confirm intent.",
     )
+
+    @model_validator(mode="after")
+    def _check_the_starting_prompt(self) -> CheckinOutput:
+        # Parse-side only, never a wire `maxLength`: a constrained decoder honours that by
+        # cutting the string mid-sentence, which is a broken origin rather than a short one.
+        # Raised here, the message rides the schema-repair retry back to the model.
+        problems = [
+            f"{name} must not be empty"
+            for name in ("task_intent", "answer_format")
+            if not getattr(self, name).strip()
+        ] + [
+            f"{name} is {len(value)} chars (at most {ORIGIN_FIELD_MAX})"
+            for name in PROMPT_STRING_FIELDS
+            if len(value := getattr(self, name)) > ORIGIN_FIELD_MAX
+        ]
+        if problems:
+            raise ValueError(
+                "; ".join(problems) + " — these fields are the starting prompt; "
+                "move domain detail into task_context."
+            )
+        return self
 
 
 # ---------------------------------------------------------------------------

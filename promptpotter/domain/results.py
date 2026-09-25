@@ -194,20 +194,14 @@ def best_round_on_shared_cells(
     the origin. Newest wins, because rows compared against each other must be on one set. The fill
     lands on the caller's rows, which is what persists it into the cycle index. A cycle whose line
     shares no measurable cell has run only its origin, and answers with it."""
-    # A row carrying the reading WHOLE but not the flattened pair skipped `overlap_row` — the one
-    # failure this derivation cannot survive quietly, since the fall-through below then crowns C0
-    # with a plausible number on every resume. Rows that carry NEITHER are simply older than the
-    # projection and are read as unmeasured, which is what they are.
-    unprojected = [
-        r.get("round")
-        for r in rounds
-        if r.get("overlap") is not None and "overlap_accuracy" not in r
-    ]
+    # A row without the flattened pair skipped `overlap_row` — the one failure this derivation
+    # cannot survive quietly, since the fall-through below then crowns C0 on every resume.
+    unprojected = [r.get("round") for r in rounds if "overlap_accuracy" not in r]
     if unprojected:
         raise ValueError(
-            f"rounds {unprojected} carry an `overlap` reading but no `overlap_accuracy`: this row "
-            "shape reached the election without `results.py::overlap_row`, which would collapse "
-            "the whole trajectory onto round 0. Project every carrier's rows through it."
+            f"rounds {unprojected} carry no `overlap_accuracy`: this row shape reached the "
+            "election without `results.py::overlap_row`, which would collapse the whole "
+            "trajectory onto round 0. Project every carrier's rows through it."
         )
     # By ROUND, not by list order: the append path rewrites one row in place, so position does not
     # order this list. `is not None` because a 0.0 origin is a measurement, not an absence.
@@ -485,14 +479,13 @@ class ScoreboardRow(StrictModel):
 
 
 class CandidateProposal(StrictModel):
-    """Both deltas ride here, not just the merged result — the OSP carries the RESULTING prompt
-    fields, which cannot answer what L1 actually proposed this round."""
+    """The child OSP carries the resulting prompt, so its prompt edit is ``candidate_delta``
+    against the parent; the overlay rides here because nothing else carries it."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     opt_sp: OptSearchPoint
     pipeline_overlay: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    prompt_fields_updates: dict[str, str] = Field(default_factory=dict)
 
 
 class RoundParent(StrictModel):
@@ -869,10 +862,9 @@ class RoundResult(StrictModel):
     # bar reconstructed it from round N-1's winner instead. **Subsets move between rounds**, so
     # that reconstruction reads the parent on cells this round never bought — which is how a
     # sample-set mask came to re-score every arm on the selected cells while leaving the bar they
-    # must clear at its full-set value (`mask/load.py`). Empty at round 0, which has no parent,
-    # and on any round that closed before this field. A repair re-measures the ARMS and not the
-    # bar, so on a repaired round this stays the reading the round was actually decided under —
-    # which is what a record is for.
+    # must clear at its full-set value (`mask/load.py`). Empty at round 0, which has no parent.
+    # A repair re-measures the ARMS and not the bar, so on a repaired round this stays the reading
+    # the round was actually decided under — which is what a record is for.
     #
     # On a HELD round `results` already IS these rows (the retained parent is the headline), so
     # the panel is banked twice there. Deliberately: a reader wanting the bar must not first have
@@ -928,7 +920,7 @@ class RoundResult(StrictModel):
     # round produced by the optimizer I am holding now?" once the process exited — everything
     # else a resume re-renders depends on live cycle state. Resume diverges at the FIRST round
     # that disagrees, which is what lets a prompt edit fork a sibling rather than condemn the
-    # campaign. Empty ⇒ the round predates the stamp and cannot be asked.
+    # campaign. Empty on a generation-only round, which stamps nothing and cannot be asked.
     # IDENTITY, NOT A FIRE RECORD — every optimizer node is named on every round, including ones
     # that never run. Which node RAN, and what each panel cost it, is the ledger's `llm_call`.
     optimizer_prompt_hashes: dict[str, str] = Field(default_factory=dict)

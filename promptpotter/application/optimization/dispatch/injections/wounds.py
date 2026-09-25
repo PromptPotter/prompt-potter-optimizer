@@ -28,7 +28,7 @@ def _rf_matches_current_config(
     rf: RuntimeFailure, pipeline_params: dict[str, dict[str, Any]]
 ) -> bool:
     """Filter ACCUMULATED failures by current backend config: one observed under a superseded provider/model is stale
-    evidence that mis-steers L2's framing."""
+    evidence that mis-steers L2's axis routing."""
     node = rf.dominant_warning.split(":", 1)[0]
     if not node:
         return True
@@ -146,8 +146,8 @@ def _render_guard_breaches(outcomes: list[ValidatorOutcome], layer: str) -> str:
     citable=True,
 )
 def _r_guard_breaches(b: InjectionBundle) -> list[Item]:
-    """L2 + L3 post-parse guard outcomes in one block; both route to L3, which reads its own past breaches to avoid
-    repeating them. ``escalate_l2`` force-triggers off the stream directly, not this render."""
+    """L2 + L3 post-parse guard outcomes in one block, read by both layers so neither repeats a past breach. Prompt
+    evidence only: no escalation rule reads the stream (``escalation/firing.py``)."""
     wounds = b.opt_sp.memory.wounds
     blocks = [
         blk

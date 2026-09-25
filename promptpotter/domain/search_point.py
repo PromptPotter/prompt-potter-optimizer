@@ -123,8 +123,8 @@ class JobSearchPoint(SearchPoint):
 # TaskDecomposition — structured domain context for optimizer LLM calls
 # ---------------------------------------------------------------------------
 
-# The FRAMING half: operator-authored, never measured (no candidate carries them), FROZEN for
-# the run — `merge` refuses them and L2's schema has no field for them. Why, with the numbers:
+# The FRAMING half: operator-authored, never measured, budgeted at mint. The whole
+# `TaskDecomposition` is frozen for the run — no layer's wire schema has a field of it. Why:
 # `application/optimization/CLAUDE.md` § L2.
 FRAMING_FIELDS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
     {
@@ -185,26 +185,11 @@ class TaskDecomposition:
 
     @classmethod
     def coerce(cls, v: TaskDecomposition | dict[str, Any] | None) -> TaskDecomposition:
-        """The one "already typed ⇒ passthrough, else build" admission — shared by the OSP field
-        validator, the runner seam and the L2 verbatim check, so those three cannot drift."""
+        """The one "already typed ⇒ passthrough, else build" admission, read by the OSP field
+        validator."""
         if isinstance(v, TaskDecomposition):
             return v
         return cls.from_dict(v)
-
-    def merge(self, overrides: dict[str, Any]) -> TaskDecomposition:
-        """Applies ``overrides`` but REFUSES every framing field (frozen for the run), so a caller
-        meaning to re-frame the task fails loud instead of paraphrasing curated knowledge."""
-        if forbidden := sorted(FRAMING_FIELDS & overrides.keys()):
-            raise ValueError(
-                f"task_context framing is frozen for the run — refusing to overwrite "
-                f"{forbidden}. These fields are operator-authored evidence about the task; "
-                f"a round's findings belong in the critique / axis_memory / mutation_memory "
-                f"channels, which are derived from measurement. Mutable here: "
-                f"{sorted({f.name for f in fields(self)} - FRAMING_FIELDS)}."
-            )
-        base = self.to_dict()
-        base.update(overrides)
-        return self.from_dict(base)
 
     def check_budget(self, *, source: str) -> None:
         """Both bounds, because the per-field one cannot see the sum. Called once at the run-start

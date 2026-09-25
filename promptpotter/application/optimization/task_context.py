@@ -74,8 +74,7 @@ async def decompose_prompt_fields(
         )
 
     consultation_instruction = (
-        "Return a JSON object with exactly these keys. Use empty string for "
-        "fields that don't apply. Be concise and actionable."
+        "Return a JSON object with exactly these keys. Be concise and actionable."
     )
 
     token = set_cycle_ledger(context.ledger)

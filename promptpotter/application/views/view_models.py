@@ -265,22 +265,13 @@ class L2RefineEnterView:
 
 @dataclass(frozen=True)
 class L2RefineExitView:
-    # The two surfaces L2 still writes (`escalation/firing.py::_l2_exit`), plus its prose.
-    # Three fields sat here that `_l2_exit` had stopped emitting, so each rendered its
-    # default forever: `task_context_changed` (the framing is frozen — L2 has no
-    # task_context field), `action` (probe rounds are not wired — no `action` on
-    # `L2ContextOutput`), and `warned_samples` (the warned-query inventory was deleted).
-    # Meanwhile `l1_layout_changed` and `axis_targeted` WERE emitted and shown nowhere —
-    # so the operator's L2 line reported a param count and stayed silent about the
-    # attention edit, which is the move L2 is for.
+    # The two surfaces L2 writes (`escalation/firing.py::_l2_exit`), plus its prose.
     param_changes_count: int
     l1_layout_changed: bool
     axis_targeted: str
     changes_description: str
     # Post-fire L2 counters — the four scalars ``EscalationFSM.fold`` rebuilds resume state
-    # from. They ride the VIEW because the view is the persisted half of the record: they used
-    # to travel in ``PhaseEvent.data``, which is in-memory-only, so every resume silently
-    # rebuilt L2 as never-fired. A resume-critical fact is a declared field, not a loose key.
+    # from. They ride the VIEW because the view is the persisted half of the record.
     l2_round: int
     l2_stall_count: int
     l2_best_composite_fitness_at_entry: float
@@ -362,7 +353,7 @@ class RoundDigestView:
     # be differenced on, since `accuracy` above is read on whatever subset the round bought.
     overlap: OverlapReading | None = None
     # Per-candidate P(best) trajectory from ``.runtime/streams/round_NNNN_p_best.jsonl``;
-    # empty for resumed / pre-PoBB rounds.
+    # empty for resumed rounds.
     p_best_trajectory: dict[str, list[float]] = field(default_factory=dict)
     # Who the round ELECTED. The trajectory above is a STOPPING posterior and cannot answer it —
     # its argmax is regularly not the elected arm, and can name two of them or none.
@@ -370,8 +361,8 @@ class RoundDigestView:
     # What THIS round cost, and how much of its input providers served off their own prefix cache.
     # Served per round by the projection (`dashboard.json::spend_by_round`) and read here, never
     # re-folded: the browser's cost strip and this line are the same number or one of them is
-    # wrong. ``None`` for a cycle with no dashboard on disk — a foreign fork sibling, or a round
-    # banked before the split was served.
+    # wrong. ``None`` for a cycle with no dashboard on disk (a foreign fork sibling) or a round
+    # that billed nothing.
     spend: SpendRollup | None = None
 
 

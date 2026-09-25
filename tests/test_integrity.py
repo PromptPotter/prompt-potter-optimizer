@@ -12,6 +12,7 @@ them out with the loud-breakage shape/contract bulk.
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import copy
 import functools
@@ -355,23 +356,20 @@ def test_adopt_advances_identity_and_carries_the_wound_ledger():
     one) while CARRYING the outgoing parent's persistent memory: the wound ledger and
     L2's l1_layout. ``mutate`` deliberately resets those two on a child, so a seam that
     forgets to carry them silently drops the failures the search already paid to discover
-    — no error, the next round just re-invites the mistake. The surface the adoption
-    OWNS (here task_context) must instead come from the new parent.
+    — no error, the next round just re-invites the mistake.
     """
     from promptpotter.application.optimization.cycle import Cycle
 
     parent = OptSearchPoint(persona="Expert", instruction="Rank.")
     parent.memory.wounds.l3_note = "prior failure ledger"
-    # An L1 winner is a `mutate` child: it inherits task_context but resets wounds.
-    winner = parent.mutate(
-        source="l1_generate", changes_description="try X", task_context={"domain": "biotech"}
-    )
+    # An L1 winner is a `mutate` child: it resets wounds.
+    winner = parent.mutate(source="l1_generate", changes_description="try X")
     assert winner.memory.wounds.l3_note == ""  # the reset adopt must repair
     prior_id = parent.lineage.id
 
     cyc = object.__new__(Cycle)
     cyc.opt_sp = parent
-    cyc.adopt(winner, advanced={"task_context": winner.memory.task_context})
+    cyc.adopt(winner)
 
     # Identity advanced to the winner, parented on the outgoing parent.
     assert cyc.opt_sp is winner
@@ -379,8 +377,6 @@ def test_adopt_advances_identity_and_carries_the_wound_ledger():
     assert cyc.opt_sp.lineage.parent_id == prior_id
     # The wound ledger carried forward (would be silently lost without copy_memory_to).
     assert cyc.opt_sp.memory.wounds.l3_note == "prior failure ledger"
-    # The OWNED surface came from the new parent, not the carried memory.
-    assert cyc.opt_sp.memory.task_context.domain == "biotech"
 
 
 def test_judge_identity_moves_the_searchpoint_hash() -> None:
@@ -405,7 +401,9 @@ def test_judge_identity_moves_the_searchpoint_hash() -> None:
 
     def sp_hash(judges: dict[str, JudgeSpec]) -> str:
         return schema.sp_hash(
-            resolve_pipeline_config_params(active, {}, None, schema, judges=judges, experiment=None)
+            resolve_pipeline_config_params(
+                active, {}, None, schema, judges=judges, experiment=None, workspace=None
+            )
         )
 
     def spec(name: str, model: str) -> JudgeSpec:
@@ -875,9 +873,11 @@ def test_the_provenance_sink_cannot_move_the_merge_it_observes(tmp_path: Path) -
     )
     overlay = {"llm_only": {"model": "campaign-model"}}
     sink: dict[str, dict[str, str]] = {}
-    plain = resolve_pipeline_config_params(["llm_only"], overlay, tmp_path, schema, experiment=None)
+    plain = resolve_pipeline_config_params(
+        ["llm_only"], overlay, tmp_path, schema, experiment=None, workspace=None
+    )
     observed = resolve_pipeline_config_params(
-        ["llm_only"], overlay, tmp_path, schema, experiment=None, provenance=sink
+        ["llm_only"], overlay, tmp_path, schema, experiment=None, workspace=None, provenance=sink
     )
     assert plain == observed
     assert sink["llm_only"] == {"model": "campaign", "temperature": "dataset"}
@@ -1502,9 +1502,9 @@ def test_l1_is_offered_no_slot_whose_panel_it_never_saw() -> None:
 
     Live on `sealqa-longseal-12` r1, launched unframed so the `task_context` panel produced
     nothing: both variants named `answer_format` and `instruction` in their descriptions, emitted
-    `prompt_fields_updates: {}`, and wrote `task_context_updates` — whose two keys splice around
-    `problem_description`, neither field they named. The round scored two arms and every artifact
-    that outlives it — the ledger, the SP diff table, `round_0001.json` — records the field the
+    `prompt_fields_updates: {}`, and wrote the context slot then on offer — whose two keys splice
+    around `problem_description`, neither field they named. The round scored two arms and every
+    artifact that outlives it — the ledger, the SP diff table, `round_0001.json` — records the field the
     model named rather than the one it changed, so no later reader can attribute the result.
     """
     from promptpotter.application.optimization.dispatch.l1_wire_schema import (
@@ -1559,8 +1559,8 @@ def test_a_held_prompt_field_is_neither_offered_nor_accepted() -> None:
     parent = OptSearchPoint(persona="Expert", instruction="Solve.")
 
     def forbidden(updates: dict[str, str]) -> list[str]:
-        cp = CandidateProposal(opt_sp=parent.mutate(**updates), prompt_fields_updates=updates)
-        [opt_sp], _ = parse_population([cp], None, schema)
+        cp = CandidateProposal(opt_sp=parent.mutate(**updates))
+        [opt_sp], _ = parse_population([cp], parent, None, schema)
         failures = opt_sp.memory.wounds.validation_failures
         return [f.axis for f in failures if f.reason == "forbidden_axis"]
 
@@ -1736,7 +1736,7 @@ def _draft(overlay: dict[str, Any]) -> Any:
         n_samples=1,
         sample_preview=(),
         connector=DEFAULT_CONNECTOR,
-        scoring_composite="exact_match",
+        scoring_composite="label_match",
         raw_task_description="",
         pipeline_overlay=overlay,
         created_at=now,
@@ -1983,6 +1983,43 @@ def test_an_axis_the_model_REFUSES_offers_only_the_value_it_runs() -> None:
     assert silent.param_options(unknown, "response_format") == ["text", "json"]
 
 
+def test_a_swapped_model_starts_at_its_own_effort_floor(tmp_path: Path) -> None:
+    """The origin's rung is the floor of the model the node RUNS. Spelled as a dataset constant, a
+    campaign that swapped in a model whose `low` switches hidden reasoning ON inherited the old
+    model's floor — ~6000 output tokens a cell, most of them timing out, every number rendering."""
+    from promptpotter.application.pipeline_resolve import resolve_pipeline_config_params
+
+    schema = parse_pipeline_response(
+        {
+            "nodes": {
+                "llm_only": {"type": "llm", "optimizer": {"param_keys": ["reasoning_effort"]}}
+            },
+            "pipelines": {"default": ["llm_only"]},
+        }
+    )
+    write_yaml(tmp_path / "pipeline.yaml", {"nodes": {"llm_only": {"config": {"model": "a"}}}})
+    workspace = tmp_path / "ws"
+    write_yaml(
+        workspace / "model_capabilities.yaml",
+        {
+            "a": {"reasoning_efforts": ["default", "low", "medium", "high"]},
+            "b": {"reasoning_efforts": ["none", "default", "low", "medium", "high"]},
+        },
+    )
+
+    def effort(overlay: dict[str, Any]) -> object:
+        params = resolve_pipeline_config_params(
+            ["llm_only"], overlay, tmp_path, schema, experiment=None, workspace=workspace
+        )
+        return params["llm_only"].get("reasoning_effort")
+
+    assert effort({}) == "low"
+    assert effort({"llm_only": {"model": "b"}}) == "none", "the floor stayed with the old model"
+    assert effort({"llm_only": {"model": "b", "reasoning_effort": "high"}}) == "high"
+    # Unknown to every layer: nothing to floor on, so the field stays off the wire.
+    assert effort({"llm_only": {"model": "c"}}) is None
+
+
 def test_a_measured_point_is_served_the_SCHEMA_it_ran_under() -> None:
     """The structured output is an AXIS, so the contract a surface shows must be resolved like any
     other value. The description keys are open by default: L1 rewrites the prose of any node
@@ -2183,6 +2220,75 @@ def test_the_campaign_list_names_the_model_its_root_course_runs(built_stores: An
         served = resolve_pipeline_for_campaign(stores, campaign, at=at)
         row = next(p for p in served.node_config_schema["llm_only"] if p.key == "model")
         assert [(row.value, row.source)] == models, at.kind
+
+
+def test_a_new_runs_the_campaign_it_minted_when_another_mint_lands_mid_launch(
+    built_stores: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every mint rewrites the tenant's active pointer, and `new` awaits the backend probe between
+    its mint and its run. Read back there, two launches in one second swapped campaigns: each ran
+    its own model under the other's manifest and cycle, with every surface rendering."""
+    from promptpotter.connectors import DEFAULT_CONNECTOR, get
+    from promptpotter.domain.campaign import Campaign
+    from promptpotter.infrastructure.store.session_pointer import save_active_pointer
+    from promptpotter.presentation.cli.commands import new as new_cmd
+
+    stores = built_stores
+    dataset = stores.tenant_datasets.dataset_dir("ds")
+    write_yaml(
+        dataset / "pipeline.yaml",
+        {
+            "backend_type": DEFAULT_CONNECTOR,
+            "nodes": {"llm_only": {"type": "llm", "config": {"model": "shared"}}},
+            "pipelines": {"default": ["llm_only"]},
+        },
+    )
+    write_yaml(
+        dataset / "campaign.yaml",
+        {"campaign_config": {"optimization": dict(get(DEFAULT_CONNECTOR).default_optimization)}},
+    )
+
+    def mint(model: str) -> CycleHop:
+        hop = CycleHop(campaign_id=f"ds__{model}", cycle_id=f"cycle_{model}")
+        stores.campaigns.create_campaign(
+            Campaign(
+                campaign_id=hop.campaign_id,
+                dataset_name="ds",
+                created_at="2026-09-24T00:00:00Z",
+                root_cycle_id=hop.cycle_id,
+                owner_user_id=str(stores.identity.user_id),
+                config={"pipeline_overlay": {"llm_only": {"model": model}}},
+            )
+        )
+        stores.campaigns.create(hop, {"parent_session_id": f"s_{model}"})
+        stores.sessions.create(f"s_{model}", {"init_params": {"dataset_name": "ds"}})
+        save_active_pointer(stores.base_dir, f"s_{model}", hop)
+        return hop
+
+    minted = mint("a")
+    session = types.SimpleNamespace(
+        store=stores, hop=minted, samples=[], pipeline_schema=None, pipeline_params={}
+    )
+
+    class DrivenError(Exception):
+        pass
+
+    async def mint_own(_args: Any) -> tuple[Any, None, str]:
+        return session, None, "ds"
+
+    async def second_launch_mints(*_args: Any) -> None:
+        mint("b")
+
+    async def drive(_args: Any, ctx: Any, config: Any, *_rest: Any, **_kw: Any) -> None:
+        raise DrivenError(ctx.hop, config.pipeline_overlay)
+
+    monkeypatch.setattr(new_cmd, "_mint_fresh_session", mint_own)
+    monkeypatch.setattr(new_cmd, "probe_backend", second_launch_mints)
+    monkeypatch.setattr(new_cmd, "drive_cycle", drive)
+
+    with pytest.raises(DrivenError) as driven:
+        asyncio.run(new_cmd.cmd_new(argparse.Namespace(dataset="ds", backend_url="")))
+    assert driven.value.args == (minted, {"llm_only": {"model": "a"}})
 
 
 # 5. The dispatch frame — what a node is shown, within what budget
@@ -4160,3 +4266,27 @@ def test_backend_row_names_the_endpoint_the_run_actually_reached(built_stores: A
     row = built_stores.backends.get(minted)
     assert row is not None
     assert row.base_url == "http://127.0.0.1:8000"
+
+
+def test_a_cycle_with_an_unfinished_job_refuses_a_second_producer(tmp_path: Path) -> None:
+    """Two processes driving one cycle append to one ledger and mint C0 twice, and nothing errors:
+    each run believes it is the only writer. A launch naming a cycle an unfinished job already
+    targets is refused at admission, a queued one included — it becomes a producer once admitted.
+    """
+    from promptpotter.application.jobs.registry import JobRegistry
+    from promptpotter.shared.errors import CycleBusyError
+
+    registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    running = CycleHop(campaign_id="c", cycle_id="cycle_live")
+    waiting = CycleHop(campaign_id="c", cycle_id="cycle_queued")
+    first = registry.request_slot(user_id="u", dataset_name="d", hop=running)
+    queued = registry.request_slot(user_id="u", dataset_name="d", hop=waiting)
+    assert (first.status, queued.status) == ("pending", "queued")
+
+    for hop, holder in ((running, first), (waiting, queued)):
+        with pytest.raises(CycleBusyError) as refused:
+            registry.request_slot(user_id="u", dataset_name="d", hop=hop)
+        assert refused.value.details["job_id"] == holder.job_id
+
+    registry.mark_finished(first.job_id, status="stopped", stop_reason="paused")
+    assert registry.request_slot(user_id="u", dataset_name="d", hop=running).status == "pending"

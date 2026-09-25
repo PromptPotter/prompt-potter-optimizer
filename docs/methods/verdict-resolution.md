@@ -63,8 +63,9 @@ the inflation that left the outer election unable to crown and PoBB pinned at a 
 `fit_theta_given_delta` scales the SE by `√φ`, the Pearson dispersion estimated off the fit's own
 residuals (Wedderburn 1974). **An estimate, not a knob**, failing safe in both directions: `φ ≈ 1`
 leaves a dichotomous campaign unchanged, `φ < 1` returns a graded backend's real precision, `φ > 1`
-widens the SE on an overdispersed one. It is floored — a response with no residual variance carries
-no evidence about its own dispersion, and an unfloored `φ→0` would report infinite confidence.
+widens the SE on an overdispersed one. It is shrunk toward the nominal 1.0 by an inverse-gamma
+prior rather than floored — a response with no residual variance carries no evidence about its own
+dispersion, and an unshrunk `φ→0` would report infinite confidence.
 
 **1PL by default; each dataset graduates to 2PL where it wins held-out CV**
 (`enable_2pl_graduation`, on by default). Elsewhere 2PL is the field default —
@@ -99,12 +100,12 @@ So **a winner with lower accuracy than a rival, or than the previous round, is n
 reads the accuracy column and calls the election wrong, say which column the election used; do not
 treat the inversion as a defect on their word.
 
-**States where θ is NOT ability, and the pushback above is wrong.** Count them off the list, not
-off this sentence — it said "two" while listing three, then listed three while the code served four.
+**States where θ is NOT ability, and the pushback above is wrong.** Count them off
+`domain/ruler.py::ThetaCaveat`, not off prose.
 
-**All four are now SERVED as a `ThetaCaveat` (`domain/ruler.py`), so the screen and the optimizer's
+**Every one is SERVED as a `ThetaCaveat` member, so the screen and the optimizer's
 `confounds` panel read one verdict rather than each deciding.** They arrive on two carriers,
-because they are facts about different things: the three SCALE states are decided by
+because they are facts about different things: the SCALE states are decided by
 `ruler.py::theta_caveat` and ride the round's `AbilityReading.caveat`; the 0% floor is decided by
 `results.py::is_floor_pinned` and rides the candidate row, since it is a property of one arm's
 responses. A sound round can carry a pinned arm, and a pinned arm can sit on a sound ruler.
@@ -177,8 +178,9 @@ BAR it reads that column against does not currently test anything, so a crowned 
 evidence than the word "winner" implies. Treat any claim that rests on "this round improved" as
 provisional, and say so rather than passing it on.
 
-- **The bar is a bare point estimate.** `selection.py` admits on `lift > 0.0` — no interval, no
-  multiplicity correction — and `winner.py` sets `improved = bool(winner_id)`. With three arms,
+- **The bar is a bare point estimate.** `selection.py::elect_round_winner` admits on a raw θ
+  lift over the parent above zero — the earned `parent_selection_bias` credit only reorders
+  admitted arms — with no interval and no multiplicity correction — and `winner.py` sets `improved = bool(winner_id)`. With three arms,
   P(at least one positive | every arm identical to the parent) is **0.875 per round**.
 - **Almost nothing separates.** `separable=True` in 6 of 508 banked rounds; `round_not_separable`
   fired 362 times. `separable` gates the L1 patience reset and is the clock a result quotes
@@ -294,15 +296,16 @@ Together they are a **Knowledge Gradient** acquisition — the one-step Bayesian
 would measuring `(c, s)` shift our point estimate of the best candidate?", closed-form for Bernoulli
 observations under Laplace.
 
-**Selection is parameter-free at the policy level** — no swap thresholds. `select_round_subset`
-ranks the whole bank each round and takes the top `budget`: *exploit* falls out of the ranking
-(samples on the contested band `δ_s ≈ leader θ` carry the most decision information and sort to the
-top), *explore* falls out of the prior. Note the strength of that second term: an unmeasured sample
-carries the population `σ_δ`, and `delta_learning_gain` rises with that SE, so unmeasured samples
-**outrank** measured ones rather than merely competing — and they tie with each other, so the
-tiebreak (ascending `sample_id`) drains the bank in stored order. On a bank stored grouped by label
-that yields disjoint single-label panels per round, and cross-round accuracy stops being a series.
-Cold start → bank-order prefix. The scoring-set floor is `elimination_n_min`.
+**The between-round pick spends the two terms separately, not summed** — no swap thresholds.
+`select_round_subset` (`intelligence/exploration.py`) ranks the whole bank on term 1 alone
+(`adaptive_queue_mechanism.py::decision_order`) against the best θ among the arms in this race, so
+*exploit* falls out of the ranking (samples on the contested band `δ_s ≈ leader θ` sort to the
+top). *Explore* is a reserved tail rather than a term: `_with_ruler_learning` gives the last few
+slots to the cells δ is least sure of, which holds the band open, and `_with_anchor_block` swaps
+already-anchored cells into the tail until the next ruler extension has enough to equate against.
+Summed, `delta_learning_gain` dominated — an unmeasured sample carries the population `σ_δ`, so
+unmeasured samples outranked measured ones and tied with each other, draining the bank in stored
+order. Cold start → bank-order prefix. The scoring-set floor is `elimination_n_min`.
 
 **On by default — but warm-gated.** `mechanisms.selection.per_round_resubset` (default `True`):
 while the δ ruler is still cold the subset stays frozen to the campaign-start prefix
@@ -380,7 +383,7 @@ one per scope: `campaigns/{id}/cycles/{id}/hard_samples.json` (this cycle's roun
 `campaigns/{id}/hard_samples.json` (those folded with the campaign's archive observations). The
 active scoring set is in-memory only — restored on resume by re-running both mutations against the
 rebuilt observation history. **Dataset scope is never persisted**: it is cross-campaign, so no
-campaign owns it, and `GET /datasets/{name}/heatmap` folds it from the archive per request.
+campaign owns it, and `GET /datasets/{name}/cells?scope=dataset` folds it from the archive per request.
 
 ---
 

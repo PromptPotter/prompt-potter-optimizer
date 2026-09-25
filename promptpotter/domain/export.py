@@ -131,6 +131,13 @@ def build_prompt_export(
     — a campaign nothing beat exports its origin, under round 0, rather than exporting nothing.
     That is the whole special-casing: one round shape in, values that differ, no second path.
     """
+    fields = dict(winner.prompt_fields)
+    # The operator's framing splices into `problem_description` at render, so the stored fields
+    # alone re-render a prompt nothing was scored on.
+    if winner.opt_sp is not None and (
+        spliced := dict(winner.opt_sp.render_fields()).get("problem_description")
+    ):
+        fields["problem_description"] = spliced
     return PromptExport(
         artifact_version=EXPORT_ARTIFACT_VERSION,
         tool="promptpotter",
@@ -142,7 +149,7 @@ def build_prompt_export(
         optimizer_prompt_hash=optimizer_prompt_hash,
         stop_reason=stop_reason,
         finished_at=finished_at,
-        prompt_fields=dict(winner.prompt_fields),
+        prompt_fields=fields,
         tuned_params=_tuned_params(winner.pipeline_params),
         measurement=ExportMeasurement(
             round=winner.round,

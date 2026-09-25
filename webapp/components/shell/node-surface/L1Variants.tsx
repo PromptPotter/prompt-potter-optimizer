@@ -12,7 +12,6 @@ interface Variant {
   targets_cluster?: string | null;
   pipeline_overlay?: Record<string, unknown> | null;
   prompt_fields_updates?: Record<string, unknown> | null;
-  task_context_updates?: Record<string, unknown> | null;
   changes_description?: string | null;
 }
 
@@ -97,7 +96,6 @@ export function L1Variants({ variants }: { variants: Variant[] }) {
 
       <Overrides title="Prompt changes" map={shown.prompt_fields_updates} />
       <Overrides title="Param changes" map={shown.pipeline_overlay} />
-      <Overrides title="Task context" map={shown.task_context_updates} />
     </section>
   );
 }

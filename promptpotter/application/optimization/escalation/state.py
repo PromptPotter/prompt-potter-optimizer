@@ -320,9 +320,8 @@ class EscalationFSM:
     # enum reference makes a wrong name an import-time AttributeError instead of an arm that
     # silently never matches. The L2/L3 node names are NOT their phase names.
     #
-    # Read the counters off `payload["view"]` — the PERSISTED half. `payload["data"]` was the
-    # builder's in-memory input and never reached disk, so every resume rebuilt L2/L3 as
-    # never-fired. `L2RefineExitView` / `PlanExitView` declare the four scalars each arm needs.
+    # Read the counters off `payload["view"]` — the PERSISTED half; `PhaseRecord.data` never
+    # reaches disk. `L2RefineExitView` / `PlanExitView` declare the four scalars each arm needs.
 
     def fold(self, record: CycleRecord, *, lives: LivesConfig | None = None) -> None:
         """Advance state from one ledger record. ``lives`` reconstructs from the same ``improved`` sequence
@@ -339,12 +338,9 @@ class EscalationFSM:
             # TWICE, so folding it stepped the stall counter by two on every resume.
             if record.round == 0:
                 return
-            # `separable` reads OPTIONAL where its two neighbours are required, and that is the
-            # field's own third state rather than a tolerance: a round whose arms carried no
-            # interval records `None`, and a round closed before the field existed is unreadable
-            # in exactly the same way. Both bank on `improved` alone, which is what those rounds
-            # were decided on.
-            sep = record.payload.get("separable")
+            # `None` is the field's own third state: a round whose arms carried no interval banks
+            # on `improved` alone, which is what it was decided on.
+            sep = record.payload["separable"]
             self._bank_round(
                 bool(record.payload["improved"]),
                 lives,
@@ -359,12 +355,12 @@ class EscalationFSM:
             self._l2_best_composite_fitness_at_entry = float(
                 escalation_state["l2_best_composite_fitness_at_entry"]
             )
-            l2_theta = escalation_state.get("l2_best_theta_at_entry")
+            l2_theta = escalation_state["l2_best_theta_at_entry"]
             self._l2_best_theta_at_entry = None if l2_theta is None else float(l2_theta)
         elif record.phase == CampaignPhase.MODIFY_PLAN and record.event == "exit":
             escalation_state = view_fields(record)
             best_comp = float(escalation_state["l3_best_composite_fitness_at_entry"])
-            l3_theta = escalation_state.get("l3_best_theta_at_entry")
+            l3_theta = escalation_state["l3_best_theta_at_entry"]
             best_theta = None if l3_theta is None else float(l3_theta)
             self._l1_stall_count = 0
             self._l3_round = int(escalation_state["l3_round"])

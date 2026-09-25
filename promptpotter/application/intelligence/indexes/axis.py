@@ -250,7 +250,12 @@ class AxisIndex:
         return _collect(
             ("axis_rankings", _fmt_axis_rankings(rankings5, peaked) if rankings5 else None),
             ("top_values", top_vals_str),
-            ("failure_clusters", _fmt_clusters(clusters, with_counts=True) if clusters else None),
+            # One cluster partitions nothing — on a single-node pipeline it is "every failure is
+            # in the node", at 100%.
+            (
+                "failure_clusters",
+                _fmt_clusters(clusters, with_counts=True) if len(clusters) > 1 else None,
+            ),
             ("dead_queries", f"{len(dead)} queries never hit" if dead else None),
             (
                 "discriminating_queries",
@@ -446,13 +451,15 @@ class AxisIndex:
 
     def _refresh_top_runs(self, entries: list[dict[str, Any]], k: int = 10) -> None:
         """Top-K by (composite_fitness, accuracy) desc. Only the modal ``total`` count is kept: an 8/20
-        composite is not comparable with a 20/20 one, and mixing them inflates the leaderboard."""
+        composite is not comparable with a 20/20 one, and mixing them inflates the leaderboard. A
+        one-cell run reads that cell, not a configuration, and backfills mint enough of them to
+        become the mode, so they are excluded."""
         from collections import Counter
 
         all_totals = [
             (entry.get("scores") or {}).get("total", 0)
             for entry in entries
-            if (entry.get("scores") or {}).get("total", 0) > 0
+            if (entry.get("scores") or {}).get("total", 0) > 1
         ]
         if not all_totals:
             self._top_runs = []

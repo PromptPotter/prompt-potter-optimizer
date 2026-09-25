@@ -95,12 +95,8 @@ def _accumulate(
         lift = _credible_lift(cand)
         if lift is None:
             continue
-        changed, _ = candidate_delta(fields, parent, None, None)
-        for field, text in changed.items():
-            if field not in _REUSABLE_FIELDS or not isinstance(text, str):
-                continue
-            block = text.strip()
-            if block:
+        for field, text in candidate_delta(fields, parent, None, None).prompt.items():
+            if field in _REUSABLE_FIELDS and (block := text.strip()):
                 acc[(fit, field, block)].append(lift)
 
 

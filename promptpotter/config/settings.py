@@ -57,11 +57,6 @@ PROMPT_STRING_FIELDS: Annotated[list[str], shapes_optimizer_prompt] = [
 # detector and the earned-block library's task-fit signature, so both draw the same line.
 ANSWER_SPACE_CAP: Annotated[int, shapes_optimizer_prompt] = 10
 
-# task_context sub-fields that L1 may emit alongside prompt/node overrides.
-TASK_CONTEXT_OVERRIDES: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
-    {"upstream_context", "downstream_context"}
-)
-
 # Populates ``PipelineNode.param_types`` so a dataset overlay need not spell these out. An
 # overlay may add backend-specific types via the node's ``optimizer.param_types`` block, which
 # overrides these; inference from ``node.config`` Python types is the last-resort fallback.
@@ -271,7 +266,6 @@ __all__ = [
     "OPTIMIZER_CALL_DEADLINE_S",
     "POBB_DEFAULT_EPSILON",
     "PROMPT_STRING_FIELDS",
-    "TASK_CONTEXT_OVERRIDES",
     "TERMS_VERSION",
     "WELL_KNOWN_PARAM_TYPES",
     "Settings",

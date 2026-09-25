@@ -9,8 +9,10 @@ below are the render side of the same delta."""
 from __future__ import annotations
 
 import difflib
+import json
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from typing import Annotated, Any
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
@@ -24,6 +26,7 @@ __all__ = [
     "IDEA_MIN_TOKENS",
     "IDEA_MIN_TOKEN_CHARS",
     "IDEA_STOPWORDS",
+    "CandidateDelta",
     "build_candidate_flat",
     "candidate_delta",
     "candidate_idea",
@@ -48,27 +51,58 @@ def parent_param_value(parent_cfg: dict[str, Any], param: str) -> Any:
 
 
 @shapes_optimizer_prompt
+@dataclass(frozen=True)
+class CandidateDelta:
+    """What a candidate changed against its parent: prompt field → new text, ``(node, param)`` →
+    new value. Empty ⇔ the candidate is a clone."""
+
+    prompt: dict[str, str]
+    params: dict[tuple[str, str], Any]
+
+    def __bool__(self) -> bool:
+        return bool(self.prompt or self.params)
+
+    def signature(self) -> tuple[Any, ...]:
+        """Hashable identity — two siblings with one signature are one candidate."""
+        return (
+            tuple(sorted(self.prompt.items())),
+            tuple(
+                sorted((n, p, json.dumps(v, sort_keys=True)) for (n, p), v in self.params.items())
+            ),
+        )
+
+
+@shapes_optimizer_prompt
+def _is_edit(value: object, parent_value: object) -> bool:
+    # An empty string is "no edit", never "clear the field": every reader of a delta — the gates,
+    # the SP table, the memory panels — must agree on this, and a model spells "unchanged" as "".
+    return value is not None and value != "" and value != parent_value
+
+
+@shapes_optimizer_prompt
 def candidate_delta(
-    child_fields: dict[str, Any],
-    parent_fields: dict[str, Any],
+    child_fields: Mapping[str, Any],
+    parent_fields: Mapping[str, Any],
     pipeline_overlay: dict[str, Any] | None,
-    parent_pp: dict[str, Any] | None,
-) -> tuple[dict[str, Any], dict[tuple[str, str], Any]]:
-    """The ONE delta definition: dedup hashes it and the ALREADY TRIED panel renders it, so a rule
-    honoured in one cannot desert the other. Restating the parent's value is not a mutation."""
-    pf = {
-        f: child_fields.get(f)
-        for f in PROMPT_STRING_FIELDS
-        if child_fields.get(f) != parent_fields.get(f)
-    }
+    parent_pp: Mapping[str, Any] | None,
+) -> CandidateDelta:
+    """The ONE definition of what a candidate changed — the parse guard, round-local dedup, the
+    repeat gate, the ALREADY TRIED panel and earned blocks all read it. ``child_fields`` may be the
+    child's whole prompt or only the fields a variant wrote."""
     parent = parent_pp or {}
-    pp = {
-        (n, p): v
-        for n, cfg in node_config_items(pipeline_overlay)
-        for p, v in cfg.items()
-        if v != parent_param_value(parent.get(n) or {}, p)
-    }
-    return pf, pp
+    return CandidateDelta(
+        prompt={
+            f: str(v)
+            for f in PROMPT_STRING_FIELDS
+            if _is_edit(v := child_fields.get(f), parent_fields.get(f))
+        },
+        params={
+            (n, p): v
+            for n, cfg in node_config_items(pipeline_overlay)
+            for p, v in cfg.items()
+            if _is_edit(v, parent_param_value(parent.get(n) or {}, p))
+        },
+    )
 
 
 @shapes_optimizer_prompt
@@ -92,14 +126,15 @@ def changed_words(parent: str, child: str) -> str:
 def variant_prose_written(variant: dict[str, Any]) -> dict[str, str]:
     """A prose mutation rides two different carriers depending on whether the campaign evolves a
     target prompt or a node's own template — reading one answers inverted on the other kind."""
-    written: dict[str, str] = {}
-    for f, v in (variant.get("prompt_fields_updates") or {}).items():
-        if f in PROMPT_STRING_FIELDS:
-            written[f] = str(v or "")
+    written = {
+        f: str(v)
+        for f, v in (variant.get("prompt_fields_updates") or {}).items()
+        if f in PROMPT_STRING_FIELDS and v
+    }
     for n, cfg in node_config_items(variant.get("pipeline_overlay")):
         for p, v in cfg.items():
-            if p in PROMPT_STRING_FIELDS:
-                written[f"{n}.{p}"] = str(v or "")
+            if p in PROMPT_STRING_FIELDS and v:
+                written[f"{n}.{p}"] = str(v)
     return written
 
 
@@ -224,21 +259,21 @@ def same_idea(a: frozenset[str], b: frozenset[str], *, threshold: float) -> bool
 
 @shapes_optimizer_prompt
 def candidate_idea(
-    child_fields: dict[str, Any],
-    parent_fields: dict[str, Any],
+    child_fields: Mapping[str, Any],
+    parent_fields: Mapping[str, Any],
     pipeline_overlay: dict[str, Any] | None,
-    parent_pp: dict[str, Any] | None,
+    parent_pp: Mapping[str, Any] | None,
 ) -> frozenset[str]:
     """The parent is subtracted WHOLE, every prompt field: the task's own vocabulary lives across the
     fields this candidate did not change, and left in it convicts unrelated rewrites of repeating."""
-    pf, pp = candidate_delta(child_fields, parent_fields, pipeline_overlay, parent_pp)
+    delta = candidate_delta(child_fields, parent_fields, pipeline_overlay, parent_pp)
     parent = parent_pp or {}
-    written = idea_fingerprint([str(v) for v in pf.values() if v] + [str(v) for v in pp.values()])
+    written = idea_fingerprint([*delta.prompt.values(), *map(str, delta.params.values())])
     carried = idea_fingerprint(
         [str(v) for v in parent_fields.values() if v]
         + [
             str(prior)
-            for n, p in pp
+            for n, p in delta.params
             if (prior := parent_param_value(parent.get(n) or {}, p)) is not None
         ]
     )
@@ -268,17 +303,14 @@ def flatten_sp_summary(pp: dict[str, Any] | None) -> dict[str, str]:
 
 
 def build_candidate_flat(parent: dict[str, str], candidate_meta: dict[str, Any]) -> dict[str, str]:
-    """Merge candidate overrides onto parent across the three disjoint keyspaces:
-    ``node.param`` (pipeline_params), bare prompt fields, ``tc.<key>`` (task_context)."""
+    """Merge candidate overrides onto parent across the two disjoint keyspaces: ``node.param``
+    (pipeline_params) and bare prompt fields."""
     flat = parent.copy()
     if pp := candidate_meta.get("pipeline_overlay"):
         flat.update(flatten_sp_summary(pp))
     for field_name, value in (candidate_meta.get("prompt_fields") or {}).items():
         if value:
             flat[field_name] = str(value)
-    for field_name, value in (candidate_meta.get("task_context") or {}).items():
-        if value:
-            flat[f"tc.{field_name}"] = str(value)
     return flat
 
 

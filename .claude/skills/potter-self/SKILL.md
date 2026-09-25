@@ -21,10 +21,10 @@ Every figure below carries its corpus size and date. **Recompute before citing**
 
 ## Mental model
 
-The optimizer is three nested generation loops (`promptpotter/CLAUDE.md`):
+The optimizer is three nested generation loops (`promptpotter/application/optimization/CLAUDE.md`):
 
 - **L1** (`l1_generate`) generates candidate prompts with cause from its evidence surface — the panels its live layout renders (`NODE_LAYOUTS["l1_generate"].floor`, `domain/l1_layout.py` — read the membership there) — under `plan` from L3 and the operator's frozen `task_context`.
-- **L2** (`l2_context`) fires on L1 stall and moves L1's surface — `l1_layout` (which panels L1 sees) and `l1_overrides` (how hard it explores). **It cannot write `task_context`**: `L2ContextOutput` has no such field and `TaskDecomposition.merge` raises on it, so a fire that changed neither lever bought nothing.
+- **L2** (`l2_context`) fires on L1 stall and moves L1's surface — `l1_layout` (which panels L1 sees) and `l1_overrides` (how hard it explores). **It cannot write `task_context`**: `L2ContextOutput` has no such field, so a fire that changed neither lever bought nothing.
 - **L3** (`l3_plan`) replans on L2 stall, writing `OptSearchPoint.plan`.
 
 **Never name a panel from memory.** The citable set is *derived* — `@signal(..., citable=True)` intersected with the node's live layout by `citable_fields` (`dispatch/injections/registry.py`). A panel that does not render invites a fabricated citation, which is exactly how `sibling_yield` — a name this skill carried for weeks — went on being cited after it was deleted from the code.
@@ -63,7 +63,7 @@ Reads happen by opening files; `evidence` is the one read VERB, because a compar
 1. **`l1_generate`** — rendered input: are the panels populated or empty? `injection_dropped` on the `llm_call_start` record answers that directly, and **a name in it that is also `L1_MANDATORY` is a stop-and-diagnose** — `rendered_prompt` refused whole is how the generator ends up rewriting prompts it was never shown. For the OUTER generator, is `inner_narratives` present with a story per seed rather than bare stat lines — the primary evidence an optimizer-prompt edit must ground on, not the scalar per-seed delta? Then raw output, parsed variants: `evidence_grounding.field` in the real enum? citations quoting text that EXISTS in the rendered input — and quoting the panel they NAME, not another one? hypotheses distinct, not one idea relocated? `changes_description` actually REPORTING the override emitted beside it? any hallucinated node/param?
 2. **`l1_critique`** — the input carries the evidence, and WHICH panel is the evidence depends on the level: inner reads SAMPLE TRANSCRIPTS + MODEL REASONING, outer reads INNER RUN NARRATIVES. The two are a matched pair, each silent where the other fires (`panels.py::_inner_narrated`), because transcripts are selected by a MISS and one level up a miss is a placeholder artifact. Output `priority_fix` / `failure_highlights` must quote CONCRETE evidence — a reasoning step, a premise — not recycled labels, and `priority_fix` must name a steer the generator is ALLOWED to make: an edit to the inner optimizer's own job, never one naming the benchmark's vocabulary or answer labels.
 3. **Scoring** — per-candidate `candidate_scores` (accuracy, θ, θ_se, `mean_fitness_ci_lo`), the **matched-parent** comparison (never the cross-subset round-0 origin — subset drift reads as lift), the PoBB stream (`p_best` moving off 0.5?), `decisions` (cuts firing, on the right arm?).
-4. **`l2_context` / `l3_plan` when fired** — validator failures (`paraphrase_repeat`, `dangling_trigger`), whether the `task_context` delta is evidence-anchored, plan text sane and within its render cap.
+4. **`l2_context` / `l3_plan` when fired** — their behaviour checks (`validators/l2_behavior.py`, `l3_output.py` — read the registry there), whether the `l1_layout` / `l1_overrides` move is evidence-anchored, plan text sane and within its render cap.
 5. **Spot-check ≥1 inner campaign per outer sample batch** — the same four reads one level down, under `.inner/<key>/…/campaigns/`.
 
 **STOP-AND-DIAGNOSE, not keep-watching:** `raw_chars: 0` / an empty candidate list · an outer sample returning in ~0.0s (stale-cache reuse) · off-enum grounding fields · any optimizer call > 2 min · a headline Δ that disagrees with `matched_parent_*` / `improved`.
@@ -83,7 +83,7 @@ Read this before proposing any new run. It is the reason a year of panels produc
 
 ## What the outer panel can and cannot tell you (73 cells / 17 arms / 6 seeds, 2026-08-15)
 
-> **`promptpotter evidence --campaign <id>` answers the variance and power half of this on demand — run it rather than reading a figure here.** The split is `variance.{cell_effect_sd,arm_effect_sd,residual_sd}`, the resolving power `power.{paired_se,min_detectable_effect,cells_for_largest_gap}`, and the replicate and run-order reasoning `replicates` / `order_confound`. What stays below is what the verb does not answer.
+> **`promptpotter evidence --subject campaign:<id>` answers the variance and power half of this on demand — run it rather than reading a figure here.** The split is `variance.{cell_effect_sd,subject_effect_sd,residual_sd}`, the resolving power `power.{paired_se,min_detectable_effect,cells_for_largest_gap}`, and the replicate and run-order reasoning `replicates` / `order_confound`. What stays below is what the verb does not answer.
 
 - **Pairing is what makes the comparison possible at all**, because seed variance runs several times arm variance. On the 2026-08-15 corpus a typical two-arm gap resolved at ~10 paired cells against 22.9 un-paired, and the panel runs 6 — so **6 → 10 cells is the cheapest move on the board**. The arm effect roughly doubled as the corpus grew from 39 to 73 cells, so the panel is closer to working than an older read suggested; re-read it with the verb before quoting either number.
 - **Read the SHAPE as well as the scalar — it is legible at n=6 where the scalar is not.** Every cell records a per-round `improved` verdict, a *within-round* paired comparison against the matched parent on the same samples, so it touches neither the θ anchor nor the re-drawn subset. A 6-cell panel carries ~24 of those against 6 scalars (`application/runner/inner/spawn.py::_lift_shape`).
@@ -165,7 +165,7 @@ Edit: must ride `changes_description` (no new fields — see Edit etiquette). Re
 
 #### Off-task — candidates ignore `task_context`
 
-Symptom: candidates contradict the framing L2 set. Root cause: the slot renders but the template never cites it as a constraint. Edit: require the rationale to quote one phrase from `task_context`. Keep the injection through `DispatchHub` — do not summarize it at the prompt site.
+Symptom: candidates contradict the operator's frozen framing. Root cause: the slot renders but the template never cites it as a constraint. Edit: require the rationale to quote one phrase from `task_context`. Keep the injection through `DispatchHub` — do not summarize it at the prompt site.
 
 #### Ignoring critique — candidates repeat last round's mistakes
 
@@ -177,7 +177,7 @@ Symptom: identical `pipeline_overlay`; only prompt text varies cosmetically; com
 
 #### Pipeline-params overreach — touching locked axes
 
-Symptom: `validators/l1_strict.py` flags a mutation outside `escalation_panel.params_unlocked`. Edit: render `params_unlocked` as a fenced list and state the consequence — "mutations on locked axes are dropped before scoring".
+Symptom: `param_scope_discipline` (`validators/l1_behavior.py`) scores a param-scope mutation made while a prompt field sat unmutated for two rounds. Edit: require `changes_description` to name the prompt-field evidence exhausted first. `validate_overrides`' rejections are mechanical — do not restate them in the prompt.
 
 #### Critique-score divergence (out of scope from L1)
 
@@ -191,8 +191,8 @@ Parse failure, no-ops and verbatim duplicates: **zero** over 6 inner campaigns /
 
 Skipping these has historically let evidence-free or rule-violating proposals through unflagged. None
 is blanket-rejected by code; **for the unenforced ones your analysis IS the gate.** The enforced set is
-the registry itself (`optimization/validators/l1_strict.py`) plus `validate_overrides()`, which locks
-`model` / `provider` unconditionally — read the registry before assuming a check is unenforced.
+the registry itself (`optimization/validators/l1_strict.py`) plus `validate_overrides()`, which rejects
+`PARAM_FORBIDDEN_KEYS` unconditionally — read the registry before assuming a check is unenforced.
 
 - **Evidence availability.** For round 1 (especially a fresh fork), does the rendered input actually
   carry the signals a candidate claims to consult? `axis_memory` is present iff `AxisIndex.ensure_for`
@@ -242,7 +242,7 @@ Write the edit as a unified diff against `resolved_prompts["l1_generate/1"]`. St
 - **You may not add a field to the response contract from the prompt side.** `L1Variant` is `extra="forbid"` and its field set is `dispatch/schemas.py::L1Variant` — read it there. Note `targets_cluster`, which binds a variant to one `l1_critique` root cause: it is the STRUCTURAL answer to semantic restatement, already shipped, so do not re-prescribe a prompt clause for it. A prompt demanding anything else fails **every** variant at validation. Adding one for real means the Pydantic model, both `answer_format`s and `resolved_schemas` move in **one commit**, or the loop stops parsing. Prefer riding `changes_description`.
 - **No backward compatibility.** Zero released versions. Change a slot name everywhere — no fallback chains, no defaults. See the STOP section in root `CLAUDE.md`.
 - **Slots flow through `DispatchHub`.** A new `{{slot}}` is an `@signal` renderer under `dispatch/injections/`; `validate_template` raises at template load on typos. Never summarize a field at the prompt site.
-- **L1 owns `pipeline_params`.** If the diagnosis points at the framing surface, write down "→ L2 should refine task_context to X" and stop. That is L2's contract, not yours.
+- **L1 owns `pipeline_params`.** If the diagnosis points at the framing, write down "→ operator should revise task_context to X" and stop — it is operator-authored and frozen for the run; no layer writes it.
 - **Cycle hash awareness.** An optimizer prompt edit changes `JobSearchPoint.content_hash` for the next round but **not** the target cycle's origin hash. At L4 an edit to an **inner** optimizer node's prompt body or config moves `_identity_config`'s `inner_origin` fingerprint and voids banked outer cells; the outer set (`sets/self_optimizing.yaml`), `checkin`, node descriptions and a release do not. See § Why experiments did not accumulate. To keep prior runs comparable, suggest `--fork-on-divergence` after the edit.
 - **No hidden defaults.** Render the empty case explicitly rather than "if `axis_memory` is empty, do X".
 - **Trim to invariants, not history.** When you remove a line, remove it. No `# was: …` breadcrumbs.
@@ -250,7 +250,7 @@ Write the edit as a unified diff against `resolved_prompts["l1_generate/1"]`. St
 ## What L4 does *not* do
 
 - Does not generate new candidates itself. That is L1's job.
-- Does not refine `task_context` (L2's) or replan strategy (L3's). L3 firing means the plan-space was wrong, not that the L1 prompt needs tweaking.
+- Does not refine `task_context` (operator-authored, frozen) or replan strategy (L3's). L3 firing means the plan-space was wrong, not that the L1 prompt needs tweaking.
 - Does not modify `task_description.md` or the per-dataset configs — those change cycle identity and the scoring contract.
 - Does not re-score past rounds. If the scoring formula changes, swap it in `campaign.yaml::scoring` and let the next round-end recompile.
 

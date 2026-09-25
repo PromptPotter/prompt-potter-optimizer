@@ -4,9 +4,9 @@ pipeline_purpose: >-
   the JustLogic deductive-reasoning benchmark (TRUE/FALSE/Uncertain; the depth cut is the dataset's, in
   inner_tasks.yaml).
 data_characteristics: >-
-  Each sample is a whole inner run; the mutation surface is 24 free-prose and categorical optimizer prompt
-  fields, and fitness is noisy numeric deltas from a small inner panel, so edits move the score but improvement
-  is real and infrequent.
+  Each sample is a whole inner run; the mutation surface is four prose fields per inner node plus per-node
+  panel layouts, and fitness is noisy numeric deltas from a small inner panel, so edits move the score but
+  improvement is real and infrequent.
 optimization_goals: >-
   Maximize mean_round_delta (the MEAN, over inner rounds, of the ability the parent that
   round ADOPTED, minus its origin, in logits) on the inner benchmark. That is the whole score,
@@ -27,7 +27,7 @@ raw_description: |
   # Task: evolve PromptPotter's own optimizer prompts
 
   Goal: the outer cycle mutates the **inner** cycle's L1 / L1_CRITIQUE / L2 / L3
-  optimizer prompt template fields (6 per node × 4 nodes = 24 fields) so inner cycles
+  optimizer prompts (four prose fields per inner node plus per-node panel layouts) so inner cycles
   converge **faster and further** on the proxy benchmark.
 
   ## What the inner cycle is solving (so you mutate toward the right behaviour)
@@ -72,24 +72,21 @@ raw_description: |
 
   ## Mutation surface
 
-  - Per-node six-field PromptTemplate scheme: ``persona``, ``task_intent``,
-    ``problem_description``, ``instruction``, ``thinking_style``, ``answer_format``
-  - Exposed at ``pipeline.yaml::nodes.{node}.optimizer.param_keys``
-  - Four nodes: ``l1_generate``, ``l1_critique``, ``l2_context``, ``l3_plan``.
-    Outer L1 may mutate any subset per round
+  - Per-node prose fields: ``persona``, ``task_intent``, ``instruction``,
+    ``thinking_style`` — plus a panel ``layout`` on the nodes that declare one
+  - The per-node set is ``pipeline.yaml::nodes.{node}.optimizer.param_keys``;
+    outer L1 may mutate any subset per round
+  - ``problem_description`` and ``answer_format`` carry the injection slots and
+    output contract, so they are not levers
   - Out of scope (belongs to inner cycle): inner ``pipeline_params``,
     inner ``optimizer_llm``
 
   ## Intuition (don't bake in — algo should rediscover)
 
-  - Dimensionality is non-uniform across the 24 fields:
+  - Dimensionality is non-uniform across the fields:
     - bool / categorical slot → doubles state space
     - free-prose slot (``instruction``, ``thinking_style``, ...) →
       explodes it → more signal AND more noise per round
-  - The ``answer_format`` field is highest-leverage AND easiest-to-break: the
-    inner scorer reads the last ``**TRUE**`` / ``**FALSE**`` / ``**Uncertain**``
-    bold span, so a mutation that drops or garbles that contract makes the inner
-    cycle score zero. Expect the same shape as a structured-output schema slot.
   - Corollary: L2 / L3 shouldn't read early variance on a high-dim slot
     as "axis unstable, avoid" — that's the slot doing what high-dim
     slots do

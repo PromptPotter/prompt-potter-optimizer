@@ -18,7 +18,7 @@ tests. Add new ones the same way — never as a `test_structure` scan.
 
 | You want to add… | Recipe | What actually catches you |
 |---|---|---|
-| A telemetry event / ledger record | [§1](#1-a-ledger-record--telemetry-event) | Breaks loud in use — a union member with no `on_record` arm never reaches `dashboard.json`; on the tracing half, `ObservabilityBridge.__init__` raises on an unrouted `Event` |
+| A telemetry event / ledger record | [§1](#1-a-ledger-record--telemetry-event) | Import-time: `_ROUTES` (`projections/base.py`) must answer for every `CycleRecord` arm; on the tracing half, `ObservabilityBridge.__init__` raises on an unrouted `Event` |
 | A prompt injection (`{{slot}}`) | [§2](#2-a-prompt-injection) | Init-time: the `injection_table()` guard + `validate_template()` |
 | A dashboard / view field | [§3](#3-a-dashboard--view-field) | Breaks loud — a wrong/empty dashboard |
 | A resume / decision checkpoint | [§4](#4-a-resume--decision-checkpoint-kind) | Import-time: `decisions.py` + `replayers.py` asserts |
@@ -86,18 +86,18 @@ Contract: [`application/CLAUDE.md`](../../promptpotter/application/CLAUDE.md) §
 
 A `{{slot}}` the optimizer LLM sees. The registry is `injection_table()`
 (`application/optimization/dispatch/injections/registry.py`); every renderer
-is a pure `(InjectionBundle) -> str`.
+is a pure `(InjectionBundle) -> list[Item]`.
 
 **Recipe:**
 
-1. Write a `_r_<name>(bundle) -> str` renderer in `dispatch/injections/`
-   (returns `""` when its source field is empty — empty injections are skipped).
+1. Write a `_r_<name>(bundle) -> list[Item]` renderer in `dispatch/injections/`
+   (returns `[]` when its source field is empty — a panel that produces nothing is silent).
 2. Decorate it with `@signal("<name>", kind=…, char_cap=…, citable=…)` — registration
    happens at the definition site; key and body are co-located, no separate
    registry edit.
 3. To make it reachable, add it to the node's `NODE_LAYOUTS[node].possible`
-   (and `.floor` to put it on by default — for `l1_generate` these alias
-   `L1_POSSIBLE`/`L1_MANDATORY`), or use `{{<name>}}` directly in a template.
+   (and `.floor` to put it on by default — for `l1_generate`, `.possible` and `.mandatory`
+   alias `L1_POSSIBLE` / `L1_MANDATORY`).
 
 **Guard (at registry completion, no standing test):** `injection_table()` fails loud if a
 `possible` name has no registered renderer, and
@@ -322,7 +322,8 @@ purpose). A maintenance verb owes two things a diagnostic does not: it is dry-ru
 and it refuses while a producer could still be writing what it rewrites
 (`application/maintenance/archive_maintenance.py::archive_writers`) — except `reindex`, which
 rebuilds a derived index from the detail files and deletes nothing, so it owes neither. And do
-**not** add a read verb: reads happen by opening the artifact tree, and raw-file ingest is
+**not** add a read verb: reads happen by opening the artifact tree. The one exception is
+`evidence`, because a comparison ACROSS subjects is in no single file. Raw-file ingest is
 `new <file.csv>`, not an `ingest` verb.
 
 **Guard:** the import-time assert named above — `COMMANDS.keys()` must equal

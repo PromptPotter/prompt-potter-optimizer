@@ -118,7 +118,9 @@ async def score_population(
     parent_sp = cycle.tracking.current_sp
     parent_grades: dict[int, float] = {}
     if parent_results and parent_sp is not None:
-        parent_id = f"R{cycle.rounds[-1].round}_winner"
+        # Named for the round that ELECTED it: a held round keeps the parent it had.
+        elected_in = next((rr.round for rr in reversed(cycle.rounds) if rr.improved), 0)
+        parent_id = f"R{elected_in}_winner"
         elim_check.register_completed(
             cast("list[QueryMeasurement]", parent_results), candidate_id=parent_id, sp=parent_sp
         )

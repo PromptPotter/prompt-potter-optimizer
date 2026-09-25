@@ -106,8 +106,8 @@ def _check_config_couplings(config: CampaignConfig) -> list[PreflightWarning]:
 def _check_task_context_present(framing: Mapping[str, Any] | None) -> PreflightWarning | None:
     """The operator's frozen framing is the SOLE source of l1_generate's ``task_intent`` slot, and
     an empty one renders as nothing at all — no header, no placeholder — so the slot falls back to
-    the static template and the wire schema drops ``task_context_updates`` with it. Decidable
-    before a cell is bought, and afterwards visible only as ``review.md``'s ``_(empty)_``."""
+    the static template. Decidable before a cell is bought, and afterwards visible only as
+    ``review.md``'s ``_(empty)_``."""
     if has_framing(framing):
         return None
     return PreflightWarning(

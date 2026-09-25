@@ -230,10 +230,9 @@ resolved_prompts:
       Return JSON: {"variants": [...]}. Each variant, IN THIS ORDER:
         - "evidence_grounding": {field, citation}. field one of the CITABLE FIELDS listed below — nothing else is admissible; citation quotes the cited entry verbatim, <=320c.
         - "targets_cluster": the ONE failure this variant attacks — the critique's cluster label verbatim where one fits, else your own short name for a failure the panel you cite actually shows. Two variants may NOT name the same target.
-        - Three delta slots; AT LEAST ONE NON-EMPTY. A variant that changes nothing mutates nothing and is rejected — describing a change is not making one. Never conflate the slots.
+        - Two delta slots, carrying ONLY what changes: omit a field you keep, since an empty string or the current text is no edit. A variant with no new value anywhere is rejected — describing a change is not making one.
           * "pipeline_overlay": nested {node: {param: value}} — scalar backend tunables, and "output_schema_descriptions.<path>": prose, which rewrites the `description` of that field of the node's output schema. Each is a param under ITS NODE like any other, NEVER a top-level key beside the nodes. Paths are FIXED: you describe a field, never rename or invent one.
-          * "prompt_fields_updates": flat {field: string}, over the prompt fields its schema offers.
-          * "task_context_updates": flat {field: string}, field one of upstream_context, downstream_context.
+          * "prompt_fields_updates": flat {field: new full text}, over the prompt fields its schema offers.
         - "changes_description": 1-2 sentences, <=320c, REPORTING the change you just emitted — the failure pattern it targets, the concrete change, and the expected directional effect ("improve reasoning" is too vague).
   l1_critique/1:
     persona: You are a pipeline evaluation analyst.
@@ -347,38 +346,8 @@ resolved_prompts:
 
       Return a JSON object with:
         "plan": the new strategy as AT MOST 6 bullets, ONE sentence each (required). Bullets, not prose. It rides every downstream optimizer prompt, so each bullet evicts failure evidence from L1's and L2's context.
-        "note": OPTIONAL sticky pointer for L2 (string or null), persisting until your next replan. Use it only when L2 keeps drifting off a constraint the plan needs honored — a runtime ceiling, a dead axis, a cohort. Omit when the plan is enough.
+        "note": OPTIONAL sticky pointer for L2 (string; leave empty when unused), persisting until your next replan. Use it only when L2 keeps drifting off a constraint the plan needs honored — a runtime ceiling, a dead axis, a cohort. Leave it empty when the plan is enough.
         "rationale": 1-2 sentences on the strategic shift
-  checkin/1:
-    persona: You are a prompt engineering assistant.
-    task_intent: >-
-      Your job is to structure user-provided context into Layer 1 prompt fields AND domain context fields
-      for an optimization campaign.
-    instruction: |-
-      Layer 1 fields (for prompt construction):
-      - persona: Who the LLM should act as (e.g., 'You are a domain expert...')
-      - task_intent: What the prompt needs to accomplish
-      - problem_description: Description of the problem domain
-      - instruction: Core instruction text (may contain template variables)
-      - thinking_style: How to reason (e.g., 'Think step by step')
-      - answer_format: Expected output format
-
-      Domain context fields (for optimization guidance):
-      - domain: Research/industry domain (e.g., 'Life Cycle Assessment', 'Medical NLP')
-      - pipeline_purpose: What the pipeline does end-to-end in 1-2 sentences
-      - data_characteristics: What kind of data flows through (input format, volume, language)
-      - optimization_goals: What 'better' means in this context (accuracy metric, edge cases)
-      - key_challenges: Known difficulties, ambiguities, or edge cases the optimizer should know about
-      - upstream_context: What happens BEFORE this step — what data/processing feeds into it (e.g., 'Web search retrieves raw content from 7 pages'). Gets injected into the target prompt.
-      - downstream_context: What happens AFTER this step — how the output is consumed (e.g., 'Output fields are tokenized into words and matched against a database index by shared token count'). Gets injected into the target prompt.
-    thinking_style: >-
-      Prefer the user's own wording for domain terms. Do not invent facts the source does not state —
-      but the task description is dense source material: populate every task_context field the source
-      supports, and leave a field empty only when the source genuinely says nothing about it. Restating
-      source content in a field's own framing is not padding.
-    answer_format: >-
-      Return a JSON object with Layer 1 fields at the top level AND a "task_context" key containing the
-      domain context fields as a nested object. {{consultation_instruction}}
   checkin/2:
     persona: >-
       You are a prompt-engineering assistant who also helps operators set up a new optimization campaign.
@@ -395,30 +364,28 @@ resolved_prompts:
       - thinking_style: How to reason (e.g., 'Think step by step')
       - answer_format: Expected output format
 
-      Domain context fields (for optimization guidance):
-      - domain: Research/industry domain (e.g., 'Life Cycle Assessment', 'Medical NLP')
-      - pipeline_purpose: What the pipeline does end-to-end in 1-2 sentences
-      - data_characteristics: What kind of data flows through (input format, volume, language)
-      - optimization_goals: What 'better' means in this context (accuracy metric, edge cases)
-      - key_challenges: Known difficulties, ambiguities, or edge cases the optimizer should know about
+      Domain context fields (task_context, for optimization guidance): each field's scope and length is stated in its schema description. Two of them also reach the target prompt:
       - upstream_context: What happens BEFORE this step — what data/processing feeds into it (e.g., 'Web search retrieves raw content from 7 pages'). Gets injected into the target prompt.
       - downstream_context: What happens AFTER this step — how the output is consumed (e.g., 'Output fields are tokenized into words and matched against a database index by shared token count'). Gets injected into the target prompt.
 
-      IF THE USER MESSAGE IS A DRAFT-CAMPAIGN ORIGIN (it lists uploaded columns, sample rows, current field values with provenance, and open gaps), ALSO resolve the origin AND author the Layer 1 + task_context fields by decomposing the task_description you propose this turn — those Layer 1 fields seed the campaign's starting prompt, so they must not be empty:
+      In either mode the Layer 1 fields seed the campaign's starting prompt: task_intent and answer_format are never empty, thinking_style carries the brevity ORIGIN INVARIANT 2 asks for, persona, problem_description and instruction stay empty unless the task needs them, and the ORIGIN INVARIANTS below govern every field.
+
+      IF THE USER MESSAGE IS A DRAFT-CAMPAIGN ORIGIN (it lists uploaded columns, sample rows, current field values with provenance, and open gaps), ALSO resolve the origin AND author the Layer 1 + task_context fields by decomposing the task_description you propose this turn:
       - assessment: one line on the current setup state.
       - findings: for each OPEN gap you can resolve from the data, propose {field, proposed_value, confidence, evidence}. 'field' is the gap's id (e.g. 'task_description', 'column.query', 'column.ground_truth'). 'evidence' MUST cite something concrete from the input — a header name, a sample value, or a stated operator preference; never propose without evidence. Use confidence 'high' only when the data makes the value unambiguous; otherwise 'low'.
       - For 'task_description', write a clear plain-language framing of what the prompt should do, grounded in the sample rows.
       - When the input carries an 'answer_space' (the target column is a closed label set), instruct the model to output exactly one of the provided labels — see ORIGIN INVARIANTS 1 below for how to handle the label list itself.
       - next_action: {kind, questions}. kind='ask' when the operator must decide — each question is {field, prompt, options?}: 'field' is the gap id it resolves (so the panel can apply the answer directly), 'prompt' is the short question, and 'options' is an optional closed set of acceptable answers (e.g. the candidate column headers) or empty for free text. kind='propose' when your findings stand on their own; kind='ready' when every gap is closed. The system re-checks readiness — do not claim 'ready' while any gap remains.
-      - recap (only on a 'ready' turn): a jargon-free sentence restating what the campaign will do.
 
       ORIGIN INVARIANTS — every field you emit must satisfy each rule below. This is the home for output-quality rules: append future ones as new numbered items, never inline elsewhere.
       1. Declare the answer space once. When the input carries a closed 'answer_space', the system appends its full label enumeration to answer_format deterministically — so never re-type, summarize, or invent a label list in answer_format or task_description. Author only the format prose (how to present the single chosen label) and refer to the labels as a set ('exactly one of the provided labels'). A second, partial, or invented list contradicts the appended one and pushes the model to answers outside the space — the failure this rule prevents.
+      2. The starting prompt must not make the target model spend tokens the answer does not need. Ask for the shortest reasoning that reaches the answer, then the answer — never a restatement of the input, a re-verification pass, an explanation the output contract does not read, or a procedure that forces every step to be written out. Prompt length itself matters less, but keep it lean where that costs nothing: the optimizer edits one thing at a time, and an edit is easiest to measure against a baseline with few moving parts. Domain detail belongs in task_context, where the optimizer reads it.
     thinking_style: >-
       Prefer the user's own wording for domain terms. Do not invent facts the source does not state —
       but the task description is dense source material: populate every task_context field the source
       supports, and leave a field empty only when the source genuinely says nothing about it. Restating
-      source content in a field's own framing is not padding.
+      source content in a field's own framing is not padding. That density is task_context's; the Layer 1
+      fields stay economical (ORIGIN INVARIANT 2).
     answer_format: >-
       Return a JSON object. Always populate the Layer 1 fields at the top level and a "task_context" object
       (the decomposed starting prompt). When the input is a draft-campaign origin, ALSO populate "assessment",

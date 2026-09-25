@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -237,13 +238,6 @@ async def execute_round(
         declare_run_phase(session, RunPhase.PAUSED)
         raise StopLoop(reason)
 
-    # The 1-to-1 series. Here and nowhere earlier: the election, the ruler extension and the
-    # panel gate are all behind us, so no cell this buys can reach a decision this round made —
-    # and the fields it writes sit outside `results` / `all_candidate_results`, which is where
-    # the NEXT round's acquisition and ruler read. Bounded by `sp_budget_round` on ONE
-    # searchpoint, and zero on a held round.
-    await measure_overlap(cycle, round_result, scoring_pool)
-
     # The election, banked. AFTER the panel gate on purpose: a round halted on a holed panel is
     # unwound and re-run, so crowning it would put a winner on the timeline for a round that
     # never stood. Still a whole `l1_critique` call before the close, which is the point — the
@@ -251,48 +245,57 @@ async def execute_round(
     # was the record that happened to have a payload.
     callbacks.on_election(round_result)
 
-    # Round diagnostics feed dispatch's ``diagnostics`` signal (L1_CRITIQUE/L2/L3).
-    rounds_history = [*cycle.rounds, round_result]
-    round_result.diagnostics = compute_round_diagnostics(
-        round_result,
-        rounds_history,
-        session.pipeline_schema,
-    )
+    # The 1-to-1 series, measured WHILE the critique runs. Here and nowhere earlier: the
+    # election, the ruler extension and the panel gate are all behind us, so no cell this buys
+    # can reach a decision this round made — and the fields it writes sit outside `results` /
+    # `all_candidate_results`, which is where the NEXT round's acquisition, ruler and critique
+    # read. The critique needs none of its cells; its reading reaches the screen at the close.
+    overlap = asyncio.create_task(measure_overlap(cycle, round_result, scoring_pool))
+    try:
+        # Round diagnostics feed dispatch's ``diagnostics`` signal (L1_CRITIQUE/L2/L3).
+        rounds_history = [*cycle.rounds, round_result]
+        round_result.diagnostics = compute_round_diagnostics(
+            round_result,
+            rounds_history,
+            session.pipeline_schema,
+        )
 
-    # A zero-candidate round (l1_generate returned [] — empty/parse-failed provider
-    # response) leaves ``round_result.results`` holding the ORIGIN's rows, so without the
-    # ``candidates`` guard critique would fire a meta LLM call to critique nothing. Skip it:
-    # the empty generation is already recorded as a ``ValidationFailure`` wound that routes
-    # L2 to heal l1_generate — that is the right next move, not another critique.
-    # Critique is feedback FOR THE NEXT ROUND's l1_generate — nothing else reads it. When no
-    # next round will run, the call is pure latency: on the L4 inner benchmark the terminal
-    # critique + the terminal L2 fire together burned 15.8% of all inner wall time producing
-    # output that died with the cycle. Both boundaries must be checked: the calendar cap
-    # (`is_final_round`, known before the round) and the lives bank emptying (knowable only
-    # now, from this round's `improved` verdict — asked through the FSM so the lives-bank lookahead can
-    # never disagree with the banking `post_round` is about to do).
-    will_stop = is_final_round or cycle.escalation.would_exhaust_lives(
-        round_result.improved,
-        config.optimization.lives,
-        compared=round_result.electable_count > 0,
-    )
-    if candidates and round_result.results and not will_stop:
-        # Critique is round-over-round feedback — survive a malformed response.
-        with graceful("L1 critique failed; the next round re-sends it before generating"):
-            async with observed_node(
-                f"l1_critique_r{round_num}",
-                "llm",
-                obs=obs,
-                campaign_id=session.state.tracing_campaign_id,
-                round_num=round_num,
-            ):
-                critique_result = await run_l1_critique(
-                    cycle,
-                    round_result,
+        # A zero-candidate round (l1_generate returned [] — empty/parse-failed provider
+        # response) leaves ``round_result.results`` holding the ORIGIN's rows, so without the
+        # ``candidates`` guard critique would fire an optimizer call to critique nothing. Skip it:
+        # the empty generation is already recorded as a ``ValidationFailure`` wound that routes
+        # L2 to heal l1_generate — that is the right next move, not another critique.
+        # Critique is feedback FOR THE NEXT ROUND's l1_generate — nothing else reads it, so when
+        # no next round will run the call is pure latency. Both boundaries must be checked: the
+        # calendar cap (`is_final_round`, known before the round) and the lives bank emptying
+        # (knowable only now, from this round's `improved` verdict — asked through the FSM so the
+        # lookahead can never disagree with the banking `post_round` is about to do).
+        will_stop = is_final_round or cycle.escalation.would_exhaust_lives(
+            round_result.improved,
+            config.optimization.lives,
+            compared=round_result.electable_count > 0,
+        )
+        if candidates and round_result.results and not will_stop:
+            # Critique is round-over-round feedback — survive a malformed response.
+            with graceful("L1 critique failed; the next round re-sends it before generating"):
+                async with observed_node(
+                    f"l1_critique_r{round_num}",
+                    "llm",
+                    obs=obs,
+                    campaign_id=session.state.tracing_campaign_id,
                     round_num=round_num,
-                    ledger=session.state.ledger,
-                )
-            round_result.critique = critique_result
+                ):
+                    critique_result = await run_l1_critique(
+                        cycle,
+                        round_result,
+                        round_num=round_num,
+                        ledger=session.state.ledger,
+                    )
+                round_result.critique = critique_result
+    except BaseException:
+        overlap.cancel()
+        raise
+    await overlap
     if obs:
         with graceful("RoundEnd emit failed"):
             obs.emit(

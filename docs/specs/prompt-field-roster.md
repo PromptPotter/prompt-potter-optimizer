@@ -18,14 +18,13 @@ The SET is a module constant and the ORDER is a class variable, and a check marr
   nowhere — silently, in a prompt."
 
 **The order is already per-class, and there are already two of them.** `PromptTemplate`'s is the
-OPTIMIZER prompt's and ends at `l1_layout.py::VOLATILE_SLOT` — why, and what a layout may put ahead
-of it, is owned by that constant and by `RENDER_ORDER`'s own docstring; do not restate it here.
-`OptSearchPoint` restates its own — `PROMPT_STRING_FIELDS` order — for the TARGET prompt, because
-that render is inside the measurement archive's key and moving it re-cuts every banked cell. So the
-seam this spec asks for **exists for the order and is load-bearing**; what it does not have is a
-per-CAMPAIGN value, only a per-class one. The set has no seam at all.
+TARGET prompt's — `PROMPT_STRING_FIELDS` order, inside the measurement archive's key, so moving it
+re-cuts every banked cell. `OptimizerPromptTemplate` overrides it for the optimizer prompt, ending at
+`l1_layout.py::VOLATILE_SLOT` — why is owned by its own docstring. So the seam this spec asks for
+**exists for the order and is load-bearing**; what it does not have is a per-CAMPAIGN value, only a
+per-class one. The set has no seam at all.
 
-**The target prompt is ordered by `OptSearchPoint.RENDER_ORDER`.** `to_job_search_point` calls
+**The target prompt is ordered by `PromptTemplate.RENDER_ORDER`.** `to_job_search_point` calls
 `self.render()` and writes the result to `pipeline_params[prompt_node]["prompt"]`. So a reorder
 that stays in the browser would change nothing the backend sends — the editor would show one order
 and the model would read another. **Order has to reach the engine or it is decoration.** And it is
@@ -57,8 +56,9 @@ The structural one is the real gate: `persona: str = ""` and friends are model f
 ## Reordering re-cuts the archive key — and that is correct
 
 `shared/hashing.py::content_hash` hashes `{"prompt": rendered_prompt, "pairs": …, "pipeline_params": …}`.
-The rendered prompt is the joined, ORDERED text — under `OptSearchPoint.RENDER_ORDER`, which is
-restated rather than inherited for exactly this reason. So:
+The rendered prompt is the joined, ORDERED text — under `PromptTemplate.RENDER_ORDER` (`tuple(PROMPT_STRING_FIELDS)`); `OptimizerPromptTemplate`
+declares its own order for exactly this reason, so shaping an optimizer prompt's cache prefix
+cannot re-cut this key. So:
 
 - Reordering an origin's fields yields a different `sp_hash` / `prompt_fields_id`, and **every
   cached measurement under the old order misses.** That is honest — a different string went to

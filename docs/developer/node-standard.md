@@ -48,7 +48,7 @@ Both backends and the optimizer loop declare pipelines as JSON. The optimizer's 
 }
 ```
 
-The `pipelines` dict composes named sequences from the node pool; the same node can appear in several. Prompts and structured-output schemas are referenced by `(family, version)` from each node's `config` and resolved against the top-level `resolved_prompts` / `resolved_schemas` registries — the same shape `parse_pipeline_response` (`domain/pipeline_parsing.py`) consumes for backends. The optimizer manifest carries the registries inline; a backend serves them via `GET /pipeline`.
+The `pipelines` dict composes named sequences from the node pool; the same node can appear in several. Prompts and structured-output schemas are referenced by `(family, version)` from each node's `config` and resolved against the top-level `resolved_prompts` / `resolved_schemas` registries — the same shape `parse_pipeline_response` (`domain/pipeline_parsing.py`) consumes for backends. The optimizer manifest carries `resolved_prompts` inline and takes `resolved_schemas` from its generated sibling `promptpotter/assets/optimizer/resolved_schemas.json` (`scripts/build_optimizer_schemas.py`), merged at load; a backend serves both via `GET /pipeline`.
 
 ## The shape, and what PromptPotter reads of it
 
@@ -118,8 +118,7 @@ Capabilities are opt-in. A deterministic node declares none; an LLM node in the 
 
 - **Prompt exposure** — expose the prompt as a `PromptTemplate`. PromptPotter reads, displays, and optimises it. See [`README.md`](README.md) § 1. Prompt structure.
 - **Optimizer-discoverable parameters** — declare accepted parameters and valid values. PromptPotter picks these up automatically as optimisation axes, with no hardcoding on either side.
-- **Self-healing Wound 1** — `ValidationFailure` caught at L1 parse time by `L1_SCHEMA_COMPLIANCE`; L2 teaches L1 not to repeat. See [`self-healing-internals.md`](self-healing-internals.md).
-- **Self-healing Wound 2** — `RuntimeFailure` attached to the candidate mid-eval; L2 adjusts; L3 replans on persistence.
+- **Self-healing Wounds 1 and 2** — a `ValidationFailure` caught at L1 parse time, a `RuntimeFailure` attached to the candidate mid-run. **Who heals each** — owned by [`self-healing-internals.md`](self-healing-internals.md) § The wounds, mapped to the two axes.
 - **Warnings → optimizer context** — per-sample warnings surface to the optimizer through the round's `evidence_health` / `diagnostics` panels. They do **not** select samples: the cumulative warned-query subset that once fed probe-round selection is gone, along with the probe lever it served.
 - **Warnings → escalation counter** — sustained degradation increments a patience counter.
 - **Warnings → search-point attachment** — failures pin to the exact configuration that caused them, not the round.
@@ -141,7 +140,7 @@ The per-sample `predicted` value is the **head of the terminal ranker's output**
 `parse_pipeline_response()` in `promptpotter/domain/pipeline_parsing.py` is the single ingress for every `pipeline.yaml`. **Two non-negotiables:**
 
 1. **No silent-default forgiveness.** Either a field is required and the connector supplies it, or it is optional and PromptPotter ignores it absent. The "TermNorm doesn't supply X so PromptPotter assumes Y" pattern is what makes a second connector painful.
-2. **Same parser, same shape, every time.** A backend's `pipeline.yaml` and PromptPotter's own `promptpotter/assets/optimizer/pipeline.yaml` MUST round-trip through `parse_pipeline_response()` identically. The parity test pins this — add a special-case field to one and the test fails until both agree.
+2. **Same parser, same shape, every time.** A backend's `pipeline.yaml` and PromptPotter's own `promptpotter/assets/optimizer/pipeline.yaml` MUST round-trip through `parse_pipeline_response()` identically. No test pins this; the shared parser does — add a special-case field to one and it is rejected at load (§ Optimizer-manifest parity).
 
 ## Worked examples
 
@@ -151,7 +150,7 @@ the full multi-node shape.
 
 ## Optimizer-manifest parity
 
-PromptPotter's own optimizer prompt pipeline uses the **same shape** as a backend's: the same `nodes` dict keyed by node name, the same `config` + `optimizer` per-node sub-objects, the same `pipelines` dict over those names, and the same `resolved_prompts` + `resolved_schemas` registries, carried inline where a backend serves them via `GET /pipeline`. It publishes escalation sequences beside `default`, which no backend needs; the shape is identical either way.
+PromptPotter's own optimizer prompt pipeline uses the **same shape** as a backend's: the same `nodes` dict keyed by node name, the same `config` + `optimizer` per-node sub-objects, the same `pipelines` dict over those names, and the same `resolved_prompts` + `resolved_schemas` registries — prompts inline, schemas from the generated `resolved_schemas.json` merged at load — where a backend serves them via `GET /pipeline`. It publishes escalation sequences beside `default`, which no backend needs; the shape is identical either way.
 
 It once declared a `view` block beside those two — a second node roster, hand-kept in sync with the one the engine runs. The graph is derived from `nodes` + `pipelines` now (§ The shape), so the parity is whole rather than one key short of it.
 

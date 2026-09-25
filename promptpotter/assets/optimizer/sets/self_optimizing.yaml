@@ -70,19 +70,19 @@ l1_generate:
 
 
     SECOND LEVER - information flow (l1_critique/l2_context/l3_plan only): a `layout` edit reshapes WHICH
-    evidence panels feed that inner node. Under pipeline_overlay[node] emit `layout: {problem_description:
-    [signal, ...]}`; the schema's own enum for that node lists every legal panel name, so pick from it
-    rather than inventing one. Excise a panel that is crowding out the evidence the failures need, or add
-    one that is missing. A few per node are load-bearing: an edit dropping one, or naming a panel outside
-    the enum, is REJECTED and the candidate scores 0 — it does not fall back to the current layout. Keep
-    what the node cannot work without, and name in `changes_description` what you removed. One candidate
-    edits prose OR layout for a node, not both.
+    evidence panels feed that inner node. Under pipeline_overlay[node] emit `layout: {"<panel>": "<slot>"}`:
+    each named panel MOVES to that slot, and every panel you omit stays put. The schema's own enum for
+    that node lists every legal panel name, so pick from it rather than inventing one. Move a panel that
+    is crowding out the evidence the failures need to another slot, or add one that is missing. Naming a
+    panel outside the enum is REJECTED and the candidate scores 0 — it does not fall back to the current
+    layout. Name in `changes_description` what you moved or added. One candidate edits prose OR layout
+    for a node, not both.
   answer_format: |-
     Return JSON: {"variants": [...]}. Each variant, IN THIS ORDER:
       - "evidence_grounding": {field, citation} — field is EXACTLY one of the CITABLE FIELDS listed below (any other value, e.g. 'failure', is invalid); citation quotes the panel entry.
       - "targets_cluster": the verbatim label of the ONE critique failure cluster this candidate attacks; "none" when there is no critique yet. Two candidates may NOT name the same cluster.
       - "pipeline_overlay": {inner_node: {field: "complete replacement text"}} — inner_node one of l1_generate/l1_critique/l2_context/l3_plan; field one of persona/task_intent/instruction/thinking_style. MUST be non-empty: a variant that changes nothing mutates nothing and is rejected.
-      - Instead of a prose field, a variant may edit information flow: "pipeline_overlay": {inner_node: {"layout": {"problem_description": ["signal", ...]}}} — inner_node one of l1_critique/l2_context/l3_plan; signals from that node's `layout` enum.
+      - Instead of a prose field, a variant may edit information flow: "pipeline_overlay": {inner_node: {"layout": {"<panel>": "<slot>"}}} — inner_node one of l1_critique/l2_context/l3_plan; panels from that node's `layout` enum, each moved to the named slot.
       - "changes_description": which inner node-field you edited and the expected effect ("make inner critique reward TRUE/FALSE commitment") — REQUIRED, never empty. It REPORTS the change above; it never substitutes for one.
 l1_critique:
   persona: >-
@@ -112,7 +112,7 @@ l1_critique:
     Flat inner loop → pull an inner optimizer prompt lever, not a 'parsing' fix.
 l2_context:
   persona: >-
-    You are L2 for a self-optimization cycle: you refine the framing the outer loop uses to improve an
+    You are L2 for a self-optimization cycle: you steer what the outer L1 looks at while it improves an
     INNER optimizer's own prompts. You steer which inner node-field the outer L1 attacks; you do not
     author the edits.
   task_intent: >-

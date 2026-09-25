@@ -27,7 +27,7 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 **What to try:**
 - Swap the `model` field in the relevant `datasets/<name>/pipeline.yaml` to `openai/gpt-oss-20b` and keep iterating. Flip back to `120b` for benchmarks.
 - Each dataset's `reasoning_effort` default is tuned to keep both models clear of Groq's per-model output ceiling — `bbeh` ships `reasoning_effort: low` so `20b` doesn't burn its reasoning budget.
-- `max_tokens` is **never** set as a numeric default in any dataset's `pipeline.yaml` — provider ceiling applies. Raise it per-cycle via `campaign.yaml::pipeline_overlay`.
+- Where `max_tokens` is and is not pinned by a dataset — owned by the matrix below. Raise it per-cycle via `campaign.yaml::pipeline_overlay`.
 - Target-layer model lives in `datasets/<name>/pipeline.yaml::llm_only.config` (set `provider` explicitly — e.g. `openrouter`); the optimizer-layer model is install-global in `promptpotter/assets/optimizer/pipeline.yaml` (per optimizer node). They're independent.
 - Full per-dataset matrix: [`docs/operations/dataset-reasoning-matrix.md`](../operations/dataset-reasoning-matrix.md).
 
@@ -52,7 +52,7 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 **Why:** L1 proposed a parameter value outside the allowed set for a pipeline node. PromptPotter catches this before any backend call (the *schema-compliance check*; Wound 1 in [self-healing](../developer/self-healing-internals.md)).
 
-**What to try:** Self-healing usually clears this within 1–2 rounds — the next outer layer (L2) sees the failure and rewrites L1's next prompt to name the forbidden value. If it persists, check `param_allowed_values` in your pipeline schema — the allowed set may be misconfigured backend-side. (Self-healing in one line: when the loop hits a recoverable failure, an outer layer rewrites the next prompt — see [self-healing-internals.md](../developer/self-healing-internals.md).)
+**What to try:** Self-healing usually clears this within 1–2 rounds — the failure reaches L1's own next call as a wound that names the forbidden value. If it persists, check `param_allowed_values` in your pipeline schema — the allowed set may be misconfigured backend-side. Which wound reaches which layer: [self-healing-internals.md](../developer/self-healing-internals.md).
 
 ---
 
@@ -64,7 +64,7 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 **What to try:**
 - Look at which `{step}:{code}` is firing. This is shown in the warning lines.
-- If the step is `llm_only` with `reasoning_budget_exhausted`: the reasoning model spent its entire output budget on the hidden reasoning trace before emitting visible content. Raise `pipeline_params.llm_only.max_tokens` (look at `step_tokens.llm_only.output` and `reasoning` to size it). L2's brief should already point at `max_tokens` directly.
+- If the step is `llm_only` with `reasoning_budget_exhausted`: the reasoning model spent its entire output budget on the hidden reasoning trace before emitting visible content. Raise `pipeline_params.llm_only.max_tokens` (look at `step_tokens.llm_only.output` and `reasoning` to size it). L1's wound channel should already name `max_tokens` directly.
 - If the code is `output_truncated`: the provider cut the response short. Same `max_tokens` lever; it is provider-fault, so it deprecates the sample without eliminating the candidate.
 - If the code is `reasoning_only_response`: the model spent its output on the hidden reasoning trace and then stopped on its own, without hitting the cap — so raising `max_tokens` will not help. That is the route, not the prompt: pick a different model or provider for the node. Also provider-fault, so the candidate survives.
 - If the code is `empty_response`: the LLM returned nothing parseable *and no retry recovered it*. Often a sign the prompt is causing a refusal or the model is overloaded. This one is candidate-fault and eliminates on a single sighting, so L3 will eventually replan to avoid the failing region.
@@ -76,7 +76,7 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 **What you see:** Every round produces candidates that look nearly identical. Accuracy has plateaued.
 
-**Why:** L1 is over-exploiting a small region of the search space. This can happen when the improvement threshold is set very low (making it easy to "win" with tiny gains) or when the candidate budget is too small to explore.
+**Why:** L1 is over-exploiting a small region of the search space. This can happen when the candidate budget is too small to explore. (There is no improvement-threshold knob: a round is elected on θ against its parent.)
 
 **What to try:**
 - Increase `n_variants` to widen the search per round.

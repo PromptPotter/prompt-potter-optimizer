@@ -6,9 +6,9 @@ issue-router and carries no backend-fault diagnostics. Accumulated evidence of a
 instead routes to L2 as a weak preemptor, bypassing ``l1_patience`` so the loop stops grinding
 dead rounds, and L2 judges recoverability.
 
-``_parse_l2`` coerces ``{name: slot}`` onto the current layout, validates, and writes the new
-layout to the OSP only when HARD checks pass; ``_apply_l2`` is the whole of the write side. A
-control output fires after the layer's normal output is adopted and the exit-phase event emitted.
+``_parse_l2`` coerces and validates the layout and merges ``l1_overrides`` into the mutated OSP;
+``_apply_l2`` installs an accepted layout. A control output fires after the layer's normal output
+is adopted and the exit-phase event emitted.
 
 What each layer may write, and why the framing is not among it:
 ``application/optimization/CLAUDE.md``."""
@@ -343,8 +343,8 @@ async def _run_transition(
         except OptimizerPromptParseError as parse_err:
             # A refinement that never parsed costs a REFINEMENT, not a MEASUREMENT. Unhandled
             # it kills the cycle — and under L4 that voids a whole outer sample, scoring one
-            # flaky provider response as "this optimizer prompt is bad". Prior
-            # `task_context`/`plan` stays adopted, the round is a stall, the loop continues.
+            # flaky provider response as "this optimizer prompt is bad". Prior `l1_layout` /
+            # `l1_overrides` / `plan` stay adopted, the round is a stall, the loop continues.
             logger.error(
                 "%s: optimizer prompt parse failure — refinement discarded, prior framing kept. [%s]",
                 transition.template_name,
@@ -378,7 +378,7 @@ async def _run_transition(
     # parent) and the persistent memory carries forward. The frame surfaces L2/L3 own are
     # installed by `transition.apply` below, so no `advanced` overlay is passed here.
     new_opt = result.opt_sp
-    cycle.adopt(new_opt, advanced={})
+    cycle.adopt(new_opt)
     cycle.tracking.current_sp = new_opt.to_job_search_point(
         base_pipeline_params=current_pp, schema=pipeline_schema
     )

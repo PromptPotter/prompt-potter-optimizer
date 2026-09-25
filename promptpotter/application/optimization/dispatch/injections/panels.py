@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass
-from itertools import pairwise
+from itertools import pairwise, zip_longest
 from typing import Any, cast
 
 from promptpotter.application.optimization.dispatch.bundle import (
@@ -154,8 +154,17 @@ def _r_diagnostics(b: InjectionBundle) -> list[Item]:
     # covers them and the numeric parts after them need none.
     parts: list[str] = []
 
+    # Only a miss carrying a rank or a retrieval fact says something the miss panels do not: one
+    # carrying neither is a query stem beside the label, which `failing_samples` already holds.
     miss_samples = (
-        [] if _no_labels(b) else [s for s in d.samples if not is_hit(s.fitness)][:SAMPLE_RENDER_CAP]
+        []
+        if _no_labels(b)
+        else [
+            s
+            for s in d.samples
+            if not is_hit(s.fitness)
+            and (s.rank is not None or s.gt_in_source is not None or s.gt_in_ranked is not None)
+        ][:SAMPLE_RENDER_CAP]
     )
     if miss_samples:
         s_lines = [f"SAMPLE DIAGNOSTICS ({len(miss_samples)}/{len(d.samples)} misses shown):"]
@@ -396,7 +405,11 @@ def _r_sample_transcripts(b: InjectionBundle) -> list[Item]:
         off = (b.cycle_slice.round_num * TRANSCRIPT_RENDER_CAP) % len(fresh)
         fresh = fresh[off:] + fresh[:off]
     losses = dict(lost)
-    pool = [loss.run for _, loss in lost if loss.run is not None] + fresh + stale
+    # The parent's own misses LEAD and lost cells interleave behind them: the parent's failure is
+    # what this round must fix, and an edit's loss is one failure among them.
+    misses = fresh + stale
+    losing = [loss.run for _, loss in lost if loss.run is not None]
+    pool = [r for pair in zip_longest(misses, losing) for r in pair if r is not None]
     unit = unit_plural(b.measured_unit)
     pools = [
         text
@@ -730,22 +743,46 @@ def _r_failing_samples(b: InjectionBundle) -> list[Item]:
         *graded,
         *((None, r) for r in ungraded),
     ]
-    ruled = "difficulty δ from the cycle's fixed ruler; easiest first — the top rows are the "
-    cold = "the difficulty ruler is still cold, so these are unordered"
-    # One item per miss, ordered easiest-first — how many fit is the composition's call. A row
-    # budget here would pre-decide a size against a ceiling this panel cannot see, and would hand
-    # back one block the composition can only starve whole rather than thin.
-    rows_out = [
-        Item(
-            f"  [#{r.get('sample_id')}] "
-            + ("δ=?" if delta is None else ("δ=tied" if delta in tied else f"δ={delta:+.2f}"))
-            + f" | {_query_stem(r, MISS_QUERY_CAP)}"
-            + f" | said: {str(r.get('predicted') or '')[:MISS_PREDICTED_CAP]}"
-            + f" | true: {str(r.get('ground_truth') or '')[:MISS_GT_CAP]}",
-            trusted=False,
+    labelled = [r for r in b.trajectory_results if r.get("ground_truth") not in (None, "")]
+    grouped = enumerable_truth_labels(labelled) is not None
+    if grouped:
+        # Over a label set the query's opening is the same preamble on every row and says nothing
+        # about the miss; what does is WHICH wrong answer, and that is a confusion group. One line
+        # per (said, true) pair carries the whole breadth in the bytes one stemmed row cost.
+        groups: dict[tuple[str, str], list[str]] = {}
+        for delta, r in ordered:
+            pair = (
+                str(r.get("predicted") or "")[:MISS_PREDICTED_CAP],
+                str(r.get("ground_truth") or "")[:MISS_GT_CAP],
+            )
+            mark = "" if delta is None else ("(tied)" if delta in tied else f"({delta:+.1f})")
+            groups.setdefault(pair, []).append(f"#{r.get('sample_id')}{mark}")
+        rows_out = [
+            Item(f"  said {said}, true {true} — {len(ids)}: {' '.join(ids)}", trusted=False)
+            for (said, true), ids in sorted(groups.items(), key=lambda kv: -len(kv[1]))
+        ]
+        ruled = (
+            "grouped by what was said against the truth, largest group first; inside a group the "
+            "ids run easiest first by δ on the cycle's fixed ruler — the leading ids are the "
         )
-        for delta, r in ordered
-    ]
+        cold = "grouped by what was said against the truth; the difficulty ruler is still cold"
+    else:
+        ruled = "difficulty δ from the cycle's fixed ruler; easiest first — the top rows are the "
+        cold = "the difficulty ruler is still cold, so these are unordered"
+        # One item per miss, ordered easiest-first — how many fit is the composition's call. A row
+        # budget here would pre-decide a size against a ceiling this panel cannot see, and would
+        # hand back one block the composition can only starve whole rather than thin.
+        rows_out = [
+            Item(
+                f"  [#{r.get('sample_id')}] "
+                + ("δ=?" if delta is None else ("δ=tied" if delta in tied else f"δ={delta:+.2f}"))
+                + f" | {_query_stem(r, MISS_QUERY_CAP)}"
+                + f" | said: {str(r.get('predicted') or '')[:MISS_PREDICTED_CAP]}"
+                + f" | true: {str(r.get('ground_truth') or '')[:MISS_GT_CAP]}",
+                trusted=False,
+            )
+            for delta, r in ordered
+        ]
     # States what the panel HAS; what it SHOWED is the composition's line, written after the
     # selection this cannot see.
     header = (
@@ -753,8 +790,8 @@ def _r_failing_samples(b: InjectionBundle) -> list[Item]:
         "across the configurations tried so far, not one round's score; "
         + (f"{ruled}winnable ones" if graded else cold)
         + (
-            ". `δ=tied` is the ruler's prior, not a reading of that cell — those rows carry no "
-            "order among themselves and no claim that any is winnable"
+            f". `{'(tied)' if grouped else 'δ=tied'}` is the ruler's prior, not a reading of that "
+            "cell — those rows carry no order among themselves and no claim that any is winnable"
             if tied
             else ""
         )
@@ -778,15 +815,14 @@ def _candidate_mutation(
     """What the candidate EDITED, per field: a prose field as the words it wrote and cut
     (``changed_words``), a param as its new value. Returned UNCLIPPED — the render clips for the
     eye. The delta rule is the shared ``candidate_delta`` dedup hashes."""
-    pf, pp = candidate_delta(cand.prompt_fields, parent, cand.pipeline_overlay, parent_pp)
+    delta = candidate_delta(cand.prompt_fields, parent, cand.pipeline_overlay, parent_pp)
     pp_nested: dict[str, Any] = {}
-    for (node, param), value in pp.items():
+    for (node, param), value in delta.params.items():
         pp_nested.setdefault(node, {})[param] = value
     pairs = [(key, str(value)) for key, value in flatten_sp_summary(pp_nested).items()]
     pairs += [
-        (field, changed_words(str(parent.get(field) or ""), str(value)))
-        for field, value in pf.items()
-        if value
+        (field, changed_words(str(parent.get(field) or ""), value))
+        for field, value in delta.prompt.items()
     ]
     return pairs[:MEMORY_FIELD_CAP]
 

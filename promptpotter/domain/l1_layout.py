@@ -13,10 +13,11 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 shapes_optimizer_prompt(__name__)
 
-# What L2 may never excise: a field L1 cannot OPERATE without, or the sole carrier of a state L1
-# must not enter blind — `answer_distribution` is the second kind, and it self-suppresses where
+# What every L1 layout must carry: a field L1 cannot OPERATE without, or the sole carrier of a state
+# L1 must not enter blind — `answer_distribution` is the second kind, and it self-suppresses where
 # there is no label to be constant about, so it costs nothing on the runs it cannot speak about.
-# Dropping any fires `l1_layout_missing_mandatory`, which rolls back rather than starving L1.
+# An edit only MOVES panels (`coerce_l1_layout`), so a layout lacking one can only be authored, and
+# `l1_layout_missing_mandatory` rolls it back rather than starving L1.
 L1_MANDATORY: frozenset[str] = frozenset(
     {
         "plan",
@@ -64,9 +65,9 @@ L1_POSSIBLE: frozenset[str] = frozenset(
     }
 )
 
-# PromptTemplate slots a layout addresses, IN RENDER ORDER (`PromptTemplate.RENDER_ORDER`, which
-# asserts this sequence is a subsequence of its own). ``answer_format`` is omitted — it carries the
-# output JSON schema and is owned by the template, not L2.
+# PromptTemplate slots a layout addresses, IN RENDER ORDER (`OptimizerPromptTemplate.RENDER_ORDER`,
+# which asserts this sequence is a subsequence of its own). ``answer_format`` is omitted — it
+# carries the output JSON schema and is owned by the template, not L2.
 #
 # The order is what makes `VOLATILE_SLOT` readable below: the slots ahead of it are the ones a
 # panel voids the provider's prefix cache from.
@@ -79,7 +80,7 @@ L1_LAYOUT_SLOTS: tuple[str, ...] = (
 
 VOLATILE_SLOT: str = L1_LAYOUT_SLOTS[-1]
 """The slot behind the provider's prefix-cache boundary — the LAST thing an optimizer prompt
-renders (`PromptTemplate.RENDER_ORDER`), which is why every floor below puts its evidence there.
+renders (`OptimizerPromptTemplate.RENDER_ORDER`), which is why every floor below puts its evidence there.
 
 An implicit prefix cache hits on an identical LEADING byte range, so a panel whose text CHANGES
 between rounds voids the discount on every byte after it. Ahead of this slot that means the static
@@ -91,11 +92,8 @@ PREFIX_STABLE_PANELS: frozenset[str] = frozenset({"task_context"})
 from round to round — so the shared prefix survives them.
 
 **Membership is a claim about a WRITER, not about a renderer**, and there is exactly one today:
-`_r_task_context` renders `FRAMING_FIELDS`, which `TaskDecomposition.merge` refuses to overwrite
-("frozen for the run"), plus the upstream/downstream splice pair. That pair moves only when an
-L2 merge or an adopted winner rewrites it, and each such move costs one prefix-cache miss — the
-price of showing L1 the framing outside the text it replaces. Every other panel is derived from
-measurement and moves whenever the measurement does.
+`_r_task_context` renders the operator's framing, which no layer writes, so it never moves within
+a run. Every other panel is derived from measurement and moves whenever the measurement does.
 
 This list is what keeps :func:`validate_l1_layout`'s prefix check silent on the floors while still
 catching an EDIT that walks a live panel forward — L2 addresses any of the four slots
@@ -164,8 +162,8 @@ class NodeLayoutSpec(StrictModel):
 # node from here, so the set of signals reaching each optimizer prompt is ONE searched axis
 # rather than two hand-tuned sources. `checkin` is excluded: it runs around the loop.
 #
-# `mandatory` = the GUARD RAIL L4 may never excise, deliberately minimal. `floor` = the good
-# default a normal campaign runs on UNCHANGED — these govern every campaign's inner prompts,
+# `mandatory` = the GUARD RAIL every layout of the node carries, deliberately minimal. `floor` = the
+# good default a normal campaign runs on UNCHANGED — these govern every campaign's inner prompts,
 # and a normal campaign has no outer loop to reconverge, so the floor must be good rather than
 # merely not-terrible. `possible − mandatory` = L4's search space, scored by the same proxy as
 # any other mutation.

@@ -21,7 +21,7 @@ Mechanism lives at its definition site — the `l1/generate.py` and `escalation/
 
 ## Origin = conservative floor
 
-**Start every tunable in the dataset's per-node overlay (`datasets/{name}/pipeline.yaml::nodes.{name}.config`) at its FLOOR, not its centre** — `reasoning_effort: "low"`, low `temperature`, minimal `thinking_budget`, no expensive system-prompt scaffolding. L1 expands upward when sibling-yield or stall evidence supports it; an expanded start burns round-0 budget and steals the headroom L1 exists to discover. Per-dataset starting points: [`../../../docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md).
+**Start every tunable in the dataset's per-node overlay (`datasets/{name}/pipeline.yaml::nodes.{name}.config`) at its FLOOR, not its centre** — low `temperature`, minimal `thinking_budget`, no expensive system-prompt scaffolding. **`reasoning_effort`'s floor is the MODEL's, so the overlay never spells one**: a declared axis no layer sets resolves to the lowest rung the running model accepts (`pipeline_resolve.py::_apply_model_floors`), where a spelled rung would follow no model a campaign swaps in. L1 expands upward when stall or axis-memory evidence supports it; an expanded start burns round-0 budget and steals the headroom L1 exists to discover. Per-dataset starting points: [`../../../docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md).
 
 ## Cycle stop conditions
 
@@ -48,14 +48,14 @@ Boundary stops are `max_rounds` and its opt-in measurement-driven twin `Optimiza
 Fires on L1 stall (default), yield drought (`l2_axis_yield_drought`), or evidence-starvation (`l1_evidence_starved`). `decide_escalation` over `DEFAULT_ESCALATION_RULES` decides transitions — **the rule set is the policy**; `EscalationFSM` only holds the counters those rules read.
 
 - **Deterministic rules route; they never diagnose or stop.** A systemic fault brings L2 in as a *weak preemptor*, bypassing `l1_patience`, and L2 judges recoverability — fixable by steering L1's attention, or unfixable by any prompt move, in which case `terminate_proposal` is the HITL exit. The diagnose-and-stop authority lives in the LLM tier.
-- **L2 writes exactly two surfaces**: `l1_layout` (which panels L1 sees) and `l1_overrides` (how hard it explores), plus optional optimizer-param tweaks — **never pipeline_params**, which belong to `l1_generate`.
+- **L2 writes exactly two surfaces**: `l1_layout` (which panels L1 sees) and `l1_overrides` (how hard it explores) — **never pipeline_params**, which belong to `l1_generate`.
 - **The steer is evidence-anchored**: it cites a specific axis, sample or yield number. Speculative moves ("maybe try X") are out of contract, and a fire touching no L1 surface is a wasted escalation scored as one (`l2_targets_l1_surface`).
-- **The framing is frozen — L2 does not write `task_context`.** The five framing fields are operator-authored evidence, locked structurally: `TaskDecomposition.merge` refuses them and the L2 wire schema has no field for them. A round's findings reach L1 through `critique`, `axis_memory` and `mutation_memory` instead. Only `upstream_context` / `downstream_context` stay mutable, because those splice into the TARGET prompt and a candidate carrying them is scored.
-- **Escalating to L3 is rare** — only when the failure mode is outside the framing surface. Default: keep refining the framing for L1.
+- **The framing is frozen — no layer writes `task_context`.** It is operator-authored evidence, locked structurally: no wire schema has a field of it. A round's findings reach L1 through `critique`, `axis_memory` and `mutation_memory` instead. `upstream_context` / `downstream_context` still splice into the TARGET prompt, but target text is L1's to write through `prompt_fields_updates` alone — a second carrier was scored yet never persisted on the candidate, so every delta reader disagreed about it.
+- **Escalating to L3 is rare** — only when the failure mode is outside what `l1_layout` / `l1_overrides` can steer. Default: keep steering L1's surface.
 
 ## L3 — what `l3_plan` may write
 
-Fires only on L2 stall. Produces a **strategic replan** — the framing surface, escalation policy, or which axes are in scope — written to `OptSearchPoint.plan` and read by **every** prompt, so it is the frame inside which both L2 and L1 operate. It heals L2 on layout HARD-validator failures or repeated cross-field issues — L2 thrashing within the plan.
+Fires only on L2 stall. Produces a **strategic replan** — what L2 and L1 should do with the levers they hold, escalation policy, which axes are in scope — written to `OptSearchPoint.plan` and read by **every** prompt, so it is the frame inside which both L2 and L1 operate. It heals L2 on layout HARD-validator failures or repeated cross-field issues — L2 thrashing within the plan.
 
 **Firing is rarer still than L2**: a fire signals the cycle's plan was wrong, not that one variant missed. If L3 fires repeatedly inside one cycle the plan-space itself is exhausted, and it should terminate rather than replan again.
 
@@ -91,7 +91,7 @@ Within the reject posture, `l1_strict.py` judges ONE proposal against a declared
 
 ## Signals come from measurement, not from the calendar
 
-Avoid hardcoded round thresholds inside the loops. `params_unlocked` derives from stall depth + mutation history, not `round ≥ 3`; `exploration_budget` widens with `stall_rounds`, not on a fixed schedule. Hardcoded stop conditions sit at the cycle boundary; everything inside the loops reasons from measurement.
+Avoid hardcoded round thresholds inside the loops. `param_scope_discipline` (`validators/l1_behavior.py`) scores a param-scope mutation only while a prompt field went unmutated for two rounds — mutation history, never `round ≥ N`; `exploration_budget` widens with stall depth, not on a fixed schedule. Hardcoded stop conditions sit at the cycle boundary; everything inside the loops reasons from measurement.
 
 ## Add no 4th LayerStrategy — L4 is a recursion
 

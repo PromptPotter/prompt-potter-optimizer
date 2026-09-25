@@ -1,8 +1,8 @@
 campaign_config:
   dataset_name: promptpotter-self
   # What an operator may steer the inner optimizer TO on a babysat fork. It listed only
-  # gpt-oss-120b while `assets/optimizer/pipeline.yaml` ran deepseek-v4-flash:nitro on all
-  # four nodes — so the model actually in use was outside its own campaign's allow-list, and
+  # gpt-oss-120b while `assets/optimizer/pipeline.yaml` ran deepseek-v4-flash:nitro on every
+  # node — so the model actually in use was outside its own campaign's allow-list, and
   # every run silently sat in the taints-the-branch case the gate exists to mark. The list
   # now names what runs; gpt-oss-120b stays because `pipeline.yaml::available_models` still
   # offers it as a sanctioned alternative. Move this list in the SAME commit as the manifest —

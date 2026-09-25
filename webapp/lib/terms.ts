@@ -16,7 +16,7 @@ export const TERMS: Record<string, string> = {
   node_l1_generate: "L1 Generate: produces N candidate prompts from current framing + critique.",
   node_l1_score:    "L1 Score: runs each candidate over the dataset, computes composite_fitness.",
   node_l1_critique: "L1 Critique: reads round results, writes the critique L1 Generate reads next round.",
-  node_l2_context:  "L2 Context: rewrites the task framing L1 generation reads. Fires on L1 stall.",
+  node_l2_context:  "L2 Context: moves which panels L1 generation reads and how widely it explores. Fires on L1 stall.",
   node_l3_plan:     "L3 Plan: rewrites the strategy. Fires on L2 stall.",
 
   composite: "composite_fitness — the per-candidate scalar the optimizer optimizes. Recipe in the formula row.",

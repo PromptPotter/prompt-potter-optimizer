@@ -47,8 +47,8 @@ from promptpotter.application.scoring.formula import (
 )
 from promptpotter.application.scoring.formula.matchers import (
     _aime_match,
-    _exact_match,
     _gsm8k_match,
+    _label_match,
 )
 from promptpotter.application.scoring.metrics import (
     compute_composite_fitness,
@@ -202,10 +202,14 @@ scipy = pytest.importorskip("scipy")  # transitively required by the PoBB math
         # _gsm8k_match: cross-format numeric equivalence / mismatch.
         (_gsm8k_match, ("42.0", "#### 42"), 1.0),
         (_gsm8k_match, ("#### 99", "#### 42"), 0.0),
-        # _exact_match: last bold wins (case-insensitive) / no-marker / mismatch.
-        (_exact_match, ("First try **No**. Corrected: **Yes**", "yes"), 1.0),
-        (_exact_match, ("plain text answer", "Plain Text Answer"), 1.0),
-        (_exact_match, ("foo", "bar"), 0.0),
+        # _label_match: last bold wins (case-insensitive) / no-marker / mismatch / an option
+        # letter against its parenthesised truth, either way round / a wrong option.
+        (_label_match, ("First try **No**. Corrected: **Yes**", "yes"), 1.0),
+        (_label_match, ("plain text answer", "Plain Text Answer"), 1.0),
+        (_label_match, ("foo", "bar"), 0.0),
+        (_label_match, ("so the answer is **D**", "(D)"), 1.0),
+        (_label_match, ("**(b)**", "B"), 1.0),
+        (_label_match, ("**C**", "(D)"), 0.0),
     ],
 )
 def test_matcher_formula(fn, args, expected):
@@ -220,7 +224,7 @@ def test_matcher_formula(fn, args, expected):
         "(lambda: 1)()",
         "[x for x in range(10)][0]",
         "predicted.__class__",
-        "exact_match(predicted, ground_truth) := 1",
+        "label_match(predicted, ground_truth) := 1",
     ],
 )
 def test_compile_scorer_rejects_attribute_and_unsafe_syntax(formula: str) -> None:
@@ -1168,16 +1172,9 @@ def test_the_bar_is_what_the_parent_can_do_not_the_draw_that_crowned_it() -> Non
     largest noise draw and not just its ability. Nothing washes it out — ``rescore_parent``
     replays the winner's own cached rows, so the same inflated estimate is re-fit bit-for-bit
     every round after. ``parent_selection_bias`` subtracts E[max of k standard normals] × the
-    winner's OWN SE so the bar stops ratcheting past what any arm can clear.
-
-    Both ways of getting it wrong are silent, and they fail in opposite directions.
-    UNDER-correct (drop the term) and a genuinely better arm is refused for the rest of the
-    cycle: ``improved: false`` on every round with no reason recorded anywhere.
-    OVER-correct — the paired ``√2`` SE, which charges the parent's noise to a maximum that
-    never selected on it — and the bar sinks below the parent's real ability: on round 2 of
-    `screen-taste-v0__0cb4d4` that turned a raw lift of −0.337 into +0.060 and crowned an arm
-    below the parent on θ AND composite. A correction that over-corrects buys back exactly the
-    noise-crowning it exists to stop, so the ~41% gap between the two is the whole subject.
+    winner's OWN SE; the rank reads the corrected bar. Admission does not: an arm must beat
+    the parent's measured θ on its own, so the credit can reorder admitted arms but never crown
+    a tie or a trailing arm.
     """
     import math
 
@@ -1237,30 +1234,25 @@ def test_the_bar_is_what_the_parent_can_do_not_the_draw_that_crowned_it() -> Non
     assert parent_selection_bias([]) == 0.0
     assert parent_selection_bias([won(se=None, electable=4)]) == 0.0
 
-    # ---- and what it does to an election ---------------------------------------------
+    # ---- and what it may NOT do to an election ----------------------------------------
+    # The credit reorders admitted arms; it never admits one. Live rounds crowned an arm at
+    # exactly the parent's θ ("+0.000 over the parent + 0.323 parent selection bias") and arms
+    # BELOW it (-0.061, -0.072), each won on the credit alone.
     ruler = _ruler(dict.fromkeys(range(28), 0.0))
     parent = measurements([1.0] * 15 + [0.0] * 13)
-    challenger = measurements([1.0] * 13 + [0.0] * 15)  # two cells behind on the same panel
-    deficit = -(theta_lift_over_parent(candidate_abilities({"c": challenger}, parent, ruler), "c"))
-    assert deficit > 0.0, "the challenger must LOOK worse, or there is no bar to lower"
+    trailing = measurements([1.0] * 13 + [0.0] * 15)  # two cells behind on the same panel
+    leading = measurements([1.0] * 17 + [0.0] * 11)
+    tie = measurements([1.0] * 15 + [0.0] * 13)
+    assert theta_lift_over_parent(candidate_abilities({"c": trailing}, parent, ruler), "c") < 0.0
 
-    def elect(bias: float) -> str:
-        return elect_round_winner(["c"], {"c": challenger}, parent, 6, ruler, parent_bias=bias)[0]
+    def elect(arm: list[Any], bias: float) -> str:
+        return elect_round_winner(["c"], {"c": arm}, parent, 6, ruler, parent_bias=bias)[0]
 
-    # Sized against the term itself, not a hardcoded z: a round whose winner SE puts the curse
-    # just OVER the apparent deficit, and one that puts it just under.
-    z = parent_selection_bias([won(se=1.0, electable=3)])
-    covers = [won(se=deficit * 1.10 / z, electable=3)]
-    tight = [won(se=deficit * 0.90 / z, electable=3)]
-
-    # Uncorrected, the arm is refused — which is right only if the parent's θ were its ability.
-    assert elect(0.0) == ""
-    # The curse covers the deficit ⇒ the arm is crowned. This is the whole point of the term.
-    assert elect(parent_selection_bias(covers)) == "c"
-    # It does not ⇒ still refused. A term that admitted here would admit anything.
-    assert elect(parent_selection_bias(tight)) == ""
-    # …and the ~41% the paired √2 SE adds is exactly enough to crown it anyway. THE regression.
-    assert elect(parent_selection_bias(tight) * math.sqrt(2.0)) == "c"
+    big = parent_selection_bias([won(se=5.0, electable=6)])
+    for bias in (0.0, big):
+        assert elect(trailing, bias) == "", "a trailing arm won on the credit"
+        assert elect(tie, bias) == "", "a tie won on the credit"
+        assert elect(leading, bias) == "c"
 
 
 def test_leader_eligibility_bars_invalid_measurement_not_stops():
@@ -2846,6 +2838,41 @@ def test_the_two_collapse_kinds_are_counted_apart_in_one_population():
     assert stats.l1_yield == 0.5
 
 
+def test_a_blank_answer_is_no_edit_at_either_boundary():
+    """A model spells "unchanged" as ``""`` or ``{node: {}}``. Read as an edit, the parse guard skips
+    the repair re-ask and the round scores clones as candidates, one blank measured as an arm. Both
+    boundaries read one ``candidate_delta``, so they must convict the same variants."""
+    from promptpotter.application.optimization.dispatch.schemas import build_l1_response_model
+
+    parent = _parent()
+    parent_params = {"llm_only": {"temperature": 0.0}}
+    model = build_l1_response_model(
+        {}, parent_prompt=parent.prompt_fields(), parent_params=parent_params
+    )
+
+    def variant(**slots) -> dict:
+        return {"variants": [{"changes_description": "x", **slots}]}
+
+    for blank in (
+        {"prompt_fields_updates": {"instruction": "", "persona": "  "}},
+        {"prompt_fields_updates": {"persona": "Expert"}},  # restates the parent
+        {"pipeline_overlay": {"llm_only": {}}},
+        {"pipeline_overlay": {"llm_only": {"temperature": 0.0}}},  # restates the parent
+    ):
+        with pytest.raises(ValueError, match="mutates nothing"):
+            model.model_validate(variant(**blank))
+    [edit] = model.model_validate(
+        variant(prompt_fields_updates={"instruction": "Rank with care.", "persona": ""})
+    ).variants
+    assert edit.prompt_fields_updates == {"instruction": "Rank with care."}
+
+    restated = CandidateProposal(
+        opt_sp=parent.mutate(), pipeline_overlay={"llm_only": {"temperature": 0.0}}
+    )
+    stats = detect_invariants([restated, _child(parent, persona="Pirate")], parent, parent_params)
+    assert (stats.l1_n_no_op, stats.l1_n_duplicate) == (1, 0)
+
+
 def test_a_reproposed_idea_is_rejected_even_when_rewritten_into_another_field():
     """The re-proposal that burned 8 rounds on `justlogic-d234` — same idea, new field.
 
@@ -2950,11 +2977,13 @@ def test_parse_population_flags_dropped_optimizer_prompt_port():
 
     opt_sp_list, _ = parse_population(
         [dropped, intact],
+        parent,
         pipeline_params=None,
         schema=schema,
     )
     inherited_list, _ = parse_population(
         [inherits_broken],
+        parent,
         pipeline_params={"l1_generate": {"problem_description": "Panels without ports."}},
         schema=schema,
     )

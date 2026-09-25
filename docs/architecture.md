@@ -64,7 +64,7 @@ Both are first-class:
   could still beat the leader. Otherwise it is eliminated and we
   move to the next candidate in the round. Concentrates query
   budget on candidates that might actually win.
-- **Hard-sample ordering (`build_round_order`).** ONE static order per
+- **Hard-sample ordering (`intelligence/adaptive_queue_mechanism.py::build_round_order`).** ONE static order per
   round, shared by every candidate: a three-strata partition on the
   PARENT's per-sample grades — misses by ascending δ, hits by
   descending, cells the parent never answered nearest the ruler's
@@ -97,7 +97,7 @@ A deterministic, no-LLM **readiness gate** (`origin_readiness.py`) *gates*: mint
 
 **No individual prompt field is gated:** any of the six may be blank because the optimizer evolves them, so only an entirely blank prompt falls back to the task description, and a closed label set is appended to `answer_format` deterministically whether or not the prose is blank, because the optimizer prompts forbid the LLMs from re-typing labels on the promise that the system supplies them (`DraftCampaign.committed_prompt_fields`).
 
-Extractability is empirical (prompt × model × scorer matcher), so the second gate is the **round-0 origin gate**: a floor that grades `critical` — all-`NO_RESULT`, a PP-owned health signal in `domain/results_health.py` — halts before L1 instead of being optimized. **That verdict asks COVERAGE before any rate**, because a rate needs a denominator the round actually sent: cells a cut-short walk never dispatched carry no row and arrive as `not_attempted`, so an origin that measured too few of its panel is reported as unmeasured rather than graded as a broken pipeline.
+Extractability is empirical (prompt × model × scorer matcher), so the second gate is the **round-0 origin gate**: a floor that grades `critical` — every critical cause of the PP-owned health signal in `domain/results_health.py`, including no extractable label on a majority of rows — halts before L1 instead of being optimized, and under the default `strict` mode a `degraded` floor halts too (`runner/termination.py::origin_gate_tripped`). **That verdict asks COVERAGE before any rate**, because a rate needs a denominator the round actually sent: cells a cut-short walk never dispatched carry no row and arrive as `not_attempted`, so an origin that measured too few of its panel is reported as unmeasured rather than graded as a broken pipeline.
 
 Resolver and operator collaborate across both gates until the origin passes readiness *and* runs scoreable.
 
@@ -116,7 +116,8 @@ Escalation is **lazy** — L2 fires on an L1 stall, L3 on an L2 stall — and hi
 layers constrain lower ones, never replace them.
 
 **No layer rewrites `task_context`**: the framing is operator-authored and frozen for the run,
-and `TaskDecomposition.merge` raises rather than paraphrase it.
+and no LAYER's (L1/L2/L3) wire schema has a field of it — the check-in authors it before the run
+(`CheckinOutput.task_context`).
 
 The split is deliberate: a *healthy* round is L1-critique's job (analyse, mutate); a *systemic
 fault* (evidence-starvation) routes to L2, which either self-heals or — on a fault no prompt move
@@ -139,30 +140,36 @@ A candidate is aborted only when its **`DegradationCheck`**
 (`application/optimization/pobb/checks.py::DegradationCheck`) fires — i.e. when its
 fraction of failed measurements crosses the per-campaign
 `degradation_threshold` (`campaign.yaml::degradation_threshold`,
-e.g. `0.4` on gsm8k).
+e.g. `0.4` on gsm8k) — or, by default, on a single fatal-classified
+sighting (`mechanisms.elimination.degradation_fatal_fastpath`).
 
 Aggregated failures surface at round end and
-flow upward: cadence/escalation rules route them (L1 validation
-failures → L2 next round; L2 output-validator failures → L3); the
-dispatch hub is the prompt-fill path each healing call goes through.
+flow upward; the dispatch hub is the prompt-fill path each healing
+call goes through. **Which wound reaches which layer** — owned by
+[`developer/self-healing-internals.md`](developer/self-healing-internals.md);
+an L1 validation failure reaches L1's own next call, not L2.
 
-**No retry of the same (sample, candidate) pair after a technical
-error** — same inputs, same error, wasted budget. The pair is dead;
-move on. **No mid-round LLM diagnostic. No complex per-error
-branching.** A discarded candidate is cheap: next round's
-`l1_generate` produces siblings on the same axis, and any genuinely
-useful direction returns naturally. Trust the loop's self-healing
-(validation → L2 next round, runtime → DegradationCheck escalation)
-plus passage of time over hand-coded recovery logic. The default
+**No measurement-level retry of the same (sample, candidate) pair
+after a technical error** — same inputs, same error, wasted budget.
+The pair is dead; move on. Transport resends below the measurement
+(a 5xx, a never-sent request, a broken connection:
+`infrastructure/llm/base.py::_retry_wait`) and the origin's one fresh
+re-score after a transient abort are not second verdicts. **No
+mid-round LLM diagnostic. No complex per-error branching.** A
+discarded candidate is cheap: next round's `l1_generate` produces
+siblings on the same axis, and any genuinely useful direction returns
+naturally. Trust the loop's self-healing plus passage of time over
+hand-coded recovery logic. The default
 posture is "ignore and continue"; aborting requires evidence.
 
 ### Dispatch hub
 
 #### One fill path, one registry
 
-Every optimizer LLM call composes its prompt by the
+Every loop-layer (L1/L2/L3) LLM call composes its prompt by the
 same path: `build_bundle(cycle) → DispatchHub.fill(template, bundle, node=…)
-→ compile_prompt` — one fill path for every optimizer node. **Injections** are the named placeholder renderers
+→ compile_prompt` — one fill path for every loop node; `checkin` runs
+around the loop and bypasses it. **Injections** are the named placeholder renderers
 (`{{slot}} → renderer(bundle) → str`) — they inject deterministic
 state into a prompt's body. One registry (`dispatch/injections/registry.py::injection_table`).
 One `validate_template()` at template load that catches typos.
@@ -229,7 +236,10 @@ world is a strict containment hierarchy:
   (the webapp + docs say "unit", the on-disk / API id stays `cycle_id`).
   Identity stays `cycle_{target_hash[:12]}` (+ `_fork_`/`_diag_`
   for branches) — the *target* content hash, content-addressed. It keeps
-  two jobs: archive cache-reuse keying and target-drift detection.
+  two jobs: archive cache-reuse keying and target-drift detection. A root
+  born at check-in keeps its permanent `cycle_chk_{hex}` id
+  (`runner/campaign_ids.py`), and drift reads `root_content_hash` rather
+  than the parsed id.
   `cycle_id` is campaign-scoped — all path resolution is
   `(campaign_id, cycle_id)`. Path helpers:
   `promptpotter/infrastructure/store/layout.py`.
@@ -274,8 +284,10 @@ wearing three names. What survives is *not* an entity:
 - **`Session`** (`application/initialization/session.py`) — the in-process
   **wiring object**: stores, LLM clients, connectors, the resolved
   `dataset_config_dir`. It is services + identity, not a persisted tier.
-- **`active_session.json`** — the operator's *pointer/lens* into the
-  Workspace: which tenant, campaign, and cycle are live.
+- **`active_session.json`** — the operator's *pointer* into the
+  Workspace: the tenant's latest launch, which `resume` defaults to. It is
+  not the live set — several cycles can run at once, each saying so by its
+  own `run_phase`.
 - **`mint_kind: "session"`** — the sidebar's label for a *root cycle*
   (`campaign_store/store.py::_mint_kind`). A label, not a container.
 
@@ -460,7 +472,8 @@ projections written by sole-writer subscribers under the single-writer
 invariant (pinned above). Operator hand-edits to these files are not
 the input channel; the next ledger event overwrites them. Operator
 input flows through the **Control** kinds only: Control-local
-(`.runtime/{pause,skip}.flag` and `sample_lookahead.json`, polled per checkpoint) and Control-remote
+(`.runtime/{pause,skip}.flag`, `sample_lookahead.json`, `gate_decision.json` and
+`run_limits.json`, polled per checkpoint — `store/layout.py` names them) and Control-remote
 (§ Control-remote).
 Opening the files IS the folder-UI workflow, and it is a read-out:
 writes land through the running loop.
@@ -523,10 +536,11 @@ ledger, a cross-cycle persistence layer lives at
 `measurements/runs/{run_id}.jsonl` — an append-only log per run,
 content-addressed by `JobSearchPoint.content_hash`, indexed by
 `measurements/index.jsonl`.
-Each row is `(sample × config → outcome)`, stamped with
-`dataset_name` and `campaign_id` so the store answers all three data
-scopes from one query path: **campaign** (`campaign_id=…`),
-**dataset** (`dataset_name=…`), **workspace** (no filter). The
+Each row is `(sample × config → outcome)`, stamped with the
+`dataset_name` it measured and never with a campaign, so its scopes are
+**dataset** and **workspace** only — owned by
+[`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md)
+§ The archive is not scoped by campaign. The
 archive is the Workspace datastore — a peer of `campaigns/`, never
 siloed into a campaign dir. **Cross-cycle, cross-session,
 cross-campaign, and shared into an L4 sandbox — but rooted per
@@ -593,7 +607,8 @@ opposite ways: an operator installs the whole product, while a *host program* �
 module, an agent, a harness — runs the loop inside a dependency tree it did not choose to
 merge with ours. So the **core install is the engine and nothing else**; every surface above
 it is an extra (`pyproject.toml::[project.optional-dependencies]` is the roster),
-and `all` folds the operator set back — `benchmarks` deliberately excepted. What belongs in core is decided by *measured*
+and `all` folds the operator set back, less the exceptions
+[ADR-0006](adr/0006-embeddable-core-and-extras.md) names. What belongs in core is decided by *measured*
 reachability from the two embedding entry points (`cli/campaign_runner.py`,
 `application/embedded_run.py`), never by argument; an extra's import is guarded where a
 non-installer would hit it, naming the extra. A capability that seems to need a new core
@@ -765,9 +780,11 @@ the PR description.
 - **The `new` verb + `/potter-run` onboarding flow** — operator's
   first-run path; cruft-audit yes, mechanism delete no.
 
-- **`new`-verb decomposition into `task_context`** — the one-time
-  `checkin` LLM call that seeds the campaign when `new <name>`
-  first sees a dataset. Don't fold into `l1_generate`.
+- **Check-in decomposition into `task_context`** — the one-time
+  `checkin` LLM call that commits a dataset's framing: `new <name>
+  --task-file` / `--task-text`, `new <file.csv>`, or the web check-in.
+  A bare `new <name>` decomposes nothing and runs on whatever framing is
+  already committed. Don't fold into `l1_generate`.
 
 - **Origin, parent and check-in — the start definitions**
   (§0 § Origin, parent, and check-in). A cleanup PR cannot collapse the origin/parent distinction, drop
@@ -829,19 +846,21 @@ the PR description.
     formulas re-project from the stored per-ROUND evaluator namespace via
     `value_with_mask_applied`; the webapp recomputes nothing.
   - **A cycle's "best" deliberately has two bases** — the winner export and the
-    L2/L3 stall comparator argmax cumulative `composite_fitness`, the optimizer's
-    actual objective, while the index/dashboard `best_round` headline argmaxes
-    cumulative `accuracy`. Forcing them to agree would make the deployed winner
-    stop optimizing the configured composite.
+    L2/L3 stall comparator take the high-water of each round's own
+    `composite_fitness`, the optimizer's actual objective, while the
+    index/dashboard `best_round` headline is elected on the shared cells
+    (`domain/results.py::best_round_on_shared_cells`, over `overlap_accuracy`).
+    Forcing them to agree would make the deployed winner stop optimizing the
+    configured composite.
 
 - **Spend-ceiling resolution chain** — **a ceiling is never one number; always ask
   "at which tier?"** Four carry one, answering different questions: the **campaign
   knob** is what the operator wants this run to cost; the **held** ceiling is the
   run's whole declaration as the host wallet ADMITTED it at launch
   (`jobs/quota.py::admit_launch`); the **account lifetime** ceiling is what the
-  tenant may ever spend; and the cycle ledger's last `SpendCeilingRecord` is its
-  **standing** operator ceiling, moved by `set-budget` and polled mid-flight through
-  its mirror, `.runtime/spend_cap.json`. The tiers and their law are
+  tenant may ever spend; and the cycle ledger's last `RunLimitsRecord` is its
+  **standing** operator ceiling, moved by `set-limits` and polled mid-flight through
+  its mirror, `.runtime/run_limits.json`. The tiers and their law are
   owned by [`adr/0003-spend-and-tenancy.md`](adr/0003-spend-and-tenancy.md) § D1.
   Three rulings a cleanup PR cannot touch:
   - **Declare once, then admit — one number** (`jobs/quota.py::declare_run_ceiling`

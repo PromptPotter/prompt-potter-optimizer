@@ -9,14 +9,12 @@ cross-round one is the loop's most destructive rejection, which is why every bou
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 from typing import Any
 
-from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.candidate_diff import (
     IDEA_MATCH_REJECT,
     candidate_delta,
@@ -40,18 +38,12 @@ class L1YieldStats:
     l1_n_no_op: int
     l1_n_duplicate: int
     # Cross-ROUND collapses (the other two are round-local): re-proposals of an idea a prior
-    # round already measured and lost. Defaulted so the many construction sites that predate
-    # the gate stay valid — the count is only ever non-zero where prior rounds are passed.
+    # round already measured and lost. Zero wherever no prior rounds are passed.
     l1_n_repeat: int = 0
     # Set when the optimizer prompt made L1's own output unparseable — the round then holds zero
     # candidates. `detect_invariants` never sets it (it only sees proposals that exist); it is
     # stamped from `l1_generate`'s return in `generate_or_load_candidates`.
     l1_parse_failure: str | None = None
-
-
-# The reasons `detect_invariants` emits — a synthetic-0 candidate that never burned an LLM call.
-# The SET lives in `domain/escalation_signals.py`, re-exported here because it is this validator's
-# own vocabulary and three call sites import it from here.
 
 
 def lost_ideas(prior_rounds: Sequence[Any]) -> list[tuple[int, frozenset[str]]]:
@@ -102,23 +94,11 @@ def detect_invariants(
     # how many proposals SURVIVE the other two gates, which is only known after the loop.
     repeats: list[tuple[CandidateProposal, int]] = []
     n_live = 0
-    parent_tc = parent_opt_sp.memory.task_context.to_dict()
+    parent_fields = parent_opt_sp.prompt_fields()
     for i, cp in enumerate(proposals):
-        child = cp.opt_sp
-        pf, pp = candidate_delta(
-            {f: getattr(child, f) for f in PROMPT_STRING_FIELDS},
-            {f: getattr(parent_opt_sp, f) for f in PROMPT_STRING_FIELDS},
-            cp.pipeline_overlay,
-            parent_pp,
-        )
-        pf_delta = tuple(pf.items())
-        child_tc = child.memory.task_context.to_dict()
-        tc_delta = tuple(sorted((k, v) for k, v in child_tc.items() if v != parent_tc.get(k)))
-        # json canon (not tuple-of-items) so a nested value — e.g. a slice-6 `layout`
-        # dict riding alongside the prose edits — stays hashable for the `seen` sig.
-        pp_delta = tuple(sorted((n, p, json.dumps(v, sort_keys=True)) for (n, p), v in pp.items()))
-        sig = (pf_delta, tc_delta, pp_delta)
-        if not any(sig):
+        child_fields = cp.opt_sp.prompt_fields()
+        delta = candidate_delta(child_fields, parent_fields, cp.pipeline_overlay, parent_pp)
+        if not delta:
             cp.opt_sp.memory.wounds.validation_failures = [
                 *cp.opt_sp.memory.wounds.validation_failures,
                 ValidationFailure(
@@ -130,6 +110,7 @@ def detect_invariants(
             ]
             n_no_op += 1
             continue
+        sig = delta.signature()
         if sig in seen:
             twin = seen[sig]
             cp.opt_sp.memory.wounds.validation_failures = [
@@ -148,12 +129,7 @@ def detect_invariants(
         # The idea is the words the candidate ADDED to its parent — never the field names, and
         # never the changed field's whole value: both collapse the test into "touched the same
         # field" (see `candidate_idea`).
-        fp = candidate_idea(
-            {f: getattr(child, f) for f in PROMPT_STRING_FIELDS},
-            {f: getattr(parent_opt_sp, f) for f in PROMPT_STRING_FIELDS},
-            cp.pipeline_overlay,
-            parent_pp,
-        )
+        fp = candidate_idea(child_fields, parent_fields, cp.pipeline_overlay, parent_pp)
         echo = next(
             (rnd for rnd, prev in tried if same_idea(fp, prev, threshold=IDEA_MATCH_REJECT)),
             None,

@@ -18,6 +18,7 @@ from promptpotter.application.optimization.validators.l1_strict import (
 )
 from promptpotter.application.pipeline_resolve import apply_node_overlay
 from promptpotter.application.scoring.evaluators import materialize_row_derivable
+from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.domain.escalation_signals import RuntimeFailure, ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_overlay import node_config_items
@@ -67,6 +68,7 @@ def merge_pipeline_params(
 
 def parse_population(
     proposals: list[CandidateProposal],
+    parent: OptSearchPoint,
     pipeline_params: dict[str, Any] | None,
     schema: PipelineSchema | None,
     *,
@@ -78,21 +80,22 @@ def parse_population(
     ``restrict``."""
     opt_sp_list: list[OptSearchPoint] = []
     merged: list[dict[str, Any] | None] = []
+    parent_fields = parent.prompt_fields()
     for cp in proposals:
         pipeline_overlay = cp.pipeline_overlay
         opt_sp = cp.opt_sp
         merged_pp = merge_pipeline_params(pipeline_params, pipeline_overlay, schema)
         if schema:
             failures: list[ValidationFailure] = []
+            # The DELTA, never the child's whole prompt: an inherited field was not proposed.
+            prompt_edit = candidate_delta(opt_sp.prompt_fields(), parent_fields, None, None).prompt
             block_outcome = L1_PROMPT_BLOCKS_IN_LIBRARY.run(
-                cp.prompt_fields_updates,
+                prompt_edit,
                 prompt_block_catalogue=prompt_block_catalogue,
             )
             if block_outcome is not None:
                 failures.extend(block_outcome.evidence["failures"])
-            held_outcome = L1_PROMPT_FIELDS_OPEN.run(
-                cp.prompt_fields_updates, pipeline_schema=schema
-            )
+            held_outcome = L1_PROMPT_FIELDS_OPEN.run(prompt_edit, pipeline_schema=schema)
             if held_outcome is not None:
                 failures.extend(held_outcome.evidence["failures"])
             if pipeline_overlay:

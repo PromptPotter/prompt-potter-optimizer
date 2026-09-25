@@ -78,7 +78,7 @@ def individual_summary_from_dict(
                 f"{YELLOW}⚠{RESET} {vf.get('axis', '?')} = {vf.get('value', '?')!r}  "
                 f"∉ [{allowed_str}]"
             )
-            out.append("  ↳ scored 0 (no backend call); L2 brief will name this value")
+            out.append("  ↳ scored 0 (no backend call); the next l1_generate reads it in l1_wounds")
         return IndividualSummary(
             status="invalid",
             tag=f"{YELLOW}INVALID{RESET}",

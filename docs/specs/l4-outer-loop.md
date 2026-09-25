@@ -13,9 +13,10 @@ its own prompts, at bounded and visible cost.
 ## The measurand
 
 `mean_round_delta` — the MEAN, over the inner rounds, of the parent each round **adopted**, minus the
-origin, in logits on one ability ruler (`exploration.py::parent_level_trajectory`). `campaign.yaml::scoring`
+origin, in logits on one ability ruler (`exploration.py::parent_level_trajectory`). `campaign.yaml::scoring.per_sample`
 re-anchors it `(x+1)/3`: linear, clipping nothing in the banked range, so the paired estimator's effect × 3
-IS the mean logit lift — a number to read, not merely to order by.
+IS the mean logit lift — a number to read, not merely to order by. `scoring.per_cell` then weighs each cell
+by its wall clock against a fixed anchor; the reason is the comment beside it in `campaign.yaml`.
 
 - **Adopted, not proposed.** A round's value is what it *crowns*; the arms it discards are the price of
   finding that. For any mutation operator with mass below the parent (all of them — that is why selection
@@ -54,7 +55,7 @@ IS the mean logit lift — a number to read, not merely to order by.
   `rounds_improved_frac` flipped nothing. Each was a *multiplier*, so each held authority over an ordering it
   could not justify, and together they roughly doubled apparent significance by compressing the scale.
   **A term that cannot move with the candidate does not get a vote.**
-- **No term divides by cost, and this is the argument any proposal to add one must answer.** Both caches are
+- **No term divides by dollar cost, and this is the argument any proposal to add one must answer.** Both caches are
   content-addressed and tenant-shared — which is what makes the inner origin identical across every arm, and
   therefore what lets the paired verdict cancel the inner loop's noise. But the arm that replays is the
   *origin* arm; a variant writes different prompts, so every hash is new and it pays full freight. A cost
@@ -95,7 +96,7 @@ exposed to.
   shared ruler above is the same θ. Manufacturing a noise term measures how noisy an LLM is on an identical
   request, which is not a quantity the loop can act on. Depth on a specific candidate is `verify`'s job — it
   re-scores on MORE samples without touching the cycle.
-- **A cell that failed is not a cell that scored zero** (`scoring/selection.py::_scoreable`). The election
+- **A cell that failed is not a cell that scored zero** (`optimization/pobb/classification.py::scoreable_rows`). The election
   grades an errored row 0.0 on purpose — the overlap guard needs that — but a published interval may not: at
   L4 a floored cell does not read as "scored nothing", it reads as "drove the inner loop maximally down".
 - **Absolute outer numbers never travel across runs.** Only a candidate's delta against its OWN run's origin

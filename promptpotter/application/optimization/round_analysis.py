@@ -217,41 +217,27 @@ def _trend(rounds: list[RoundResult]) -> tuple[TrendClass, str]:
 
 
 def _cross_candidate_diff(round_result: RoundResult) -> list[str]:
-    """Queries other candidates hit but the winner missed. Empty when fewer than two candidates ran, or the winner solved
+    """Cells other candidates hit but the winner missed. Empty when fewer than two candidates ran, or the winner solved
     everything."""
     winner_results = round_result.results
     all_results = round_result.all_candidate_results
-    candidate_scores = round_result.candidate_scores
     if not winner_results or len(all_results) < 2:
         return []
 
-    winner_misses: set[str] = {
-        r.get("query", "")
+    # Keyed on the cell's id, the handle every other panel names it by: a query stem cannot be
+    # matched to a transcript or a failing row, and over a templated dataset every stem reads alike.
+    winner_misses = {
+        r.get("sample_id")
         for r in winner_results
-        if not is_hit(r.get("fitness")) and r.get("query")
+        if not is_hit(r.get("fitness")) and r.get("sample_id") is not None
     }
-    if not winner_misses:
-        return []
-
-    missed_by: dict[str, list[str]] = {}
-    for cand_id, results in all_results.items():
-        desc = cand_id
-        for cs in candidate_scores:
-            if cs.candidate_id == cand_id:
-                desc = (cs.changes_description or cand_id)[:60]
-                break
+    solvers: dict[Any, int] = {}
+    for results in all_results.values():
         for r in results:
-            q = r.get("query", "")
-            if q in winner_misses and is_hit(r.get("fitness")):
-                missed_by.setdefault(q, []).append(desc)
-
-    if not missed_by:
-        return []
-    sorted_missed = sorted(missed_by.items(), key=lambda x: -len(x[1]))
-    return [
-        f"  {q[:60]} — solved by {len(candidates)} other candidate(s)"
-        for q, candidates in sorted_missed[:5]
-    ]
+            if r.get("sample_id") in winner_misses and is_hit(r.get("fitness")):
+                solvers[r["sample_id"]] = solvers.get(r["sample_id"], 0) + 1
+    ranked = sorted(solvers.items(), key=lambda kv: -kv[1])
+    return [f"  #{sid} — solved by {n} other candidate(s)" for sid, n in ranked[:5]]
 
 
 def _sample_diagnostics(

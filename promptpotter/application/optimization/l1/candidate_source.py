@@ -72,6 +72,7 @@ async def generate_or_load_candidates(
         CampaignPhase.L1_GENERATE,
         "enter",
         round=round_num,
+        max_rounds=opt.max_rounds,
         current_accuracy=cycle.tracking.current_accuracy,
         prompt_preview=prompt_preview,
         n_variants=_n_variants,
@@ -80,9 +81,6 @@ async def generate_or_load_candidates(
         has_l1_critique=bool(cycle.rounds[-1].critique) if cycle.rounds else False,
         pipeline_params=parent_pipeline_params,
         parent_prompt_fields={k: v for k, v in cycle.opt_sp.prompt_field_dict().items() if v},
-        parent_task_context={
-            k: v for k, v in cycle.opt_sp.memory.task_context.to_dict().items() if v
-        },
     )
 
     if cached is not None:
@@ -149,10 +147,9 @@ async def generate_or_load_candidates(
         l1_parse_failure=parse_failure,
     )
 
-    # Persist a NON-EMPTY population only. The replay branch above tests `is not None`, and
-    # `read_json_optional` hands back the parsed `[]` — which is not None — so an empty file
-    # reads as a legitimate replay payload: the resumed round adopts zero candidates and
-    # never calls the LLM again. A parse failure would therefore become permanent, replaying
+    # Persist a NON-EMPTY population only. The replay branch above tests `is not None`, so a
+    # file holding an empty population reads as a legitimate replay payload: the resumed round
+    # adopts zero candidates and never calls the LLM again. A parse failure would therefore become permanent, replaying
     # identically on every resume, and the round's own healing (FIRE_L2 via
     # `l1_generate_unusable`) would re-steer a generation that no longer happens. Writing no
     # file is what makes the resume regenerate — which is the whole point of retrying a round

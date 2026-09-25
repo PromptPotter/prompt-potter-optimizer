@@ -19,7 +19,11 @@ from promptpotter.domain.l1_layout import (
     coerce_l1_layout,
     validate_l1_layout,
 )
-from promptpotter.domain.opt_search_point import OptSearchPoint, PromptTemplate
+from promptpotter.domain.opt_search_point import (
+    OptimizerPromptTemplate,
+    OptSearchPoint,
+    PromptTemplate,
+)
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.validators import ValidatorOutcome
@@ -211,7 +215,7 @@ def _resolved_prompt_for_node(name: str) -> dict[str, Any] | None:
 
 
 @functools.lru_cache(maxsize=32)
-def base_optimizer_template(name: str) -> PromptTemplate:
+def base_optimizer_template(name: str) -> OptimizerPromptTemplate:
     """Override-free: the base an L4 prose mutation merges onto, and the declaration of the inline
     ``{{tokens}}`` (``{{n_variants}}``, ``{{citable_fields}}``) that mutation must preserve."""
     body = _resolved_prompt_for_node(name)
@@ -220,7 +224,7 @@ def base_optimizer_template(name: str) -> PromptTemplate:
             f"Optimizer prompt '{name}' not found in resolved_prompts registry "
             f"(check nodes.{name}.config.prompt_family/version)."
         )
-    return PromptTemplate(**body)
+    return OptimizerPromptTemplate(**body)
 
 
 def effective_optimizer_prompts(
@@ -250,7 +254,7 @@ def effective_optimizer_prompts(
     return out
 
 
-def load_optimizer_prompt(name: str) -> PromptTemplate:
+def load_optimizer_prompt(name: str) -> OptimizerPromptTemplate:
     """Every load runs ``validate_template``, so a template naming a slot outside ``injection_table()``
     and the per-template extras raises at load time rather than silently rendering empty."""
     template = base_optimizer_template(name)

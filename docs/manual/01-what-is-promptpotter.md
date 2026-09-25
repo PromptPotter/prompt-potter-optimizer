@@ -17,9 +17,7 @@ The pipeline can be a single LLM call or a [multi-step pipeline](../developer/no
 
 ## When the optimizer gets stuck
 
-🛟 If progress stalls, PromptPotter doesn't just keep trying the same kinds of variations. An outer loop steps in, looks at what's failing, and **rewrites the framing** the next round uses. If that also stalls, a higher loop **replans the strategy**.
-
-You'll see this in the round summary — the **Layer** field tells you whether the current round is normal, recovering, or replanning.
+🛟 If progress stalls, PromptPotter doesn't just keep trying the same kinds of variations. An outer loop steps in, looks at what's failing, and **re-aims which evidence the optimizer looks at and how widely it explores**. If that also stalls, a higher loop **replans the strategy**.
 
 Internals: [`../concepts/the-loop.md`](../concepts/the-loop.md).
 
@@ -33,7 +31,7 @@ Internals: [`../concepts/the-loop.md`](../concepts/the-loop.md).
 
 **Round** — one generate-evaluate-critique cycle inside a campaign. Each round, the optimizer proposes several candidate configurations, scores all of them against the dataset, and runs a critique to decide what to try next. A campaign is a sequence of rounds.
 
-**Candidate** — one proposed configuration scored during a round. A candidate is a specific combination of prompt fields and pipeline parameters. The best-scoring candidate that beats the current best becomes the new best; the others are discarded.
+**Candidate** — one proposed configuration scored during a round. A candidate is a specific combination of prompt fields and pipeline parameters. The candidate that beats its parent (the configuration it was mutated from) on θ — ability, read with how hard each sample is taken into account — becomes the next parent; the others are discarded. Raw accuracy is reported beside it but does not decide.
 
 ---
 

@@ -24,7 +24,7 @@ from promptpotter.application.optimization.dispatch.bundle import (
 )
 from promptpotter.application.optimization.dispatch.llm_call.prompts import resolve_node_override
 from promptpotter.application.optimization.dispatch.schemas import L1GenerateOutput, L1Variant
-from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
+from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.l1_layout import NODE_LAYOUTS, layout_json_schema
 from promptpotter.domain.pipeline_schema import (
     NESTED_PARAM_TYPES,
@@ -106,7 +106,6 @@ def _nested_param_property(node: PipelineNode, param: str) -> dict[str, Any] | N
 # withdrawn. Why that rule and what it cost before it existed: `optimization/CLAUDE.md` § L1.
 _SLOT_PANEL: dict[str, str] = {
     "prompt_fields_updates": "rendered_prompt",
-    "task_context_updates": "task_context",
     "pipeline_overlay": "pipeline_param_catalogue",
 }
 
@@ -214,33 +213,24 @@ def build_l1_response_schema(
             "additionalProperties": False,
         }
 
-    # 2 + 3. The two OptSearchPoint slots — emitted only where the evolved prompt has a
-    # node to land on. `to_job_search_point` gates its whole render on the same
-    # `prompt_node_names()`, so with none the slots would be write-only.
-    # The same rule, second condition (below, off `_SLOT_PANEL`): never offer a slot L1 cannot
-    # OBSERVE. A held prompt field is simply not a property, so the lock is structural.
-    if pipeline_schema.prompt_node_names():
-        open_fields = pipeline_schema.open_prompt_fields()
-        pf_updates = variant_props["prompt_fields_updates"]
-        pf_updates["properties"] = {field: {"type": "string"} for field in open_fields}
-        pf_updates["additionalProperties"] = False
-        if not open_fields:
-            del variant_props["prompt_fields_updates"]
-
-        tc_updates = variant_props["task_context_updates"]
-        tc_updates["properties"] = {
-            field: {"type": "string"} for field in sorted(TASK_CONTEXT_OVERRIDES)
-        }
-        tc_updates["additionalProperties"] = False
+    # 2. The prompt slot — emitted only where the evolved prompt has a node to land on:
+    # `to_job_search_point` gates its whole render on the same `open_prompt_fields()`, so with none
+    # the slot would be write-only. A held prompt field is simply not a property, so the lock is
+    # structural. `minLength` because "" is not an edit (`candidate_delta`): a model with nothing to
+    # write in a field omits it, and a variant writing nothing anywhere is re-asked.
+    if open_fields := pipeline_schema.open_prompt_fields():
+        variant_props["prompt_fields_updates"].update(
+            properties={field: {"type": "string", "minLength": 1} for field in open_fields},
+            additionalProperties=False,
+        )
     else:
         del variant_props["prompt_fields_updates"]
-        del variant_props["task_context_updates"]
 
     for slot, panel in _SLOT_PANEL.items():
         if panel in silent_panels:
             variant_props.pop(slot, None)
 
-    # 4. evidence_grounding — the panels THIS round's prompt renders, and the one field this
+    # 3. evidence_grounding — the panels THIS round's prompt renders, and the one field this
     # schema makes STRICTER than its parse twin. The model stays optional on purpose (a provider
     # omitting the citation must not crash a whole round's variants), but the WIRE offered `null`
     # as a legal answer to a question the loop treats as mandatory, and 2 of 19 live rounds took
@@ -259,7 +249,7 @@ def build_l1_response_schema(
     if "targets_cluster" not in required:
         required.append("targets_cluster")
 
-    # 5. Rename LAST. `build_l1_response_model` aliases the same map back so no downstream
+    # 4. Rename LAST. `build_l1_response_model` aliases the same map back so no downstream
     # reader observes the wire name. (The `description` lever no longer touches THIS schema:
     # it rewrites each TARGET node's own `output_schema` at the wire seam
     # `OptSearchPoint.to_job_search_point`, keyed by that node's fields — the core case.)

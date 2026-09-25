@@ -17,7 +17,7 @@ available_models:
 # render into `pipeline_params` where the connector drops it: an inert lever the generator
 # was still offered, beside a `CURRENT PROMPT` panel that showed it and nothing else.
 #
-# `problem_description` and `answer_format` are absent from every `param_keys` for the
+# `problem_description` and `answer_format` are absent from the four loop nodes' `param_keys` for the
 # reason a lever is never advertised and then forbidden: they carry the injection slots and
 # the output contract, so an edit there severs a channel rather than steering one. That was
 # prose in `assets/optimizer/sets/self_optimizing.yaml` asking the generator not to; it is now a
@@ -58,7 +58,7 @@ nodes:
     runtime: in_process
     node_role: ranker
     description: >-
-      Inner cycle's L1-critique optimizer prompt — narrates score deltas and proposes negative_critique + suggested_axes.
+      Inner cycle's L1-critique optimizer prompt — distils failure_highlights, a priority_fix and suggested_axes.
     config: {}
     optimizer:
       param_keys:
@@ -78,7 +78,9 @@ nodes:
     type: llm
     runtime: in_process
     node_role: enricher
-    description: Inner cycle's L2 optimizer prompt — refines task_context on inner-L1 stall.
+    description: >-
+      Inner cycle's L2 optimizer prompt — moves inner L1's panels (l1_layout) and exploration width
+      (l1_overrides) on inner-L1 stall.
     config: {}
     optimizer:
       param_keys:

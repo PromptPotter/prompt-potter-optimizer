@@ -27,12 +27,6 @@ from promptpotter.domain.candidate_diff import variant_prose_written
 from promptpotter.domain.l1_layout import L1Layout
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
 
-# Rounds before this one keep param-scope locked so prompt-field exploration
-# settles first (see ``_check_param_scope_discipline``). Fixed policy, not a
-# per-round knob — derived signals (stall depth, mutation history) drive the
-# rest of the loop, but this floor stays constant.
-PARAM_UNLOCK_ROUND = 3
-
 __all__ = [
     "CHECK_REGISTRY",
     "extract_l1_variants",
@@ -66,8 +60,6 @@ def _variant_text_blob(variant: dict[str, Any]) -> str:
     override slot, so scanning the overrides alone leaves a one-sentence blob to match against."""
     parts = [str(variant.get("changes_description") or "")]
     parts.extend(variant_prose_written(variant).values())
-    for value in (variant.get("task_context_updates") or {}).values():
-        parts.append(str(value or ""))
     return "\n".join(parts).lower()
 
 
@@ -120,14 +112,9 @@ def _check_param_scope_discipline(round_dict: dict[str, Any], ctx: ValidatorCont
     if not variants:
         return CheckResult("param_scope_discipline", True, "no variants emitted")
 
-    early = ctx.round_num < PARAM_UNLOCK_ROUND
     stale_field = _stale_prompt_field(ctx, _held_prompt_fields(round_dict))
-    if not early and stale_field is None:
-        return CheckResult(
-            "param_scope_discipline",
-            True,
-            f"unlocked: round ≥ {PARAM_UNLOCK_ROUND} and no stale prompt field",
-        )
+    if stale_field is None:
+        return CheckResult("param_scope_discipline", True, "unlocked: no stale prompt field")
 
     offenders: list[str] = []
     for i, v in enumerate(variants):
@@ -135,15 +122,11 @@ def _check_param_scope_discipline(round_dict: dict[str, Any], ctx: ValidatorCont
         if _touches_param_scope(pp):
             offenders.append(f"C{i + 1}")
     if offenders:
-        reason = (
-            f"round < {PARAM_UNLOCK_ROUND}"
-            if early
-            else f"prompt field {stale_field!r} unchanged for ≥2 rounds"
-        )
         return CheckResult(
             "param_scope_discipline",
             False,
-            f"{len(offenders)} variant(s) touched param scope ({reason}): {offenders[:3]}",
+            f"{len(offenders)} variant(s) touched param scope (prompt field {stale_field!r} "
+            f"unchanged for ≥2 rounds): {offenders[:3]}",
         )
     return CheckResult(
         "param_scope_discipline",
@@ -343,7 +326,7 @@ def _rendered_l1_prompt(round_dict: dict[str, Any]) -> str:
 
 def _citation_in_prompt(citation: str, shown: str) -> bool:
     """An honest citation may ELIDE, so the test is the longest ellipsis-free run. Abstains (True)
-    when the prompt is unavailable — an older round file must not fail every variant it holds."""
+    when the prompt is unavailable, rather than failing every variant the round holds."""
     if not shown:
         return True
     longest = max((_normalize_quote(part) for part in re.split(r"[.]{3}|…", citation)), key=len)

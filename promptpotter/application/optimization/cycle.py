@@ -687,12 +687,10 @@ class Cycle:
             round_num=max(len(self.rounds) - 1, 0),
         )
 
-    def adopt(self, new_parent: OptSearchPoint, *, advanced: dict[str, Any]) -> None:
+    def adopt(self, new_parent: OptSearchPoint) -> None:
         """The ONE adoption seam for an L1 win and an L2/L3 transition alike: persistent memory
-        carries from the outgoing parent, and only ``advanced`` comes from the new one."""
+        carries from the outgoing parent."""
         self.opt_sp.copy_memory_to(new_parent)
-        for surface, val in advanced.items():
-            setattr(new_parent.memory, surface, val)
         self.opt_sp = new_parent
 
     def absorb_round(
@@ -721,7 +719,7 @@ class Cycle:
         # match, nothing is adopted and no node is minted.
         winner_opt_sp = rr.opt_sp
         if winner_opt_sp is not None and winner_opt_sp.lineage.id != self.opt_sp.lineage.id:
-            self.adopt(winner_opt_sp, advanced={"task_context": winner_opt_sp.memory.task_context})
+            self.adopt(winner_opt_sp)
         assert tr.current_sp is not None
         _pp = (
             rr.pipeline_params if rr.pipeline_params is not None else tr.current_sp.pipeline_params

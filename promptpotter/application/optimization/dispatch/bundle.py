@@ -69,8 +69,10 @@ SCHEMA_RENAME_INSTRUCTION = (
 LAYOUT_SCHEMA_INSTRUCTION = (
     "Which prompt slot each evidence panel fills. Name a panel to MOVE it to that "
     "slot; a panel you omit stays where it is, and a panel is only ever in one "
-    "place. Slot order within the prompt is the floor's and does not move — what "
-    "you choose is which slot a panel speaks from."
+    "place. Keyed by PANEL, one slot string each — the inverse of the CURRENT L1 "
+    'LAYOUT listing: {"critique": "thinking_style", "failing_samples": '
+    '"thinking_style"} moves two panels into one slot. Slot order within the prompt '
+    "is the floor's and does not move — what you choose is which slot a panel speaks from."
 )
 
 

@@ -24,12 +24,7 @@ Four things every contributor needs to understand:
 
 ## 1. Prompt structure
 
-Every optimizer LLM node — `l1_generate`, `l1_critique`, `l2_context`, `l3_plan` — renders a `PromptTemplate` (`promptpotter/domain/opt_search_point.py`). Eight fields, in render order:
-
-```
-persona → task_intent → problem_description → instruction
-→ thinking_style → answer_format → few_shot_examples → plan
-```
+Every optimizer LLM node — `l1_generate`, `l1_critique`, `l2_context`, `l3_plan` — renders an `OptimizerPromptTemplate`; the target prompt the optimizer produces renders a `PromptTemplate`. Both live in `promptpotter/domain/opt_search_point.py`, and **each class's `RENDER_ORDER` is the field order** — they differ on purpose (the optimizer's is cut for the provider prefix cache, the target's is the archive key), so read both there, never from a copy here. `plan` is carried on the template but is not in `render()`.
 
 **Invariant:** no prompt site summarizes its own data. If a name isn't in `injection_table()`, it doesn't enter a prompt. **The render chain, the per-layer composition paths and the per-placeholder source map are owned by** [`dispatch-hub.md`](dispatch-hub.md) — read them there.
 
@@ -37,15 +32,15 @@ persona → task_intent → problem_description → instruction
 
 | Field | Writer | Reader(s) | Lifetime |
 |-------|--------|-----------|----------|
-| `RoundResult.critique` | L1 critique | L2, L3 (`critique` injection via `cycle.latest_round.critique`) | per round (lives on the round audit, not OSP) |
-| `OSP.memory.task_context` | operator (frozen for the run) | L1, L1 critique, L2, L3 (`task_context` injection — broadcast) | persistent; set at run init, never overwritten by any layer |
-| `OSP.memory.l1_layout` | L2 | L1 generate (`fill`) | persistent (on `L2L3Memory`, copied on adopt) |
-| `OSP.plan` | L3 | every prompt (`plan` injection in all 4 templates) | persistent — never cleared |
+| `RoundResult.critique` | L1 critique | L1 generate, L2, L3 (`critique` injection via `bundle.digest.critique`) | per round (lives on the round audit, not OSP) |
+| `OSP.memory.task_context` | operator, at check-in (frozen for the run) | L1 generate (`task_context` injection — on that floor only) | persistent; never overwritten by any layer |
+| `OSP.memory.l1_layout` | L2 | L1 generate (`fill`); L2 (`l1_layout` injection) | persistent (on `L2L3Memory`, copied on adopt) |
+| `OSP.plan` | L3 | L1 generate, L2, L3 (`plan` injection; not on `l1_critique`'s layout) | persistent — never cleared |
 | `OSP.memory.wounds.l3_note` | L3 | L2 (`l3_to_l2_note` injection — L2 template only) | persistent until L3 next fires |
 | `OSP.memory.wounds.l2_guard_breaches` | L2 parser + layout validator | L3 (rendered in the merged `guard_breaches` injection) | persistent until L3 fires |
 | `OSP.memory.wounds.l3_guard_breaches` | L3 parser | L3 next fire (rendered in the merged `guard_breaches` injection) | persistent |
 
-**Symmetric broadcast:** L3 writes `plan`; every prompt reads it via the same `_r_plan` renderer. `task_context` is operator-authored framing, frozen for the run; every prompt reads it via the same `_r_task_context` renderer, but no layer writes it. (`L2ContextOutput` explicitly carries neither `task_context` nor `action` — see `dispatch/schemas.py`.)
+**One renderer per field:** L3 writes `plan`, and every node whose layout places it reads it through the same `_r_plan`. `task_context` is operator-authored framing, frozen for the run and rendered by `_r_task_context`, but no layer writes it. (`L2ContextOutput` explicitly carries neither `task_context` nor `action` — see `dispatch/schemas.py`.) Which node places which panel is `domain/l1_layout.py::NODE_LAYOUTS`.
 
 ---
 
@@ -54,7 +49,7 @@ persona → task_intent → problem_description → instruction
 The runner asks the escalation rules engine after every round. `EscalationFSM.observe_round` builds a frozen `EscalationInputs` snapshot and delegates to `decide_escalation`, which sort-by-priority first-match-wins over `DEFAULT_ESCALATION_RULES`. All three live in `application/optimization/escalation/rules.py` — the input vocabulary, the rules and the router are one file, so the policy reads without a hop:
 
 ```
-round runs L1 → EscalationInputs(improved, l1_stall_count, l1_patience, axes_with_positive_yield, …)
+round runs L1 → EscalationInputs(current_objective, l1_stall_count, l1_patience, separable, axes_with_positive_yield, …)
                   ↓
         decide_escalation(inputs) → EscalationRule
                   ↓
@@ -63,9 +58,9 @@ round runs L1 → EscalationInputs(improved, l1_stall_count, l1_patience, axes_w
 
 **Which rules exist, and which of them preempt patience, is owned by [`dispatch-hub.md`](dispatch-hub.md) § Trigger** — read the membership there and in `escalation/rules.py`, never from a copy on this page.
 
-Counter state lives at `Cycle.escalation` (`l1_stall_count`, `l2_stall_count`, …) — the only mutation surface is observation methods. In-memory during a cycle, persisted to `rounds/round_NNNN.json` after every round, replayed on resume by `resume_with_divergence_check()`. Every transition is checkpointed.
+Counter state lives at `Cycle.escalation` (`l1_stall_count`, `l2_stall_count`, …) — the only mutation surface is observation methods. In-memory during a cycle and rebuilt on resume by `EscalationFSM.from_ledger` — a fold over the cycle's escalation history, not re-derived from one round. Every transition is checkpointed.
 
-Self-healing fires through a different door: failures route directly to the layer *above* the failing one (validation → L2, runtime → L2, L2-output validators → L3), bypassing the escalation ladder. See [`self-healing-internals.md`](self-healing-internals.md).
+Self-healing fires through a different door, bypassing the escalation ladder. **Which layer heals which wound** — owned by [`self-healing-internals.md`](self-healing-internals.md) § The wounds, mapped to the two axes.
 
 ---
 

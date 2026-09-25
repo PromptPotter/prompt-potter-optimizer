@@ -153,10 +153,10 @@ def _separability(round_num: int, electable: list[ScoredCandidate]) -> bool | No
     """Did the round resolve anything — did any arm's lift interval clear 0? ``None`` when no arm
     carries one: below two shared cells there is nothing to be inconclusive ABOUT.
 
-    The winner still stands either way; what this decides is whether the margin may be READ as a
-    result. It reaches the loop's control path rather than only warning, because a round that
-    resolved nothing is silent on every other channel — a winner is crowned and every number
-    reads — and would otherwise reset L1's patience exactly as a round that advanced does."""
+    Whatever the election decides stands either way; what this decides is whether the margin may
+    be READ as a result. It reaches the loop's control path rather than only warning, because a
+    round that resolved nothing is silent on every other channel — a winner is crowned and every
+    number reads — and would otherwise reset L1's patience exactly as a round that advanced does."""
     bracketed = [c for c in electable if c.matched_parent_lift_ci_lo is not None]
     if not bracketed:
         return None
@@ -171,8 +171,8 @@ def _separability(round_num: int, electable: list[ScoredCandidate]) -> bool | No
         message=(
             f"round {round_num} resolved nothing: every one of its {len(bracketed)} readable arms "
             f"has a lift interval spanning 0 (best reaches {widest.matched_parent_lift_ci_hi:+.3f} "
-            "at its upper bound). A winner was still elected — read it as the best of what this "
-            "round saw, not as a measured improvement over the parent"
+            "at its upper bound). An arm this round elects is the best of what it saw, not a "
+            "measured improvement over the parent"
         ),
         detail={"arms": len(bracketed), "best_ci_hi": widest.matched_parent_lift_ci_hi},
     )
@@ -200,6 +200,7 @@ async def l1_score(
 
     opt_sp_population, effective_pipeline_params = parse_population(
         candidates,
+        cycle.opt_sp,
         pipeline_params,
         schema,
         prompt_block_catalogue=cycle.config.optimization.prompt_block_catalogue,

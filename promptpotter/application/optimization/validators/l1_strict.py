@@ -191,7 +191,7 @@ def _check_l1_prompt_blocks_in_library(
     prompt_block_catalogue: str = "guidance",
     **_: Any,
 ) -> ValidatorOutcome | None:
-    """Reads the round's ``prompt_fields_updates`` — the DELTA, not the resulting OSP: the parent's
+    """Reads the candidate's prompt DELTA (``candidate_delta``), not the resulting OSP: the parent's
     fields are the dataset's authored origin, so checking the merge rejects every round-1 candidate."""
     if prompt_block_catalogue != "restrict" or not source_output:
         return None

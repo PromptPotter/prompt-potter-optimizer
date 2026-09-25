@@ -9,11 +9,9 @@ re-derives the choice.
 ``task_context`` (frozen framing) and ``plan`` (L3 strategy) arrive on ``OptSearchPoint`` and
 surface alongside the panels — this node is fan-in, reading both layers' outputs in one round.
 
-``no_op_variant`` is checked at two boundaries on purpose and both must convict the same variants:
-``L1Variant._reject_empty_mutation`` carries the parent's text so its message rides the
-schema-repair retry back to the model, while ``l1_invariants`` re-derives the same delta once the
-call returned, where it can only drop the candidate. Both compare VALUES against the parent —
-testing the container instead lets a slot filled with "" pass one gate and empty a whole round.
+``no_op_variant`` is checked at two boundaries, through ONE ``candidate_delta``:
+``L1Variant._reject_empty_mutation`` so its message rides the schema-repair retry back to the model,
+and ``l1_invariants`` after the call returned, where it can only drop the candidate.
 
 Contract: ``application/optimization/CLAUDE.md``.
 """
@@ -94,9 +92,6 @@ def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> l
             summary["pipeline_overlay"] = cp.pipeline_overlay
         if prompt_fields:
             summary["prompt_fields"] = prompt_fields
-        # Third L1 mutation slot — lets SP-diff render task_context-only candidates as a mutation,
-        # not a bare [clone].
-        summary["task_context"] = cp.opt_sp.memory.task_context.to_dict()
         summaries.append(summary)
     return summaries
 
@@ -151,11 +146,12 @@ async def l1_generate(
     )
     # The wire schema advertises renamed keys; the response model aliases them back. Both read
     # the SAME `effective_l1_field_names` — a disagreement would fail every parse, every round.
-    # The parent's text rides along so the empty-mutation guard can compare VALUES: the two
-    # task_context keys are disjoint from the six prompt fields, so one flat map serves both slots.
+    assert cycle.tracking.current_sp is not None
     response_model = build_l1_response_model(
         effective_l1_field_names(),
-        parent_text={**opt_sp.prompt_field_dict(), **opt_sp.memory.task_context.to_dict()},
+        parent_prompt=opt_sp.prompt_fields(),
+        # The baseline `detect_invariants` reads too: the parent's resolved, folded config.
+        parent_params=cycle.tracking.current_sp.pipeline_params,
     )
     try:
         generated, _prompt, _repairs = await run_optimizer_node(
@@ -261,31 +257,17 @@ async def l1_generate(
 
     population: list[CandidateProposal] = []
     for v in variants_list[:n_variants]:
-        # Three slots, three readers — schema split (B1) prevents conflation. A node name
-        # absent from the active schema (hallucinated) is NOT pre-filtered here: it flows to
-        # the one validation producer (``validate_overrides`` via ``parse_population``), which
-        # records it as a non-fatal ``hallucinated_node`` wound (routed to l1_wounds), and
+        # A node name absent from the active schema (hallucinated) is NOT pre-filtered here: it
+        # flows to the one validation producer (``validate_overrides`` via ``parse_population``),
+        # which records it as a non-fatal ``hallucinated_node`` wound, and
         # ``merge_pipeline_params`` strips it from the wire.
-        prompt_changes = dict(v.prompt_fields_updates)
-        tc_changes = dict(v.task_context_updates)
-        pipeline_overlay = v.pipeline_overlay
-        # Override validation is deferred to parse_population — one producer of truth.
-        evidence = _parse_evidence_grounding(v.evidence_grounding)
         child = opt_sp.mutate(
             changes_description=v.changes_description,
             source="l1_generate",
-            evidence_grounding=evidence,
-            **prompt_changes,
+            evidence_grounding=_parse_evidence_grounding(v.evidence_grounding),
+            **v.prompt_fields_updates,
         )
-        if tc_changes:
-            child.memory.task_context = child.memory.task_context.merge(tc_changes)
-        population.append(
-            CandidateProposal(
-                opt_sp=child,
-                pipeline_overlay=pipeline_overlay,
-                prompt_fields_updates=prompt_changes,
-            )
-        )
+        population.append(CandidateProposal(opt_sp=child, pipeline_overlay=v.pipeline_overlay))
 
     return population, None
 

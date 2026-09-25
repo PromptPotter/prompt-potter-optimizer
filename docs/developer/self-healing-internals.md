@@ -25,8 +25,8 @@ Storage stays four typed lists (+ `l3_note`); **rendering collapses to two owner
 | **Owner source** | structural (L1's own output) | `RuntimeFailure.owner`: `L1` (rate) · `OPERATOR` (fatal) | (patience event) | structural (layout refusal → L3) |
 | **Detector** | `L1_SCHEMA_COMPLIANCE` (`validators/l1_strict.py`), at `parse_population()` | `DegradationCheck` (`pobb/checks.py`), mid-eval | `escalate_l2` patience (`escalation/firing.py`) | `validate_l1_layout` (post-parse) |
 | **Failure record class** | `ValidationFailure` | `RuntimeFailure` | (patience event, no record) | `ValidatorOutcome` |
-| **OSP storage** | `validation_failures` | `runtime_failures` | `escalation.l2.stall_count` | `l2_guard_breaches` |
-| **Outer-memory mirror** | none (L2 reads `candidate_scores`) | cumulative on `cycle.opt_sp.wounds.runtime_failures` | none | per-round on the OSP itself |
+| **OSP storage** | `validation_failures` | `runtime_failures` | `cycle.escalation.l2_stall_count` (on the cycle, not the OSP) | `l2_guard_breaches` |
+| **Outer-memory mirror** | none (L2 reads `candidate_scores`) | cumulative on `cycle.opt_sp.memory.wounds.runtime_failures` | none | per-round on the OSP itself |
 | **Nurse prompt slot** | `{{l1_wounds}}` | `{{l1_wounds}}` | (whole `l3_plan` template) | `{{guard_breaches}}` |
 | **Renderer** | `_r_l1_wounds` | `_r_l1_wounds` | `_r_l1_wounds` | `_r_guard_breaches` |
 | **Nurse's writeback** | L1 re-proposes a valid override | L1 retunes the node config · or operator trims schema/model | `cycle.opt_sp.plan` | `cycle.opt_sp.plan` |
@@ -51,11 +51,11 @@ Storage stays four typed lists (+ `l3_note`); **rendering collapses to two owner
 
 ## Wound 3 — what L3 reads and writes
 
-L3 fires when `esc.l2.stall_count >= opt.l2_patience`, subject to its own `l3_patience`. Its prompt (`promptpotter/assets/optimizer/pipeline.yaml::resolved_prompts['l3_plan/1']`) reads `{{l1_wounds}}`, `{{guard_breaches}}`, `{{plan}}`, `{{task_context}}`, `{{diagnostics}}` and `{{critique}}`, and writes a new `plan` (optionally `pipeline_params`) that feeds both L1's `{{plan}}` slot and the next L2 invocation. The only wound with cross-layer authority — L3 changes pipeline composition or strategy framing.
+L3 fires when `cycle.escalation.l2_stall_count >= opt.l2_patience`, subject to its own `l3_patience`. What its prompt reads is its layout, `domain/l1_layout.py::NODE_LAYOUTS["l3_plan"]` — read the membership there; what it writes is `dispatch/schemas.py::L3PlanOutput` (`plan`, `note` → `wounds.l3_note`, `rationale`, `fork_proposal`, `terminate_proposal`). The new `plan` feeds every node whose layout places it, L1 and the next L2 fire included. The only wound with cross-layer authority — L3 changes the strategy L2 and L1 work within.
 
 ## Wound 4 — immediate, never patient
 
-A REFUSED L2 layout edit makes `escalate_l2` invoke `L3ModifyPlan` *immediately*, bypassing `l2_patience` and `l3_patience`: broken L2 output is not "wait and see". The trigger is deterministic from L2's output, already on the round file, so resume reproduces it without a separate decision record. It is suppressed on an `escalation_ladder` that stops short of L3.
+A REFUSED L2 layout edit makes `escalate_l2` run `_run_transition(L3, …)` *immediately*, bypassing `l2_patience` and `l3_patience`: broken L2 output is not "wait and see". The trigger is deterministic from L2's output, already on the round file, so resume reproduces it without a separate decision record. It is suppressed on an `escalation_ladder` that stops short of L3.
 
 **The trigger reads the refusal, not the breach stream** — owned by [`dispatch-hub.md`](dispatch-hub.md) § Wound 4, which also holds the breach set. This layer must route off `TransitionResult.l1_layout_refused`.
 
@@ -67,14 +67,14 @@ A REFUSED L2 layout edit makes `escalate_l2` invoke `L3ModifyPlan` *immediately*
 
 The fields that travel with each candidate cross-round are `domain/opt_search_point.py::L2L3Memory` — read the roster and each field's lifecycle off the model, which is frozen and cannot drift from itself.
 
-Two that the model cannot tell you. **`wounds.l3_note` is sticky free-text and not a failure record** — L3 sets it to steer L2, and it survives every parent swap (an L1 win as well as an L2/L3 transition) through the `Cycle.adopt` seam's `copy_memory_to`, the only field there with that lifetime. And **the L1 critique is not on `L2L3Memory` at all**: it lives on `RoundResult.critique`, which the dispatch hub's `critique` injection reads from `cycle.latest_round.critique`, the same way per-round trajectory lives on `Cycle.rounds` rather than the OSP.
+Two that the model cannot tell you. **`wounds.l3_note` is sticky free-text and not a failure record** — L3 sets it to steer L2, and it survives every parent swap (an L1 win as well as an L2/L3 transition) through the `Cycle.adopt` seam's `copy_memory_to`, the only field there with that lifetime. And **the L1 critique is not on `L2L3Memory` at all**: it lives on `RoundResult.critique`, which the dispatch hub's `critique` injection reads through `bundle.digest.critique` (`build_bundle`, off the latest round), the same way per-round trajectory lives on `Cycle.rounds` rather than the OSP.
 
 ## The prompt-budget unit (a separate mechanism)
 
 Not a wound: it guards the size of a composed optimizer prompt, has no producer→nurse pair, and rides the `injection_table()` registry, `DispatchHub` and the existing `StopLoop` / round-loop teardown rather than a sidecar. Two healing modes:
 
-1. **Truncate** — per-injection `char_cap`; an over-cap block is section-aware truncated in the hub (`facade.py`), with an `injection_budget_overrun` warning naming the overrun + dropped sections.
-2. **Halt** — `RENDER_ERROR`: an injection renderer *raised* (usually code drift); operator-recoverable stop.
+1. **Select** — the composition (`dispatch/compose.py::select`) places whole items under the node's `OPTIMIZER_DISCRETIONARY_CHARS` allowance and drops the rest; the rules are owned by [`dispatch-hub.md`](dispatch-hub.md) § Every item that reaches an LLM carries an upper limit. `char_cap` is only the runaway backstop on indivisible panels (`facade.py::_cap_runaway`), which emits an `injection_budget_overrun` warning.
+2. **Halt** — `RENDER_ERROR`: an injection renderer *raised* (usually code drift), or `MandatoryPanelStarvedError`: a mandatory panel rendered but was not placed; operator-recoverable stop.
 
 ## Mid-eval termination — what is and isn't healing
 

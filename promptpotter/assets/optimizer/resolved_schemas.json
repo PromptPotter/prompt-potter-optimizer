@@ -44,14 +44,6 @@
                 "title": "Prompt Fields Updates",
                 "type": "object"
               },
-              "task_context_updates": {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "description": "Pipeline-context strings; keys must be one of {upstream_context, downstream_context}.",
-                "title": "Task Context Updates",
-                "type": "object"
-              },
               "changes_description": {
                 "maxLength": 320,
                 "title": "Changes Description",
@@ -215,7 +207,7 @@
               ],
               "type": "string"
             },
-            "description": "Which prompt slot each evidence panel fills. Name a panel to MOVE it to that slot; a panel you omit stays where it is, and a panel is only ever in one place. Slot order within the prompt is the floor's and does not move — what you choose is which slot a panel speaks from.",
+            "description": "Which prompt slot each evidence panel fills. Name a panel to MOVE it to that slot; a panel you omit stays where it is, and a panel is only ever in one place. Keyed by PANEL, one slot string each — the inverse of the CURRENT L1 LAYOUT listing: {\"critique\": \"thinking_style\", \"failing_samples\": \"thinking_style\"} moves two panels into one slot. Slot order within the prompt is the floor's and does not move — what you choose is which slot a panel speaks from.",
             "propertyNames": {
               "enum": [
                 "answer_distribution",
@@ -391,10 +383,10 @@
     "fields": [
       "persona",
       "task_intent",
+      "answer_format",
       "problem_description",
       "instruction",
       "thinking_style",
-      "answer_format",
       "task_context",
       "assessment",
       "findings",
@@ -543,8 +535,12 @@
             "type": "string"
           },
           "task_intent": {
-            "default": "",
             "title": "Task Intent",
+            "type": "string"
+          },
+          "answer_format": {
+            "description": "The output contract only: the exact shape the scorer extracts, as described to you in context. The valid labels are appended deterministically — never list them here.",
+            "title": "Answer Format",
             "type": "string"
           },
           "problem_description": {
@@ -561,12 +557,6 @@
             "default": "",
             "description": "How to reason. Never the output shape or the scoring rule — those are answer_format's.",
             "title": "Thinking Style",
-            "type": "string"
-          },
-          "answer_format": {
-            "default": "",
-            "description": "The output contract only: the exact shape the scorer extracts, as described to you in context. The valid labels are appended deterministically — never list them here.",
-            "title": "Answer Format",
             "type": "string"
           },
           "task_context": {
@@ -595,6 +585,10 @@
             "type": "string"
           }
         },
+        "required": [
+          "task_intent",
+          "answer_format"
+        ],
         "title": "CheckinOutput",
         "type": "object"
       }

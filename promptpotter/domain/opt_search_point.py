@@ -40,6 +40,7 @@ __all__ = [
     "IndividualLineage",
     "L2L3Memory",
     "OptSearchPoint",
+    "OptimizerPromptTemplate",
     "PromptTemplate",
     "WoundChannels",
 ]
@@ -83,37 +84,12 @@ class PromptTemplate(SearchPoint):
         super().__init_subclass__(**kwargs)
         _check_render_order(cls)
 
-    RENDER_ORDER: ClassVar[Annotated[tuple[str, ...], shapes_optimizer_prompt]] = (
-        "persona",
-        "task_intent",
-        "instruction",
-        "thinking_style",
-        "answer_format",
-        "problem_description",
+    RENDER_ORDER: ClassVar[Annotated[tuple[str, ...], shapes_optimizer_prompt]] = tuple(
+        PROMPT_STRING_FIELDS
     )
-    """Order ``render()`` concatenates the decomposition fields in, for the OPTIMIZER prompt
-    (`dispatch/llm_call`). Apart from the SET, so shaping a cache prefix here cannot re-cut the
-    target prompt below.
-
-    ``problem_description`` renders LAST because it is where the evidence goes: it is
-    `l1_layout.py::VOLATILE_SLOT`, the slot every `NODE_LAYOUTS` floor fills, so anything rendered
-    after it would sit behind panels that change every round and could never be served off a
-    provider's prefix cache. Measured before this order: `l1_generate` read 32,512 of 200,554
-    prompt tokens from cache (16%), `l1_critique` 1,024 of 144,961 (0.7%) — same client, model and
-    provider.
-
-    **The corollary binds the prompts, not just this tuple: a value that CHANGES between rounds
-    belongs in ``problem_description``, never in a field ahead of it.** `l1_generate`'s citable
-    menu was substituted into `answer_format`, one slot early, and a menu that moves with the
-    layout truncated the stable prefix at 5,406 of 7,197 chars on a real round pair — a static
-    template voiding itself from the inside. Ordering the fields is half the contract; keeping the
-    moving values behind the boundary is the other half, and the half nothing can assert: the
-    layout axis addresses the earlier slots too, so `validate_l1_layout` REPORTS a panel placed
-    ahead of the boundary (`l1_layout_voids_prefix`) rather than the order alone guaranteeing it.
-
-    A constant ahead of the boundary is free, and the exemption is declared rather than assumed —
-    `PREFIX_STABLE_PANELS`, whose one member is `task_context`; the shared prefix measurably
-    survives all of `task_intent`."""
+    """Order ``render()`` concatenates the decomposition fields in — the TARGET prompt's, so it sits
+    inside the measurement archive's ``node_configs`` key and moving it re-cuts every banked cell.
+    ``OptimizerPromptTemplate`` is the one class that orders otherwise."""
 
     persona: str = ""
     task_intent: str = ""
@@ -201,6 +177,38 @@ class PromptTemplate(SearchPoint):
         return cls(few_shot_examples=fse, **fields, **kwargs)
 
 
+class OptimizerPromptTemplate(PromptTemplate):
+    """A prompt the optimizer RUNS ON (`dispatch/llm_call`), never one it produces."""
+
+    RENDER_ORDER: ClassVar[Annotated[tuple[str, ...], shapes_optimizer_prompt]] = (
+        "persona",
+        "task_intent",
+        "instruction",
+        "thinking_style",
+        "answer_format",
+        "problem_description",
+    )
+    """Ordered for the provider's prefix cache, apart from the target's order so shaping a cache
+    prefix here cannot re-cut a banked measurement.
+
+    ``problem_description`` renders LAST because it is where the evidence goes: it is
+    `l1_layout.py::VOLATILE_SLOT`, the slot every `NODE_LAYOUTS` floor fills, so anything rendered
+    after it would sit behind panels that change every round and could never be served off a
+    provider's prefix cache.
+
+    **The corollary binds the prompts, not just this tuple: a value that CHANGES between rounds
+    belongs in ``problem_description``, never in a field ahead of it** — a moving menu substituted
+    one slot early voids the stable prefix from inside a static template. Ordering the fields is
+    half the contract; keeping the
+    moving values behind the boundary is the other half, and the half nothing can assert: the
+    layout axis addresses the earlier slots too, so `validate_l1_layout` REPORTS a panel placed
+    ahead of the boundary (`l1_layout_voids_prefix`) rather than the order alone guaranteeing it.
+
+    A constant ahead of the boundary is free, and the exemption is declared rather than assumed —
+    `PREFIX_STABLE_PANELS`, whose one member is `task_context`; the shared prefix measurably
+    survives all of `task_intent`."""
+
+
 class EvidenceGrounding(StrictModel):
     """Panel field + citation L1 declares to justify a mutation.
 
@@ -279,11 +287,9 @@ class L2L3Memory(StrictModel):
     task_context: TaskDecomposition = Field(
         default_factory=TaskDecomposition,
         description=(
-            "Operator-authored task framing, spliced around "
-            "``problem_description`` at render time. The five ``FRAMING_FIELDS`` "
-            "are frozen for the run — ``TaskDecomposition.merge`` refuses them "
-            "and the L2 wire schema declares none of them; only "
-            "``upstream_context`` / ``downstream_context`` are mutable."
+            "Operator-authored task framing, frozen for the run: no layer's wire "
+            "schema declares a field of it. ``upstream_context`` / "
+            "``downstream_context`` splice around ``problem_description`` at render time."
         ),
     )
 
@@ -298,13 +304,6 @@ class OptSearchPoint(PromptTemplate):
 
     model_config = ConfigDict(extra="forbid")
 
-    RENDER_ORDER: ClassVar[Annotated[tuple[str, ...], shapes_optimizer_prompt]] = tuple(
-        PROMPT_STRING_FIELDS
-    )
-    """Order for the TARGET prompt, so it sits inside the measurement archive's ``node_configs``
-    key and moving it re-cuts every banked cell. Restated, not inherited: inheriting is the
-    coupling."""
-
     lineage: IndividualLineage = Field(default_factory=IndividualLineage)
     memory: L2L3Memory = Field(default_factory=L2L3Memory)
 
@@ -315,7 +314,7 @@ class OptSearchPoint(PromptTemplate):
     @shapes_optimizer_prompt
     def _field_value(self, name: str) -> str:
         """Splice ``task_context`` up/downstream context around ``problem_description`` — which may
-        be EMPTY, and they still render; they are mutable because they reach the target prompt."""
+        be EMPTY, and they still render."""
         v: str = getattr(self, name)
         if name != "problem_description":
             return v
@@ -391,22 +390,21 @@ class OptSearchPoint(PromptTemplate):
 
 _check_render_order(PromptTemplate)
 
-# The prefix-cache half of the same contract, and asserted HERE rather than in
-# `_check_render_order` because it is true of the optimizer prompt alone: `OptSearchPoint` below
-# restates `PROMPT_STRING_FIELDS` order for the target prompt, where `problem_description` is
-# third and the archive key — not a cache — is what the order answers to.
+# The prefix-cache half of the same contract, true of the optimizer prompt alone — the target's
+# order answers to the archive key, not a cache.
 #
 # `l1_layout.py` cannot assert this itself (domain import direction: it is imported BY this
-# module), so the reading lives on the importer. Two claims, both load-bearing and neither
-# previously checked: the volatile slot renders last, and the layout's slot sequence is the
-# render sequence — without the second, `L1_LAYOUT_SLOTS[:-1]` is not "the slots ahead of the
-# boundary" and `validate_l1_layout`'s prefix check reads the wrong ones.
-assert PromptTemplate.RENDER_ORDER[-1] == VOLATILE_SLOT, (
+# module), so the reading lives on the importer. Two claims, both load-bearing: the volatile slot
+# renders last, and the layout's slot sequence is the render sequence — without the second,
+# `L1_LAYOUT_SLOTS[:-1]` is not "the slots ahead of the boundary" and `validate_l1_layout`'s
+# prefix check reads the wrong ones.
+_OPTIMIZER_ORDER = OptimizerPromptTemplate.RENDER_ORDER
+assert _OPTIMIZER_ORDER[-1] == VOLATILE_SLOT, (
     f"the optimizer prompt must render {VOLATILE_SLOT!r} last — it is where every NODE_LAYOUTS "
     f"floor puts its evidence, so a field behind it can never sit in a provider's stable prefix."
 )
-assert [f for f in PromptTemplate.RENDER_ORDER if f in L1_LAYOUT_SLOTS] == list(L1_LAYOUT_SLOTS), (
+assert [f for f in _OPTIMIZER_ORDER if f in L1_LAYOUT_SLOTS] == list(L1_LAYOUT_SLOTS), (
     f"L1_LAYOUT_SLOTS {L1_LAYOUT_SLOTS} must be a subsequence of RENDER_ORDER "
-    f"{PromptTemplate.RENDER_ORDER} — the layout is declared in render order so that "
+    f"{_OPTIMIZER_ORDER} — the layout is declared in render order so that "
     f"'ahead of the boundary' means the same thing in both modules."
 )

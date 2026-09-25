@@ -6,11 +6,9 @@ A trace records what the pipeline did (query, prediction, ground truth, node ran
 
 **The archive's shape — the fold, its two derived views, its two retrieval keys, and the content-addressing that makes it cross-cycle** — owned by [`../developer/README.md`](../developer/README.md#4-cross-run-memory). One row there is one **measurement**, `(sample × config → outcome)`; this page owns only what a *score* over that row means.
 
-## Score ledger + rescore-on-load
+## Rescore-on-load
 
-A trace can be judged under many policies, so scores are persisted as a ledger — `{score, hit, formula}` rows alongside the scorer that produced them. Cycle identity is hashed from pipeline + prompts + dataset, **not** the scoring formula. Editing the formula doesn't mint a new cycle; the traces stay addressable, the ledger gains another entry.
-
-Every trace gets rescored under the active scorer when crossing from disk to memory. Fresh samples, cache hits, trial reloads, cross-campaign memory ingest — all four paths go through the same step. The `hit` / `score` you read at runtime is always the current policy's view.
+A trace can be judged under many policies, so no score is stored as the trace's own truth. Every trace is rescored under the active scorer when it crosses from disk to memory — `application/scoring/formula/rescore.py::rescore_results` re-stamps each row's `fitness` and `objective` — so fresh samples, cache hits, trial reloads and cross-campaign memory ingest all go through the same step, and the `fitness` / `objective` you read at runtime is always the current policy's view. The traces stay addressable under any formula; what a formula CHANGE does to a running cycle is owned by [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § Changing the composite formula — fork, never swap.
 
 ---
 
@@ -30,7 +28,7 @@ The costs above turn on OUR cache. A provider keeps its own, and **conflating th
 
 The rule is that **one word cannot mean both**: `cached` is the replay, never the count. Filing a provider's count under the `cached` name is what kept the Harbor backend — the majority of spend — reporting `0` on every row while it was in fact capturing, and `account_spend` drops a record from the spend roll-up whenever `cached` is truthy, so a count there would have hidden paid calls from the budget ceiling.
 
-Two consequences worth knowing before reading any capture number. The provider cache is **per-replica and warms by repetition** — a prefix sent once warms one machine in a fleet, so capture climbs over a run rather than appearing on the second call; measured, a repeated prompt missed, then held 92–99% from roughly the fourth call on. And it is **why the optimizer prompt orders its fields the way it does** ([`opt_search_point.py::PromptTemplate.RENDER_ORDER`](../../promptpotter/domain/opt_search_point.py)): everything volatile renders last, because a single per-round value early in the prompt voids the discount on every byte behind it.
+Two consequences worth knowing before reading any capture number. The provider cache is **per-replica and warms by repetition** — a prefix sent once warms one machine in a fleet, so capture climbs over a run rather than appearing on the second call; measured, a repeated prompt missed, then held 92–99% from roughly the fourth call on. And it is **why the optimizer prompt orders its fields the way it does** ([`opt_search_point.py::OptimizerPromptTemplate.RENDER_ORDER`](../../promptpotter/domain/opt_search_point.py)): everything volatile renders last, because a single per-round value early in the prompt voids the discount on every byte behind it.
 
 
 ## Deprecated samples
@@ -47,6 +45,6 @@ Decision records are two-tier, on the same facts-vs-policy line: **replayable** 
 
 Round-winner selection compares candidates on difficulty-adjusted ability (θ on the cycle's fixed δ ruler — subset-invariant, so candidates scored on different adaptive subsets stay comparable). **θ is fit on the composite, not on accuracy**: each cell carries what it was WORTH (`objective`) beside whether it was RIGHT (`fitness`), so a campaign that prices latency, cost or a provider's flakiness elects on that price rather than merely displaying it. Declare one under `campaign.yaml::scoring.per_cell`; absent, the two are the same number and nothing changes. **Accuracy** displays alongside as the subset-relative correctness rate, which is what makes a win that came with hidden costs visible as a gap between the two. **Changing the composite forks the cycle rather than swapping inside it** — owned by [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § Changing the composite formula — fork, never swap.
 
-θ is the standard IRT/CAT fix: a small statistical model that **structurally** removes the per-round sample-set drift — when the adaptive picker hands each candidate a different subset, raw accuracy is no longer comparable, but ability is. Today it's 1PL (difficulty only); a richer **2PL** variant adds per-sample signal-to-noise (discrimination), giving more power once enough data is collected, and graduates per-dataset only when it beats 1PL out-of-sample. The model itself is owned by [`../methods/verdict-resolution.md`](../methods/verdict-resolution.md).
+θ is the standard IRT/CAT fix: a small statistical model that **structurally** removes the per-round sample-set drift — when the adaptive picker hands each candidate a different subset, raw accuracy is no longer comparable, but ability is. It starts 1PL (difficulty only); a richer **2PL** variant adds per-sample signal-to-noise (discrimination), giving more power once enough data is collected, and graduates per-cycle only when it beats 1PL out-of-sample — on by default (`enable_2pl_graduation`). The model itself is owned by [`../methods/verdict-resolution.md`](../methods/verdict-resolution.md).
 
 Why two forks share one archive without duplicating a measurement — content-addressing, in [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § The primitive.
