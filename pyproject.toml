@@ -80,7 +80,7 @@ dspy = [
 harbor = [
     # why kept: the `harbor` connector, which runs one containerized agent episode per measured
     # cell through Harbor's own trial runner. Deliberately absent from `all`, for a reason
-    # stronger than `benchmarks`': it needs Python >=3.12 and a running container runtime, so
+    # stronger than `benchmarks`': it needs a running container runtime, so
     # folding it in would break `pip install -e ".[all,dev]"` — the developer default this
     # repo's own Commands block names. The connector's import is function-local, so
     # `promptpotter.connectors` still loads without it and `preflight` fails naming this extra.
@@ -141,8 +141,7 @@ all = [
     # `benchmarks` is NOT folded in here, and that is the point of it being separate: `all` is
     # what a developer installs by default, so anything listed becomes attack surface nobody
     # opted into. Reach for `.[all,dev,benchmarks]` when you actually fetch a public bank.
-    # `harbor` is out for the same reason plus a harder one — it requires Python >=3.12 and a
-    # container runtime, so folding it in would make this very install fail on a working box.
+    # `harbor` is out for the same reason plus a harder one — it requires a container runtime, so folding it in would make this very install fail on a working box.
     "fastapi>=0.119.0",
     "starlette>=1.0.1",
     "python-multipart>=0.0.27",

@@ -93,7 +93,7 @@ is not a validated document — a `Stores`-shaped stub, a session object.
 
 `factories.py` is not a test file (no `test_` prefix, collects nothing). It holds builders that
 return REAL models — `round_result`, `cycle_result`, `scored_candidate`, `degradation_health`,
-`lost_round`, `cycle_slice`, `injection_bundle`, plus `measurement` / `measurements`, the one
+`lost_history`, plus `measurement` / `measurements`, the one
 MEASURED-CELL row (`QueryMeasurement` is a `TypedDict`, so the dict *is* the model). Domain models
 and the few application models the dispatch seam needs.
 

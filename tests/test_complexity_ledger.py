@@ -34,7 +34,7 @@ LEDGER_BASELINE = {
     # backend shape whose row is graded by a verifier rather than matched against a label.
     # +4: `judges/` — `protocol.py`, `simpleqa.py`, `call.py`, `__init__.py`. The surface it buys
     # is an LLM-as-judge as a measured observation, which is what a dataset whose answer is free
-    # text has no other way to score: `exact_match` on a bold span cannot grade a factoid, and
+    # text has no other way to score: `label_match` on a bold span cannot grade a factoid, and
     # three datasets already record being blocked on it. It is FOUR and not one because a judge is
     # not a connector — the protocol is a public extension point, the built-in rubric is verbatim
     # third-party text that must not sit in the same file as the registry that validates it, and
@@ -156,7 +156,9 @@ LEDGER_BASELINE = {
     # setting and not a constant because it is the one queue number a HOST has to be able to
     # answer for: on a shared box it decides when someone else's waiting launch is given up on.
     "settings_env": 32,
-    "settings_const": 14,
+    # -1: `TASK_CONTEXT_OVERRIDES` — the L1 context slot it keyed is gone; target text has one
+    # carrier, `prompt_fields_updates`.
+    "settings_const": 13,
     "opt_search_point_fields": 39,
     # +1: `theta_caveat` on `ScoredCandidate` and `ScoreboardRow` — the per-ARM half of
     # `ThetaCaveat`, so a floor-pinned arm's θ is disclaimed on the row it invalidates rather
@@ -249,7 +251,9 @@ LEDGER_BASELINE = {
     # signal's candidate position they would have serialized was read by nothing either.
     # +1: `CellSpan.config` — a node's config for one run, prompt excepted: the per-node dict every
     # node config already is, served as the panel's Details tab.
-    "domain_any_maps": 91,
+    # -2: `TaskDecomposition.merge(overrides)` and `CandidateProposal.prompt_fields_updates` — the
+    # context slot's only writer, and a copy of the delta the child OSP already carries.
+    "domain_any_maps": 89,
     "models_lax": 3,
     "prompt_string_fields": 6,
     "injections": 32,
@@ -374,7 +378,7 @@ LEDGER_BASELINE = {
     # held. One `object` param reached top-level fields only and locked all or none, so a nested
     # field's prose was unreachable and a locked one could not be told apart. (test_integrity § 4)
     # +1: moving one spend ceiling leaves the other at the cap its launch composed. Merged against
-    # the job's reservation instead, the untouched arm would land in `spend_cap.json`, which the
+    # the job's reservation instead, the untouched arm would land in `run_limits.json`, which the
     # gate prefers, and a USD raise would lift the token ceiling to the account's headroom.
     # (test_security)
     # +1: a cell the active formula cannot grade keeps its measurement rather than being banked a
@@ -438,7 +442,19 @@ LEDGER_BASELINE = {
     # +1: the sweep that removes what a killed run left reaching a SIBLING's live container — the
     # machine's cells are one pool, so the wrong liveness test forces an episode mid-flight and
     # banks it as an infrastructure failure, minutes and its whole bill (test_integrity § 7).
-    "test_functions": 199,
+    # +1: a `new` that reads its campaign back off the shared pointer after another mint rewrote
+    # it runs its own model under that campaign's manifest and cycle (test_integrity § 4).
+    # +1: a resume before round 1 keyed on the round-0 FILE skips the origin gate, so L1 elects
+    # against a partial origin with no refusal anywhere (test_resume).
+    # +1: a second launch on a cycle with an unfinished job — two producers interleave one ledger
+    # and mint C0 twice, each believing it is the only writer (test_integrity § 8).
+    # +1: an origin's `reasoning_effort` spelled as a dataset constant followed no model a campaign
+    # swapped in — a rung that switched hidden reasoning ON cost ~6000 tokens a cell and most of
+    # its cells timed out, every number rendering. The floor follows the model (test_integrity § 4).
+    # +1: four readers disagreed whether "" was an edit, so a blank L1 answer skipped the repair
+    # re-ask and was scored as an arm. Both boundaries now read one
+    # `candidate_delta`, pinned by test_numerics § 9.
+    "test_functions": 204,
     # Every property the generated contract offers the browser. A field with no reader is the
     # shape this row exists to price: `NodeReach` and `permitted` were both served, neither was
     # ever read, and nothing counted them until here.

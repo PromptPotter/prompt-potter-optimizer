@@ -106,15 +106,6 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   with:** the next change to `connectors/dspy_module.py`. **Re-test:** a dspy campaign under a USD
   ceiling — every cell refused with "no rate bounds what it may cost" means this is still open.
 
-- **`noise-floor` and `seed-screen` spend with no record.** Both admit every call against a book
-  (`initialization/loop_start.py::arm_diagnostic_scoring`) but bind no ledger, so what they pay is
-  on no ledger any account sum reads; on a `promptpotter-self` cycle the inner spend is banked only
-  when the sandbox is reaped. Action: file both on a ledger the account walk reaches — `noise-floor`
-  has its cycle, as `verify` does (`diagnostics/verify.py::_diagnostic_trace`); `seed-screen` has
-  none and needs one named. **Rides with:** the next change to either verb. **Re-test:** run
-  `noise-floor -k 1` on a cycle and grep its `.runtime/ledger.jsonl` for a `token_usage` line
-  stamped `diagnostic`; none means this is open.
-
 - **No gate stops a router importing `promptpotter.infrastructure.store`**, so a route that picks WHICH rows or in WHAT ORDER stays unreachable from every other entry point (`presentation/CLAUDE.md` § Out-of-bounds). Action: move each router's composition into `application/` (template: `routers/datasets/leaderboard.py` → `application/scoring/cells.py::measurement_log`), then add the import ban to the gate. **Rides with:** any change to one of those routers — each takes its own module off the list. **Re-test:** `grep -rl --include=*.py promptpotter.infrastructure.store promptpotter/presentation/api/routers` — a non-empty list means the gate cannot land yet.
 
 - **`webapp/lib/derivations/round-samples.ts` re-walks the sample mark with three arms** (ERR / HIT / MISS) over raw round-file rows, where `domain/dashboard_rows.py::sample_status` has four — so a historical UNSC row reads as a wrong answer. Action: serve the mark on the row the client reads (the round file's `all_candidate_results`, or route the reader through `/cells`, which already serves `CellRow.status`), then delete the client ladder. **Rides with:** any change to `round-samples.ts` or the round-file result row. **Re-test:** `grep -n '"UNSC"' webapp/lib/derivations/round-samples.ts` — empty while the client ladder still has three arms.
@@ -139,9 +130,8 @@ category · retry-after) that our clients emit and every relay must produce, rea
 and ONE settle rule (unknown ⇒ the whole bound); one retry budget and one time budget passed down
 through every nested loop.
 - `application/scoring/sample_measurement.py::cell_billing` settles a relayed timed-out attempt
-  at $0 (`StepTokenUsage` drops TermNorm's `attempts`), and `infrastructure/backend.py::run_query`
-  re-sends the 503 TermNorm uses for "my provider timed out" — a possibly-billed send the ceiling
-  never sees, up to five times. Silent. `grep -n '"attempts"' promptpotter/domain/spend.py` (empty).
+  at $0 (`StepTokenUsage` drops TermNorm's `attempts`) — a possibly-billed send the ceiling never
+  sees. Silent. `grep -n '"attempts"' promptpotter/domain/spend.py` (empty).
 - `infrastructure/llm/pricing.py::_fetch_route_ceiling` returns `None` for a FAILED catalogue fetch
   as for an unpriceable route, so an OpenRouter outage stops a capped run as `SPEND_BUDGET` with
   advice that cannot help, and re-fetches on every send. Loud, wrong reason. `grep -n -A3 "except
@@ -339,17 +329,14 @@ an entry point, in-process, so it never touches the inbound credential.
   through the whole ingress, but the cycle it was measured on went with a store wipe, so the fix is
   reasoned, not seen. **Re-test:** repair a fork, then confirm each corrected round carries its own
   `round:complete` on the branch; nothing under `tests/` asserts it.
-- **The `evolved` and `seed` provenance layers have never been stamped by real data.**
-  `pipeline_resolve.py::_evolved_overlay` reads the CANDIDATE's `pipeline_overlay` and the seed
-  layer the CYCLE SEED's — one field name, three carriers, distinguished by the `source` each
-  layer stamps (`campaign` / `seed` / `evolved`); every candidate on this workspace
-  is prompt-only, so both feeds are dead here and only the merge primitive beneath them is
-  covered (`tests/test_integrity.py`). A campaign that actually MOVES a node param
-  exercises both, and the trap they guard is documented at `_evolved_overlay`: reading
-  `resolved_pipeline_params` instead would stamp every param `evolved` at once.
+- **The `seed` provenance layer has never been stamped by real data.** `pipeline_resolve.py`
+  reads the CYCLE SEED's `pipeline_overlay` for it — one field name, three carriers, distinguished
+  by the `source` each layer stamps (`campaign` / `seed` / `evolved`). Candidates move node
+  params, so the `evolved` layer has live rows; no cycle seed on this workspace carries an overlay,
+  so the seed feed is still dead here and only the merge primitive beneath it is covered
+  (`tests/test_integrity.py`). A fork steered with `resume --steer NODE.PARAM=VALUE` exercises it.
   **Re-test**, from the checkout root where `.promptpotter/` lives and never from a worktree:
-  `grep -rho '"pipeline_overlay": [^,}]*'
-  .promptpotter/projects/*/campaigns/*/cycles/*/rounds/*.json | sort -u` — while the only
-  distinct value is `null`, no live row has reached either layer.
+  `grep -rh cycle_seed .promptpotter/projects/*/campaigns/*/cycles/*/.runtime/ledger.jsonl | grep -c '"pipeline_overlay": *{'`
+  — `0` means no live seed has reached the layer.
 
 Closed items are not tracked here — `git log` is the history layer.

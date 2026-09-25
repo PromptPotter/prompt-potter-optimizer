@@ -57,9 +57,9 @@ folds back the ones an operator wants.**
    embedding entry points (`presentation/cli/campaign_runner.py` and
    `application/embedded_run.py`), computed per module in a fresh interpreter, not argued.
 2. **An operator surface is an extra.** `api` (dashboard, OIDC, SSE), `excel`, `jupyter`,
-   `stats`, `observability`, `anthropic`, `dspy`. `all` folds in the operator set;
-   `benchmarks` stays out of it, because fetching a public bank pulls a large third-party
-   surface that nothing on the default path imports.
+   `stats`, `observability`, `anthropic`, `dspy`, `benchmarks`, `harbor`. `all` folds in the
+   operator set and leaves three out — `benchmarks`, `harbor` and `dspy`; why, per extra, is the
+   comment beside each in `pyproject.toml`.
 3. **An extra's import is guarded where a non-installer would hit it**, and the guard names
    the extra. Two shapes, chosen by who imports the module: **function-local** when something
    on the default path imports the module (the `dspy` connector is imported eagerly by

@@ -22,7 +22,8 @@ carry on. One word from the operator flips it.
 Signals: `promptpotter-self` / `justlogic-d234`, the L4 finish line, a dirty tree, "why", "what
 broke", "bug-hunting", an operator already mid-investigation.
 - Read past the headline into the round's LLM I/O. A green accuracy over an empty panel is a finding.
-- Authority: halt a run, fix at its ROOT, relaunch — without asking. Name the structural cause
+- Authority: halt a run, fix at its ROOT, relaunch — within the autonomy mode (root `CLAUDE.md`
+  § Working principles). Name the structural cause
   before touching code; default the fix to the `promptpotter/assets/optimizer/` optimizer prompts
   (`pipeline.yaml::resolved_prompts` inner, `sets/*.yaml` outer) (`<root-fix>`; `<dispatch-first>` in `promptpotter/application/optimization/CLAUDE.md`).
 - **Never commit.** Fixes accumulate uncommitted; name every path touched so the operator can
@@ -38,16 +39,18 @@ broke", "bug-hunting", an operator already mid-investigation.
 There is no fresh-start ceremony and no audit to replay. Whatever the conversation already
 covered, re-read state from disk — that is what makes turn 0 and turn 100 the same entry:
 
-1. `projects/{tenant}/.workspace/active_session.json` → `{session_id, campaign_id, cycle_id}`
+1. `projects/{tenant}/.workspace/active_session.json` → `{session_id, campaign_id, cycle_id}` —
+   the LATEST launch only; parallel runs each say so by their own `run_phase` (`GET /cycles`)
 2. that cycle's `dashboard.json` (`run_phase`, `round`, `best`, `hearts`, `error_count`) + the
    newest `rounds/round_NNNN.json`
-3. `logs/latest.log` tail — the most recent run's terminal readout, ANSI-stripped
+3. that cycle's `readout.log` tail — its terminal readout, ANSI-stripped, every launch appended.
+   With several runs live, each has its own; `logs/latest-readout-path.txt` names only the newest launch's
 
 Then **one line**: `mode · what's live · next action`. Nothing else before it.
 
 Reads happen by opening files; `evidence` is the one read VERB, because a comparison ACROSS subjects is in no single file. Campaign detail lives in
-`campaigns/<campaign_id>/{campaign.json,dashboard.json,log.md}`, per-cycle detail in
-`cycles/<cycle_id>/{index.json,log.md,rounds/}`, per-round node I/O in
+`campaigns/<campaign_id>/{campaign.json,log.md}`, per-cycle detail in
+`cycles/<cycle_id>/{index.json,dashboard.json,log.md,readout.log,rounds/}`, per-round node I/O in
 `.runtime/cache/rounds/round_NNNN.json`. **Open JSON as UTF-8 explicitly** — a default read on
 Windows renders `δ` as `Î´` and manufactures a phantom encoding bug.
 
@@ -63,16 +66,16 @@ Windows renders `δ` as `Î´` and manufactures a phantom encoding bug.
 
 ## Launch
 
-The operator runs the command in their own terminal; campaigns take minutes to hours, so never
-wrap one in Bash and never `run_in_background`. Other CLI calls: 30 s default timeout, 60 s hard
-max — ask before exceeding.
+Who launches is the autonomy mode's call — root `CLAUDE.md` § Working principles. A campaign takes
+minutes to hours, so never block a foreground shell on one; `promptpotter-self` is the exception,
+owned by `/potter-self`.
 
 | Verb | Behavior |
 |---|---|
 | `new <name>` | Registered benchmark. Mint a fresh Campaign + root cycle from `datasets/<name>/`, decompose `task_description.md` on first sight, run from round 0. Distinct `campaign_id` per invocation; the prior campaign is preserved. |
 | `new <file>` | Raw ingest — parse → `--set` → resolve origin → commit tenant dataset → mint + run. See [onboarding.md](reference/onboarding.md). |
 | `resume` | Continue the active cycle from the tenant pointer. `--from N` rewinds in place. |
-| `set-budget` | Raise (or lower) an existing cycle's ceiling: `--max-usd` / `--max-tokens`. |
+| `set-limits` | Raise (or lower) an existing cycle's ceiling: `--max-usd` / `--max-tokens` / `--max-rounds N\|none`. |
 | `pause` | Ask a RUNNING cycle to stop at its next checkpoint — resumable, and the same dispatcher verb the webapp control fires. This is the HALT this skill keeps asking for. |
 | `verify` | Re-score one candidate on more samples and record the result WITHOUT touching the cycle. The sanctioned way to settle a candidate — never re-ask a cell it already answered. |
 | `evidence` | Read any set of campaigns together: roster, comparability, replicates, the variance split, resolving power, and (behind `--ranking`) which edits beat their own origin. Zero spend, writes nothing. |
@@ -85,9 +88,9 @@ the ceiling is clamped against the account allowance, so read the ARMED value ba
 CUMULATIVE across resume, so the new ceiling must exceed the total already spent, not the work
 remaining. Only `spend_budget_usd` is armed by default — `token_budget` is `None` until set.
 
-Flags come from `datasets/{name}/dataset.md § Init Flags`, verbatim — never guessed. `new`
-overwrites the tenant pointer; `resume` is the happy path and needs no flags. Stop with Ctrl+C:
-first cancels the in-flight call and pauses (resumable, exit 130), second force-quits. Every query lands in
+Flags are the verbs' own (`--help`); a dataset's defaults live in its `campaign.yaml` — never
+guessed. `new` overwrites the tenant pointer; `resume` is the happy path and needs no flags. Stop with Ctrl+C:
+first pauses (resumable, exit 130), second force-quits. Every query lands in
 `measurements/runs/{run_id}.jsonl` immediately, so a hard kill loses zero work and `resume`
 cache-hits prior results.
 
@@ -127,8 +130,8 @@ only when it is genuinely specific to this cell (one seed's transport blip), and
 is. The failure mode to avoid: reporting "instrument is healthy" beside two measured defect
 rates, then paying for N-1 more copies of both.
 
-Surface the live paths so the operator can open them directly, and recommend the webapp preview
-(`python -m uvicorn promptpotter.main:app --port 8001` → <http://127.0.0.1:8001/>, polls
+Surface the live paths so the operator can open them directly, and the webapp preview
+(`python -X utf8 -m uvicorn promptpotter.main:app --port 8001` → <http://127.0.0.1:8001/>, polls
 `dashboard.json` every 2 s; reload after a fresh mint).
 
 ## Read a round
@@ -173,7 +176,7 @@ disagree without either being broken. Read both, name both.
 are defined by the *parent's own* grades, so on a truncated prefix the score is fixed by
 construction rather than by the data (one HIT-stratum slot every 4th position ⇒ a cut arm reports
 `⌊n/4⌋/n`). `scoring/metrics.py::matched_parent_stats` now returns `None` unless the candidate
-covered the origin's panel, so a cut arm reports where it stopped plus its θ, never a standing.
+measured every cell its parent did, so a cut arm reports where it stopped plus its θ, never a standing.
 **A `matched_parent_accuracy` on a row whose `scored_samples < expected_samples` is a pre-fix
 artifact — do not quote it, and do not compare it across arms.**
 
@@ -193,15 +196,12 @@ wrong after reading both numbers, ask what the round measured, not which estimat
 
 ## Configs are the source of truth
 
-The skill carries no parallel default-ladder. `dataset.md` (entry point, init flags) ·
+The skill carries no parallel default-ladder. `dataset.md` (source, split, sample shape) ·
 `campaign.yaml` (max_rounds, n_variants, sp_budget_round, patiences) · `pipeline.yaml` (pipeline,
 model, caps). BBEH only: `notebooks/bbeh_potter.ipynb::build_campaign_config()` shadows
-`campaign.yaml` and wins. Per-dataset model + `reasoning_effort` + `max_tokens` defaults live in
-[`docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md).
-The `pipeline.yaml` `model` field is a live operator knob (Groq daily-volume swaps 120b → 20b), not
-a fixed default. `max_tokens` is never set numerically in node configs — provider ceiling applies;
-override per-cycle via `campaign.yaml::pipeline_overlay`. That is convention, not a test, so CHECK
-the overlay rather than assuming it ([`docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md) owns it).
+`campaign.yaml` and wins. Model, `reasoning_effort` and the `max_tokens` convention are owned by
+[`docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md)
+— CHECK a campaign's `pipeline_overlay` against it rather than assuming.
 
 Read them. Don't propose parameter tweaks unbidden, don't classify data volume, don't offer
 leaderboard picks.
@@ -219,8 +219,8 @@ leaderboard picks.
   connection never made, 5 attempts, and a 429 whenever the run's backpressure lets it (the
   `Provider` row under Samples in flight), each admitted against the spend book; a read timeout
   is never re-sent. If 5xx still propagates, halt and say so — don't loop on top of the client's loop.
-- Error prefixes (`[CLIENT]` / `[SERVER]` / `[CONNECTION]` / `[PIPELINE]`) → `logs/latest.log` + the
-  latest `rounds/round_NNNN.json`.
+- Error prefixes (`[CLIENT]` / `[SERVER]` / `[CONNECTION]` / `[PIPELINE]`) → the cycle's `readout.log`
+  and the latest `rounds/round_NNNN.json`.
 - Surface the kill command (`tasklist | findstr python` → `taskkill //F //PID <pid>`) only when
   recommending a long-running launch in *this* turn. If a CLI call auto-backgrounds, kill it before
   retrying.

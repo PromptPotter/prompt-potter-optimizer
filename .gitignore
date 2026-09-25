@@ -157,3 +157,6 @@ webapp/test-results/
 webapp/playwright-report/
 webapp/blob-report/
 webapp/.last-run.json
+
+# per-machine autonomy mode (root CLAUDE.md § Working principles)
+CLAUDE.local.md

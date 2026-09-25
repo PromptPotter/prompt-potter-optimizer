@@ -20,8 +20,10 @@ jobs:
         with:
           enable-cache: true
 
+      # The extras are `scripts/gate.py::_PINNED_EXTRAS`, the env the verdict is taken in; one
+      # missing here reads green at the desk and red on CI (litellm, reached through `harbor`).
       - name: Install dependencies
-        run: uv sync --extra stats --extra dev --extra api --frozen
+        run: uv sync --extra stats --extra dev --extra api --extra harbor --frozen
 
       # One step, and deliberately: `scripts/gate.py` is the single declaration of
       # what this repo checks, so the desk and CI cannot drift apart. It also runs

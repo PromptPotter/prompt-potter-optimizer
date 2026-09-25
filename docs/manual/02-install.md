@@ -39,7 +39,7 @@ Connecting to a remote / auth-gated backend? See [`operations/backend-integratio
 pip install -e ".[all]"
 ```
 
-Not developing on it? `pip install "promptpotter[all]"` instead, and skip step 2. `[all]` bundles every optional feature (Jupyter, observability, Excel loaders, etc.) **except `[benchmarks]`**, which stays opt-in: the HuggingFace `datasets` loader carries a large third-party surface, and only fetching a public bank needs it. Add `,benchmarks` when you run one. For a minimal install or a specific extra, see [§ Optional dependency bundles](#optional-dependency-bundles) below.
+Not developing on it? `pip install "promptpotter[all]"` instead, and skip step 2. `[all]` bundles the operator extras but not every one — which stay out, and why, is [ADR-0006](../adr/0006-embeddable-core-and-extras.md) § Decision. Add `,benchmarks` when you fetch a public bank. For a minimal install or a specific extra, see [§ Optional dependency bundles](#optional-dependency-bundles) below.
 
 ## 5. Reload Claude Code
 
@@ -82,7 +82,7 @@ pip install -e ".[benchmarks]"     # GSM8K, AIME 2025, BBEH (HuggingFace dataset
 pip install -e ".[observability]"  # Langfuse cloud tracing
 pip install -e ".[anthropic]"      # Anthropic Claude as optimizer LLM
 pip install -e ".[dev]"            # pytest, ruff, mypy, deptry
-pip install -e ".[all]"            # Every extra except [dev] and [benchmarks]
+pip install -e ".[all]"            # The operator extras (what it leaves out: ADR-0006)
 pip install -e ".[all,dev]"        # Recommended for contributors
 pip install -e ".[all,dev,benchmarks]"  # …plus the opt-in public-bank loader
 ```
