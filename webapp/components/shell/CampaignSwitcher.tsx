@@ -6,13 +6,14 @@ import {
   campaignLineParts,
   campaignStatus,
   campaignVendors,
+  phaseStatus,
   spendLabel,
   type OriginGroup,
   type RunGroup,
 } from "@/lib/derivations";
 import { campaignDisplayName, unitDisplayName } from "@/lib/names";
 import { useWorkspace } from "@/lib/workspace";
-import { CampaignRowLabel } from "./sidebar/CampaignRowLabel";
+import { CampaignRowLabel, PhaseMark } from "./sidebar/CampaignRowLabel";
 
 // The masthead's campaign switcher over the sidebar's own forest; it renders `CampaignRowLabel`
 // so a campaign cannot read one way here and another in the sidebar.
@@ -100,7 +101,10 @@ export function CampaignSwitcher({ origins }: { origins: OriginGroup[] }) {
                         close();
                       }}
                     >
-                      <span className="run-switch-branch">{unitDisplayName(branch)}</span>
+                      <span className="run-switch-branch">
+                        <PhaseMark status={phaseStatus(branch.run_phase, branch.status)} />
+                        {unitDisplayName(branch)}
+                      </span>
                     </MenuItem>
                   ))}
                 </Fragment>

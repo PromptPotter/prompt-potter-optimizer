@@ -12,7 +12,7 @@ GET /api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe
 
 The `:subscribe` suffix follows the AsyncAPI / Google AIP-136 convention for non-CRUD actions. Path resolution is `(campaign_id, cycle_id)`; tenant scope rides `IdentityContext` ambient.
 
-Response: `text/event-stream` (set by `EventSourceResponse`). The handler adds `X-Accel-Buffering: no` to defeat proxy buffering (nginx, Cloudflare, etc. buffer otherwise); `Cache-Control: no-store` is forced on every `/api/v1/*` response by the `no_store_on_api` middleware.
+Response: `text/event-stream` (set by `EventSourceResponse`). The handler adds `X-Accel-Buffering: no` to defeat proxy buffering (nginx, Cloudflare, etc. buffer otherwise); `Cache-Control: no-store` is forced on every `/api/v1/*` response by `main.py::SecurityHeadersMiddleware`.
 
 404 only when the cycle directory doesn't exist (unknown campaign/cycle). The stream tails the on-disk ledger **cross-process**, so a running, paused, or finished cycle all subscribe successfully — a finished cycle replays its snapshot then idles on heartbeats.
 

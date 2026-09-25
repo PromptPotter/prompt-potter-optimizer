@@ -631,7 +631,7 @@ def _winner_chain(
 
 
 def _config_of(point: _ChainPoint) -> dict[str, str]:
-    """One searchpoint as a flat ``key -> rendered value`` map, over the three disjoint keyspaces
+    """One searchpoint as a flat ``key -> rendered value`` map, over the two disjoint keyspaces
     `build_candidate_flat` already owns: ``node.param`` from the RESOLVED config, then the bare
     prompt fields on top.
 
@@ -639,9 +639,9 @@ def _config_of(point: _ChainPoint) -> dict[str, str]:
     two searchpoints from different campaigns share none — lined up on their deltas, a panel
     would show two lists with nothing in common and call it a comparison.
 
-    ``lineage`` is dropped for the reason `results.py::_identity_config` drops it: it is IDENTITY,
-    not configuration, and it differs between any two candidates by construction — carried, it
-    would report a difference on every pair no matter what they were configured with.
+    ``lineage`` is dropped for the reason `connectors/promptpotter.py::_identity_config` drops it:
+    it is IDENTITY, not configuration, and it differs between any two candidates by construction —
+    carried, it would report a difference on every pair no matter what they were configured with.
     """
     entry = point.scores
     fields = {k: v for k, v in (entry.get("prompt_fields") or {}).items() if k != "lineage" and v}

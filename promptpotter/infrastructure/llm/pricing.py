@@ -253,8 +253,8 @@ def lookup_rate(model: str | None, provider: str | None = None) -> Rate | None:
         # keeps first-party OpenAI and Anthropic (523 unprefixed keys, "gpt-4o" not
         # "openai/gpt-4o"). That is a naming convention, not a fallback.
         return rates.get(needle)
-    # Provider unknown (a historical ledger row predating the field): an exact key is the
-    # only honest answer — it is the one match that cannot belong to somebody else.
+    # Provider unknown: an exact key is the only honest answer — it is the one match that
+    # cannot belong to somebody else.
     return rates.get(needle)
 
 

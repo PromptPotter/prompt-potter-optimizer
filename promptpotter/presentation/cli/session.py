@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import argparse
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, benchmark_datasets_root
+from promptpotter.config.paths import benchmark_datasets_root
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.infrastructure.store.stores import Stores, build_stores
-from promptpotter.presentation.cli.commands._shared import identity_from_args, resolve_target
+from promptpotter.infrastructure.store.stores import Stores
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -61,28 +59,19 @@ def no_dataset_hint() -> str:
     return "Available datasets:\n\n" + body
 
 
-def load_session(args: argparse.Namespace) -> SessionCtx:
-    """The session is the one the targeted cycle was minted under
-    (``index.json::parent_session_id``), the same read the web launch makes — never the pointer's,
-    which names another campaign's."""
-    store = build_stores(identity_from_args(args), projects_root=DEFAULT_PROJECTS_ROOT)
-    campaign_id, cycle_id = resolve_target(args, store)
-    if not campaign_id:
-        raise SystemExit(
-            "ERROR: No active session.\n\n"
-            "To start a campaign, run `new` against a dataset:\n\n" + no_dataset_hint()
-        )
-    hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
+def load_session(store: Stores, hop: CycleHop) -> SessionCtx:
+    """The session *hop* was minted under (``index.json::parent_session_id``), the same read the web
+    launch makes. A verb that minted passes its own hop: the pointer is rewritten by every mint."""
     session_id = str((store.campaigns.load(hop) or {}).get("parent_session_id") or "")
     if not session_id:
-        raise SystemExit(f"ERROR: cycle {cycle_id!r} in {campaign_id!r} names no session.")
+        raise SystemExit(f"ERROR: cycle {hop.cycle_id!r} in {hop.campaign_id!r} names no session.")
 
     state = store.sessions.read(session_id)
     if not state:
         raise SystemExit(f"ERROR: Session '{session_id}' not found.")
 
     backend_id = state.get("init_params", {}).get("backend_id", "") or ""
-    return SessionCtx(store, state, backend_id, session_id, campaign_id, cycle_id)
+    return SessionCtx(store, state, backend_id, session_id, hop.campaign_id, hop.cycle_id)
 
 
 __all__ = ["SessionCtx", "load_session", "no_dataset_hint"]

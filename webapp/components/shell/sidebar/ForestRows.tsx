@@ -7,7 +7,6 @@ import { cx } from "@/lib/cx";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
 import { campaignDisplayName } from "@/lib/names";
 import { effectTone, fmtPct0, fmtSigned } from "@/lib/format";
-import { runPhaseLabel, runPhaseMark } from "@/lib/run-phase";
 import { CAVEAT_COPY } from "@/components/candidates/AbilityInfo";
 import {
   accuracyStat,
@@ -21,6 +20,7 @@ import {
   nodeKeyOf,
   panelCellLabel,
   pathOf,
+  phaseStatus,
   roundSizes,
   spendLabel,
   splitRetired,
@@ -214,7 +214,7 @@ function CourseRow({
   const status: RowStatus | null = run
     ? campaignStatus(run)
     : phase
-      ? { mark: runPhaseMark(phase, phaseReason), word: runPhaseLabel(phase, phaseReason) }
+      ? phaseStatus(phase, phaseReason)
       : null;
 
   const cycleId = path[path.length - 1]!.cycleId;
@@ -522,12 +522,7 @@ function CandidateRow({
               <span className="unit-library-meta">
                 {/* A cut that broke before measuring must not borrow the origin's number. */}
                 {cand.accuracy == null && cand.course_kind ? (
-                  <PhaseMark
-                    status={{
-                      mark: runPhaseMark("terminal", cand.status),
-                      word: runPhaseLabel("terminal", cand.status),
-                    }}
-                  />
+                  <PhaseMark status={phaseStatus("terminal", cand.status)} />
                 ) : (
                   fmtPct0(cand.accuracy)
                 )}

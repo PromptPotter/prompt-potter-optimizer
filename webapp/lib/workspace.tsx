@@ -151,9 +151,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const { authed, onAuthError } = useAuthGate();
 
-  // `new` and a fork move the server pointer and snap the view to it; `resume` does not, so a
-  // pinned operator studying a finished cycle stays put.
+  // The pointer is the tenant's LATEST launch, not the live set — several runs share a tenant, and
+  // every one of them is a `/cycles` row carrying its own served `run_phase`.
   const prevActivePointerRef = useRef<string | null>(null);
+  // Read by the pointer tick and `reportAddressGone`: `usePoll` restarts its loop when a tick's
+  // identity changes, so neither may close over the pin itself.
+  const pinnedRef = useRef<CyclePath | null>(pinnedPath);
+  useEffect(() => {
+    pinnedRef.current = pinnedPath;
+  });
 
   // A null parse is a malformed hash and changes nothing, rather than a typo throwing the
   // operator back to the active run.
@@ -215,11 +221,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setActiveCycleId(nextActiveCycle);
       setActiveCampaignId(nextActiveCampaign);
       setActiveError(null);
-      // The first poll only sets the baseline; a pinned operator running `new` opted into the snap.
+      // The first poll only sets the baseline. A pin moves only onto a new cycle of its OWN campaign
+      // (a fork of what is on screen); a launch of any other run leaves the operator where they are.
       if (nextActiveCycle && nextActiveCampaign) {
         const nextPointer = `${nextActiveCampaign}::${nextActiveCycle}`;
         const prevPointer = prevActivePointerRef.current;
-        if (prevPointer !== null && prevPointer !== nextPointer) {
+        const pinned = pinnedRef.current ? pathRoot(pinnedRef.current) : null;
+        const forkOfPinned =
+          pinned !== null &&
+          pinned.campaignId === nextActiveCampaign &&
+          pinned.cycleId !== nextActiveCycle;
+        if (prevPointer !== null && prevPointer !== nextPointer && forkOfPinned) {
           setFollowing(true);
           setPinnedPath(null);
           setViewedCandidateId(null);
@@ -395,13 +407,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [tab],
   );
-
-  // Keeps `reportAddressGone` identity-stable: `usePoll` restarts its loop when a tick's identity
-  // changes, so churning with every pin would re-arm the very polls this quiets.
-  const pinnedRef = useRef<CyclePath | null>(pinnedPath);
-  useEffect(() => {
-    pinnedRef.current = pinnedPath;
-  });
 
   // The caller has already confirmed the verdict (`poll.tsx::GONE_CONFIRM_LIMIT`); this only
   // refuses a late report from an address the operator has since moved off.

@@ -55,12 +55,12 @@ test.describe("the view axis", () => {
   test("the pinned cycle is named on screen and can be released", async ({ page, rich }) => {
     await open(page, rich.addr);
     await expect(page.getByText(`ID: ${rich.cycleId}`)).toBeVisible();
-    await page.getByRole("button", { name: /Follow active/ }).click();
+    await page.getByRole("button", { name: /Follow the latest launch/ }).click();
     await expect.poll(() => new URL(page.url()).hash).not.toContain(rich.id);
   });
 
   test("the campaign switcher is offered", async ({ page, rich }) => {
     await open(page, rich.addr);
-    await expect(page.getByRole("combobox", { name: "Switch campaign or session" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Switch campaign" })).toBeVisible();
   });
 });

@@ -150,14 +150,13 @@ def _parent(
     divergence. Re-derived from ``parent_results`` — the parent's own rows on THIS round's
     subset — instead.
 
-    A round with no such rows cannot answer on a subset at all: round 0 has no parent, and a
-    round that closed before the field banked none. Empty evaluators, which
-    ``masked_election`` already reads as ``decidable=False`` — the answer it gives for every
-    other parent it cannot score, rather than a bar it made up.
+    A round with no such rows cannot answer on a subset at all — round 0 has no parent. Empty
+    evaluators, which ``masked_election`` already reads as ``decidable=False`` — the answer it
+    gives for every other parent it cannot score, rather than a bar it made up.
     """
     if samples is None:
         return carried
-    rows = [r for r in (round_file.get("parent_results") or []) if r.get("sample_id") in samples]
+    rows = [r for r in round_file["parent_results"] if r.get("sample_id") in samples]
     if not rows or not carried[0]:
         return ({}, None)
     # The snapshot supplies the schema/opt_sp-bound names, the rows the derivable ones — the same

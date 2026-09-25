@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 import time
 from pathlib import Path
@@ -37,6 +38,8 @@ from promptpotter.infrastructure.projections.live_state import (
     roll_p_best_at_round_complete,
     top_n_p_best,
 )
+from promptpotter.infrastructure.store.io import write_text
+from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.presentation.terminal.ansi import to_text
 from promptpotter.presentation.terminal.live.candidate import (
     fmt_individual_header,
@@ -67,37 +70,16 @@ from promptpotter.presentation.terminal.primitives import (
 from promptpotter.shared.composite import render_composite_fitness_block
 
 if TYPE_CHECKING:
-    from typing import TextIO
-
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import RoundResult
 
 
-# Rolling mirror of the live stdout stream to a gitignored, most-recent-only file, so a
-# headless reader (or a returning operator) can open the last run's full readout — satisfies
-# the presentation "everything emitted to stdout is findable on disk" constraint. Truncated
-# per run in ``__init__``; ANSI-stripped per line. Captures the LiveDisplay stream only —
-# ``logging``-level warnings route through Python logging, not ``_write``.
-_READOUT_PATH = Path("logs/latest.log")
-# The run BEFORE this one. A relaunch is exactly when the previous readout is worth having —
-# it is the one that holds why the run stopped — and truncate-in-place destroyed it at the
-# moment of asking. One generation back, not a rotation series: two files answer the question.
-_PREVIOUS_READOUT_PATH = Path("logs/previous.log")
+# Holds the PATH of the newest launch's readout, never a copy: parallel runs each own their
+# cycle's file, and one shared copy interleaves them.
+_LATEST_READOUT_POINTER = Path("logs/latest-readout-path.txt")
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
-
-
-def _open_readout() -> TextIO | None:
-    """Truncate and hold open the run-readout mirror; ``None`` if the filesystem refuses — capture is best-effort and must
-    never abort a costly run. Held open rather than reopened per line, and line-buffered so a hard kill still leaves them."""
-    try:
-        _READOUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        if _READOUT_PATH.is_file():
-            _READOUT_PATH.replace(_PREVIOUS_READOUT_PATH)
-        return _READOUT_PATH.open("w", encoding="utf-8", buffering=1)
-    except OSError:
-        return None
 
 
 class LiveDisplay(Projection):
@@ -134,7 +116,7 @@ class LiveDisplay(Projection):
         self._round_started_at: float | None = None
         self._pobb_printed_for: str = ""
         self._pending_calls: dict[str, int] = {}
-        self._readout = _open_readout()
+        self._readout: Path | None = None
 
     @classmethod
     def for_campaign(
@@ -155,13 +137,30 @@ class LiveDisplay(Projection):
             measured_unit=session.backend_client.measured_unit,
         )
 
+    def open_readout(self, cycle_dir: Path) -> None:
+        """Mirror every later line into *cycle_dir*'s readout. A fork rebinds the display, so the
+        readout follows the ledger, and the file it leaves ends on the line naming the next one."""
+        path = CycleLayout(cycle_dir.absolute()).readout
+        line = f"Readout: {path} · {time.strftime('%Y-%m-%d %H:%M:%S')}"
+        self._write(line)
+        self._readout = path
+        self._mirror(line)
+        with contextlib.suppress(OSError):
+            write_text(_LATEST_READOUT_POINTER, f"{path}\n")
+
     def _write(self, line: str) -> None:
         print(line, flush=True)
-        if self._readout is not None:
-            try:
-                self._readout.write(_ANSI_RE.sub("", line) + "\n")
-            except (OSError, ValueError):
-                self._readout = None  # stop retrying; never break the run for a dev mirror
+        self._mirror(line)
+
+    def _mirror(self, line: str) -> None:
+        if self._readout is None:
+            return
+        # Reopened per line, as the ledger is: a held handle blocks a stub fork's delete on Windows.
+        try:
+            with self._readout.open("a", encoding="utf-8") as fh:
+                fh.write(_ANSI_RE.sub("", line) + "\n")
+        except OSError:
+            self._readout = None  # stop retrying; never break the run for its mirror
 
     @property
     def origin_acc(self) -> float:

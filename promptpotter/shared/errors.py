@@ -197,6 +197,37 @@ class MachineBusyError(PotterError):
         )
 
 
+class CycleBusyError(PotterError):
+    """The cycle a launch targets already has an unfinished job — 409, naming that job. Two
+    producers on one cycle interleave one ledger and mint the same candidates twice."""
+
+    http_status = 409
+    code = "cycle_busy"
+
+    def __init__(
+        self,
+        *,
+        job_id: str,
+        status: str,
+        holder_user: str,
+        campaign_id: str,
+        cycle_id: str,
+        started_at: str | None,
+    ) -> None:
+        super().__init__(
+            f"Cycle {cycle_id} of {campaign_id} already has a {status} run (job {job_id}, "
+            f"started {started_at or 'not yet'}). Pause or cancel it, or wait for it to finish.",
+            details={
+                "job_id": job_id,
+                "status": status,
+                "holder_user": holder_user,
+                "campaign_id": campaign_id,
+                "cycle_id": cycle_id,
+                "started_at": started_at,
+            },
+        )
+
+
 class ContentTooLargeError(PotterError):
     """Request/target exceeds a hard size cap (too many file entries) — 413."""
 
@@ -287,9 +318,8 @@ class RulerUnpersistedError(PotterError):
     """This cycle's rounds were read on a WARM δ ruler that its ledger cannot reproduce.
 
     ``write_ruler`` appends the ``RulerRecord`` BEFORE the round document that names it, so a
-    live run cannot reach this: it means the ledger was truncated, or the rounds predate the
-    record existing at all. Resuming would re-derive a ruler from an archive that has grown since
-    the lock, putting a second scale under one cycle — two ``ruler_id``s across its rounds, and
+    live run cannot reach this: it means the ledger was truncated. Resuming would re-derive a
+    ruler from an archive that has grown since the lock, putting a second scale under one cycle — two ``ruler_id``s across its rounds, and
     every θ read on the later one incomparable with the earlier. Refuse, and name the campaign.
     """
 
@@ -430,6 +460,7 @@ __all__ = [
     "CellUnscoreableError",
     "ConflictError",
     "ContentTooLargeError",
+    "CycleBusyError",
     "DatasetIdentityError",
     "ErrorCategory",
     "MachineBusyError",

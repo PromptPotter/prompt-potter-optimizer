@@ -23,6 +23,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     CallLabel,
     SendBound,
     admitted,
+    connection_broke,
     may_have_billed,
     never_sent,
 )
@@ -64,11 +65,11 @@ def _status(exc: BaseException) -> int | None:
 def _retry_wait(exc: BaseException, attempt: int) -> float | None:
     """How long to wait before sending again after a failure that is not a throttle, or ``None``
     to give up. A read timeout is never retried: the provider may still be generating, and a
-    second send is a second bill."""
+    second send is a second bill. A broken connection is, like a 5xx: its send stays held."""
     if attempt + 1 >= MAX_SEND_ATTEMPTS:
         return None
     status = _status(exc)
-    if (status is not None and status >= 500) or never_sent(exc):
+    if (status is not None and status >= 500) or never_sent(exc) or connection_broke(exc):
         return float(2**attempt)
     return None
 

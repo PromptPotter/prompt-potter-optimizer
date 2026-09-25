@@ -97,11 +97,18 @@ export interface RowStatus {
 
 const ARCHIVED: RowStatus = { mark: { glyph: "▫", tone: "quiet" }, word: "Archived" };
 
+// One cycle's served phase as a row mark — a campaign row, a fork row and an inner run alike.
+export function phaseStatus(
+  runPhase: string | null | undefined,
+  reason: string | null | undefined,
+): RowStatus {
+  return { mark: runPhaseMark(runPhase, reason), word: runPhaseLabel(runPhase, reason) };
+}
+
 // Off the ANSWERING cycle, so the sidebar row and the masthead switcher cannot disagree.
 export function campaignStatus(run: RunGroup): RowStatus {
   if (run.campaign.lifecycle_status === "archived") return ARCHIVED;
-  const { run_phase, status } = run.answering;
-  return { mark: runPhaseMark(run_phase, status), word: runPhaseLabel(run_phase, status) };
+  return phaseStatus(run.answering.run_phase, run.answering.status);
 }
 
 // After a supersede cut the line continues on a fork, which carries its own cap and rounds.

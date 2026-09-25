@@ -447,8 +447,7 @@ async def _run_inner_campaign(
         campaign_id=inner_campaign_id(spec, optimizer_prompt_overrides, spawn_role),
     )
     if session.campaign_id and session.state.cycle_id:
-        # An L4-only fact, so it stays out of the generic mint seam every campaign shares. The
-        # cycle index is a raw dict, so an older cycle simply has no `spawned_by`.
+        # An L4-only fact, so it stays out of the generic mint seam every campaign shares.
         session.store.campaigns.update(session.hop, {"spawned_by": spawned_by})
         # Publish the minted dir so the outer heartbeat's detail_fn can tail this dashboard.
         cycle_dir_box["dir"] = session.store.campaigns.cycle_dir(session.hop)

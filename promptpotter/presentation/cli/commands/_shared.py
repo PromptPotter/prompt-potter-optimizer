@@ -112,7 +112,7 @@ def campaign_result_human(campaign_dir: Path, *, dataset_name: str, cycle_id: st
         f"Directory: {campaign_dir}\n"
         f"  campaign.json          — manifest\n"
         f"  log.md                 — campaign digest\n"
-        f"  cycles/{cycle_id or '?'}/  — session telemetry (dashboard.json) + rounds"
+        f"  cycles/{cycle_id or '?'}/  — session telemetry (dashboard.json) + rounds + readout.log"
     )
 
 
@@ -151,14 +151,6 @@ def launch_limits_from_args(args: argparse.Namespace) -> LaunchLimits:
         spend_budget_usd=getattr(args, "spend_budget_usd", None),
         token_budget=getattr(args, "token_budget", None),
     )
-
-
-def bind_session_identity(session: Session, ctx: SessionCtx) -> None:
-    """Stamp a resumed session's identity onto the freshly-initialized :class:`Session` — the shared
-    bind every cycle-scoped CLI command runs after :func:`init_services_cli`."""
-    session.session_id = ctx.session_id
-    session.campaign_id = ctx.campaign_id
-    session.state.cycle_id = ctx.cycle_id
 
 
 def backend_reach_line(backend_type: str, backend_url: str) -> str:
@@ -457,7 +449,6 @@ def confirm_tty(prompt: str, *, default_no: bool = True) -> bool | None:
 __all__ = [
     "CommandResult",
     "backend_unreachable_result",
-    "bind_session_identity",
     "confirm_tty",
     "cycle_result_command",
     "drive_cycle",

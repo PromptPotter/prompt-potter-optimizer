@@ -79,10 +79,12 @@ The general rule is owned by root [`CLAUDE.md`](../../CLAUDE.md) § Pre-flight g
 this section owns the terminal stream's half of it.
 
 `LiveDisplay._write` (`terminal/live/display.py`) is the single stdout funnel for the
-live readout and mirrors every line to the gitignored **`logs/latest.log`** — the
-"findable on disk" guarantee for the terminal stream. It is best-effort: a filesystem
-error disables the mirror, never aborts the campaign. It carries the **display** stream
-only; `logging`-level warnings are not in it.
+live readout and mirrors every line to **its cycle's `readout.log`** (`CycleLayout.readout`),
+bound where the ledger is, so N parallel runs write N files and a fork's lines follow the
+fork — the "findable on disk" guarantee for the terminal stream. **`logs/latest-readout-path.txt` only
+NAMES the newest launch's file** — never a copy. It is best-effort: a filesystem error
+disables the mirror, never aborts the campaign. It carries the **display** stream only;
+`logging`-level warnings are not in it.
 
 **And the converse: a value already on disk is ADDRESSED here, never reprinted.** The
 readout is a map — phase and round rules, candidate boxes, verdicts, the cost spine —

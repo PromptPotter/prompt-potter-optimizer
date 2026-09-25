@@ -101,7 +101,7 @@ def render_review_md(
 
 
 def _schema_repair_count(audit: dict[str, Any] | None) -> int:
-    """Sum ``schema_repair_attempts`` across optimizer nodes; non-zero ⇒ a second round-trip was paid.
+    """Count ``schema_repair_errors`` across optimizer nodes; non-zero ⇒ a second round-trip was paid.
     Cycle-wide rate is the cleanest single-number quality signal for an L1 optimizer prompt."""
     if not audit:
         return 0
@@ -109,7 +109,7 @@ def _schema_repair_count(audit: dict[str, Any] | None) -> int:
     if not isinstance(nodes, dict):
         return 0
     return sum(
-        int(block.get("schema_repair_attempts") or 0)
+        len(block.get("schema_repair_errors") or ())
         for block in nodes.values()
         if isinstance(block, dict)
     )
@@ -336,10 +336,10 @@ def _render_wall_clock(clock: dict[str, Any]) -> list[str]:
     for phase, seconds in sorted(_float_map(clock.get("phase_s")).items(), key=lambda kv: -kv[1]):
         lines.append(f"- {phase}: {_minutes(seconds)}")
     lines.append(f"- origin gate (a human waiting): {_minutes(clock['gate_s'])}")
-    # Named by what is IN it, not as a remainder: the round's tail holds the overlap series (real
-    # backend cells) and the critique call (real optimizer time), and neither has a bracket.
+    for bucket, node, seconds in _node_rows(clock.get("unbracketed_call_s")):
+        lines.append(f"- `{node}` calls outside every phase ({bucket}): {_minutes(seconds)}")
     lines.append(
-        f"- unattributed — the overlap series, the election, the critique call, the persist: "
+        f"- unattributed — no phase, gate or fresh call held it: "
         f"{_minutes(clock['unattributed_s'])}"
     )
     # Rendered as a state, never suppressed on truthiness: no envelope observed a wait and every
@@ -349,18 +349,29 @@ def _render_wall_clock(clock: dict[str, Any]) -> list[str]:
         f"- cells not ALLOWED to spend: "
         f"{'no envelope observed one' if unworked is None else _minutes(unworked)}"
     )
-    worked = _float_map(clock.get("worked_s"))
+    worked = _node_rows(clock.get("worked_s"))
     if worked:
         lines += [
             "",
-            "_Summed CALL time per spend bucket, not a share of the clock above: concurrent cells"
+            "_Summed CALL time per node, not a share of the clock above: concurrent cells"
             " overshoot it, and replayed calls are excluded._",
             "",
         ]
-        for bucket, seconds in sorted(worked.items(), key=lambda kv: -kv[1]):
-            lines.append(f"- {bucket}: {_minutes(seconds)}")
+        for bucket, node, seconds in worked:
+            lines.append(f"- `{node}` ({bucket}): {_minutes(seconds)}")
     lines.append("")
     return lines
+
+
+def _node_rows(raw: object) -> list[tuple[str, str, float]]:
+    if not isinstance(raw, dict):
+        return []
+    rows = [
+        (str(bucket), node, seconds)
+        for bucket, by_node in raw.items()
+        for node, seconds in _float_map(by_node).items()
+    ]
+    return sorted(rows, key=lambda row: -row[2])
 
 
 def _render_behavior_summary(

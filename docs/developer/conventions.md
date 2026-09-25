@@ -13,10 +13,10 @@ collects everything else.
   via `promptpotter/config/logging.py`. A print is an operator-facing OUTPUT, never a
   debug aid, so it belongs to the CLI (`presentation/cli/`), the terminal views, the
   server banner, first-run setup, the interactive origin gate and the maintenance
-  verbs (`restamp`, `diagnostics`) — anywhere else it writes to a stream nothing
+  verbs (`restamp`, `reindex`, `compact-archive`) — anywhere else it writes to a stream nothing
   captures. Inside the live run readout it is narrower still: every line goes through
-  `LiveDisplay._write`, the single stdout funnel that mirrors ANSI-stripped to
-  `logs/latest.log`, so a bare `print()` there is a line no headless reader can recover.
+  `LiveDisplay._write`, the single stdout funnel that mirrors ANSI-stripped to the
+  cycle's `readout.log`, so a bare `print()` there is a line no headless reader can recover.
 - **Ruff line-length: 100.** Enforced by `scripts/gate.py`, which is what CI runs.
 - **Direct field access** — `dict[key]` for guaranteed fields, not
   `.get(key, fallback)`. Fallbacks announce uncertainty; if you have a

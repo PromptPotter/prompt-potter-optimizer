@@ -157,7 +157,7 @@ def _replay_round_winner(
     coverage_floor = int(inputs_ref["coverage_floor"])
     # Read, never re-derived: it is a function of the round HISTORY, which this replay does not
     # hold, so recomputing it is the same defect as reconstructing the parent panel above. A
-    # record missing it RAISES — `restamp` writes the bias every election ran under.
+    # record missing it RAISES.
     winner_id, _ = elect_round_winner(
         candidate_ids,
         cast("dict[str, list[QueryMeasurement]]", all_results),

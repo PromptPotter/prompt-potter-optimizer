@@ -36,6 +36,7 @@ being wrong.
 from __future__ import annotations
 
 import logging
+import ssl
 import sys
 import time
 import uuid
@@ -75,6 +76,7 @@ __all__ = [
     "admitted",
     "bind_spend_book",
     "bound_spend_book",
+    "connection_broke",
     "may_have_billed",
     "never_sent",
     "reservation_left",
@@ -119,6 +121,26 @@ def never_sent(exc: BaseException) -> bool:
     seen: BaseException | None = exc
     while seen is not None:
         if isinstance(seen, httpx.ConnectError | httpx.ConnectTimeout | httpx.PoolTimeout):
+            return True
+        seen = seen.__cause__ or seen.__context__
+    return False
+
+
+def connection_broke(exc: BaseException) -> bool:
+    """Whether a request that left lost its connection before any reply — a reset, a TLS record
+    fault, a protocol break. Never a timeout: there the provider may still be generating."""
+    seen: BaseException | None = exc
+    while seen is not None:
+        if isinstance(seen, httpx.TimeoutException | TimeoutError):
+            return False
+        if isinstance(
+            seen,
+            httpx.ReadError
+            | httpx.WriteError
+            | httpx.RemoteProtocolError
+            | ssl.SSLError
+            | ConnectionError,
+        ):
             return True
         seen = seen.__cause__ or seen.__context__
     return False

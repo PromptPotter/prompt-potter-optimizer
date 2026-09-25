@@ -35,12 +35,16 @@ from promptpotter.infrastructure.llm.spend_book import (
     reserved,
 )
 from promptpotter.infrastructure.llm.telemetry import emit_backend_warning
-from promptpotter.shared.errors import CellThrottledError, CellUnscoreableError
+from promptpotter.shared.errors import CellHaltedError, CellThrottledError, CellUnscoreableError
 
 # HTTP timeout for /matches. Longer than the backend's own retries can run — a few provider
 # attempts per LLM node, each on its own timeout — because a read timeout is terminal: the backend
 # is still working and billing, so the cell is left unreported and never sent again.
 QUERY_TIMEOUT: float = 600.0
+# How long a cell waits out a backend it cannot connect to — a restart under a running campaign —
+# before it is banked unreachable, which stops the walk.
+BACKEND_OUTAGE_S: float = 600.0
+_OUTAGE_POLL_S = 5.0
 
 # The hold a whole cell is admitted on, and the settle that reads what it billed off the reply —
 # ``None`` where the reply reports nothing, which leaves the cell unreported.
@@ -119,6 +123,19 @@ def _is_session_error(resp: httpx.Response) -> bool:
         return True
     text = " ".join(str(body.get(k, "")) for k in ("message", "detail", "error"))
     return "session" in text.lower()
+
+
+def _resend_refused(resp: httpx.Response) -> str | None:
+    """The backend's reason where its error body says a resend ends the same way
+    (``detail.retryable: false`` — TermNorm's deadline on a provider request), else ``None``."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return None
+    detail = body.get("detail") if isinstance(body, dict) else None
+    if not isinstance(detail, dict) or detail.get("retryable") is not False:
+        return None
+    return f"{detail.get('error_code')}: {detail.get('message')}"
 
 
 def _reply_data(resp: httpx.Response) -> dict[str, Any]:
@@ -335,6 +352,21 @@ class BackendClient:
             logger.warning("Backend status check failed: %s", exc)
             return {"status": "error", "error": str(exc)}
 
+    async def _reachable_within(self, down_since: float) -> bool:
+        """Probe ``GET /status`` until the backend answers; ``False`` once it has been unreachable
+        for :data:`BACKEND_OUTAGE_S`. Reported as stall, so the cell's envelope gives it back."""
+        abort = get_abort_check()
+        while time.monotonic() - down_since < BACKEND_OUTAGE_S:
+            if abort is not None and abort():
+                raise asyncio.CancelledError("backend outage wait aborted")
+            started = time.monotonic()
+            await asyncio.sleep(_OUTAGE_POLL_S)
+            answered = (await self.check_status()).get("status") != "unreachable"
+            report_throttle_stall(time.monotonic() - started)
+            if answered:
+                return True
+        return False
+
     # -- pipeline config ---------------------------------------------------
 
     async def fetch_pipeline(self) -> dict[str, Any]:
@@ -360,8 +392,10 @@ class BackendClient:
         (``Connector.holds_own_sends``) the cell only RESERVES ``bound``, and ``bound`` is ``None``
         where nothing bounds it. A request that may have reached the backend is never sent
         again: only a throttle, a 5xx, a connection never made and a lost session are — a throttle
-        whenever the run's :attr:`backpressure` lets it, the rest a bounded number of times, each
-        landing on the ledger through :func:`emit_backend_warning`."""
+        whenever the run's :attr:`backpressure` lets it, a connection never made until the backend
+        answers within :data:`BACKEND_OUTAGE_S`, the rest a bounded number of times, each landing
+        on the ledger through :func:`emit_backend_warning`. A 5xx whose body says a resend ends the
+        same way is never sent again either: the cell is HALTED (:class:`CellHaltedError`)."""
         payload = self._wire_adapter(query, pipeline_params)
 
         if self._execution != "remote_http":
@@ -405,12 +439,15 @@ class BackendClient:
                 **extra,
             )
 
-        # 429 → the run's backpressure; 5xx + a connection never made → exp backoff (1, 2, 4, 8s);
-        # a lost session → one recovery; everything else, a read timeout included, exits.
+        # 429 → the run's backpressure; a connection never made → wait out the outage; a 5xx → exp
+        # backoff (1, 2, 4, 8s); a lost session → one recovery; everything else, a read timeout
+        # included, exits.
         recovered = False
         attempt = 0
+        down_since: float | None = None
         while True:
             wait: float | None = None
+            unreachable: httpx.TransportError | None = None
             async with self.backpressure.send() as ticket:
                 with admitted(_CELL, bound, model=None, provider=None) as admission:
                     try:
@@ -420,31 +457,19 @@ class BackendClient:
                             timeout=QUERY_TIMEOUT,
                         )
                     except httpx.TransportError as exc:
-                        error_class = exc.__class__.__name__
-                        if never_sent(exc):
-                            admission.release()
-                            if attempt + 1 < MAX_SEND_ATTEMPTS:
-                                wait = float(2**attempt)
-                        if wait is None:
+                        if not never_sent(exc):
                             _warn(
                                 "transport_error",
                                 attempt=attempt,
                                 wait_s=0.0,
-                                error_class=error_class,
+                                error_class=exc.__class__.__name__,
                                 final=True,
                             )
                             raise
-                        logger.warning(
-                            "Backend unreachable (attempt %d/%d): %s; waiting %.1fs",
-                            attempt + 1,
-                            MAX_SEND_ATTEMPTS,
-                            error_class,
-                            wait,
-                        )
-                        _warn(
-                            "transport_error", attempt=attempt, wait_s=wait, error_class=error_class
-                        )
+                        admission.release()
+                        unreachable = exc
                     else:
+                        down_since = None
                         code = resp.status_code
                         reported = billed(_reply_data(resp))
                         if reported is not None:
@@ -460,6 +485,10 @@ class BackendClient:
                             continue
                         if resp.is_success:
                             self.backpressure.eased(ticket)
+                        if 500 <= code < 600 and (refused := _resend_refused(resp)) is not None:
+                            raise CellHaltedError(
+                                f"HTTP {code} {refused}", spent={}, step_timings={}
+                            )
                         if 500 <= code < 600 and attempt + 1 < MAX_SEND_ATTEMPTS:
                             wait = float(2**attempt)
                             logger.warning(
@@ -478,6 +507,31 @@ class BackendClient:
                         ):
                             recovered = True
                             wait = 0.0
+            if unreachable is not None:
+                error_class = unreachable.__class__.__name__
+                if down_since is None:
+                    down_since = time.monotonic()
+                    logger.warning(
+                        "Backend unreachable (%s); waiting up to %.0fs for it to answer",
+                        error_class,
+                        BACKEND_OUTAGE_S,
+                    )
+                    _warn(
+                        "transport_error",
+                        attempt=attempt,
+                        wait_s=BACKEND_OUTAGE_S,
+                        error_class=error_class,
+                    )
+                if not await self._reachable_within(down_since):
+                    _warn(
+                        "transport_error",
+                        attempt=attempt,
+                        wait_s=0.0,
+                        error_class=error_class,
+                        final=True,
+                    )
+                    raise unreachable
+                continue
             if wait is None:
                 break
             attempt += 1

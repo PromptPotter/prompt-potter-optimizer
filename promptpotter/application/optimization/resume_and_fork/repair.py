@@ -220,10 +220,7 @@ async def repair_incomplete_rounds(
         cached = cache[0] if cache else []
         opt_sps: dict[str, OptSearchPoint] = {}
         for entry in cached:
-            try:
-                osp = OptSearchPoint.model_validate(entry.get("opt_sp") or {})
-            except Exception:  # a stale cache entry must not abort the resume
-                continue
+            osp = OptSearchPoint.model_validate(entry["opt_sp"])
             opt_sps[osp.lineage.id] = osp
         changed = False
         for i, cs in enumerate(t.candidate_scores):

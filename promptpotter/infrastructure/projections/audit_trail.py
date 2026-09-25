@@ -108,10 +108,9 @@ def _action_to_node_block(action: dict[str, Any]) -> dict[str, Any]:
         block["duration_s"] = action["duration_s"]
     if "timestamp" in action:
         block["timestamp"] = action["timestamp"]
-    # Schema-repair count surfaces only when non-zero — keeps the common (clean parse) audit terse.
-    repairs = action.get("schema_repair_attempts")
-    if repairs:
-        block["schema_repair_attempts"] = repairs
+    # Surfaces only when a retry was paid — keeps the common (clean parse) audit terse.
+    if repairs := action.get("schema_repair_errors"):
+        block["schema_repair_errors"] = repairs
     return block
 
 

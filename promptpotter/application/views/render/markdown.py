@@ -58,7 +58,7 @@ def _spark(values: list[float]) -> str:
 
 
 def _render_p_best_trajectory(rd: RoundDigestView) -> list[str]:
-    """Per-round P(best) sparkline section; silent when JSONL is absent (resumed cycles, pre-PoBB rounds)."""
+    """Per-round P(best) sparkline section; silent when JSONL is absent (resumed cycles)."""
     if not rd.p_best_trajectory:
         return []
     # The ELECTED arm first, then by final P(best) desc — a round is won on θ lift, and the arm

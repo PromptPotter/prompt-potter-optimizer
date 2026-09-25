@@ -95,8 +95,8 @@ def test_a_replayer_that_cannot_re_derive_is_not_reported_as_a_match() -> None:
     `parent_bias`/`parent_cells` anchor, `RulerCoverageError` on a cell the ruler never carried.
     The walker caught every exception and counted it as a match, so the rounds nothing could verify
     were exactly the rounds that reported clean: `--fork-on-divergence` never fired, and the resume
-    continued on a winner no rule had reproduced. Silent in the worst direction — a ledger that has
-    not been through `restamp --stamp-election-bias` replays green from end to end.
+    continued on a winner no rule had reproduced. Silent in the worst direction — a ledger missing
+    an anchor replays green from end to end.
     """
     round_data = _round(
         round=0,
@@ -331,7 +331,7 @@ def test_merge_with_unprocessed_priors_preserves_full_archive_on_partial_run() -
     fields (scores, provenance, item_count) would be computed off that short set.
     """
     dataset_sample_ids = set(range(20))
-    formula = "exact_match(predicted, ground_truth)"
+    formula = "label_match(predicted, ground_truth)"
     prior_tail = rescored_prior_tail(
         cached_sample_results={i: _prior(i) for i in dataset_sample_ids},
         dataset_sample_ids=dataset_sample_ids,
@@ -469,7 +469,7 @@ def test_lives_resume_fold_matches_live_observe() -> None:
                 phase="round",
                 event="complete",
                 round=0,
-                payload={"improved": False, "electable_count": 0},
+                payload={"improved": False, "electable_count": 0, "separable": None},
             ),
             lives=cfg,
         )
@@ -481,7 +481,7 @@ def test_lives_resume_fold_matches_live_observe() -> None:
                 phase="round",
                 event="complete",
                 round=i,
-                payload={"improved": improved, "electable_count": electable},
+                payload={"improved": improved, "electable_count": electable, "separable": None},
             ),
             lives=cfg,
         )
@@ -561,15 +561,15 @@ def test_unresolved_round_stalls_and_replays_as_one() -> None:
         )
     assert replay.l1_stall_count == live.l1_stall_count
 
-    # A round whose arms carried no interval is UNREADABLE, not unresolved: it banks on
-    # `improved` alone, so an old record that names no verdict replays as it was decided.
+    # A round whose arms carried no interval is UNREADABLE, not unresolved: it records
+    # `separable: None` and banks on `improved` alone, as it was decided.
     unreadable = EscalationFSM()
     unreadable.fold(
         PhaseRecord(
             phase="round",
             event="complete",
             round=1,
-            payload={"improved": True, "electable_count": 2},
+            payload={"improved": True, "electable_count": 2, "separable": None},
         ),
         lives=None,
     )
@@ -806,7 +806,7 @@ def _compactable_cell(sample_id: int, **extra: object) -> dict[str, object]:
         "fitness": 1.0,
         "objective": 1.0,
         "hit": True,
-        "scored": {"auto": {"fitness": 1.0, "formula": "exact_match(predicted, ground_truth)"}},
+        "scored": {"auto": {"fitness": 1.0, "formula": "label_match(predicted, ground_truth)"}},
         "error_category": "",
         "ground_truth_rank": 0,
         "pipeline_data": {
@@ -1200,6 +1200,69 @@ def test_a_resumed_cycle_clocks_only_its_own_launch(tmp_path: Path) -> None:
     assert clock.elapsed_s is not None and sum(clock.phase_s.values()) <= clock.elapsed_s
     assert "1" not in clock.round_ended_s, "a round an earlier launch closed read as instant"
     assert clock.round_ended_s["2"] == pytest.approx(21 * 60 + 1)
+
+
+def test_a_resume_before_round_one_regates_the_origin_it_measured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A round-0 file a stopped run left has passed no gate. Keyed on that file's existence, a
+    resume of an origin that measured 4 of its 40 cells skipped the close AND the gate, and elected
+    round 1 against a floor its own verdict called unmeasured — silently, since nothing refused."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from promptpotter.application.campaign_config import load_campaign_config
+    from promptpotter.application.runner import loop
+    from promptpotter.domain.phases import StopReason
+    from promptpotter.domain.results_health import compute_degradation_health
+    from tests.factories import round_result
+
+    def origin(attempted: int, not_attempted: int) -> RoundResult:
+        verdict = compute_degradation_health(
+            attempted=attempted,
+            not_attempted=not_attempted,
+            structural_count=0,
+            transient_count=0,
+            prior_clean_rounds=0,
+            consecutive_degraded_rounds=0,
+            is_origin=True,
+        )
+        return round_result(0, health=verdict)
+
+    left_on_disk = origin(4, 36)
+    cycle = SimpleNamespace(origin_round=None)
+
+    async def close_round_zero(cyc: Any, *_: Any) -> None:
+        # This launch's re-measure, still cut short: the verdict the gate must read.
+        cyc.origin_round = origin(37, 3)
+
+    gated_on: list[int] = []
+
+    async def hold(cyc: Any, *_: Any) -> StopReason:
+        gated_on.append(cyc.origin_round.health.samples)
+        return StopReason.ORIGIN_GATE
+
+    monkeypatch.setattr(loop, "emit_origin_round", close_round_zero)
+    monkeypatch.setattr(loop, "run_origin_gate", hold)
+    session = SimpleNamespace(
+        state=SimpleNamespace(resumed_from_round=1, cycle_id="cycle_r0"),
+        store=SimpleNamespace(
+            campaigns=SimpleNamespace(load_round_file=lambda _hop, _n: left_on_disk)
+        ),
+        hop=CycleHop(campaign_id=_CAMPAIGN, cycle_id="cycle_r0"),
+    )
+    stop, _ = asyncio.run(
+        loop.run_round_loop(
+            cycle,
+            [],
+            load_campaign_config({"optimization": _OPT}),
+            session,
+            None,
+            budget_gate=None,
+        )
+    )
+    assert stop is StopReason.ORIGIN_GATE, "a resume reached round 1 past an ungated origin"
+    assert gated_on == [37], "the gate read a verdict other than this launch's re-measure"
 
 
 def test_a_halted_cell_is_not_a_hole_a_resume_can_plug() -> None:

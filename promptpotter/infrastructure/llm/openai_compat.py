@@ -141,6 +141,13 @@ defines, ``none`` included, which means reasoning genuinely OFF rather than abse
 the sender because it is a wire fact: stated anywhere else, it goes out as a literal string."""
 
 
+def _validation_summary(err: ValidationError, content: str) -> str:
+    """Which schema rules one attempt broke, and what it emitted — kept on the response so a
+    paid retry's cause is on disk, even when a later rung rescued the call."""
+    broke = "; ".join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in err.errors()[:5])
+    return f"{broke} || emitted: {truncate(content, 1500)}"
+
+
 class OpenAICompatibleClient(LLMClientBase):
     def __init__(
         self,
@@ -286,7 +293,7 @@ class OpenAICompatibleClient(LLMClientBase):
             # Groq json_validate_failed salvage — already typed.
             return result
         response, content, validation_err, parsed = result
-        schema_repair_attempts = 0
+        repair_errors: list[str] = []
         # The failed first attempt still burned tokens; carry them so the returned usage
         # counts BOTH round-trips, as each one's own usage record already did. Zero unless a
         # repair fires below.
@@ -371,9 +378,10 @@ class OpenAICompatibleClient(LLMClientBase):
                 ]
             )
             for attempt_no, (retry_kind, retry_params) in enumerate(ladder, start=1):
+                repair_errors.append(_validation_summary(validation_err, content))
                 logger.warning(
                     "%s: %s parse failed (%d errors, %d content chars, finish=%s) on %s — %s. "
-                    "Retrying via %s (rung %d of %d; each is a full call).",
+                    "Retrying via %s (rung %d of %d; each is a full call). Errors: %s",
                     self._provider_name,
                     schema_name,
                     validation_err.error_count(),
@@ -384,13 +392,13 @@ class OpenAICompatibleClient(LLMClientBase):
                     retry_kind,
                     attempt_no,
                     len(ladder),
+                    truncate(repair_errors[-1], 900),
                 )
                 result = await self._one_attempt(
                     client, retry_params, response_model, response_schema, label
                 )
-                schema_repair_attempts = attempt_no
                 if isinstance(result, LLMResponse):
-                    result.schema_repair_attempts = schema_repair_attempts
+                    result.schema_repair_errors = list(repair_errors)
                     # Fold every failed attempt's tokens onto the salvaged response; the account
                     # owns the summing rule, so no field can be forgotten here.
                     result.usage = result.usage + first
@@ -453,7 +461,7 @@ class OpenAICompatibleClient(LLMClientBase):
             cost_usd=_billed_cost(first_cost, reply_cost(response)),
             served_by=reply_served_by(response),
             parsed=parsed,
-            schema_repair_attempts=schema_repair_attempts,
+            schema_repair_errors=repair_errors,
         )
 
     async def _one_attempt(

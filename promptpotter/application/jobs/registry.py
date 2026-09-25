@@ -27,7 +27,7 @@ from promptpotter.application.jobs.interlock import (
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store.io import read_json, write_json
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import ServiceUnavailableError
+from promptpotter.shared.errors import CycleBusyError, ServiceUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -197,8 +197,23 @@ class JobRegistry:
 
         The count read, the capacity resolution and the write happen under :meth:`admission_gate`
         with **no ``await`` between them**, which closes the race in this process and across
-        processes."""
+        processes.
+
+        A resolved *hop* that an unfinished job already targets is refused (``CycleBusyError``) —
+        queued included, since it runs once admitted — so one cycle never has two producers."""
         with self.admission_gate():
+            if hop != UNRESOLVED_HOP:
+                unfinished = self._reconciled(UNFINISHED_JOB_STATUSES, user_id=None)
+                holder = next((j for j in unfinished if j.hop == hop), None)
+                if holder is not None:
+                    raise CycleBusyError(
+                        job_id=holder.job_id,
+                        status=holder.status,
+                        holder_user=holder.user_id,
+                        campaign_id=hop.campaign_id,
+                        cycle_id=hop.cycle_id,
+                        started_at=holder.started_at,
+                    )
             running = self.list_running()
             live = len(running)
             status: JobStatus = "pending" if live < self._capacity(live) else "queued"

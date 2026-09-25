@@ -250,7 +250,7 @@ function ChannelCard({
   );
 
   // Each node is asked for its own address rather than parsing edit keys apart — the subject grammar is
-  // the server's (`webapp/CLAUDE.md` § Addressing).
+  // the server's (`webapp/CLAUDE.md` § Viewed identity — one address (CyclePath)).
   const edited = useMemo(() => {
     const seeds: string[] = [];
     for (const { candidates } of index.values()) {

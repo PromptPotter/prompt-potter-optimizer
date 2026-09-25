@@ -35,7 +35,6 @@ from promptpotter.application.maintenance.archive_maintenance import (
     iter_cycle_ledgers,
     workspace_trees,
 )
-from promptpotter.application.run_observers import QUERY_PREVIEW_CHARS
 from promptpotter.application.views.view_models import (
     L2RefineExitView,
     PlanExitView,
@@ -48,7 +47,6 @@ from promptpotter.domain.phases import CampaignPhase, RunPhase
 from promptpotter.domain.results import DiagnosticRunRecord, RoundResult
 from promptpotter.domain.run_records import CycleRecord
 from promptpotter.domain.scoring import ledger_sample_view
-from promptpotter.infrastructure.llm.pricing import compute_usd
 from promptpotter.infrastructure.runtime_flags import derive_run_phase
 from promptpotter.infrastructure.store.campaign_store.store import reproject_round_index
 from promptpotter.infrastructure.store.io import (
@@ -339,8 +337,8 @@ _EXIT_VIEW_KEYS: dict[str, frozenset[str]] = {
 # `sequence`/`offset` join (the SSE tail, the family ray) is that line index — renumber under one
 # and the stream skips or repeats. PAUSED qualifies on the run-phase contract's own terms ("a
 # paused producer has exited", `runtime_flags.derive_run_phase`) and MUST be included, not merely
-# may: a paused cycle is the one an operator resumes, and resume is what reads the counters this
-# pass migrates. RUNNING / GATE (a fresh producer) and CHECKIN (pre-loop) are the exclusions.
+# may: a paused cycle is the one an operator resumes, and resume skips every line this pass
+# would have pruned. RUNNING / GATE (a fresh producer) and CHECKIN (pre-loop) are the exclusions.
 _COMPACTABLE_PHASES: frozenset[RunPhase] = frozenset(
     {RunPhase.TERMINAL, RunPhase.DETACHED, RunPhase.PAUSED}
 )
@@ -372,26 +370,8 @@ def _prune_record(rec: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     return (pruned, [dotted for dotted, _ in dropped]) if dropped else (rec, [])
 
 
-def _stamp_price(rec: dict[str, Any]) -> dict[str, Any] | None:
-    """A usage record carrying no price, stamped as the writer stamps one today — every reader sums
-    the stamp and none re-prices. ``None`` ⇒ already stamped, or no rate to stamp it with."""
-    if rec.get("cost_usd") is not None:
-        return None
-    usd = compute_usd(
-        rec.get("model"),
-        int(rec.get("input_tokens", 0)),
-        int(rec.get("output_tokens", 0)),
-        provider=rec.get("provider"),
-        cache_read_tokens=int(rec.get("cache_read_tokens", 0)),
-        cache_write_tokens=int(rec.get("cache_write_tokens", 0)),
-    )
-    return None if usd is None else rec | {"cost_usd": usd}
-
-
 def _compact_record(rec: dict[str, Any]) -> dict[str, Any] | None:
     """One stored record → what the writer would emit for it today. ``None`` ⇒ already current."""
-    if rec.get("record_type") == "token_usage":
-        return _stamp_price(rec)
     payload = rec.get("payload")
     if not isinstance(payload, dict):
         return None
@@ -405,10 +385,6 @@ def _compact_record(rec: dict[str, Any]) -> dict[str, Any] | None:
                 if lean == payload["result"]
                 else rec | {"payload": {**payload, "result": lean}}
             )
-        if event == "sample_started" and "query_text" in payload:
-            trimmed = {k: v for k, v in payload.items() if k != "query_text"}
-            trimmed["query_preview"] = str(payload.get("query_text") or "")[:QUERY_PREVIEW_CHARS]
-            return rec | {"payload": trimmed}
         if event == "candidate_scored" and isinstance(payload.get("phase_ctx"), dict):
             ctx = payload["phase_ctx"]
             if _ANCHOR_KEYS.issuperset(ctx):
@@ -421,20 +397,13 @@ def _compact_record(rec: dict[str, Any]) -> dict[str, Any] | None:
     if rec.get("record_type") != "phase":
         return None
 
-    new = {k: v for k, v in payload.items() if k != "data"}
+    new = dict(payload)
     ctx = new.get("phase_ctx")
     if isinstance(ctx, dict):
         new["phase_ctx"] = {k: ctx.get(k) for k in _ANCHOR_KEYS}
     keep = _EXIT_VIEW_KEYS.get(str(rec.get("phase"))) if rec.get("event") == "exit" else None
     view = new.get("view")
     if keep is not None and isinstance(view, dict):
-        # MIGRATE before pruning. On a record written before the counters became view fields
-        # they sit in `data`, which this pass drops — lift them across first or `resume` on
-        # this cycle dies in `EscalationFSM.from_ledger` on the key that moved. The lift is
-        # the whole reason a paused cycle must be compacted rather than left alone.
-        old = payload.get("data")
-        if isinstance(old, dict):
-            view = {**view, **{k: old[k] for k in keep if k not in view and k in old}}
         new["view"] = {k: v for k, v in view.items() if k in keep}
     return None if new == payload else rec | {"payload": new}
 

@@ -291,7 +291,7 @@ def comparability(rows: list[SubjectReading]) -> Comparability:
     elif not readings or len(stamped) != len(readings):
         reason, verdict = "ruler_unstamped", None
         note = (
-            "Comparability UNKNOWN — at least one origin predates the ruler stamp, which is not "
+            "Comparability UNKNOWN — at least one origin carries no δ ruler, which is not "
             "the same as yes. Absolute levels above may sit on different δ scales: pair on cells, "
             "do not read the value column across campaigns."
         )

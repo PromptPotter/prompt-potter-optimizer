@@ -59,7 +59,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "QUERY_PREVIEW_CHARS",
     "ForkInfo",
     "RunCallbacks",
     "RunObservers",
@@ -670,6 +669,7 @@ def build_run_observers(
     ledger.bind(dashboard)
     ledger.bind(audit)
     if display is not None:
+        display.open_readout(cycle_dir)
         ledger.bind(display)
     ledger.bind(pobb)
     session.state.ledger = ledger

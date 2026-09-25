@@ -147,7 +147,7 @@ async def resume_with_divergence_check(
 
     # Fingerprinted BEFORE any repair, from ONE cycle, so both sets differ by exactly what the
     # repair changed. Deep copies because the repair mutates `prior` in place. No pre-replay:
-    # `_round_packages` seeds every round's state itself, k=0 included.
+    # `round_packages` seeds every round's state itself, k=0 included.
     packages_before = round_packages(cycle, [t.model_copy(deep=True) for t in prior])
 
     correction = await apply_correction(

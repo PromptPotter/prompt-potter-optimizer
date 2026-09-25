@@ -54,7 +54,6 @@ from promptpotter.presentation.cli.commands._shared import (
     CommandResult,
     backend_reach_line,
     backend_unreachable_result,
-    bind_session_identity,
     cycle_result_command,
     drive_cycle,
     get_verbose,
@@ -239,7 +238,7 @@ async def _ingest_checkin(args: argparse.Namespace) -> str:
 
 async def _ingest_and_prepare_checkin(
     args: argparse.Namespace,
-) -> tuple[Session, CampaignConfig, str, str]:
+) -> tuple[Session, CampaignConfig, str]:
     """The CLI tail of check-in Start. Backend reachability is not preflighted: a check-in is
     durable, so ``resume`` runs it later."""
 
@@ -270,12 +269,7 @@ async def _ingest_and_prepare_checkin(
         ),
     )
     checkin_line("campaign", f"started check-in {campaign_id}")
-    return (
-        prepared.session,
-        prepared.campaign_config,
-        prepared.session.dataset_name or "?",
-        prepared.session_id,
-    )
+    return prepared.session, prepared.campaign_config, prepared.session.dataset_name or "?"
 
 
 async def _commit_task_framing(
@@ -328,7 +322,7 @@ async def _commit_task_framing(
 
 async def _mint_fresh_session(
     args: argparse.Namespace,
-) -> tuple[Session, CampaignConfig, str, str]:
+) -> tuple[Session, CampaignConfig, str]:
     """Find-or-create campaign + mint session + root cycle. No scoring — the origin is phase 0 of the loop."""
 
     file_config = read_campaign_config_file(Path(args.config)) if args.config else {}
@@ -378,7 +372,7 @@ async def _mint_fresh_session(
 
     checkin_line("campaign", f"minted {minted.campaign_id}")
 
-    return session, campaign_config, dataset_name, minted.session_id
+    return session, campaign_config, dataset_name
 
 
 async def _run_loop(
@@ -406,9 +400,9 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
     """Mint a fresh campaign and run from round 0. The positional is a dataset name or a raw CSV; both
     produce the same session bundle, so the tail (backend → dataset → pipeline → task → loop) is one."""
     if (pos := getattr(args, "dataset", None)) and Path(pos).is_file():
-        session, campaign_config, dataset_name, _sid = await _ingest_and_prepare_checkin(args)
+        session, campaign_config, dataset_name = await _ingest_and_prepare_checkin(args)
     else:
-        session, campaign_config, dataset_name, _sid = await _mint_fresh_session(args)
+        session, campaign_config, dataset_name = await _mint_fresh_session(args)
 
     backend_type = backend_type_of_dataset(session.store, dataset_name)
     try:
@@ -421,9 +415,8 @@ async def cmd_new(args: argparse.Namespace) -> CommandResult:
     checkin_line("dataset", f"{dataset_name} ({len(train_data)} queries)")
     checkin_line("pipeline", pipeline_summary(session, session.pipeline_params))
 
-    ctx = load_session(args)
+    ctx = load_session(session.store, session.hop)
     campaign_config = ctx.campaign_config
-    bind_session_identity(session, ctx)
 
     logger.info("Session: %s", session.store.sessions.session_dir(ctx.session_id))
     logger.info("Campaign: %s", session.store.campaigns.campaign_root_dir(ctx.campaign_id))

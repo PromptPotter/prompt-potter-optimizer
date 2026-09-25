@@ -134,8 +134,8 @@ export function RunMasthead({
                 followActive();
                 onFollowed();
               }}
-              aria-label={`${phaseLabel} — pinned to this campaign. Follow the campaign the CLI is currently running.`}
-              title="Pinned to this campaign. Click to follow the campaign the CLI is currently running."
+              aria-label={`${phaseLabel} — pinned to this campaign. Follow the latest launch instead.`}
+              title="Pinned to this campaign; other launches leave it on screen. Click to follow the latest launch."
             >
               <span className="chip-lbl">Follow</span>
               {phaseBody}

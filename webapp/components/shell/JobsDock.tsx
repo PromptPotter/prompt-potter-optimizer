@@ -1,9 +1,10 @@
 "use client";
 import { useWorkspace } from "@/lib/workspace";
 import { runPhaseLabel } from "@/lib/run-phase";
-import { campaignDisplayName } from "@/lib/names";
+import { campaignDisplayName, unitDisplayName } from "@/lib/names";
 import { cx } from "@/lib/cx";
-import { Menu, MenuItem } from "@/components/ui";
+import type { CycleListEntry } from "@/lib/api";
+import { Menu, MenuCheck } from "@/components/ui";
 import { PotterMark } from "@/components/brand/PotterMark";
 
 // The live-run dock on the sidebar's outer edge; absent when idle — the absence IS "all quiet",
@@ -16,26 +17,28 @@ interface Props {
 const POTTER_GLYPH = <PotterMark size={16} />;
 
 export function JobsDock({ onPicked }: Props) {
-  const { runningCycles, campaigns, selectCycle } = useWorkspace();
+  const { runningCycles, campaigns, campaignId, cycleId, selectCycle } = useWorkspace();
   const n = runningCycles.length;
 
   if (n === 0) return null;
 
-  const pick = (campaignId: string, cycleId: string) => {
-    selectCycle(campaignId, cycleId);
+  const pick = (c: CycleListEntry) => {
+    selectCycle(c.campaign_id, c.cycle_id);
     onPicked?.();
   };
 
-  const labelFor = (campaignId: string) => {
-    const campaign = campaigns.find((c) => c.campaign_id === campaignId);
-    return campaign ? campaignDisplayName(campaign) : campaignId;
+  // A fork runs under its campaign's name, so two live cycles of one campaign need the fork's too.
+  const labelFor = (c: CycleListEntry) => {
+    const campaign = campaigns.find((k) => k.campaign_id === c.campaign_id);
+    const name = campaign ? campaignDisplayName(campaign) : c.campaign_id;
+    return c.is_root ? name : `${name} · ${unitDisplayName(c)}`;
   };
 
   // Still carries its phase class: a run held at the origin gate must not look like one
   // making progress.
   const c = n === 1 ? runningCycles[0] : undefined;
   if (c) {
-    const label = labelFor(c.campaign_id);
+    const label = labelFor(c);
     return (
       <div className="jobs-dock">
         <button
@@ -43,7 +46,7 @@ export function JobsDock({ onPicked }: Props) {
           className={cx("jobs-dock-btn", `phase-${c.run_phase}`)}
           aria-label={`1 active job — ${label} (${runPhaseLabel(c.run_phase, c.status)}). Go to it.`}
           title={`${runPhaseLabel(c.run_phase, c.status)}: ${label}`}
-          onClick={() => pick(c.campaign_id, c.cycle_id)}
+          onClick={() => pick(c)}
         >
           {POTTER_GLYPH}
         </button>
@@ -74,23 +77,25 @@ export function JobsDock({ onPicked }: Props) {
       >
         {({ close }) => (
           <>
-            {/* Already in the shared `dockPriority` order — never re-sorted here. */}
-            {runningCycles.map((c) => (
-              <MenuItem
-                key={`${c.campaign_id}/${c.cycle_id}`}
+            {/* Already in the shared `dockPriority` order — never re-sorted here. The tick is the
+                run on screen, so the list says where a switch starts from. */}
+            {runningCycles.map((r) => (
+              <MenuCheck
+                key={`${r.campaign_id}/${r.cycle_id}`}
+                on={r.campaign_id === campaignId && r.cycle_id === cycleId}
                 onClick={() => {
-                  pick(c.campaign_id, c.cycle_id);
+                  pick(r);
                   close();
                 }}
               >
                 <span className="jobs-dock-row">
-                  <span className={cx("phase-chip", `phase-${c.run_phase}`)}>
+                  <span className={cx("phase-chip", `phase-${r.run_phase}`)}>
                     <span className="phase-dot" aria-hidden="true" />
-                    {runPhaseLabel(c.run_phase, c.status)}
+                    {runPhaseLabel(r.run_phase, r.status)}
                   </span>
-                  <span className="jobs-dock-item-label">{labelFor(c.campaign_id)}</span>
+                  <span className="jobs-dock-item-label">{labelFor(r)}</span>
                 </span>
-              </MenuItem>
+              </MenuCheck>
             ))}
           </>
         )}

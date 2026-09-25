@@ -84,11 +84,18 @@ _LLM_DEFAULTS: dict[str, Any] = {"temperature": 0.0}
 # needs the ladder false-halts with no round trip having hung.
 _MAX_ROUND_TRIPS_PER_CALL = 3
 
-# Head-cap on the thinking channel before it rides the ledger: a reasoning model can emit tens
-# of KB per call into every round file, and the head is where the approach is stated. Matches
-# TermNorm's `reasoning_trace_cap` so both channels truncate alike. ANALYTICAL ONLY — see
+# Cap on the thinking channel before it rides the ledger: a reasoning model can emit tens of KB
+# per call into every round file. Head AND tail — the head states the approach, the tail the
+# decision that explains what the call emitted. ANALYTICAL ONLY — see
 # ``LLMResponse.reasoning``: nothing may branch on this value.
 _REASONING_LEDGER_CAP = 4000
+
+
+def _ledger_reasoning(text: str) -> str:
+    if len(text) <= _REASONING_LEDGER_CAP:
+        return text
+    half = _REASONING_LEDGER_CAP // 2
+    return f"{text[:half]}\n[… {len(text) - 2 * half} chars …]\n{text[-half:]}"
 
 
 async def _chat_under_deadline(
@@ -385,12 +392,12 @@ async def llm_call(
             "duration_s": duration_s,
             # Non-zero ⇒ the JSON only landed after an extra round-trip — the audit trail's
             # read on prompt parse quality, rolled up per cycle in ``review.md``.
-            "schema_repair_attempts": response.schema_repair_attempts,
+            "schema_repair_errors": response.schema_repair_errors,
         }
         # EVIDENCE FOR A HUMAN, never an input to the loop: nothing downstream reads this key
         # and nothing may start. Omitted when empty so a non-reasoning model's block stays clean.
         if response.reasoning:
-            payload["reasoning"] = response.reasoning[:_REASONING_LEDGER_CAP]
+            payload["reasoning"] = _ledger_reasoning(response.reasoning)
         if replayed is not None:
             payload["cached"] = True
         if trace_meta:
@@ -449,4 +456,4 @@ async def run_optimizer_node(
         },
         **overrides,
     )
-    return extract_parsed_json(response), prompt, response.schema_repair_attempts
+    return extract_parsed_json(response), prompt, len(response.schema_repair_errors)

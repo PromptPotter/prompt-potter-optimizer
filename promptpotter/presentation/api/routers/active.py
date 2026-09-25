@@ -41,21 +41,25 @@ active_router = APIRouter()
 
 
 class ActiveSessionResponse(StrictModel):
+    """The tenant's latest launch — not the set of live runs, which is `run_phase` on `/cycles`."""
+
     tenant_id: str = Field(
         description="Tenant the pointer belongs to — the caller's own, always known"
     )
     session_id: str | None = Field(description="Active session id; null when no session is active.")
     campaign_id: str | None = Field(
-        description="Active campaign id (pinned by the webapp); null when no session is active."
+        description="Campaign of the latest launch; null when no session is active."
     )
     cycle_id: str | None = Field(
-        description="Active cycle id within the campaign; null when no session is active."
+        description="Cycle of the latest launch; null when no session is active."
     )
 
 
 @active_router.get("/sessions/active", response_model=ActiveSessionResponse, tags=["Sessions"])
 def get_active_session(stores: StoresDep) -> ActiveSessionResponse:
-    """The caller-tenant's active-session pointer, null-valued while nothing runs.
+    """The caller-tenant's active-session pointer: its LATEST launch from any entry point, the
+    terminal's default ``resume`` target and what an unpinned webapp follows. Several runs can be
+    live at once, and each is a ``/cycles`` entry whose ``run_phase`` says so — never this route.
 
     **"No active session" is a STEADY STATE, not a missing resource** — nothing has
     been launched yet, or the workspace was cleared — so it answers 200 with null ids

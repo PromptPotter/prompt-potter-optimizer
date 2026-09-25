@@ -110,9 +110,9 @@ class LineageNode(StrictModel):
         "Neither `id` (a per-individual `uuid4`) nor `label` joins to a row; this does. Served "
         "rather than derived: it hashes the node configs INCLUDING the rendered prompt, which "
         "no served field carries, so a client recomputing it would match nothing and see no "
-        "error. Empty on a course, on a candidate minted before the stamp existed, and on one "
-        "that measured nothing. NOT unique — one searchpoint scored on two subsets is one "
-        "`sp_hash` over two runs, and a re-proposed configuration shares it across rounds.",
+        "error. Empty on a course and on a candidate that measured nothing. NOT unique — one "
+        "searchpoint scored on two subsets is one `sp_hash` over two runs, and a re-proposed "
+        "configuration shares it across rounds.",
     )
     accuracy: float | None = None
     composite_fitness: float | None = None

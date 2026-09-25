@@ -18,14 +18,16 @@ Your work lives in `.promptpotter/`, in two trees:
 
 ## Active session pointer
 
-`projects/{tenant_id}/.workspace/active_session.json` (`{session_id, campaign_id, cycle_id}`) is your active tab — the workspace root selects the file, so the tenant is the path, not a payload field (`store/session_pointer.py::_active_pointer_path`).
+`projects/{tenant_id}/.workspace/active_session.json` (`{session_id, campaign_id, cycle_id}`) is your latest launch — the workspace root selects the file, so the tenant is the path, not a payload field (`store/session_pointer.py::_active_pointer_path`).
+
+**It names ONE cycle and runs can be many.** A CLI `new`, a browser Start and a fork each overwrite it, so it is the terminal's default target and what an unpinned webapp follows — never "what is running". That is each cycle's own `run_phase` on `GET /cycles`, which the webapp's jobs dock and sidebar marks read; a view the operator pinned moves only when the pointer lands on a new cycle of that same campaign.
 
 - **`new`** mints a fresh campaign + session + root cycle and overwrites the pointer. Re-running `new` on an unchanged declaration reuses the content-addressed root-cycle id and origin score (cache-served), then diverges from round 1.
 - **`resume`** reads the pointer and picks up that cycle. No re-`new` needed.
 - **fork** mints a new cycle in the same session and retargets the pointer.
 - **`--campaign <id>` / `--cycle <id>`** override the pointer for one command, on `resume` as on every run-control verb; the session is the one the named cycle was minted under (`index.json::parent_session_id`), never picked separately. **`--tenant <id>`** (default `"default"`) selects the partition under `projects/`.
 
-Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [options]`. **Loop-mint:** `new`, `resume`. **Lifecycle:** `archive`, `delete`, `unarchive`, `reset`. **Manifest-edit:** `rename` (display name only; `campaign_id` still addresses it), `replace-dataset`. **Run-control:** `pause` (stops a running cycle at its next checkpoint, resumable), `set-budget` (raises or lowers a live cycle's ceiling — how a budget-halted cycle is continued), `cancel-queued` (withdraws a launch still waiting for a machine slot; `pause` cannot serve one, since a queued mint has no cycle to write a flag into), `skip-searchpoint`, `step-cycle`. **Diagnostic:** `verify`, `ab`, `noise-floor`, `seed-screen`, `evidence`. **Maintenance** — the three that REWRITE stored artifacts rather than reading them, all dry-run by default and all refusing while a producer could still be appending: `reindex`, `restamp`, `compact-archive`.
+Every subcommand runs as `python -m promptpotter [--tenant <id>] <subcommand> [options]`. **Loop-mint:** `new`, `resume`. **Lifecycle:** `archive`, `delete`, `unarchive`, `reset`. **Manifest-edit:** `rename` (display name only; `campaign_id` still addresses it), `replace-dataset`. **Run-control:** `pause` (stops a running cycle at its next checkpoint, resumable), `set-limits` (raises or lowers a live or paused cycle's `--max-usd` / `--max-tokens` / `--max-rounds` ceiling, `--max-rounds none` lifting the round cap — how a budget- or round-halted cycle is continued), `cancel-queued` (withdraws a launch still waiting for a machine slot; `pause` cannot serve one, since a queued mint has no cycle to write a flag into), `skip-searchpoint`, `step-cycle`, `origin-gate` (answers a cycle holding at the round-0 gate — the only answer a run launched without a TTY has in the terminal). **Diagnostic:** `verify`, `ab`, `noise-floor`, `seed-screen`, `probe-reasoning`, `evidence`. **Maintenance** — the three that REWRITE stored artifacts rather than reading them, all dry-run by default and all refusing while a producer could still be appending: `reindex`, `restamp`, `compact-archive`.
 
 Reads happen by opening the on-disk artifact tree. `evidence` is the one read VERB, because a comparison ACROSS subjects — a campaign, one branch or one searchpoint, repeated `--subject` and at any L4 depth — is in no single file.
 
@@ -62,7 +64,8 @@ Reads happen by opening the on-disk artifact tree. `evidence` is the one read VE
         optimized.md                   # which of those values the optimizer MOVES, and whether the
                                        #   model can see each one (`PipelineSchema.value_tree`)
         log.md  review.md              # per-cycle digests (derived — safe to recompute)
-        rounds/round_NNNN.json         # serialized RoundResult; its opt_search_point is the resume SoT
+        readout.log                    # the terminal readout, ANSI-stripped, every launch appended
+        rounds/round_NNNN.json         # serialized RoundResult; its opt_sp is the resume SoT
         langfuse/  prompts/            # trace shadow; rendered optimizer prompts
         .runtime/
           ledger.jsonl                 # append-only Decision/Phase/Snapshot/LLMCall/TokenUsage spine
@@ -104,16 +107,15 @@ Reads happen by opening the on-disk artifact tree. `evidence` is the one read VE
 | `experiment.resolved.yaml` | per cycle | The panel this cycle MEASURED — the connector's `experiment_file` with everything it only NAMES resolved to what it named, so a Harbor campaign carries the task roster its rounds actually ran rather than a pointer into a registry that can be re-pinned under the same version. Beside the declaration because the two answer one question about different halves: that file is the search SPACE, this is the set of CELLS. **Write-once, the opposite cadence to its neighbour** — a declaration owes the operator what the next round will search, a roster owes what every round already measured, and re-pinning it mid-campaign would change what was measured without changing the campaign's name. A later resolution that disagrees is logged, never written. Read in preference to a live re-resolve wherever a campaign's identity is recomputed (`pipeline_resolve.py::resolve_pipeline_for_campaign`). Absent for a connector that owns no panel. |
 | `optimized.md` | per cycle | Which of the resolved values the optimizer MOVES, and the channel each reaches the model by — the reading of the declaration beside it that the declaration cannot give, since it names a key and never whether the model will ever see the value. Markdown: its only reader is a person. Same cadence as the declaration. |
 | `log.md` / `review.md` (cycle) | per cycle | Per-cycle digests. Derived views — safe to delete and recompute. |
-| `rounds/round_NNNN.json` | per cycle | Serialized `RoundResult` — the model IS the document (`save_round_file` persists `model_dump()`, `load_round_file` validates it back). Its `opt_search_point` field is the resume source of truth. |
+| `readout.log` | per cycle | The live terminal readout (per-sample HIT/MISS, round summaries, SP tables), ANSI-stripped — the headless tail when you're not watching `dashboard.json::current_round`. **One file per cycle, appended per launch**: each launch opens with a `Readout:` line, so why the last one stopped sits directly above it. A fork mid-run moves the mirror to the fork, and the parent's file ends on the line naming it. The repo-root gitignored `logs/latest-readout-path.txt` holds only the newest launch's readout PATH. |
+| `rounds/round_NNNN.json` | per cycle | Serialized `RoundResult` — the model IS the document (`save_round_file` persists `model_dump()`, `load_round_file` validates it back). Its `opt_sp` field is the resume source of truth. |
 | `.runtime/ledger.jsonl` | per cycle | Append-only fact stream. Escalation firings ride a `PhaseRecord(phase="escalation", event="rule_fired")` — no separate signals stream. **It is also the only surface that says which optimizer node actually RAN, and what each dispatch panel cost it**: the `llm_call` record carries `prompt_chars` plus `injection_chars` / `injection_dropped` / `injection_silent` (`dispatch/facade.py`). The round document cannot answer either — its `optimizer_prompt_hashes` names every node on every round by construction. |
 | `.runtime/streams/…_p_best.jsonl` | per cycle | Per-sample PoBB snapshots. |
 | `.runtime/cache/rounds\|candidates/` | per cycle | Per-node I/O (l1_generate/critique/score, l2/l3) + pre-scoring candidate checkpoint. |
 
-The most-recent run's live readout (per-sample HIT/MISS, round summaries, SP tables), ANSI-stripped, also mirrors to the repo-root gitignored **`logs/latest.log`** — the headless tail when you're not watching `dashboard.json::current_round`.
-
 Material facts land on disk in human-readable form. Entry points never write campaign artifacts directly — every write rides the per-cycle ledger through two projections (live telemetry + audit). The allowlist is a structural invariant that fails loud; no standing test, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md).
 
-**Editing optimizer state by hand.** Open `cycles/{cycle_id}/rounds/round_{N:04d}.json` before `resume --from N` and edit; keep the `opt_search_point` block round-trippable through `OptSearchPoint.model_validate`. On resume the cycle replays every prior `round_NNNN.json` in order to rebuild its state — there is no separate write-ahead log.
+**Editing optimizer state by hand.** Open `cycles/{cycle_id}/rounds/round_{N:04d}.json` before `resume --from N` and edit; keep the `opt_sp` block round-trippable through `OptSearchPoint.model_validate`. On resume the cycle replays every prior `round_NNNN.json` in order to rebuild its state — there is no separate write-ahead log.
 
 ## Diagnosing a live or stuck run
 
@@ -166,13 +168,13 @@ Polled per checkpoint and consumed at the next **sample** boundary — transient
 | `checkin.flag` | The campaign is still authoring its origin. Dropped at skeleton creation, cleared when Start flips `checkin` → `active`. |
 | `sample_lookahead.json` | The operator's *request* that the round hold several calls in flight, for one round — or, with `auto`, until a later press replaces it. What the loop actually ran at is `dashboard.json::sample_lookahead` — never serve the flag as that. |
 | `skip.flag` | Skip the current unit at the next checkpoint. |
-| `spend_cap` | The polled mirror of the cycle's standing operator `(usd, tokens)` ceiling, whose record is the ledger's last `SpendCeilingRecord`. Swept and re-landed by every launch. |
+| `run_limits` | The polled mirror of the cycle's standing operator `(usd, tokens, rounds)` ceiling, whose record is the ledger's last `RunLimitsRecord`. Swept and re-landed by every launch; `max_rounds: null` is a lifted round cap, an absent key an unmoved one. |
 
 A fresh launch clears every polled run-control flag: a flag surviving the gesture it answered would re-answer the next one. An `auto` look-ahead answered no gesture — it is a mode — so it stays.
 
 ### Where the error text is
 
-A failed cell's typed `error_category` (`shared/errors.py::ErrorCategory`) and its message land in the latest `rounds/round_NNNN.json`, alongside the mirrored `logs/latest.log`. The optimizer-call path carries a hard wall-clock (`_chat_under_deadline` → `OPTIMIZER_TIMEOUT`), so a hung optimizer call terminates itself. **An overnight death with no terminal record is machine-sleep or session-end class, not a code fault** — do not go looking for a bug in the loop.
+A failed cell's typed `error_category` (`shared/errors.py::ErrorCategory`) and its message land in the latest `rounds/round_NNNN.json`, alongside the cycle's `readout.log`. The optimizer-call path carries a hard wall-clock (`_chat_under_deadline` → `OPTIMIZER_TIMEOUT`), so a hung optimizer call terminates itself. **An overnight death with no terminal record is machine-sleep or session-end class, not a code fault** — do not go looking for a bug in the loop.
 
 **A killed run outlives itself in its containers.** A containerized cell is torn down by the process that started it — on cancellation and on failure alike — so only a hard kill leaves one idle container per in-flight cell, holding a trial nobody will collect. The next run on that backend sweeps them, and its trial scratch, off the lock each carries (`connectors/harbor.py::_reap_dead_producers`); what the sweep keeps is the task images and the package cache, which are what make the resume cheap.
 
@@ -185,6 +187,8 @@ Three workflows over one fork primitive.
 | **Resume** | `resume` | Pick up from the latest completed round of the active cycle. |
 | **Rewind** | `resume --from N` | Same `cycle_id`; archive rounds after N; resume at N+1. |
 | **Fork on divergence** | `resume --fork-on-divergence` | On divergence — a round produced by a different optimizer, a package that no longer reproduces, or a decision that re-derives differently — mint a sibling cycle rooted at that round and continue. |
+
+**Until an L1 round closes, a resume re-enters round 0.** Every launch re-measures the origin — cached cells replay free, cells never sent or errored are sent — then closes round 0 from that measurement and holds at the origin gate on its verdict. A round-0 file a stopped run left has passed no gate, so no resume reaches round 1 past a partial origin. **One live run per cycle:** a launch targeting a cycle that already has an unfinished job is refused `409 cycle_busy`, naming that job.
 
 ### The primitive
 
@@ -252,7 +256,7 @@ A hole is plugged with a **real measurement, never an archive row** — a cached
 
 ### Interrupt handling
 
-- **First Ctrl+C** — cancels the in-flight call, banks completed work, declares the cycle `paused` (resumable), exits **130**.
+- **First Ctrl+C** — banks completed work, declares the cycle `paused` (resumable), exits **130**. A sent call is cancelled only where cancelling stops its bill (`Connector.cancel_stops_billing`); elsewhere it lands.
 - **Second Ctrl+C** — force-quits immediately.
 
 An interrupt mid-round leaves ledger events but no closing `round:complete` — see **Partial rounds** under Rewind for which `--from N` offsets are then admissible. Nothing is left running to hunt for: a cancelled cell is torn down by the process it belongs to, and only a hard kill leaves anything, which § Where the error text is covers.
@@ -296,7 +300,7 @@ Single-operator (auth-off) and hosted-beta (OIDC) share the same on-disk shape. 
 **Per-user quotas (`user.json`)** — one tenant per user, missing file ⇒ defaults, hand-editable, checked on every `mint-campaign` and `start-run`:
 
 ```json
-{ "spend_budget_usd_total": null, "max_concurrent_cycles": 2, "max_campaigns_per_day": 10 }
+{ "spend_budget_usd_total": null, "token_budget_total": null, "max_concurrent_cycles": 2, "max_campaigns_per_day": 1000 }
 ```
 
 **What each knob bounds, and what bounds resource use generally** — owned by [`access-model.md`](access-model.md) § What bounds resource use.

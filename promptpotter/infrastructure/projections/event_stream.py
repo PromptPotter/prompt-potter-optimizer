@@ -39,10 +39,8 @@ class CycleLedgerTail:
 
         It picks up one PAST the offset the dashboard is a fold OF (``at_offset``), not at
         end-of-file. The dashboard write is debounced, so records can land between the fold and the
-        file's mtime; parking at EOF meant the client never received those — the snapshot did not
-        carry them and the tail began after them. A body with no ``at_offset`` (a warming shape, or
-        a file written before the fold stamped one) still parks at EOF, which is what it did all
-        along."""
+        file's mtime; parked at EOF, the client would never receive those. A warming shape carries
+        no ``at_offset`` and parks at EOF."""
         body = self._read_dashboard()
         folded = body.get("at_offset")
         offset = (

@@ -202,7 +202,7 @@ class SubjectReading(StrictModel):
     number reached two ways.
 
     ``values`` is keyed by the cell's QUERY, the identity that survives across campaigns; a cell the
-    metric cannot read is ABSENT from it and counted in ``n_unscorable`` rather than scored — the
+    metric cannot read is ABSENT from it and named in ``unscorable_cells`` rather than scored — the
     two absences are different facts and a surface renders them as different glyphs.
     ``ci_lo``/``ci_hi`` are ``None`` below two scored cells — one reading has no spread, and a
     bracket drawn from it is a fiction.
