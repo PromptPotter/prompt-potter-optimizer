@@ -288,6 +288,9 @@ class RoundSummary(StrictModel):
     # than a point at zero (`ScoredCandidate.accuracy`).
     accuracy: float | None
     composite_fitness: float
+    # The rows `accuracy` is a mean over — the winner's, or on a held round the parent's on this
+    # panel. Mirrors `RoundResult.total`; no arm's own count stands in for it.
+    total: int
     # The cross-round-comparable series and the scale that makes it one: ability on the cycle's
     # fixed δ ruler, subset-invariant where `accuracy`/`composite_fitness` above are
     # subset-relative — under `per_round_resubset` those swing on each fresh draw, reading as a

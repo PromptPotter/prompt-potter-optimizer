@@ -106,6 +106,7 @@ export type {
   MachineHolder,
   MachineStatusResponse,
   KnobRow,
+  ManifestNodeOverlay,
   NodeKnobs,
   OptimizerEntry,
   OptimizerKnobsResponse,

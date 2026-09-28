@@ -99,20 +99,26 @@ each layer tolerates before handing up (full mechanism:
 from promptpotter.presentation.teleprompter import Loop
 
 loop = Loop(
+    optimizer="potter",       # which optimizer proposes — any name optimizer_roster() lists
+    nodes={                   # that optimizer's node knobs; None keeps its defaults
+        "l1_generate": {"n_variants": 6},       # candidates generated per round
+        "escalation": {"l1_patience": 0,        # L1 mutates the winner
+                       "l2_patience": 2,        # L2 observes the history, re-aims L1
+                       "l3_patience": 1},       # L3 replans the strategy L1 works within
+        "pobb": {"epsilon": 0.2},               # how aggressively trailing candidates are killed
+    },
     max_rounds=5,
-    n_variants=6,             # candidates generated per round
     samples_per_round=20,     # rows each candidate is scored on — the cost knob
-    l1_patience=0,            # L1 mutates the winner
-    l2_patience=2,            # L2 observes the history, re-aims L1
-    l3_patience=1,            # L3 replans the strategy L1 works within
     elimination_n_min=4,      # samples a candidate gets before it may be pruned
-    pobb_epsilon=0.2,         # how aggressively trailing candidates are killed
     spend_budget_usd=None,    # a ceiling the run stops at; None runs uncapped
 )
 ```
 
-The values above are an illustration, not the defaults — those live on the `Loop` dataclass
-itself and move without this page hearing about it. Read them off the fields.
+The three layers are potter's. `optimizer="capo"` (or `gepa`, `levi`) swaps the proposer and
+keeps everything around it; its `nodes` are that manifest's knobs, which
+`GET /optimizers/{name}/knobs` lists, and a knob the manifest does not take is refused when the
+`Loop` is built. The values above are an illustration, not the defaults — those live on the
+`Loop` dataclass itself and move without this page hearing about it. Read them off the fields.
 
 ## The node is your program
 

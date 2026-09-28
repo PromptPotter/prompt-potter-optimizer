@@ -222,8 +222,7 @@ def _render_bench(final: dict[str, Any]) -> list[str]:
         return [
             "## Bench score — the headline",
             "",
-            "None: the campaign's `dataset_split` holds nothing out, or the cycle stopped before "
-            "its selection could be graded.",
+            "None: the cycle stopped before its selection could be graded.",
             "",
         ]
     bench = BenchScore.model_validate(final["bench"])

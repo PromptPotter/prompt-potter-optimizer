@@ -7,10 +7,11 @@ import {
   roundCandidates,
 } from "../round-candidates";
 import { availableRounds } from "../round-axis";
+import { runSummary } from "../run-summary";
 import { liveCandidateId } from "@/lib/candidate-label";
 
 describe("roundCandidates — l2_terminal fixture", () => {
-  // Fixture: origin + 4 scored rounds of two + an empty round-5 stub (closed mid-L2).
+  // Fixture: origin + 3 scored rounds of three + an empty round-4 stub (closed mid-L2).
   const dash = loadCycleFixture("l2_terminal");
   const rows = roundCandidates(dash);
 
@@ -23,13 +24,11 @@ describe("roundCandidates — l2_terminal fixture", () => {
 
   it("emits every non-empty post-origin round's candidates", () => {
     const historical = rows.filter((r) => r.round > 0);
-    expect(historical).toHaveLength(8);
-    expect(new Set(historical.map((r) => r.round))).toEqual(
-      new Set([1, 2, 3, 4]),
-    );
+    expect(historical).toHaveLength(9);
+    expect(new Set(historical.map((r) => r.round))).toEqual(new Set([1, 2, 3]));
   });
 
-  it("does not emit any inflight row for the L2-terminal round 5", () => {
+  it("does not emit any inflight row for the L2-terminal round 4", () => {
     const inflight = rows.filter((r) => r.source === "inflight");
     expect(inflight).toHaveLength(0);
   });
@@ -40,39 +39,56 @@ describe("roundCandidates — l2_terminal fixture", () => {
       "R0.0",
       "R1.0",
       "R1.1",
+      "R1.2",
       "R2.0",
       "R2.1",
+      "R2.2",
       "R3.0",
       "R3.1",
-      "R4.0",
-      "R4.1",
+      "R3.2",
     ]);
   });
 
-  it("empty round 5 does not suppress the in-flight branch for round 5", () => {
-    const round5 = rows.filter((r) => r.round === 5);
-    expect(round5).toHaveLength(0);
+  it("empty round 4 does not suppress the in-flight branch for round 4", () => {
+    const round4 = rows.filter((r) => r.round === 4);
+    expect(round4).toHaveLength(0);
   });
 
-  it("availableRounds excludes the empty L2-terminal round 5 from completed", () => {
+  it("availableRounds excludes the empty L2-terminal round 4 from completed", () => {
     const axis = availableRounds(dash, false);
-    expect(axis.completed).toEqual([0, 1, 2, 3, 4]);
+    expect(axis.completed).toEqual([0, 1, 2, 3]);
     expect(axis.live).toBeNull();
   });
 
-  it("closedRoundNumbers is the shared 'closed with fitness data' set — excludes the empty round 5", () => {
+  it("closedRoundNumbers is the shared 'closed with fitness data' set — excludes the empty round 4", () => {
     // Excludes the empty round, unlike `useRoundSource`'s on-disk presence check.
-    expect(closedRoundNumbers(dash)).toEqual(new Set([0, 1, 2, 3, 4]));
+    expect(closedRoundNumbers(dash)).toEqual(new Set([0, 1, 2, 3]));
   });
 
   it("groupByRound buckets the same spine rows without recomputing the merge", () => {
     const byRound = groupByRound(rows);
-    expect([...byRound.keys()].sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4]);
+    expect([...byRound.keys()].sort((a, b) => a - b)).toEqual([0, 1, 2, 3]);
     expect(byRound.get(0)?.map((r) => r.key)).toEqual(["R0.0"]);
-    expect(byRound.get(1)?.map((r) => r.key)).toEqual(["R1.0", "R1.1"]);
-    expect(byRound.get(5)).toBeUndefined();
+    expect(byRound.get(1)?.map((r) => r.key)).toEqual(["R1.0", "R1.1", "R1.2"]);
+    expect(byRound.get(4)).toBeUndefined();
     const grouped = [...byRound.values()].reduce((n, b) => n + b.length, 0);
     expect(grouped).toBe(rows.length);
+  });
+
+  // Rounds 2 and 3 HELD: the crown is only what each served `is_selected` says.
+  it("crowns exactly the rows the rounds served as selected", () => {
+    expect(rows.filter((r) => r.is_selected).map((r) => r.label)).toEqual(["C0", "C1.2"]);
+  });
+
+  it("carries θ on every row of a campaign whose optimizer stamps it", () => {
+    expect(rows.every((r) => r.theta !== null)).toBe(true);
+  });
+
+  it("reads the last closed round's optimizer facts, never the empty stub's", () => {
+    const last = runSummary(dash)?.lastRound;
+    expect(last?.round).toBe(3);
+    expect(last?.facts).toEqual(dash.rounds[3]?.optimizer_facts);
+    expect(last?.facts.length).toBeGreaterThan(0);
   });
 });
 

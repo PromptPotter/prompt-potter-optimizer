@@ -141,9 +141,9 @@ def _scan(
     """Grep with an exemption, and the two exemptions are not interchangeable.
 
     An allowed LINE is a sanctioned use (the CLI-seam imports); an allowed PATH is a
-    file exempt whatever it says (the migration-debt components). Honouring a path
-    pattern against line text would exempt any line that merely names one of those
-    files — a comment pointing at the spine would hide a real violation beside it.
+    file exempt whatever it says (`_MAY_IMPORT_POTTER`). Honouring a path pattern
+    against line text would exempt any line that merely names one of those files — a
+    comment pointing at one would hide a real violation beside it.
 
     Split on ``\\n`` rather than ``splitlines()``, which also breaks on five of the characters
     ``_CONTROL_CHAR`` hunts — a needle matching one of those consumed it as a line terminator and
@@ -217,27 +217,6 @@ def _undiffable(_: Sel) -> Outcome:
         if hits
         else (0, "")
     )
-
-
-_LIVE_L1 = re.compile(r"liveL1Candidates")
-# Two surfaces re-deriving the candidate list is what produced the
-# lineage/fitness alignment bug. New consumers go through useRoundCandidates() /
-# lib/derivations/round-candidates.ts; the named components are migration debt,
-# each owing its own derivation.
-_ANTI_ROT_ALLOW = re.compile(
-    r"__tests__/|FreqChart\.tsx|HardSamplesHeatmap\.tsx|CandidatesCard\.tsx"
-    r"|lib/poll\.tsx|lib/derivations/round-candidates\.ts"
-)
-
-
-def _anti_rot(_: Sel) -> Outcome:
-    files = [
-        p
-        for root in ("components", "lib", "app")
-        for p in _sources(_WEBAPP / root, "*.ts", "*.tsx")
-    ]
-    hits = _scan(files, _LIVE_L1, allow_path=_ANTI_ROT_ALLOW)
-    return (1, "liveL1Candidates outside the spine:\n" + "\n".join(hits)) if hits else (0, "")
 
 
 # A CLAUDE.md loads into every session beneath it. A CAP, not a ratchet: prose moves freely under
@@ -512,7 +491,6 @@ CHECKS: tuple[Check, ...] = (
     # concurrently, tsc either read that directory mid-rewrite (TS2307 on 3 of 6 runs) or won
     # the race and typechecked the PREVIOUS build's route signatures. Behind it, both ways.
     Check("tsc", "web", _tsc, staged=True, after="next-build"),
-    Check("anti-rot", "web", _anti_rot, staged=True),
     # vitest.config.ts keeps its own `maxWorkers` for a standalone `npm run test`;
     # under the gate the budget decides, because here it shares the box.
     Check(

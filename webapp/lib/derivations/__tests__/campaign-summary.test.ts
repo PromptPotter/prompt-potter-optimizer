@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  benchReading,
   campaignLineParts,
   campaignModels,
   campaignTitle,
@@ -7,7 +8,7 @@ import {
 } from "../campaign-summary";
 import { vendorOf } from "@/lib/format";
 import type { RunGroup } from "../campaign-forest";
-import type { CampaignRunsWith, CampaignSummary, CycleListEntry } from "@/lib/api";
+import type { BenchScore, CampaignRunsWith, CampaignSummary, CycleListEntry } from "@/lib/api";
 
 // `rounds_closed` counts rounds after the origin, the unit `max_rounds` bounds. The row is a NAME
 // and a reading, never a config dump.
@@ -157,6 +158,24 @@ describe("campaignModels / campaignVendors", () => {
 
   it("has nothing to draw when the pipeline did not resolve", () => {
     expect(campaignVendors(run({ runsWith: null }))).toEqual([]);
+  });
+});
+
+describe("benchReading", () => {
+  // Two silences, two remedies: a split holding nothing out never grades; one that does, will.
+  it("tells nothing held out apart from a pass not taken", () => {
+    const unheld: BenchScore = {
+      bench_size: 0,
+      origin: null,
+      selected: null,
+      missing_reason: "nothing held out: the campaign's dataset_split declares no bench rows",
+      lift: null,
+      lift_ci_lo: null,
+      lift_ci_hi: null,
+    };
+    expect(benchReading(unheld, "terminal").sub).toBe(unheld.missing_reason);
+    expect(benchReading(null, "running").sub).toBe("graded when the run ends");
+    expect(benchReading(null, "terminal").sub).toBe("not graded — the run ended first");
   });
 });
 

@@ -4,7 +4,7 @@ import { Badge, CopyButton, VendorLogo } from "@/components/ui";
 import { CampaignSwitcher } from "@/components/shell/CampaignSwitcher";
 import { ViewTabs } from "@/components/shell/ViewTabs";
 import {
-  benchStat,
+  benchReading,
   buildForest,
   campaignLineParts,
   campaignModels,
@@ -75,7 +75,7 @@ export function RunMasthead({
   );
 
   const { best } = headlineStats(dash);
-  const bench = dash?.bench_score ? benchStat(dash.bench_score) : null;
+  const bench = benchReading(dash?.bench_score, dash?.run_phase);
   // `dash.candidate` goes stale between rounds, so it stands in only while the measurement works.
   const scoringCand = dash && isMeasuring(dash) ? String(dash.candidate || "").split("/")[0] : "";
   const roundsCap = dash?.run_limits?.max_rounds ?? null;
@@ -162,8 +162,8 @@ export function RunMasthead({
           {/* The headline: the selection graded on held-out rows; BEST beside it is the optimizer's own. */}
           <span className="chip">
             <span className="chip-lbl">Bench</span>
-            {bench ? bench.value : "—"}
-            {bench && <span className="chip-of"> {bench.sub}</span>}
+            {bench.value}
+            {bench.sub && <span className="chip-of"> {bench.sub}</span>}
           </span>
           <span className="chip">
             <span className="chip-lbl">Rounds</span>

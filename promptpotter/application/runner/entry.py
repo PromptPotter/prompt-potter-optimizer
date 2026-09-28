@@ -38,7 +38,12 @@ from promptpotter.application.run_observers import (
     run_limits_from,
 )
 from promptpotter.application.run_phase_control import declare_run_phase
-from promptpotter.application.runner.bench import BenchPass, bench_selection, score_on_bench
+from promptpotter.application.runner.bench import (
+    BenchPass,
+    bench_selection,
+    nothing_held_out,
+    score_on_bench,
+)
 from promptpotter.application.runner.inner.ruler import refresh_inner_rulers
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.runner.loop import run_round_loop, set_round_cap
@@ -559,6 +564,7 @@ async def _run_single_cycle(
     cancel_exc: asyncio.CancelledError | None = None
     budget_gate: BudgetGate | None = None
     origin_bench: BenchPass | None = None
+    unheld: BenchScore | None = None
     try:
         cycle = await init_optimization_loop(
             origin,
@@ -618,6 +624,8 @@ async def _run_single_cycle(
                 spend=observers.dashboard.state.spend,
             )
             budget_gate.book.set_aside(origin_bench.incurred_usd, origin_bench.billed_tokens)
+        elif not session.scoring.require_partition().bench:
+            unheld = nothing_held_out(cb)
         stop_reason, cycle_error = await run_round_loop(
             cycle,
             dataset,
@@ -667,7 +675,7 @@ async def _run_single_cycle(
             kind=kind, message=message, stop_reason="CRASHED", traceback=tb
         )
 
-    bench: BenchScore | None = None
+    bench: BenchScore | None = unheld
     if (
         cycle is not None
         and budget_gate is not None

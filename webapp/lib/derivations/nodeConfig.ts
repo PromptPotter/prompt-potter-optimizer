@@ -3,7 +3,7 @@
 // An OPTIMIZER node's knobs are the third reading: a served `KnobRow` typed in as text.
 
 import type { DraftPatch, KnobRow, ModelCapability, NodeConfigParam } from "@/lib/api";
-import type { NodeSearchNarrowing } from "@/lib/api/types";
+import type { ManifestNodeOverlay, NodeSearchNarrowing } from "@/lib/api/types";
 
 export type ConfigMode = "search-space" | "values";
 
@@ -351,11 +351,12 @@ export function seedOverlayFromRows(
   return overlay;
 }
 
-// `optimization.nodes`: the campaign's overlay on its optimizer manifest, keyed by manifest node.
-export type OptimizerNodeOverlay = Record<string, { config: Record<string, unknown> }>;
-
 /** The value a knob runs at: the overlay's where it sets the key, else the manifest's. */
-export function knobValue(nodes: OptimizerNodeOverlay | null, node: string, knob: KnobRow): unknown {
+export function knobValue(
+  nodes: Record<string, ManifestNodeOverlay> | null,
+  node: string,
+  knob: KnobRow,
+): unknown {
   const set = nodes?.[node]?.config;
   return set && knob.key in set ? set[knob.key] : knob.value;
 }

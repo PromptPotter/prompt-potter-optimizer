@@ -198,6 +198,7 @@ export interface RoundSummary {
   round: number;
   accuracy: number | null;
   composite_fitness: number;
+  total: number;
   ability: AbilityReading | null;
   improved: boolean | null;
   electable_count: number | null;
@@ -2355,6 +2356,9 @@ export interface OriginGateDecisionPayload {
 
 // How an arm's measurement ended (domain/results.py::ArmOutcome).
 export type ArmOutcome = 'measured' | 'invalid' | 'skipped' | 'broken' | 'eliminated' | 'locked_in';
+
+// The outcomes whose walk stopped before its panel (domain/results.py::ArmOutcome.ended_early).
+export const ARM_OUTCOMES_ENDED_EARLY: readonly ArmOutcome[] = ['skipped', 'broken', 'eliminated', 'locked_in'];
 
 // The coarse run-state axis (domain/phases.py::RunPhase).
 export type RunPhase = 'checkin' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';

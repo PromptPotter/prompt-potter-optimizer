@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest";
 import { fitnessTrend, primaryMetric } from "@/lib/derivations";
 import type { RoundSummary } from "@/lib/api/types";
 
-const round = (r: number, accuracy: number, composite_fitness: number): RoundSummary =>
+const round = (r: number, accuracy: number, composite_fitness: number, total = 20): RoundSummary =>
   ({
     round: r,
     accuracy,
     composite_fitness,
+    total,
     ability: null,
     improved: null,
     electable_count: null,
@@ -30,6 +31,12 @@ describe("fitnessTrend", () => {
     // The invariant that matters: every plotted point is a number some round scored.
     const measured = new Set(rounds.map((r) => r.accuracy));
     expect(points.every((p) => measured.has(p.composite))).toBe(true);
+  });
+
+  // A held round crowns nobody, and a peer optimizer's round has no crowned arm to read n off.
+  it("reads each point's n off the round's own measured total", () => {
+    const { points } = fitnessTrend([round(0, 0.4, 0.4, 30), round(1, 0.5, 0.5, 12)]);
+    expect(points.map((p) => p.n)).toEqual([30, 12]);
   });
 
   it("running-best folds over the measured series", () => {

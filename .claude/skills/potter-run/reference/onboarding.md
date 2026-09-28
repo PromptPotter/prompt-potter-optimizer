@@ -26,8 +26,9 @@ one origin, no hand-written loader. A registered benchmark skips all of it and u
    ground_truth + framing are all CONFIRMED and every active LLM node owns a model —
    no individual prompt field is gated (the optimizer evolves them).
 5. The origin lands as **round 0 / C0** in the lineage tree.
-6. Select · modify · start. Mint writes the tenant dataset + campaign + cycle and runs from
-   round 0.
+6. Select · modify · start. The optimizer picker chooses which optimizer proposes and its node
+   knobs (`optimization.optimizer` + `optimization.nodes.<node>.config.<knob>`). Mint writes the
+   tenant dataset + campaign + cycle and runs from round 0.
 
 **CLI parity:**
 
@@ -36,7 +37,8 @@ python -m promptpotter new <file.csv> --set task_description='what the prompt do
 ```
 
 Same chain, same seam: `ingest_draft` → `resolve_origin_turn` → `prepare_checkin_run`. Omit
-`--set` to let the resolver propose the framing and ask.
+`--set` to let the resolver propose the framing and ask; `--set optimizer=capo` and
+`--set nodes.<node>.<knob>=V` are the picker's two answers.
 
 Seam: `application/datasets/` (`ingest.py`, `origin_resolve.py`, `origin_readiness.py`) +
 `application/jobs/` (`launcher/checkin.py`, `mint.py`). Web: `webapp/components/ingest/`.

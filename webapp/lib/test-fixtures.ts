@@ -311,6 +311,7 @@ export function summaryRound(over: Partial<RoundSummary> = {}): RoundSummary {
     round: 0,
     accuracy: 0,
     composite_fitness: 0,
+    total: 0,
     ability: null,
     improved: null,
     electable_count: null,

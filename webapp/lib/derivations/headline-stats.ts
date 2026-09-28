@@ -85,7 +85,7 @@ export function headlineStats(dash: DashboardSnapshot | null): HeadlineStats {
 
 export interface FitnessTrend {
   // `null` composite draws a GAP: a point at 0 would claim the prompt scored nothing.
-  points: { round: number; composite: number | null; theta: number | null; n: number | null }[];
+  points: { round: number; composite: number | null; theta: number | null; n: number }[];
   best: number[];
 }
 
@@ -105,8 +105,8 @@ export function fitnessTrend(
       r.ability != null && r.ability.ruler_id != null && r.ability.ruler_id === seriesRuler
         ? r.ability.theta
         : null,
-    // Every arm of one round measured the same draw.
-    n: r.candidates.find((c) => c.is_selected)?.scored_samples ?? null,
+    // The rows the plotted value is a mean over, a held round's included.
+    n: r.total,
   }));
   const best: number[] = [];
   let runningBest = 0;

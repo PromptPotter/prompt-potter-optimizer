@@ -506,6 +506,18 @@ def _emit_enum_union(enum_cls: type[enum.Enum], note: str) -> str:
     return f"// {note}\nexport type {enum_cls.__name__} = {members};"
 
 
+def _emit_arm_outcomes_ended_early() -> str:
+    """Emit ``ArmOutcome.ended_early`` as the member list the webapp's stopped-walk badge reads."""
+    from promptpotter.domain.results import ArmOutcome
+
+    members = ", ".join(repr(o.value) for o in ArmOutcome if o.ended_early)
+    return (
+        "// The outcomes whose walk stopped before its panel "
+        "(domain/results.py::ArmOutcome.ended_early).\n"
+        f"export const ARM_OUTCOMES_ENDED_EARLY: readonly ArmOutcome[] = [{members}];"
+    )
+
+
 def _emit_command_kinds() -> str:
     """Emit ``ALL_DISPATCHED_KINDS`` as a named union so ``postCommand`` can be narrowed.
 
@@ -766,6 +778,7 @@ def main() -> int:
             ArmOutcome, "How an arm's measurement ended (domain/results.py::ArmOutcome)."
         )
     )
+    blocks.append(_emit_arm_outcomes_ended_early())
     blocks.append(
         _emit_enum_union(RunPhase, "The coarse run-state axis (domain/phases.py::RunPhase).")
     )

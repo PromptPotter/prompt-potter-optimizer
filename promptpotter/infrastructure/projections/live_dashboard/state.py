@@ -232,8 +232,8 @@ class LiveDashboardState(StrictModel):
     # reporting one for it would put an infinity on the strip.
     ability_delta_per_usd: float | None = None
     # The headline — the selection and the origin graded on the held-out bench set. Null until
-    # the bench pass lands, and on a split holding nothing out; every number beside it is the
-    # optimizer's own, read on the rows that chose its winner.
+    # the bench pass lands; a split holding nothing out says so from run start, in
+    # `missing_reason`. Every number beside it is the optimizer's own.
     bench_score: BenchScore | None = None
     composite_fitness_formula: str | None = None
     # The same formula as ``{evaluator: coefficient}``, where it IS a weighted sum — what the mask

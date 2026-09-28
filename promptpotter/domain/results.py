@@ -89,6 +89,11 @@ class ArmOutcome(StrEnum):
         """Stopped before its panel against the arm — by the operator, the bench or a cut."""
         return self in (ArmOutcome.SKIPPED, ArmOutcome.BROKEN, ArmOutcome.ELIMINATED)
 
+    @property
+    def ended_early(self) -> bool:
+        """Stopped before its panel for the arm or against it — what a stopped-walk badge marks."""
+        return self.cut_short or self is ArmOutcome.LOCKED_IN
+
 
 class DegradationContext(TypedDict, total=False):
     """The bench's reading of a ``BROKEN`` arm, empty on every other — beside the eliminator's own

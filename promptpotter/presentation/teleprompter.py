@@ -23,12 +23,14 @@ except ModuleNotFoundError as exc:  # lazy: an extra, and the only importer is t
         "promptpotter.presentation.teleprompter needs DSPy — `pip install promptpotter[dspy]`"
     ) from exc
 
+from promptpotter.application.campaign_config import OptimizationConfig
 from promptpotter.application.datasets.authored import (
     dataset_campaign_path,
     load_dataset_campaign_config,
 )
 from promptpotter.application.datasets.loaders import samples_from_dicts
 from promptpotter.application.embedded_run import open_session, run_campaign
+from promptpotter.application.optimizer_manifest import resolve_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.runner.entry import RunMode
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
@@ -39,14 +41,16 @@ from promptpotter.connectors.dspy_module import (
     DspyProgram,
 )
 from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.optimizer_state import POTTER_MANIFEST
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
+from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.infrastructure.store.dataset_access import dataset_pipeline_path
 from promptpotter.infrastructure.store.io import write_text, write_yaml
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.shared.identity import default_identity
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
     from promptpotter.domain.export import PromptExport
@@ -54,45 +58,55 @@ if TYPE_CHECKING:
 __all__ = ["Loop", "Node", "PromptPotterOpt"]
 
 
+# What `Loop(nodes=None)` lays on potter's manifest; every other optimizer runs its own as declared.
+_POTTER_NODES: dict[str, dict[str, Any]] = {
+    "l1_generate": {"n_variants": 6},
+    "pobb": {"epsilon": 0.2},
+    "escalation": {"l1_patience": 0, "l2_patience": 2, "l3_patience": 1},
+}
+
+
 @dataclass(frozen=True)
 class Loop:
     """Loop control. Every field has a default, so ``Loop()`` is a complete configuration."""
 
+    optimizer: str = OptimizationConfig.model_fields["optimizer"].default
+    """Which optimizer proposes: any name ``optimizer_roster()`` lists."""
+
+    nodes: Mapping[str, Mapping[str, Any]] | None = None
+    """Knobs on that optimizer's nodes, ``{node: {knob: value}}``, refused at construction when
+    the manifest does not take them. ``None`` runs the manifest as declared, potter's with
+    :data:`_POTTER_NODES` laid on."""
+
     max_rounds: int = 5
-    n_variants: int = 6
     samples_per_round: int = 20
     """How many trainset rows each candidate is scored on per round — the adaptive queue picks
     the informative ones out of the whole set. The cost knob: a round costs roughly
-    ``n_variants x samples_per_round`` calls before PoBB starts cutting."""
+    ``arms x samples_per_round`` calls before the eliminator starts cutting."""
 
-    l1_patience: int = 0
-    l2_patience: int = 2
-    l3_patience: int = 1
     degradation_threshold: float = 0.4
     elimination_n_min: int = 4
-    pobb_epsilon: float = 0.2
     spend_budget_usd: float | None = None
     token_budget: int | None = None
 
+    def __post_init__(self) -> None:
+        resolve_optimizer(self.optimizer, self._overlay())
+
+    def _overlay(self) -> dict[str, ManifestNodeOverlay]:
+        nodes = self.nodes
+        if nodes is None:
+            nodes = _POTTER_NODES if self.optimizer == POTTER_MANIFEST else {}
+        return {node: ManifestNodeOverlay(config=dict(knobs)) for node, knobs in nodes.items()}
+
     def _optimization(self) -> dict[str, Any]:
         return {
+            "optimizer": self.optimizer,
             "max_rounds": self.max_rounds,
             "degradation_threshold": self.degradation_threshold,
             "elimination_n_min": self.elimination_n_min,
             "spend_budget_usd": self.spend_budget_usd,
             "token_budget": self.token_budget,
-            # Potter's knobs, as the overlay on its manifest's nodes.
-            "nodes": {
-                "l1_generate": {"config": {"n_variants": self.n_variants}},
-                "pobb": {"config": {"epsilon": self.pobb_epsilon}},
-                "escalation": {
-                    "config": {
-                        "l1_patience": self.l1_patience,
-                        "l2_patience": self.l2_patience,
-                        "l3_patience": self.l3_patience,
-                    }
-                },
-            },
+            "nodes": {n: o.model_dump(mode="json") for n, o in self._overlay().items()},
         }
 
 

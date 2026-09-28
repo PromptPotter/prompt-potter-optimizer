@@ -9,8 +9,9 @@ import {
   fetchOptimizerKnobs,
   fetchOptimizerRoster,
   type KnobRow,
+  type ManifestNodeOverlay,
 } from "@/lib/api";
-import { knobText, knobValue, parseKnob, type OptimizerNodeOverlay } from "@/lib/derivations";
+import { knobText, knobValue, parseKnob } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useWorkspace } from "@/lib/workspace";
 import { Badge, Button, CommitInput, Switch } from "@/components/ui";
@@ -22,9 +23,9 @@ export function NodeKnobsPanel({
   onChange,
 }: {
   optimizer?: string;
-  nodes?: OptimizerNodeOverlay;
+  nodes?: Record<string, ManifestNodeOverlay>;
   // A SPARSE patch — one knob — merged server-side onto the draft's overlay key by key.
-  onChange?: (patch: OptimizerNodeOverlay) => void;
+  onChange?: (patch: Record<string, ManifestNodeOverlay>) => void;
 } = {}) {
   const editable = onChange != null;
   const cv = useConnector();
@@ -56,10 +57,10 @@ export function NodeKnobsPanel({
   }
   const menu = knobsRead.data;
   const detail = readyData(detailRead);
-  const values: OptimizerNodeOverlay | null = editable
+  const values: Record<string, ManifestNodeOverlay> | null = editable
     ? (nodes ?? null)
-    : ((detail?.config.optimization as { nodes?: OptimizerNodeOverlay } | undefined)?.nodes ??
-      null);
+    : ((detail?.config.optimization as { nodes?: Record<string, ManifestNodeOverlay> } | undefined)
+        ?.nodes ?? null);
   const entry = readyData(rosterRead)?.optimizers.find((o) => o.name === menu.optimizer);
   const declared = entry?.paper ? "Paper" : "Default";
 

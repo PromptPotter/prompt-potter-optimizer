@@ -131,6 +131,7 @@ def build_round_summary(rr: RoundResult, origin_rows: list[dict[str, Any]]) -> R
         round=rr.round,
         accuracy=rr.accuracy,
         composite_fitness=float(rr.composite_fitness),
+        total=rr.total,
         ability=rr.ability,
         improved=None if rr.round == 0 else rr.improved,
         electable_count=None if rr.round == 0 else rr.electable_count,

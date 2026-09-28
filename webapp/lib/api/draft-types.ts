@@ -2,6 +2,7 @@
 // `lib/`'s one import from `components/`; that edge is tolerated here and nowhere else.
 
 import type {
+  ManifestNodeOverlay,
   ModelCapability,
   NodeConfigParam,
   NodeOutputSchema,
@@ -23,7 +24,7 @@ export interface OptimizationOverridesWire {
   max_rounds: number;
   // A manifest under `assets/optimizers/`; its knobs ride `nodes`.
   optimizer: string;
-  nodes: Record<string, { config: Record<string, unknown> }>;
+  nodes: Record<string, ManifestNodeOverlay>;
 }
 export interface DraftCampaignWire {
   draft_id: string;

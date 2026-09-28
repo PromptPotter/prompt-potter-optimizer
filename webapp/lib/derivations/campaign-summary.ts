@@ -8,6 +8,7 @@ import type {
   ConfigKnob,
   ConfigMapResponse,
   LineageNode,
+  LiveDashboardState,
   RunsWithParam,
 } from "@/lib/api";
 import { campaignDisplayName } from "@/lib/names";
@@ -81,6 +82,18 @@ export function benchStat(bench: BenchScore): RowStat {
         : `origin ${origin === null ? "—" : fmtPct0(origin.composite_fitness)} · ` +
           `lift ${fmtSigned(bench.lift)} · ${bench.bench_size} held-out rows`,
   };
+}
+
+// A split holding nothing out is served as a score with its `missing_reason`, so a null one is
+// only ever a pass not taken: still to come, or skipped by the way the run ended.
+export function benchReading(
+  bench: BenchScore | null | undefined,
+  runPhase: LiveDashboardState["run_phase"] | undefined,
+): RowStat {
+  if (bench) return benchStat(bench);
+  const sub =
+    runPhase === "terminal" ? "not graded — the run ended first" : "graded when the run ends";
+  return { label: "Bench", value: "—", sub };
 }
 
 // The θ clause only where the served node elects on θ: a peer optimizer's rounds are not.

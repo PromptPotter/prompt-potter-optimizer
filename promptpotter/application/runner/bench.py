@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.spend import SpendRollup
 
-__all__ = ["BenchPass", "bench_selection", "score_on_bench"]
+__all__ = ["BenchPass", "bench_selection", "nothing_held_out", "score_on_bench"]
 
 
 class BenchPass(NamedTuple):
@@ -95,6 +95,21 @@ async def score_on_bench(
         stopped=scored.stopped,
     )
     return BenchPass(sp_hash, reading, None, rows, incurred_usd, billed_tokens)
+
+
+def nothing_held_out(cb: RunCallbacks) -> BenchScore:
+    """A split holding no bench row never grades, so its headline is final at run start."""
+    score = BenchScore(
+        bench_size=0,
+        origin=None,
+        selected=None,
+        missing_reason="nothing held out: the campaign's dataset_split declares no bench rows",
+        lift=None,
+        lift_ci_lo=None,
+        lift_ci_hi=None,
+    )
+    emit_phase(cb.on_phase, CampaignPhase.BENCH, "scored", bench=score)
+    return score
 
 
 async def bench_selection(

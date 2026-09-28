@@ -14,7 +14,8 @@ import {
   pathOf,
 } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
-import type { ArmOutcome, LineageNode } from "@/lib/api";
+import type { LineageNode } from "@/lib/api";
+import { ARM_OUTCOMES_ENDED_EARLY } from "@/lib/api/types.generated";
 import { liveCandidates } from "@/lib/poll";
 import {
   isSelectedCandidate,
@@ -197,7 +198,7 @@ export function MeasurementRun({
                       {g.candidate.accuracy != null && ` · ${fmtPct0(g.candidate.accuracy)}`}
                     </span>
                   )}
-                  {g.candidate.outcome && STOPPED.has(g.candidate.outcome) && (
+                  {g.candidate.outcome && ARM_OUTCOMES_ENDED_EARLY.includes(g.candidate.outcome) && (
                     <Badge tone={g.candidate.outcome === "broken" ? "danger" : "default"}>
                       <Term content={TERMS[`arm_${g.candidate.outcome}`]}>
                         {g.candidate.outcome.replace("_", " ")}
@@ -306,9 +307,6 @@ export function MeasurementRun({
 }
 
 const PANEL_RENDER_CAP = 250;
-
-// The walks that ended before their panel; a broken arm never reads as an elimination.
-const STOPPED: ReadonlySet<ArmOutcome> = new Set(["broken", "eliminated", "locked_in", "skipped"]);
 
 function Region({ children }: { children: ReactNode }) {
   return (
