@@ -144,6 +144,11 @@ export function effectTone(lo: number | null, hi: number | null): string {
   return lo > 0 ? "l4-eff-pos" : hi < 0 ? "l4-eff-neg" : "l4-eff-flat";
 }
 
+// A comparability verdict's tone; the sentence beside it is served, and `null` is UNKNOWN.
+export function verdictTone(verdict: boolean | null): string {
+  return verdict === true ? "l4-note" : "l4-warn";
+}
+
 export function fmtNum(v: unknown, digits = 3): string {
   if (v == null) return "—";
   if (typeof v === "number") return v.toFixed(digits);

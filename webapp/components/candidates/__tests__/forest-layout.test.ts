@@ -24,6 +24,7 @@ function node(
     sp_hash: "",
     accuracy: null,
     composite_fitness: null,
+    changes_description: "",
     status: "",
     election_held: false,
     is_selected: false,

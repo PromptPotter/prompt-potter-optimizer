@@ -1,9 +1,11 @@
 "use client";
 import { useMemo } from "react";
-import { Badge, CopyButton, VendorLogo } from "@/components/ui";
+import { Badge, CopyButton, Term, VendorLogo } from "@/components/ui";
 import { CampaignSwitcher } from "@/components/shell/CampaignSwitcher";
+import { SpendBuckets } from "@/components/shell/SpendBuckets";
 import { ViewTabs } from "@/components/shell/ViewTabs";
 import {
+  METER_WORD,
   benchReading,
   buildForest,
   campaignLineParts,
@@ -81,7 +83,7 @@ export function RunMasthead({
   const roundsCap = dash?.run_limits?.max_rounds ?? null;
   const position = scoringCand || (dashRound != null ? `R${dashRound}` : "—");
 
-  const { usedUsd, budgetUsd, unpricedTokens } = readSpend(dash);
+  const { metered, budgetUsd, unpricedTokens } = readSpend(dash);
   const spendFloor = unpricedTokens > 0 ? "≥" : "";
 
   return (
@@ -172,10 +174,17 @@ export function RunMasthead({
           </span>
           <span className={cx("chip", unpricedTokens > 0 && "chip-warn")}>
             <span className="chip-lbl">Spend</span>
-            {usedUsd != null ? `${spendFloor}${fmtUsdCents(usedUsd)}` : "—"}
+            {metered ? (
+              <Term content={<SpendBuckets metered={metered} />}>
+                {`${spendFloor}${fmtUsdCents(metered.usd)}`}
+              </Term>
+            ) : (
+              "—"
+            )}
             {budgetUsd != null && (
               <span className="chip-of"> / {fmtUsdCents(budgetUsd)} cap</span>
             )}
+            {metered && <span className="chip-of"> {METER_WORD[metered.meter]}</span>}
           </span>
         </div>
         <ViewTabs tab={tab} onSelect={onSelectTab} />

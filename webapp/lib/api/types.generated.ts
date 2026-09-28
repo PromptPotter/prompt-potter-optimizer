@@ -494,6 +494,16 @@ export interface SpendRollup {
   unpriced_tokens: number;
 }
 
+/** What a run's spend caps have counted, in the units they meter, by bucket. */
+export interface MeteredSpend {
+  meter: 'bill' | 'search_incurred';
+  usd: number;
+  tokens: number;
+  buckets: Record<string, number>;
+  beside: Record<string, number>;
+  billed_usd: number;
+}
+
 /** A provider holding a sender's sends (`infrastructure/llm/rate_limit.py::Backpressure`). */
 export interface BackpressureReading {
   sender: string;
@@ -685,6 +695,7 @@ export interface LiveDashboardState {
   sp_budget_round: number;
   run_limits: RunLimits | null;
   spend: SpendRollup;
+  spend_metered: MeteredSpend | null;
   spend_by_round: Record<string, SpendRollup>;
   catch_up_log: CatchUpLogEntry[];
   current_round: CurrentRound;
@@ -1163,6 +1174,10 @@ export interface CampaignSummary {
    * the bounds they were admitted on — unknown, never spent. Its share of
    * `QuotaStatus.spend_unreported_usd`. */
   spend_unreported_usd: number;
+  /** What the campaign's spend cap counts along its LINE — the root and every cycle
+   * a rebase handed it to — by bucket: the bill, or the search's incurred USD
+   * for a controlled arm. The number a surface sets beside a cap, live. */
+  spend_metered: MeteredSpend;
   /** The headline (`architecture.md` § The bench score is not an optimizer's
    * selection), read off the campaign's result (`result.json`) under the
    * formula its line runs — whichever cycle rebases handed the line to.
@@ -1494,6 +1509,7 @@ export interface HeadToHeadRow {
   controlled: boolean;
   treatment_digest: string | null;
   budget: ArmBudget;
+  spend_metered: MeteredSpend | null;
   human_intervened: boolean;
   bench: BenchScore | null;
   bench_set: Instrument | null;
@@ -1532,7 +1548,9 @@ export interface HeadToHead {
   differs_on: string[];
   pairs: SelectionPair[];
   ratio_reference: string | null;
-  note: string;
+  verdict_line: string;
+  uncontrolled_note: string | null;
+  notes: string[];
 }
 
 /** The whole read for one selection of subjects — recomputed on every fetch. */
@@ -1642,6 +1660,9 @@ export interface LineageNode {
   sp_hash: string;
   accuracy: number | null;
   composite_fitness: number | null;
+  /** What the optimizer says this candidate changed against its parent, as it
+   * worded it at mint. Empty on a course. */
+  changes_description: string;
   /** Candidate: minted | measured | invalid — never 'winner' (that rides
    * `is_selected`). `invalid` was rejected before it cost a sample, so it
    * carries no accuracy: its stored 0.0 is synthetic and reads as getting
@@ -2155,6 +2176,10 @@ export interface CampaignDetailResponse {
    * the bounds they were admitted on — unknown, never spent. Its share of
    * `QuotaStatus.spend_unreported_usd`. */
   spend_unreported_usd: number;
+  /** What the campaign's spend cap counts along its LINE — the root and every cycle
+   * a rebase handed it to — by bucket: the bill, or the search's incurred USD
+   * for a controlled arm. The number a surface sets beside a cap, live. */
+  spend_metered: MeteredSpend;
   /** The headline (`architecture.md` § The bench score is not an optimizer's
    * selection), read off the campaign's result (`result.json`) under the
    * formula its line runs — whichever cycle rebases handed the line to.

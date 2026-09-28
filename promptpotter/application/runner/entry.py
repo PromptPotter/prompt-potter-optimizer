@@ -60,6 +60,7 @@ from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.application.scoring.query_loop import FlightGauge
 from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.bench import BenchPasses, BenchScore, partition_bank
+from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import PromptExport, build_prompt_export
 from promptpotter.domain.launch_limits import HeldLimits
@@ -139,7 +140,7 @@ def _build_budget_gate(
     webapp, enforced by nothing. An unset arm still costs nothing: the book skips a ``None`` cap.
     The book it arms is what admits every call the run sends."""
     dashboard = observers.dashboard
-    usd_spent, tokens_spent = dashboard.spend_metered(meters)
+    spent = dashboard.spend_metered(meters)
 
     def _usd_cap() -> float | None:
         saved = read_run_limits_mirror(cycle_dir).usd
@@ -154,8 +155,8 @@ def _build_budget_gate(
         usd_cap=_usd_cap,
         tokens_cap=_token_cap,
         meters=meters,
-        usd_spent=usd_spent,
-        tokens_spent=tokens_spent,
+        usd_spent=spent.usd,
+        tokens_spent=spent.tokens,
     )
     observers.arm_spend_book(book)
     return BudgetGate(book=book)
@@ -183,7 +184,7 @@ def _arm_run_controls(
         cycle_dir,
         usd_cap=campaign_config.optimization.spend_budget_usd,
         token_cap=campaign_config.optimization.token_budget,
-        meters="search_incurred" if session.controlled else "bill",
+        meters=ceiling_meter(session.arm),
     )
     session.budget_tripped = gate.tripped
     session.spend_used = lambda: gate.book.usd_spent

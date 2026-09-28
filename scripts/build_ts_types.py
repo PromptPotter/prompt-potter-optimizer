@@ -122,7 +122,7 @@ from promptpotter.domain.results import (
 )
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
-from promptpotter.domain.spend import SpendBucket, SpendRollup
+from promptpotter.domain.spend import MeteredSpend, SpendBucket, SpendRollup
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackendWarning,
@@ -218,6 +218,7 @@ EXPORTED_MODELS: list[type[BaseModel]] = [
     RoundResult,
     SpendBucket,
     SpendRollup,
+    MeteredSpend,
     # --- dashboard.json IS `LiveDashboardState` (the webapp polls it every 2s). It was
     # hand-declared webapp-side with an index signature that typechecked anything. ---
     BackpressureReading,

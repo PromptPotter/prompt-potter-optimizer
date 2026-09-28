@@ -860,7 +860,15 @@ LEDGER_BASELINE = {
     # `HeadToHeadRow`, `arm`, `controlled`, `treatment_digest`, `human_intervened`, `replay_share`
     # and `budget` over `ArmBudget`'s three; `HeadToHead.head_to_head_id`. Each is a fact the
     # guard decides on, served so no surface re-derives whether a pair is one quantity.
-    "served_fields": 758,
+    # +2: `HeadToHead.note` split into `verdict_line`, `uncontrolled_note` and `notes`, so a surface
+    # places each part (the reason a row is uncontrolled on that row) without parsing one paragraph.
+    # +1: `LineageNode.changes_description` — what each step of a compared campaign's main line
+    # changed, as the optimizer worded it at mint; the tree is the one read the Compare column holds.
+    # +9: `MeteredSpend` (6) on `CampaignSummary` and its detail twin (2) and `HeadToHeadRow` (1) —
+    # what a spend cap COUNTS, by bucket, beside the bill. A controlled arm's cap meters its search's
+    # incurred USD, so every surface read the bill beside it; picking the meter or the buckets in the
+    # browser is the arithmetic `webapp/CLAUDE.md` forbids, and `SpendRollup` names no meter.
+    "served_fields": 770,
 }
 
 

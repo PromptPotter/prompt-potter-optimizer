@@ -120,6 +120,11 @@ class LineageNode(StrictModel):
     )
     accuracy: float | None = None
     composite_fitness: float | None = None
+    changes_description: str = Field(
+        default="",
+        description="What the optimizer says this candidate changed against its parent, as it "
+        "worded it at mint. Empty on a course.",
+    )
     status: str = Field(
         default="",
         description="Candidate: minted | measured | invalid — never 'winner' (that rides "
@@ -749,6 +754,7 @@ def _candidate_node(
         sp_hash=cand.sp_hash,
         accuracy=cand.accuracy,
         composite_fitness=cand.composite_fitness,
+        changes_description=cand.changes_description,
         status=cand.state,
         # The candidate's own band, and only ever that.
         mean_fitness_ci_lo=cand.mean_fitness_ci_lo,

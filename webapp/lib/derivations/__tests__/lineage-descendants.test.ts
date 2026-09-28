@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { descendantsOf } from "../lineage-descendants";
+import { mainLine } from "../lineage-candidates";
 import type { LineageNode } from "@/lib/api";
 
 // A missed descendant fails SILENTLY: a channel keeps rendering a measurement an edit invalidated.
@@ -62,5 +63,37 @@ describe("descendantsOf", () => {
       ],
     });
     expect([...descendantsOf(cyclic, ["A"])].sort()).toEqual(["A", "B"]);
+  });
+});
+
+// A held round is a fact about the line, not an absence: it must read as held, never be dropped.
+// The parents here name ids no node carries, as a resume's re-mint leaves them.
+describe("mainLine", () => {
+  const cand = (id: string, round: number, won: boolean, held = true): LineageNode =>
+    node({
+      kind: "candidate",
+      id,
+      round,
+      parent_ids: ["re-minted"],
+      election_held: held,
+      is_selected: won,
+    });
+  const course = [
+    cand("C0", 0, true),
+    cand("R1.1", 1, true),
+    cand("R1.2", 1, false),
+    cand("R2.1", 2, false),
+    cand("R3.1", 3, true),
+    cand("R4.1", 4, false),
+    cand("R5.1", 5, false, false),
+  ];
+  const line = (head: LineageNode | undefined) => {
+    if (!head) throw new Error("fixture");
+    return mainLine(course, head).map((s) => (s.kind === "held" ? `held@${s.round}` : s.node.id));
+  };
+
+  it("reads the crowns from the origin and names every held round, to any head", () => {
+    expect(line(course[4])).toEqual(["C0", "R1.1", "held@2", "R3.1", "held@4"]);
+    expect(line(course[6])).toEqual(["C0", "R1.1", "held@2", "R3.1", "held@4", "R5.1"]);
   });
 });

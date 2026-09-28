@@ -5,10 +5,12 @@ import { useConnector } from "@/lib/hooks/useConnector";
 import { useObserveSearchPoint } from "@/lib/hooks/useObserveSearchPoint";
 import { useRoundRows, type RoundRows } from "@/lib/hooks/useRoundRows";
 import {
+  METER_WORD,
   candidateObserveConfig,
   isSelfOptimization,
   observeOptions,
   runSummary,
+  runSummaryFacts,
   sampleFlips,
   searchPointDiff,
   searchpointCopyChoices,
@@ -20,11 +22,13 @@ import {
 } from "@/lib/derivations";
 import type { ElectedRow } from "@/lib/types";
 import { PROMPT_STRING_FIELDS } from "@/lib/prompt-fields";
-import { runPhaseLabel, stopReasonNextStep } from "@/lib/run-phase";
+import { stopReasonNextStep } from "@/lib/run-phase";
 import { fmtPct0, fmtSigned, fmtUsd } from "@/lib/format";
 import { cx } from "@/lib/cx";
-import { CopyButton, HoverCard, SegmentedControl, pressable } from "@/components/ui";
+import { CopyButton, HoverCard, SegmentedControl, Term, pressable } from "@/components/ui";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
+import { SummaryBlock } from "@/components/shell/SummaryBlock";
+import { SpendBuckets } from "@/components/shell/SpendBuckets";
 import { HardSamplesPreview } from "@/components/dashboard/samples/HardSamplesPreview";
 import { TrendChart } from "@/components/eval/TrendChart";
 
@@ -173,8 +177,16 @@ function ConfigBox({
     <div className="run-box">
       <div className="run-box-head">
         <div className="run-headline">
-          <strong>{summary.usedUsd != null ? fmtUsd(summary.usedUsd) : "—"}</strong>
-          <span className="run-headline-unit">spent</span>
+          {summary.metered ? (
+            <>
+              <Term content={<SpendBuckets metered={summary.metered} />}>
+                <strong>{fmtUsd(summary.metered.usd)}</strong>
+              </Term>
+              <span className="run-headline-unit">{METER_WORD[summary.metered.meter]}</span>
+            </>
+          ) : (
+            <strong>—</strong>
+          )}
           <span className="run-headline-sep" aria-hidden="true">
             ·
           </span>
@@ -415,23 +427,10 @@ function FlipIds({
 export function RunSummaryItem({ summary }: { summary: RunSummary }) {
   return (
     <div className="chat-msg ai run-summary-item" role="note">
-      <span className="run-summary-title">
-        Run finished
-        {summary.stopReason ? ` · ${runPhaseLabel("terminal", summary.stopReason)}` : ""}
-      </span>
+      <SummaryBlock dense facts={runSummaryFacts(summary)} />
       {stopReasonNextStep(summary.stopReason) ? (
         <p className="run-summary-next">{stopReasonNextStep(summary.stopReason)}</p>
       ) : null}
-      {/* θ does not appear: a log line has no hover to hide jargon behind. */}
-      <span className="run-summary-line">
-        {summary.championLabel ? `${summary.championLabel} · ` : ""}
-        {summary.accuracy != null ? fmtPct0(summary.accuracy) : "—"}
-        {summary.accuracy != null && summary.parentAccuracy != null
-          ? ` from ${fmtPct0(summary.parentAccuracy)}`
-          : ""}
-        {` · ${summary.rounds} rounds`}
-        {summary.usedUsd != null ? ` · ${fmtUsd(summary.usedUsd)}` : ""}
-      </span>
       {summary.changes ? <p className="run-summary-changes">{summary.changes}</p> : null}
     </div>
   );

@@ -1319,9 +1319,11 @@ paths:
         here. Each summary carries the campaign's lifetime billed spend
         (`spend_used_usd`, a floor while `spend_unpriced_tokens > 0`), summed
         server-side over its cycle ledgers and banked tombstones — the
-        per-campaign split of `GET /auth/quota-status`'s account total, so the
-        sidebar prints dollars it never adds up itself. Each carries `bench`,
-        the headline read off the campaign's result (`campaigns/{id}/result.json`,
+        per-campaign split of `GET /auth/quota-status`'s account total. Beside
+        it, `spend_metered` is what the campaign's cap counts along its line —
+        the bill, or a controlled arm's search incurred — by bucket: the
+        number the sidebar prints, so it never picks or adds one up itself.
+        Each carries `bench`, the headline read off the campaign's result (`campaigns/{id}/result.json`,
         `domain/campaign.py::CampaignResult`) under the formula its line runs —
         whichever cycle a rebase handed the line to — and never a per-cycle copy.
         Each also carries
@@ -1561,6 +1563,10 @@ paths:
         `/cycles` and `/tree` serve — overriding what the file declares, and
         `Last-Modified` covers that derivation's inputs rather than this file's mtime
         alone, since the phase turns `detached` on the clock with nothing written.
+        `spend_metered` (`MeteredSpend`) is set at read time too, head and replay
+        alike: `spend` read under the campaign's `ceiling_meter` — the bill, or a
+        controlled arm's search incurred — by bucket, the number every
+        surface sets beside `run_limits`' spend cap.
         The body names no optimizer's node in a key the bench serves.
         `current_round.candidates[]` (`LiveCandidate`) carries the round in flight
         whole: the closed-row numbers, the searchpoint in the `SearchpointCandidate`

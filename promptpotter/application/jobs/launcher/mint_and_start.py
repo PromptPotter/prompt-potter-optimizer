@@ -275,6 +275,7 @@ async def mint_campaign_command(
             origin_override=origin_override,
         )
         campaign_id, cycle_id = minted.campaign_id, minted.cycle_id
+        campaign_config = minted.campaign_config
         # Resolve the reservation onto the cycle it now names. Every hop-keyed join reads this —
         # `running_job_for` (how `change-run-limits` reaches the held cap), `reap_cycle_by_id`,
         # the holder readout — and each answers nothing at all against `UNRESOLVED_HOP`.

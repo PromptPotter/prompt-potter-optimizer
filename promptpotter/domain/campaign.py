@@ -14,7 +14,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import stable_hash
 from promptpotter.domain.run_records import WallClock
-from promptpotter.domain.spend import SpendRollup
+from promptpotter.domain.spend import CeilingMeter, SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 
 
@@ -128,6 +128,10 @@ class Arm(StrictModel):
     treatment_digest: str
 
 
+def ceiling_meter(arm: Arm | None) -> CeilingMeter:
+    return "bill" if arm is None else "search_incurred"
+
+
 class Launch(StrictModel):
     """One launch of the campaign's line, and where its wall clock went across every cycle it ran."""
 
@@ -220,4 +224,5 @@ __all__ = [
     "Launch",
     "Treatment",
     "bench_instrument",
+    "ceiling_meter",
 ]

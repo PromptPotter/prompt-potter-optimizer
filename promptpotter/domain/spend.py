@@ -27,6 +27,7 @@ __all__ = [
     "TOKEN_KIND_BUCKET",
     "BudgetChange",
     "CeilingMeter",
+    "MeteredSpend",
     "SpendBucket",
     "SpendCeilings",
     "SpendRollup",
@@ -246,6 +247,9 @@ class SpendBucket(StrictModel):
     # reads cheapness that never happened. The L4 no-evidence guard refuses such a cell.
     incurred_unpriced_tokens: int = 0
 
+    def metered_usd(self, meter: CeilingMeter) -> float:
+        return self.used_usd if meter == "bill" else self.incurred_usd
+
 
 class SpendRollup(StrictModel):
     """A cycle's spend: a bucket per spend kind, and the totals every consumer reads off them.
@@ -327,12 +331,10 @@ class SpendRollup(StrictModel):
 
     def metered(self, meters: CeilingMeter) -> tuple[float, int]:
         """What a ceiling of ``meters`` has already counted: USD, then billed tokens."""
-        if meters == "bill":
-            return self.total_used_usd, self.total_tokens_used
-        search = [getattr(self, TOKEN_KIND_BUCKET[k]) for k in SEARCH_KINDS]
+        counted = [getattr(self, TOKEN_KIND_BUCKET[k]) for k in METER_KINDS[meters]]
         return (
-            sum(b.incurred_usd for b in search),
-            sum(b.input_tokens + b.output_tokens for b in search),
+            round(sum(b.metered_usd(meters) for b in counted), 6),
+            sum(b.input_tokens + b.output_tokens for b in counted),
         )
 
     @property
@@ -352,6 +354,34 @@ class SpendRollup(StrictModel):
         if any(b.incurred_unpriced_tokens for b in search):
             return None
         return sum(b.incurred_usd for b in search)
+
+
+class MeteredSpend(StrictModel):
+    """What a run's spend caps have counted, in the units they meter, by bucket.
+    Every surface sets this beside a cap, so none picks the bill or the incurred total itself."""
+
+    meter: CeilingMeter
+    usd: float
+    tokens: int
+    # Each `SpendRollup` bucket the meter counts, in its units, summing to `usd`; `beside` holds the
+    # rest in the same units — a search meter's bench and diagnostic passes.
+    buckets: dict[str, float]
+    beside: dict[str, float]
+    billed_usd: float
+
+    @classmethod
+    def of(cls, spend: SpendRollup, meter: CeilingMeter) -> MeteredSpend:
+        usd, tokens = spend.metered(meter)
+        counted = {TOKEN_KIND_BUCKET[k] for k in METER_KINDS[meter]}
+        at = {name: getattr(spend, name).metered_usd(meter) for name in TOKEN_KIND_BUCKET.values()}
+        return cls(
+            meter=meter,
+            usd=usd,
+            tokens=tokens,
+            buckets={name: v for name, v in at.items() if name in counted},
+            beside={name: v for name, v in at.items() if name not in counted},
+            billed_usd=spend.total_used_usd,
+        )
 
 
 TOKEN_KIND_BUCKET: dict[TokenUsageKind, str] = {
@@ -377,3 +407,8 @@ assert set(TOKEN_KIND_BUCKET.values()) <= set(SpendRollup.model_fields), (
 SEARCH_KINDS: tuple[TokenUsageKind, ...] = ("optimizer", "backend", "judge")
 """The spend that FINDS a result — what a lift is priced in. The bench's pass is the instrument
 grading the result, and a diagnostic asks a question about it; neither is the search's."""
+
+METER_KINDS: dict[CeilingMeter, tuple[TokenUsageKind, ...]] = {
+    "bill": tuple(TOKEN_KIND_BUCKET),
+    "search_incurred": SEARCH_KINDS,
+}

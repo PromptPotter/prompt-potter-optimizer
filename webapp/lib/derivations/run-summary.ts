@@ -1,8 +1,11 @@
 // A finished run's chat-thread item, lifted verbatim off `dashboard.json`. Values, not a pointer:
 // a `resume` or rewind moves the dashboard on, and the frozen item must not restate itself.
 
-import type { OptimizerFact } from "@/lib/api/types";
+import type { MeteredSpend, OptimizerFact } from "@/lib/api/types";
 import type { DashboardSnapshot } from "@/lib/poll";
+import { fmtPct0 } from "@/lib/format";
+import { runPhaseLabel } from "@/lib/run-phase";
+import { SPEND_STAT_LABEL, spendStat, type SummaryFacts } from "./campaign-summary";
 import { bestObserveTarget } from "./searchPoint";
 import { headlineStats } from "./headline-stats";
 import { roundHasCandidates, sortedRounds } from "./round-candidates";
@@ -20,7 +23,7 @@ export interface RunSummary {
   parentAccuracy: number | null;
   // The bench's served held-out lift of the pick over the origin, in composite fitness.
   benchLift: number | null;
-  usedUsd: number | null;
+  metered: MeteredSpend | null;
   changes: string;
   // Lets a champion still at the origin tell "nothing tried" from "tried and lost". Round 0
   // holds no election, so its `improved` is `null`.
@@ -32,6 +35,28 @@ export interface RunSummary {
     // The optimizer's own words about that round, whichever optimizer ran it.
     facts: OptimizerFact[];
   } | null;
+}
+
+// The frozen item as `shell/SummaryBlock` draws it. θ does not appear: a log line has no hover to
+// hide jargon behind.
+export function runSummaryFacts(s: RunSummary): SummaryFacts {
+  return {
+    title: "Run finished",
+    state: s.stopReason ? runPhaseLabel("terminal", s.stopReason) : null,
+    stats: [
+      { label: "Champion", value: s.championLabel ?? "—" },
+      {
+        label: "Accuracy",
+        value: fmtPct0(s.accuracy),
+        sub:
+          s.accuracy != null && s.parentAccuracy != null
+            ? `from ${fmtPct0(s.parentAccuracy)}`
+            : undefined,
+      },
+      { label: "Rounds", value: String(s.rounds) },
+      s.metered ? spendStat(s.metered, "") : { label: SPEND_STAT_LABEL, value: "—" },
+    ],
+  };
 }
 
 export function runSummary(dash: DashboardSnapshot | null): RunSummary | null {
@@ -51,7 +76,7 @@ export function runSummary(dash: DashboardSnapshot | null): RunSummary | null {
     accuracy: champion?.accuracy ?? null,
     parentAccuracy: champion?.reference_accuracy ?? null,
     benchLift,
-    usedUsd: readSpend(dash).usedUsd,
+    metered: readSpend(dash).metered,
     changes: champion?.changes_description ?? "",
     lastRound: last
       ? {

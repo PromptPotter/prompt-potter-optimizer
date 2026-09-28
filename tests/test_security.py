@@ -825,14 +825,17 @@ async def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
     from promptpotter.application.runner.entry import _build_budget_gate
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.phases import StopReason
-    from promptpotter.domain.spend import BudgetChange
+    from promptpotter.domain.spend import BudgetChange, MeteredSpend
 
     hop = CycleHop(campaign_id="camp-4", cycle_id="cycle_budget0001")
     registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
     job = registry.request_slot(user_id="default", dataset_name="ds1", hop=hop)
     registry.set_caps(job.job_id, cap_usd=0.30, cap_tokens=5_000_000)
+    spent = MeteredSpend(
+        meter="bill", usd=0.10, tokens=210_000, buckets={}, beside={}, billed_usd=0.10
+    )
     observers = types.SimpleNamespace(
-        dashboard=types.SimpleNamespace(spend_metered=lambda _meters: (0.10, 210_000)),
+        dashboard=types.SimpleNamespace(spend_metered=lambda _meters: spent),
         arm_spend_book=lambda _book: None,
     )
     gate = _build_budget_gate(
@@ -961,15 +964,16 @@ def test_a_ceiling_the_operator_set_is_never_silently_unenforced(tmp_path: Path)
     from promptpotter.application.runner.loop import _armed_round_cap
     from promptpotter.domain.launch_limits import RoundsCap
     from promptpotter.domain.phases import StopReason
-    from promptpotter.domain.spend import BudgetChange
+    from promptpotter.domain.spend import BudgetChange, MeteredSpend
     from promptpotter.infrastructure.runtime_flags import (
         clear_run_control_flags,
         write_run_limits_mirror,
     )
 
     cycle_dir = tmp_path / "cyc"
+    spent = MeteredSpend(meter="bill", usd=1.0, tokens=9_000, buckets={}, beside={}, billed_usd=1.0)
     observers = types.SimpleNamespace(
-        dashboard=types.SimpleNamespace(spend_metered=lambda _meters: (1.0, 9_000)),
+        dashboard=types.SimpleNamespace(spend_metered=lambda _meters: spent),
         arm_spend_book=lambda _book: None,
     )
 

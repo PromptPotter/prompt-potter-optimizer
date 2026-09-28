@@ -1,19 +1,42 @@
 // The single parser for the dashboard `spend` block. A bucket may be ABSENT from the served file
 // (`diagnostic` and `bench` often are), so index a rollup through a guard, never an annotation.
 
-import type { SpendBucket, SpendRollup } from "@/lib/api/types";
+import type { MeteredSpend, SpendBucket, SpendRollup } from "@/lib/api/types";
 import type { DashboardSnapshot } from "@/lib/poll";
+import { fmtUsd } from "@/lib/format";
 import { cacheShare, prefixReading, type PrefixReading } from "./token-account";
 
-// Display order, biggest first. Must stay total over `domain/spend.py::TOKEN_KIND_BUCKET`: an
-// unlisted server bucket renders as an unexplained gap between the rows and the served total.
+// Display order, biggest first, in the operator's words — `evidence.py::_BUCKET_WORD` says the same.
+// Must stay total over `domain/spend.py::TOKEN_KIND_BUCKET`: an unlisted server bucket renders as
+// an unexplained gap between the rows and the served total.
 export const SPEND_BUCKETS = [
-  { key: "backend", label: "Backend" },
-  { key: "loop", label: "Loop" },
+  { key: "backend", label: "Connector" },
+  { key: "loop", label: "Optimizer" },
   { key: "judge", label: "Judge" },
   { key: "diagnostic", label: "Diagnostic" },
   { key: "bench", label: "Bench" },
 ] as const satisfies readonly { key: keyof SpendRollup; label: string }[];
+
+export const METER_WORD: Record<MeteredSpend["meter"], string> = {
+  bill: "billed",
+  search_incurred: "search incurred",
+};
+
+// A served `MeteredSpend` bucket map in display order, each under its label.
+export function labelledBuckets(served: Record<string, number>): { label: string; usd: number }[] {
+  return SPEND_BUCKETS.flatMap(({ key, label }) => {
+    const usd = served[key];
+    return usd === undefined ? [] : [{ label, usd }];
+  });
+}
+
+// The compact secondary line: the buckets inside the cap, then what is metered beside it.
+export function meteredBucketsLine(m: MeteredSpend): string {
+  const part = (b: { label: string; usd: number }) => `${b.label.toLowerCase()} ${fmtUsd(b.usd)}`;
+  const inside = labelledBuckets(m.buckets).map(part).join(" · ");
+  const beside = labelledBuckets(m.beside).map(part).join(" · ");
+  return beside ? `${inside} — beside: ${beside}` : inside;
+}
 
 export interface SpendView {
   backendUsd: number;
@@ -22,6 +45,8 @@ export interface SpendView {
   // Served, never summed here. 0 where the block is absent — `usedUsd` separates that from $0.00.
   totalUsd: number;
   usedUsd: number | null;
+  // What the caps count — the one number set beside a cap. `null` where the route served none.
+  metered: MeteredSpend | null;
   // From `run_limits`, the gate's source; `null` = that ceiling is disarmed.
   budgetUsd: number | null;
   budgetTokens: number | null;
@@ -72,6 +97,7 @@ export function readSpend(dash: DashboardSnapshot | null): SpendView {
     judgeUsd,
     totalUsd,
     usedUsd: totalUsd > 0 ? totalUsd : null,
+    metered: dash?.spend_metered ?? null,
     budgetUsd,
     budgetTokens: typeof limits?.token_budget === "number" ? limits.token_budget : null,
     rateKnown: buckets.some((b) => b.rate_known),

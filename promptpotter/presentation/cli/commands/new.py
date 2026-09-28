@@ -360,7 +360,7 @@ async def _mint_fresh_session(
 
     checkin_line("campaign", f"minted {minted.campaign_id}")
 
-    return session, campaign_config, dataset_name
+    return session, minted.campaign_config, dataset_name
 
 
 async def _run_loop(

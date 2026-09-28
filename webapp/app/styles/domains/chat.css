@@ -42,8 +42,13 @@
 .wf-hero-node-toggle:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent-glow)}
 .wf-hero-node-toggle[aria-pressed="true"]{border-color:var(--color-accent);box-shadow:inset 0 0 0 1px var(--color-accent),0 0 14px var(--color-accent-glow)}
 .wf-hero-node.llm .val{color:var(--color-accent);align-self:center;text-align:center;max-width:220px}
-.wf-hero-node.llm.active{border-color:var(--color-success-border);animation:wf-running-pulse 2s ease-in-out infinite}
-.wf-hero-node.llm.active .val{color:var(--color-success)}
+.wf-hero-node.llm.running{
+  border-color:var(--color-success-border);
+  background:linear-gradient(180deg,rgba(var(--color-success-rgb),0.16) 0%,rgba(var(--color-success-rgb),0.04) 100%);
+  box-shadow:0 0 28px rgba(var(--color-success-rgb),0.22),inset 0 1px 0 rgba(255,255,255,0.05)
+}
+.wf-hero-node.llm.running .val{color:var(--color-success)}
+.wf-hero-node.llm.scoring{animation:wf-running-pulse 2s ease-in-out infinite}
 .wf-hero-arrow{
   flex:1;max-width:180px;min-width:65px;height:2px;position:relative;margin:0 -1px;
   background:linear-gradient(90deg,transparent 0%,var(--color-accent) 18%,var(--color-accent) 82%,transparent 100%);
@@ -510,8 +515,6 @@
 .hsp-full{margin-top:var(--space-4)}
 
 .chat-msg.run-summary-item{max-width:100%;width:100%;align-self:stretch;display:flex;flex-direction:column;gap:var(--space-4)}
-.run-summary-title{font-size:var(--text-sm);font-weight:600;color:var(--color-text-primary)}
-.run-summary-line{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary)}
 .run-summary-changes{margin:0;font-size:var(--text-sm);line-height:1.5;color:var(--color-text-secondary)}
 /* Served, never composed here (`run-phase.ts`). */
 .run-summary-next{margin:0;font-size:var(--text-sm);line-height:1.5;color:var(--color-text-secondary)}

@@ -123,6 +123,7 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
     loopUsd,
     judgeUsd,
     usedUsd,
+    metered,
     budgetUsd,
     budgetTokens,
     rateKnown,
@@ -141,7 +142,7 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
 
   // The lift itself is the masthead's BENCH chip; the strip carries its price.
   const { benchLiftPerUsd } = headlineStats(dash);
-  const etaChip = etaToBudget(usedUsd, budgetUsd, cycleStartedAt);
+  const etaChip = etaToBudget(metered?.usd ?? null, budgetUsd, cycleStartedAt);
   // SERVER state (I6): the depth clears itself at the round boundary, and the walk re-reads it
   // at every launch, so a press applies to a walk already running.
   const lookahead = dash?.sample_lookahead ?? 1;
@@ -228,10 +229,10 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
             <div className="section-title">Spend</div>
             {/* Cache share per bucket, never pooled: the buckets hit different providers, and a
                 pooled ratio would drown the judge's. */}
-            <div className="row"><span className="lbl">Backend</span><span className="val">{rateKnown ? fmtUsd(backendUsd) : `${backendTokens} tok`}{cacheTag(backendCacheShare, backendCacheWrite)}</span></div>
-            <div className="row"><span className="lbl">Loop</span><span className="val">{rateKnown ? fmtUsd(loopUsd) : `${loopTokens} tok`}{cacheTag(loopCacheShare, loopCacheWrite)}</span></div>
+            <div className="row"><span className="lbl">Connector</span><span className="val">{rateKnown ? fmtUsd(backendUsd) : `${backendTokens} tok`}{cacheTag(backendCacheShare, backendCacheWrite)}</span></div>
+            <div className="row"><span className="lbl">Optimizer</span><span className="val">{rateKnown ? fmtUsd(loopUsd) : `${loopTokens} tok`}{cacheTag(loopCacheShare, loopCacheWrite)}</span></div>
             <div className="row"><span className="lbl">Judge</span><span className="val">{rateKnown ? fmtUsd(judgeUsd) : `${judgeTokens} tok`}{cacheTag(judgeCacheShare, judgeCacheWrite)}</span></div>
-            <div className="row"><span className="lbl">Total</span><span className="val">{usedUsd != null ? fmtUsd(usedUsd) : "—"}</span></div>
+            <div className="row"><span className="lbl">Billed</span><span className="val">{usedUsd != null ? fmtUsd(usedUsd) : "—"}</span></div>
             <div className="row"><span className="lbl">Tokens</span><span className="val">{fmtTokens(totalTokens)}</span></div>
             {unpricedTokens > 0 ? (
               <div className="row">
@@ -324,8 +325,7 @@ export function RemoteControl({ cycleStartedAt = null }: Props) {
               currentBudgetUsd={budgetUsd}
               currentBudgetTokens={budgetTokens}
               currentMaxRounds={dash?.run_limits?.max_rounds ?? null}
-              usedUsd={usedUsd}
-              usedTokens={totalTokens}
+              metered={metered}
             />
           </div>
         </div>

@@ -211,8 +211,8 @@ function PipelineBox({
   const labelLines = (label: string) =>
     label.includes("_") ? label.split("_") : [label];
 
-  // `active_node` speaks for the optimizer, so it names a node here only on a self-optimizing
-  // campaign; otherwise the whole chip pulses. Never both.
+  // Green is the RUN's phase, held across every step; the pulse is the measurement node scoring.
+  // `active_node` lights a dot here only on a self-optimizing campaign, and then the chip holds.
   const namedHere = isLive && interior.some((n) => n.id === activeNode);
   const calling = isLive && isMeasuring(dash) && !namedHere;
 
@@ -228,7 +228,15 @@ function PipelineBox({
     const isSelected = isSel(sole.id);
     const soleNest = nestAt(sole.id);
     return (
-      <div className={cx("wf-hero-node", "llm", isSelected && "selected", calling && "active")}>
+      <div
+        className={cx(
+          "wf-hero-node",
+          "llm",
+          isSelected && "selected",
+          isLive && "running",
+          calling && "scoring",
+        )}
+      >
         {connector && <div className="wf-hero-multi-tag">{connector}</div>}
         <button
           type="button"
@@ -254,7 +262,15 @@ function PipelineBox({
   }
 
   return (
-    <div className={cx("wf-hero-node", "llm", "wf-hero-node-multi", calling && "active")}>
+    <div
+      className={cx(
+        "wf-hero-node",
+        "llm",
+        "wf-hero-node-multi",
+        isLive && "running",
+        calling && "scoring",
+      )}
+    >
       {connector && <div className="wf-hero-multi-tag">{connector}</div>}
       <div className="wf-hero-multi-rail">
       {/* min-width floors the scaling: below ~44px a cell is unreadable, so the rail scrolls. */}

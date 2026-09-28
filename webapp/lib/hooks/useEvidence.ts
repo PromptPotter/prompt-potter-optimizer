@@ -24,6 +24,8 @@ export function useEvidence(
   metric: string,
   // `row,col` over two served factors. Pooled server-side, so a new axis is a new read.
   grid: string,
+  // Set while a subject's campaign runs: re-read in place, and at once on each `revalidateOn` bump.
+  live: { intervalMs: number; revalidateOn: number } | null,
 ): EvidenceRead {
   const selection = [...subjects].sort().join(SEP);
   const read = useRead(
@@ -38,7 +40,12 @@ export function useEvidence(
             ),
         }
       : null,
-    { surface: "evidence", survive: "invalid" },
+    {
+      surface: "evidence",
+      survive: "invalid",
+      intervalMs: live?.intervalMs,
+      revalidateOn: live?.revalidateOn,
+    },
   );
 
   if (read.status === "ready") {

@@ -9,6 +9,7 @@ import type {
   ConfigMapResponse,
   LineageNode,
   LiveDashboardState,
+  MeteredSpend,
   RunsWithParam,
 } from "@/lib/api";
 import { campaignDisplayName } from "@/lib/names";
@@ -27,6 +28,7 @@ import {
   vendorOf,
 } from "@/lib/format";
 import type { RunGroup } from "./campaign-forest";
+import { METER_WORD, meteredBucketsLine } from "./spend";
 
 export interface RowStat {
   label: string;
@@ -42,13 +44,17 @@ export interface RowSetting {
   source: RunsWithParam["source"];
 }
 
-export interface RowCardFacts {
+// What `shell/SummaryBlock` draws, for each host that summarises a campaign.
+export interface SummaryFacts {
   title: string;
   // Always a word, never colour alone.
   state?: string | null;
   tags?: string[];
-  lede: string;
   stats: RowStat[];
+}
+
+export interface RowCardFacts extends SummaryFacts {
+  lede: string;
   caveat?: ReactNode;
   facts: [string, string][];
   // `null` ⇒ the pipeline did not resolve, which the card says out loud; absent ⇒ not a campaign.
@@ -66,17 +72,30 @@ function spendFloor(c: CampaignSummary): string {
   return c.spend_unpriced_tokens > 0 ? "≥" : "";
 }
 
+// What the campaign's cap counts, so an arm stopped at its cap reads at its cap.
 export function spendLabel(c: CampaignSummary): string {
-  return `${spendFloor(c)}${fmtUsdCents(c.spend_used_usd)}`;
+  return `${spendFloor(c)}${fmtUsdCents(c.spend_metered.usd)}`;
+}
+
+export const SPEND_STAT_LABEL = "Spend";
+
+export function spendStat(metered: MeteredSpend, floor: string): RowStat {
+  return {
+    label: SPEND_STAT_LABEL,
+    value: `${floor}${fmtUsd(metered.usd)} ${METER_WORD[metered.meter]}`,
+    sub: meteredBucketsLine(metered),
+  };
 }
 
 // The headline: the selection graded on held-out rows no optimizer node read. It is the campaign's
 // COMPOSITE, a 0–1 score and never a rate, so accuracy rides beside it; every value served, and a
 // pass that read nothing shows the served reason in place of a number.
+export const BENCH_STAT_LABEL = "Bench composite";
+
 export function benchStat(bench: BenchScore): RowStat {
   const { selected, origin, missing_reason } = bench;
   return {
-    label: "Bench composite",
+    label: BENCH_STAT_LABEL,
     value: selected === null ? "—" : fmtFitness(selected.composite_fitness),
     sub:
       missing_reason !== null
@@ -96,7 +115,7 @@ export function benchReading(
   if (bench) return benchStat(bench);
   const sub =
     runPhase === "terminal" ? "not graded — the run ended first" : "graded when the run ends";
-  return { label: "Bench composite", value: "—", sub };
+  return { label: BENCH_STAT_LABEL, value: "—", sub };
 }
 
 // The θ clause only where the served node elects on θ: a peer optimizer's rounds are not.
@@ -232,8 +251,9 @@ export function campaignCard(
   const cap = runsWith ? runsWith.max_rounds : null;
   const stats: RowStat[] = [
     ...(campaign.bench ? [benchStat(campaign.bench)] : []),
+    spendStat(campaign.spend_metered, spendFloor(campaign)),
     {
-      label: "Spend",
+      label: "Billed",
       value: `${spendFloor(campaign)}${fmtUsd(campaign.spend_used_usd)}`,
       sub:
         campaign.spend_unpriced_tokens > 0
@@ -243,7 +263,7 @@ export function campaignCard(
             : "lifetime, every cycle",
       className:
         campaign.spend_unpriced_tokens > 0 || campaign.spend_unreported_usd > 0
-          ? "rowhover-tone-warn"
+          ? "summary-block-warn"
           : undefined,
     },
     {

@@ -34,6 +34,33 @@ export function splitRetired(rows: readonly LineageNode[]): {
   return { live, retired: [...byBranch].map(([branch, candidates]) => ({ branch, candidates })) };
 }
 
+export type MainLineStep = { kind: "step"; node: LineageNode } | { kind: "held"; round: number };
+
+// The main line to a head, origin first: each round's crowns, a crownless election as held, then the
+// head. Read off crowns, never `parent_ids`: a parent edge names the id at mint, which resume re-mints.
+export function mainLine(candidates: readonly LineageNode[], head: LineageNode): MainLineStep[] {
+  const upTo = head.round ?? 0;
+  const crowned = new Map<number, LineageNode[]>();
+  const elected = new Set<number>();
+  for (const c of candidates) {
+    if (c.round === null || !c.election_held) continue;
+    elected.add(c.round);
+    if (!c.is_selected) continue;
+    const picks = crowned.get(c.round);
+    if (picks) picks.push(c);
+    else crowned.set(c.round, [c]);
+  }
+  const steps: MainLineStep[] = [];
+  for (const r of [...new Set([...elected, upTo])].sort((a, b) => a - b)) {
+    const picks = crowned.get(r);
+    if (r === upTo) steps.push({ kind: "step", node: head });
+    else if (r < upTo && picks) steps.push(...picks.map((node) => ({ kind: "step" as const, node })));
+    else if (r > upTo && picks) break;
+    else steps.push({ kind: "held", round: r });
+  }
+  return steps;
+}
+
 // A fork is never one of these: it is not a node, its candidates sit on the parent's timeline.
 export function childCourses(candidate: LineageNode | undefined): LineageNode[] {
   return (candidate?.children ?? []).filter((c) => c.kind === "course");

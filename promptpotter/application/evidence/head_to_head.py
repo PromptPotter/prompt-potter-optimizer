@@ -10,6 +10,7 @@ from promptpotter.application.datasets.authored import config_cell_scorer
 from promptpotter.application.evidence.subjects import SubjectReading
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.runner.bench import read_bench, read_pass
+from promptpotter.application.runner.campaign_result import read_line_spend
 from promptpotter.application.scoring.selection import paired_fitness
 from promptpotter.domain.bench import BenchPass, BenchReading, BenchScore, DatasetSplit
 from promptpotter.domain.campaign import (
@@ -19,9 +20,10 @@ from promptpotter.domain.campaign import (
     HeadToHeadRecord,
     Instrument,
     bench_instrument,
+    ceiling_meter,
 )
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.spend import SpendRollup
+from promptpotter.domain.spend import MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.archive_queries import bench_reads
 from promptpotter.infrastructure.store.io import read_json_tolerant
@@ -48,6 +50,8 @@ class HeadToHeadRow(StrictModel):
     treatment_digest: str | None
     # The budget the campaign ran under: its head-to-head's for an arm, else its own config's.
     budget: ArmBudget
+    # What that budget counts of `spend`; `None` beside a `None` spend.
+    spend_metered: MeteredSpend | None
     # A cycle on its line was steered, skipped or model-overridden by an operator.
     human_intervened: bool
     # `None` where the line banked no origin's pass: nothing held out, or none sent yet. Its
@@ -104,7 +108,7 @@ class HeadToHead(StrictModel):
     """The campaigns' bench headlines side by side, and whether one instrument graded them all."""
 
     rows: list[HeadToHeadRow]
-    # The head-to-head whose declaration this table reads, where every arm in it names one.
+    # The head-to-head whose declaration this table reads: the one most arms in it name.
     head_to_head_id: str | None
     # The one grader every row's bench is read under — the declared one, else the oldest
     # campaign's formula — so no two headlines differ by the function that graded them.
@@ -119,11 +123,16 @@ class HeadToHead(StrictModel):
     pairs: list[SelectionPair]
     # The oldest row carrying a spend and a worked clock, which every row's `*_ratio` divides by.
     ratio_reference: str | None
-    note: str
+    # `verdict` in one sentence.
+    verdict_line: str
+    # Why a row that is no arm of the declared head-to-head is NOT CONTROLLED; `None` where none is.
+    uncontrolled_note: str | None
+    # The rest qualifying the verdict, one sentence each.
+    notes: list[str]
 
 
 class HeadToHeadEntry(NamedTuple):
-    """One campaign subject, with the tree it lives in."""
+    """The subject standing for one campaign — its own, or a course on it — and its tree."""
 
     reading: SubjectReading
     stores: Stores
@@ -144,13 +153,15 @@ _ORIGIN_READING = "origin_reading"
 def _declared(
     entries: list[HeadToHeadEntry], campaigns: list[Campaign]
 ) -> tuple[HeadToHeadRecord, int] | None:
-    """The record every arm here names, and its first arm's slot — ``None`` where no arm is here
-    or the arms name two head-to-heads."""
-    ids = {c.arm.head_to_head_id for c in campaigns if c.arm is not None}
-    if len(ids) != 1:
+    """The record most arms here name, ties to the oldest arm's, and its first arm's slot —
+    ``None`` where no arm is here. An arm of another record is a foreign row, never a veto."""
+    named = [c.arm.head_to_head_id for c in campaigns if c.arm is not None]
+    if not named:
         return None
-    (h2h_id,) = ids
-    slot = next(i for i, c in enumerate(campaigns) if c.arm is not None)
+    h2h_id = max(dict.fromkeys(named), key=named.count)
+    slot = next(
+        i for i, c in enumerate(campaigns) if c.arm is not None and c.arm.head_to_head_id == h2h_id
+    )
     record = entries[slot].stores.campaigns.load_head_to_head(h2h_id)
     return None if record is None else (record, slot)
 
@@ -225,13 +236,17 @@ def head_to_head(entries: list[HeadToHeadEntry]) -> HeadToHead | None:
         differs_on=differs_on,
         pairs=_pairs(graded),
         ratio_reference=None if base is None else base.campaign_id,
-        note=_note(
+        verdict_line=_verdict_line(verdict, len(graded)),
+        uncontrolled_note=None
+        if record is None or all(g.row.controlled for g in read)
+        else f"Ran as no arm of head-to-head {record.head_to_head_id}, so its search could read "
+        "other campaigns' measurements and take an operator's steer.",
+        notes=_notes(
             verdict,
             differs_on,
             len(graded),
             len(read),
             [cid for cid, others in concurrent.items() if others],
-            uncontrolled=[g.row.campaign_id for g in read if not g.row.controlled],
             declared=record,
         ),
     )
@@ -351,7 +366,9 @@ def _read(
         else None
     )
     cost = None if result is None else result.cost
-    spend = None if cost is None else cost.spend
+    # Live off the line's ledgers, the fold the campaign card's bill reads: the banked cost is the
+    # last ended launch's, so a running arm's would lag its own bill.
+    spend = None if cost is None else read_line_spend(stores, campaign)
     windows = [
         (start, end)
         for run in ([] if cost is None else cost.launches)
@@ -364,11 +381,18 @@ def _read(
             campaign_id=reading.campaign_id,
             optimizer=config.optimization.optimizer,
             arm=campaign.arm,
+            # A row's own fact: an arm of the read's record, on its budget and — once graded — its
+            # instrument.
             controlled=record is not None
             and campaign.arm is not None
-            and campaign.arm.head_to_head_id == record.head_to_head_id,
+            and campaign.arm.head_to_head_id == record.head_to_head_id
+            and config.optimization.arm_budget == record.budget
+            and (bench_set is None or bench_set == record.instrument),
             treatment_digest=None if campaign.treatment is None else campaign.treatment.digest,
             budget=config.optimization.arm_budget,
+            spend_metered=None
+            if spend is None
+            else MeteredSpend.of(spend, ceiling_meter(campaign.arm)),
             human_intervened=reading.human_intervened,
             bench=bench,
             bench_set=bench_set,
@@ -428,62 +452,55 @@ def _pairs(graded: list[_Graded]) -> list[SelectionPair]:
     return out
 
 
-def _note(
+def _verdict_line(verdict: bool | None, n_graded: int) -> str:
+    if verdict is None:
+        return f"No verdict: a head-to-head needs two campaigns with a graded bench set; {n_graded} here."
+    if verdict:
+        return (
+            "Comparable: one bank, split, held-out row set, scorer, target model, origin and "
+            "budget, so the selected column is one quantity."
+        )
+    return "Not comparable: these headlines are NOT one quantity, and no pair is read across two."
+
+
+def _notes(
     verdict: bool | None,
     differs_on: list[str],
     n_graded: int,
     n_rows: int,
     concurrent: list[str],
     *,
-    uncontrolled: list[str],
     declared: HeadToHeadRecord | None,
-) -> str:
-    controlled = (
-        ""
-        if declared is None
-        else f" Read against head-to-head {declared.head_to_head_id}'s declared instrument, "
-        "scorer and budget."
-    ) + (
-        f" NOT CONTROLLED: {', '.join(uncontrolled)} ran as no arm of it, so its search could "
-        "read other campaigns' measurements and take an operator's steer."
-        if uncontrolled and declared is not None
-        else ""
-    )
-    tail = (
-        f" {n_rows - n_graded} campaign(s) carry no bench headline — nothing held out, or the "
-        "line has not graded its selection — and sit outside the verdict."
-        if n_rows > n_graded
-        else ""
-    ) + (
-        f" {', '.join(concurrent)} ran concurrently on one content-addressed cache: the first to "
-        "reach a cell paid and the rest replayed it, so the bill and the clock split by "
-        "arrival. The USD ratios price INCURRED spend, which counts a replay as paid; the "
-        "worked-seconds ratio stays confounded."
-        if concurrent
-        else ""
-    )
-    if verdict is None:
-        body = f"A head-to-head needs two campaigns with a graded bench set; {n_graded} here."
-    elif verdict:
-        body = (
-            "Bench set IDENTICAL — one bank, one split, the same held-out rows, one scorer, one "
-            "target model, one origin and one budget — so the selected column is one quantity and "
-            "every pair below is read on the same rows."
+) -> list[str]:
+    notes = []
+    if declared is not None:
+        notes.append(
+            f"Read against head-to-head {declared.head_to_head_id}'s declared instrument, scorer "
+            "and budget."
         )
-    else:
-        drift = (
-            " `origin_reading`: campaigns on one bench set read the same origin apart beyond its "
+    if verdict is True:
+        notes.append("Every pair below is read on the same rows.")
+    if verdict is False:
+        notes.append("A row off the declared or most shared instrument is marked.")
+    if _ORIGIN_READING in differs_on:
+        notes.append(
+            "`origin_reading`: campaigns on one bench set read the same origin apart beyond its "
             "own noise under one formula, so the backend or a judge moved between them — a change "
             "no stamp names."
-            if _ORIGIN_READING in differs_on
-            else ""
         )
-        body = (
-            f"Bench DIFFERS on {', '.join(differs_on)}, so these headlines are NOT one quantity. "
-            "A row off the declared or most shared instrument is marked; no pair is read across "
-            "two." + drift
+    if n_rows > n_graded:
+        notes.append(
+            f"{n_rows - n_graded} campaign(s) carry no bench headline — nothing held out, or the "
+            "line has not graded its selection — and sit outside the verdict."
         )
-    return body + controlled + tail
+    if concurrent:
+        notes.append(
+            f"{', '.join(concurrent)} ran concurrently on one content-addressed cache: the first "
+            "to reach a cell paid and the rest replayed it, so the bill and the clock split by "
+            "arrival. The USD ratios price INCURRED spend, which counts a replay as paid; the "
+            "worked-seconds ratio stays confounded."
+        )
+    return notes
 
 
 __all__ = [

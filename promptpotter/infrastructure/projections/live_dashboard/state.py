@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, ValidationError
 
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import BenchScore
@@ -19,7 +19,7 @@ from promptpotter.domain.dashboard_rows import (
 )
 from promptpotter.domain.phases import DashboardState, RunPhase
 from promptpotter.domain.results import DisplayMetric, OverlapReading
-from promptpotter.domain.spend import SpendRollup
+from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.clock import utcnow_iso
 
@@ -32,6 +32,7 @@ __all__ = [
     "LoopWarning",
     "RacingBlock",
     "RunLimits",
+    "overlay_spend_metered",
     "warming_payload",
 ]
 
@@ -51,6 +52,15 @@ def warming_payload(hop: CycleHop, *, run_phase: str) -> dict[str, Any]:
         "phase_hint": "origin",
         "run_phase": run_phase,
     }
+
+
+def overlay_spend_metered(body: dict[str, Any], meter: CeilingMeter) -> None:
+    """A ``spend`` block this build cannot parse serves none, rather than failing the poll."""
+    try:
+        spend = SpendRollup.model_validate(body["spend"])
+    except ValidationError:
+        return
+    body["spend_metered"] = MeteredSpend.of(spend, meter).model_dump()
 
 
 class CatchUpLogEntry(StrictModel):
@@ -313,6 +323,9 @@ class LiveDashboardState(StrictModel):
     run_limits: RunLimits | None = None
 
     spend: SpendRollup = Field(default_factory=SpendRollup)
+    # WIRE-ONLY like `run_phase`: the dashboard route sets it off `spend` under the campaign's
+    # `ceiling_meter`, a manifest fact no ledger record carries, so a replay serves it too.
+    spend_metered: MeteredSpend | None = Field(default=None, exclude=True)
 
     # The SAME fold, keyed by the round each call stamped itself with — so "what did round 3 cost,
     # and how much of its input did providers serve off their own prefix cache" is answerable at

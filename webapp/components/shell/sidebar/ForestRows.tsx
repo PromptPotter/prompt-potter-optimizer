@@ -438,7 +438,7 @@ function CandidateRow({
           ? "—"
           : `${cand.theta.toFixed(2)}${cand.theta_se != null ? ` ± ${cand.theta_se.toFixed(2)}` : ""}`,
       sub: caveat ? "not ability — see below" : "what the round elects on",
-      className: caveat ? "rowhover-tone-warn" : undefined,
+      className: caveat ? "summary-block-warn" : undefined,
     });
   }
   stats.push({

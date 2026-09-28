@@ -7,6 +7,8 @@ import type { Evidence, SubjectReading } from "@/lib/api";
 import { CardFrame, SegmentedControl, Toolbar, ToolbarSep } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { useCompareSelection } from "@/lib/compare-selection";
+import { buildForest } from "@/lib/derivations";
+import { useWorkspace } from "@/lib/workspace";
 import { useEvidence } from "@/lib/hooks/useEvidence";
 import {
   effectTone,
@@ -14,6 +16,7 @@ import {
   fmtMetricValue,
   fmtSigned,
   shortId,
+  verdictTone,
 } from "@/lib/format";
 import { maskedSubject } from "@/lib/api/reads";
 import { ChannelCards } from "./ChannelCards";
@@ -36,10 +39,7 @@ const VIEWS: readonly { value: CompareView; label: string; title: string }[] = [
   },
 ];
 
-// The sentence is served (`Comparability.note`); only the tone is chosen here, and `null` is UNKNOWN.
-function comparabilityTone(verdict: boolean | null): string {
-  return verdict === true ? "l4-note" : "l4-warn";
-}
+const LIVE_EVIDENCE_MS = 30000;
 
 function channelNames(subjects: readonly SubjectReading[]): ReadonlyMap<string, string> {
   return new Map(
@@ -70,6 +70,27 @@ export function ComparePane() {
   const [metric, setMetric] = useState("");
   // Server `row,col`, held here because cells pool server-side: an axis change is a refetch.
   const [grid, setGrid] = useState("");
+  // The registry's own poll says when a compared campaign moved: a closed round or a new phase
+  // re-reads the evidence at once, and a running one is re-read on a slow tick besides.
+  const { campaigns, cycles } = useWorkspace();
+  const runs = useMemo(
+    () =>
+      new Map(
+        buildForest(campaigns, cycles)
+          .flatMap((o) => o.runs)
+          .map((r) => [r.campaign.campaign_id, r]),
+      ),
+    [campaigns, cycles],
+  );
+  const compared = channels.flatMap((c) => runs.get(c.rootCampaignId)?.answering ?? []);
+  const moved = compared.map((a) => `${a.cycle_id}:${a.rounds_closed}:${a.run_phase}`).join("|");
+  const [seenMoved, setSeenMoved] = useState(moved);
+  const [revalidateOn, setRevalidateOn] = useState(0);
+  if (moved !== seenMoved) {
+    setSeenMoved(moved);
+    setRevalidateOn((n) => n + 1);
+  }
+  const running = compared.some((a) => a.run_phase === "running");
   const { evidence, loading, error, invalidMetric } = useEvidence(
     selected,
     ranking,
@@ -77,6 +98,7 @@ export function ComparePane() {
     config,
     metric,
     grid,
+    running ? { intervalMs: LIVE_EVIDENCE_MS, revalidateOn } : null,
   );
 
   // A new campaign set drops the ranking press, the metric (the catalogue is per-selection; a stale
@@ -137,6 +159,7 @@ export function ComparePane() {
               <ChannelCards
                 evidence={evidence}
                 channels={channels}
+                runs={runs}
                 edits={edits}
                 onEdits={setEdits}
                 onReplace={repoint}
@@ -209,7 +232,7 @@ export function ComparePane() {
                 {readable ? (
                   <>
                     {comparability && (
-                      <p className={comparabilityTone(comparability.verdict)}>
+                      <p className={verdictTone(comparability.verdict)}>
                         {comparability.note}
                       </p>
                     )}

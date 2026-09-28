@@ -89,7 +89,7 @@ from promptpotter.application.scoring.metrics import (
 from promptpotter.application.scoring.sample_measurement import measure_sample
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.bench import BenchPass, BenchPasses, DatasetSplit, partition_bank
-from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.campaign import Arm, Campaign, HeadToHeadRecord
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.export import build_prompt_export
 from promptpotter.domain.measurement_provenance import RunSource
@@ -3593,6 +3593,7 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
         loop: float = 0.05,
         wall: int = 100,
         rebased: bool = False,
+        arm: Arm | None = None,
     ) -> Any:
         split = DatasetSplit(bench=6, seed=seed)
         partition = partition_bank(bank, split)
@@ -3603,6 +3604,7 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
                 dataset_name="ds",
                 created_at=f"2026-09-26T00:00:{n:02d}Z",
                 root_cycle_id=root.cycle_id,
+                arm=arm,
                 config={
                     "optimization": {
                         "optimizer": cid.split("_")[0],
@@ -3708,6 +3710,13 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
     assert [r.concurrent_with for r in h2h.rows] == [[], []]
     # Every individual graded on the shared rows spent them — the one origin and two picks.
     assert [r.bench_reads for r in h2h.rows] == [3, 3]
+    # A campaign ticked in the webapp arrives as a COURSE on its line and stands for the campaign
+    # ONCE: a second subject of it would pair the campaign with itself.
+    course = SubjectSpec("course", "potter_a", "cycle_potter_a_fork_r1")
+    for asked, subjects in (([course, capo], [course]), ([course, potter, capo], [potter])):
+        h2h = subject_evidence(stores, asked).head_to_head
+        assert h2h is not None and len(h2h.pairs) == 1
+        assert sorted(r.subject for r in h2h.rows) == sorted(s.key for s in (*subjects, capo))
 
     # Another seed drew other held-out rows: its headline is listed and never paired.
     gepa = campaign("gepa_c", 3, seed=1, selected=0.9)
@@ -3737,6 +3746,36 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
     assert len(h2h.pairs) == 3
     # Their runs overlapped potter's: a shared cache split the bill by arrival.
     assert [r.concurrent_with for r in h2h.rows] == [["capo_f"], [], ["potter_a"]]
+
+    # Three arms of one declared record beside an arm of another: only the foreign row is not
+    # controlled. Naming two records must not demote the arms, which read their own record.
+    shared = subject_evidence(stores, [potter, capo]).head_to_head
+    assert shared is not None and shared.rows[0].bench_set is not None
+    for h2h_id in ("real4", "real5"):
+        stores.campaigns.declare_head_to_head(
+            HeadToHeadRecord(
+                head_to_head_id=h2h_id,
+                created_at="",
+                instrument=shared.rows[0].bench_set,
+                budget=shared.rows[0].budget,
+            )
+        )
+    arms = [
+        campaign(
+            f"{key}_{h2h_id}",
+            n,
+            seed=0,
+            selected=0.6,
+            arm=Arm(head_to_head_id=h2h_id, arm_key=key, treatment_digest=key),
+        )
+        for n, (key, h2h_id) in enumerate(
+            [("potter", "real4"), ("capo", "real4"), ("gepa", "real4"), ("levi", "real5")],
+            start=10,
+        )
+    ]
+    h2h = subject_evidence(stores, arms).head_to_head
+    assert h2h is not None and h2h.head_to_head_id == "real4"
+    assert [r.controlled for r in h2h.rows] == [True, True, True, False]
 
 
 # 8. The L4 outer proxy — what one finished inner cycle says
@@ -4656,9 +4695,9 @@ def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
     assert spend.total_used_usd == pytest.approx(0.02)
     assert spend.total_incurred_usd == pytest.approx(0.04)
     # The budget gate reads the bill, so a replay can never halt a run it cost nothing to make.
-    assert view.spend_metered("bill")[0] == pytest.approx(0.02)
+    assert view.spend_metered("bill").usd == pytest.approx(0.02)
     # A controlled arm's ceiling is its search's incurred cost: a sibling's cache stretches nothing.
-    assert view.spend_metered("search_incurred")[0] == pytest.approx(0.04)
+    assert view.spend_metered("search_incurred").usd == pytest.approx(0.04)
     assert spend.loop.input_tokens == 1000  # billed tokens: the wire call only
 
     # The per-round map is the SAME fold under a second key, so it must reconcile against the
@@ -4709,7 +4748,7 @@ def test_cached_calls_are_metered_but_not_billed(tmp_path: Path) -> None:
     )
     assert by_round["3"].diagnostic.used_usd == pytest.approx(0.005)
     assert by_round["3"].backend.used_usd == pytest.approx(0.01), "a verify is not backend spend"
-    assert view.spend_metered("bill")[0] == pytest.approx(0.035)
+    assert view.spend_metered("bill").usd == pytest.approx(0.035)
     assert sum(r.total_used_usd for r in by_round.values()) == pytest.approx(spend.total_used_usd)
 
 

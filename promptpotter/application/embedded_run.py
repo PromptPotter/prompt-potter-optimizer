@@ -107,7 +107,7 @@ async def run_campaign(
     the config's budget under *limits*' — composed exactly as every admitted launch composes it, and
     ``LaunchLimits()`` adds nothing to the config's own."""
     if not session.campaign_id:
-        await mint_framed_cycle(
+        minted = await mint_framed_cycle(
             session,
             campaign_config,
             train_data,
@@ -115,6 +115,7 @@ async def run_campaign(
             task_text=None,
             arm=arm,
         )
+        campaign_config = minted.campaign_config
     held = unadmitted_limits(
         campaign_config,
         stores=session.store,

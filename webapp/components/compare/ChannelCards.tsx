@@ -1,13 +1,17 @@
 "use client";
-// One card per Compare channel: its served reading, a config drill-in, and the campaign's cladogram as a map.
-// Every number is served (`SubjectReading`); a pick on the map moves the highlight, never the channel or the cut.
+// The Compare LIST, one item per channel, folding per item; campaigns alone read as COLUMNS of a
+// transposed table (`campaignColumns`), each folding to a panel below it. Every number is served.
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type {
-  CampaignSummary,
+  BenchScore,
   CycleListEntry,
   Evidence,
+  HeadToHead,
+  HeadToHeadRow,
   LineageNode,
+  MeteredSpend,
   SubjectReading,
 } from "@/lib/api";
 import { fetchCampaignPipeline } from "@/lib/api";
@@ -25,11 +29,19 @@ import { MeasurementsPane } from "@/components/shell/measurements/MeasurementsPa
 import type { CompareChannel } from "@/lib/compare-selection";
 import {
   applyFlatEdits,
+  BENCH_STAT_LABEL,
+  SPEND_STAT_LABEL,
+  benchReading,
+  campaignCard,
+  campaignColumns,
+  campaignStatus,
   candidateObserveConfig,
+  compareItems,
   descendantsOf,
   docCandidateId,
   historicalSamplesFor,
   indexLineage,
+  mainLine,
   nodeKeyOf,
   nodeOverlays,
   pathOf,
@@ -37,16 +49,31 @@ import {
   scoreboardRow,
   searchpointCopyChoices,
   selectedCandidateOf,
+  sharedComparableNote,
+  spendStat,
   walkCourses,
   type LineageIndex,
+  type MainLineStep,
+  type RunGroup,
 } from "@/lib/derivations";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useRoundFile } from "@/lib/hooks/useRoundFile";
 import { useLineageTree } from "@/lib/lineage";
-import { fmtMetricInterval, fmtMetricValue, fmtPct0, fmtUsd, shortId } from "@/lib/format";
-import { encodeCyclePath, rootCycleId, type CyclePath } from "@/lib/ids";
+import { cx } from "@/lib/cx";
+import {
+  effectTone,
+  fmtDuration,
+  fmtMetricInterval,
+  fmtMetricValue,
+  fmtPct0,
+  fmtSigned,
+  fmtUsd,
+  shortId,
+  verdictTone,
+} from "@/lib/format";
+import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 import { seriesVar } from "@/lib/theme";
-import { useWorkspace } from "@/lib/workspace";
+import { SummaryBlock } from "@/components/shell/SummaryBlock";
 import {
   ChannelRestore,
   editsFor,
@@ -54,7 +81,7 @@ import {
   withOverlay,
   type ScenarioEdits,
 } from "./config-edit";
-import { CopyButton, SegmentedControl } from "@/components/ui";
+import { Badge, CopyButton, SegmentedControl, Term } from "@/components/ui";
 
 const KIND_WORD: Record<SubjectReading["kind"], string> = {
   campaign: "origin",
@@ -75,6 +102,7 @@ function channelPoints(subjects: readonly SubjectReading[]): CladogramChannel[] 
 export function ChannelCards({
   evidence,
   channels,
+  runs,
   edits,
   onEdits,
   onReplace,
@@ -88,46 +116,326 @@ export function ChannelCards({
   onEdits: (next: ScenarioEdits) => void;
   // Read off the request, not the response, so a channel that answered nothing still gets a card.
   channels: readonly CompareChannel[];
+  // The sidebar's own campaign reading, by campaign id: a column's header and live state.
+  runs: ReadonlyMap<string, RunGroup>;
   onReplace: (from: string, to: string) => void;
   onAdd: (channel: CompareChannel) => void;
   hasSubject: (subject: string) => boolean;
   onRemove: (subject: string) => void;
 }) {
-  const byKey = useMemo(
-    () => new Map(evidence.subjects.map((s) => [s.key, s])),
-    [evidence.subjects],
-  );
+  const items = useMemo(() => compareItems(evidence, channels), [evidence, channels]);
+  const listNote = useMemo(() => sharedComparableNote(items), [items]);
   const points = useMemo(() => channelPoints(evidence.subjects), [evidence.subjects]);
+  const h2h = evidence.head_to_head;
+  const columns = useMemo(() => campaignColumns(items), [items]);
+  const rows = useMemo(() => {
+    if (!columns) return null;
+    const flagged = items.some(
+      ({ headline }) => headline && (!headline.controlled || headline.comparable !== true),
+    );
+    return COLUMN_ROWS.filter(
+      (r) => (r !== "optimizer" || columns.showOptimizer) && (r !== "standing" || flagged),
+    );
+  }, [columns, items]);
+  // The folded panels land BELOW the table: a column is too narrow to hold a drill-in.
+  const [panelHost, setPanelHost] = useState<HTMLDivElement | null>(null);
+  const cards = items.map(({ channel, reading, slot, headline }, i) => (
+    <ChannelCard
+      key={channel.subject}
+      channel={channel}
+      reading={reading}
+      headline={headline}
+      ownNote={listNote === null}
+      points={points}
+      // Null for an unread channel: it plots no series, so any ink here would be another channel's.
+      own={slot === null ? null : (points[slot] ?? null)}
+      edits={edits}
+      onEdits={onEdits}
+      unit={evidence.metric.spec.unit}
+      axis={evidence.metric.spec.axis_label}
+      onReplace={onReplace}
+      onAdd={onAdd}
+      hasSubject={hasSubject}
+      onRemove={onRemove}
+      run={runs.get(channel.rootCampaignId) ?? null}
+      uncontrolledNote={h2h === null ? null : h2h.uncontrolled_note}
+      column={rows && { rows, panelHost, order: i }}
+    />
+  ));
   return (
-    <div className="cmp-channels">
-      {channels.map((channel) => {
-        const reading = byKey.get(channel.subject) ?? null;
-        return (
-          <ChannelCard
-            key={channel.subject}
-            channel={channel}
-            reading={reading}
-            points={points}
-            // Null for an unread channel: it plots no series, so any ink here would be another channel's.
-            own={reading ? points[evidence.subjects.indexOf(reading)] ?? null : null}
-            edits={edits}
-            onEdits={onEdits}
-            unit={evidence.metric.spec.unit}
-            axis={evidence.metric.spec.axis_label}
-            onReplace={onReplace}
-            onAdd={onAdd}
-            hasSubject={hasSubject}
-            onRemove={onRemove}
-          />
-        );
-      })}
+    <>
+      {h2h && <HeadToHeadVerdict h2h={h2h} />}
+      {/* Neutral once it holds for every item: nothing on the list then reads against another. */}
+      {listNote !== null && (
+        <p className="l4-note">
+          <strong>Every channel below</strong> — {listNote}
+        </p>
+      )}
+      {rows ? (
+        <>
+          <div
+            className="cmp-cols"
+            style={{ "--cmp-rows": rows.length } as CSSProperties}
+            role="group"
+            aria-label="Campaigns side by side"
+          >
+            <div className="cmp-col">
+              {rows.map((r) => (
+                <div key={r} className={cx("cmp-cell", "cmp-row-label", `is-${r}`)}>
+                  {ROW_LABEL[r]}
+                </div>
+              ))}
+            </div>
+            {cards}
+          </div>
+          <div className="cmp-col-panels" ref={setPanelHost} />
+        </>
+      ) : (
+        <ol className="cmp-channels">{cards}</ol>
+      )}
+    </>
+  );
+}
+
+const COLUMN_ROWS = [
+  "head",
+  "optimizer",
+  "bench",
+  "lift",
+  "per_usd",
+  "spent",
+  "worked",
+  "standing",
+  "reads",
+  "line",
+  "more",
+] as const;
+type ColumnRow = (typeof COLUMN_ROWS)[number];
+
+const ROW_LABEL: Record<ColumnRow, ReactNode> = {
+  head: null,
+  optimizer: "optimizer",
+  bench: "bench",
+  lift: "lift over origin",
+  per_usd: "lift / USD",
+  spent: "spent",
+  worked: "worked",
+  standing: "standing",
+  reads: "reads at",
+  line: (
+    <Term
+      content={
+        <p className="cmp-line-key">
+          Each round&rsquo;s pick, from the origin up to the searchpoint above: its accuracy on the
+          cells it measured, then its lift over its parent on those same cells, toned by the 95%
+          interval. The lift is the round&rsquo;s verdict — the accuracy moves with the subset each
+          round drew. A held round crowned nobody, so the line kept its parent.
+        </p>
+      }
+    >
+      main line
+    </Term>
+  ),
+  more: null,
+};
+
+// Every sentence is served; why a row is not controlled rides that row's badge, not this block.
+function HeadToHeadVerdict({ h2h }: { h2h: HeadToHead }) {
+  return (
+    <div className="cmp-verdict">
+      <p className={cx("cmp-verdict-line", verdictTone(h2h.verdict))}>
+        <strong>Bench head-to-head{h2h.head_to_head_id ? ` ${h2h.head_to_head_id}` : ""}</strong>
+        {" — "}
+        {h2h.verdict_line}
+      </p>
+      <p className="cmp-verdict-meta">
+        {h2h.differs_on.length > 0 && (
+          <span className="cmp-channel-badges" role="group" aria-label="Bench set differs on">
+            <span className="l4-dim">differs on</span>
+            {h2h.differs_on.map((field) => (
+              <Badge key={field} tone="danger">
+                {field}
+              </Badge>
+            ))}
+          </span>
+        )}
+        <span className="l4-dim">
+          graded by <code className="cmp-verdict-scorer">{h2h.scorer_id}</code>
+        </span>
+      </p>
+      {h2h.notes.length > 0 && (
+        <ul className="cmp-verdict-notes">
+          {h2h.notes.map((note) => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
+      )}
     </div>
+  );
+}
+
+// The column's main line to its picked head; every number on a step is the tree's.
+function MainLine({ steps }: { steps: readonly MainLineStep[] }) {
+  if (steps.length === 0) return <span className="l4-dim">—</span>;
+  return (
+    <ol className="cmp-line">
+      {steps.map((s) =>
+        s.kind === "held" ? (
+          <li key={`held-${s.round}`} className="cmp-line-step is-held">
+            <span className="cmp-line-round">R{s.round}</span>
+            <span className="cmp-line-label">held</span>
+            <span className="cmp-line-change">kept its parent</span>
+          </li>
+        ) : (
+          <li
+            key={`${encodeCyclePath(pathOf(s.node))}/${s.node.id}`}
+            className={cx("cmp-line-step", s.node.is_selected && "is-crowned")}
+          >
+            <span className="cmp-line-round">R{s.node.round ?? 0}</span>
+            <span className="cmp-line-label">{s.node.label}</span>
+            <span className="cmp-line-score">
+              {fmtPct0(s.node.accuracy)}
+              {s.node.reference_lift !== null && (
+                <span className={effectTone(s.node.reference_lift_ci_lo, s.node.reference_lift_ci_hi)}>
+                  {" "}
+                  {fmtSigned(s.node.reference_lift, 2)}
+                </span>
+              )}
+            </span>
+            {/* Round 0's text is the origin's provenance, not a change. */}
+            <span className="cmp-line-change" title={s.node.changes_description || undefined}>
+              {s.node.round === 0 ? "origin" : s.node.changes_description || "—"}
+            </span>
+          </li>
+        ),
+      )}
+    </ol>
+  );
+}
+
+function Metric({
+  label,
+  value,
+  band,
+  tone,
+}: {
+  label?: string;
+  value: string;
+  band: string;
+  tone?: string;
+}) {
+  return (
+    <div className={cx("cmp-metric", tone)}>
+      {label && <span className="cmp-metric-label">{label}</span>}
+      <span className="cmp-metric-num l4-effect-mean">{value}</span>
+      {/* One line: a stopped pass's served reason can be a provider's whole error. */}
+      <span className="cmp-metric-band" title={band}>
+        {band}
+      </span>
+    </div>
+  );
+}
+
+// The BENCH headline off the served head-to-head row, never the search rows; a missing one says why
+// in the sidebar's own words (`benchReading`).
+function benchLead(bench: BenchScore | null, runPhase: CycleListEntry["run_phase"] | undefined) {
+  const s = bench?.selected ?? null;
+  return {
+    score:
+      bench === null || s === null
+        ? { value: "—", band: benchReading(bench, runPhase).sub ?? "" }
+        : {
+            value: fmtMetricValue("level", s.composite_fitness),
+            band: `${fmtMetricInterval("level", s.ci_lo, s.ci_hi)} · ${s.n_scored}/${bench.bench_size} rows`,
+          },
+    lift:
+      bench === null
+        ? { value: "—", band: "" }
+        : {
+            value: fmtSigned(bench.lift),
+            band: fmtMetricInterval("delta", bench.lift_ci_lo, bench.lift_ci_hi),
+            tone: effectTone(bench.lift_ci_lo, bench.lift_ci_hi),
+          },
+  };
+}
+
+// What the arm's budget counts — the sidebar's own spend stat — its buckets on a secondary line.
+function SpentReading({ metered }: { metered: MeteredSpend | null }) {
+  if (metered === null) return "—";
+  const { value, sub } = spendStat(metered, "");
+  return (
+    <span className="cmp-metric">
+      {value}
+      <span className="cmp-metric-band" title={sub}>
+        {sub}
+      </span>
+    </span>
+  );
+}
+
+function CostFacts({ row }: { row: HeadToHeadRow }) {
+  return (
+    <dl className="cmp-channel-facts cmp-channel-cost">
+      <div>
+        <dt>lift / USD</dt>
+        <dd>{fmtSigned(row.lift_per_incurred_usd, 2)}</dd>
+      </div>
+      <div>
+        <dt>spent</dt>
+        <dd>
+          <SpentReading metered={row.spend_metered} />
+        </dd>
+      </div>
+      <div>
+        <dt>worked</dt>
+        <dd>{row.worked_s === null ? "—" : fmtDuration(row.worked_s)}</dd>
+      </div>
+      <div>
+        <dt>calls</dt>
+        <dd>{row.calls ?? "—"}</dd>
+      </div>
+      <div>
+        <dt>replayed</dt>
+        <dd>{fmtPct0(row.replay_share)}</dd>
+      </div>
+    </dl>
+  );
+}
+
+// The shared instrument is the expected state, so only its absence wears a badge.
+function HeadlineBadges({
+  row,
+  uncontrolledNote,
+}: {
+  row: HeadToHeadRow;
+  uncontrolledNote: string | null;
+}) {
+  return (
+    <span className="cmp-channel-badges">
+      {row.controlled ? (
+        <Badge>controlled</Badge>
+      ) : uncontrolledNote === null ? (
+        <Badge tone="danger">not controlled</Badge>
+      ) : (
+        <Term content={uncontrolledNote}>
+          <Badge tone="danger">not controlled</Badge>
+        </Term>
+      )}
+      {row.comparable !== true && (
+        <Badge tone={row.comparable === false ? "danger" : "default"}>
+          {row.comparable === null ? "no headline" : "instrument off"}
+        </Badge>
+      )}
+    </span>
   );
 }
 
 function ChannelCard({
   channel,
   reading,
+  headline,
+  uncontrolledNote,
+  ownNote,
   points,
   own,
   edits,
@@ -138,9 +446,15 @@ function ChannelCard({
   onAdd,
   hasSubject,
   onRemove,
+  column,
+  run,
 }: {
   channel: CompareChannel;
   reading: SubjectReading | null;
+  headline: HeadToHeadRow | null;
+  uncontrolledNote: string | null;
+  // False where the list already said this item's `comparable_note` once for all of them.
+  ownNote: boolean;
   points: readonly CladogramChannel[];
   own: CladogramChannel | null;
   edits: ScenarioEdits;
@@ -151,22 +465,18 @@ function ChannelCard({
   onAdd: (channel: CompareChannel) => void;
   hasSubject: (subject: string) => boolean;
   onRemove: (subject: string) => void;
+  // Set when the list reads as campaign columns: this card renders one cell per row, in order.
+  column: { rows: readonly ColumnRow[]; panelHost: HTMLElement | null; order: number } | null;
+  run: RunGroup | null;
 }) {
   const subject = channel.subject;
-  const { campaigns, cycles } = useWorkspace();
-  const campaign = campaigns.find(
-    (c: CampaignSummary) => c.campaign_id === channel.rootCampaignId,
-  );
-  const campaignName = campaign?.label || shortId(channel.rootCampaignId);
+  const campaignName = run?.campaign.label || shortId(channel.rootCampaignId);
   // The TOP-LEVEL campaign (the registry lists no inner one), read off the registry — never parsed from
   // the subject: `lib/api/reads.ts` is the one place the browser spells the address grammar.
-  const anyCycle = cycles.find((c: CycleListEntry) => c.campaign_id === channel.rootCampaignId);
+  const rootCycle = run?.root.cycle_id ?? null;
   const rootPath = useMemo<CyclePath>(
-    () =>
-      anyCycle
-        ? [{ campaignId: channel.rootCampaignId, cycleId: rootCycleId(anyCycle.cycle_id) }]
-        : [],
-    [anyCycle, channel.rootCampaignId],
+    () => (rootCycle ? [{ campaignId: channel.rootCampaignId, cycleId: rootCycle }] : []),
+    [rootCycle, channel.rootCampaignId],
   );
 
   // One tree subscription per card: the head picker needs the genealogy before the map ever opens.
@@ -177,19 +487,25 @@ function ChannelCard({
   const [selected, setSelected] = useState<LineageNode | null>(null);
   const head = useChannelHead(index, reading, selected);
   // Render-phase seed: a `useEffect` would paint one frame of the previous channel's pick.
+  // A column opens on the Winner: an optimizer is compared on its pick, not on the origin it read.
   const [seededFor, setSeededFor] = useState<string | null>(null);
-  if (head.own && seededFor !== subject) {
+  const seed = column ? head.nodeFor("winner") : head.own;
+  if (seed && seededFor !== subject) {
     setSeededFor(subject);
-    setSelected(head.own);
+    setSelected(seed);
   }
   const [mapOpen, setMapOpen] = useState(false);
   // Must NOT close when the pick moves — that is the moment the operator asked to see something.
   const [setupOpen, setSetupOpen] = useState(true);
+  const [detailOpen, setDetailOpen] = useState(false);
 
   // No live snapshot: exactly one cycle streams (`webapp/CLAUDE.md` § Polling shape), so a round
   // still scoring has nothing to read here.
   const pickedPath = useMemo(() => (selected ? pathOf(selected) : null), [selected]);
-  const { doc, loading: docLoading } = useRoundFile(pickedPath, selected?.round ?? null);
+  const { doc, loading: docLoading } = useRoundFile(
+    detailOpen ? pickedPath : null,
+    selected?.round ?? null,
+  );
   // Addressed as the point, never by dataset name: one `pipeline.yaml` is shared by every campaign on the slug.
   const at = useMemo(
     () => (pickedPath && selected ? candidateSubject(pickedPath, selected.id) : ""),
@@ -197,7 +513,7 @@ function ChannelCard({
   );
   const pickedCampaign = pickedPath?.at(-1)?.campaignId ?? "";
   const pipelineRead = useRead(
-    pickedCampaign && at
+    detailOpen && pickedCampaign && at
       ? {
           key: `${pickedCampaign}\x1f${at}`,
           fetch: (s) => fetchCampaignPipeline(pickedCampaign, at, s),
@@ -218,6 +534,13 @@ function ChannelCard({
     );
     return { pickedArms: sibs.length || null, pickedIdx: Math.max(sibs.indexOf(selected), 0) };
   }, [index, selected]);
+  const line = useMemo(
+    () =>
+      selected
+        ? mainLine(index.get(encodeCyclePath(pathOf(selected)))?.candidates ?? [], selected)
+        : [],
+    [index, selected],
+  );
   // The DOCUMENT's own id, via the served join key: a tree id differs after a resume re-mints C0. Key on
   // `course_label`, never `label` — a fork-contributed attempt keeps its minting course's label in the doc.
   const docId = selected ? docCandidateId(doc, selected.course_label) : null;
@@ -262,66 +585,116 @@ function ChannelCard({
   }, [index, edits]);
   const invalidated = useMemo(() => descendantsOf(root, edited), [root, edited]);
 
-  return (
-    <section className="cmp-channel">
-      <header className="cmp-channel-head">
-        {own && (
-          <span className="cmp-swatch" style={{ background: own.ink }} aria-hidden="true" />
-        )}
-        <span className="cmp-channel-name" title={subject}>
-          {reading
-            ? reading.kind === "campaign"
-              ? shortId(reading.label)
-              : reading.label
-            : campaignName}
-        </span>
-        <span className="l4-dim">{reading ? KIND_WORD[reading.kind] : "nothing measured"}</span>
-        <button
-          type="button"
-          className="cmp-link cmp-channel-close"
-          aria-label={`Remove this channel from the comparison`}
-          onClick={() => onRemove(subject)}
-        >
-          ✕
-        </button>
-      </header>
+  // An edit removes the ground under the level: nothing ran at the edited value, so the item
+  // withdraws it rather than show the recorded one beside a changed setup.
+  const withdrawn = reading !== null && invalidated.has(reading.candidate_id);
+  const rulerNote = ownNote && reading?.comparable === false;
+  const level = reading && {
+    value: withdrawn ? "?" : fmtMetricValue(unit, reading.value),
+    band: withdrawn
+      ? "? · ? cells"
+      : `${fmtMetricInterval(unit, reading.ci_lo, reading.ci_hi)} · ${reading.n_cells} cell${
+          reading.n_cells === 1 ? "" : "s"
+        }`,
+  };
 
-      {reading === null ? (
-        <p className="l4-note">
-          Nothing measured at this address — it is named in the read&rsquo;s{" "}
-          <code>unread_subjects</code> rather than counted as a low number. Open the lineage below
-          and pick a point that has run.
-        </p>
-      ) : (
-        <>
-          {/* An edit removes the ground under this number: nothing ran at the edited value, so the
-              card withdraws the level rather than show the recorded one beside a changed setup. */}
-          {invalidated.has(reading.candidate_id) ? (
-            <>
-              <p className="cmp-channel-value cmp-channel-unknown">
-                <span className="cmp-channel-num">?</span>
-                <span className="l4-subtle"> ? · ? cells</span>
-              </p>
-              <p className="l4-warn">
-                ✗ A setting was changed at or above the point this channel reads, and nothing ran
-                under it. Every number here is unknown until it is measured — restore it below, or
-                steer &amp; fork from that searchpoint to actually run it.
-              </p>
-            </>
-          ) : (
-            <p className="cmp-channel-value">
-              <span className="cmp-channel-num">{fmtMetricValue(unit, reading.value)}</span>
-              <span className="l4-subtle">
-                {" "}
-                {fmtMetricInterval(unit, reading.ci_lo, reading.ci_hi)} · {reading.n_cells} cell
-                {reading.n_cells === 1 ? "" : "s"}
-              </span>
-            </p>
+  const lead = benchLead(headline?.bench ?? null, run?.answering.run_phase);
+
+  const idRow = (
+    <div className="cmp-channel-row">
+      <div className="cmp-channel-id">
+        <span className="cmp-channel-name">
+          {own && (
+            <span className="cmp-swatch" style={{ background: own.ink }} aria-hidden="true" />
           )}
-          <p className="l4-subtle">{axis}</p>
+          {headline
+            ? headline.optimizer
+            : reading && reading.kind !== "campaign"
+              ? reading.label
+              : campaignName}
+        </span>
+        <span className="cmp-channel-sub" title={subject}>
+          {reading ? `${KIND_WORD[reading.kind]} · ${reading.campaign_id}` : "nothing measured"}
+        </span>
+        {headline && <HeadlineBadges row={headline} uncontrolledNote={uncontrolledNote} />}
+      </div>
+      {headline ? (
+        <>
+          <Metric label="bench" {...lead.score} />
+          <Metric label="lift over origin" {...lead.lift} />
+        </>
+      ) : (
+        level && (
+          <div className={cx("cmp-channel-lead", withdrawn && "cmp-channel-unknown")}>
+            <Metric label={axis} value={level.value} band={level.band} />
+          </div>
+        )
+      )}
+      <button
+        type="button"
+        className="cmp-link cmp-channel-close"
+        aria-label="Remove this channel from the comparison"
+        onClick={() => onRemove(subject)}
+      >
+        ✕
+      </button>
+      {headline && <CostFacts row={headline} />}
+    </div>
+  );
+  const notes =
+    reading === null ? (
+      <p className="l4-note">
+        Nothing measured at this address — it is named in the read&rsquo;s{" "}
+        <code>unread_subjects</code> rather than counted as a low number. Open the lineage below
+        and pick a point that has run.
+      </p>
+    ) : (
+      <>
+        {withdrawn && (
+          <p className="l4-warn">
+            ✗ A setting was changed at or above the point this channel reads, and nothing ran
+            under it. Every number here is unknown until it is measured — restore it below, or
+            steer &amp; fork from that searchpoint to actually run it.
+          </p>
+        )}
+        {/* The sentence is served (`comparable_note`); never word it here. It qualifies the level,
+            so it sits wherever the level does — here only where the level leads. */}
+        {rulerNote && !headline && <p className="l4-warn">{reading.comparable_note}</p>}
+        {/* A fact about the RUN, not the author — a loop-authored arm carries it too. */}
+        {reading.human_intervened && (
+          <p className="l4-warn">
+            An operator intervened mid-run on this cycle, so it is no longer purely reproducible.
+          </p>
+        )}
+      </>
+    );
+  const detailLabel = reading === null ? "Lineage" : "Search reading, lineage and configuration";
+  const body = (
+    <>
+      {detailOpen && reading === null && (
+        <ChannelMap
+          root={root}
+          index={index}
+          loaded={loaded}
+          failed={failed}
+          rootPath={rootPath}
+          reading={reading}
+          points={points}
+          own={own}
+          subject={subject}
+          selected={selected}
+          setSelected={setSelected}
+          invalidated={invalidated}
+          onReplace={onReplace}
+          onAdd={onAdd}
+          hasSubject={hasSubject}
+        />
+      )}
+      {detailOpen && reading !== null && level && (
+        <>
           {/* A SELECTOR, not a navigator. An unavailable head is dropped, not disabled; a map click
               lands on "Picked" because the lit segment derives from the selection. */}
-          {head.options.length > 1 && (
+          {!column && head.options.length > 1 && (
             <SegmentedControl
               options={head.options}
               value={head.value}
@@ -330,6 +703,30 @@ function ChannelCard({
             />
           )}
           <dl className="cmp-channel-facts">
+            {headline && (
+              <>
+                <div>
+                  <dt>{axis} on search rows</dt>
+                  <dd>
+                    {level.value} {level.band}
+                  </dd>
+                </div>
+                <div>
+                  <dt>arm</dt>
+                  <dd>{headline.arm ? headline.arm.arm_key : "none"}</dd>
+                </div>
+                <div>
+                  <dt>treatment</dt>
+                  <dd title={headline.treatment_digest ?? undefined}>
+                    {headline.treatment_digest?.slice(0, 8) ?? "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>bench reads</dt>
+                  <dd>{headline.bench_reads ?? "—"}</dd>
+                </div>
+              </>
+            )}
             {/* Served `spend_to_round`, indexed by the looked-at round. A pick on another lane falls
                 back to the cycle's roll-up, and says which it shows. */}
             <div>
@@ -387,17 +784,7 @@ function ChannelCard({
               <dd>{reading.cached_samples ?? "—"}</dd>
             </div>
           </dl>
-          {/* The sentence is served (`comparable_note`); never word it here. */}
-          {reading.comparable === false && (
-            <p className="l4-warn">{reading.comparable_note}</p>
-          )}
-          {/* A fact about the RUN, not the author — a loop-authored arm carries it too. */}
-          {reading.human_intervened && (
-            <p className="l4-warn">
-              An operator intervened mid-run on this cycle, so it is no longer purely
-              reproducible.
-            </p>
-          )}
+          {rulerNote && headline && <p className="l4-warn">{reading.comparable_note}</p>}
 
           <p className="cmp-channel-lineage">
             <button
@@ -524,7 +911,144 @@ function ChannelCard({
           </div>
         </>
       )}
-    </section>
+    </>
+  );
+
+  if (!column || !headline) {
+    return (
+      <li className="cmp-channel">
+        {idRow}
+        {notes}
+        <details className="cmp-channel-detail" open={detailOpen}>
+          <summary
+            onClick={(e) => {
+              e.preventDefault();
+              setDetailOpen((v) => !v);
+            }}
+          >
+            {detailLabel}
+          </summary>
+          {body}
+        </details>
+      </li>
+    );
+  }
+
+  // The sidebar's own reading of the campaign, live off the registry poll, less its bench and spend
+  // stats: the rows below read both off the head-to-head row, the bench under its one grader.
+  const summary = run && campaignCard(run, root, campaignStatus(run).word);
+  const close = (
+    <button
+      type="button"
+      className="cmp-link cmp-channel-close"
+      aria-label="Remove this campaign from the comparison"
+      onClick={() => onRemove(subject)}
+    >
+      ✕
+    </button>
+  );
+  const cell = (row: ColumnRow): ReactNode => {
+    switch (row) {
+      case "head":
+        return (
+          <div className="cmp-col-head">
+            {own && (
+              <span className="cmp-swatch" style={{ background: own.ink }} aria-hidden="true" />
+            )}
+            {summary ? (
+              <SummaryBlock
+                dense
+                facts={{
+                  ...summary,
+                  tags: [shortId(headline.campaign_id), ...(summary.tags ?? [])],
+                  stats: summary.stats.filter(
+                    (s) => s.label !== BENCH_STAT_LABEL && s.label !== SPEND_STAT_LABEL,
+                  ),
+                }}
+                actions={close}
+              />
+            ) : (
+              <span className="cmp-channel-name">
+                {campaignName}
+                {close}
+              </span>
+            )}
+          </div>
+        );
+      case "optimizer":
+        return <span className="cmp-col-optimizer">{headline.optimizer}</span>;
+      case "bench":
+        return <Metric {...lead.score} />;
+      case "lift":
+        return <Metric {...lead.lift} />;
+      case "per_usd":
+        return fmtSigned(headline.lift_per_incurred_usd, 2);
+      case "spent":
+        return <SpentReading metered={headline.spend_metered} />;
+      case "worked":
+        return headline.worked_s === null ? "—" : fmtDuration(headline.worked_s);
+      case "standing":
+        return <HeadlineBadges row={headline} uncontrolledNote={uncontrolledNote} />;
+      case "reads":
+        return (
+          <div className="cmp-col-reads">
+            {head.options.length > 1 && (
+              <SegmentedControl
+                options={head.options}
+                value={head.value}
+                onChange={(v) => setSelected(head.nodeFor(v))}
+                ariaLabel="Which searchpoint this column reads"
+              />
+            )}
+            <span className="cmp-metric-band">
+              {selected ? `${selected.label} · round ${selected.round ?? 0}` : "—"}
+            </span>
+          </div>
+        );
+      case "line":
+        return <MainLine steps={line} />;
+      case "more":
+        return (
+          <button
+            type="button"
+            className="cmp-link"
+            aria-expanded={detailOpen}
+            onClick={() => setDetailOpen((v) => !v)}
+          >
+            {detailOpen ? "▾" : "▸"} Reading, lineage, config
+          </button>
+        );
+    }
+  };
+  return (
+    <>
+      <div className="cmp-col" role="group" aria-label={`${headline.optimizer} · ${campaignName}`}>
+        {column.rows.map((r) => (
+          <div key={r} className={cx("cmp-cell", `is-${r}`)}>
+            {cell(r)}
+          </div>
+        ))}
+      </div>
+      {detailOpen &&
+        column.panelHost &&
+        createPortal(
+          <section
+            className="cmp-channel"
+            style={{ order: column.order }}
+            aria-label={`${headline.optimizer} · ${campaignName} in detail`}
+          >
+            <span className="cmp-channel-name">
+              {own && (
+                <span className="cmp-swatch" style={{ background: own.ink }} aria-hidden="true" />
+              )}
+              {headline.optimizer} · {campaignName}
+            </span>
+            {notes}
+            {body}
+          </section>,
+          column.panelHost,
+        )}
+    </>
   );
 }
 

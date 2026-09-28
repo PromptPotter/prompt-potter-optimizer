@@ -49,8 +49,11 @@ if TYPE_CHECKING:
 
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
+    from promptpotter.application.jobs.registry import JobRegistry
+    from promptpotter.domain.launch_limits import RoundsCap
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.sample import Sample
+    from promptpotter.infrastructure.store.stores import Stores
 
 
 logger = logging.getLogger(__name__)
@@ -80,6 +83,8 @@ class MintedCycle:
     cycle_id: str
     session_id: str
     campaign_id: str
+    # What the campaign froze and runs: an arm's carries its head-to-head's declared budget.
+    campaign_config: CampaignConfig
 
 
 def resolve_cycle_plan(
@@ -198,7 +203,7 @@ def _join_head_to_head(
     request: ArmRequest,
 ) -> Arm:
     """Declare the head-to-head off this arm's own instrument and budget when none is recorded,
-    else refuse an arm that would run under any other — or re-use a key another arm holds."""
+    else refuse an arm off its instrument — or re-use a key another arm holds."""
     optimization = campaign_config.optimization
     partition = partition_bank(dataset, campaign_config.dataset_split)
     instrument = bench_instrument(
@@ -227,10 +232,6 @@ def _join_head_to_head(
             f"instrument.{name}"
             for name in Instrument.model_fields
             if getattr(declared.instrument, name) != getattr(instrument, name)
-        ] + [
-            f"budget.{name}"
-            for name in ArmBudget.model_fields
-            if getattr(declared.budget, name) != getattr(budget, name)
         ]
         if differs:
             raise ConflictError(
@@ -259,6 +260,69 @@ def _join_head_to_head(
     )
 
 
+def _under_declaration(
+    campaign_config: CampaignConfig, declared: HeadToHeadRecord
+) -> CampaignConfig:
+    """The config a later arm runs: the declaration owns the split and the budget, so an arm adopts
+    both rather than repeating them — before its origin resolves, whose id the split moves."""
+    optimization = campaign_config.optimization
+    budget = declared.budget
+    adopted = type(optimization).model_validate(
+        {
+            **optimization.model_dump(),
+            "spend_budget_usd": budget.usd,
+            "max_rounds": budget.max_rounds,
+            "determinism": budget.determinism,
+        }
+    )
+    return campaign_config.model_copy(
+        update={"optimization": adopted, "dataset_split": declared.instrument.split}
+    )
+
+
+def move_arm_budget(
+    stores: Stores,
+    registry: JobRegistry,
+    head_to_head_id: str,
+    *,
+    usd: float | None,
+    rounds: RoundsCap | None,
+) -> ArmBudget:
+    """Move a head-to-head's declared budget and every arm's frozen knob with it, so the arms
+    stay equal and controlled. Refused while an arm runs: it would finish under the old one."""
+    campaigns = stores.campaigns
+    declared = campaigns.load_head_to_head(head_to_head_id)
+    if declared is None:
+        raise ConflictError(f"head-to-head {head_to_head_id} is not declared", code="not_declared")
+    arms = [
+        campaign
+        for campaign_dir in campaigns.iter_campaign_dirs()
+        if (campaign := campaigns.load_campaign(campaign_dir.name)) is not None
+        and campaign.arm is not None
+        and campaign.arm.head_to_head_id == head_to_head_id
+    ]
+    running = {job.hop.campaign_id for job in registry.list_running()}
+    if busy := [arm.campaign_id for arm in arms if arm.campaign_id in running]:
+        raise ConflictError(
+            f"arm {busy[0]} of {head_to_head_id} is running: pause its arms first",
+            code="arm_running",
+        )
+    moved: dict[str, float | int | None] = {"usd": usd} if usd is not None else {}
+    if rounds is not None:
+        moved["max_rounds"] = rounds.max_rounds
+    budget = declared.budget.model_copy(update=moved)
+    campaigns.declare_head_to_head(declared.model_copy(update={"budget": budget}))
+    for arm in arms:
+        config = dict(arm.config)
+        config["optimization"] = {
+            **config["optimization"],
+            "spend_budget_usd": budget.usd,
+            "max_rounds": budget.max_rounds,
+        }
+        campaigns.update_campaign(arm.campaign_id, {"config": config})
+    return budget
+
+
 def fresh_campaign_id(session: Session, campaign_config: CampaignConfig) -> str:
     """A brand-new random campaign id — what every mint that does NOT own its campaign's identity
     passes on. The L4 inner spawn is the one caller that does, deriving it from its cell."""
@@ -278,6 +342,11 @@ def prepare_fresh_cycle(
     """Mint a fresh campaign + session + root cycle. ``campaign_id`` is a REQUIRED keyword with no
     default: who owns the campaign's identity is a decision, and a default picks it for you."""
     seed = _campaign_origin_seed(origin_override)
+    if (
+        arm is not None
+        and (declared := session.store.campaigns.load_head_to_head(arm.head_to_head_id)) is not None
+    ):
+        campaign_config = _under_declaration(campaign_config, declared)
     plan = resolve_cycle_plan(
         session, campaign_config, dataset, origin_override=origin_override, log=log
     )
@@ -307,6 +376,7 @@ def prepare_fresh_cycle(
         cycle_id=cycle_id,
         session_id=session_id,
         campaign_id=campaign_id,
+        campaign_config=campaign_config,
     )
 
 
@@ -384,6 +454,7 @@ __all__ = [
     "CyclePlan",
     "fresh_campaign_id",
     "mint_framed_cycle",
+    "move_arm_budget",
     "prepare_fresh_cycle",
     "resolve_cycle_plan",
 ]

@@ -3,8 +3,8 @@ import { Fragment, useState, type ReactNode } from "react";
 import { CopyButton, HoverCard } from "@/components/ui";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { fetchCampaignStorage, fetchConfigMap } from "@/lib/api";
-import { cx } from "@/lib/cx";
 import { declaredKnobs, type RowCardFacts } from "@/lib/derivations";
+import { SummaryBlock } from "@/components/shell/SummaryBlock";
 import { fmtBytes, fmtValue } from "@/lib/format";
 
 // The ONE hover surface for every sidebar row. The copy button reads the SAME lists the card
@@ -87,31 +87,11 @@ function RowCardBody({ card }: { card: RowCardFacts }) {
 
   return (
     <div className="rowhover">
-      <header className="rowhover-head">
-        <div className="rowhover-titleline">
-          <span className="rowhover-title">{card.title}</span>
-          {card.tags?.map((t) => (
-            <span key={t} className="rowhover-tag">
-              {t}
-            </span>
-          ))}
-          {card.state && <span className="rowhover-state">{card.state}</span>}
-        </div>
-        <CopyButton title="Copy these details as JSON" data={payload} />
-      </header>
-      <p className="rowhover-lede">{card.lede}</p>
-
-      {card.stats.length > 0 && (
-        <dl className="rowhover-stats">
-          {card.stats.map((s) => (
-            <div key={s.label} className="rowhover-stat">
-              <dt>{s.label}</dt>
-              <dd className={cx("rowhover-stat-value", s.className)}>{s.value}</dd>
-              {s.sub && <dd className="rowhover-stat-sub">{s.sub}</dd>}
-            </div>
-          ))}
-        </dl>
-      )}
+      <SummaryBlock
+        facts={card}
+        lede={<p className="rowhover-lede">{card.lede}</p>}
+        actions={<CopyButton title="Copy these details as JSON" data={payload} />}
+      />
       {card.caveat && <div className="rowhover-caveat">{card.caveat}</div>}
 
       <dl className="rowhover-facts">

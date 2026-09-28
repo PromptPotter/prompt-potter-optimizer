@@ -150,8 +150,8 @@ class Evidence(StrictModel):
     # row, so nothing downstream joins two lists on `key`.
     subjects: list[SubjectReading]
     comparability: Comparability
-    # The HEADLINE, read off each unmasked campaign subject's result — the held-out bench set, not
-    # the search rows everything below pools. `None` with no campaign subject.
+    # The HEADLINE, read off the result of each campaign an unmasked campaign or course subject
+    # stands for — the held-out bench set, not the search rows everything below pools.
     head_to_head: HeadToHead | None = None
     # WHICH number everything below is about — the picker's vocabulary, the merged per-subject
     # intervals and every pairwise test, all under one selection. Non-optional: the default always
@@ -361,11 +361,7 @@ def subject_evidence(
         subjects=rows,
         comparability=comparability(rows),
         head_to_head=head_to_head(
-            [
-                HeadToHeadEntry(r, leaves[r.key])
-                for r in rows
-                if r.kind == "campaign" and r.mask is None
-            ]
+            [HeadToHeadEntry(r, leaves[r.key]) for r in _campaign_channels(rows)]
         ),
         metric=reading,
         unread_subjects=sorted(set(wanted) - set(heads)),
@@ -379,6 +375,20 @@ def subject_evidence(
         edits=edits,
         spread=_edit_spread(edits),
     )
+
+
+def _campaign_channels(rows: list[SubjectReading]) -> list[SubjectReading]:
+    """One unmasked row per campaign, oldest first: its campaign subject, else its first course.
+    Either reads the campaign's result, so a second would pair the campaign with itself."""
+    chosen: dict[tuple[str, ...], SubjectReading] = {}
+    for r in rows:
+        if r.kind == "candidate" or r.mask is not None:
+            continue
+        ident = (*(f"{h.campaign_id}/{h.cycle_id}" for h in r.inside), r.campaign_id)
+        if ident not in chosen or (r.kind == "campaign" and chosen[ident].kind != "campaign"):
+            chosen[ident] = r
+    picked = {r.key for r in chosen.values()}
+    return [r for r in rows if r.key in picked]
 
 
 # --- resolving a subject to the rows it stands for ---------------------------------------------

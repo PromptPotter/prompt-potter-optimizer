@@ -296,10 +296,18 @@ def run_phase_validator_epoch(cycle_dir: Path, *, fresh_s: float = RUN_FRESH_S) 
     ``detached`` edge moves with the CLOCK, so without it a stale ``If-Modified-Since`` pins a dead
     producer at ``running`` for as long as the browser keeps polling. It is read from
     :func:`_detached_after`, the same expression the phase itself derives from — restating it here
-    is what would let the 304 outlive the answer it stands for."""
+    is what would let the 304 outlive the answer it stands for. The campaign's ``campaign.json``
+    rides too: a halted cycle serves the ceilings its frozen config declares."""
     layout = CycleLayout(cycle_dir)
+    campaign_manifest = cycle_dir.parent.parent / "campaign.json"
     stamps: list[float] = []
-    for path in (layout.cycle_dir, layout.dashboard, layout.manifest, layout.runtime):
+    for path in (
+        layout.cycle_dir,
+        layout.dashboard,
+        layout.manifest,
+        layout.runtime,
+        campaign_manifest,
+    ):
         try:
             stamps.append(path.stat().st_mtime)
         except OSError:

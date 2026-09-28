@@ -99,10 +99,10 @@ class CellSendRefusedError(CellInfrastructureError):
         self.category = category
 
 
-# The refusals once an account's credit or a key's limit is spent: OpenRouter's two (HTTP 402 /
+# The refusals once an account's credit or a key's limit is spent: OpenRouter's three (HTTP 402 /
 # 403) and Anthropic's, which arrives as an HTTP 400 `invalid_request_error`.
 _PROVIDER_CREDIT_REFUSAL = re.compile(
-    r"requires more credits|Key limit exceeded|credit balance is too low"
+    r"requires more credits|[Ii]nsufficient credits|Key limit exceeded|credit balance is too low"
 )
 
 

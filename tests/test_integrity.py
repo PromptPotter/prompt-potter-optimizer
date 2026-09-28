@@ -672,7 +672,9 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
     import openai
     from factories import measurement
 
+    from promptpotter.application.runner.termination import run_stop_reason
     from promptpotter.connectors import harbor
+    from promptpotter.domain.phases import StopReason
     from promptpotter.infrastructure.llm.anthropic import AnthropicClient
     from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
     from promptpotter.infrastructure.llm.spend_book import (
@@ -713,22 +715,41 @@ def test_a_provider_throttle_or_empty_account_is_never_the_models_grade(
     ):
         assert harbor._provider_throttle(throttle) is not None
     # Out of credit halts on the first attempt: no backoff can top the key up.
-    bodies = (
-        '{"error":{"message":"This request requires more credits","code":402}}',
-        '{"error":{"message":"Key limit exceeded (daily limit).","code":403}}',
+    refusals = (
+        (402, '{"error":{"message":"This request requires more credits","code":402}}'),
+        (402, '{"error":{"message":"Insufficient credits. Add more using x","code":402}}'),
+        (403, '{"error":{"message":"Key limit exceeded (daily limit).","code":403}}'),
     )
     client = OpenAICompatibleClient(api_key="k", provider="openrouter", display_name="OpenRouter")
-    for code, body in zip((402, 403), bodies, strict=True):
-        failed = trial(str(code), "", "APIError", f"litellm.APIError: {body}")
+    for code, body in refusals:
+        failed = trial(f"{code}-{len(body)}", "", "APIError", f"litellm.APIError: {body}")
         assert banked_as(failed) is ErrorCategory.PROVIDER_CREDIT
-        # The same refusal on our own client is the same fact, and no best-effort block eats it.
-        refused = openai.APIStatusError(
-            f"Error code: {code} - {body}",
-            response=httpx.Response(code, request=httpx.Request("POST", "https://x")),
-            body=None,
+
+        # The same refusal on an optimizer's own call ends the run on its stop, never a crash.
+        async def _openrouter_refuses(_code: int = code, _body: str = body, **_: Any) -> None:
+            raise openai.APIStatusError(
+                f"Error code: {_code} - {_body}",
+                response=httpx.Response(_code, request=httpx.Request("POST", "https://x")),
+                body=None,
+            )
+
+        client._client = SimpleNamespace(  # type: ignore[assignment]
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(
+                    with_raw_response=SimpleNamespace(create=_openrouter_refuses)
+                )
+            )
         )
-        with pytest.raises(SendRefusedError), graceful("best-effort step"):
-            client._try_recover_from_chat_error(refused, {}, None)
+
+        async def _optimizer_call() -> None:
+            bind_spend_book(unbounded_spend_book())
+            await client.chat(
+                [{"role": "user", "content": "q"}], model="m", label=CallLabel("l1", "optimizer")
+            )
+
+        with pytest.raises(SendRefusedError) as credit, graceful("best-effort step"):
+            asyncio.run(_optimizer_call())
+        assert run_stop_reason(credit.value) is StopReason.PROVIDER_CREDIT
 
     class _StatusError(Exception):
         def __init__(self, status_code: int, message: str) -> None:
@@ -5103,6 +5124,7 @@ def test_first_mint_decomposes_once_and_bills_the_run_it_frames(
             cycle_id=f"cycle_{len(framing_at_mint)}",
             session_id="s",
             campaign_id=kwargs["campaign_id"],
+            campaign_config=campaign_config,
         )
 
     monkeypatch.setattr(task_context, "run_checkin", scripted_checkin)

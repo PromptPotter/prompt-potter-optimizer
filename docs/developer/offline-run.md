@@ -23,8 +23,10 @@ Run it from the tree under test with that tree's own venv — a worktree probe r
 tree's interpreter answers for that other tree.
 
 `--controlled` proves the controlled comparison instead ([`../architecture.md`](../architecture.md)
-§ The controlled comparison): two workspaces, each running a potter and a capo arm of one
-head-to-head, one of them after a foreign campaign on the dataset whose origin differs. It fails
+§ The controlled comparison): two workspaces, each running the arms `--optimizer` names (potter and
+capo by default) of one head-to-head, one of them after a foreign campaign on the dataset whose
+origin differs — the one layout that puts several optimizers' campaigns in ONE workspace, so the
+webapp's Compare tab can read them together. It fails
 unless a skip on an arm is refused, each arm's memory holds only runs it filed, and both arms'
 decisions are byte-identical with and without the foreign campaign; `head_to_head.json` beside
 them is the evidence read of all three.

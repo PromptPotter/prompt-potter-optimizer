@@ -336,6 +336,19 @@ def declare_run_ceiling(
     return declared, BudgetChange(*operator)
 
 
+def next_launch_limits(
+    config: CampaignConfig, *, stores: Stores, hop: CycleHop
+) -> dict[str, float | int | None]:
+    """The ceilings a halted cycle's next launch declares, as ``run_limits`` updates: what its
+    dashboard serves in place of the last launch's, which only a running cycle still holds."""
+    ceiling, _ = declare_run_ceiling(config, stores=stores, hop=hop, requested=LaunchLimits())
+    return {
+        "spend_budget_usd": ceiling.usd,
+        "token_budget": ceiling.tokens,
+        "max_rounds": config.optimization.max_rounds or None,
+    }
+
+
 def unadmitted_limits(
     config: CampaignConfig,
     *,
@@ -596,6 +609,7 @@ __all__ = [
     "hold_run_limits",
     "is_host_tenant_dir",
     "lifetime_ceilings",
+    "next_launch_limits",
     "overrun",
     "read_account_wallet",
     "set_concurrent_cycles",

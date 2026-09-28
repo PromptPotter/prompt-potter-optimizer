@@ -894,6 +894,10 @@
             ],
             "description": "What the ROOT course runs with — a second transport of the answer `GET /campaigns/{id}/pipeline` gives at the root, never a second source. Null when the root pipeline did not resolve. `max_rounds` is the DECLARED rounds cap; 0 means origin only."
           },
+          "spend_metered": {
+            "$ref": "#/components/schemas/MeteredSpend",
+            "description": "What the campaign's spend cap counts along its LINE — the root and every cycle a rebase handed it to — by bucket: the bill, or the search's incurred USD for a controlled arm. The number a surface sets beside a cap, live."
+          },
           "spend_unpriced_tokens": {
             "description": "Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them. Zero means the dollar figure is complete.",
             "title": "Spend Unpriced Tokens",
@@ -918,6 +922,7 @@
           "spend_used_usd",
           "spend_unpriced_tokens",
           "spend_unreported_usd",
+          "spend_metered",
           "bench",
           "runs_with",
           "arm",
@@ -1271,6 +1276,10 @@
             ],
             "description": "What the ROOT course runs with — a second transport of the answer `GET /campaigns/{id}/pipeline` gives at the root, never a second source. Null when the root pipeline did not resolve. `max_rounds` is the DECLARED rounds cap; 0 means origin only."
           },
+          "spend_metered": {
+            "$ref": "#/components/schemas/MeteredSpend",
+            "description": "What the campaign's spend cap counts along its LINE — the root and every cycle a rebase handed it to — by bucket: the bill, or the search's incurred USD for a controlled arm. The number a surface sets beside a cap, live."
+          },
           "spend_unpriced_tokens": {
             "description": "Billed tokens with no resolvable rate, so `spend_used_usd` cannot see them. Zero means the dollar figure is complete.",
             "title": "Spend Unpriced Tokens",
@@ -1295,6 +1304,7 @@
           "spend_used_usd",
           "spend_unpriced_tokens",
           "spend_unreported_usd",
+          "spend_metered",
           "bench",
           "runs_with",
           "arm"
@@ -3644,9 +3654,12 @@
             ],
             "title": "Head To Head Id"
           },
-          "note": {
-            "title": "Note",
-            "type": "string"
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
           },
           "pairs": {
             "items": {
@@ -3677,6 +3690,17 @@
             "title": "Scorer Id",
             "type": "string"
           },
+          "uncontrolled_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uncontrolled Note"
+          },
           "verdict": {
             "anyOf": [
               {
@@ -3687,6 +3711,10 @@
               }
             ],
             "title": "Verdict"
+          },
+          "verdict_line": {
+            "title": "Verdict Line",
+            "type": "string"
           }
         },
         "required": [
@@ -3697,7 +3725,9 @@
           "differs_on",
           "pairs",
           "ratio_reference",
-          "note"
+          "verdict_line",
+          "uncontrolled_note",
+          "notes"
         ],
         "title": "HeadToHead",
         "type": "object"
@@ -3853,6 +3883,16 @@
               }
             ]
           },
+          "spend_metered": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeteredSpend"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "subject": {
             "title": "Subject",
             "type": "string"
@@ -3899,6 +3939,7 @@
           "controlled",
           "treatment_digest",
           "budget",
+          "spend_metered",
           "human_intervened",
           "bench",
           "bench_set",
@@ -4143,6 +4184,12 @@
             ],
             "description": "Of `scored_samples`, how many were replayed from the MeasurementArchive rather than measured. `None` on a course and on any candidate never measured.",
             "title": "Cached Samples"
+          },
+          "changes_description": {
+            "default": "",
+            "description": "What the optimizer says this candidate changed against its parent, as it worded it at mint. Empty on a course.",
+            "title": "Changes Description",
+            "type": "string"
           },
           "children": {
             "items": {
@@ -4794,6 +4841,56 @@
           "terms_accepted_version"
         ],
         "title": "MeResponse",
+        "type": "object"
+      },
+      "MeteredSpend": {
+        "additionalProperties": false,
+        "description": "What a run's spend caps have counted, in the units they meter, by bucket.\nEvery surface sets this beside a cap, so none picks the bill or the incurred total itself.",
+        "properties": {
+          "beside": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Beside",
+            "type": "object"
+          },
+          "billed_usd": {
+            "title": "Billed Usd",
+            "type": "number"
+          },
+          "buckets": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Buckets",
+            "type": "object"
+          },
+          "meter": {
+            "enum": [
+              "bill",
+              "search_incurred"
+            ],
+            "title": "Meter",
+            "type": "string"
+          },
+          "tokens": {
+            "title": "Tokens",
+            "type": "integer"
+          },
+          "usd": {
+            "title": "Usd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "meter",
+          "usd",
+          "tokens",
+          "buckets",
+          "beside",
+          "billed_usd"
+        ],
+        "title": "MeteredSpend",
         "type": "object"
       },
       "MetricReading": {

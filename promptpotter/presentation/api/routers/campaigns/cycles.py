@@ -10,16 +10,22 @@ from fastapi.responses import JSONResponse
 
 from promptpotter.application import optimizers
 from promptpotter.application.evidence.subjects import LENS_SCORE_PREFIX
+from promptpotter.application.jobs.quota import next_launch_limits
 from promptpotter.application.mask.divergence import Verdict, find_divergences
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.record import MaskReading, MaskRecord, parse_sample_ids
 from promptpotter.application.mask.verdicts import make_abort_verdict, make_scoring_verdict
+from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.scoring.formula import ScoringFormulaError
+from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop, CyclePath, WorkspaceDir
+from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.pipeline_schema import NodeKind
+from promptpotter.domain.spend import CeilingMeter
 from promptpotter.infrastructure.projections.live_dashboard.projection import fold_at
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     LiveDashboardState,
+    overlay_spend_metered,
     warming_payload,
 )
 from promptpotter.infrastructure.runtime_flags import (
@@ -50,6 +56,8 @@ from promptpotter.presentation.api.routers.campaigns._router import campaigns_ro
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from promptpotter.application.optimizers.nodes import Eliminator
 
 
@@ -69,6 +77,9 @@ def serve_dashboard_response(
     base_dir: WorkspaceDir,
     campaign_id: str,
     cycle_id: str,
+    *,
+    meter: CeilingMeter | None,
+    next_launch: Callable[[], dict[str, float | int | None]] | None = None,
     at: int | None = None,
 ) -> Response:
     """The single dashboard-serving path — the outer route passes the caller's ``base_dir``, the inner a sandbox's. One
@@ -130,6 +141,8 @@ def serve_dashboard_response(
             for field in LiveDashboardState.WIRING_FIELDS:
                 if field in body:
                     replay[field] = body[field]
+        if meter is not None:
+            overlay_spend_metered(replay, meter)
         return JSONResponse(replay, headers=headers)
     if body is None:
         # Missing OR corrupt (half-written / truncated): degrade to the warming
@@ -140,7 +153,12 @@ def serve_dashboard_response(
             body["reason"] = "dashboard_unreadable"
     else:
         body["run_phase"] = run_phase
+        limits = body.get("run_limits")
+        if next_launch is not None and run_phase != RunPhase.RUNNING and isinstance(limits, dict):
+            limits.update(next_launch())
         overlay_armed_controls(body, cycle_path)
+        if meter is not None:
+            overlay_spend_metered(body, meter)
     return JSONResponse(body, headers=headers)
 
 
@@ -179,8 +197,19 @@ def get_cycle_dashboard(
     stores, leaf = resolve_cycle_path(
         stores, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
     )
+    campaign = stores.campaigns.load_campaign(leaf.campaign_id)
     return serve_dashboard_response(
-        request, stores.base_dir, leaf.campaign_id, leaf.cycle_id, at=at
+        request,
+        stores.base_dir,
+        leaf.campaign_id,
+        leaf.cycle_id,
+        meter=None if campaign is None else ceiling_meter(campaign.arm),
+        next_launch=None
+        if campaign is None or not campaign.config
+        else lambda: next_launch_limits(
+            resolve_campaign_config(stores, campaign, leaf), stores=stores, hop=leaf
+        ),
+        at=at,
     )
 
 

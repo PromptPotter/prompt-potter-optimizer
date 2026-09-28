@@ -154,21 +154,35 @@
 .unit-library-children>li::after{content:"";position:absolute;left:-9px;top:20px;width:9px;border-top:1px solid var(--color-accent)}
 /* The fixed-position shell escaping overflow is the `HoverCard` primitive; this is only the body. */
 .rowhover{display:flex;flex-direction:column;gap:var(--space-10);inline-size:min(300px,calc(100vw - var(--space-40)))}
-.rowhover-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-8)}
-.rowhover-titleline{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--space-4) var(--space-8);min-width:0}
-.rowhover-title{font-size:var(--text-md);font-weight:600;color:var(--color-text-primary);overflow-wrap:anywhere}
-.rowhover-state{font-size:var(--text-xs);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--color-accent)}
-.rowhover-tag{font-size:var(--text-xs);padding:0 var(--space-4);border:0.5px solid var(--color-border);border-radius:var(--border-radius-sm);color:var(--color-text-secondary)}
+/* `SummaryBlock` — one block for every host; `.is-dense` is the host's density, never a second look. */
+.summary-block{display:flex;flex-direction:column;gap:var(--space-10);min-width:0}
+.summary-block-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-8)}
+.summary-block-titleline{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--space-4) var(--space-8);min-width:0}
+.summary-block-title{font-size:var(--text-md);font-weight:600;color:var(--color-text-primary);overflow-wrap:anywhere}
+.summary-block-state{font-size:var(--text-xs);font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--color-accent)}
+.summary-block-tag{font-size:var(--text-xs);padding:0 var(--space-4);border:0.5px solid var(--color-border);border-radius:var(--border-radius-sm);color:var(--color-text-secondary)}
+.summary-block-stats{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:var(--space-10) var(--space-12);padding-block:var(--space-10);border-block:0.5px solid var(--color-border)}
+.summary-block-stat{display:flex;flex-direction:column;gap:2px;min-width:0}
+.summary-block-stat dt,.rowhover-heading{margin:0;font-size:var(--text-xs);letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-tertiary)}
+.summary-block-stat dd{margin:0}
+.summary-block-stat-value{font-size:var(--text-lg);font-weight:600;line-height:1.2;font-variant-numeric:tabular-nums;color:var(--color-text-primary);white-space:nowrap}
+.summary-block-stat .summary-block-stat-sub{display:-webkit-box;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;font-size:var(--text-xs);line-height:1.35;color:var(--color-text-tertiary);overflow-wrap:anywhere}
+.summary-block-warn{color:var(--color-warn)}
+.summary-block.is-dense{gap:var(--space-6)}
+.summary-block.is-dense .summary-block-stats{grid-template-columns:repeat(auto-fit,minmax(64px,1fr));gap:var(--space-6) var(--space-10);padding-block:var(--space-6);border-bottom:0}
+.summary-block.is-dense .summary-block-stat-value{font-size:var(--text-sm)}
+/* `SpendBuckets`, the breakdown a spend figure opens onto — the masthead's chip, the chat's run card. */
+.spend-buckets{min-width:200px;font-size:var(--text-sm)}
+.spend-buckets-head{margin:0 0 var(--space-4);color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-size:var(--text-xs);font-weight:600}
+.spend-buckets dl{margin:0;display:grid;gap:var(--space-4)}
+.spend-buckets dl>div{display:flex;justify-content:space-between;gap:var(--space-12)}
+.spend-buckets dt{color:var(--color-text-secondary)}
+.spend-buckets dd{margin:0;font-variant-numeric:tabular-nums}
+.spend-buckets-total{border-top:0.5px solid var(--color-border);padding-top:var(--space-4);font-weight:600}
+.spend-buckets .spend-buckets-beside dt,.spend-buckets .spend-buckets-beside dd{color:var(--color-text-tertiary)}
 .rowhover-lede{margin:0;font-size:var(--text-xs);line-height:1.45;color:var(--color-text-secondary)}
-.rowhover-stats{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:var(--space-10) var(--space-12);padding-block:var(--space-10);border-block:0.5px solid var(--color-border)}
-.rowhover-stat{display:flex;flex-direction:column;gap:2px;min-width:0}
-.rowhover-stat dt,.rowhover-heading{margin:0;font-size:var(--text-xs);letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-tertiary)}
 .rowhover-heading{margin-bottom:var(--space-4)}
 .rowhover-source{margin-left:var(--space-6);color:var(--color-text-tertiary)}
-.rowhover-stat dd{margin:0}
-.rowhover-stat-value{font-size:var(--text-lg);font-weight:600;line-height:1.2;font-variant-numeric:tabular-nums;color:var(--color-text-primary);white-space:nowrap}
-.rowhover-stat .rowhover-stat-sub{font-size:var(--text-xs);line-height:1.35;color:var(--color-text-tertiary)}
-.rowhover-tone-warn{color:var(--color-warn)}
 .rowhover-caveat{font-size:var(--text-xs);line-height:1.45;color:var(--color-text-secondary);padding:var(--space-6) var(--space-8);border-left:2px solid var(--color-warn);background:var(--color-warn-bg);border-radius:var(--border-radius-sm)}
 .rowhover-caveat strong{color:var(--color-warn)}
 .rowhover-facts{margin:0;display:grid;grid-template-columns:auto 1fr;column-gap:var(--space-12);row-gap:var(--space-4);align-items:baseline}

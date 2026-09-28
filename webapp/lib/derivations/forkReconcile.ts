@@ -29,7 +29,8 @@ export function forkReconcileDefaults(dash: DashboardSnapshot | null): ForkRecon
     parentMaxRounds != null ? Math.max(1, parentMaxRounds - roundsConsumed) : null;
 
   const spend = readSpend(dash);
-  const spentUsd = spend.usedUsd ?? 0;
+  // In the cap's own units: what is left of it is what the fork inherits.
+  const spentUsd = spend.metered?.usd ?? 0;
   const parentBudgetUsd = spend.budgetUsd;
   const spendRemaining =
     parentBudgetUsd != null ? Math.max(0, parentBudgetUsd - spentUsd) : null;

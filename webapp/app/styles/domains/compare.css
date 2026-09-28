@@ -11,47 +11,281 @@
 .cmp-channel-lineage {
   margin: var(--space-8) 0 0;
 }
-/* `auto-fit`, not a fixed count: two channels get halves, four quarters, with no breakpoint. */
+.cmp-verdict {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.cmp-verdict .cmp-verdict-line {
+  margin: 0;
+  max-width: none;
+}
+.cmp-verdict-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4) var(--space-16);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+.cmp-verdict-scorer {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+.cmp-verdict-notes {
+  margin: 0;
+  padding-left: var(--space-16);
+  max-width: 78ch;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+/* One item per line, full width: the lead numbers line up down the list, and an opened item's
+   drill-in gets the whole row. */
 .cmp-channels {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr));
-  gap: var(--space-12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 .cmp-channel {
   display: flex;
   flex-direction: column;
-  gap: var(--space-6);
+  gap: var(--space-8);
   min-width: 0;
-  padding: var(--space-12);
+  padding: var(--space-12) var(--space-16);
   border: 1px solid var(--color-border);
   border-radius: 8px;
   background: var(--color-background-secondary);
 }
-.cmp-channel-head {
+/* Every item shares this template, so its columns align down the list without a table. */
+.cmp-channel-row {
+  display: grid;
+  grid-template-columns: minmax(0, 16rem) minmax(0, 12rem) minmax(0, 12rem) minmax(0, 1fr) auto;
+  gap: var(--space-8) var(--space-24);
+  align-items: start;
+}
+.cmp-channel-id {
   display: flex;
-  align-items: baseline;
-  gap: var(--space-6);
+  flex-direction: column;
+  gap: var(--space-4);
   min-width: 0;
 }
 .cmp-channel-name {
-  font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: var(--text-lg);
+  font-weight: 600;
   color: var(--color-text-primary);
+}
+.cmp-channel-sub {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.cmp-channel-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+.cmp-channel-lead {
+  grid-column: 2 / 4;
+}
 .cmp-channel-close {
-  margin-left: auto;
-  flex: 0 0 auto;
+  grid-column: 5;
+  grid-row: 1;
   color: var(--color-text-tertiary);
 }
-.cmp-channel-value {
-  margin: 0;
+/* Level with the metrics' labels: the cost is read against the headline beside it. */
+.cmp-channel-cost {
+  grid-column: 4;
+  grid-row: 1;
+  padding-top: var(--space-14);
 }
-.cmp-channel-num {
-  font-size: var(--text-xl);
+.cmp-metric {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.cmp-metric-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cmp-metric-num {
   font-family: var(--font-mono);
+  font-size: var(--text-4xl);
+  line-height: 1.15;
   color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.cmp-metric-band {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cmp-channel-detail > summary {
+  cursor: pointer;
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+}
+.cmp-channel-detail[open] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding-top: var(--space-8);
+  border-top: 1px solid var(--color-border);
+}
+/* A transposed table: each campaign fills one grid column top to bottom (`display: contents`), so a
+   row's cells line up across campaigns and the label column names them once. */
+.cmp-cols {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(var(--cmp-rows), auto);
+  grid-template-columns: max-content;
+  grid-auto-columns: minmax(14rem, 1fr);
+  overflow-x: auto;
+}
+.cmp-col {
+  display: contents;
+}
+.cmp-cell {
+  min-width: 0;
+  padding: var(--space-8) var(--space-16);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+.cmp-cell.is-head {
+  border-top: 0;
+  padding-bottom: var(--space-12);
+}
+.cmp-cell.is-per_usd,
+.cmp-cell.is-spent,
+.cmp-cell.is-worked {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+/* Sticky, so the names stay beside the values while the columns scroll. */
+.cmp-row-label {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  padding-left: 0;
+  background: var(--color-background-primary);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cmp-col-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+}
+.cmp-col-head .summary-block {
+  flex: 1;
+}
+.cmp-col-optimizer {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--color-accent);
+}
+.cmp-col-reads {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+.cmp-line {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  margin: 0;
+  padding: 0 0 0 var(--space-8);
+  list-style: none;
+  border-left: 1px solid var(--color-border);
+}
+.cmp-line-step {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 0 var(--space-8);
+  font-size: var(--text-xs);
+}
+.cmp-line-round,
+.cmp-line-label,
+.cmp-line-score {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.cmp-line-round {
+  color: var(--color-text-tertiary);
+}
+.cmp-line-score {
+  justify-self: end;
+  color: var(--color-text-secondary);
+}
+.cmp-line-step.is-crowned .cmp-line-label {
+  color: var(--color-accent);
+}
+.cmp-line-change {
+  grid-column: 1 / -1;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--color-text-secondary);
+}
+.cmp-line-step.is-held {
+  color: var(--color-text-tertiary);
+}
+.cmp-line-step.is-held .cmp-line-change {
+  color: var(--color-text-tertiary);
+}
+/* The main line's key, taught on hover. */
+.cmp-line-key {
+  max-width: min(32rem, 90vw);
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--color-text-secondary);
+}
+.cmp-col-panels {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+.cmp-col-panels:empty {
+  display: none;
+}
+@media (max-width: 640px) {
+  .cmp-channel-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  }
+  .cmp-channel-id {
+    grid-column: 1 / 3;
+  }
+  .cmp-channel-close {
+    grid-column: 3;
+  }
+  .cmp-channel-lead,
+  .cmp-channel-cost {
+    grid-column: 1 / -1;
+    grid-row: auto;
+    padding-top: 0;
+  }
 }
 .cmp-channel-facts {
   display: flex;
@@ -214,7 +448,7 @@
   color: var(--color-new);
 }
 /* Nothing ran at the edited value, so the level is not a small number — it is no number. */
-.cmp-channel-unknown .cmp-channel-num {
+.cmp-channel-unknown .cmp-metric-num {
   color: var(--color-text-tertiary);
 }
 

@@ -27,13 +27,14 @@ from promptpotter.application.pipeline_resolve import (
     resolve_pipeline_for_campaign,
     resolve_root_config,
 )
-from promptpotter.application.runner.campaign_result import read_campaign_bench
+from promptpotter.application.runner.campaign_result import read_campaign_bench, read_line_spend
 from promptpotter.domain.bench import BenchScore
-from promptpotter.domain.campaign import Arm, Campaign
+from promptpotter.domain.campaign import Arm, Campaign, ceiling_meter
 from promptpotter.domain.pipeline_overlay import (
     permitted_models_for_campaign,
     steers_disallowed_model,
 )
+from promptpotter.domain.spend import MeteredSpend
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.account_spend import campaign_spend
 from promptpotter.infrastructure.store.stores import Stores, descend_store
@@ -107,6 +108,13 @@ class CampaignSummary(StrictModel):
             "`QuotaStatus.spend_unreported_usd`."
         )
     )
+    spend_metered: MeteredSpend = Field(
+        description=(
+            "What the campaign's spend cap counts along its LINE — the root and every cycle a "
+            "rebase handed it to — by bucket: the bill, or the search's incurred USD for a "
+            "controlled arm. The number a surface sets beside a cap, live."
+        )
+    )
     bench: BenchScore | None = Field(
         description=(
             "The headline (`architecture.md` § The bench score is not an optimizer's selection), "
@@ -163,6 +171,9 @@ def _campaign_summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
         spend_used_usd=round(spent.used_usd, 6),
         spend_unpriced_tokens=spent.unpriced_tokens,
         spend_unreported_usd=round(spent.unreported_usd, 6),
+        spend_metered=MeteredSpend.of(
+            read_line_spend(stores, campaign), ceiling_meter(campaign.arm)
+        ),
         bench=read_campaign_bench(stores, campaign),
         runs_with=campaign_runs_with(stores, campaign),
         arm=campaign.arm,

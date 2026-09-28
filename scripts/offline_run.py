@@ -626,11 +626,13 @@ async def run_one(
     return cycle, session.campaign_id
 
 
-async def run_controlled(workspace: Path, *, rounds: int, rows: int, foreign: bool) -> None:
-    """Two arms of one head-to-head — potter, then capo — after, with *foreign*, an undeclared
-    campaign on the dataset whose origin differs (framing off). Asserts what M5 promises: a steer on
-    an arm is refused, an arm's MEMORY holds no foreign run, and the evidence reads the arms under
-    the declared scorer with the foreign origin marked."""
+async def run_controlled(
+    workspace: Path, arm_names: list[str], *, rounds: int, rows: int, foreign: bool
+) -> None:
+    """*arm_names* as arms of one head-to-head, in order, after, with *foreign*, an undeclared
+    potter campaign on the dataset whose origin differs (framing off). Asserts what M5 promises: a
+    steer on an arm is refused, an arm's MEMORY holds no foreign run, and the evidence reads the
+    arms under the declared scorer with the foreign origin marked."""
     subjects = []
     if foreign:
         _, cid = await run_one(
@@ -638,7 +640,7 @@ async def run_controlled(workspace: Path, *, rounds: int, rows: int, foreign: bo
         )
         subjects.append(cid)
     arms = {}
-    for name in ("potter", "capo"):
+    for name in arm_names:
         cycle, cid = await run_one(
             name,
             workspace,
@@ -650,7 +652,7 @@ async def run_controlled(workspace: Path, *, rounds: int, rows: int, foreign: bo
         arms[name] = (cycle, cid)
         subjects.append(cid)
     stores = build_stores(default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
-    cycle, cid = arms["potter"]
+    cycle, cid = arms[arm_names[0]]
     try:
         await CommandDispatcher(stores).dispatch_cycle_command(
             CommandCall(SkipSearchpointPayload(campaign_id=cid, cycle_id=cycle.name), "skip-arm"),
@@ -957,7 +959,11 @@ def child_env(home: Path) -> dict[str, str]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--optimizer", action="append", help="default: every installed optimizer")
+    ap.add_argument(
+        "--optimizer",
+        action="append",
+        help="default: every installed optimizer; under --controlled, the arms (potter and capo)",
+    )
     ap.add_argument("--rounds", type=int, default=4, help="max_rounds per campaign")
     ap.add_argument("--rows", type=int, default=200, help="synthetic bank size")
     ap.add_argument("--digests", action="store_true", help="print the L4 identity digests")
@@ -979,6 +985,7 @@ def main() -> int:
             asyncio.run(
                 run_controlled(
                     workspace,
+                    args.optimizer,
                     rounds=args.rounds,
                     rows=args.rows,
                     foreign=args.child == CONTROLLED[0],
@@ -990,19 +997,22 @@ def main() -> int:
 
     home = claim_home()
     complete_registries()
+    arm_names = args.optimizer or ["potter", "capo"]
     names = list(CONTROLLED) if args.controlled else args.optimizer or sorted(optimizers.runtimes())
     stamp = {"offline": True, "note": LABEL, "workspaces": names}
     (home / STAMP).write_text(json.dumps(stamp, indent=1) + "\n", encoding="utf-8")
     # One workspace each: the archive and the δ ruler pool across campaigns in a workspace, so a
     # shared one would let one optimizer's run move another's decisions.
-    sizes = ["--rounds", str(args.rounds), "--rows", str(args.rows)]
+    child_args = ["--rounds", str(args.rounds), "--rows", str(args.rows)]
+    if args.controlled:
+        child_args += [f"--optimizer={name}" for name in arm_names]
     t0 = time.monotonic()
     children = {}
     for name in names:
         (home / name).mkdir()
         with (home / name / "run.log").open("w", encoding="utf-8") as log:
             children[name] = subprocess.Popen(
-                [sys.executable, __file__, "--child", name, *sizes],
+                [sys.executable, __file__, "--child", name, *child_args],
                 cwd=home / name,
                 env=child_env(home / name),
                 stdout=log,
@@ -1024,7 +1034,7 @@ def main() -> int:
         print(f"{name}: {run['stop_reason']}, bench lift {headline} -- {cycle}")
     if args.controlled and not failed:
         beside, bare = (home / name for name in CONTROLLED)
-        for arm in ("arm-potter", "arm-capo"):
+        for arm in (f"arm-{name}" for name in arm_names):
             same = (beside / arm / "decisions.json").read_bytes() == (
                 bare / arm / "decisions.json"
             ).read_bytes()

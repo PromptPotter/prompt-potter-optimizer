@@ -51,6 +51,16 @@ if _unformatted:
     raise RuntimeError(f"MetricUnit members with no terminal format: {_unformatted}")
 del _unformatted
 
+# Each `SpendRollup` bucket in the operator's word for it; the webapp's `SPEND_BUCKETS` says the same.
+_BUCKET_WORD = {
+    "loop": "optimizer",
+    "backend": "connector",
+    "judge": "judge",
+    "diagnostic": "diagnostic",
+    "bench": "bench",
+}
+assert set(_BUCKET_WORD) == set(TOKEN_KIND_BUCKET.values()), "a spend bucket has no operator word"
+
 
 def _roster_lines(ev: Evidence) -> list[str]:
     """One row per subject, identity and reading in ONE table. Two tables — a roster in the
@@ -155,8 +165,12 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
         return []
     lines = [
         f"Head-to-head on the held-out bench, oldest first, every row graded by "
-        f"`{h2h.scorer_id}`. {h2h.note}"
+        f"`{h2h.scorer_id}`. {h2h.verdict_line}",
+        *(f"  {note}" for note in h2h.notes),
     ]
+    if h2h.uncontrolled_note is not None:
+        uncontrolled = ", ".join(r.campaign_id for r in h2h.rows if not r.controlled)
+        lines.append(f"  NOT CONTROLLED: {uncontrolled}. {h2h.uncontrolled_note}")
     shared = next((r.bench_set for r in h2h.rows if r.comparable), None)
     if shared is not None and not set(h2h.differs_on) & set(Instrument.model_fields):
         lines.append(
@@ -181,15 +195,16 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
     lines += [
         "",
         f"  /ref divides by {h2h.ratio_reference or '—'}, the oldest run carrying a spend and a "
-        "worked clock: total and optimizer-only (`loop`) INCURRED USD, then worked seconds — "
-        "every launch of the campaign's line, less its origin gate and unworked time. lift/$ is "
-        "the bench lift per USD the SEARCH incurred, the bench's own pass excluded; USD is the "
-        "bill. reads counts the individuals ever graded on those held-out rows: each one chosen "
-        "off a headline spends the holdout.",
+        "worked clock: total and optimizer-only INCURRED USD, then worked seconds — every "
+        "launch of the campaign's line, less its origin gate and unworked time. lift/$ is the "
+        "bench lift per USD the SEARCH incurred, the bench's own pass excluded. billed $ is the "
+        "providers' bill; cap $ is what the row's budget counts — the search's incurred USD for "
+        "an arm, the bill otherwise. reads counts the individuals ever graded on those held-out "
+        "rows: each one chosen off a headline spends the holdout.",
         f"  {'campaign':<24}  {'optimizer':<9}  {'sel':>3}  {'selected':>8}  {'95% CI':>16}  "
-        f"{'origin':>7}  {'95% CI':>16}  {'lift':>7}  {'95% CI':>18}  {'USD':>8}  "
-        f"{'tokens':>8}  {'calls':>6}  {'work s':>7}  {'rounds':>6}  {'USD/ref':>8}  "
-        f"{'loop/ref':>8}  {'work/ref':>8}  {'lift/$':>7}  {'reads':>5}",
+        f"{'origin':>7}  {'95% CI':>16}  {'lift':>7}  {'95% CI':>18}  {'billed $':>8}  "
+        f"{'cap $':>8}  {'tokens':>8}  {'calls':>6}  {'work s':>7}  {'rounds':>6}  "
+        f"{'inc/ref':>8}  {'opt/ref':>8}  {'work/ref':>8}  {'lift/$':>7}  {'reads':>5}",
     ]
     for r in h2h.rows:
         # `x` off the instrument most rows share: its headline is listed, never paired.
@@ -198,6 +213,7 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
         sel, org = (None, None) if b is None else (b.selected, b.origin)
         spend = r.spend
         per_usd = r.lift_per_incurred_usd
+        cap = "—" if r.spend_metered is None else f"{r.spend_metered.usd:.4f}"
         lines.append(
             f" {mark}{r.campaign_id[:24]:<24}  {r.optimizer[:9]:<9}  "
             + (
@@ -215,9 +231,9 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
                 else f"{'no bench headline':<95}  "
             )
             + (
-                f"{spend.total_used_usd:>8.4f}  {spend.total_tokens_used:>8}  "
+                f"{spend.total_used_usd:>8.4f}  {cap:>8}  {spend.total_tokens_used:>8}  "
                 if spend is not None
-                else f"{'—':>8}  {'—':>8}  "
+                else f"{'—':>8}  {'—':>8}  {'—':>8}  "
             )
             + f"{'—' if r.calls is None else r.calls:>6}  "
             + f"{'—' if r.worked_s is None else f'{r.worked_s:.0f}':>7}  {r.rounds:>6}  "
@@ -228,21 +244,21 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
             + f"  {'—' if per_usd is None else f'{per_usd:+.2f}':>7}"
             + f"  {'—' if r.bench_reads is None else r.bench_reads:>5}"
         )
-    buckets = list(TOKEN_KIND_BUCKET.values())
-    lines += [
-        "",
-        "  USD billed by bucket — `bench` is the held-out pass that graded the selection:",
-        f"  {'campaign':<24}" + "".join(f"  {b:>10}" for b in buckets),
-    ]
-    for r in h2h.rows:
-        spend = r.spend
-        lines.append(
-            f"  {r.campaign_id[:24]:<24}"
-            + "".join(
-                f"  {'—' if spend is None else f'{getattr(spend, b).used_usd:.4f}':>10}"
-                for b in buckets
+    for reading, field in (("billed", "used_usd"), ("incurred, replays priced", "incurred_usd")):
+        lines += [
+            "",
+            f"  USD {reading} by bucket — `bench` is the held-out pass that graded the selection:",
+            f"  {'campaign':<24}" + "".join(f"  {w:>10}" for w in _BUCKET_WORD.values()),
+        ]
+        for r in h2h.rows:
+            spend = r.spend
+            lines.append(
+                f"  {r.campaign_id[:24]:<24}"
+                + "".join(
+                    f"  {'—' if spend is None else f'{getattr(getattr(spend, b), field):.4f}':>10}"
+                    for b in _BUCKET_WORD
+                )
             )
-        )
     if h2h.pairs:
         lines += [
             "",

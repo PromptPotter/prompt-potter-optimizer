@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
-import { postChangeRunLimits } from "@/lib/api";
+import { postChangeRunLimits, type MeteredSpend } from "@/lib/api";
+import { METER_WORD } from "@/lib/derivations";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { fmtUsd, fmtTokens } from "@/lib/format";
 import { parseCap } from "@/lib/run-limits";
@@ -13,8 +14,7 @@ interface Props {
   currentBudgetUsd: number | null;
   currentBudgetTokens: number | null;
   currentMaxRounds: number | null;
-  usedUsd: number | null;
-  usedTokens: number;
+  metered: MeteredSpend | null;
 }
 
 // Arms the run's caps (USD, tokens, rounds) via `change-run-limits`; the loop re-reads them at the
@@ -23,8 +23,7 @@ export function RunLimitsControl({
   currentBudgetUsd,
   currentBudgetTokens,
   currentMaxRounds,
-  usedUsd,
-  usedTokens,
+  metered,
 }: Props) {
   const { campaignId, cycleId } = useWorkspace();
   const [usdDraft, setUsdDraft] = useState<string>(
@@ -118,8 +117,11 @@ export function RunLimitsControl({
         <span className="lbl">Spend cap</span>
         <span className="val">
           {currentBudgetUsd != null ? fmtUsd(currentBudgetUsd) : "Uncapped"}
-          {usedUsd != null ? (
-            <span className="run-limits-control-used"> · {fmtUsd(usedUsd)} used</span>
+          {metered ? (
+            <span className="run-limits-control-used">
+              {" "}
+              · {fmtUsd(metered.usd)} {METER_WORD[metered.meter]}
+            </span>
           ) : null}
         </span>
       </div>
@@ -145,7 +147,9 @@ export function RunLimitsControl({
         <span className="lbl">Token cap</span>
         <span className="val">
           {currentBudgetTokens != null ? fmtTokens(currentBudgetTokens) : "Uncapped"}
-          <span className="run-limits-control-used"> · {fmtTokens(usedTokens)} used</span>
+          {metered ? (
+            <span className="run-limits-control-used"> · {fmtTokens(metered.tokens)} used</span>
+          ) : null}
         </span>
       </div>
       <div className="run-limits-control-edit">

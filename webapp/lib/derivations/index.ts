@@ -2,6 +2,7 @@ export * from "./campaign-forest";
 export * from "./campaign-summary";
 export * from "./candidate-views";
 export * from "./candidateSearchPoint";
+export * from "./compare-items";
 export * from "./connector-state";
 export * from "./critical-alert";
 export * from "./draft-for-campaign";
